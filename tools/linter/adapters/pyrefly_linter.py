@@ -1,3 +1,31 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "numpy==1.26.4 ; python_version >= '3.10' and python_version <= '3.11'",
+#   "numpy==2.1.0 ; python_version >= '3.12' and python_version <= '3.13'",
+#   "numpy==2.3.4 ; python_version >= '3.14'",
+#   "expecttest==0.3.0",
+#   "pyrefly==0.52.0",
+#   "sympy==1.13.3",
+#   "types-requests==2.27.25",
+#   "types-pyyaml==6.0.2",
+#   "types-tabulate==0.8.8",
+#   "types-protobuf==5.29.1.20250403",
+#   "types-setuptools==79.0.0.20250422",
+#   "types-jinja2==2.11.9",
+#   "types-colorama==0.4.6",
+#   "filelock==3.18.0",
+#   "junitparser==2.1.1",
+#   "rich==14.1.0",
+#   "optree==0.17.0",
+#   "types-openpyxl==3.1.5.20250919",
+#   "types-python-dateutil==2.9.0.20251008",
+#   "packaging",
+#   "libcst",
+#   "isort",
+#   "usort",
+# ]
+# ///
 from __future__ import annotations
 
 import argparse
@@ -111,8 +139,7 @@ def in_github_actions() -> bool:
 
 
 def check_files(
-    code: str,
-    config: str,
+    code: str, config: str, remove_unused_ignores: bool, suppress: bool
 ) -> list[LintMessage]:
     try:
         pyrefly_commands = [
@@ -122,6 +149,10 @@ def check_files(
             config,
             "--output-format=json",
         ]
+        if remove_unused_ignores:
+            pyrefly_commands.append("--remove-unused-ignores")
+        if suppress:
+            pyrefly_commands.append("--suppress-errors")
         proc = run_command(
             [*pyrefly_commands],
             extra_env={},
@@ -158,10 +189,12 @@ def check_files(
             )
         ]
 
-    # Parse JSON output from pyrefly
+    # Parse JSON output from pyrefly. In GitHub Actions, pyrefly appends
+    # ::error commands to stdout after the JSON, so use raw_decode to parse
+    # only the first JSON object and ignore trailing output.
     try:
         if stdout:
-            result = json.loads(stdout)
+            result, _ = json.JSONDecoder().raw_decode(stdout)
             errors = result.get("errors", [])
         else:
             errors = []
@@ -237,6 +270,16 @@ def main() -> None:
         required=True,
         help="path to an mypy .ini config file",
     )
+    parser.add_argument(
+        "--remove-unused-ignores",
+        action="store_true",
+        help="clean up unused ignores",
+    )
+    parser.add_argument(
+        "--suppress",
+        action="store_true",
+        help="add suppressions",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -246,7 +289,7 @@ def main() -> None:
     )
 
     lint_messages = check_pyrefly_installed(args.code) + check_files(
-        args.code, args.config
+        args.code, args.config, args.remove_unused_ignores, args.suppress
     )
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)

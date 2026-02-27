@@ -2,6 +2,8 @@
 
 
 import itertools
+import math
+from collections.abc import Sequence
 from contextlib import nullcontext
 from typing import Any
 from unittest import expectedFailure
@@ -72,7 +74,7 @@ class LocalTest(TestCase):
         TP_shard_size = global_shape[0] / TP
         for my_coordinate in itertools.product(range(DP), range(TP)):
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             dp_rank, tp_rank = my_coordinate
             expected_shard_size = 18
@@ -96,7 +98,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
 
             dp012_shard_size = 5
@@ -106,17 +108,20 @@ class LocalTest(TestCase):
                     expected_shard_offset = dp012_shard_size * dp_rank
                     expected_shard_size = 3
                 else:
-                    assert tp_rank == 1
+                    if tp_rank != 1:
+                        raise AssertionError(f"Expected tp_rank == 1, got {tp_rank}")
                     expected_shard_offset = dp012_shard_size * dp_rank + tp0_shard_size
                     expected_shard_size = 2
             else:
-                assert dp_rank == 3
+                if dp_rank != 3:
+                    raise AssertionError(f"Expected dp_rank == 3, got {dp_rank}")
                 tp0_shard_size = 2
                 if tp_rank == 0:
                     expected_shard_offset = dp012_shard_size * dp_rank
                     expected_shard_size = 2
                 else:
-                    assert tp_rank == 1
+                    if tp_rank != 1:
+                        raise AssertionError(f"Expected tp_rank == 1, got {tp_rank}")
                     expected_shard_offset = dp012_shard_size * dp_rank + tp0_shard_size
                     expected_shard_size = 1
             self.assertEqual(local_shape, (expected_shard_size, 2))
@@ -131,7 +136,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
 
             dp012_shard_size = 4
@@ -141,17 +146,20 @@ class LocalTest(TestCase):
                     expected_shard_offset = dp012_shard_size * dp_rank
                     expected_shard_size = 2
                 else:
-                    assert tp_rank == 1
+                    if tp_rank != 1:
+                        raise AssertionError(f"Expected tp_rank == 1, got {tp_rank}")
                     expected_shard_offset = dp012_shard_size * dp_rank + tp0_shard_size
                     expected_shard_size = 2
             else:
-                assert dp_rank == 3
+                if dp_rank != 3:
+                    raise AssertionError(f"Expected dp_rank == 3, got {dp_rank}")
                 tp0_shard_size = 1
                 if tp_rank == 0:
                     expected_shard_offset = dp012_shard_size * dp_rank
                     expected_shard_size = 1
                 else:
-                    assert tp_rank == 1
+                    if tp_rank != 1:
+                        raise AssertionError(f"Expected tp_rank == 1, got {tp_rank}")
                     expected_shard_offset = global_shape[0]
                     expected_shard_size = 0
             self.assertEqual(local_shape, (expected_shard_size, 2))
@@ -167,7 +175,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             expected_shard_size = 3
             expected_shard_offset = (
@@ -191,7 +199,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             if dp_rank in (0, 1, 2):
                 tp0_shard_size = 8
@@ -199,17 +207,20 @@ class LocalTest(TestCase):
                     expected_shard_offset = 4 * dp_rank
                     expected_shard_size = tp0_shard_size
                 else:
-                    assert tp_rank == 1
+                    if tp_rank != 1:
+                        raise AssertionError(f"Expected tp_rank == 1, got {tp_rank}")
                     expected_shard_offset = 4 * dp_rank + 2
                     expected_shard_size = 4
             else:
-                assert dp_rank == 3
+                if dp_rank != 3:
+                    raise AssertionError(f"Expected dp_rank == 3, got {dp_rank}")
                 tp0_shard_size = 3
                 if tp_rank == 0:
                     expected_shard_offset = 4 * dp_rank
                     expected_shard_size = 3
                 else:
-                    assert tp_rank == 1
+                    if tp_rank != 1:
+                        raise AssertionError(f"Expected tp_rank == 1, got {tp_rank}")
                     expected_shard_offset = global_shape[0]
                     expected_shard_size = 0
             self.assertEqual(local_shape, (expected_shard_size, 2))
@@ -224,7 +235,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             if dp_rank in (0, 1, 2):
                 tp0_shard_size = 3
@@ -232,16 +243,19 @@ class LocalTest(TestCase):
                     expected_shard_offset = 5 * dp_rank
                     expected_shard_size = tp0_shard_size
                 else:
-                    assert tp_rank == 1
+                    if tp_rank != 1:
+                        raise AssertionError(f"Expected tp_rank == 1, got {tp_rank}")
                     expected_shard_offset = 5 * dp_rank + 2
                     expected_shard_size = 2
             else:
-                assert dp_rank == 3
+                if dp_rank != 3:
+                    raise AssertionError(f"Expected dp_rank == 3, got {dp_rank}")
                 if tp_rank == 0:
                     expected_shard_offset = 5 * dp_rank
                     expected_shard_size = 2
                 else:
-                    assert tp_rank == 1
+                    if tp_rank != 1:
+                        raise AssertionError(f"Expected tp_rank == 1, got {tp_rank}")
                     expected_shard_offset = 5 * dp_rank + 1
                     expected_shard_size = 1
             self.assertEqual(local_shape, (expected_shard_size, 2))
@@ -257,7 +271,7 @@ class LocalTest(TestCase):
         ):
             mesh0_rank, mesh1_rank, mesh2_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             if mesh0_rank in (0, 1, 2):
                 if mesh1_rank == 0:
@@ -271,7 +285,10 @@ class LocalTest(TestCase):
                         expected_shard_offset = 10 * mesh0_rank + 6
                         expected_shard_size = 2
                 else:
-                    assert mesh1_rank == 1
+                    if mesh1_rank != 1:
+                        raise AssertionError(
+                            f"Expected mesh1_rank == 1, got {mesh1_rank}"
+                        )
                     if mesh2_rank == 0:
                         expected_shard_offset = 10 * mesh0_rank + 3
                         expected_shard_size = 2
@@ -279,21 +296,31 @@ class LocalTest(TestCase):
                         expected_shard_offset = 10 * mesh0_rank + 8
                         expected_shard_size = 2
                     else:
-                        assert mesh2_rank == 2
+                        if mesh2_rank != 2:
+                            raise AssertionError(
+                                f"Expected mesh2_rank == 2, got {mesh2_rank}"
+                            )
                         expected_shard_size = 0
                         expected_shard_offset = global_shape[0]
             else:
-                assert mesh0_rank == 3
+                if mesh0_rank != 3:
+                    raise AssertionError(f"Expected mesh0_rank == 3, got {mesh0_rank}")
                 if mesh1_rank == 0:
                     if mesh2_rank in (0, 1):
                         expected_shard_offset = 10 * mesh0_rank + 2 * mesh2_rank
                         expected_shard_size = 2
                     else:
-                        assert mesh2_rank == 2
+                        if mesh2_rank != 2:
+                            raise AssertionError(
+                                f"Expected mesh2_rank == 2, got {mesh2_rank}"
+                            )
                         expected_shard_offset = 10 * mesh0_rank + 6
                         expected_shard_size = 1
                 else:
-                    assert mesh1_rank == 1
+                    if mesh1_rank != 1:
+                        raise AssertionError(
+                            f"Expected mesh1_rank == 1, got {mesh1_rank}"
+                        )
                     if mesh2_rank == 0:
                         expected_shard_offset = 10 * mesh0_rank + 3
                         expected_shard_size = 2
@@ -566,7 +593,8 @@ class UtilTest(DTensorTestBase):
         local_shape, global_offset = compute_local_shape_and_global_offset(
             global_tensor_shape, global_mesh, placements
         )
-        assert global_mesh.get_coordinate is not None
+        if global_mesh.get_coordinate is None:
+            raise AssertionError("Expected global_mesh.get_coordinate to be not None")
         dp_rank = global_mesh.get_local_rank("dp")
         tp_rank = global_mesh.get_local_rank("tp")
         shard_idx_on_dim_0 = tp_rank * dp_size + dp_rank
@@ -617,7 +645,8 @@ class UtilTest(DTensorTestBase):
         local_shape, global_offset = compute_local_shape_and_global_offset(
             global_tensor_shape, global_mesh, placements
         )
-        assert global_mesh.get_coordinate is not None
+        if global_mesh.get_coordinate is None:
+            raise AssertionError("Expected global_mesh.get_coordinate to be not None")
         dp_shard_rank = global_mesh.get_local_rank("dp_shard")
         tp_rank = global_mesh.get_local_rank("tp")
         shard_idx_on_dim_0 = tp_rank * dp_shard_size + dp_shard_rank
@@ -688,7 +717,10 @@ class UtilSingleDeviceTest(TestCase):
                 "cp",
             ),
         )
-        assert world_size == mesh.shape[0] * mesh.shape[1] * mesh.shape[2]
+        if world_size != mesh.shape[0] * mesh.shape[1] * mesh.shape[2]:
+            raise AssertionError(
+                f"Expected world_size == {mesh.shape[0] * mesh.shape[1] * mesh.shape[2]}, got {world_size}"
+            )
 
         # Add Partial() when we are allowed to redistribute to it
         options = [Shard(0), Shard(1), Shard(2), Replicate()]
@@ -1033,15 +1065,16 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
 
             with CommDebugMode() as comm_mode:
                 # `A @ B2` will trigger redistribution on both inputs as below:
-                # A: S(1)[0]S(1)[1]->S(1)R->RR->RS(1)
-                # B2: _S(0, 4)S(0)[0] -> RS(0)
-                # The final output res2's placements will be RP.
+                # A: S(1)[0]S(1)[1]->S(1)R->RR
+                # B2: S(0)[1]S(0)[0]->RS(0)->RR
                 res2 = A @ B2
             self.assertEqual(
-                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 3
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 4
             )
-            assert isinstance(res1, DTensor)
-            assert isinstance(res2, DTensor)
+            if not isinstance(res1, DTensor):
+                raise AssertionError(f"Expected res1 to be DTensor, got {type(res1)}")
+            if not isinstance(res2, DTensor):
+                raise AssertionError(f"Expected res2 to be DTensor, got {type(res2)}")
             self.assertEqual(res1.full_tensor(), res2.full_tensor())
 
     @with_comms
@@ -1057,13 +1090,57 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
             with CommDebugMode() as comm_mode:
                 res1 = torch.sum(A, dim=0)
             self.assertEqual(comm_mode.get_total_counts(), 0)
-            assert isinstance(res1, DTensor)
+            if not isinstance(res1, DTensor):
+                raise AssertionError(f"Expected res1 to be DTensor, got {type(res1)}")
             self.assertEqual(res1.full_tensor(), torch.sum(input_tensor, dim=0))
             with CommDebugMode() as comm_mode:
                 res2 = torch.sum(A, dim=1)
             self.assertEqual(comm_mode.get_total_counts(), 0)
-            assert isinstance(res2, DTensor)
+            if not isinstance(res2, DTensor):
+                raise AssertionError(f"Expected res2 to be DTensor, got {type(res2)}")
             self.assertEqual(res2.full_tensor(), torch.sum(input_tensor, dim=1))
+
+    @with_comms
+    def test_inplace_op_with_strided_shard(self):
+        """Test that inplace ops work correctly with strided shard placements.
+
+        This verifies that the inplace_op flag is correctly passed during strategy
+        expansion, ensuring that incompatible Partial strategies are filtered out
+        for inplace ops like mul_.
+        """
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = init_device_mesh("cpu", (4, 4))
+            input_tensor = torch.arange(32).float().view(2, 16)
+            # Create a strided shard DTensor (similar to FSDP+TP pattern)
+            A = distribute_tensor(
+                input_tensor,
+                mesh,
+                [_StridedShard(1, split_factor=mesh.size(1)), Shard(1)],
+            )
+            original_placements = A.placements
+
+            # Test inplace mul_ with scalar - this should preserve the strided shard placement
+            with CommDebugMode() as comm_mode:
+                A.mul_(0.9)
+            # Inplace op should not require redistribution
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            # Placements should be preserved
+            self.assertEqual(A.placements, original_placements)
+            # Verify correctness
+            expected = input_tensor * 0.9
+            self.assertEqual(A.full_tensor(), expected)
+
+            # Test inplace add_ with scalar
+            B = distribute_tensor(
+                input_tensor,
+                mesh,
+                [_StridedShard(1, split_factor=mesh.size(1)), Shard(1)],
+            )
+            with CommDebugMode() as comm_mode:
+                B.add_(1.0)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(B.placements, original_placements)
+            self.assertEqual(B.full_tensor(), input_tensor + 1.0)
 
     def run_view_propagation(
         self,
@@ -1073,9 +1150,10 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
         view_into_shape: list[int],
         expected_placements_after_view,
     ):
-        import math
-
-        assert math.prod(original_full_tensor.shape) == math.prod(view_into_shape)
+        if math.prod(original_full_tensor.shape) != math.prod(view_into_shape):
+            raise AssertionError(
+                f"Expected shapes to have same product, got {math.prod(original_full_tensor.shape)} vs {math.prod(view_into_shape)}"
+            )
         # verify user specified `expected_placements_after_view `is correct
         A = distribute_tensor(original_full_tensor, mesh, original_placements)
         B = original_full_tensor.view(*view_into_shape)
@@ -1087,8 +1165,14 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
         )
         # verify the propagated sharding spec after view is correct
         viewed_A = A.view(*view_into_shape)
-        assert isinstance(viewed_A, DTensor)
-        assert viewed_A.placements == tuple(expected_placements_after_view)
+        if not isinstance(viewed_A, DTensor):
+            raise AssertionError(
+                f"Expected viewed_A to be DTensor, got {type(viewed_A)}"
+            )
+        if viewed_A.placements != tuple(expected_placements_after_view):
+            raise AssertionError(
+                f"Expected placements {tuple(expected_placements_after_view)}, got {viewed_A.placements}"
+            )
         self.assertEqual(A.to_local().view(-1), viewed_A.to_local().view(-1))
 
     @with_comms
@@ -1455,7 +1539,8 @@ class LocalTensorTestBase(TestCase):
         mode = local_tensor_mode()
         with nullcontext() if mode is None else mode.disable():
             if isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor):
-                assert isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)
+                if not (isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)):
+                    raise AssertionError("Expected both lhs and rhs to be LocalTensor")
                 super().assertEqual(lhs._ranks, rhs._ranks)
                 for r in lhs._ranks:
                     super().assertEqual(
@@ -1494,6 +1579,141 @@ class LocalTensorTestBase(TestCase):
             dist.destroy_process_group()
         except AssertionError:
             pass
+
+
+class TestStridedShardCollectiveOpUtils:
+    from collections import namedtuple
+
+    ShardConfig = namedtuple("ShardConfig", ["mesh_dim", "split_factor"], defaults=(1,))
+
+    def _convert_default_order_placements_to_ShardConfig(
+        self, placements: Sequence[Placement]
+    ) -> dict[int, list["TestStridedShardCollectiveOpUtils.ShardConfig"]]:
+        """
+        Convert placements to a shard_map for use with _get_logical_shape.
+
+        Given placements like [Shard(0), _StridedShard(0, split_factor=2), Shard(1)],
+        creates a mapping from tensor dimension to list of ShardConfigs:
+        {
+            0: [ShardConfig(mesh_dim=0, split_factor=1), ShardConfig(mesh_dim=1, split_factor=2)],
+            1: [ShardConfig(mesh_dim=2, split_factor=1)]
+        }
+
+        Each mesh_dim corresponds to the index of the placement in the placements list.
+        """
+        shard_map: dict[int, list[TestStridedShardCollectiveOpUtils.ShardConfig]] = {}
+
+        for mesh_dim, placement in enumerate(placements):
+            if isinstance(placement, _StridedShard):
+                tensor_dim = placement.dim
+                split_factor = placement.split_factor
+            elif isinstance(placement, Shard):
+                tensor_dim = placement.dim
+                split_factor = 1
+            else:
+                continue
+
+            if tensor_dim not in shard_map:
+                shard_map[tensor_dim] = []
+            shard_map[tensor_dim].append(
+                self.ShardConfig(mesh_dim=mesh_dim, split_factor=split_factor)
+            )
+
+        return shard_map
+
+    def _get_logical_shape(
+        self,
+        shard_map: dict[int, list["TestStridedShardCollectiveOpUtils.ShardConfig"]],
+        mesh: DeviceMesh,
+        operate_mesh_dim: int,
+        full_tensor_shape: tuple[int, ...],
+    ) -> list[int]:
+        """
+        Compute the logical shape after applying sharding, excluding `operate_mesh_dim`.
+
+        Args:
+            shard_map: Maps tensor dim to list of ShardConfigs describing how it's sharded
+            mesh: The device mesh
+            operate_mesh_dim: The mesh dimension to exclude from shape computation
+            full_tensor_shape: The original full tensor shape
+
+        Returns:
+            The logical shape after applying all sharding except on operate_mesh_dim
+        """
+        new_logical_shape = list(full_tensor_shape)
+        coordinate = mesh.get_coordinate()
+        if coordinate is None:
+            raise AssertionError("Expected mesh.get_coordinate() to be not None")
+
+        for tensor_dim, shard_configs in shard_map.items():
+            for config in shard_configs:
+                if operate_mesh_dim == config.mesh_dim:
+                    continue
+                if config.split_factor == 1:
+                    placement = Shard(tensor_dim)
+                else:
+                    placement = _StridedShard(
+                        tensor_dim, split_factor=config.split_factor
+                    )
+                new_size, _ = placement._local_shard_size_and_offset(
+                    curr_local_size=new_logical_shape[tensor_dim],
+                    num_chunks=mesh.size(mesh_dim=config.mesh_dim),
+                    rank=coordinate[config.mesh_dim],
+                )
+                new_logical_shape[tensor_dim] = new_size
+
+        return new_logical_shape
+
+
+class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    @with_comms
+    def test_StridedShard_to_replicate(self):
+        mesh = self.build_device_mesh()
+        for split_factor in range(2, 17):
+            for tensor_size in range(1, 200):
+                a = torch.arange(tensor_size)
+                src_p = (_StridedShard(0, split_factor=split_factor),)
+                a_dt = distribute_tensor(a, mesh, src_p, src_data_rank=None)
+                logical_shape = self._get_logical_shape(
+                    self._convert_default_order_placements_to_ShardConfig(src_p),
+                    mesh,
+                    0,
+                    a.shape,
+                )
+                p = _StridedShard(0, split_factor=split_factor)
+                a_dt_after_to_replicate = p._to_replicate_tensor(
+                    a_dt.to_local(), mesh, 0, logical_shape
+                )
+                b_dt = distribute_tensor(a, mesh, [Replicate()], src_data_rank=None)
+                self.assertEqual(
+                    a_dt_after_to_replicate,
+                    b_dt.to_local(),
+                    f"{tensor_size=}, placements={src_p}",
+                )
+
+    @with_comms
+    def test_replicate_to_StridedShard(self):
+        mesh = self.build_device_mesh()
+        coordinate = mesh.get_coordinate()
+        for split_factor in range(2, 17):
+            for tensor_size in range(1, 200):
+                a = torch.arange(tensor_size)
+                a_dt_replicate = distribute_tensor(
+                    a, mesh, [Replicate()], src_data_rank=None
+                )
+                p = _StridedShard(0, split_factor=split_factor)
+                a_dt_strided = p._replicate_to_strided_shard(
+                    a_dt_replicate.to_local(), mesh, 0, coordinate[0]
+                )
+                b_dt = distribute_tensor(a, mesh, (p,), src_data_rank=None)
+                self.assertEqual(
+                    a_dt_strided,
+                    b_dt.to_local(),
+                )
 
 
 class TestExplicitRedistribute(LocalTensorTestBase):

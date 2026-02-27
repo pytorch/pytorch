@@ -1,8 +1,3 @@
-from ast import Call
-
-from torch._ops import OpOverload
-
-
 """
 A LocalTensor is a tensor subclass which simulates a tensor that is
 distributed across SPMD ranks.  A LocalTensor might be size N, but in fact
@@ -46,10 +41,12 @@ then running all the fibers for this.
 import contextlib
 import copy
 import functools
+import importlib
 import operator
 import os
 import sys
 import threading
+from ast import Call
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from types import TracebackType
@@ -69,6 +66,7 @@ import torch.distributed as dist
 from torch import Size, SymBool, SymInt, Tensor
 from torch._C import DispatchKey, DispatchKeySet, ScriptObject
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
+from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.distributed import DeviceMesh, ProcessGroup
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -304,16 +302,16 @@ def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
         return _combine_int_rank_results(rank_results)
 
     if isinstance(any_v, torch.device):
-        assert all(v.type == any_v.type for v in rank_results.values()), (
-            "device type should be the same"
-        )
+        if not all(v.type == any_v.type for v in rank_results.values()):
+            raise AssertionError("device type should be the same")
         # Just use the first device - the device type is what matters,
         # and LocalTensorMode runs on a single physical device anyway
         return any_v
 
-    assert all(v == any_v for v in rank_results.values()), (
-        "Non Tensor or int rank results must be equal for all ranks"
-    )
+    if not all(v == any_v for v in rank_results.values()):
+        raise AssertionError(
+            "Non Tensor or int rank results must be equal for all ranks"
+        )
 
     return any_v
 
@@ -365,11 +363,13 @@ def _for_each_rank_run_func(
     default_value: Tensor | None = None
     for r in sorted(ranks):
         if use_per_rank_rng:
-            assert lm is not None
+            if lm is None:
+                raise AssertionError
             if r in lm._per_rank_rng_states:
                 _set_rng_state(*lm._per_rank_rng_states[r])
         else:
-            assert global_rng_state is not None
+            if global_rng_state is None:
+                raise AssertionError
             _set_rng_state(*global_rng_state)
 
         rank_flat_args = [_map_to_rank_local_val(a, r) for a in flat_args]
@@ -382,7 +382,8 @@ def _for_each_rank_run_func(
         flat_rank_rets[r] = rank_ret
 
         if use_per_rank_rng:
-            assert lm is not None
+            if lm is None:
+                raise AssertionError
             lm._per_rank_rng_states[r] = _get_rng_state()
 
         if default_value is None and func is torch.ops.aten.split.Tensor:
@@ -479,7 +480,17 @@ class LocalIntNode:
             }
         )
 
-    def sym_sum(self, other: Any) -> "LocalIntNode | ConstantIntNode":
+    def sym_min(
+        self, other: "int | LocalIntNode | ConstantIntNode"
+    ) -> "LocalIntNode | ConstantIntNode":
+        return LocalIntNode(
+            {
+                r: min(self._local_ints[r], _int_on_rank(other, r))
+                for r in self._local_ints
+            }
+        )
+
+    def sym_sum(self, other: Sequence[Any]) -> "LocalIntNode | ConstantIntNode":
         t = LocalIntNode(dict.fromkeys(self._local_ints, 0))
         for o in other:
             t = t.add(o)
@@ -540,17 +551,26 @@ class LocalIntNode:
 
     def ge(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] >= _int_on_rank(other, r) for r in self._local_ints}
-        assert len(r) == 1, (self, other)
+        if len(r) != 1:
+            raise AssertionError((self, other))
+        return torch._C._get_constant_bool_symnode(next(iter(r)))
+
+    def le(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
+        r = {self._local_ints[r] <= _int_on_rank(other, r) for r in self._local_ints}
+        if len(r) != 1:
+            raise AssertionError((self, other))
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 
     def gt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] > _int_on_rank(other, r) for r in self._local_ints}
-        assert len(r) == 1, (self, other)
+        if len(r) != 1:
+            raise AssertionError((self, other))
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 
     def lt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] < _int_on_rank(other, r) for r in self._local_ints}
-        assert len(r) == 1, (self, other)
+        if len(r) != 1:
+            raise AssertionError((self, other))
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 
     def wrap_int(self, num: int) -> "LocalIntNode | ConstantIntNode":
@@ -621,7 +641,8 @@ class _LocalDeviceHandle:
         """
         if isinstance(state, LocalTensor):
             lm = enabled_local_tensor_mode()
-            assert lm is not None
+            if lm is None:
+                raise AssertionError
 
             # Similar to get_rng_state but in reverse: we need to convert from
             # device-specific tensor format to full state tuple format.
@@ -676,7 +697,8 @@ class _LocalOffsetBasedRNGTracker:
         from torch.distributed.tensor.placement_types import Shard
 
         lm = enabled_local_tensor_mode()
-        assert lm is not None
+        if lm is None:
+            raise AssertionError
 
         state._per_rank_offsets = {}
 
@@ -727,7 +749,8 @@ class _LocalOffsetBasedRNGTracker:
         from torch.distributed.tensor._ops.utils import prod
 
         lm = enabled_local_tensor_mode()
-        assert lm is not None
+        if lm is None:
+            raise AssertionError
 
         dtensor_shape = spec.shape
         numel = prod(dtensor_shape)
@@ -754,7 +777,8 @@ class _LocalOffsetBasedRNGTracker:
     def _distribute_region(self, spec, generator=None):
         """Context manager for LocalTensor mode distribute region."""
         lm = enabled_local_tensor_mode()
-        assert lm is not None
+        if lm is None:
+            raise AssertionError
 
         # get base state
         if generator is not None:
@@ -774,7 +798,8 @@ class _LocalOffsetBasedRNGTracker:
                 any_rank_cpu, any_rank_cuda = any_rank_state
 
                 if self._device.type == "cuda":
-                    assert self._device.index in any_rank_cuda
+                    if self._device.index not in any_rank_cuda:
+                        raise AssertionError
                     any_rank_device_state = any_rank_cuda[self._device.index]
                 else:
                     any_rank_device_state = any_rank_cpu
@@ -782,8 +807,8 @@ class _LocalOffsetBasedRNGTracker:
                 from torch.distributed.tensor._random import _PhiloxState
 
                 any_rank_philox = _PhiloxState(any_rank_device_state)
-                state.seed = any_rank_philox.seed
-                state.offset = any_rank_philox.offset
+                state.seed = int(any_rank_philox.seed.item())
+                state.offset = int(any_rank_philox.offset.item())
 
             old_offset = state.offset
             self._set_pre_op_offset(state, spec)
@@ -854,15 +879,19 @@ def _compute_local_tensor_meta(
     # Assert that all tensors have the same dtype, layout and dispatch keys. Due
     # to uneven sharding, it is possible that tensors will have different shapes.
     for local_tensor in it:
-        assert dtype == local_tensor.dtype, (
-            "Tensors representing LocalTensor shards must have the same dtype"
-        )
-        assert layout == local_tensor.layout, (
-            "Tensors representing LocalTensor shards must have the same layout"
-        )
-        assert extra_dispatch_keys == _get_extra_dispatch_keys(local_tensor), (
-            "Tensors representing LocalTensor shards must have the same set of extra dispatch keys"
-        )
+        if dtype != local_tensor.dtype:
+            raise AssertionError(
+                "Tensors representing LocalTensor shards must have the same dtype"
+            )
+        if layout != local_tensor.layout:
+            raise AssertionError(
+                "Tensors representing LocalTensor shards must have the same layout"
+            )
+        if extra_dispatch_keys != _get_extra_dispatch_keys(local_tensor):
+            raise AssertionError(
+                "Tensors representing LocalTensor shards must have the "
+                "same set of extra dispatch keys"
+            )
 
     # Compute shape/stride.  We allow for non-SPMD'ness here
     local_shapes: dict[int, dict[int, int]] = defaultdict(dict)  # dim => rank => size
@@ -947,6 +976,10 @@ class LocalTensor(torch.Tensor):
             requires_grad=requires_grad,
             _extra_dispatch_keys=extra_dispatch_keys,
         )
+        # The wrapper has no real storage (data_ptr()=0). Prevent callers
+        # (e.g. Triton kernels) from silently reading the null pointer —
+        # turn it into a clear RuntimeError instead of a CUDA IMA.
+        torch._C._set_throw_on_mutable_data_ptr(r)
 
         local_tensors = {
             r: v if not isinstance(v, AsyncCollectiveTensor) else v.wait()
@@ -972,7 +1005,6 @@ class LocalTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
-            # pyrefly: ignore [bad-argument-type]
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -1000,9 +1032,10 @@ class LocalTensor(torch.Tensor):
         outer_size: torch.Size,
         outer_stride: tuple[int, ...],
     ) -> "LocalTensor":
-        assert flatten_spec is not None, (
-            "Expecting spec to be not None from `__tensor_flatten__` return value!"
-        )
+        if flatten_spec is None:
+            raise AssertionError(
+                "Expecting spec to be not None from `__tensor_flatten__` return value!"
+            )
         local_tensors = {
             _from_local_tensor_attr(a): t for a, t in inner_tensors.items()
         }
@@ -1029,9 +1062,8 @@ class LocalTensor(torch.Tensor):
                 local_tensor = arg
                 break
 
-        assert local_tensor is not None, (
-            "At least one of the arguments must be a LocalTensor"
-        )
+        if local_tensor is None:
+            raise AssertionError("At least one of the arguments must be a LocalTensor")
 
         # Check for unrecognized tensor subclasses (but allow regular tensors and scalars)
         has_unrecognized_types = _check_for_subclass(flat_args)
@@ -1057,14 +1089,7 @@ class LocalTensor(torch.Tensor):
         self,
         memory_format: torch.memory_format = torch.contiguous_format,
     ) -> torch.Tensor:
-        # pyrefly: ignore [bad-argument-type]
-        return LocalTensor(
-            # pyrefly: ignore [bad-argument-count]
-            {
-                r: t.contiguous(memory_format=memory_format)
-                for r, t in self._local_tensors.items()
-            }
-        )
+        return _LocalContiguous.apply(self, memory_format)
 
     def is_contiguous(
         self,
@@ -1109,9 +1134,8 @@ class LocalTensor(torch.Tensor):
 
         # Force all local tensor shards across ranks to be the same
         equal_obj = self._equal_local_tensors()
-        assert isinstance(equal_obj, torch.Tensor), (
-            "LocalTensor shards must be the same to reconcile"
-        )
+        if not isinstance(equal_obj, torch.Tensor):
+            raise AssertionError("LocalTensor shards must be the same to reconcile")
         cl = equal_obj.clone().detach()
         cl.requires_grad_(self.requires_grad)
         return cl
@@ -1133,6 +1157,33 @@ class LocalTensor(torch.Tensor):
             self._size = shape
 
 
+class _LocalContiguous(torch.autograd.Function):
+    """Autograd function for LocalTensor.contiguous() that preserves gradient flow."""
+
+    @staticmethod
+    def forward(  # type: ignore[override]
+        ctx: torch.autograd.function.FunctionCtx,
+        input: LocalTensor,
+        memory_format: torch.memory_format,
+    ) -> LocalTensor:
+        # pyrefly: ignore [bad-argument-type]
+        return LocalTensor(
+            # pyrefly: ignore [bad-argument-count]
+            {
+                r: t.contiguous(memory_format=memory_format)
+                for r, t in input._local_tensors.items()
+            },
+            input.requires_grad,
+        )
+
+    @staticmethod
+    def backward(  # type: ignore[override]
+        ctx: torch.autograd.function.FunctionCtx,
+        grad_output: torch.Tensor,
+    ) -> tuple[torch.Tensor, None]:
+        return grad_output, None
+
+
 # If set to `True` the LocalTensorMode stack will be created for the whole process,
 # otherwise it will be created for each thread.
 _PROCESS_MODE: bool = True
@@ -1151,6 +1202,24 @@ def get_local_tensor_mode_list() -> list["LocalTensorMode"]:
     if not hasattr(_THREAD_LOCAL_TENSOR_MODE, "value"):
         _THREAD_LOCAL_TENSOR_MODE.value = []
     return _THREAD_LOCAL_TENSOR_MODE.value
+
+
+# These methods are patched from DeviceMesh to the _LocalDeviceMesh versions.
+_PATCHED_DEVICE_MESH_METHODS: Sequence[str] = (
+    "get_coordinate",
+    "get_local_rank",
+    "get_rank",
+    "_is_current_rank_part_of_mesh",
+    "_sym_get_coordinate",
+)
+
+# These random functions are also patched.
+_PATCHED_RANDOM_FUNCTIONS: Sequence[tuple[str, str]] = (
+    ("torch.random.manual_seed", "torch_manual_seed"),
+    ("torch.manual_seed", "torch_manual_seed"),
+    ("torch.random.initial_seed", "torch_initial_seed"),
+    ("torch.initial_seed", "torch_initial_seed"),
+)
 
 
 class LocalTensorMode(TorchDispatchMode):
@@ -1177,17 +1246,21 @@ class LocalTensorMode(TorchDispatchMode):
             # assume is world size
             self.ranks = frozenset(range(ranks))
         else:
-            assert isinstance(ranks, frozenset)
+            if not isinstance(ranks, frozenset):
+                raise AssertionError
             self.ranks = ranks
         self._disable = True
-        self._old_get_coordinate = None
-        self._old_get_rank = None
-        self._old_get_local_rank = None
-        self._old_torch_manual_seed: Any = None
-        self._old_torch_initial_seed: Any = None
+        # Used to store the patched DeviceMesh methods
+        self._old_device_mesh_methods: dict[str, Callable[..., object]] | None = None
+        # Used to store the patched "random" functions
+        self._old_random_functions: dict[str, Callable[..., object]] = {}
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
+        # Cache for get_coordinate results, keyed by mesh id
+        # Protected by _coordinate_cache_lock for thread safety in MPMD contexts
+        self._coordinate_cache: dict[int, list[SymInt]] = {}
+        self._coordinate_cache_lock = threading.Lock()
 
     def __enter__(self) -> "LocalTensorMode":
         get_local_tensor_mode_list().append(self)
@@ -1259,9 +1332,11 @@ class LocalTensorMode(TorchDispatchMode):
         # For LocalTensors, verify they have compatible ranks
         for a in flat_args:
             if isinstance(a, LocalTensor):
-                assert a._ranks <= self.ranks, (
-                    f"Input LocalTensor {a} must be configured for a subset of the LocalTensorMode ranks {self.ranks}"
-                )
+                if a._ranks > self.ranks:
+                    raise AssertionError(
+                        f"Input LocalTensor {a} must be configured for a "
+                        f"subset of the LocalTensorMode ranks {self.ranks}"
+                    )
 
         if func.overloadpacket == torch.ops.aten.dim:
             return len(args[0]._size)
@@ -1400,57 +1475,46 @@ class LocalTensorMode(TorchDispatchMode):
         return self._per_rank_rng_states[next(iter(self.ranks))]
 
     def _patch_device_mesh(self) -> None:
-        assert self._old_get_coordinate is None
-        assert self._old_get_rank is None
-        assert self._old_get_local_rank is None
-        self._old_get_coordinate = DeviceMesh.get_coordinate  # type: ignore[assignment]
-        self._old_get_rank = DeviceMesh.get_rank  # type: ignore[assignment]
-        self._old_get_local_rank = DeviceMesh.get_local_rank  # type: ignore[assignment]
-        DeviceMesh.get_coordinate = _LocalDeviceMesh.get_coordinate  # type: ignore[method-assign]
-        DeviceMesh.get_rank = _LocalDeviceMesh.get_rank  # type: ignore[method-assign]
-        DeviceMesh.get_local_rank = _LocalDeviceMesh.get_local_rank  # type: ignore[method-assign]
+        if self._old_device_mesh_methods is not None:
+            raise AssertionError
+        saved = {}
+        for name in _PATCHED_DEVICE_MESH_METHODS:
+            saved[name] = getattr(DeviceMesh, name)
+            local = getattr(_LocalDeviceMesh, name)
+            setattr(DeviceMesh, name, local)
+        self._old_device_mesh_methods = saved
 
     def _unpatch_device_mesh(self) -> None:
-        assert self._old_get_coordinate is not None
-        assert self._old_get_rank is not None
-        assert self._old_get_local_rank is not None
-        DeviceMesh.get_coordinate = self._old_get_coordinate
-        DeviceMesh.get_rank = self._old_get_rank
-        DeviceMesh.get_local_rank = self._old_get_local_rank
-        # pyrefly: ignore [bad-assignment]
-        self._old_get_coordinate = None
-        # pyrefly: ignore [bad-assignment]
-        self._old_get_rank = None
-        # pyrefly: ignore [bad-assignment]
-        self._old_get_local_rank = None
+        saved, self._old_device_mesh_methods = self._old_device_mesh_methods, None
+        if saved is None:
+            raise AssertionError
+        for name, value in saved.items():
+            setattr(DeviceMesh, name, value)
 
     def _patch_random_functions(self) -> None:
-        import torch.random
+        # TODO: This should either be removed or documented why it's necessary.
         from torch.distributed.tensor import _random as dtensor_random
 
-        if self._old_torch_manual_seed is None:
-            self._old_torch_manual_seed = torch.random.manual_seed
-            torch.random.manual_seed = _LocalRandom.torch_manual_seed
-            torch.manual_seed = _LocalRandom.torch_manual_seed
-
-        if self._old_torch_initial_seed is None:
-            self._old_torch_initial_seed = torch.random.initial_seed
-            torch.random.initial_seed = _LocalRandom.torch_initial_seed
-            torch.initial_seed = _LocalRandom.torch_initial_seed
+        for global_name, local_name in _PATCHED_RANDOM_FUNCTIONS:
+            if global_name in self._old_random_functions:
+                continue
+            mod_name, attr_name = global_name.rsplit(".", 1)
+            mod = importlib.import_module(mod_name)
+            old = getattr(mod, attr_name)
+            local = getattr(_LocalRandom, local_name)
+            setattr(mod, attr_name, local)
+            self._old_random_functions[global_name] = old
 
     def _unpatch_random_functions(self) -> None:
-        import torch.random
+        # TODO: This should either be removed or documented why it's necessary.
         from torch.distributed.tensor import _random as dtensor_random
 
-        if self._old_torch_manual_seed is not None:
-            torch.random.manual_seed = self._old_torch_manual_seed
-            torch.manual_seed = self._old_torch_manual_seed
-            self._old_torch_manual_seed = None
-
-        if self._old_torch_initial_seed is not None:
-            torch.random.initial_seed = self._old_torch_initial_seed
-            torch.initial_seed = self._old_torch_initial_seed
-            self._old_torch_initial_seed = None
+        for global_name, local_name in _PATCHED_RANDOM_FUNCTIONS:
+            value = self._old_random_functions.pop(global_name, None)
+            if value is not None:
+                mod_name, attr_name = global_name.rsplit(".", 1)
+                mod = importlib.import_module(mod_name)
+                setattr(mod, attr_name, value)
 
 
 class _LocalRandom:
@@ -1516,39 +1580,71 @@ class _LocalDeviceMesh:
     """
 
     @staticmethod
-    def get_coordinate(self: DeviceMesh) -> list[int] | None:
+    def get_coordinate(self: DeviceMesh) -> list[SymInt] | None:
         # NB: In order to support submeshes the code below recreates for each
         # rank submesh with the same mesh dimensions as current mesh. We are
         # doing this because when submesh is created it is created for a particular
         # rank (therefore below we are patching get_rank method). We are trying to
         # limit the invasiveness of local tensor.
         lm = enabled_local_tensor_mode()
-        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+        if lm is None:
+            raise AssertionError("Unexpectedly not in LocalTensorMode")
 
-        coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
-        for r in lm.ranks:
-            rank_tensor = self._layout.remap_to_tensor(self._rank_map)
-            rank_coords = (rank_tensor == r).nonzero().tolist()
-            assert len(rank_coords) == 1
-            for d, c in enumerate(rank_coords[0][1:]):
-                coords[d][r] = c
+        # Check cache first (fast path without lock)
+        mesh_id = id(self)
+        if mesh_id in lm._coordinate_cache:
+            return lm._coordinate_cache[mesh_id]
 
-        out = [torch.SymInt(LocalIntNode(c)) for c in coords]
-        # The output contains coordinates for each of the ranks with respect to
-        # their meshes formed from root mesh and selecting the same dimensions
-        # as the current mesh.
-        return out  # type: ignore[return-value]
+        # Acquire lock for thread safety in MPMD contexts
+        with lm._coordinate_cache_lock:
+            # Double-check after acquiring lock
+            if mesh_id in lm._coordinate_cache:
+                return lm._coordinate_cache[mesh_id]
+
+            coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
+            # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
+            # error when running under torch.inference_mode()
+            rank_map = self._rank_map.clone()
+            for r in lm.ranks:
+                rank_tensor = self._layout.remap_to_tensor(rank_map)
+                rank_coords = (rank_tensor == r).nonzero().tolist()
+                if len(rank_coords) != 1:
+                    raise AssertionError
+                for d, c in enumerate(rank_coords[0][1:]):
+                    coords[d][r] = c
+
+            out = [torch.SymInt(LocalIntNode(c)) for c in coords]
+            # Cache the result
+            lm._coordinate_cache[mesh_id] = out
+            # The output contains coordinates for each of the ranks with respect to
+            # their meshes formed from root mesh and selecting the same dimensions
+            # as the current mesh.
+            return out  # type: ignore[return-value]
+
+    @staticmethod
+    def _is_current_rank_part_of_mesh(self: DeviceMesh) -> bool:
+        my_coordinate = self.get_coordinate()
+        return my_coordinate is not None
+
+    @staticmethod
+    def _sym_get_coordinate(self: DeviceMesh, index: int) -> int:
+        my_coordinate = self.get_coordinate()
+        if my_coordinate is None:
+            raise AssertionError
+        return my_coordinate[index]
 
     @staticmethod
     def get_rank(self) -> int | SymInt:
         lm = enabled_local_tensor_mode()
-        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+        if lm is None:
+            raise AssertionError("Unexpectedly not in LocalTensorMode")
         return torch.SymInt(LocalIntNode(local_ints={r: r for r in lm.ranks}))
 
     @staticmethod
     def get_local_rank(self, mesh_dim: int | str | None = None) -> int | SymInt:
         lm = enabled_local_tensor_mode()
-        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+        if lm is None:
+            raise AssertionError("Unexpectedly not in LocalTensorMode")
 
         if self.ndim > 1 and mesh_dim is None:
             raise RuntimeError(
@@ -1565,7 +1661,8 @@ class _LocalDeviceMesh:
         # get_coordinate returns a list of SymInt, one per mesh dimension
         # We need to extract the coordinate for the specified mesh_dim
         coords = _LocalDeviceMesh.get_coordinate(self)
-        assert coords is not None
+        if coords is None:
+            raise AssertionError
         return coords[mesh_dim]
 
 
@@ -1664,6 +1761,40 @@ def maybe_run_for_local_tensor(func: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapper
 
 
+def rank_map(cb: Callable[[int], Tensor]) -> Tensor:
+    """
+    Creates a tensor by mapping a callback over the current rank.
+
+    Under LocalTensorMode, calls cb(rank) for each simulated rank and returns
+    a LocalTensor. In real distributed (no LocalTensorMode), calls
+    cb(dist.get_rank()) and returns a plain Tensor.
+    """
+    lm = enabled_local_tensor_mode()
+    if lm is not None:
+        return lm.rank_map(cb)
+    else:
+        return cb(dist.get_rank())
+
+
+def tensor_map(tensor: Tensor, cb: Callable[[int, Tensor], Tensor | None]) -> Tensor:
+    """
+    Transforms a tensor by mapping a callback over the current rank and its
+    local shard.
+
+    Under LocalTensorMode, calls cb(rank, shard) for each simulated rank and
+    returns a LocalTensor. In real distributed (no LocalTensorMode), calls
+    cb(dist.get_rank(), tensor) and returns the result directly.
+    """
+    lm = enabled_local_tensor_mode()
+    if lm is not None:
+        assert isinstance(tensor, LocalTensor)
+        return lm.tensor_map(tensor, cb)
+    else:
+        r = cb(dist.get_rank(), tensor)
+        assert r is not None
+        return r
+
+
 def maybe_disable_local_tensor_mode() -> contextlib.AbstractContextManager:
     """
     Context manager that disables LocalTensorMode for the duration of the context.
@@ -1746,6 +1877,27 @@ from queue import Queue
 _LOCAL_RUNNER_MODE: "LocalRunnerMode | None" = None
 
 
+class _ExceptionRaisingThread(threading.Thread):
+    def __init__(
+        self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None
+    ):
+        super().__init__(
+            target=target, name=name, args=args, kwargs=kwargs, daemon=daemon
+        )
+        self.exception: BaseException | None = None
+
+    def run(self):
+        try:
+            super().run()
+        except BaseException as e:  # noqa: B036
+            self.exception = e
+
+    def join(self, timeout=None):
+        super().join(timeout=timeout)
+        if self.exception:
+            raise self.exception
+
+
 class LocalRunnerMode:
     """
     A class for running multiple SPMD functions concurrently, however at any point
@@ -1771,14 +1923,15 @@ class LocalRunnerMode:
             dst: {src: Queue() for src in ranks} for dst in ranks
         }
         self._runners = [
-            threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
+            _ExceptionRaisingThread(target=self._run, args=(i,), name="LocalRunnerMode")
             for i in range(concurrency)
         ]
         self._process_mode = True
 
     def __enter__(self) -> "LocalRunnerMode":
         global _LOCAL_RUNNER_MODE
-        assert _LOCAL_RUNNER_MODE is None, "LocalRunnerMode is already running"
+        if _LOCAL_RUNNER_MODE is not None:
+            raise AssertionError("LocalRunnerMode is already running")
         _LOCAL_RUNNER_MODE = self
 
         global _PROCESS_MODE
@@ -1820,9 +1973,8 @@ class LocalRunnerMode:
         self._run_lock.release()
 
     def _assert_holds_run_lock(self) -> None:
-        assert self._run_id == LocalRunnerMode.runner_context.id, (
-            "Calling thread does not hold the run lock"
-        )
+        if self._run_id != LocalRunnerMode.runner_context.id:
+            raise AssertionError("Calling thread does not hold the run lock")
 
     def _get_recv_object(self, src: int, dst: int) -> object | None:
         peers = [src] if src != -1 else list(self._ranks)
@@ -1835,7 +1987,8 @@ class LocalRunnerMode:
         return None
 
     def _signal_send(self, src: int, dst: int, obj: object) -> None:
-        assert obj is not None, "Cannot signal None"
+        if obj is None:
+            raise AssertionError("Cannot signal None")
         # Only a single thread a time executes so it is safe to mutate
         # read objects queue (executing thread is already holding the lock)
         self._recv_objects[dst][src].put(obj)
@@ -1857,7 +2010,8 @@ class LocalRunnerMode:
     @staticmethod
     def current() -> "LocalRunnerMode":
         global _LOCAL_RUNNER_MODE
-        assert _LOCAL_RUNNER_MODE is not None, "LocalRunnerMode is not enabled"
+        if _LOCAL_RUNNER_MODE is None:
+            raise AssertionError("LocalRunnerMode is not enabled")
         return _LOCAL_RUNNER_MODE
 
 
@@ -1872,9 +2026,8 @@ class _LocalPhiloxState:
     """
 
     def __init__(self, state: torch.Tensor):
-        assert isinstance(state, LocalTensor), (
-            "_LocalPhiloxState requires a LocalTensor"
-        )
+        if not isinstance(state, LocalTensor):
+            raise AssertionError("_LocalPhiloxState requires a LocalTensor")
         self._local_tensor = state
         self._per_rank_states = {
             rank: local_state.to("cpu")
@@ -1892,11 +2045,11 @@ class _LocalPhiloxState:
         offsets = {}
         for rank, state in self._per_rank_states.items():
             rank_philox = _PhiloxState(state)
-            offsets[rank] = rank_philox.offset
+            offsets[rank] = int(rank_philox.offset.item())
 
         if len(set(offsets.values())) == 1:
             return next(iter(offsets.values()))
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+
         return SymInt(LocalIntNode(offsets))
 
     @offset.setter
@@ -1907,12 +2060,13 @@ class _LocalPhiloxState:
             for rank, state in self._per_rank_states.items():
                 rank_offset = offset.node._local_ints[rank]
                 rank_philox = _PhiloxState(state)
-                rank_philox.offset = rank_offset
+                rank_philox.offset = torch.tensor([rank_offset], dtype=torch.int64)
         else:
             offset_int = int(offset) if isinstance(offset, SymInt) else offset
+            offset_tensor = torch.tensor([offset_int], dtype=torch.int64)
             for state in self._per_rank_states.values():
                 rank_philox = _PhiloxState(state)
-                rank_philox.offset = offset_int
+                rank_philox.offset = offset_tensor
 
     @property
     def seed(self) -> int | SymInt:
@@ -1921,7 +2075,7 @@ class _LocalPhiloxState:
         seeds = {}
         for rank, state in self._per_rank_states.items():
             rank_philox = _PhiloxState(state)
-            seeds[rank] = rank_philox.seed
+            seeds[rank] = int(rank_philox.seed.item())
 
         if len(set(seeds.values())) == 1:
             return next(iter(seeds.values()))
@@ -1935,12 +2089,13 @@ class _LocalPhiloxState:
             for rank, state in self._per_rank_states.items():
                 rank_seed = seed.node._local_ints[rank]
                 rank_philox = _PhiloxState(state)
-                rank_philox.seed = rank_seed
+                rank_philox.seed = torch.tensor([rank_seed], dtype=torch.int64)
         else:
             seed_int = int(seed) if isinstance(seed, SymInt) else seed
+            seed_tensor = torch.tensor([seed_int], dtype=torch.int64)
             for state in self._per_rank_states.values():
                 rank_philox = _PhiloxState(state)
-                rank_philox.seed = seed_int
+                rank_philox.seed = seed_tensor
 
     def apply_to_local_tensor_mode(self, device_handle) -> None:
         """
@@ -1953,7 +2108,8 @@ class _LocalPhiloxState:
         if not enabled_local_tensor_mode():
             return
 
-        assert hasattr(self, "_per_rank_offsets")
+        if not hasattr(self, "_per_rank_offsets"):
+            raise AssertionError
 
         for rank in sorted(self._per_rank_states.keys()):
             offset_value = self._per_rank_offsets[rank]

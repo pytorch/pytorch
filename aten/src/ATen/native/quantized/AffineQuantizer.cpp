@@ -269,7 +269,7 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis) {
-  static constexpr auto fn_name = "dequantize_tensor_per_channel_affine";
+  static constexpr auto fn_name = "dequantize_tensor_per_channel_float_qparams";
 
   checkFloatTensor(fn_name, rtensor);
   checkSameDevice(fn_name, rtensor, qtensor);

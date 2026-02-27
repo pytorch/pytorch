@@ -23,9 +23,11 @@ if IS_WINDOWS and IS_CI:
 
 
 def count_philox_rand(gm, args, freq):
-    assert [node.target for node in gm.graph.nodes].count(
+    count = [node.target for node in gm.graph.nodes].count(
         torch.ops.rngprims.philox_rand.default
-    ) == freq
+    )
+    if count != freq:
+        raise AssertionError(f"expected {freq} philox_rand ops, got {count}")
     return gm
 
 
@@ -318,6 +320,51 @@ class TestFunctionalizationRngOps(TestCase):
         aot_fn = aot_function(fn, functools.partial(count_philox_rand, freq=1))
         # We can't check accuracy here because rand_like generated different rand numbers than dropout
         aot_fn(x)
+
+    @dtypes(torch.float32)
+    def test_checkpoint_with_unused_rng_in_backward(self, dtype, device):
+        # Test that RNG ops in checkpointed regions that are not needed for
+        # backward computation don't cause KeyError in functionalize_rng_ops.
+        #
+        # This reproduces a bug where rand is used in an additive way:
+        #   rand = torch.rand(...)
+        #   result = x + rand * scale
+        #
+        # The gradient of addition doesn't depend on the VALUE of rand,
+        # only on its shape. So backward doesn't need to recompute rand,
+        # and it gets eliminated from the backward graph by DCE.
+        # But functionalize_rng_ops was assuming all recomputable RNG ops
+        # exist in both forward and backward graphs.
+
+        def g(x):
+            # rand used additively - NOT needed in backward
+            # (gradient of add doesn't depend on the value)
+            # This pattern matches real-world jitter/noise augmentation
+            noise = torch.rand(x.shape[0], 1, device=x.device, dtype=x.dtype)
+            x = x + noise * 1.0
+            return x
+
+        def fn(x):
+            return torch.utils.checkpoint.checkpoint(g, x, use_reentrant=False)
+
+        x = torch.ones(2, 4, device=device, dtype=dtype, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        # Use torch.compile to trigger the same code path as the original error
+        ref_fn = torch.compile(g, backend="aot_eager")
+        torch.manual_seed(123)
+        ref = ref_fn(x_clone)
+        ref.sum().backward()
+
+        torch.manual_seed(123)
+        compiled_fn = torch.compile(fn, backend="aot_eager")
+        res = compiled_fn(x)
+        # This should not raise KeyError: 'rand' in functionalize_rng_ops
+        res.sum().backward()
+
+        # check results match the non-checkpoint case
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
 
 
 only_for = ("cuda",)

@@ -201,15 +201,15 @@ for hip_platform_file in hip_platform_files:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
 
-# NOTE: fbgemm sources needing hipify
-# fbgemm is its own project with its own build system. pytorch uses fbgemm as
+# NOTE: MSLK sources needing hipify
+# MSLK is its own project with its own build system. pytorch uses mslk as
 # a submodule to acquire some gpu source files but compiles only those sources
-# instead of using fbgemm's own build system. One of the source files refers
-# to a header file that is the result of running hipify, but fbgemm uses
-# slightly different hipify settings than pytorch. fbgemm normally hipifies
+# instead of using mslk's own build system. One of the source files refers
+# to a header file that is the result of running hipify, but mslk uses
+# slightly different hipify settings than pytorch. mslk normally hipifies
 # and renames tuning_cache.cuh to tuning_cache_hip.cuh, but pytorch's settings
 # for hipify puts it into its own 'hip' directory. After hipify runs below with
-# the added fbgemm file, we move it to its expected location.
+# the added mslk file, we move it to its expected location.
 # NOTE: Internal meta builds (using buck) don't need this step, so conditionally disable it
 buck_build = os.environ.get("FBCODE_BUILD_TOOL", "") == "buck"
 
@@ -220,15 +220,68 @@ extra_files = [
     "torch/_inductor/codegen/wrapper.py",
 ]
 
-fbgemm_dir = (
-    REPO_ROOT
-    / "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include/fbgemm_gpu/quantize"
-)
+mslk_dir = REPO_ROOT / "third_party/mslk/include/mslk/utils/"
+
 
 if not buck_build:
-    fbgemm_original = fbgemm_dir / "tuning_cache.cuh"
+    mslk_original = mslk_dir / "tuning_cache.cuh"
+    if mslk_original.exists():
+        extra_files.append(mslk_original.as_posix())
 
-    extra_files.append(fbgemm_original.as_posix())
+# TODO Remove once the following submodules are updated to use hipify v2
+hipify_v1_to_v2_files = [
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/gemm/ck_extensions.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/bf16_grouped/bf16_grouped_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/bf16_grouped/kernels/bf16_grouped_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/ck_utility.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_blockwise_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_batched/kernels/fp8_rowwise_batched_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise/kernels/fp8_rowwise_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_preshuffle/kernels/fp8_rowwise_preshuffle_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_tensorwise_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fused_moe/fused_moe_kernel.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include/fbgemm_gpu/quantize/tuning_cache.hpp",
+    "third_party/mslk/csrc/moe/ck_extensions/fused_moe_kernel.hip",
+    "third_party/mslk/csrc/gemm/ck/bf16_grouped/bf16_grouped_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/bf16_grouped/kernels/bf16_grouped_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise/kernels/fp8_rowwise_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_batched/kernels/fp8_rowwise_batched_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_preshuffle/kernels/fp8_rowwise_preshuffle_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_tensorwise_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/fp8_blockwise_gemm.hip",
+]
+
+
+def hipify_v1_to_v2(line: str) -> str:
+    line = line.replace("hip::HIPStreamMasqueradingAsCUDA", "cuda::CUDAStream")
+    line = line.replace(
+        "hip::HIPStreamGuardMasqueradingAsCUDA", "cuda::CUDAStreamGuard"
+    )
+    line = line.replace(
+        "hip::getStreamFromPoolMasqueradingAsCUDA", "cuda::getStreamFromPool"
+    )
+    line = line.replace("getCurrentHIPStream", "getCurrentCUDAStream")
+    return line
+
+
+for hipify_v1_to_v2_file in hipify_v1_to_v2_files:
+    do_write = False
+    if os.path.exists(hipify_v1_to_v2_file):
+        with open(hipify_v1_to_v2_file) as sources:
+            lines = sources.readlines()
+        newlines = [hipify_v1_to_v2(line) for line in lines]
+        if lines == newlines:
+            print(f"{hipify_v1_to_v2_file} skipped")
+        else:
+            with open(hipify_v1_to_v2_file, "w") as sources:
+                for line in newlines:
+                    sources.write(line)
+            print(f"{hipify_v1_to_v2_file} updated")
+
 
 hipify_python.hipify(
     project_directory=proj_dir,
@@ -241,23 +294,27 @@ hipify_python.hipify(
 )
 
 if not buck_build:
-    fbgemm_move_src = fbgemm_dir / "hip/tuning_cache.cuh"
-    fbgemm_move_dst = fbgemm_dir / "tuning_cache_hip.cuh"
+    mslk_move_src = mslk_dir / "hip/tuning_cache.cuh"
+    mslk_move_dst = mslk_dir / "tuning_cache_hip.cuh"
 
     # only update the file if it changes or doesn't exist
     do_write = True
     src_lines = None
-    with open(fbgemm_move_src) as src:
+
+    if not mslk_move_src.exists():
+        _error = f"Error: Source file {mslk_move_src} does not exist"
+        sys.exit(_error)
+    with open(mslk_move_src) as src:
         src_lines = src.readlines()
-    if os.path.exists(fbgemm_move_dst):
+    if os.path.exists(mslk_move_dst):
         dst_lines = None
-        with open(fbgemm_move_dst) as dst:
+        with open(mslk_move_dst) as dst:
             dst_lines = dst.readlines()
         if src_lines == dst_lines:
-            print(f"{fbgemm_move_dst} skipped")
+            print(f"{mslk_move_dst} skipped")
             do_write = False
     if do_write:
-        with open(fbgemm_move_dst, "w") as dst:
+        with open(mslk_move_dst, "w") as dst:
             for line in src_lines:
                 dst.write(line)
-        print(f"{fbgemm_move_dst} updated")
+        print(f"{mslk_move_dst} updated")

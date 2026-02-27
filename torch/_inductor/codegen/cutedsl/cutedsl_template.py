@@ -2,7 +2,7 @@
 import functools
 import itertools
 from collections.abc import Iterable
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import patch
 
 from torch._inductor.utils import Placeholder
@@ -29,8 +29,8 @@ class CuteDSLTemplate(KernelTemplate):
         self,
         name: str,
         source: str,
-        subgraph_fn: Optional[Any] = None,
-        mask_fn: Optional[Any] = None,
+        subgraph_fn: Any | None = None,
+        mask_fn: Any | None = None,
     ) -> None:
         super().__init__(name)
         self.source = source
@@ -48,7 +48,7 @@ class CuteDSLTemplate(KernelTemplate):
 
     def maybe_append_choice(
         self, choices: list[Any], **kwargs: Any
-    ) -> Optional[NotImplementedError]:
+    ) -> NotImplementedError | None:
         """
         Maybe generates a new ChoiceCaller and appends it into existing choices.
         Returns None if success, otherwise returns the error.
@@ -98,7 +98,7 @@ class CuteDSLTemplate(KernelTemplate):
                 source_code=code,
             )
 
-            def make_kernel_render(out_node, hint_override: Optional[int] = None):
+            def make_kernel_render(out_node, hint_override: int | None = None):
                 """
                 Factory function that creates a kernel renderer for the final output.
 
@@ -140,7 +140,7 @@ class CuteDSLTemplateCaller(ChoiceCaller):
         make_kernel_render: Any,
         bmreq: CuteDSLBenchmarkRequest,
         template: "CuteDSLTemplate",
-        mutated_inputs: Optional[Iterable[IRNode]] = None,
+        mutated_inputs: Iterable[IRNode] | None = None,
     ):
         super().__init__(
             name=name,
@@ -162,15 +162,17 @@ class CuteDSLTemplateCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         """Create the output node for this template choice."""
-        return TensorBox.create(
-            CuteDSLTemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                template=self.template,
-                mutated_inputs=self.mutated_inputs,
-            )
+        buffer = CuteDSLTemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            template=self.template,
+            mutated_inputs=self.mutated_inputs,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)
 
     def call_name(self) -> str:
         """Return the kernel call name."""

@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+import math
 import unittest
 from typing import cast, Optional
 
@@ -16,9 +17,18 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._ops._matrix_ops import (
+    gen_single_dim_einsum_strategies,
+    mm_single_dim_strategy,
+)
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -53,20 +63,135 @@ def scale_for_fp8(
 class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     def test_addmm(self):
+        """
+        Test addmm with all sharding strategies from addmm_single_dim_strategy.
+
+        The single dim strategy generates these cases for addmm(bias, mat1, mat2):
+        - Contracting dim k: mat1=Shard(1), mat2=Shard(0) -> output=Partial
+        - LHS free dim m: mat1=Shard(0), mat2=Replicate -> output=Shard(0)
+        - RHS free dim n: mat1=Replicate, mat2=Shard(1) -> output=Shard(1)
+
+        The bias placement depends on output placement and broadcast dims.
+        """
         device_mesh = self.build_device_mesh()
-        shard_spec = [Shard(0)]
-        replica_spec = [Replicate()]
+        M, K, N = 12, 8, 4  # mat1: (M, K), mat2: (K, N), output: (M, N)
 
-        tensor_to_shard = torch.randn(12, 8)
-        mat1 = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
-        tensor_to_replicate = torch.randn(8, 4)
-        mat2 = distribute_tensor(tensor_to_replicate, device_mesh, replica_spec)
-        input_tensor = torch.randn(4)
-        input = distribute_tensor(input_tensor, device_mesh, replica_spec)
+        mat1_tensor = torch.randn(M, K)
+        mat2_tensor = torch.randn(K, N)
+        bias_1d = torch.randn(N)  # 1D bias, broadcasts on M dim
+        bias_2d = torch.randn(M, N)  # 2D bias, no broadcast
 
-        dist_res = torch.addmm(input, mat1, mat2)
-        local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
-        self.assertEqual(dist_res.full_tensor(), local_res)
+        local_res_1d = torch.addmm(bias_1d, mat1_tensor, mat2_tensor)
+        local_res_2d = torch.addmm(bias_2d, mat1_tensor, mat2_tensor)
+
+        # Case 1: LHS free dim m - mat1=Shard(0), mat2=Replicate -> output=Shard(0)
+        # With 1D bias: bias should be Replicate (broadcast on m dim)
+        mat1_s0 = distribute_tensor(mat1_tensor, device_mesh, [Shard(0)])
+        mat2_r = distribute_tensor(mat2_tensor, device_mesh, [Replicate()])
+        bias_1d_r = distribute_tensor(bias_1d, device_mesh, [Replicate()])
+
+        dist_res = torch.addmm(bias_1d_r, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_1d)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        # Case 1b: LHS free dim m with 2D bias - bias should be Shard(0)
+        bias_2d_s0 = distribute_tensor(bias_2d, device_mesh, [Shard(0)])
+        dist_res = torch.addmm(bias_2d_s0, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_2d)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        # Case 2: RHS free dim n - mat1=Replicate, mat2=Shard(1) -> output=Shard(1)
+        # With 1D bias: bias should be Shard(0) (its dim 0 corresponds to n)
+        mat1_r = distribute_tensor(mat1_tensor, device_mesh, [Replicate()])
+        mat2_s1 = distribute_tensor(mat2_tensor, device_mesh, [Shard(1)])
+        bias_1d_s0 = distribute_tensor(bias_1d, device_mesh, [Shard(0)])
+
+        dist_res = torch.addmm(bias_1d_s0, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_1d)
+        self.assertEqual(dist_res.placements[0], Shard(1))
+
+        # Case 2b: RHS free dim n with 2D bias - bias should be Shard(1)
+        bias_2d_s1 = distribute_tensor(bias_2d, device_mesh, [Shard(1)])
+        dist_res = torch.addmm(bias_2d_s1, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_2d)
+        self.assertEqual(dist_res.placements[0], Shard(1))
+
+        # Case 3: Contracting dim k - mat1=Shard(1), mat2=Shard(0) -> output=Partial
+        # bias should be Partial
+        mat1_s1 = distribute_tensor(mat1_tensor, device_mesh, [Shard(1)])
+        mat2_s0 = distribute_tensor(mat2_tensor, device_mesh, [Shard(0)])
+        bias_1d_p = distribute_tensor(bias_1d, device_mesh, [Partial()])
+
+        dist_res = torch.addmm(bias_1d_p, mat1_s1, mat2_s0)
+        self.assertIsInstance(dist_res.placements[0], Partial)
+        self.assertEqual(dist_res.full_tensor(), local_res_1d)
+
+        # Case 3b: Contracting dim k with 2D bias - bias should be Partial
+        bias_2d_p = distribute_tensor(bias_2d, device_mesh, [Partial()])
+        dist_res = torch.addmm(bias_2d_p, mat1_s1, mat2_s0)
+        self.assertIsInstance(dist_res.placements[0], Partial)
+        self.assertEqual(dist_res.full_tensor(), local_res_2d)
+
+        # Case 4: All-Replicate case
+        mat1_r = distribute_tensor(mat1_tensor, device_mesh, [Replicate()])
+        mat2_r = distribute_tensor(mat2_tensor, device_mesh, [Replicate()])
+        bias_1d_r = distribute_tensor(bias_1d, device_mesh, [Replicate()])
+        bias_2d_r = distribute_tensor(bias_2d, device_mesh, [Replicate()])
+
+        dist_res = torch.addmm(bias_1d_r, mat1_r, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_1d)
+        self.assertEqual(dist_res.placements[0], Replicate())
+
+        dist_res = torch.addmm(bias_2d_r, mat1_r, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_2d)
+        self.assertEqual(dist_res.placements[0], Replicate())
+
+        # Case 5: Scalar bias - broadcasts on all dims
+        bias_scalar = torch.randn(())
+        local_res_scalar = torch.addmm(bias_scalar, mat1_tensor, mat2_tensor)
+
+        # Scalar with all strategies - should always be Replicate
+        bias_scalar_r = distribute_tensor(bias_scalar, device_mesh, [Replicate()])
+
+        dist_res = torch.addmm(bias_scalar_r, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_scalar)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        dist_res = torch.addmm(bias_scalar_r, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_scalar)
+        self.assertEqual(dist_res.placements[0], Shard(1))
+
+        # Case 6: (1, N) bias - broadcasts on M dim, similar to 1D
+        bias_1n = torch.randn(1, N)
+        local_res_1n = torch.addmm(bias_1n, mat1_tensor, mat2_tensor)
+
+        # With LHS sharding: output=Shard(0), bias broadcasts on M so bias=Replicate
+        bias_1n_r = distribute_tensor(bias_1n, device_mesh, [Replicate()])
+        dist_res = torch.addmm(bias_1n_r, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_1n)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        # With RHS sharding: output=Shard(1), bias dim 1 corresponds to N
+        bias_1n_s1 = distribute_tensor(bias_1n, device_mesh, [Shard(1)])
+        dist_res = torch.addmm(bias_1n_s1, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_1n)
+        self.assertEqual(dist_res.placements[0], Shard(1))
+
+        # Case 7: (M, 1) bias - broadcasts on N dim
+        bias_m1 = torch.randn(M, 1)
+        local_res_m1 = torch.addmm(bias_m1, mat1_tensor, mat2_tensor)
+
+        # With LHS sharding: output=Shard(0), bias dim 0 corresponds to M
+        bias_m1_s0 = distribute_tensor(bias_m1, device_mesh, [Shard(0)])
+        dist_res = torch.addmm(bias_m1_s0, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_m1)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        # With RHS sharding: output=Shard(1), bias broadcasts on N so bias=Replicate
+        bias_m1_r = distribute_tensor(bias_m1, device_mesh, [Replicate()])
+        dist_res = torch.addmm(bias_m1_r, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_m1)
+        self.assertEqual(dist_res.placements[0], Shard(1))
 
     @with_comms
     def test_addmm_empty_operand(self):
@@ -116,6 +241,107 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertIsNotNone(mat2.grad)
         self.assertEqual(mat2.grad.full_tensor(), tensor_to_shard0.grad)
 
+    def test_gen_single_dim_einsum_strategies_bias_reduce_op(self):
+        """Test that bias Partial placements preserve reduce_op from output Partial."""
+        # Test addmm strategy: "mk,kn->mn" with bias
+        # For contracting dim k: output=Partial, bias should also be Partial with same reduce_op
+        bias_shape_1d = torch.Size([4])  # 1D bias
+        bias_shape_2d = torch.Size([12, 4])  # 2D bias
+
+        strategies_1d = gen_single_dim_einsum_strategies(
+            "mk,kn->mn", bias_shape=bias_shape_1d
+        )
+        strategies_2d = gen_single_dim_einsum_strategies(
+            "mk,kn->mn", bias_shape=bias_shape_2d
+        )
+
+        # Find strategies where output is Partial (contracting dim case)
+        # Strategy format: [output, bias, mat1, mat2]
+        for strategies, bias_shape in [
+            (strategies_1d, bias_shape_1d),
+            (strategies_2d, bias_shape_2d),
+        ]:
+            for strategy in strategies:
+                output_placement = strategy[0]
+                bias_placement = strategy[1]
+
+                if isinstance(output_placement, Partial):
+                    # Bug: _derive_bias_placement was returning Partial() without
+                    # preserving reduce_op from output_placement
+                    self.assertIsInstance(bias_placement, Partial)
+                    self.assertEqual(
+                        bias_placement.reduce_op,
+                        output_placement.reduce_op,
+                        f"Bias Partial should have same reduce_op as output Partial. "
+                        f"Got bias={bias_placement.reduce_op}, output={output_placement.reduce_op}",
+                    )
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_mm_with_strided_input(self):
+        # Case 1: 1D mesh with StridedShard
+        # Tests mm where input has _StridedShard(dim=0, split_factor=2) placement.
+        # Input shape: (batch_size * seq_len, contract_dim), weight is Replicate.
+        # Output should preserve the same StridedShard placement.
+        mesh = self.build_device_mesh()
+        batch_size, seq_len, contract_dim, out_dim = 2, self.world_size, 3, 7
+        global_inps_viewed = (
+            torch.arange(batch_size * seq_len * contract_dim)
+            .float()
+            .view(batch_size * seq_len, contract_dim)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            mesh,
+            (_StridedShard(dim=0, split_factor=2),),
+            src_data_rank=None,
+        )
+        global_weight = (
+            torch.arange(contract_dim * out_dim).float().view(contract_dim, out_dim)
+        )
+        weight = distribute_tensor(global_weight, mesh, (Replicate(),))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (_StridedShard(dim=0, split_factor=2),)
+        self.assertEqual(out.placements, expected_placements)
+
+        # Case 2: 2D mesh (2x2) with nested StridedShard on both mesh dimensions
+        # Tests mm where input has StridedShard on both mesh dims with different split_factors.
+        # This simulates a more complex sharding pattern (e.g., from a reshaped 4D tensor).
+        # Output should preserve both StridedShard placements.
+        mesh = init_device_mesh(self.device_type, (2, 2))
+        tensor_dims = (4, mesh.size(0) * mesh.size(1), 6, 8)
+        global_inps_viewed = (
+            torch.arange(math.prod(tensor_dims))
+            .float()
+            .view(math.prod(tensor_dims[:3]), 8)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            mesh,
+            (
+                _StridedShard(dim=0, split_factor=4),
+                _StridedShard(
+                    dim=0,
+                    split_factor=tensor_dims[0] * (tensor_dims[1] // mesh.size(0)),
+                ),
+            ),
+            src_data_rank=None,
+        )
+        global_weight = (
+            torch.arange(tensor_dims[-1] * tensor_dims[-1])
+            .float()
+            .view(tensor_dims[-1], tensor_dims[-1])
+        )
+        weight = distribute_tensor(global_weight, mesh, (Replicate(), Replicate()))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (
+            _StridedShard(dim=0, split_factor=4),
+            _StridedShard(
+                dim=0, split_factor=tensor_dims[0] * (tensor_dims[1] // mesh.size(0))
+            ),
+        )
+        self.assertEqual(out.placements, expected_placements)
+
     @with_comms
     def test_mm(self):
         device_mesh = self.build_device_mesh()
@@ -145,6 +371,51 @@ class DistMatrixOpsTest(DTensorTestBase):
         shard_specs_comb = list(itertools.product(placement_specs, placement_specs))
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
+
+    @with_comms
+    def test_aten_linear(self):
+        device_mesh = self.build_device_mesh()
+        x = distribute_tensor(
+            torch.randn(1, 47, 2048),
+            device_mesh,
+            [Replicate()],
+        )
+        w = distribute_tensor(
+            torch.randn(2048, 2048),
+            device_mesh,
+            [Shard(0)],
+        )
+
+        with torch.inference_mode():  # call aten::linear
+            out = torch.nn.functional.linear(x, w)
+
+        self.assertEqual(out.placements, (Shard(2),))
+
+    @with_comms
+    def test_mm_single_dim_strategy(self):
+        register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
+        # unshardable input where some rank have empty _local_tensor
+        # eg sharding tensor (world_size - 1) over world_size
+        device_mesh = self.build_device_mesh()
+        global_inps_viewed = (
+            torch.arange((self.world_size - 1) * self.world_size)
+            .float()
+            .view(self.world_size - 1, self.world_size)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            device_mesh,
+            (Shard(dim=0),),
+        )
+        global_weight = (
+            torch.arange(self.world_size * self.world_size)
+            .float()
+            .view(self.world_size, self.world_size)
+        )
+        weight = distribute_tensor(global_weight, device_mesh, (Replicate(),))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (Replicate(),)
+        self.assertEqual(out.placements, expected_placements)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -277,6 +548,20 @@ class DistMatrixOpsTest(DTensorTestBase):
             dc.redistribute(device_mesh, [Replicate()]).to_local(),
         )
 
+    @with_comms
+    def test_t_1d(self):
+        # t() on a 1D tensor is a no-op and should preserve the shard placement
+        device_mesh = self.build_device_mesh()
+
+        tensor_1d = torch.randn(8)
+        mat = distribute_tensor(tensor_1d, device_mesh, [Shard(0)])
+        transposed = mat.t()
+        # t() on 1D is a no-op, should stay Shard(0)
+        self.assertEqual(transposed.size(), torch.Size([8]))
+        self.assertEqual(transposed.placements, (Shard(0),))
+        # Verify values match
+        self.assertEqual(transposed.full_tensor(), tensor_1d)
+
     # baddbmm introduces nan occasionally on CPU: https://github.com/pytorch/pytorch/issues/80588
     @with_comms
     @skip_unless_torch_gpu
@@ -304,8 +589,10 @@ class DistMatrixOpsTest(DTensorTestBase):
                 ),
             ).redistribute(device_mesh, [Replicate()])
             dist_local_res = dist_res.to_local()
-            assert not torch.isnan(local_result).any()
-            assert not torch.isnan(dist_local_res).any()
+            if torch.isnan(local_result).any():
+                raise AssertionError("NaN values found in local_result")
+            if torch.isnan(dist_local_res).any():
+                raise AssertionError("NaN values found in dist_local_res")
             self.assertEqual(dist_local_res.detach(), local_result.detach())
 
             # TODO: add test backward
@@ -386,6 +673,107 @@ class DistMatrixOpsTest(DTensorTestBase):
         # tests that currently pass
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_mm_partial_inputs(self):
+        # mm with Partial inputs should produce Partial output via per-input
+        # linearity, for both the default and single-dim strategy paths,
+        # across various mesh dimensionalities and reduce ops (sum, avg).
+        mesh_shapes = [
+            (self.world_size,),
+            (self.world_size // 2, 2),
+            (self.world_size // 2, 2, 1),
+            (1, self.world_size // 2, 2, 1),
+            (1, 1, self.world_size // 2, 2, 1),
+        ]
+
+        def _run_mm(device_mesh, reduce_op="sum"):
+            placements = [Partial(reduce_op)] * device_mesh.ndim
+            a_local = torch.randn(16, 12, device=self.device_type)
+            b_local = torch.randn(12, 20, device=self.device_type)
+            dt1 = DTensor.from_local(
+                a_local,
+                device_mesh,
+                placements,
+                run_check=False,
+            )
+            dt2 = DTensor.from_local(
+                b_local,
+                device_mesh,
+                placements,
+                run_check=False,
+            )
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                dist_res = torch.mm(dt1, dt2)
+            expected_placements = tuple(
+                Partial(reduce_op) for _ in range(device_mesh.ndim)
+            )
+            self.assertEqual(dist_res.placements, expected_placements)
+            # Per-input linearity keeps one input as-is and redistributes
+            # the other from Partial to Replicate via one all-reduce per
+            # Partial mesh dim with size > 1.
+            expected_allreduce_count = sum(
+                1
+                for i, p in enumerate(placements)
+                if isinstance(p, Partial) and device_mesh.size(i) > 1
+            )
+            self.assertEqual(
+                comm_mode.get_comm_counts()[funcol.all_reduce],
+                expected_allreduce_count,
+            )
+            self.assertEqual(comm_mode.get_total_counts(), expected_allreduce_count)
+            # Numeric check: redistribute to Replicate to materialize the full
+            # result, then compare against the ground truth computed from the
+            # full (all-reduced) inputs.
+            full_res = dist_res.full_tensor()
+            full_a = dt1.full_tensor()
+            full_b = dt2.full_tensor()
+            expected_val = torch.mm(full_a, full_b)
+            self.assertEqual(full_res, expected_val)
+
+        for mesh_shape in mesh_shapes:
+            device_mesh = init_device_mesh(self.device_type, mesh_shape)
+            for reduce_op in Partial.LINEAR_REDUCE_OPS:
+                _run_mm(device_mesh, reduce_op)
+
+        # Also verify mixed Partial placements across mesh dims: on a 2D mesh,
+        # left=P(op)R and right=RP(op) should produce output=P(op)P(op)
+        # with no communication, matching the full tensor result.
+        device_mesh = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        M, K, N = 16, 12, 20
+        for reduce_op in Partial.LINEAR_REDUCE_OPS:
+            a_local = torch.randn(M, K, device=self.device_type)
+            b_local = torch.randn(K, N, device=self.device_type)
+
+            dt_a = DTensor.from_local(
+                a_local,
+                device_mesh,
+                [Partial(reduce_op), Replicate()],
+                run_check=False,
+            )
+            dt_b = DTensor.from_local(
+                b_local,
+                device_mesh,
+                [Replicate(), Partial(reduce_op)],
+                run_check=False,
+            )
+
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                dist_res = torch.mm(dt_a, dt_b)
+
+            self.assertEqual(
+                dist_res.placements,
+                (Partial(reduce_op), Partial(reduce_op)),
+            )
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            full_res = dist_res.full_tensor()
+            full_a = dt_a.full_tensor()
+            full_b = dt_b.full_tensor()
+            self.assertEqual(full_res, torch.mm(full_a, full_b))
 
     @with_comms
     @skip_unless_torch_gpu

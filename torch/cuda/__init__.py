@@ -18,7 +18,7 @@ import traceback
 import warnings
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, cast, NewType, Optional, TYPE_CHECKING
+from typing import Any, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
@@ -193,10 +193,7 @@ def is_bf16_supported(including_emulation: bool = True):
 
     device = torch.cuda.current_device()
 
-    # Check for CUDA version and device compute capability.
-    # This is a fast way to check for it.
-    cuda_version = torch.version.cuda
-    if cuda_version is not None and torch.cuda.get_device_properties(device).major >= 8:
+    if torch.cuda.get_device_properties(device).major >= 8:
         return True
 
     if not including_emulation:
@@ -241,68 +238,137 @@ def _extract_arch_version(arch_string: str) -> int:
     return int(base)
 
 
+class _CompatInterval:
+    """
+    Defines a range of compute capabilities starting at a given
+    version and going up to the end of that major version. This
+    also allows excluding specific versions from the range.
+    """
+
+    def __init__(self, start, exclude: Optional[set[int]] = None):
+        self.major, self.minor = start // 10, start % 10
+        self.exclude = set() if exclude is None else exclude
+
+    def __contains__(self, x):
+        if x in self.exclude:
+            return False
+        x_major, x_minor = x // 10, x % 10
+        return x_major == self.major and x_minor >= self.minor
+
+    def __str__(self):
+        result = f">={self.major}.{self.minor},<{self.major + 1}.0"
+        if len(self.exclude) > 0:
+            exceptions = ", ".join(f"{x // 10}.{x % 10}" for x in self.exclude)
+            result += f" except {{{exceptions}}}"
+        return result
+
+
+class _CompatSet:
+    """
+    A set of compute capabilities. It exists primarily to support custom
+    printing logic and is otherwise equivalent to a plain python set().
+    """
+
+    def __init__(self, values: set[int]):
+        self.values = values
+
+    def __contains__(self, x):
+        return x in self.values
+
+    def __str__(self):
+        return "{" + ", ".join(f"{v // 10}.{v % 10}" for v in self.values) + "}"
+
+
+# (code SM)->(device SM required to execute the code)
+#
+# Developer Notes:
+# - This dict should be kept up to date with keys corresponding
+#   to SM versions that PyTorch can be built for. An out of date
+#   mapping will lead to false warnings.
+# - The keys in dict correspond to known sm versions but the values
+#   are merely rules based on sm compatibility guarantees for NVIDIA
+#   devices while accounting for incompatibility of iGPU and dGPU.
+DEVICE_REQUIREMENT: dict[int, Union[_CompatSet, _CompatInterval]] = {
+    50: _CompatInterval(start=50, exclude={53}),
+    52: _CompatInterval(start=52, exclude={53}),
+    53: _CompatSet({53}),
+    60: _CompatInterval(start=60, exclude={62}),
+    61: _CompatInterval(start=61, exclude={62}),
+    62: _CompatSet({62}),
+    70: _CompatInterval(start=70, exclude={72}),
+    72: _CompatSet({72}),
+    75: _CompatInterval(start=75),
+    80: _CompatInterval(start=80, exclude={87}),
+    86: _CompatInterval(start=86, exclude={87}),
+    87: _CompatSet({87}),
+    89: _CompatInterval(start=89),
+    90: _CompatInterval(start=90),
+    100: _CompatInterval(start=100, exclude={101}),
+    101: _CompatSet({101, 110}),
+    103: _CompatInterval(start=103),
+    110: _CompatInterval(start=110),
+    120: _CompatInterval(start=120),
+    121: _CompatInterval(start=121),
+}
+
+
+# TORCH_CUDA_ARCH_LIST for PyTorch releases
+PYTORCH_RELEASES_CODE_CC: dict[str, set[int]] = {
+    "12.6": {50, 60, 70, 80, 86, 90},
+    "12.8": {70, 80, 86, 90, 100, 120},
+    "13.0": {75, 80, 86, 90, 100, 110, 120},
+}
+
+
+def _code_compatible_with_device(device_cc: int, code_cc: int):
+    if code_cc not in DEVICE_REQUIREMENT:
+        warnings.warn(
+            f"PyTorch was compiled with an unknown compute capability {code_cc // 10}.{code_cc % 10}. "
+            + " Please create an issue on Github if this is a valid compute capability.",
+            stacklevel=2,
+        )
+        return device_cc in _CompatInterval(start=code_cc)
+    return device_cc in DEVICE_REQUIREMENT[code_cc]
+
+
+def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int]):
+    name = get_device_name(device_index)
+
+    compatible_releases: list[str] = []
+    for cuda, build_ccs in PYTORCH_RELEASES_CODE_CC.items():
+        if any(_code_compatible_with_device(device_cc, cc) for cc in build_ccs):
+            compatible_releases.append(cuda)
+
+    lines = [
+        f"Found GPU{device_index} {name} which is of compute capability (CC) {device_cc // 10}.{device_cc % 10}.",
+        "The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:",
+    ] + [
+        f"- {cc // 10}.{cc % 10} which supports hardware CC {DEVICE_REQUIREMENT[cc]}"
+        for cc in code_ccs
+    ]
+
+    if len(compatible_releases) > 0:
+        releases_str = ", ".join(compatible_releases)
+        lines.append(
+            "Please follow the instructions at https://pytorch.org/get-started/locally/ to "
+            + f"install a PyTorch release that supports one of these CUDA versions: {releases_str}"
+        )
+
+    warnings.warn("\n".join(lines), stacklevel=2)
+
+
 def _check_capability():
-    incompatible_gpu_warn = """
-    Found GPU%d %s which is of cuda capability %d.%d.
-    Minimum and Maximum cuda capability supported by this version of PyTorch is
-    (%d.%d) - (%d.%d)
-    """
-    matched_cuda_warn = """
-    Please install PyTorch with a following CUDA
-    configurations: {} following instructions at
-    https://pytorch.org/get-started/locally/
-    """
+    if torch.version.cuda is None:  # on ROCm we don't want this check
+        return
 
-    # Binary CUDA_ARCHES SUPPORTED by PyTorch
-    CUDA_ARCHES_SUPPORTED = {
-        "12.6": {"min": 50, "max": 90},
-        "12.8": {"min": 70, "max": 120},
-        "13.0": {"min": 75, "max": 120},
-    }
-
-    if (
-        torch.version.cuda is not None and torch.cuda.get_arch_list()
-    ):  # on ROCm we don't want this check
-        for d in range(device_count()):
-            capability = get_device_capability(d)
-            major = capability[0]
-            minor = capability[1]
-            name = get_device_name(d)
-            current_arch = major * 10 + minor
-            min_arch = min(
-                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
-                default=50,
-            )
-            max_arch = max(
-                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
-                default=50,
-            )
-            if current_arch < min_arch or current_arch > max_arch:
-                warnings.warn(
-                    incompatible_gpu_warn
-                    % (
-                        d,
-                        name,
-                        major,
-                        minor,
-                        min_arch // 10,
-                        min_arch % 10,
-                        max_arch // 10,
-                        max_arch % 10,
-                    ),
-                    stacklevel=2,
-                )
-                matched_arches = ""
-                for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
-                    if (
-                        current_arch >= arch_info["min"]
-                        and current_arch <= arch_info["max"]
-                    ):
-                        matched_arches += f" {arch}"
-                if matched_arches != "":
-                    warnings.warn(
-                        matched_cuda_warn.format(matched_arches), stacklevel=2
-                    )
+    code_ccs = [_extract_arch_version(cc) for cc in get_arch_list()]
+    for d in range(device_count()):
+        major, minor = get_device_capability(d)
+        device_cc = 10 * major + minor
+        if not any(
+            _code_compatible_with_device(device_cc, code_cc) for code_cc in code_ccs
+        ):
+            _warn_unsupported_code(d, device_cc, code_ccs)
 
 
 def _check_cubins():
@@ -723,7 +789,7 @@ def _set_stream_by_id(stream_id, device_index, device_type):
 
 
 def set_stream(stream: Stream):
-    r"""Set the current stream.This is a wrapper API to set the stream.
+    r"""Set the current stream. This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
 
@@ -1042,9 +1108,15 @@ def device_count() -> int:
         return 0
     if _cached_device_count is not None:
         return _cached_device_count
-    # bypass _device_count_nvml() if rocm (not supported)
-    nvml_count = _device_count_amdsmi() if torch.version.hip else _device_count_nvml()
-    r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
+    if _initialized or hasattr(_tls, "is_initializing"):
+        r = torch._C._cuda_getDeviceCount()
+    else:
+        # bypass _device_count_nvml() if rocm (not supported)
+        if torch.version.hip:
+            nvml_count = _device_count_amdsmi()
+        else:
+            nvml_count = _device_count_nvml()
+        r = torch._C._cuda_getDeviceCount() if nvml_count < 0 else nvml_count
     # NB: Do not cache the device count prior to CUDA initialization, because
     # the number of devices can change due to changes to CUDA_VISIBLE_DEVICES
     # setting prior to CUDA initialization.
@@ -1239,7 +1311,7 @@ def _get_amdsmi_handler(device: Device = None):
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
         raise RuntimeError(
-            "amdsmi driver can't be loaded, requires >=ROCm5.6 installation"
+            "amdsmi driver can't be loaded, requires >=ROCm6.0 installation"
         ) from e
     device = _get_amdsmi_device_index(device)
     handle = amdsmi.amdsmi_get_processor_handles()[device]
@@ -1819,26 +1891,36 @@ _POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 __all__ = [
     # Typed storage and tensors
     "BFloat16Storage",
+    # pyrefly: ignore [bad-dunder-all]
     "BFloat16Tensor",
     "BoolStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "BoolTensor",
     "ByteStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "ByteTensor",
     "CharStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "CharTensor",
     "ComplexDoubleStorage",
     "ComplexFloatStorage",
     "DoubleStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "DoubleTensor",
     "FloatStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "FloatTensor",
     "HalfStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "HalfTensor",
     "IntStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "IntTensor",
     "LongStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "LongTensor",
     "ShortStorage",
+    # pyrefly: ignore [bad-dunder-all]
     "ShortTensor",
     "CUDAGraph",
     "CudaError",

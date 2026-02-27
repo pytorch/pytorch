@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,23
+detectron2_fcos_r_50_fpn,pass,22
 
 
 
@@ -202,7 +202,6 @@ pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,0
 
 
 

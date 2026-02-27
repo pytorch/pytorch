@@ -130,6 +130,10 @@ struct THPFunction {
   std::vector<bool> is_variable_input;
   char has_freed_buffers;
 
+  // Flag for clear_saved_tensors_on_access feature
+  bool clear_saved_tensors_on_access;
+  bool saved_tensors_accessed_and_cleared;
+
   PyObject* saved_for_forward;
   // The actual PyNode (in the autograd graph) that this data was
   // saved for.  This field may be NULL (because a user can construct

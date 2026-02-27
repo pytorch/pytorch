@@ -45,12 +45,14 @@ class CrossEntropyForward(BenchmarkKernel):
         return (M * N + M + M) * dtype.itemsize
 
     def eager(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, target = args
         return lambda: F.cross_entropy(x, target, reduction="none")
 
     def compiled(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, target = args
 
         # Mark batch size as dynamic for realistic workload
@@ -67,14 +69,16 @@ class CrossEntropyForward(BenchmarkKernel):
         return lambda: compiled_cross_entropy(x, target)
 
     def quack(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, target = args
         from quack.cross_entropy import _cross_entropy
 
         return lambda: _cross_entropy(x, target)
 
     def liger(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         from liger_kernel.transformers.cross_entropy import LigerCrossEntropyLoss
 
         x, target = args
@@ -146,7 +150,8 @@ class CrossEntropyBackward(BenchmarkKernel):
         )
 
     def eager(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, target, dloss = args
         loss = F.cross_entropy(x, target, reduction="none")
         return lambda: torch.autograd.grad(
@@ -154,7 +159,8 @@ class CrossEntropyBackward(BenchmarkKernel):
         )
 
     def compiled(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, target, dloss = args
 
         compiled_cross_entropy = torch.compile(
@@ -170,7 +176,8 @@ class CrossEntropyBackward(BenchmarkKernel):
     def quack(self, args, kwargs=None) -> Any:
         from quack.cross_entropy import cross_entropy
 
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, target, dloss = args
         loss = cross_entropy(x, target)
         return lambda: torch.autograd.grad(
@@ -178,7 +185,8 @@ class CrossEntropyBackward(BenchmarkKernel):
         )
 
     def liger(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         from liger_kernel.transformers.cross_entropy import LigerCrossEntropyLoss
 
         x, target, dloss = args
@@ -228,12 +236,14 @@ class SoftmaxForward(BenchmarkKernel):
         return 2 * M * N * x.dtype.itemsize
 
     def eager(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         (x,) = args
         return lambda: F.softmax(x, dim=-1)
 
     def compiled(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         (x,) = args
 
         # Mark batch size as dynamic for realistic workload
@@ -247,14 +257,16 @@ class SoftmaxForward(BenchmarkKernel):
     def quack(self, args, kwargs=None) -> Any:
         from quack.softmax import softmax
 
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         (x,) = args
         return lambda: softmax(x)
 
     def liger(self, args, kwargs=None) -> Any:
         from liger_kernel.transformers.softmax import LigerSoftmax
 
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         (x,) = args
         softmax = LigerSoftmax().to("cuda")
         return lambda: softmax(x)
@@ -294,13 +306,15 @@ class SoftmaxBackward(BenchmarkKernel):
         return 3 * M * N * x.dtype.itemsize
 
     def eager(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, dy = args
         y = F.softmax(x, dim=-1)
         return lambda: torch.autograd.grad(y, x, grad_outputs=dy, retain_graph=True)
 
     def compiled(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, dy = args
         compiled_softmax = torch.compile(
             lambda x: F.softmax(x, dim=-1), mode=self.compile_mode, fullgraph=True
@@ -311,7 +325,8 @@ class SoftmaxBackward(BenchmarkKernel):
     def quack(self, args, kwargs=None) -> Any:
         from quack.softmax import softmax
 
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, dy = args
 
         y = softmax(x)
@@ -320,7 +335,8 @@ class SoftmaxBackward(BenchmarkKernel):
     def liger(self, args, kwargs=None) -> Any:
         from liger_kernel.transformers.softmax import LigerSoftmax
 
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, dy = args
         softmax = LigerSoftmax().to("cuda")
         y = softmax(x)
@@ -371,12 +387,14 @@ class RMSNormForward(BenchmarkKernel):
         ).to(x.dtype)
 
     def eager(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, w = args
         return lambda: self.rms_norm_ref(x, w)
 
     def compiled(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, w = args
 
         # Mark batch size as dynamic for realistic workload
@@ -465,7 +483,8 @@ class RMSNormBackward(BenchmarkKernel):
         ).to(x.dtype)
 
     def eager(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, w, dy = args
         y = self.rms_norm_ref(x, w)
         return lambda: torch.autograd.grad(
@@ -473,7 +492,8 @@ class RMSNormBackward(BenchmarkKernel):
         )
 
     def compiled(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, w, dy = args
         y = torch.compile(self.rms_norm_ref, mode=self.compile_mode, fullgraph=True)(
             x, w
@@ -486,6 +506,8 @@ class RMSNormBackward(BenchmarkKernel):
         return torch.rsqrt(torch.mean(x.float().square(), dim=-1, keepdim=True) + eps)
 
     def quack(self, args, kwargs=None) -> Any:
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         from quack.rmsnorm import _get_sm_count, _rmsnorm_bwd
 
         (
@@ -521,6 +543,8 @@ class RMSNormBackward(BenchmarkKernel):
         return quack_bwd
 
     def liger(self, args, kwargs=None) -> Any:
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         from liger_kernel.transformers.rms_norm import LigerRMSNorm
 
         x, w, dy = args
@@ -574,12 +598,14 @@ class LayerNormForward(BenchmarkKernel):
         return F.layer_norm(x_f32, w.shape, w, None, eps).to(x.dtype)
 
     def eager(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, w = args
         return lambda: self.layernorm_ref(x, w)
 
     def compiled(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, w = args
 
         # Mark batch size as dynamic for realistic workload
@@ -652,7 +678,8 @@ class LayerNormBackward(BenchmarkKernel):
         return F.layer_norm(x_f32, w.shape, w, None, eps).to(x.dtype)
 
     def eager(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, w, dy = args
         y = self.layernorm_ref(x, w)
         return lambda: torch.autograd.grad(
@@ -660,7 +687,8 @@ class LayerNormBackward(BenchmarkKernel):
         )
 
     def compiled(self, args, kwargs=None) -> Any:
-        assert kwargs is None
+        if kwargs is not None:
+            raise AssertionError(f"Expected kwargs to be None, but got {kwargs}")
         x, w, dy = args
         compiled_layernorm = torch.compile(
             self.layernorm_ref, mode=self.compile_mode, fullgraph=True

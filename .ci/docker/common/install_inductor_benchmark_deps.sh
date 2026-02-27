@@ -49,14 +49,23 @@ fi
 # Stable packages are ok here, just to satisfy TorchBench check
 pip_install torch torchvision torchaudio --index-url "${CUDA_INDEX_URL}"
 
+# Pin setuptools<82 to avoid breaking visdom install (setuptools 82 removed
+# pkg_resources which visdom's setup.py depends on)
+pip_install 'setuptools<82'
+
 install_torchbench
 install_huggingface
 install_timm
 
 # Clean up
+# NS: It's very important to uninstall some of the system dependencies
+# Otherwise torchnbench test might start to fail with hard to detect errors
+# Especially if cudnn/nccl version are different between nightly and last release
 conda_run pip uninstall -y torch torchvision torchaudio triton torchao
 if [[ "${DESIRED_CUDA}" == 13.* ]]; then
   conda_run pip uninstall -y nvidia-nccl-cu13
+  conda_run pip uninstall -y nvidia-cudnn-cu13
 else
   conda_run pip uninstall -y nvidia-nccl-cu12
+  conda_run pip uninstall -y nvidia-cudnn-cu12
 fi

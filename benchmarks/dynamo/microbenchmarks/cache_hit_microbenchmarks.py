@@ -26,7 +26,10 @@ def main():
 
         # write to cache
         compiled_fn(a)
-        assert counters["inductor"]["fxgraph_cache_miss"] == 1
+        if counters["inductor"]["fxgraph_cache_miss"] != 1:
+            raise AssertionError(
+                f"expected fxgraph_cache_miss == 1, got {counters['inductor']['fxgraph_cache_miss']}"
+            )
 
         def setup():
             torch._dynamo.reset()
@@ -37,8 +40,14 @@ def main():
 
         def fn():
             result = compiled_fn(a)
-            assert counters["inductor"]["fxgraph_cache_miss"] == 0
-            assert counters["inductor"]["fxgraph_cache_hit"] == 1
+            if counters["inductor"]["fxgraph_cache_miss"] != 0:
+                raise AssertionError(
+                    f"expected fxgraph_cache_miss == 0, got {counters['inductor']['fxgraph_cache_miss']}"
+                )
+            if counters["inductor"]["fxgraph_cache_hit"] != 1:
+                raise AssertionError(
+                    f"expected fxgraph_cache_hit == 1, got {counters['inductor']['fxgraph_cache_hit']}"
+                )
             return result
 
         t = min(timeit.repeat(fn, setup=setup, number=K, repeat=3))

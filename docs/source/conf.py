@@ -13,10 +13,9 @@
 
 import inspect
 import os
-
-# import sys
 import pkgutil
 import re
+import sys
 from os import path
 
 # source code directory, relative to this file, for sphinx-autobuild
@@ -44,6 +43,10 @@ import pytorch_sphinx_theme2
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
+# Add the source directory to sys.path so that redirects.py can be imported
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+from redirects import redirects  # noqa: F401
+
 
 # -- General configuration ------------------------------------------------
 
@@ -66,6 +69,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
+    "sphinx_reredirects",
 ]
 
 myst_enable_extensions = [
@@ -131,7 +135,6 @@ switcher_version = "main" if not RELEASE else version
 
 html_static_path = ["_static"]
 html_theme_options = {
-    "logo": {"text": "Home"},
     "analytics_id": "GTM-T8XT4PS",
     "canonical_url": "https://docs.pytorch.org/docs/stable/",
     "switcher": {
@@ -147,6 +150,7 @@ html_theme_options = {
         },
     ],
     "show_version_warning_banner": True,
+    "llm_disabled": False,
     "icon_links": [
         {
             "name": "X",
@@ -170,12 +174,16 @@ html_theme_options = {
         },
     ],
     "navbar_align": "left",
-    "navbar_start": ["version-switcher", "navbar-logo"],
+    "navbar_start": ["navbar-logo", "version-switcher"],
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
     "header_links_before_dropdown": 6,
     "navbar_persistent": [],
     "use_edit_page_button": True,
+    # RunLLM Widget Configuration (uncomment and set assistant_id to enable)
+    # Each repository should have its own unique assistant_id from RunLLM
+    "runllm_assistant_id": "834",
+    "runllm_name": "PyTorch Assistant",
     "pytorch_project": "docs",
 }
 
@@ -243,38 +251,8 @@ autosummary_filename_map = {
 }
 
 coverage_ignore_functions = [
-    # torch
-    "typename",
-    # torch.cuda._sanitizer
-    "zip_arguments",
-    "zip_by_key",
-    # torch.distributed.autograd
-    "is_available",
-    # torch.distributed.checkpoint.state_dict
-    "gc_context",
-    # torch.distributed.elastic.events
-    "record_rdzv_event",
-    # torch.distributed.elastic.metrics
-    "initialize_metrics",
-    # torch.distributed.elastic.rendezvous.registry
-    "get_rendezvous_handler",
-    # torch.distributed.launch
-    "launch",
-    "main",
-    "parse_args",
-    # torch.distributed.rpc
-    "is_available",
-    # torch.distributed.run
-    "config_from_args",
-    "determine_local_world_size",
-    "get_args_parser",
-    "get_rdzv_endpoint",
-    "get_use_env",
-    "main",
-    "parse_args",
-    "parse_min_max_nnodes",
-    "run",
-    "run_script_path",
+    "main",  # utility script
+    "run",  # utility script
     # torch.distributions.constraints
     "is_dependent",
     # torch.hub
@@ -1656,34 +1634,10 @@ coverage_ignore_classes = [
     "default_debug_observer",
     "default_placeholder_observer",
     "default_reuse_input_observer",
-    # torch.ao.quantization.pt2e.duplicate_dq_pass
-    "DuplicateDQPass",
-    # torch.ao.quantization.pt2e.port_metadata_pass
-    "PortNodeMetaForQDQ",
     # torch.ao.quantization.qconfig
     "QConfigDynamic",
     # torch.ao.quantization.quant_type
     "QuantType",
-    # torch.ao.quantization.quantizer.composable_quantizer
-    "ComposableQuantizer",
-    # torch.ao.quantization.quantizer.embedding_quantizer
-    "EmbeddingQuantizer",
-    # torch.ao.quantization.quantizer.quantizer
-    "DerivedQuantizationSpec",
-    "FixedQParamsQuantizationSpec",
-    "QuantizationAnnotation",
-    "QuantizationSpec",
-    "QuantizationSpecBase",
-    "SharedQuantizationSpec",
-    # torch.ao.quantization.quantizer.x86_inductor_quantizer
-    "X86InductorQuantizer",
-    # torch.ao.quantization.quantizer.xpu_inductor_quantizer
-    "XPUInductorQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer
-    "XNNPACKQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
-    "OperatorConfig",
-    "QuantizationConfig",
     # torch.ao.quantization.stubs
     "DeQuantStub",
     "QuantStub",
@@ -2519,11 +2473,9 @@ autodoc_default_options = {
 
 html_css_files = [
     "css/jit.css",
-    "css/custom.css",
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
-html_js_files = ["js/runllm-widget.js"]
 
 from sphinx.ext.coverage import CoverageBuilder
 

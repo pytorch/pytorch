@@ -7,9 +7,9 @@ class ListContains(torch.nn.Module):
     """
 
     def forward(self, x):
-        assert x.size(-1) in [6, 2]
-        assert x.size(0) not in [4, 5, 6]
-        assert "monkey" not in ["cow", "pig"]
+        assert x.size(-1) in [6, 2]  # noqa: S101
+        assert x.size(0) not in [4, 5, 6]  # noqa: S101
+        assert "monkey" not in ["cow", "pig"]  # noqa: S101
         return x + x
 
 example_args = (torch.randn(3, 2),)

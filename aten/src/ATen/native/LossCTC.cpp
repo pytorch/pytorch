@@ -33,6 +33,8 @@
 #include <ATen/ops/tensor.h>
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/_use_miopen_ctc_loss.h>
+#include <ATen/ops/miopen_ctc_loss.h>
 #endif
 
 #include <type_traits>
@@ -489,26 +491,42 @@ Tensor get_clamped_target_length(
   return target_lengths.clamp_min(1);
 }
 
-// this wrapper function dispatches to the native and cudnn implementations and hides the alpha/grad from the user (by just returning the loss)
-// the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
+// this wrapper function dispatches to the native and cudnn/miopen implementations and hides the alpha/grad from the user (by just returning the loss)
+// the gradient is implemented for _cudnn_ctc_loss, miopen_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
 template <typename LengthsType>
 Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsType input_lengths, LengthsType target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
   auto is_batched = log_probs_.dim() == 3;
   Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
+
+  Tensor res;
+
+  // cuDNN CTC Loss (returns false on non-CUDA builds)
   bool use_cudnn =
       (log_probs.device().type() == at::kCUDA) &&
       at::_use_cudnn_ctc_loss(
           log_probs, targets, input_lengths, target_lengths, BLANK);
 
-  Tensor res;
+  // MIOpen CTC Loss (returns false on non-ROCm builds)
+  bool use_miopen = false;
+  Tensor targets_cpu;
+  if (log_probs.device().type() == at::kCUDA) {
+    targets_cpu = targets.device().type() == at::kCPU
+        ? targets.to(at::kInt)
+        : targets.to(Device(at::kCPU), at::kInt);
+    use_miopen = at::_use_miopen_ctc_loss(log_probs, targets_cpu, input_lengths, target_lengths, BLANK);
+  }
+
   if (use_cudnn) {
     // non-deterministic ctc loss on cudnn disabled due to inconsistent results
     // see: https://github.com/pytorch/pytorch/issues/21680
     res = std::get<0>(at::_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, /*deterministic=*/true, zero_infinity));
+  } else if (use_miopen) {
+    // MIOpen CTC Loss only supports deterministic algorithm
+    res = std::get<0>(at::miopen_ctc_loss(log_probs, targets_cpu, input_lengths, target_lengths, BLANK, /*deterministic=*/true, zero_infinity));
   } else {
-    // if the targets are on CPU (which you need for CuDNN, let's move them to
-    // GPU as a service for the user)
+    // if the targets are on CPU (which you need for cuDNN/MIOpen), move them to
+    // GPU as a service for the user
     res = std::get<0>(at::_ctc_loss(
         log_probs,
         targets.to(log_probs.device(), kLong),
@@ -537,13 +555,24 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  // we don't want to convert to IntArrayRef if we can dispatch to cuDNN (this allows graph-capturable ctc_loss)
+  // we don't want to convert to IntArrayRef if we can dispatch to cuDNN/MIOpen (this allows graph-capturable ctc_loss)
+  // cuDNN CTC Loss (returns false on non-CUDA builds)
   bool use_cudnn =
       (log_probs.device().type() == at::kCUDA) &&
       at::_use_cudnn_ctc_loss(
           log_probs, targets, input_lengths, target_lengths, BLANK);
+  // MIOpen CTC Loss (returns false on non-ROCm builds)
+  bool use_miopen = false;
+  if (log_probs.device().type() == at::kCUDA) {
+    Tensor targets_check = targets.device().type() == at::kCPU
+        ? targets.to(at::kInt)
+        : targets.to(Device(at::kCPU), at::kInt);
+    use_miopen = at::_use_miopen_ctc_loss(
+        log_probs, targets_check, input_lengths, target_lengths, BLANK);
+  }
+  bool use_accelerated = use_cudnn || use_miopen;
   if (at::areAnyTensorSubclassLike(
-          {log_probs, targets, input_lengths, target_lengths}) || use_cudnn) {
+          {log_probs, targets, input_lengths, target_lengths}) || use_accelerated) {
     // Composite Compliant path for TensorSubclasses
     return ctc_loss_impl(log_probs, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
   }

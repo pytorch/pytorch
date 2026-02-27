@@ -5,7 +5,7 @@ that are produced by AOTAutograd.  They will NOT work on generic FX graphs.  See
 recommend reading :mod:torch._functorch._aot_autograd.descriptors`.
 """
 
-from typing import NoReturn, Optional, Union
+from typing import NoReturn
 
 import torch.fx as fx
 
@@ -26,7 +26,7 @@ from .descriptors import (
 
 
 def _raise_autograd_subclass_not_implemented(
-    n: fx.Node, desc: Union[AOTInput, AOTOutput]
+    n: fx.Node, desc: AOTInput | AOTOutput
 ) -> NoReturn:
     raise RuntimeError(
         "Subclasses are currently not supported by this function, but a desugared subclass input "
@@ -43,7 +43,7 @@ def _raise_autograd_subclass_not_implemented(
 
 def get_all_input_and_grad_nodes(
     g: fx.Graph,
-) -> dict[DifferentiableAOTInput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[DifferentiableAOTInput, tuple[fx.Node, fx.Node | None]]:
     """
     Given a joint graph with descriptors (meta['desc'] on placeholders and
     output), returns the node for every input and its corresponding grad
@@ -69,7 +69,7 @@ def get_all_input_and_grad_nodes(
         is not supported by API as there is not necessarily a 1-1 correspondence
         between inputs and grads when subclasses are involved.
     """
-    input_index: dict[DifferentiableAOTInput, tuple[fx.Node, Optional[fx.Node]]] = {}
+    input_index: dict[DifferentiableAOTInput, tuple[fx.Node, fx.Node | None]] = {}
     for n in g.nodes:
         if n.op == "placeholder":
             desc = n.meta["desc"]
@@ -78,24 +78,28 @@ def get_all_input_and_grad_nodes(
                 continue
             if isinstance(desc, SubclassGetAttrAOTInput):
                 _raise_autograd_subclass_not_implemented(n, desc)
-            # pyrefly: ignore [unsupported-operation]
+
             input_index[desc] = (n, None)
         elif n.op == "output":
-            assert "desc" in n.meta, (n, n.meta)
+            if "desc" not in n.meta:
+                raise AssertionError(f"'desc' not in n.meta for {n}: {n.meta}")
             desc = n.meta["desc"]
             for sub_n, sub_desc in zip(n.args[0], desc):
                 if isinstance(sub_desc, SubclassGetAttrAOTOutput):
                     _raise_autograd_subclass_not_implemented(sub_n, sub_desc)
                 if isinstance(sub_desc, GradAOTOutput):
                     inp, grad = input_index[sub_desc.grad_of]
-                    assert grad is None, (sub_n, sub_desc, input_index)
+                    if grad is not None:
+                        raise AssertionError(
+                            f"grad already set for {sub_n}, {sub_desc}, {input_index}"
+                        )
                     input_index[sub_desc.grad_of] = (inp, sub_n)
     return input_index
 
 
 def get_all_output_and_tangent_nodes(
     g: fx.Graph,
-) -> dict[DifferentiableAOTOutput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[DifferentiableAOTOutput, tuple[fx.Node, fx.Node | None]]:
     """Get all output nodes and their corresponding tangent nodes from a joint graph.
 
     Similar to get_all_input_and_grad_nodes, but returns output nodes paired with
@@ -120,7 +124,7 @@ def get_all_output_and_tangent_nodes(
         is not supported by API as there is not necessarily a 1-1 correspondence
         between outputs and tangents when subclasses are involved.
     """
-    output_index: dict[DifferentiableAOTOutput, tuple[fx.Node, Optional[fx.Node]]] = {}
+    output_index: dict[DifferentiableAOTOutput, tuple[fx.Node, fx.Node | None]] = {}
     for n in g.nodes:
         if n.op == "output":
             desc = n.meta["desc"]
@@ -130,7 +134,7 @@ def get_all_output_and_tangent_nodes(
                     continue
                 if isinstance(sub_d, SubclassGetAttrAOTOutput):
                     _raise_autograd_subclass_not_implemented(sub_n, sub_d)
-                # pyrefly: ignore [unsupported-operation]
+
                 output_index[sub_d] = (sub_n, None)
     for n in g.nodes:
         if n.op == "placeholder":
@@ -139,14 +143,17 @@ def get_all_output_and_tangent_nodes(
                 _raise_autograd_subclass_not_implemented(n, desc)
             if isinstance(desc, TangentAOTInput):
                 out, tangent = output_index[desc.output]
-                assert tangent is None, (n, desc, output_index)
+                if tangent is not None:
+                    raise AssertionError(
+                        f"tangent already set for {n}, {desc}, {output_index}"
+                    )
                 output_index[desc.output] = (out, n)
     return output_index
 
 
 def get_param_and_grad_nodes(
     graph: fx.Graph,
-) -> dict[ParamAOTInput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[ParamAOTInput, tuple[fx.Node, fx.Node | None]]:
     """Get parameter nodes and their corresponding gradient nodes from a joint graph.
 
     Args:
@@ -166,7 +173,7 @@ def get_param_and_grad_nodes(
 
 def get_plain_input_and_grad_nodes(
     graph: fx.Graph,
-) -> dict[PlainAOTInput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[PlainAOTInput, tuple[fx.Node, fx.Node | None]]:
     """Get plain input nodes and their corresponding gradient nodes from a joint graph.
 
     Args:
@@ -186,7 +193,7 @@ def get_plain_input_and_grad_nodes(
 
 def get_plain_output_and_tangent_nodes(
     graph: fx.Graph,
-) -> dict[PlainAOTOutput, tuple[fx.Node, Optional[fx.Node]]]:
+) -> dict[PlainAOTOutput, tuple[fx.Node, fx.Node | None]]:
     """Get plain output nodes and their corresponding tangent nodes from a joint graph.
 
     Args:
@@ -205,7 +212,7 @@ def get_plain_output_and_tangent_nodes(
 
 
 def _raise_fqn_subclass_not_implemented(
-    n: fx.Node, desc: Union[AOTInput, AOTOutput]
+    n: fx.Node, desc: AOTInput | AOTOutput
 ) -> NoReturn:
     raise RuntimeError(
         "Subclasses are currently not supported by this function, but a desugared subclass input "

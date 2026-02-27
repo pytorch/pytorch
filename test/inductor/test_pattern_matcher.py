@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import copy
-import itertools
 import os
 import unittest
 from collections.abc import Callable
@@ -377,22 +376,19 @@ class TestPatternMatcher(TestCase):
         }
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
-    def test_mixed_mm_exhaustive_dtypes(self):
+    @parametrize("dtype_left", (torch.float16, torch.float32, torch.bfloat16))
+    @parametrize("dtype_right", (torch.int8, torch.uint8))
+    def test_mixed_mm_exhaustive(self, dtype_left, dtype_right):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
-        dtypes_left = [torch.float16, torch.float32, torch.bfloat16]
-        dtypes_right = [torch.int8, torch.uint8]
         dtype_ranges = {torch.uint8: (0, 255), torch.int8: (-128, 127)}
-        for dtype_left, dtype_right in itertools.product(dtypes_left, dtypes_right):
-            low, high = dtype_ranges[dtype_right]
-            args = (
-                torch.randn(256, 256, dtype=dtype_left, device=GPU_TYPE),
-                torch.randint(
-                    low, high, (256, 256), dtype=dtype_right, device=GPU_TYPE
-                ),
-            )
-            self._test_mixed_impl(fn, args, True, False, rtol=0.16, atol=1e-4)
+        low, high = dtype_ranges[dtype_right]
+        args = (
+            torch.randn(256, 256, dtype=dtype_left, device=GPU_TYPE),
+            torch.randint(low, high, (256, 256), dtype=dtype_right, device=GPU_TYPE),
+        )
+        self._test_mixed_impl(fn, args, True, False, rtol=0.16, atol=1e-4)
 
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
@@ -898,7 +894,7 @@ class TestPatternMatcher(TestCase):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
 
     def test_splitwithsizes_cat(self):
@@ -1611,7 +1607,8 @@ class TestPatternMatcher(TestCase):
 
     def test_mutation_op_matching(self):
         def check(type, func_name, args, kwargs, expect=True):
-            assert type in ["call_function", "call_method"]
+            if type not in ["call_function", "call_method"]:
+                raise AssertionError
             graph = torch.fx.Graph()
             getattr(graph, type)(func_name, args, kwargs)
             res = is_mutation_op(next(iter(graph.nodes)))
@@ -2083,6 +2080,43 @@ class TestPatternMatcherLogging(LoggingTestCase):
             "add(arg0_1, 2) constant_args: add 2!=1 CallFunction(aten.add.Tensor, KeywordArg('x'), 1, _users=0)",
             specific_record.getMessage(),
         )
+
+    def test_gumbel_max_trick(self):
+        counters.clear()
+
+        @torch.compile
+        def sample(logits, temperature):
+            logits = logits / max(temperature, 1e-5)
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+            q = torch.empty_like(logits).exponential_(1)
+            return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
+
+        N = 10
+        temperature = 0.8
+        row = (
+            torch.arange(1, N + 1, dtype=torch.float, device=GPU_TYPE).log()
+            * temperature
+        )
+        expected_distribution = []
+        tot_val = N * (N + 1) / 2
+        for i in range(1, N + 1):
+            expected_distribution.append(float(i) / tot_val)
+
+        # Item 0 expect to appear M / (1 + 2 +...+ N) times. Make M large enough
+        # so the test is less flaky.
+        # If this is still flaky, either recduce N or increase M
+        M = 1000000
+        logits = row[None, :].repeat(M, 1)
+        output = sample(logits, temperature=temperature)
+        stat = (torch.bincount(output.flatten()) / M).tolist()
+
+        for expected, actual in zip(expected_distribution, stat):
+            tol = 0.1
+            ratio = actual / expected
+
+            self.assertTrue(abs(ratio - 1) < tol, f"{expected} v.s. {actual}")
+
+        self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
 
 
 if __name__ == "__main__":

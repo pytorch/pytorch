@@ -23,6 +23,7 @@ const std::set<libkineto::ActivityType> kCpuTypes{
     libkineto::ActivityType::USER_ANNOTATION,
     libkineto::ActivityType::EXTERNAL_CORRELATION,
     libkineto::ActivityType::XPU_RUNTIME,
+    libkineto::ActivityType::XPU_DRIVER,
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
     libkineto::ActivityType::PYTHON_FUNCTION,
@@ -35,7 +36,7 @@ const std::set<libkineto::ActivityType> kCudaTypes = {
     libkineto::ActivityType::GPU_MEMSET,
     libkineto::ActivityType::GPU_USER_ANNOTATION,
     libkineto::ActivityType::CONCURRENT_KERNEL,
-    // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
+    // CUDA_RUNTIME and CUDA_DRIVER appear in both kCpuTypes and kCudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
     libkineto::ActivityType::OVERHEAD,
@@ -44,8 +45,9 @@ const std::set<libkineto::ActivityType> kXpuTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
     libkineto::ActivityType::GPU_MEMSET,
     libkineto::ActivityType::CONCURRENT_KERNEL,
-    // XPU_RUNTIME appears in both kCpuTypes and kXpuTypes.
+    // XPU_RUNTIME and XPU_DRIVER appear in both kCpuTypes and kXpuTypes.
     libkineto::ActivityType::XPU_RUNTIME,
+    libkineto::ActivityType::XPU_DRIVER,
 };
 const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_CCP_EVENTS,
@@ -281,7 +283,28 @@ void prepareTrace(
     k_activities.insert(kXpuTypes.begin(), kXpuTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
-    k_activities.insert(kMtiaTypes.begin(), kMtiaTypes.end());
+    if (config.custom_profiler_config.empty()) {
+      k_activities.insert(kMtiaTypes.begin(), kMtiaTypes.end());
+    } else {
+      if (config.custom_profiler_config.find("disable_runtime_events") ==
+          std::string::npos) {
+        k_activities.insert(libkineto::ActivityType::MTIA_RUNTIME);
+      } else {
+        LOG(INFO) << "Disabling MTIA runtime events";
+      }
+      if (config.custom_profiler_config.find("disable_ccp_events") ==
+          std::string::npos) {
+        k_activities.insert(libkineto::ActivityType::MTIA_CCP_EVENTS);
+      } else {
+        LOG(INFO) << "Disabling MTIA CCP events";
+      }
+      if (config.custom_profiler_config.find("disable_insight_events") ==
+          std::string::npos) {
+        k_activities.insert(libkineto::ActivityType::MTIA_INSIGHT);
+      } else {
+        LOG(INFO) << "Disabling MTIA insight events";
+      }
+    }
   }
   if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
     k_activities.insert(hpuTypes.begin(), hpuTypes.end());
@@ -389,39 +412,31 @@ void logInvariantViolation(
 
 namespace autograd::profiler {
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
-  // fallthrough
+  // PrivateUse1 kineto backend reuse some ActivityTypes,
+  // If PrivateUse1 backend is enabled, this should return
+  // c10::DeviceType::PrivateUse1.
+  auto device_type_privateuse1_or = [](c10::DeviceType device_type) {
+    return c10::is_privateuse1_backend_registered()
+        ? c10::DeviceType::PrivateUse1
+        : device_type;
+  };
+
   switch (activity_type) {
     case libkineto::ActivityType::GPU_MEMCPY:
     case libkineto::ActivityType::GPU_MEMSET:
     case libkineto::ActivityType::CONCURRENT_KERNEL:
+#if defined(USE_XPU)
+      return device_type_privateuse1_or(c10::DeviceType::XPU);
+#endif
+      [[fallthrough]];
     case libkineto::ActivityType::CUDA_SYNC:
     case libkineto::ActivityType::GPU_USER_ANNOTATION:
-    case libkineto::ActivityType::CUDA_PROFILER_RANGE: {
-      // PrivateUse1 kineto backend reuse above ActivityTypes,
-      // If PrivateUse1 backend enabled, this should return
-      // c10::DeviceType::PrivateUse1.
-      c10::DeviceType device_type = []() {
-        if (c10::get_privateuse1_backend() != "privateuseone") {
-          return c10::DeviceType::PrivateUse1;
-        }
-        return c10::DeviceType::CUDA;
-      }();
-      return device_type;
-    }
+    case libkineto::ActivityType::CUDA_PROFILER_RANGE:
+      return device_type_privateuse1_or(c10::DeviceType::CUDA);
     // TODO: T151322015
     case libkineto::ActivityType::MTIA_CCP_EVENTS:
-    case libkineto::ActivityType::MTIA_INSIGHT: {
-      // PrivateUse1 kineto backend reuse above ActivityTypes,
-      // If PrivateUse1 backend enabled, this should return
-      // c10::DeviceType::PrivateUse1.
-      c10::DeviceType device_type = []() {
-        if (c10::get_privateuse1_backend() != "privateuseone") {
-          return c10::DeviceType::PrivateUse1;
-        }
-        return c10::DeviceType::MTIA;
-      }();
-      return device_type;
-    }
+    case libkineto::ActivityType::MTIA_INSIGHT:
+      return device_type_privateuse1_or(c10::DeviceType::MTIA);
     case libkineto::ActivityType::HPU_OP:
       return c10::DeviceType::HPU;
     case libkineto::ActivityType::CPU_OP:
@@ -429,6 +444,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::EXTERNAL_CORRELATION:
     case libkineto::ActivityType::CUDA_RUNTIME:
     case libkineto::ActivityType::XPU_RUNTIME:
+    case libkineto::ActivityType::XPU_DRIVER:
     case libkineto::ActivityType::CPU_INSTANT_EVENT:
     case libkineto::ActivityType::GLOW_RUNTIME:
     case libkineto::ActivityType::MTIA_RUNTIME:

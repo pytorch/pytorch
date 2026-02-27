@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
+import onnx_ir as ir
 import onnx_ir.passes.common as common_passes
-from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
@@ -167,7 +167,8 @@ class SymbolicOpsTest(common_utils.TestCase):
         onnx_program = torch.onnx.export(
             Model(), (torch.tensor(1),), dynamo=True, verbose=False
         )
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         node = onnx_program.model.graph.node(0)
         self.assertEqual(node.op_type, "CustomOp")
         self.assertEqual(node.domain, "custom_domain")
@@ -208,7 +209,8 @@ class SymbolicOpsTest(common_utils.TestCase):
             dynamo=True,
             verbose=False,
         )
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         node = onnx_program.model.graph.node(0)
         self.assertEqual(node.op_type, "CustomOp")
         self.assertEqual(node.domain, "custom_domain")
@@ -311,7 +313,8 @@ class SymbolicOpsTest(common_utils.TestCase):
         onnx_program = torch.onnx.export(
             Model(), (torch.tensor(1),), dynamo=True, verbose=False
         )
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         node = onnx_program.model.graph.node(0)
         self.assertEqual(node.op_type, "CustomOp")
         self.assertEqual(node.domain, "custom_domain")
@@ -356,7 +359,8 @@ class SymbolicOpsTest(common_utils.TestCase):
             dynamo=True,
             verbose=False,
         )
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         node = onnx_program.model.graph.node(0)
         self.assertEqual(node.op_type, "CustomOp")
         self.assertEqual(node.domain, "custom_domain")
@@ -424,11 +428,11 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             args,
             kwargs=kwargs,
             dynamo=True,
-            fallback=False,
             verbose=False,
             **options,
         )
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         common_passes.CheckerPass()(onnx_program.model)
         return onnx_program
 
@@ -1465,13 +1469,11 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         node = onnx_program.model.graph.node(0)
         self.assertEqual(node.op_type, "Attention")
 
-        # Verify all 4 outputs have correct shapes
-        outputs = node.outputs
-        self.assertEqual(len(outputs), 4)
-
+        graph_outputs = onnx_program.model.graph.outputs
         # output: (batch_size, q_num_heads, q_seq_len, head_size)
         self.assertEqual(
-            outputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
+            list(graph_outputs[0].shape),
+            [batch_size, q_num_heads, q_seq_len, head_size],
         )
 
         onnx_testing.assert_onnx_program(onnx_program)

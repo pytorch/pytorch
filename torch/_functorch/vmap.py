@@ -1,17 +1,18 @@
-# mypy: ignore-errors
-
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
 import contextlib
 import functools
 import itertools
-from collections.abc import Callable
+from collections.abc import Callable  # noqa: TC003
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 from torch import Tensor
@@ -32,18 +33,25 @@ from torch.utils._pytree import (
 )
 
 
-in_dims_t = Union[int, tuple]
-out_dims_t = Union[int, tuple[int, ...]]
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterable
 
 
-def doesnt_support_saved_tensors_hooks(f):
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+in_dims_t = int | tuple[Any, ...]
+out_dims_t = int | tuple[int, ...] | None
+
+
+def doesnt_support_saved_tensors_hooks(f: Callable[_P, _R]) -> Callable[_P, _R]:
     message = (
         "torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. "
         "Please open an issue with your use case."
     )
 
     @functools.wraps(f)
-    def fn(*args, **kwargs):
+    def fn(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with torch.autograd.graph.disable_saved_tensors_hooks(message):
             return f(*args, **kwargs)
 
@@ -52,7 +60,7 @@ def doesnt_support_saved_tensors_hooks(f):
 
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
-    flat_in_dims: list[Optional[int]], flat_args: list
+    flat_in_dims: list[int | None], flat_args: list[Any]
 ) -> int:
     batch_sizes = [
         arg.size(in_dim)
@@ -69,7 +77,7 @@ def _validate_and_get_batch_size(
     return batch_sizes[0]
 
 
-def _num_outputs(batched_outputs: Union[Tensor, tuple[Tensor, ...]]) -> int:
+def _num_outputs(batched_outputs: Tensor | tuple[Tensor, ...]) -> int:
     if isinstance(batched_outputs, tuple):
         return len(batched_outputs)
     return 1
@@ -80,8 +88,10 @@ def _num_outputs(batched_outputs: Union[Tensor, tuple[Tensor, ...]]) -> int:
 
 
 def _as_tuple(
-    value: Any, num_elements: int, error_message_lambda: Callable[[], str]
-) -> tuple:
+    value: tuple[_R, ...] | _R,
+    num_elements: int,
+    error_message_lambda: Callable[[], str],
+) -> tuple[_R, ...]:
     if not isinstance(value, tuple):
         return (value,) * num_elements
     if len(value) != num_elements:
@@ -90,8 +100,8 @@ def _as_tuple(
 
 
 def _process_batched_inputs(
-    in_dims: in_dims_t, args: tuple, func: Callable
-) -> tuple[int, list[Any], list[Any], TreeSpec]:
+    in_dims: in_dims_t, args: tuple[Any, ...], func: Callable[..., Any]
+) -> tuple[int, list[int | None], list[Any], TreeSpec]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
             f"vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): "
@@ -151,9 +161,13 @@ def _process_batched_inputs(
 # Returns the (potentially) batched arguments and the batch_size.
 
 
+# TODO: See if we can explain how flat works to the type checker
 def _create_batched_inputs(
-    flat_in_dims: list[Any], flat_args: list[Any], vmap_level: int, args_spec
-) -> tuple:
+    flat_in_dims: list[int | None],
+    flat_args: list[Any],
+    vmap_level: int,
+    args_spec: TreeSpec,
+) -> tuple[Any, ...]:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [
         arg if in_dim is None else _add_batch_dim(arg, in_dim, vmap_level)
@@ -162,7 +176,13 @@ def _create_batched_inputs(
     return tree_unflatten(batched_inputs, args_spec)
 
 
-def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_dim):
+def _maybe_remove_batch_dim(
+    name: str,
+    batched_output: Any,
+    vmap_level: int,
+    batch_size: int,
+    out_dim: int | None,
+) -> torch.Tensor:
     if out_dim is None:
         if isinstance(batched_output, torch.Tensor) and is_batchedtensor(
             batched_output
@@ -186,15 +206,15 @@ def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_di
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
-    batched_outputs: Union[Tensor, tuple[Tensor, ...]],
+    batched_outputs: Tensor | tuple[Tensor, ...],
     out_dims: out_dims_t,
     vmap_level: int,
     batch_size: int,
-    func: Callable,
-) -> tuple:
+    func: Callable[..., Any],
+) -> tuple[Any, ...]:
     flat_batched_outputs, output_spec = tree_flatten(batched_outputs)
 
-    def incompatible_error():
+    def incompatible_error() -> NoReturn:
         raise ValueError(
             f"vmap({_get_name(func)}, ..., out_dims={out_dims})(<inputs>): "
             f"out_dims is not compatible with the structure of `outputs`. "
@@ -202,21 +222,24 @@ def _unwrap_batched(
             f"has structure {output_spec}."
         )
 
+    flat_out_dims: list[int | None] = []
     if isinstance(batched_outputs, torch.Tensor):
         # Some weird edge case requires us to spell out the following
         # see test_out_dims_edge_case
         if isinstance(out_dims, int):
             flat_out_dims = [out_dims]
         elif isinstance(out_dims, tuple) and len(out_dims) == 1:
-            flat_out_dims = out_dims
+            flat_out_dims = list(out_dims)
         elif out_dims is None:
             flat_out_dims = [out_dims]
         else:
             incompatible_error()
     else:
-        flat_out_dims = _broadcast_to_and_flatten(out_dims, output_spec)
-        if flat_out_dims is None:
+        broadcast_result = _broadcast_to_and_flatten(out_dims, output_spec)
+        if broadcast_result is None:
             incompatible_error()
+        else:
+            flat_out_dims = broadcast_result
 
     flat_outputs = [
         _maybe_remove_batch_dim(
@@ -227,7 +250,7 @@ def _unwrap_batched(
     return tree_unflatten(flat_outputs, output_spec)
 
 
-def _check_int_or_none(x, func, out_dims):
+def _check_int_or_none(x: Any, func: Callable[..., Any], out_dims: out_dims_t) -> None:
     if isinstance(x, int):
         return
     if x is None:
@@ -239,13 +262,15 @@ def _check_int_or_none(x, func, out_dims):
     )
 
 
-def _check_out_dims_is_int_or_int_pytree(out_dims: out_dims_t, func: Callable) -> None:
+def _check_out_dims_is_int_or_int_pytree(
+    out_dims: out_dims_t, func: Callable[..., Any]
+) -> None:
     if isinstance(out_dims, int):
         return
     tree_map_(partial(_check_int_or_none, func=func, out_dims=out_dims), out_dims)
 
 
-def _get_name(func: Callable):
+def _get_name(func: Callable[..., Any]) -> str:
     if hasattr(func, "__name__"):
         return func.__name__
 
@@ -258,7 +283,15 @@ def _get_name(func: Callable):
     return repr(func)
 
 
-def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
+def vmap_impl(
+    func: Callable[_P, Tensor | tuple[Tensor, ...]],
+    in_dims: in_dims_t,
+    out_dims: out_dims_t,
+    randomness: str,
+    chunk_size: int | None,
+    *args: _P.args,
+    **kwargs: _P.kwargs,
+) -> Any:
     lazy_load_decompositions()
     _check_out_dims_is_int_or_int_pytree(out_dims, func)
     batch_size, flat_in_dims, flat_args, args_spec = _process_batched_inputs(
@@ -292,7 +325,7 @@ def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
     )
 
 
-def get_chunk_sizes(total_elems, chunk_size):
+def get_chunk_sizes(total_elems: int, chunk_size: int) -> list[int]:
     n_chunks = total_elems // chunk_size
     chunk_sizes = [chunk_size] * n_chunks
     # remainder chunk
@@ -302,7 +335,12 @@ def get_chunk_sizes(total_elems, chunk_size):
     return chunk_sizes
 
 
-def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
+def _get_chunked_inputs(
+    flat_args: list[Any],
+    flat_in_dims: list[int | None],
+    batch_size: int,
+    chunk_size: int | None,
+) -> Iterable[tuple[Any, ...]]:
     split_idxs = (batch_size,)
     if chunk_size is not None:
         chunk_sizes = get_chunk_sizes(batch_size, chunk_size)
@@ -326,11 +364,13 @@ def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
     return chunks_flat_args
 
 
-def _flatten_chunks_output(chunks_output_):
+def _flatten_chunks_output(
+    chunks_output_: list[Any],
+) -> tuple[list[tuple[Any, ...]], TreeSpec]:
     # chunks_output is a list of chunked outputs
     # flatten chunked outputs:
-    flat_chunks_output = []
-    arg_spec = None
+    flat_chunks_output: list[list[Any]] = []
+    arg_spec: TreeSpec | None = None
     for output in chunks_output_:
         flat_output, arg_specs = tree_flatten(output)
         flat_chunks_output.append(flat_output)
@@ -340,16 +380,30 @@ def _flatten_chunks_output(chunks_output_):
     # transpose chunk dim and flatten structure
     # flat_output_chunks is flat list of chunks
     flat_output_chunks = list(zip(*flat_chunks_output))
+    if arg_spec is None:
+        raise AssertionError("arg_spec must not be None")
     return flat_output_chunks, arg_spec
 
 
-def _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks):
+def _concat_chunked_outputs(
+    out_dims: out_dims_t,
+    arg_spec: TreeSpec,
+    flat_output_chunks: list[tuple[Any, ...] | None],
+) -> list[Tensor]:
     # concat chunks on out_dim
     flat_out_dims = _broadcast_to_and_flatten(out_dims, arg_spec)
-    assert len(flat_out_dims) == len(flat_output_chunks)
-    flat_output = []
+    if flat_out_dims is None:
+        raise AssertionError("flat_out_dims must not be None")
+    if len(flat_out_dims) != len(flat_output_chunks):
+        raise AssertionError(
+            f"len(flat_out_dims)={len(flat_out_dims)} != len(flat_output_chunks)={len(flat_output_chunks)}"
+        )
+    flat_output: list[Tensor] = []
     for idx, out_dim in enumerate(flat_out_dims):
-        flat_output.append(torch.cat(flat_output_chunks[idx], dim=out_dim))
+        chunk = flat_output_chunks[idx]
+        if chunk is None:
+            raise AssertionError(f"chunk at index {idx} must not be None")
+        flat_output.append(torch.cat(chunk, dim=out_dim))
         # release tensors
         flat_output_chunks[idx] = None
 
@@ -358,11 +412,18 @@ def _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks):
 
 # Applies vmap on chunked_input and returns concatenated output over the chunks.
 def _chunked_vmap(
-    func, flat_in_dims, chunks_flat_args, args_spec, out_dims, randomness, **kwargs
-):
-    chunks_output = []
+    func: Callable[_P, Tensor | tuple[Tensor, ...]],
+    flat_in_dims: list[int | None],
+    chunks_flat_args: Iterable[tuple[Any, ...]],
+    args_spec: TreeSpec,
+    out_dims: out_dims_t,
+    randomness: str,
+    **kwargs: Any,
+) -> Any:
+    chunks_output: list[Any] = []
     rs = torch.get_rng_state() if randomness == "same" else None
-    for flat_args in chunks_flat_args:
+    for flat_args_tuple in chunks_flat_args:
+        flat_args = list(flat_args_tuple)
         batch_size = _validate_and_get_batch_size(flat_in_dims, flat_args)
 
         # The way we compute split the input in `_get_chunked_inputs`,
@@ -400,14 +461,18 @@ def _chunked_vmap(
     del chunks_output
 
     # concat chunks on out_dim
-    flat_output = _concat_chunked_outputs(out_dims, arg_spec, flat_output_chunks)
+    # Note: We use cast since flat_output_chunks is modified in _concat_chunked_outputs
+    # to set elements to None after processing
+    flat_output = _concat_chunked_outputs(
+        out_dims, arg_spec, cast(list[tuple[Any, ...] | None], flat_output_chunks)
+    )
 
     # finally unflatten the output
     return tree_unflatten(flat_output, arg_spec)
 
 
 # Vmap refactored helper functions:
-def _check_randomness_arg(randomness):
+def _check_randomness_arg(randomness: str) -> None:
     if randomness not in ["error", "different", "same"]:
         raise RuntimeError(
             f"Only allowed values for randomness are 'error', 'different', or 'same'. Got {randomness}"
@@ -415,7 +480,9 @@ def _check_randomness_arg(randomness):
 
 
 @contextlib.contextmanager
-def vmap_increment_nesting(batch_size, randomness):
+def vmap_increment_nesting(
+    batch_size: int, randomness: str
+) -> Generator[int, None, None]:
     try:
         vmap_level = _vmap_increment_nesting(batch_size, randomness)
         yield vmap_level
@@ -424,8 +491,15 @@ def vmap_increment_nesting(batch_size, randomness):
 
 
 def _flat_vmap(
-    func, batch_size, flat_in_dims, flat_args, args_spec, out_dims, randomness, **kwargs
-):
+    func: Callable[..., Tensor | tuple[Tensor, ...]],
+    batch_size: int,
+    flat_in_dims: list[int | None],
+    flat_args: list[Any],
+    args_spec: TreeSpec,
+    out_dims: out_dims_t,
+    randomness: str,
+    **kwargs: Any,
+) -> Any:
     with vmap_increment_nesting(batch_size, randomness) as vmap_level:
         batched_inputs = _create_batched_inputs(
             flat_in_dims, flat_args, vmap_level, args_spec
@@ -454,8 +528,10 @@ def _flat_vmap(
 # - vmap couples the tensor-wrapping code with error checking
 # - vmap's tensor unwrapping code is in C++; we would need to rewrite part of it
 #   in python because it overlaps with unwrap_batched
-def restore_vmap(func, in_dims, batch_size, randomness):
-    def inner(*args, **kwargs):
+def restore_vmap(
+    func: Callable[..., _R], in_dims: in_dims_t, batch_size: int, randomness: str
+) -> Callable[..., tuple[Any, Any]]:
+    def inner(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
         with vmap_increment_nesting(batch_size, randomness) as vmap_level:
             batched_inputs = wrap_batched(args, in_dims, vmap_level)
             batched_outputs = func(*batched_inputs, **kwargs)
@@ -464,15 +540,18 @@ def restore_vmap(func, in_dims, batch_size, randomness):
     return inner
 
 
-def wrap_batched(args, bdims, level):
+def wrap_batched(
+    args: tuple[Any, ...], bdims: in_dims_t, level: int
+) -> tuple[Any, ...]:
     flat_args, spec = tree_flatten(args)
     flat_bdims = _broadcast_to_and_flatten(bdims, spec)
-    assert flat_bdims is not None
+    if flat_bdims is None:
+        raise AssertionError("flat_bdims must not be None")
     result = _create_batched_inputs(flat_bdims, flat_args, level, spec)
     return result
 
 
-def unwrap_batched(args, level):
+def unwrap_batched(args: Any, level: int) -> tuple[Any, Any]:
     flat_args, spec = tree_flatten(args)
     if len(flat_args) == 0:
         return args, ()

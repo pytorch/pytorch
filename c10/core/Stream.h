@@ -112,6 +112,11 @@ class C10_API Stream final {
     return id_;
   }
 
+  // Returns an opaque, backend-specific handle to the underlying stream.
+  // The handle is non-owning and its concrete type is backend-defined
+  // (e.g., a CUDA stream or a SYCL queue).
+  void* native_handle() const;
+
   // Enqueues a wait instruction in the stream's work queue.
   // This instruction is a no-op unless the event is marked
   // for recording. In that case the stream stops processing

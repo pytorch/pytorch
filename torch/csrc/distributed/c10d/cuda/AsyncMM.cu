@@ -10,8 +10,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
-    CUDA_VERSION >= 12000
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
 #define BUILD_ASYNC_MM_KERNEL
 #endif
 

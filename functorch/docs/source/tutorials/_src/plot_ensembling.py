@@ -97,23 +97,28 @@ fmodel, params, buffers = combine_state_for_ensemble(models)
 # ``buffers`` have an additional dimension of size ``num_models`` at the front;
 # and ``minibatches`` has a dimension of size ``num_models``.
 print([p.size(0) for p in params])
-assert minibatches.shape == (num_models, 64, 1, 28, 28)
+if minibatches.shape != (num_models, 64, 1, 28, 28):
+    raise AssertionError(
+        f"Expected shape {(num_models, 64, 1, 28, 28)}, got {minibatches.shape}"
+    )
 from functorch import vmap
 
 
 predictions1_vmap = vmap(fmodel)(params, buffers, minibatches)
-assert torch.allclose(
+if not torch.allclose(
     predictions1_vmap, torch.stack(predictions1), atol=1e-6, rtol=1e-6
-)
+):
+    raise AssertionError("predictions1_vmap does not match torch.stack(predictions1)")
 
 # Option 2: get predictions using the same minibatch of data
 # vmap has an in_dims arg that specify which dimensions to map over.
 # Using ``None``, we tell vmap we want the same minibatch to apply for all of
 # the 10 models.
 predictions2_vmap = vmap(fmodel, in_dims=(0, 0, None))(params, buffers, minibatch)
-assert torch.allclose(
+if not torch.allclose(
     predictions2_vmap, torch.stack(predictions2), atol=1e-6, rtol=1e-6
-)
+):
+    raise AssertionError("predictions2_vmap does not match torch.stack(predictions2)")
 
 # A quick note: there are limitations around what types of functions can be
 # transformed by vmap. The best functions to transform are ones that are

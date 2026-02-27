@@ -1,7 +1,7 @@
 import dataclasses
 import itertools
 from collections.abc import Iterable
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -17,8 +17,8 @@ class SubclassCreationMeta:
     class_type: Any
     attrs: dict[str, "SubclassCreationMeta"]
     metadata: Any
-    outer_size: Iterable[Union[None, int, torch.SymInt]]
-    outer_stride: Iterable[Union[None, int, torch.SymInt]]
+    outer_size: Iterable[None | int | torch.SymInt]
+    outer_stride: Iterable[None | int | torch.SymInt]
 
 
 class UnwrapTensorSubclass(torch.nn.Module):
@@ -43,7 +43,8 @@ class UnwrapTensorSubclass(torch.nn.Module):
         return _unwrap_tensor_subclasses(self.subclass_meta, todo, 0)[0]
 
     def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor]:
-        assert type(tensor) is not torch.Tensor
+        if type(tensor) is torch.Tensor:
+            raise AssertionError("tensor must be a subclass, not torch.Tensor")
         plain_tensors: list[torch.Tensor] = []
 
         def _create_subclass_meta(tensor, idx, plain_tensor_container):  # type: ignore[no-untyped-def]

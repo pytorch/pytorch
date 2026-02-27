@@ -15,9 +15,10 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_ENABLE_STACK_CHECKER": "#undef DNNL_ENABLE_STACK_CHECKER",
     "#cmakedefine DNNL_EXPERIMENTAL_UKERNEL": "/* undef DNNL_EXPERIMENTAL_UKERNEL */",
     "#cmakedefine DNNL_EXPERIMENTAL": "#undef DNNL_EXPERIMENTAL",
-    "#cmakedefine DNNL_EXPERIMENTAL_SPARSE": "#undef DNNL_EXPERIMENTAL_SPARSE",
     "#cmakedefine ONEDNN_BUILD_GRAPH": "#undef ONEDNN_BUILD_GRAPH",
     "#cmakedefine DNNL_EXPERIMENTAL_PROFILING": "#undef DNNL_EXPERIMENTAL_PROFILING",
+    "#cmakedefine DNNL_EXPERIMENTAL_LOGGING": "#undef DNNL_EXPERIMENTAL_LOGGING",
+    "#cmakedefine DNNL_EXPERIMENTAL_SYCL_KERNEL_COMPILER": "#undef DNNL_EXPERIMENTAL_SYCL_KERNEL_COMPILER",
     "#cmakedefine DNNL_DISABLE_GPU_REF_KERNELS": "#undef DNNL_DISABLE_GPU_REF_KERNELS",
     "#cmakedefine01 BUILD_TRAINING": "#define BUILD_TRAINING 1",
     "#cmakedefine01 BUILD_INFERENCE": "#define BUILD_INFERENCE 0",
@@ -49,8 +50,6 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine01 BUILD_AVX512": "#define BUILD_AVX512 0",
     "#cmakedefine01 BUILD_AMX": "#define BUILD_AMX 0",
     "#cmakedefine01 BUILD_PRIMITIVE_GPU_ISA_ALL": "#define BUILD_PRIMITIVE_GPU_ISA_ALL 1",
-    "#cmakedefine01 BUILD_GEN9": "#define BUILD_GEN9 0",
-    "#cmakedefine01 BUILD_GEN11": "#define BUILD_GEN11 0",
     "#cmakedefine01 BUILD_XELP": "#define BUILD_XELP 0",
     "#cmakedefine01 BUILD_XEHPG": "#define BUILD_XEHPG 0",
     "#cmakedefine01 BUILD_XEHPC": "#define BUILD_XEHPC 0",
@@ -70,8 +69,8 @@ template_rule(
     out = "include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "3",
-        "@DNNL_VERSION_MINOR@": "7",
-        "@DNNL_VERSION_PATCH@": "1",
+        "@DNNL_VERSION_MINOR@": "10",
+        "@DNNL_VERSION_PATCH@": "2",
     },
 )
 
@@ -86,7 +85,7 @@ template_rule(
     name = "include_dnnl_version_hash",
     src = "include/oneapi/dnnl/dnnl_version_hash.h.in",
     out = "include/oneapi/dnnl/dnnl_version_hash.h",
-    substitutions = {"@DNNL_VERSION_HASH@": "8d263e693366ef8db40acc569cc7d8edf644556d",}
+    substitutions = {"@DNNL_VERSION_HASH@": "f1d471933dc852f956fd05389f9313c7148783d5",}
 )
 
 cc_library(
@@ -99,6 +98,7 @@ cc_library(
         "src/cpu/aarch64/**/*.cpp",
         "src/cpu/rv64/**/*.cpp",
         "src/cpu/sycl/**/*.cpp",
+        "src/cpu/ppc64/**/*.cpp",
     ]),
     hdrs = glob([
         "include/oneapi/dnnl/*.h",
@@ -110,13 +110,16 @@ cc_library(
         "src/cpu/**/**/*.h",
         "src/common/*.hpp",
         "src/common/**/**/*.h",
-        "src/common/ittnotify/jitprofiling.h",
+        "third_party/xbyak/*.h",
+        "third_party/ittnotify/jitprofiling.h",
+        "third_party/spdlog/**/*.h",
     ], exclude=[
         "src/cpu/aarch64/**/*.hpp",
         "src/cpu/aarch64/**/*.h",
         "src/cpu/rv64/**/*.hpp",
         "src/cpu/rv64/**/*.h",
         "src/cpu/sycl/**/*.hpp",
+        "src/cpu/ppc64/**/*.hpp",
     ]) + [
         "include/oneapi/dnnl/dnnl_config.h",
         "include/oneapi/dnnl/dnnl_version.h",
@@ -141,7 +144,7 @@ cc_library(
         "src/",
         "src/common/",
         "src/cpu/",
-        "src/cpu/x64/xbyak/",
+        "third_party/",
     ],
     visibility = ["//visibility:public"],
     linkopts = [

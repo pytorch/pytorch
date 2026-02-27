@@ -414,6 +414,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
                 f"PyTreeSpec but got item of type {type(treespec)}."
             )
         # Allow passing the PyTreeSpec instance as the first argument
+        # pyrefly: ignore [bad-assignment]
         leaves, treespec = treespec, leaves
     return treespec.unflatten(leaves)
 

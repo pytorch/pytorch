@@ -872,16 +872,6 @@ add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
 target_link_libraries(pybind::pybind11 INTERFACE Python::Module)
 
-# ---[ OpenTelemetry API headers
-find_package(OpenTelemetryApi)
-if(NOT OpenTelemetryApi_FOUND)
-  message(STATUS "Using third_party/opentelemetry-cpp.")
-  set(OpenTelemetryApi_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/opentelemetry-cpp/api/include)
-endif()
-message(STATUS "opentelemetry api include dirs: " "${OpenTelemetryApi_INCLUDE_DIRS}")
-add_library(opentelemetry::api INTERFACE IMPORTED)
-target_include_directories(opentelemetry::api SYSTEM INTERFACE ${OpenTelemetryApi_INCLUDE_DIRS})
-
 # ---[ MPI
 if(USE_MPI)
   find_package(MPI)
@@ -1033,11 +1023,14 @@ if(USE_ROCM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
+    list(APPEND HIP_HIPCC_FLAGS -std=c++17)
     # Pass device library path for theRock nightly builds
     if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
-      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=$ENV{HIP_DEVICE_LIB_PATH})
+      file(TO_CMAKE_PATH "$ENV{HIP_DEVICE_LIB_PATH}" _hip_device_lib_path)
+      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${_hip_device_lib_path})
     elseif(EXISTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
-      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode)
+      file(TO_CMAKE_PATH "${ROCM_PATH}/lib/llvm/amdgcn/bitcode" _rocm_device_lib_path)
+      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${_rocm_device_lib_path})
     endif()
     if(WIN32)
       add_definitions(-DROCM_ON_WINDOWS)
@@ -1096,6 +1089,13 @@ if(USE_ROCM)
       )
     endif()
 
+    # ROCM-SMI needed to support symmetric memory
+    if(USE_DISTRIBUTED AND UNIX)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        rocm_smi64
+      )
+    endif()
+
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
     # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
@@ -1107,6 +1107,12 @@ if(USE_ROCM)
 
   else()
     caffe2_update_option(USE_ROCM OFF)
+  endif()
+
+  # Add ROCm includes as SYSTEM includes (lower priority than regular includes).
+  # This ensures third_party vendored headers take precedence over ROCm headers.
+  if(USE_ROCM AND ROCM_INCLUDE_DIRS)
+    include_directories(SYSTEM ${ROCM_INCLUDE_DIRS})
   endif()
 endif()
 

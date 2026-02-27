@@ -40,10 +40,10 @@ Tensor test_parallel_for(int64_t size, int64_t grain_size) {
   return tensor;
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("test_parallel_for(int size, int grain_size) -> Tensor");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("test_parallel_for", TORCH_BOX(&test_parallel_for));
 }

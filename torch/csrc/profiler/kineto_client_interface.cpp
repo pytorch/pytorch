@@ -9,9 +9,9 @@
 
 // Ondemand tracing is not supported on Apple or edge platform
 #if defined(__APPLE__) || defined(EDGE_PROFILER_USE_KINETO)
-#define ENABLE_GLOBAL_OBSERVER (0)
+constexpr bool kEnableGlobalObserver = false;
 #else
-#define ENABLE_GLOBAL_OBSERVER (1)
+constexpr bool kEnableGlobalObserver = true;
 #endif
 
 namespace torch {
@@ -90,28 +90,28 @@ class LibKinetoClient : public libkineto::ClientInterface {
 } // namespace profiler::impl
 
 void global_kineto_init() {
-#if ENABLE_GLOBAL_OBSERVER
-  if (c10::utils::get_env("KINETO_USE_DAEMON").has_value()) {
-    libkineto_init(
-        /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
-        /*logOnError=*/true);
-    libkineto::api().suppressLogMessages();
+  if constexpr (kEnableGlobalObserver) {
+    if (c10::utils::get_env("KINETO_USE_DAEMON").has_value()) {
+      libkineto_init(
+          /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+          /*logOnError=*/true);
+      libkineto::api().suppressLogMessages();
+    }
   }
-#endif
 }
 
-#if ENABLE_GLOBAL_OBSERVER
 namespace {
 
 struct RegisterLibKinetoClient {
   RegisterLibKinetoClient() {
-    static profiler::impl::LibKinetoClient client;
-    libkineto::api().registerClient(&client);
+    if constexpr (kEnableGlobalObserver) {
+      static profiler::impl::LibKinetoClient client;
+      libkineto::api().registerClient(&client);
+    }
   }
 } register_libkineto_client;
 
 } // namespace
-#endif
 
 } // namespace torch
 #endif // USE_KINETO

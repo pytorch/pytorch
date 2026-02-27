@@ -100,6 +100,13 @@ void unhookHandler() {
 namespace c10 {
 
 #if defined(C10_SUPPORTS_FATAL_SIGNAL_HANDLERS)
+#if defined(SYS_pidfd_send_signal) && defined(SYS_pidfd_open)
+constexpr long pidfd_send_signal = SYS_pidfd_send_signal;
+constexpr long pidfd_open = SYS_pidfd_open;
+#else
+constexpr long pidfd_send_signal = -1;
+constexpr long pidfd_open = -1;
+#endif
 
 FatalSignalHandler& FatalSignalHandler::getInstance() {
   // Leaky singleton to avoid module destructor race.
@@ -180,12 +187,15 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
 
 void FatalSignalHandler::fatalSignalHandlerPostProcess() {}
 
-void FatalSignalHandler::fatalSignalHandlerStatic(int signum) {
-  getInstance().fatalSignalHandler(signum);
+void FatalSignalHandler::fatalSignalHandlerStatic(
+    int signum,
+    siginfo_t* info,
+    void* ctx) {
+  getInstance().fatalSignalHandler(signum, info);
 }
 
 // Our fatal signal entry point
-void FatalSignalHandler::fatalSignalHandler(int signum) {
+void FatalSignalHandler::fatalSignalHandler(int signum, siginfo_t* info) {
   // Check if this is a proper signal that we declared above.
   const char* name = getSignalName(signum);
   if (!name) {
@@ -237,7 +247,23 @@ void FatalSignalHandler::fatalSignalHandler(int signum) {
   }
   fatalSignalHandlerPostProcess();
   sigaction(signum, getPreviousSigaction(signum), nullptr);
-  raise(signum);
+
+  // Re-raise the signal exactly as it was received.
+  // raise() actually calls tgkill(), which will replace the body
+  // of certain signals, like SEGV, with the uid and pid of the calling process.
+  // Which is not what we want.
+  const auto pidfd = syscall(pidfd_open, getpid(), 0);
+  if (pidfd == -1 || syscall(pidfd_send_signal, pidfd, signum, info) == -1) {
+    // If we failed to send the signal, we re-raise. We could return and
+    // let the faulting instruction be re-executed, but it can be unsafe to
+    // do so. For example if the memory region that caused a SIGSEGV changed
+    // we could potentially not refault. To avoid that, we re-raise
+    // even if we delete some information from the coredump.
+    // The primary reason we'll fail here is pidfd_send_signal was added in
+    // Linux 5.1, and if we're running on a version before that our systemcalls
+    // will fail.
+    raise(signum);
+  }
 }
 
 // Our SIGUSR2 entry point
@@ -277,7 +303,7 @@ void FatalSignalHandler::installFatalSignalHandlers() {
   // Since we'll be in an exiting situation it's possible there's memory
   // corruption, so make our own stack just in case.
   sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
-  sa.sa_handler = FatalSignalHandler::fatalSignalHandlerStatic;
+  sa.sa_sigaction = FatalSignalHandler::fatalSignalHandlerStatic;
   for (auto* handler = kSignalHandlers; handler->name != nullptr; handler++) {
     if (sigaction(handler->signum, &sa, &handler->previous)) {
       std::string str("Failed to add ");

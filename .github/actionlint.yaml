@@ -25,10 +25,8 @@ self-hosted-runner:
     - linux.aws.h100
     - linux.aws.h100.4
     - linux.aws.h100.8
-    - linux.4xlarge.nvidia.gpu
-    - linux.8xlarge.nvidia.gpu
-    - linux.16xlarge.nvidia.gpu
     - linux.g5.4xlarge.nvidia.gpu
+    - linux.c7i.2xlarge
     # Pytorch/pytorch AWS Linux Runners on Linux Foundation account
     - lf.linux.large
     - lf.linux.2xlarge
@@ -36,10 +34,8 @@ self-hosted-runner:
     - lf.linux.12xlarge
     - lf.linux.24xlarge
     - lf.linux.arm64.2xlarge
-    - lf.linux.4xlarge.nvidia.gpu
-    - lf.linux.8xlarge.nvidia.gpu
-    - lf.linux.16xlarge.nvidia.gpu
     - lf.linux.g5.4xlarge.nvidia.gpu
+    - lf.linux.c7i.2xlarge
     # Repo-specific IBM hosted S390x runner
     - linux.s390x
     # Organization wide AWS Windows runners
@@ -61,12 +57,14 @@ self-hosted-runner:
     - linux.rocm.gpu.mi250.4
     - linux.rocm.gpu.2
     - linux.rocm.gpu.4
+    - linux.rocm.mi210.docker-cache
     - linux.rocm.mi250.docker-cache
     # gfx942 runners
     - linux.rocm.gpu.gfx942.1
-    - linux.rocm.gpu.gfx942.2
     - linux.rocm.gpu.gfx942.4
-    - linux.rocm.gfx942.docker-cache
+    # gfx950 runners
+    - linux.rocm.gpu.gfx950.1
+    - linux.rocm.gpu.gfx950.4
     # Org wise AWS `mac2.metal` runners (2020 Mac mini hardware powered by Apple silicon M1 processors)
     - macos-m1-stable
     - macos-m1-14

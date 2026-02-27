@@ -56,7 +56,8 @@ def triton_red_fused_add_sum_2(in_out_ptr0, in_ptr0, xnumel, rnumel, XBLOCK : tl
 class TestMetrics(TestCase):
     def test_parse_proper_kernel_fn_code(self):
         proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)
-        assert proper_kernel_fn_code.startswith("def ")
+        if not proper_kernel_fn_code.startswith("def "):
+            raise AssertionError
 
     def test_count_args(self):
         proper_kernel_fn_code = metrics._parse_proper_kernel_fn_code(example_kernel)
@@ -76,6 +77,7 @@ class TestMetrics(TestCase):
         )
 
     @config.patch("fx_graph_remote_cache", False)
+    @config.patch("partitioned_scatter_enabled", False)
     def test_atomic_add(self):
         @torch.compile
         def f(lhs, index, rhs):

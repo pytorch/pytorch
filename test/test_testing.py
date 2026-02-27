@@ -22,7 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfRocm
+    TEST_WITH_ROCM, decorateIf
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -282,11 +282,42 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, equal_nan=True, rtol=0, atol=0)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float16, torch.float32)
+    def test_isclose_equal_nan_broadcast(self, device, dtype):
+        # Regression test: isclose with equal_nan=True should handle broadcasting
+        # See https://github.com/pytorch/pytorch/issues/174985
+        nan = torch.nan
+
+        # One-sided broadcast: different sizes
+        a = torch.tensor([nan], device=device, dtype=dtype)
+        b = torch.tensor([nan, nan], device=device, dtype=dtype)
+        result = torch.isclose(a, b, equal_nan=True)
+        self.assertEqual(result, torch.tensor([True, True], device=device))
+
+        # One-sided broadcast: scalar-like vs vector
+        a = torch.tensor([nan], device=device, dtype=dtype)
+        b = torch.tensor([nan, 1.0, nan], device=device, dtype=dtype)
+        result = torch.isclose(a, b, equal_nan=True)
+        self.assertEqual(result, torch.tensor([True, False, True], device=device))
+
+        # Mutual broadcast
+        a = torch.tensor([[nan], [1.0]], device=device, dtype=dtype)  # [2, 1]
+        b = torch.tensor([[nan, 1.0]], device=device, dtype=dtype)    # [1, 2]
+        result = torch.isclose(a, b, equal_nan=True)
+        expected = torch.tensor([[True, False], [False, True]], device=device)
+        self.assertEqual(result, expected)
+
+        # Same shape (fast path) still works
+        a = torch.tensor([nan, 1.0], device=device, dtype=dtype)
+        b = torch.tensor([nan, 1.0], device=device, dtype=dtype)
+        result = torch.isclose(a, b, equal_nan=True)
+        self.assertEqual(result, torch.tensor([True, True], device=device))
+
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
@@ -314,13 +345,19 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 if __name__ == '__main__':
     run_tests()
 """)
-        # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
-        # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('errors=1', stderr)
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure" or HSA_STATUS_ERROR_EXCEPTION
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
+        if torch.version.cuda:
+            # should run only 1 test because it throws unrecoverable error.
+            self.assertIn('errors=1', stderr)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
@@ -355,10 +392,17 @@ instantiate_device_type_tests(
 if __name__ == '__main__':
     run_tests()
 """)
-        # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
-        # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('errors=1', stderr)
+        # CUDA says "device-side assert triggered"
+        # ROCm says "unspecified launch failure" or HSA_STATUS_ERROR_EXCEPTION
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'launch failure' in stderr or 'HSA_STATUS_ERROR_EXCEPTION' in stderr
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
+        if torch.version.cuda:
+            # should run only 1 test because it throws unrecoverable error.
+            self.assertIn('errors=1', stderr)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
@@ -2354,7 +2398,6 @@ class TestImports(TestCase):
 
     # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
-    @skipIfRocm
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2369,6 +2412,7 @@ class TestImports(TestCase):
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
+                           "torch.distributed.debug._frontend",  # depends on tabulate
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
@@ -2389,6 +2433,10 @@ class TestImports(TestCase):
             ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
             ignored_modules.append("torch.testing._internal.common_fsdp")
             ignored_modules.append("torch.testing._internal.common_distributed")
+
+        if sys.version_info < (3, 12):
+            # depends on Python 3.12+ syntax
+            ignored_modules.append("torch.testing._internal.py312_intrinsics")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, _, files in os.walk(torch_dir):
@@ -2450,15 +2498,21 @@ class TestOpInfos(TestCase):
 
         # Construction with natural syntax
         s = SampleInput(a, b, c, d=d, e=e)
-        assert s.input is a
-        assert s.args == (b, c)
-        assert s.kwargs == dict(d=d, e=e)
+        if s.input is not a:
+            raise AssertionError("s.input should be a")
+        if s.args != (b, c):
+            raise AssertionError(f"s.args should be (b, c), got {s.args}")
+        if s.kwargs != dict(d=d, e=e):
+            raise AssertionError(f"s.kwargs mismatch: got {s.kwargs}")
 
         # Construction with explicit args and kwargs
         s = SampleInput(a, args=(b,), kwargs=dict(c=c, d=d, e=e))
-        assert s.input is a
-        assert s.args == (b,)
-        assert s.kwargs == dict(c=c, d=d, e=e)
+        if s.input is not a:
+            raise AssertionError("s.input should be a")
+        if s.args != (b,):
+            raise AssertionError(f"s.args should be (b,), got {s.args}")
+        if s.kwargs != dict(c=c, d=d, e=e):
+            raise AssertionError(f"s.kwargs mismatch: got {s.kwargs}")
 
         # Construction with a mixed form will error
         with self.assertRaises(AssertionError):
@@ -2486,8 +2540,10 @@ class TestOpInfos(TestCase):
         # But when only input is given, metadata is allowed for backward
         # compatibility
         s = SampleInput(a, broadcasts_input=True)
-        assert s.input is a
-        assert s.broadcasts_input
+        if s.input is not a:
+            raise AssertionError("s.input should be a")
+        if not s.broadcasts_input:
+            raise AssertionError("s.broadcasts_input should be True")
 
     def test_sample_input_metadata(self) -> None:
         a, b = (object() for _ in range(2))

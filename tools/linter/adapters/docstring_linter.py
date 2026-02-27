@@ -155,7 +155,7 @@ class DocstringLinter(_linter.FileLinter):
     def _is_bad_block(self, b: _linter.Block, pf: _linter.PythonFile) -> bool:
         max_lines = self._max_lines[b.category]
         return (
-            not (b.is_override or pf.omitted(pf.tokens, b.begin, b.dedent))
+            not (b.is_override or pf.omitted(pf.tokens, b.begin, b.end + 1))
             and b.line_count > max_lines
             and len(b.docstring) < self.args.min_docstring
             and (self.args.lint_local or not b.is_local)
@@ -224,7 +224,8 @@ def make_terse(
 
         if kids := b["children"]:
             if not all(isinstance(k, int) for k in kids):
-                assert all(isinstance(k, dict) for k in kids)
+                if not all(isinstance(k, dict) for k in kids):
+                    raise AssertionError("children must be all int or all dict")
                 d["children"] = make_terse(kids)
 
     return result
@@ -241,7 +242,8 @@ def file_summary(
         elif status == "grandfather":
             fail = ": (grandfathered)"
         else:
-            assert status == "bad"
+            if status != "bad":
+                raise AssertionError(f"Expected status 'bad', got '{status}'")
             fail = ": FAIL"
         name = v["name"]
         lines = v["lines"]

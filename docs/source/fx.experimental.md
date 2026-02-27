@@ -78,6 +78,7 @@ These APIs are experimental and subject to change without notice.
     Specialization
 
     hint_int
+    size_hint
     is_concrete_int
     is_concrete_bool
     is_concrete_float
@@ -224,6 +225,24 @@ These APIs are experimental and subject to change without notice.
     :nosignatures:
 
     reify
+```
+
+## torch.fx.experimental.unification.multipledispatch.utils
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.utils
+```
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    typename
 ```
 
 ## torch.fx.experimental.unification.unification_tools

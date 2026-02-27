@@ -198,7 +198,7 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
     tensors: tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        if all(tensors[0].size(0) != tensor.size(0) for tensor in tensors):
+        if any(tensors[0].size(0) != tensor.size(0) for tensor in tensors):
             raise AssertionError("Size mismatch between tensors")
         self.tensors = tensors
 

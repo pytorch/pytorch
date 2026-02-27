@@ -34,7 +34,7 @@ See `build.sh` for valid build environments (it's the giant switch).
 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
 
 # Set flags (see build.sh) and build image
-sudo bash -c 'TRITON=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest
+sudo bash -c 'TRITON=1 ./build.sh pytorch-linux-bionic-py3.8-gcc9 -t myimage:latest'
 ```
 
 ## [Guidance] Adding a New Base Docker Image
@@ -108,8 +108,6 @@ If your new Docker image needs a library installed from a specific pinned commit
      GCC_VERSION=11
      VISION=yes
      KATEX=yes
-     UCX_COMMIT=${_UCX_COMMIT}
-     UCC_COMMIT=${_UCC_COMMIT}
      TRITON=yes
      NEW_ARG_1=yes
      ;;
