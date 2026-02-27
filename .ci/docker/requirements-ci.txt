@@ -174,7 +174,8 @@ pillow==12.1.1
 #Pinned versions: 11.0.0
 #test that import:
 
-protobuf==6.33.5
+protobuf==6.33.5 ; platform_machine != "s390x"
+protobuf==6.32.1 ; platform_machine == "s390x"
 #Description:  Google's data interchange format
 #Pinned versions: 6.33.2
 #test that import: test_tensorboard.py, test/onnx/*
