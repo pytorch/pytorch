@@ -1854,6 +1854,13 @@ class SIMDScheduling(BaseScheduling):
         if not expr_fits_within_32bit(numel):
             return False
 
+        for buf in buffers:
+            if buf.has_tensor_output():
+                layout = buf.get_layout()
+                if hasattr(layout, "dtype") and layout.dtype == torch.int64:
+                    # Buffer uses int64, might need int64 arithmetic
+                    return False
+
         # Any use of a MultiOutputLayout will create a buffer with a
         # Layout whose sizes are accounted for
         buf_sizes = [
