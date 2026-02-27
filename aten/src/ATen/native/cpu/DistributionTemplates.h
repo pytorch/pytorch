@@ -213,25 +213,45 @@ void normal_fill(const TensorBase &self, const scalar_t mean, const scalar_t std
   auto omean = static_cast<opmath_t>(mean);
   auto ostd = static_cast<opmath_t>(std);
   at::uniform_real_distribution<opmath_t> uniform(0, 1);
-  opmath_t buf[16];
 
-  for (int64_t i = 0; i < size - 15; i += 16) {
-    for (int j = 0; j < 16; j++) {
-      buf[j] = uniform(generator);
+  if constexpr (std::is_same_v<scalar_t, opmath_t>) {
+    // float/double: generate uniform samples directly into the output buffer,
+    // then apply Box-Muller in-place.
+    for (const auto i : c10::irange(size)) {
+      data[i] = uniform(generator);
     }
-    normal_fill_16<opmath_t>(buf, omean, ostd);
-    for (int j = 0; j < 16; j++) {
-      data[i + j] = static_cast<scalar_t>(buf[j]);
+    for (int64_t i = 0; i < size - 15; i += 16) {
+      normal_fill_16<scalar_t>(data + i, omean, ostd);
     }
-  }
-  if (size % 16 != 0) {
-    int64_t offset = size - 16;
-    for (int j = 0; j < 16; j++) {
-      buf[j] = uniform(generator);
+    if (size % 16 != 0) {
+      data = data + size - 16;
+      for (const auto i : c10::irange(16)) {
+        data[i] = uniform(generator);
+      }
+      normal_fill_16<scalar_t>(data, omean, ostd);
     }
-    normal_fill_16<opmath_t>(buf, omean, ostd);
-    for (int j = 0; j < 16; j++) {
-      data[offset + j] = static_cast<scalar_t>(buf[j]);
+  } else {
+    // bf16/fp16: generate in opmath_t precision using a stack buffer,
+    // apply Box-Muller, then cast down to scalar_t.
+    opmath_t buf[16];
+    for (int64_t i = 0; i < size - 15; i += 16) {
+      for (int j = 0; j < 16; j++) {
+        buf[j] = uniform(generator);
+      }
+      normal_fill_16<opmath_t>(buf, omean, ostd);
+      for (int j = 0; j < 16; j++) {
+        data[i + j] = static_cast<scalar_t>(buf[j]);
+      }
+    }
+    if (size % 16 != 0) {
+      int64_t offset = size - 16;
+      for (int j = 0; j < 16; j++) {
+        buf[j] = uniform(generator);
+      }
+      normal_fill_16<opmath_t>(buf, omean, ostd);
+      for (int j = 0; j < 16; j++) {
+        data[offset + j] = static_cast<scalar_t>(buf[j]);
+      }
     }
   }
 }
