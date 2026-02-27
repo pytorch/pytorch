@@ -1342,7 +1342,7 @@ class TestSingleDimStrategyRegistration(TestCase):
         result = torch.ops.mylib.dummy_check(x_dt)
 
         # Verify the result is None (no tensor output)
-        self.assertIsNone(result, "No-output op should return None")
+        self.assertIsNone(result, "No-output op should returnNone")
 
 
 if __name__ == "__main__":
