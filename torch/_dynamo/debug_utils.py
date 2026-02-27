@@ -588,9 +588,6 @@ class NopInputReader:
     def unsupported(self, name: str) -> None:
         pass
 
-    def opaque(self, script_class_name: str) -> None:
-        self.total += 1
-
 
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
@@ -678,9 +675,6 @@ class InputReader:
         self.args.append(None)
 
     def unsupported(self, name: str) -> None:
-        self.args.append(None)
-
-    def opaque(self, script_class_name: str) -> None:
         self.args.append(None)
 
 
@@ -820,9 +814,6 @@ class InputWriter:
         if isinstance(val, torch.SymInt):
             val = val.node.hint
         self._lines.append(f"reader.symint({val!r})  # {name}")
-
-    def opaque(self, name: str, script_class_name: str) -> None:
-        self._lines.append(f"reader.opaque({script_class_name!r})  # {name}")
 
 
 def aot_graph_input_parser(
