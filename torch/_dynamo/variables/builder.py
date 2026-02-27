@@ -3925,6 +3925,7 @@ def _automatic_dynamic(
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         shape_ids=getattr(e, "_dynamo_shape_ids", None),
+        excluded_sizes=frame_state_entry.excluded_sizes,
     )
 
 
@@ -4044,6 +4045,7 @@ def _wrap_to_fake_tensor_and_record_impl(
             tx.output.input_source_to_sizes_strides[source] = {
                 "size": fake_e.size(),
                 "stride": fake_e.stride(),
+                "excluded_sizes": getattr(symbolic_context, "excluded_sizes", None),
             }
 
         if (

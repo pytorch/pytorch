@@ -145,7 +145,8 @@ TensorCheck::TensorCheck(
     const at::Tensor& v,
     c10::DispatchKeySet dispatch_key_set,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+    std::vector<std::optional<int64_t>> excluded_sizes)
     : pytype(pt),
       dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(v.dtype().toScalarType()),
@@ -153,7 +154,8 @@ TensorCheck::TensorCheck(
       requires_grad_(v.requires_grad()),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
-      dim_(static_cast<int64_t>(sizes_.size())) {
+      dim_(static_cast<int64_t>(sizes_.size())),
+      excluded_sizes_(std::move(excluded_sizes)) {
   // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
   // we just treat this as optional?
 }
@@ -166,7 +168,8 @@ TensorCheck::TensorCheck(
     at::DeviceIndex device_index,
     bool requires_grad,
     std::vector<std::optional<c10::SymInt>> dynamic_dims_sizes,
-    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides)
+    std::vector<std::optional<c10::SymInt>> dynamic_dims_strides,
+    std::vector<std::optional<int64_t>> excluded_sizes)
     : pytype(pt),
       dispatch_key_(state.apply(dispatch_key_set).raw_repr()),
       dtype_(dtype),
@@ -174,7 +177,8 @@ TensorCheck::TensorCheck(
       requires_grad_(requires_grad),
       sizes_(std::move(dynamic_dims_sizes)),
       strides_(std::move(dynamic_dims_strides)),
-      dim_(static_cast<int64_t>(sizes_.size())) {}
+      dim_(static_cast<int64_t>(sizes_.size())),
+      excluded_sizes_(std::move(excluded_sizes)) {}
 
 // See note in guards.py [Note - On Export Tensor Guards]
 // Logic parallel to here must be maintained in python
@@ -233,6 +237,23 @@ bool TensorCheck::check(
       }
     }
   }
+  if (excluded_sizes_.empty()) {
+    return true;
+  }
+  bool all_excluded_match = true;
+  bool has_excluded_check = false;
+  for (auto i : c10::irange(ndim)) {
+    if (excluded_sizes_[i].has_value()) {
+      has_excluded_check = true;
+      if (sizes[i] != excluded_sizes_[i].value()) {
+        all_excluded_match = false;
+        break;
+      }
+    }
+  }
+  if (has_excluded_check && all_excluded_match) {
+    return false;
+  }
   return true;
 }
 
@@ -275,13 +296,35 @@ std::string TensorCheck::check_verbose(
     return fail_reason.str();
   }
   const auto& sizes = v.sym_sizes();
+  bool all_excluded_match = true;
+  bool has_excluded_check = false;
   for (auto i : c10::irange(ndim)) {
     auto known_size = sizes_[i];
-    if (known_size.has_value() && (known_size.value() != sizes[i])) {
-      fail_reason << "size mismatch at index " << i << ". expected "
-                  << known_size.value() << ", actual " << sizes[i];
-      return fail_reason.str();
+    if (known_size.has_value()) {
+      if (known_size.value() != sizes[i]) {
+        fail_reason << "size mismatch at index " << i << ". expected "
+                    << known_size.value() << ", actual " << sizes[i];
+        return fail_reason.str();
+      }
     }
+  }
+  if (excluded_sizes_.empty()) {
+    // static full tensor matches
+    return "";
+  }
+  for (auto i : c10::irange(ndim)) {
+    if (excluded_sizes_[i].has_value()) {
+      has_excluded_check = true;
+      if (sizes[i] != excluded_sizes_[i].value()) {
+        all_excluded_match = false;
+        break;
+      }
+    }
+  }
+  if (has_excluded_check && all_excluded_match) {
+    fail_reason << "excluded sizes matched on dynamic dims."
+                << " Input matches a more specialized graph";
+    return fail_reason.str();
   }
   const bool supports_stride =
       !v.is_sparse() && !at::sparse_csr::is_sparse_compressed(v);
@@ -358,6 +401,24 @@ static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
         TORCH_CHECK(false, "Size or stride list item is not a valid integer.");
       }
       vec.emplace_back(c10::SymInt(value));
+    }
+  }
+  return vec;
+}
+
+static std::vector<std::optional<int64_t>> pyListToVecOptInt64(
+    PyObject* pyList) {
+  std::vector<std::optional<int64_t>> vec;
+  if (pyList == Py_None) {
+    return vec;
+  }
+  Py_ssize_t size = PyList_Size(pyList);
+  for (Py_ssize_t i = 0; i < size; i++) {
+    PyObject* item = PyList_GetItem(pyList, i);
+    if (item == Py_None) {
+      vec.emplace_back(std::nullopt);
+    } else {
+      vec.emplace_back(PyLong_AsLongLong(item));
     }
   }
   return vec;
@@ -4542,7 +4603,8 @@ class TENSOR_MATCH : public LeafGuard {
       py::object verbose_code_parts,
       py::object user_stack,
       py::object pytype,
-      py::object dispatch_keys)
+      py::object dispatch_keys,
+      py::object excluded_sizes_py)
       : LeafGuard(
             root_guard_manager,
             std::move(verbose_code_parts),
@@ -4571,6 +4633,10 @@ class TENSOR_MATCH : public LeafGuard {
     tensor_dims_stride = tensor_dims_stride.empty()
         ? wrapIntegersInOptional(tensor.sym_strides())
         : tensor_dims_stride;
+
+    std::vector<std::optional<int64_t>> excluded_sizes =
+        pyListToVecOptInt64(excluded_sizes_py.ptr());
+
     LocalState state;
     _tensor_check = std::make_unique<TensorCheck>(
         state,
@@ -4578,7 +4644,8 @@ class TENSOR_MATCH : public LeafGuard {
         std::move(tensor),
         dispatch_keys.cast<c10::DispatchKeySet>(),
         std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
+        std::move(tensor_dims_stride),
+        std::move(excluded_sizes));
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -7022,10 +7089,11 @@ PyObject* torch_c_dynamo_guards_init() {
            py::object,
            py::object,
            py::object,
-           py::str,
-           py::list,
            py::object,
-           py::type,
+           py::object,
+           py::object,
+           py::object,
+           py::object,
            py::object>())
       .def("__call__", &TENSOR_MATCH::check);
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -7530,7 +7598,8 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts,
              py::object user_stack,
              py::object pytype,
-             py::object dispatch_keys) -> void {
+             py::object dispatch_keys,
+             py::object excluded_sizes) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TENSOR_MATCH");
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
                 self.get_root(),
@@ -7541,8 +7610,18 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(verbose_code_parts),
                 std::move(user_stack),
                 std::move(pytype),
-                std::move(dispatch_keys)));
-          })
+                std::move(dispatch_keys),
+                std::move(excluded_sizes)));
+          },
+          py::arg("value"),
+          py::arg("sizes"),
+          py::arg("strides"),
+          py::arg("tensor_name"),
+          py::arg("verbose_code_parts"),
+          py::arg("user_stack"),
+          py::arg("pytype"),
+          py::arg("dispatch_keys"),
+          py::arg("excluded_sizes") = py::none())
 
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
