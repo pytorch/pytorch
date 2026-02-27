@@ -1207,9 +1207,12 @@ class OutputGraph(OutputGraphCommon):
         return self.root_tx if not self._current_tx else self._current_tx[-1]
 
     def resolve_source_value(self, source: Source) -> Any:
-        """Resolve the runtime value a Source points to using root_tx's frame."""
-        # The third arg is a memoization cache for recursive get_value calls.
-        # A plain dict suffices since we discard it after this call.
+        """
+        Resolve the runtime value a Source points to using root_tx's frame.
+
+        Useful to inspect the python object associated with the source during
+        debugging. Will also be used by invoke subgraph caching later on.
+        """
         return source.get_value(
             {"G": self.root_tx.f_globals, "L": self.root_tx.f_locals},
             {},
