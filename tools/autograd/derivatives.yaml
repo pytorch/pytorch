@@ -1306,8 +1306,9 @@
   reserve: not_implemented("batch_norm_backward reserve")
 
 - name: nextafter(Tensor self, Tensor other) -> Tensor
-  self: not_implemented("nextafter")
-  other: not_implemented("nextafter")
+  self: at::where(self != other, grad, 0)
+  other: zeros_like(other)
+  result: at::where(self_p != other_p, self_t, 0)
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
