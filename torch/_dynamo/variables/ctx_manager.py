@@ -18,6 +18,7 @@ consistency between eager execution and compiled graph behavior by capturing and
 restoring state changes.
 """
 
+import _thread
 import inspect
 import logging
 import warnings
@@ -1564,6 +1565,58 @@ class CudagraphOverrideVariable(ContextWrappingVariable):
         # call_cleanup_hooks() during compile_subgraph, which is AFTER
         # the annotation is copied to gm.meta.
         return variables.ConstantVariable.create(None)
+
+
+class RLockVariable(ContextWrappingVariable):
+    """represents _thread.RLock"""
+
+    # An attempt to support RLock in Dynamo code.
+    # TODO(guilhermeleobas): Python ships with a pure python impl. of RLock on
+    # threading.py::_PyRLock. See if we could use it instead
+    # Since Dynamo does not support threads, could this be simplified to be a
+    # no-op context manager?
+
+    @staticmethod
+    def create(
+        tx: "InstructionTranslator",
+        **kwargs: Any,
+    ) -> "RLockVariable":
+        return RLockVariable(**kwargs)
+
+    def __init__(self, **kwargs):
+        super().__init__(target_values=None, initial_values=None, **kwargs)
+        self.lock = _thread.RLock()
+
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+        self.lock.acquire()
+        self.set_cleanup_hook(tx, lambda: self.lock.release())
+        return variables.CONSTANT_VARIABLE_NONE
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "RLockVariable":
+        # Should create a new instance instead of returning self
+        return self
+
+    def cleanup(self) -> None:
+        if self.cleanup_fn is not None:
+            # We don't know how many times the lock was acquired, so we just
+            # release it until it raises a RuntimeError.
+            try:
+                self.cleanup_fn()
+            except RuntimeError:
+                self.cleanup_fn = None
+
+    def supports_graph_breaks(self) -> bool:
+        # skip the block on graph break?
+        return False
+
+    def exit_on_graph_break(self) -> bool:
+        # ??
+        return True
 
 
 class WithEnterFunctionVariable(VariableTracker):
