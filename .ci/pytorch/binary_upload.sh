@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+# shellcheck disable=SC2231
 set -euo pipefail
 
 PACKAGE_TYPE=${PACKAGE_TYPE:-wheel}

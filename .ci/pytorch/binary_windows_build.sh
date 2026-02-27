@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1090
 set -eux -o pipefail
 
 source "${BINARY_ENV_FILE:-/c/w/env}"
