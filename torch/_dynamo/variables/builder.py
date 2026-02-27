@@ -3372,6 +3372,8 @@ def handle_traced_output(
         proxy.node.target
         in [
             torch.sym_int,
+            torch.sym_max,
+            torch.sym_min,
             getattr,
             operator.getitem,
             torch._utils._element_size,

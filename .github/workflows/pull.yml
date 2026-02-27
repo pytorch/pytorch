@@ -413,37 +413,6 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12_8-py3_10-gcc11-inductor-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cuda12.8-py3.10-gcc11-sm75 ') }}
-    name: cuda12.8-py3.10-gcc11-sm75
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm75
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
-      test-matrix: |
-        { include: [
-          { config: "pr_time_benchmarks", shard: 1, num_shards: 1, runner: "linux.g4dn.metal.nvidia.gpu" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-cuda12_8-py3_10-gcc11-inductor-test:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cuda12.8-py3.10-gcc11-sm75 ') }}
-    name: cuda12.8-py3.10-gcc11-sm75
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-cuda12_8-py3_10-gcc11-inductor-build
-      - job-filter
-    with:
-      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
-
   linux-jammy-cuda13_0-py3_10-gcc11-inductor-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' cuda13.0-py3.10-gcc11-sm75 ') }}
     name: cuda13.0-py3.10-gcc11-sm75
