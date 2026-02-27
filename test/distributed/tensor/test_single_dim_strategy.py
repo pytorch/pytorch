@@ -25,7 +25,9 @@ from torch.distributed.tensor._op_schema import (
 from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
 from torch.distributed.tensor._ops._pointwise_ops import (
     _BINARY_ADDITIVE_RULES,
-    _make_partial_strategy,
+    _common_pointwise_single_dim_strategy,
+    _MUL_RULES,
+    _UNARY_LINEAR_RULES,
 )
 from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
 from torch.distributed.tensor._ops.single_dim_strategy import (
@@ -34,7 +36,6 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     _get_num_tensor_inputs,
     _get_unique_placements,
     _insert_single_dim_replication_strategy,
-    _PreparedSingleDimStrategy,
     _ShardingPlaceholder,
     _SingleDimStrategyInfo,
     register_single_dim_strategy,
@@ -133,7 +134,9 @@ class TestExpandPlaceholder(TestCase):
 
             op_schema = OpSchema(op=op, args_schema=tuple(specs), kwargs_schema={})
             extra_rules = _BINARY_ADDITIVE_RULES if linearity == 1 else None
-            strategy_fn = _make_partial_strategy(extra_rules=extra_rules)
+            strategy_fn = _common_pointwise_single_dim_strategy(
+                partial_extra_rules=extra_rules
+            )
             expanded = _expand_single_dim_strategy_to_mesh(
                 mesh, op_schema, _SingleDimStrategyInfo(strategy_fn), output_meta
             )
@@ -252,7 +255,9 @@ class TestExpandPlaceholder(TestCase):
                 mesh,
                 op_schema,
                 _SingleDimStrategyInfo(
-                    _make_partial_strategy(extra_rules=_BINARY_ADDITIVE_RULES)
+                    _common_pointwise_single_dim_strategy(
+                        partial_extra_rules=_BINARY_ADDITIVE_RULES
+                    )
                 ),
                 output_tensor_meta,
             )
@@ -261,8 +266,7 @@ class TestExpandPlaceholder(TestCase):
                 op_schema.args_meta,
                 op_schema.kwargs_meta,
             )
-            if not isinstance(strategy, TupleStrategy):
-                raise AssertionError(f"Expected TupleStrategy, got {type(strategy)}")
+            assert isinstance(strategy, TupleStrategy)
             return strategy
 
         # Sizes are multiples of mesh dims so every shard option is valid.
@@ -301,8 +305,7 @@ class TestExpandPlaceholder(TestCase):
         )
         self.assertEqual(len(tuple_strategy.children), 2)
         for child_i, child in enumerate(tuple_strategy.children):
-            if not isinstance(child, OpStrategy):
-                raise AssertionError(f"Expected OpStrategy, got {type(child)}")
+            assert isinstance(child, OpStrategy)
             self.assertEqual(len(child.strategies), expected_num_strategies[child_i])
 
             def sum_cost(x):
@@ -364,8 +367,7 @@ class TestExpandPlaceholder(TestCase):
             strategy = expanded_strategy_fn(
                 torch.ops.aten.cat.default, op_schema.args_meta, op_schema.kwargs_meta
             )
-            if not isinstance(strategy, OpStrategy):
-                raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
+            assert isinstance(strategy, OpStrategy)
             return strategy
 
         # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
@@ -479,8 +481,7 @@ class TestExpandPlaceholder(TestCase):
         strategy = expanded_strategy_fn(
             torch.ops.aten.matmul.default, op_schema.args_meta, op_schema.kwargs_meta
         )
-        if not isinstance(strategy, OpStrategy):
-            raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
+        assert isinstance(strategy, OpStrategy)
 
         # For a 3D mesh with 8 single-dim strategies per mesh dim
         # (3 sharding + 4 per-input linearity + 1 implicit replicate),
@@ -492,8 +493,7 @@ class TestExpandPlaceholder(TestCase):
         for op_spec in strategy.strategies:
             output_spec = op_spec.output_spec
             input_specs = op_spec.input_specs
-            if input_specs is None:
-                raise AssertionError("Expected input_specs to not be None")
+            assert input_specs is not None
 
             # Verify tensor_meta is populated for output spec
             self.assertIsNotNone(
@@ -1195,77 +1195,6 @@ class TestExpandPlaceholder(TestCase):
             "Should include mixed (P_sum, P_avg) strategies since sum+avg commute",
         )
 
-    def test_try_propagate_single_dim_strategy(self):
-        """Test _PreparedSingleDimStrategy.try_propagate against mm rules on a 2D mesh."""
-        mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
-        M, K, N = 64, 32, 64
-        left_meta, right_meta = _get_mm_metas(M, K, N)
-
-        left_spec = DTensorSpec(mesh, (Replicate(), Replicate()), tensor_meta=left_meta)
-        right_spec = DTensorSpec(
-            mesh, (Replicate(), Replicate()), tensor_meta=right_meta
-        )
-        input_specs = [left_spec, right_spec]
-
-        # Use specs with Shard placements in op_schema so _get_unique_placements
-        # returns Shard types, enabling placeholder expansion.
-        schema_left_spec = DTensorSpec(
-            mesh, (Shard(0), Shard(1)), tensor_meta=left_meta
-        )
-        schema_right_spec = DTensorSpec(
-            mesh, (Shard(0), Shard(1)), tensor_meta=right_meta
-        )
-        op_schema = OpSchema(
-            op=torch.ops.aten.mm.default,
-            args_schema=(
-                OpStrategy([OpSpec(schema_left_spec)]),
-                OpStrategy([OpSpec(schema_right_spec)]),
-            ),
-            kwargs_schema={},
-        )
-
-        output_meta = TensorMeta(torch.Size([M, N]), (N, 1), torch.float32)
-        prepared = _PreparedSingleDimStrategy(
-            mm_single_dim_strategy, op_schema, output_meta
-        )
-
-        cases = [
-            # (input_placements, should_match, expected_output_placements)
-            (
-                ((Replicate(), Replicate()), (Replicate(), Replicate())),
-                True,
-                (Replicate(), Replicate()),
-            ),
-            (
-                ((Shard(0), Shard(0)), (Replicate(), Replicate())),
-                True,
-                (Shard(0), Shard(0)),
-            ),
-            (
-                ((Shard(0), Replicate()), (Replicate(), Shard(1))),
-                True,
-                (Shard(0), Shard(1)),
-            ),
-            # No rule for (S0, S1) on a single dim
-            (
-                ((Shard(0), Shard(1)), (Shard(1), Shard(0))),
-                False,
-                None,
-            ),
-        ]
-        for input_placements, should_match, expected_out in cases:
-            with self.subTest(input_placements=input_placements):
-                result = prepared.try_propagate(mesh, input_placements, input_specs)
-                if should_match:
-                    self.assertIsNotNone(result)
-                    spec = result.strategies[0]
-                    self.assertEqual(spec.output_spec.placements, expected_out)
-                    # Redistribute costs should be zero
-                    for costs in spec.redistribute_cost:
-                        self.assertEqual(costs, [0.0])
-                else:
-                    self.assertIsNone(result)
-
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
 def dummy_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -1285,6 +1214,101 @@ def dummy_check(x: torch.Tensor) -> None:
 @dummy_check.register_fake
 def _dummy_check_fake(x):
     return None
+
+
+class TestCommonPointwiseSingleDimStrategy(TestCase):
+    """Unit tests for _common_pointwise_single_dim_strategy raw rule generation."""
+
+    def _meta(self, *dims: int) -> TensorMeta:
+        shape = torch.Size(dims)
+        stride = torch.empty(shape).stride()
+        return TensorMeta(shape=shape, stride=stride, dtype=torch.float32)
+
+    @staticmethod
+    def _normalize(rules):
+        """Convert rules to a comparable form (replace _ShardingPlaceholder with Shard)."""
+        out = []
+        for rule in rules:
+            out.append(
+                tuple(
+                    Shard(p.dim) if isinstance(p, _ShardingPlaceholder) else p
+                    for p in rule
+                )
+            )
+        return out
+
+    def test_unary_2d_shard_rules(self):
+        """Unary op with a 2D tensor should produce two Shard rules."""
+        fn = _common_pointwise_single_dim_strategy()
+        rules = self._normalize(fn(torch.ops.aten.abs.default, (self._meta(4, 8),), {}))
+        self.assertEqual(
+            rules,
+            [(Shard(0), Shard(0)), (Shard(1), Shard(1))],
+        )
+
+    def test_unary_with_partial_extra_rules(self):
+        """Unary op with _UNARY_LINEAR_RULES should append partial rules."""
+        fn = _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_UNARY_LINEAR_RULES
+        )
+        rules = self._normalize(fn(torch.ops.aten.neg.default, (self._meta(4, 8),), {}))
+        expected = [
+            (Shard(0), Shard(0)),
+            (Shard(1), Shard(1)),
+            (Partial("sum"), Partial("sum")),
+            (Partial("avg"), Partial("avg")),
+        ]
+        self.assertEqual(rules, expected)
+
+    def test_binary_broadcast_replicate(self):
+        """When one input is broadcast, the broadcast dim gets Replicate."""
+        fn = _common_pointwise_single_dim_strategy()
+        # (4, 8) + (8,) — dim 0 is broadcast for the second arg
+        rules = self._normalize(
+            fn(torch.ops.aten.add.Tensor, (self._meta(4, 8), self._meta(8)), {})
+        )
+        self.assertEqual(
+            rules,
+            [(Shard(0), Shard(0), Replicate()), (Shard(1), Shard(1), Shard(0))],
+        )
+
+    def test_partial_extra_rules_filtered_by_arity(self):
+        """Binary extra rules are filtered out when only one tensor arg is present."""
+        fn = _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_MUL_RULES + _UNARY_LINEAR_RULES
+        )
+        # Scalar promotion: mul.Tensor with one tensor arg
+        rules = self._normalize(
+            fn(torch.ops.aten.mul.Tensor, (self._meta(4, 8), 2.0), {})
+        )
+        # Length-3 _MUL_RULES should be filtered out, only length-2 _UNARY_LINEAR_RULES kept
+        expected = [
+            (Shard(0), Shard(0)),
+            (Shard(1), Shard(1)),
+            (Partial("sum"), Partial("sum")),
+            (Partial("avg"), Partial("avg")),
+        ]
+        self.assertEqual(rules, expected)
+
+    def test_binary_with_additive_rules(self):
+        """Binary op with _BINARY_ADDITIVE_RULES appends the right partial rules."""
+        fn = _common_pointwise_single_dim_strategy(
+            partial_extra_rules=_BINARY_ADDITIVE_RULES
+        )
+        rules = self._normalize(
+            fn(torch.ops.aten.add.Tensor, (self._meta(4, 8), self._meta(4, 8)), {})
+        )
+        expected = [
+            (Shard(0), Shard(0), Shard(0)),
+            (Shard(1), Shard(1), Shard(1)),
+            (Partial("sum"), Partial("sum"), Partial("sum")),
+            (Partial("avg"), Partial("avg"), Partial("avg")),
+            (Partial("avg"), Partial("avg"), Replicate()),
+            (Partial("max"), Partial("max"), Replicate()),
+            (Partial("min"), Partial("min"), Replicate()),
+            (Partial("avg"), Replicate(), Partial("avg")),
+        ]
+        self.assertEqual(rules, expected)
 
 
 class TestSingleDimStrategyRegistration(TestCase):
