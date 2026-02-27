@@ -36,7 +36,8 @@ jobs:
         "svekars",
         "sekyondaMeta",
         "AlannaBurke",
-        "ngimel"
+        "ngimel",
+        "PaulZhang12"
       ]'), github.actor) &&
       (
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
