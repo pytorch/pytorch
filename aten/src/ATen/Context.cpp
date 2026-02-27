@@ -457,9 +457,10 @@ at::BlasBackend Context::blasPreferredBackend() {
   // call site for blasPreferredBackend(), we set it to an actual value.
   if (blas_preferred_backend == at::BlasBackend::Default) {
 #ifdef USE_ROCM
-    // May change to cuBLASLt in the code below
+    // ROCm - BLAS is default. May change to Lt in the code below.
     blas_preferred_backend = at::BlasBackend::Cublas;
 #else
+    // CUDA - Lt by default if available
     blas_preferred_backend = hasCuBLASLt()
       ? at::BlasBackend::Cublaslt
       : at::BlasBackend::Cublas;
