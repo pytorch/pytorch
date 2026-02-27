@@ -7,8 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 
-# from packaging.version import Version
-# from setuptools import distutils  # type: ignore[import,attr-defined]
+from packaging.version import Version
 
 
 UNKNOWN = "Unknown"

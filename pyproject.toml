@@ -17,9 +17,66 @@
 # build-backend = "setuptools.build_meta"
 requires = [
     "scikit-build-core",
-    "pyyaml"
+    "packaging",
+    "pyyaml",
 ]
 build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+# Build type is determined by cmake/EnvVarForwarding.cmake from DEBUG,
+# REL_WITH_DEB_INFO, or CMAKE_BUILD_TYPE env vars (defaulting to Release).
+# Setting to empty string tells scikit-build-core not to override it.
+cmake.build-type = ""
+
+# Read wheel version from version.txt. For release builds,
+# PYTORCH_BUILD_VERSION overrides this (handled by generate_torch_version.py).
+metadata.version.provider = "scikit_build_core.metadata.regex"
+metadata.version.provider-path = "version.txt"
+
+# CMake install destinations (lib/, include/, share/cmake/) are relative to
+# CMAKE_INSTALL_PREFIX. This setting places them under torch/ in the wheel,
+# matching the existing layout (e.g., torch/lib/libtorch_cpu.so).
+wheel.install-dir = "torch"
+
+# Python packages to include in the wheel.
+wheel.packages = ["torch", "torchgen", "functorch"]
+
+# Editable installs use redirect mode: Python files are found in the source
+# tree, and CMake-built artifacts are rebuilt on import if stale.
+[tool.scikit-build.editable]
+mode = "redirect"
+rebuild = true
+
+[tool.scikit-build.cmake.define]
+# Core build options — read from environment variables.
+# The full set of BUILD_*/USE_*/CMAKE_* env vars is forwarded dynamically
+# by cmake/EnvVarForwarding.cmake; these are the most commonly used ones
+# made explicit for documentation and IDE support.
+BUILD_TEST = {env = "BUILD_TEST", default = "ON"}
+BUILD_PYTHON = {env = "BUILD_PYTHON", default = "ON"}
+USE_CUDA = {env = "USE_CUDA"}
+USE_CUDNN = {env = "USE_CUDNN"}
+USE_ROCM = {env = "USE_ROCM"}
+USE_XPU = {env = "USE_XPU"}
+USE_DISTRIBUTED = {env = "USE_DISTRIBUTED"}
+USE_MKLDNN = {env = "USE_MKLDNN"}
+USE_NCCL = {env = "USE_NCCL"}
+USE_NNPACK = {env = "USE_NNPACK"}
+USE_OPENMP = {env = "USE_OPENMP"}
+USE_FBGEMM = {env = "USE_FBGEMM"}
+USE_KINETO = {env = "USE_KINETO"}
+USE_NUMPY = {env = "USE_NUMPY"}
+USE_FLASH_ATTENTION = {env = "USE_FLASH_ATTENTION"}
+USE_MEM_EFF_ATTENTION = {env = "USE_MEM_EFF_ATTENTION"}
+USE_GLOO = {env = "USE_GLOO"}
+USE_MPI = {env = "USE_MPI"}
+USE_SYSTEM_NCCL = {env = "USE_SYSTEM_NCCL"}
+TORCH_CUDA_ARCH_LIST = {env = "TORCH_CUDA_ARCH_LIST"}
+TORCH_XPU_ARCH_LIST = {env = "TORCH_XPU_ARCH_LIST"}
+PYTORCH_ROCM_ARCH = {env = "PYTORCH_ROCM_ARCH"}
+TORCH_BUILD_VERSION = {env = "PYTORCH_BUILD_VERSION"}
+PYTORCH_BUILD_NUMBER = {env = "PYTORCH_BUILD_NUMBER"}
+MAX_JOBS = {env = "MAX_JOBS"}
 
 [dependency-groups]
 dev = [
@@ -85,12 +142,21 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-dynamic = [
-    "entry-points",
-    "dependencies",
-    "scripts",
-    "version",
+dynamic = ["version"]
+dependencies = [
+    "filelock",
+    "typing-extensions>=4.10.0",
+    "sympy>=1.13.3",
+    "networkx>=2.5.1",
+    "jinja2",
+    "fsspec>=0.8.5",
 ]
+
+[project.scripts]
+torchrun = "torch.distributed.run:main"
+
+[project.entry-points."torchrun.logs_specs"]
+default = "torch.distributed.elastic.multiprocessing:DefaultLogsSpecs"
 
 [project.urls]
 Homepage = "https://pytorch.org"

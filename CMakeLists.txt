@@ -25,9 +25,29 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
 endif()
 
 # ---[ Project and semantic versioning.
+# When built via scikit-build-core, these are set automatically.
+# Provide fallbacks for standalone cmake invocations.
+if(NOT DEFINED SKBUILD_PROJECT_NAME)
+  set(SKBUILD_PROJECT_NAME "torch")
+endif()
+if(NOT DEFINED SKBUILD_PROJECT_VERSION)
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" SKBUILD_PROJECT_VERSION)
+  string(STRIP "${SKBUILD_PROJECT_VERSION}" SKBUILD_PROJECT_VERSION)
+  # version.txt may contain PEP 440 pre-release suffixes like "a0" that are
+  # not valid CMake version components. Strip everything after the last digit
+  # group so project(VERSION ...) still works.
+  string(REGEX MATCH "^[0-9]+\\.[0-9]+(\\.[0-9]+)?" SKBUILD_PROJECT_VERSION "${SKBUILD_PROJECT_VERSION}")
+endif()
 project(${SKBUILD_PROJECT_NAME}
         VERSION ${SKBUILD_PROJECT_VERSION}
         LANGUAGES CXX C)
+
+# Forward environment variables to CMake variables, replicating the behavior
+# previously handled by setup.py / tools/setup_helpers/cmake.py.
+include(cmake/EnvVarForwarding.cmake)
+
+# Pre-build steps: submodule init, NCCL checkout.
+include(cmake/PreBuildSteps.cmake)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
@@ -1455,6 +1475,15 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+
+# File mirroring: copy source files into package directories for distribution.
+include(cmake/FileMirroring.cmake)
+
+# Package data: install non-Python files needed in the wheel.
+include(cmake/PackageData.cmake)
+
+# Post-build steps: header wrapping, license bundling, compile_commands merging.
+include(cmake/PostBuildSteps.cmake)
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
