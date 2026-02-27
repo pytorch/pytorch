@@ -772,6 +772,35 @@ Stack (TOS at end):
             with self.assertRaises(ZeroDivisionError):
                 InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
 
+    def test_empty_input_repeats_last_command(self):
+        """Test that empty input repeats the last command."""
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x + 1
+
+        def test_logic(sess, initial):
+            # First command: step
+            output = yield ""
+            self.assertIn("Instruction", output)
+
+            # Empty input should repeat 's' (step)
+            output = yield ""
+            self.assertIn("Instruction", output)
+
+            # Now use verbose
+            output = yield "v"
+            self.assertIn("Verbose mode enabled", output)
+
+            # Empty input should repeat 'v' (toggle verbose off)
+            output = yield ""
+            self.assertIn("Verbose mode disabled", output)
+
+            # Continue to end
+            yield "c"
+
+        InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
+
 
 if __name__ == "__main__":
     run_tests()

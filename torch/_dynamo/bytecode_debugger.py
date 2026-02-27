@@ -96,6 +96,7 @@ class DebuggerState:
     user_locals: dict[str, Any] = field(
         default_factory=dict
     )  # User-defined variables from debugger
+    last_command: str = "s"  # Last command for repeat on empty input
 
 
 class _DebugContext:
@@ -346,7 +347,9 @@ class _DebugContext:
                 raise KeyboardInterrupt from None
 
             if not cmd:
-                cmd = "s"
+                cmd = state.last_command
+            else:
+                state.last_command = cmd
 
             parts = cmd.split(maxsplit=1)
             action = parts[0].lower()
