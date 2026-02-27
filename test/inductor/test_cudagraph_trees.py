@@ -1084,8 +1084,6 @@ if HAS_CUDA_AND_TRITON:
             def get_unaligned_inputs():
                 return [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
 
-            from torch._higher_order_ops.wrap import inductor_compiled_code
-
             class CloneCounterMode(TorchDispatchMode):
                 def __init__(self) -> None:
                     self.count = 0
@@ -1094,11 +1092,6 @@ if HAS_CUDA_AND_TRITON:
                     kwargs = {} if kwargs is None else kwargs
                     self.count += func is torch.ops.aten.clone.default
                     return func(*args, **kwargs)
-
-            @inductor_compiled_code.py_impl(CloneCounterMode)
-            def _(mode, func, inputs):
-                with mode:
-                    return func(inputs)
 
             for _ in range(3):
                 with CloneCounterMode() as m:
