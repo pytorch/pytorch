@@ -2331,8 +2331,10 @@ class TestTorchDeviceType(TestCase):
         for std in [0.005, 0.01]:
             t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=std)
             res = stats.kstest(t.cpu().to(torch.double), 'norm', args=(0, std))
-            self.assertTrue(res.statistic < 0.01,
-                msg=f"KS statistic {res.statistic:.4f} for {dtype} std={std}")
+            self.assertTrue(
+                res.statistic < 0.01,
+                msg=f"KS statistic {res.statistic:.4f} for {dtype} std={std}",
+            )
 
     @skipIfNoSciPy
     @dtypes(torch.half, torch.bfloat16)
@@ -2342,8 +2344,10 @@ class TestTorchDeviceType(TestCase):
         for std in [0.01, 0.1, 1.0]:
             t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=std)
             kurtosis = stats.kurtosis(t.cpu().to(torch.double).numpy())
-            self.assertAlmostEqual(kurtosis, 0.0, delta=0.15,
-                msg=f"Excess kurtosis {kurtosis:.3f} too far from 0 for {dtype} std={std}")
+            self.assertAlmostEqual(
+                kurtosis, 0.0, delta=0.15,
+                msg=f"Excess kurtosis {kurtosis:.3f} too far from 0 for {dtype} std={std}",
+            )
 
     @dtypes(torch.bfloat16)
     def test_normal_tail_reach(self, device, dtype):
@@ -2353,8 +2357,10 @@ class TestTorchDeviceType(TestCase):
         size = 1000000
         t = torch.empty(size, dtype=dtype, device=device).normal_(mean=0, std=1.0)
         max_sigma = t.float().abs().max().item()
-        self.assertGreater(max_sigma, 3.5,
-            msg=f"Max |z| = {max_sigma:.2f} sigma, expected > 3.5 (tail truncation)")
+        self.assertGreater(
+            max_sigma, 3.5,
+            msg=f"Max |z| = {max_sigma:.2f} sigma, expected > 3.5 (tail truncation)",
+        )
 
     @dtypes(torch.half, torch.bfloat16)
     def test_normal_unique_values(self, device, dtype):
