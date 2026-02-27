@@ -390,13 +390,32 @@ def expand_to_full_mesh_op_strategy(
             [Replicate(), Replicate(), Replicate()]
         ]
     """
+    # Auto-append output placement for out= kwarg in .out variant ops.
+    # The out tensor must match the output placement, so we duplicate it.
+    args_strategy = op_schema.args_strategy
+    kwargs_strategy = op_schema.kwargs_strategy
+    if kwargs_strategy and op_schema.is_out_variant_op():
+        # Expected placements: outputs + args + kwargs
+        expected_len = input_index + len(args_strategy) + 1
+        # For each strategy, append output placement for each kwarg tensor if needed
+        expanded_strategies = []
+        for strategy in single_mesh_dim_strategies:
+            # some strategies may be the all replicate case, which auto appends
+            if len(strategy) < expected_len:
+                # Strategy doesn't include kwargs placements, append them
+                # The out tensor should match the output placement
+                expanded_strategies.append(list(strategy) + [strategy[0]])
+
+            else:
+                # Strategy already has enough placements
+                expanded_strategies.append(list(strategy))
+        single_mesh_dim_strategies = expanded_strategies
+
     # Expand the single_mesh_dim_strategies to full mesh dim strategies.
     all_mesh_dim_strategies = [single_mesh_dim_strategies] * mesh.ndim
 
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
 
-    args_strategy = op_schema.args_strategy
-    kwargs_strategy = op_schema.kwargs_strategy
     input_args_strategy = args_strategy + kwargs_strategy
     all_strategies = []
     # Track input placements if we skip strategies due to inplace placement mismatch
