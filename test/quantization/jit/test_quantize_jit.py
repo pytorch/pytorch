@@ -453,9 +453,15 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         qconfig_dict = {"": default_qconfig}
         m = prepare_jit(m, qconfig_dict)
         # for input and output of conv
-        assert len(attrs_with_prefix(m, "_observer_")) == 2
+        if len(attrs_with_prefix(m, "_observer_")) != 2:
+            raise AssertionError(
+                f"Expected 2 observers, got {len(attrs_with_prefix(m, '_observer_'))}"
+            )
         # for weight
-        assert len(attrs_with_prefix(m.conv, "_observer_")) == 1
+        if len(attrs_with_prefix(m.conv, "_observer_")) != 1:
+            raise AssertionError(
+                f"Expected 1 observer, got {len(attrs_with_prefix(m.conv, '_observer_'))}"
+            )
 
     def test_insert_observers_interface(self):
         @torch.jit.interface
@@ -551,13 +557,25 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         qconfig_dict = {"sub.fc": default_qconfig}
         m = prepare_jit(m, qconfig_dict)
         # input and output of sub
-        assert len(attrs_with_prefix(m, "_observer_")) == 2
+        if len(attrs_with_prefix(m, "_observer_")) != 2:
+            raise AssertionError(
+                f"Expected 2 observers, got {len(attrs_with_prefix(m, '_observer_'))}"
+            )
         # not quantized
-        assert len(attrs_with_prefix(m.conv, "_observer_")) == 0
+        if len(attrs_with_prefix(m.conv, "_observer_")) != 0:
+            raise AssertionError(
+                f"Expected 0 observers, got {len(attrs_with_prefix(m.conv, '_observer_'))}"
+            )
         # no observers since we observe in the outer most call site
-        assert len(attrs_with_prefix(m.sub, "_observer_")) == 0
+        if len(attrs_with_prefix(m.sub, "_observer_")) != 0:
+            raise AssertionError(
+                f"Expected 0 observers, got {len(attrs_with_prefix(m.sub, '_observer_'))}"
+            )
         # weight of linear
-        assert len(attrs_with_prefix(m.sub.fc, "_observer_")) == 1
+        if len(attrs_with_prefix(m.sub.fc, "_observer_")) != 1:
+            raise AssertionError(
+                f"Expected 1 observer, got {len(attrs_with_prefix(m.sub.fc, '_observer_'))}"
+            )
 
     @unittest.skipUnless(
         "fbgemm" in torch.backends.quantized.supported_engines,
@@ -610,24 +628,45 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         m = torch.jit.script(ConvFunctionalReLU())
         m = prepare_jit(m, qconfig_dict)
         # observer for weight of conv
-        assert len(attrs_with_prefix(m.conv, "_observer_")) == 1
+        if len(attrs_with_prefix(m.conv, "_observer_")) != 1:
+            raise AssertionError(
+                f"Expected 1 observer, got {len(attrs_with_prefix(m.conv, '_observer_'))}"
+            )
         # observer for input of conv and output of relu
-        assert len(attrs_with_prefix(m, "_observer_")) == 2
+        if len(attrs_with_prefix(m, "_observer_")) != 2:
+            raise AssertionError(
+                f"Expected 2 observers, got {len(attrs_with_prefix(m, '_observer_'))}"
+            )
 
         m = torch.jit.script(ConvReLUModule())
         m = prepare_jit(m, qconfig_dict)
         # observer for input of conv and output of relu
-        assert len(attrs_with_prefix(m, "_observer_")) == 2
+        if len(attrs_with_prefix(m, "_observer_")) != 2:
+            raise AssertionError(
+                f"Expected 2 observers, got {len(attrs_with_prefix(m, '_observer_'))}"
+            )
         # observer for weight of conv
-        assert len(attrs_with_prefix(m.conv, "_observer_")) == 1
+        if len(attrs_with_prefix(m.conv, "_observer_")) != 1:
+            raise AssertionError(
+                f"Expected 1 observer, got {len(attrs_with_prefix(m.conv, '_observer_'))}"
+            )
         # observer for output of relu
-        assert len(attrs_with_prefix(m.relu, "_observer_")) == 0
+        if len(attrs_with_prefix(m.relu, "_observer_")) != 0:
+            raise AssertionError(
+                f"Expected 0 observers, got {len(attrs_with_prefix(m.relu, '_observer_'))}"
+            )
 
         m = torch.jit.script(AddReLUModule())
         qconfig_dict = {"": default_qconfig}
         m = prepare_jit(m, qconfig_dict)
-        assert len(attrs_with_prefix(m, "_observer")) == 3
-        assert len(attrs_with_prefix(m.relu, "_observer")) == 0
+        if len(attrs_with_prefix(m, "_observer")) != 3:
+            raise AssertionError(
+                f"Expected 3 observers, got {len(attrs_with_prefix(m, '_observer'))}"
+            )
+        if len(attrs_with_prefix(m.relu, "_observer")) != 0:
+            raise AssertionError(
+                f"Expected 0 observers, got {len(attrs_with_prefix(m.relu, '_observer'))}"
+            )
         FileCheck().check("aten::add_").check_not(
             'Observer = prim::GetAttr[name="_observer_'
         ).check("ReLU = prim::GetAttr").run(str(get_forward_graph(m._c)))
@@ -635,7 +674,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         m = torch.jit.script(AddFunctionalReLU())
         qconfig_dict = {"": default_qconfig}
         m = prepare_jit(m, qconfig_dict)
-        assert len(attrs_with_prefix(m, "_observer")) == 3
+        if len(attrs_with_prefix(m, "_observer")) != 3:
+            raise AssertionError(
+                f"Expected 3 observers, got {len(attrs_with_prefix(m, '_observer'))}"
+            )
         FileCheck().check("aten::add_").check_not(
             'Observer = prim::GetAttr[name="_observer_'
         ).check("CallFunction").check('Observer = prim::GetAttr[name="_observer_').run(
@@ -664,11 +706,12 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             for x, obs in m.conv._modules._c.items()
             if x.startswith("_observer_")
         }
-        assert len(activation_dtypes) == 1, "Expected to have 1 activation dtype"
-        assert len(weight_dtypes) == 1, "Expected to have 1 weight dtype"
-        assert next(iter(activation_dtypes)) != next(iter(weight_dtypes)), (
-            "Expected activation dtype to "
-        )
+        if len(activation_dtypes) != 1:
+            raise AssertionError("Expected to have 1 activation dtype")
+        if len(weight_dtypes) != 1:
+            raise AssertionError("Expected to have 1 weight dtype")
+        if next(iter(activation_dtypes)) == next(iter(weight_dtypes)):
+            raise AssertionError("Expected activation dtype to ")
         " be different from wegiht dtype"
 
     def test_insert_observers_for_reused_weight(self):
@@ -681,7 +724,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         m = torch.jit.script(M()).eval()
         m = prepare_jit(m, {"": default_qconfig})
         # 3 for x, y, weight, one for output of each F.conv2d and one for output of add
-        assert len(attrs_with_prefix(m, "_observer")) == 6
+        if len(attrs_with_prefix(m, "_observer")) != 6:
+            raise AssertionError(
+                f"Expected 6 observers, got {len(attrs_with_prefix(m, '_observer'))}"
+            )
 
     def test_insert_observers_shared_class_type(self):
         class M(torch.nn.Module):
@@ -700,11 +746,14 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         # make sure we didn't quantize the type twice
         conv1_observers = attrs_with_prefix(m.conv1, "_observer_")
         conv2_observers = attrs_with_prefix(m.conv2, "_observer_")
-        assert len(conv1_observers) == 1, "Expected to have 1 observer submodules"
-        assert len(conv2_observers) == 1, "Expected to have 1 observer submodules"
-        assert conv1_observers == conv2_observers, (
-            "Expect conv1 and conv2 to have same observers since the class type is shared"
-        )
+        if len(conv1_observers) != 1:
+            raise AssertionError("Expected to have 1 observer submodules")
+        if len(conv2_observers) != 1:
+            raise AssertionError("Expected to have 1 observer submodules")
+        if conv1_observers != conv2_observers:
+            raise AssertionError(
+                "Expect conv1 and conv2 to have same observers since the class type is shared"
+            )
 
     def test_insert_observers_for_general_ops(self):
         """Make sure we skip observers for ops that doesn't require
@@ -725,7 +774,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         qconfig_dict = {"": default_qconfig}
         m = prepare_jit(m, qconfig_dict)
         # input and output of conv
-        assert len(attrs_with_prefix(m, "_observer_")) == 2
+        if len(attrs_with_prefix(m, "_observer_")) != 2:
+            raise AssertionError(
+                f"Expected 2 observers, got {len(attrs_with_prefix(m, '_observer_'))}"
+            )
         FileCheck().check('Observer = prim::GetAttr[name="_observer_').check(
             'prim::GetAttr[name="conv"]'
         ).check("prim::CallMethod").check(
@@ -757,7 +809,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         qconfig_dict = {"": default_qconfig}
         m = prepare_jit(m, qconfig_dict)
         # input and output of conv
-        assert len(attrs_with_prefix(m, "_observer_")) == 3
+        if len(attrs_with_prefix(m, "_observer_")) != 3:
+            raise AssertionError(
+                f"Expected 3 observers, got {len(attrs_with_prefix(m, '_observer_'))}"
+            )
         FileCheck().check('Observer = prim::GetAttr[name="_observer_').check(
             'prim::GetAttr[name="conv1"]'
         ).check("prim::CallMethod").check(
@@ -790,7 +845,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         qconfig_dict = {"": default_qconfig}
         m = prepare_jit(m, qconfig_dict)
         # input and output of conv
-        assert len(attrs_with_prefix(m, "_observer_")) == 3
+        if len(attrs_with_prefix(m, "_observer_")) != 3:
+            raise AssertionError(
+                f"Expected 3 observers, got {len(attrs_with_prefix(m, '_observer_'))}"
+            )
         FileCheck().check('Observer = prim::GetAttr[name="_observer_').check(
             'prim::GetAttr[name="conv1"]'
         ).check("prim::CallMethod").check(
@@ -836,15 +894,18 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         # we want to test that channel_shuffle is going to pass
         # the observed property from the output of conv1 to input of conv2
         # so that we don't insert observers for input of conv2
-        assert (
+        if (
             len(
                 attrs_with_prefix(
                     m,
                     "_observer_",
                 )
             )
-            == 3
-        )
+            != 3
+        ):
+            raise AssertionError(
+                f"Expected 3 observers, got {len(attrs_with_prefix(m, '_observer_'))}"
+            )
 
     def test_insert_observers_for_if(self):
         class QuantProp(torch.nn.Module):
@@ -892,33 +953,45 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             else:
                 m = torch.jit.script(M()).eval()
             m = prepare_jit(m, {"": default_qconfig})
-            assert (
+            if (
                 len(
                     attrs_with_prefix(
                         m,
                         "_observer_",
                     )
                 )
-                == result[tracing][0]
-            )
-            assert (
+                != result[tracing][0]
+            ):
+                raise AssertionError(
+                    f"Expected {result[tracing][0]} observers on m, "
+                    f"got {len(attrs_with_prefix(m, '_observer_'))}"
+                )
+            if (
                 len(
                     attrs_with_prefix(
                         m.quant_prop,
                         "_observer_",
                     )
                 )
-                == result[tracing][1]
-            )
-            assert (
+                != result[tracing][1]
+            ):
+                raise AssertionError(
+                    f"Expected {result[tracing][1]} observers on m.quant_prop, "
+                    f"got {len(attrs_with_prefix(m.quant_prop, '_observer_'))}"
+                )
+            if (
                 len(
                     attrs_with_prefix(
                         m.res,
                         "_observer_",
                     )
                 )
-                == result[tracing][2]
-            )
+                != result[tracing][2]
+            ):
+                raise AssertionError(
+                    f"Expected {result[tracing][2]} observers on m.res, "
+                    f"got {len(attrs_with_prefix(m.res, '_observer_'))}"
+                )
 
     def test_insert_observers_for_nested_if(self):
         class Res(torch.nn.Module):
@@ -956,7 +1029,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             else:
                 m = torch.jit.script(M()).eval()
             m = prepare_jit(m, {"": default_qconfig})
-            assert len(attrs_with_prefix(m, "_observer_")) == result[tracing]
+            if len(attrs_with_prefix(m, "_observer_")) != result[tracing]:
+                raise AssertionError(
+                    f"Expected {result[tracing]} observers, "
+                    f"got {len(attrs_with_prefix(m, '_observer_'))}"
+                )
 
     def test_insert_observers_for_if_consistent_observation(self):
         """check quantization for if works as long as
@@ -1002,7 +1079,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             else:
                 m = torch.jit.script(M(cond))
             m = prepare_jit(m, {"": default_qconfig})
-            assert len(attrs_with_prefix(m, "_observer_")) == 2
+            if len(attrs_with_prefix(m, "_observer_")) != 2:
+                raise AssertionError(
+                    f"Expected 2 observers, got {len(attrs_with_prefix(m, '_observer_'))}"
+                )
 
         for cond, tracing in options:
             if tracing:
@@ -1011,7 +1091,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 m = torch.jit.script(M2(cond))
             m = prepare_jit(m, {"": default_qconfig})
             num_observers = 2 if tracing and not cond else 3
-            assert len(attrs_with_prefix(m, "_observer_")) == num_observers
+            if len(attrs_with_prefix(m, "_observer_")) != num_observers:
+                raise AssertionError(
+                    f"Expected {num_observers} observers, "
+                    f"got {len(attrs_with_prefix(m, '_observer_'))}"
+                )
 
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
@@ -1035,9 +1119,8 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
             m(data)
             m = convert_jit(m, debug=True)
-            assert len(m._modules._c.items()) == 1, (
-                "Expected to have single submodule of conv"
-            )
+            if len(m._modules._c.items()) != 1:
+                raise AssertionError("Expected to have single submodule of conv")
             # make sure the quantized model is executable
             m(data)
             quant_func = (
@@ -1068,34 +1151,32 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             qconfig_dict = {"": qconfig}
             m = prepare_jit(m, qconfig_dict)
             # observers for input, output and value between conv1/conv2
-            assert len(attrs_with_prefix(m, "_observer_")) == 3, (
-                "Expected to have 3 observers"
-            )
+            if len(attrs_with_prefix(m, "_observer_")) != 3:
+                raise AssertionError("Expected to have 3 observers")
             # observer for weight
-            assert len(attrs_with_prefix(m.conv1, "_observer_")) == 1, (
-                "Expected to have 1 observers"
-            )
+            if len(attrs_with_prefix(m.conv1, "_observer_")) != 1:
+                raise AssertionError("Expected to have 1 observers")
             # observer for weight
-            assert len(attrs_with_prefix(m.conv2, "_observer_")) == 1, (
-                "Expected to have 1 observers"
-            )
+            if len(attrs_with_prefix(m.conv2, "_observer_")) != 1:
+                raise AssertionError("Expected to have 1 observers")
 
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
             m(data)
             m = convert_jit(m, debug=True)
             m(data)
-            assert m.conv1._c._type() == m.conv2._c._type()
+            if m.conv1._c._type() != m.conv2._c._type():
+                raise AssertionError(
+                    f"Expected conv1 and conv2 to share the same type, "
+                    f"got {m.conv1._c._type()} and {m.conv2._c._type()}"
+                )
 
             # check all observers have been removed
-            assert len(attrs_with_prefix(m, "_observer_")) == 0, (
-                "Expected to have 0 observers"
-            )
-            assert len(attrs_with_prefix(m.conv1, "_observer_")) == 0, (
-                "Expected to have 0 observers"
-            )
-            assert len(attrs_with_prefix(m.conv2, "_observer_")) == 0, (
-                "Expected to have 0 observers"
-            )
+            if len(attrs_with_prefix(m, "_observer_")) != 0:
+                raise AssertionError("Expected to have 0 observers")
+            if len(attrs_with_prefix(m.conv1, "_observer_")) != 0:
+                raise AssertionError("Expected to have 0 observers")
+            if len(attrs_with_prefix(m.conv2, "_observer_")) != 0:
+                raise AssertionError("Expected to have 0 observers")
 
             quant_func = (
                 "aten::quantize_per_channel"
@@ -1127,15 +1208,17 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         data = torch.randn((2, 2))
         m = torch.jit.script(M())
         ref_res = m(data)
-        assert (
-            len([x for x, _ in m._modules._c.items() if x.startswith("relu")]) == 1
-        ), "Expected to have 1 relu modules after dedup module uses"
+        if len([x for x, _ in m._modules._c.items() if x.startswith("relu")]) != 1:
+            raise AssertionError(
+                "Expected to have 1 relu modules after dedup module uses"
+            )
         torch._C._jit_pass_dedup_module_uses(m._c)
         m = torch.jit._recursive.wrap_cpp_module(m._c)
         res = m(data)
-        assert (
-            len([x for x, _ in m._modules._c.items() if x.startswith("relu")]) == 2
-        ), "Expected to have 2 relu modules after dedup module uses"
+        if len([x for x, _ in m._modules._c.items() if x.startswith("relu")]) != 2:
+            raise AssertionError(
+                "Expected to have 2 relu modules after dedup module uses"
+            )
         self.assertEqual(res, ref_res)
 
     def test_replicate_dequantize(self):
@@ -1345,7 +1428,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         qconfig_dict = {"": default_qconfig}
         model = torch.jit.script(ComplexModel()).eval()
         model = prepare_jit(model, qconfig_dict)
-        assert len(attrs_with_prefix(model, "_observer")) == 3
+        if len(attrs_with_prefix(model, "_observer")) != 3:
+            raise AssertionError(
+                f"Expected 3 observers, got {len(attrs_with_prefix(model, '_observer'))}"
+            )
         model(data)
         model = convert_jit(model, debug=False)
         FileCheck().check("quantized::linear").check("quantized::linear").run(
@@ -3016,14 +3102,20 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             m = prepare_dynamic_jit(model, {"": qconfig})
 
             # observer for weight
-            assert len(attrs_with_prefix(m.fc, "_observer_")) == 1
+            if len(attrs_with_prefix(m.fc, "_observer_")) != 1:
+                raise AssertionError(
+                    f"Expected 1 observer, got {len(attrs_with_prefix(m.fc, '_observer_'))}"
+                )
 
             if qconfig == float16_dynamic_qconfig:
                 observer_name = 'PlaceholderObserver = prim::GetAttr[name="_observer_'
                 FileCheck().check(observer_name).run(m.fc.graph)
             else:
                 # for input of FC for dynamic quant
-                assert len(attrs_with_prefix(m, "_observer_")) == 1
+                if len(attrs_with_prefix(m, "_observer_")) != 1:
+                    raise AssertionError(
+                        f"Expected 1 observer, got {len(attrs_with_prefix(m, '_observer_'))}"
+                    )
                 observer_name = 'Observer = prim::GetAttr[name="_observer_'
                 FileCheck().check(observer_name).check(
                     'prim::GetAttr[name="fc"]'
@@ -3052,13 +3144,25 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
         m = prepare_dynamic_jit(m, {"sub.fc": default_dynamic_qconfig})
 
         # input of sub for dynamic quant
-        assert len(attrs_with_prefix(m, "_observer_")) == 1
+        if len(attrs_with_prefix(m, "_observer_")) != 1:
+            raise AssertionError(
+                f"Expected 1 observer, got {len(attrs_with_prefix(m, '_observer_'))}"
+            )
         # not quantized
-        assert len(attrs_with_prefix(m.conv, "_observer_")) == 0
+        if len(attrs_with_prefix(m.conv, "_observer_")) != 0:
+            raise AssertionError(
+                f"Expected 0 observers, got {len(attrs_with_prefix(m.conv, '_observer_'))}"
+            )
         # no observers since we observe in the outer most call site
-        assert len(attrs_with_prefix(m.sub, "_observer_")) == 0
+        if len(attrs_with_prefix(m.sub, "_observer_")) != 0:
+            raise AssertionError(
+                f"Expected 0 observers, got {len(attrs_with_prefix(m.sub, '_observer_'))}"
+            )
         # weight of linear
-        assert len(attrs_with_prefix(m.sub.fc, "_observer_")) == 1
+        if len(attrs_with_prefix(m.sub.fc, "_observer_")) != 1:
+            raise AssertionError(
+                f"Expected 1 observer, got {len(attrs_with_prefix(m.sub.fc, '_observer_'))}"
+            )
         FileCheck().check('prim::GetAttr[name="sub').check("prim::CallMethod").check(
             'Observer = prim::GetAttr[name="_observer_'
         ).check("prim::CallMethod").check_not(
@@ -3084,9 +3188,8 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                 else default_dynamic_qconfig
             )
             m = quantize_dynamic_jit(m, {"": qconfig}, debug=True)
-            assert len(m._modules._c.items()) == 2, (
-                "Expected to have two submodule of linear"
-            )
+            if len(m._modules._c.items()) != 2:
+                raise AssertionError("Expected to have two submodule of linear")
 
             wt_quant_func = (
                 "aten::quantize_per_channel"
