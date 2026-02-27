@@ -19,9 +19,15 @@ struct AtomicFPOp<at::Half> {
   inline __device__ at::Half operator() (at::Half *address, at::Half val, const func_t& func) {
     unsigned int * address_as_ui =
       (unsigned int *) ((char *)address - ((size_t)address & 2));
-    unsigned int old = *address_as_ui;
-    unsigned int assumed;
 
+    // read 2 bytes only in case this is the last element of an array.
+    unsigned short target_val = *reinterpret_cast<unsigned short*>(address);
+
+    unsigned int old = ((size_t)address & 2)
+        ? (static_cast<unsigned int>(target_val) << 16)
+        : static_cast<unsigned int>(target_val);
+
+    unsigned int assumed;
     at::Half hsum;
     do {
       assumed = old;
@@ -41,9 +47,15 @@ struct AtomicFPOp<at::BFloat16> {
   inline __device__ at::BFloat16 operator() (at::BFloat16 *address, at::BFloat16 val, const func_t& func) {
     unsigned int * address_as_ui =
       (unsigned int *) ((char *)address - ((size_t)address & 2));
-    unsigned int old = *address_as_ui;
-    unsigned int assumed;
 
+    // read 2 bytes only in case this is the last element of an array.
+    unsigned short target_val = *reinterpret_cast<unsigned short*>(address);
+
+    unsigned int old = ((size_t)address & 2)
+        ? (static_cast<unsigned int>(target_val) << 16)
+        : static_cast<unsigned int>(target_val);
+
+    unsigned int assumed;
     at::BFloat16 bsum;
     do {
       assumed = old;
