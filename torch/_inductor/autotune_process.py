@@ -343,10 +343,13 @@ class TuningProcessPool:
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains."
             )
-            # An unspecified launch failure (cudaErrorLaunchFailure) corrupts the
-            # CUDA context, making it unrecoverable. All subsequent CUDA calls will
-            # fail as well. The process must be restarted to restore CUDA functionality.
-            if "cudaErrorLaunchFailure" in str(process_exception):
+            # Sticky CUDA errors corrupt the context, making it unrecoverable.
+            # The process must be restarted to restore CUDA functionality.
+            error_msg = str(process_exception)
+            if (
+                "cudaErrorLaunchFailure" in error_msg
+                or "cudaErrorIllegalAddress" in error_msg
+            ):
                 process.restart()
             # Set to INF so this choice will be ignored
             return float("inf")
@@ -974,6 +977,16 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = self.__dict__.copy()
+        state["DLL"] = None
+        state["workspace"] = None
+        state["_workspace_size_updated"] = False
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.__dict__.update(state)
 
 
 class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
