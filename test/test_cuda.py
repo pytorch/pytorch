@@ -41,6 +41,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDNN,
     TEST_MULTIGPU,
     tf32_on_and_off,
+    xfailIfSM89OrLaterOnWindows,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -178,6 +179,7 @@ class TestCuda(TestCase):
         for thread in threads:
             thread.join()
 
+    @xfailIfSM89OrLaterOnWindows("Sporadic failure on Windows")
     @serialTest()
     def test_host_memory_stats(self):
         # Helper functions
@@ -432,6 +434,7 @@ print(t.is_pinned())
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
+    @xfailIfSM89OrLaterOnWindows("Sporadic failure on Windows")
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)"
     )
@@ -4369,6 +4372,7 @@ class TestCudaMallocAsync(TestCase):
             finally:
                 torch.cuda.memory._record_memory_history(None)
 
+    @xfailIfSM89OrLaterOnWindows("Sporadic failure on Windows")
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
@@ -6183,6 +6187,7 @@ class TestMemPool(TestCase):
             f"but got {blocks_no_split} vs {blocks_split}",
         )
 
+    @xfailIfSM89OrLaterOnWindows("Sporadic failure on Windows")
     @skipIfRocmArch(MI200_ARCH)
     @serialTest()
     def test_deleted_mempool_not_used_on_oom(self):

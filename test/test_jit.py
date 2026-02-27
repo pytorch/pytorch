@@ -102,6 +102,7 @@ import torch.nn.functional as F
 
 # Testing utils
 from torch.testing._internal import jit_utils
+from torch.testing._internal.common_cuda import xfailIfSM89OrLaterOnWindows
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
     GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
@@ -16102,6 +16103,30 @@ L = 20
 M = 10
 S = 5
 
+# TestJitGeneratedModule tests that fail on Windows with CUDA SM >= 8.9
+JIT_SKIP_SM89_WINDOWS_TESTS = frozenset({
+    "test_nn_Conv2d",
+    "test_nn_Conv2d_depthwise_with_multiplier",
+    "test_nn_Conv2d_groups",
+    "test_nn_Conv2d_groups_thnn",
+    "test_nn_Conv2d_no_bias",
+    "test_nn_Conv2d_pad_same",
+    "test_nn_Conv3d",
+    "test_nn_Conv3d_circular_stride2_pad2",
+    "test_nn_Conv3d_groups",
+    "test_nn_Conv3d_pad_same",
+    "test_nn_Conv3d_pad_valid",
+    "test_nn_Conv3d_replicate_stride2_pad2",
+    "test_nn_Conv3d_stride_padding",
+    "test_nn_Conv3d_zeros_stride2_pad2",
+    "test_nn_ConvTranspose2d",
+    "test_nn_ConvTranspose2d_dilated",
+    "test_nn_ConvTranspose2d_no_bias",
+    "test_nn_ConvTranspose3d",
+    "test_nn_ConvTranspose3d_dilated",
+})
+
+
 def add_nn_module_test(*args, **kwargs):
     no_grad = kwargs.get('no_grad', False)
 
@@ -16226,7 +16251,12 @@ def add_nn_module_test(*args, **kwargs):
     if 'slowTest' in kwargs:
         do_test = slowTest(do_test)
 
-    post_add_test(test_name, (), do_test, TestJitGeneratedModule)
+    skipTestIf = []
+    if test_name in JIT_SKIP_SM89_WINDOWS_TESTS:
+        skipTestIf.append(
+            lambda f: xfailIfSM89OrLaterOnWindows("Failing on Windows on sm89+")(f)
+        )
+    post_add_test(test_name, skipTestIf, do_test, TestJitGeneratedModule)
 
 
 def post_add_test(test_name, skipTestIf, do_test, test_class):

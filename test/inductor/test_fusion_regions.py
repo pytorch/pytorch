@@ -9,11 +9,13 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
+from torch.testing._internal.common_cuda import skipIfSM89OrLaterOnWindows
 
 
 HAS_GPU = torch.cuda.is_available()
 
 
+@skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 class TestFusionRegionDetection(InductorTestCase):
     """Tests for fusion region detection and grouping."""

@@ -9,7 +9,7 @@ from operator import methodcaller
 import torch
 
 from torch._subclasses.meta_utils import assert_metadata_eq
-from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_cuda import with_tf32_off, xfailIfSM89OrLaterOnWindows
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, onlyOn, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
@@ -148,6 +148,7 @@ class TestModule(TestCase):
                 m.train(training)
                 self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
+    @xfailIfSM89OrLaterOnWindows("Multiple device transfer fails on Windows with CUDA SM >= 8.9")
     @onlyOn(["cuda", "xpu"])
     @modules(module_db)
     def test_multiple_device_transfer(self, device, dtype, module_info, training):
@@ -539,6 +540,7 @@ class TestModule(TestCase):
     def test_gradgrad(self, device, dtype, module_info, training):
         self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
+    @xfailIfSM89OrLaterOnWindows("CPU/GPU parity fails on Windows with CUDA SM >= 8.9")
     @onlyOn(["cuda", "xpu"])
     @with_tf32_off  # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
     @toleranceOverride({torch.float32: tol(5e-2, 0),

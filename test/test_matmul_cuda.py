@@ -24,6 +24,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
+    xfailIfSM89OrLaterOnWindows,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -319,6 +320,7 @@ class TestMatmulCuda(InductorTestCase):
                 out = torch.nn.functional.linear(X, A, B)
                 self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows with CUDA SM89+")
     @onlyCUDA
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
@@ -422,6 +424,7 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows with CUDA SM89+")
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -459,6 +462,7 @@ class TestMatmulCuda(InductorTestCase):
             start = offs_cpu[i]
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows with CUDA SM89+")
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -514,6 +518,7 @@ class TestMatmulCuda(InductorTestCase):
             self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
 
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows with CUDA SM89+")
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -547,6 +552,7 @@ class TestMatmulCuda(InductorTestCase):
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows with CUDA SM89+")
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])

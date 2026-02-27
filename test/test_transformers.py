@@ -55,6 +55,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     tf32_on_and_off,
     tf32_enabled,
+    skipIfSM89OrLaterOnWindows,
 )
 
 if TEST_FAIRSEQ:
@@ -2937,6 +2938,7 @@ class TestSDPACudaOnly(NNTestCase):
         torch.testing.assert_close(k.grad, k_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(v.grad, v_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
@@ -2974,6 +2976,7 @@ class TestSDPACudaOnly(NNTestCase):
             for use_compile in [False, True]:
                 test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3], use_compile)
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     @unittest.skipIf(
         not (isSM90Device and torch.backends.cudnn.version() >= 91000),
@@ -3010,6 +3013,7 @@ class TestSDPACudaOnly(NNTestCase):
         out = fn(q, k, v)
         self.assertEqual(out.shape, (B, H, S, D_v))
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_compiles(self):
         q = torch.randn(2, 8, 1024, 128, dtype=torch.half, device='cuda', requires_grad=True)
@@ -3456,6 +3460,7 @@ class TestSDPACudaOnly(NNTestCase):
                 if torch._fused_sdp_choice(query, key, value) != SDPBackend.EFFICIENT_ATTENTION.value:
                     raise AssertionError("expected EFFICIENT_ATTENTION backend")
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")

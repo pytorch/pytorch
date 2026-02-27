@@ -55,7 +55,7 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU, skipIfSM89OrLaterOnWindows
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -3511,6 +3511,7 @@ aten::mm""",
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_profiler_debug_autotuner(self):
         """

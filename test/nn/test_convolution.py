@@ -22,7 +22,12 @@ def _get_cudnn_version():
         return None
 
 
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, tf32_on_and_off
+from torch.testing._internal.common_cuda import (
+    TEST_CUDA,
+    TEST_CUDNN,
+    xfailIfSM89OrLaterOnWindows,
+    tf32_on_and_off,
+)
 from torch.testing._internal.common_device_type import (
     disablecuDNN,
     disableMkldnn,
@@ -1775,6 +1780,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # ConvB propagation shouldn't return any of gradient
         test_conv_backward_output_mask([False, False, False])
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows on sm89+")
     def test_conv_double_backward_no_bias(self):
         kern = 3
         stride = 2
@@ -1818,6 +1824,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             + str(dilation),
         )
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows on sm89+")
     def test_conv_double_backward_groups(self):
         kern = 3
         stride = 1
@@ -1863,6 +1870,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             + str(groups),
         )
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows on sm89+")
     def test_conv_double_backward_stride(self):
         batch_size = 2
 

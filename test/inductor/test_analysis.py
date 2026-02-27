@@ -15,7 +15,7 @@ from torch._inductor.analysis.profile_analysis import (
     main,
 )
 from torch._inductor.utils import fresh_inductor_cache, tabulate_2d, zip_dicts
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, skipIfSM89OrLaterOnWindows
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -287,6 +287,7 @@ class TestAnalysis(TestCase):
             main()
             self.assertEqual(mock_stdout.getvalue(), "")
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.double, torch.float16)
     def test_diff(self, device, dtype):
@@ -403,6 +404,7 @@ class TestAnalysis(TestCase):
             (True, "TRITON"),
         ],
     )
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @unittest.skipIf(
         not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune"
     )
@@ -554,6 +556,7 @@ class TestAnalysis(TestCase):
             if event["name"] == "triton_poi_fused_add_randn_sin_0":
                 event["args"]["kernel_num_gb"] = 0.002097168
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.float16)
     def test_combine_profiles(self, device, dtype):

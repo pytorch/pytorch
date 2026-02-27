@@ -7,6 +7,7 @@ import unittest.mock as mock
 import torch
 import torch.nn as nn
 from torch.nn import MultiheadAttention
+from torch.testing._internal.common_cuda import skipIfSM89OrLaterOnWindows
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -950,6 +951,7 @@ class TestMultiheadAttentionNNDeviceType(NNTestCase):
         query = torch.randn(4, 4, 4, dtype=dtype, device=device)
         mha(query, query, query)
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @dtypes(torch.double)
     def test_fast_path_check_with_mask_does_not_break_in_compile(self, device, dtype):
         # Test TransformerEncoder fast path determination with src_key_padding_mask set.
