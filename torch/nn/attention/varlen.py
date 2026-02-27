@@ -76,7 +76,9 @@ def _varlen_attn(
         if seqused_k is not None or page_table is not None:
             # TODO: cuDNN supports per-sequence KV lengths via SEQ_LEN_KV + padding_mask,
             # but _cudnn_attention_forward doesn't expose it yet.
-            raise RuntimeError("seqused_k/page_table is not yet supported with the cuDNN backend.")
+            raise RuntimeError(
+                "seqused_k/page_table is not yet supported with the cuDNN backend."
+            )
 
         result = torch.ops.aten._cudnn_attention_forward(
             query,
