@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch._inductor import config
@@ -21,7 +21,7 @@ log = torch._logging.getArtifactLogger(__name__, "auto_chunker")
 
 
 def set_chunking_meta(
-    node: Node, meta: Optional[ChunkingMeta] = None, **kwargs: Any
+    node: Node, meta: ChunkingMeta | None = None, **kwargs: Any
 ) -> bool:
     """
     kwargs can override fields in the passed in `meta`
@@ -61,7 +61,7 @@ def update_chunking_meta(node: Node, **kwargs: Any) -> bool:
 def set_chunking_meta_if_none(
     nodes: Sequence[Node],
     meta: ChunkingMeta,
-    filter_for_nop: Optional[Callable[[Node], bool]] = None,
+    filter_for_nop: Callable[[Node], bool] | None = None,
 ) -> bool:
     """
     If filter_fop_nop returns true for a node, we set the chunking
@@ -88,7 +88,7 @@ def copy_chunking_meta(dst_node: Node, src_node: Node | ChunkingMeta) -> bool:
     return set_chunking_meta(dst_node, src_meta)
 
 
-def get_chunking_meta(node: Node) -> Optional[ChunkingMeta]:
+def get_chunking_meta(node: Node) -> ChunkingMeta | None:
     return node.meta.get("chunking")
 
 
@@ -114,7 +114,7 @@ eligible_amplifier_node = OrderedSet(
 )
 
 
-def find_amplifier_node(graph: Graph) -> Optional[Node]:
+def find_amplifier_node(graph: Graph) -> Node | None:
     r"""
     Find the 'amplifier' node which is a node that generates large
     output with small/medium input.
