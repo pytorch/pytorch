@@ -287,6 +287,47 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, tra
     return module_inputs
 
 
+def module_error_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for Linear that test error messages for invalid inputs.
+    """
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        # Wrong input features: last dimension doesn't match in_features
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(10, 8),
+                forward_input=FunctionInput(make_input((4, 5))),  # Expected 10, got 5
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"mat1 and mat2 shapes cannot be multiplied"
+        ),
+        # Scalar input: 0-dimensional tensor
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(10, 8),
+                forward_input=FunctionInput(make_input(())),  # Scalar
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"both arguments to linear need to be at least 1D"
+        ),
+        # Negative in_features
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(-1, 8),
+                forward_input=FunctionInput(),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"Trying to create tensor with negative dimension"
+        ),
+    ]
+
+
+
 def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -4020,6 +4061,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
+               module_error_inputs_func=module_error_inputs_torch_nn_Linear,
                skips=(
                    # No channels_last support for Linear currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
