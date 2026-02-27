@@ -2660,6 +2660,11 @@ class PythonWrapperCodegen(CodeGen):
             }
             extra_launcher_call_args = [*extra_launcher_args.keys()]
 
+        if constexprs:
+            inductor_meta["declared_constexpr_names"] = [
+                arg_names[i] for i in constexprs
+            ]
+
         # Distinguish between different functions using function id
         cache_key: Any = [id(kernel.fn)]
         if len(configs) > 0:

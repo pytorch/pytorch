@@ -844,11 +844,19 @@ def _run_and_assert_no_indirect_indexing(
                 ("where" in code or ") ? (" in code) is has_wrapping,
                 msg=f"Wanted {has_wrapping=} but got\n{code}",
             )
+
+    def has_assert_in_code(code):
+        # Check for device_assert, or TORCH_CHECK that isn't AOTI_TORCH_CHECK
+        # AOTI_TORCH_CHECK is for lazy Triton compile infrastructure, not bounds checking
+        if "device_assert" in code:
+            return True
+        for line in code.split("\n"):
+            if "TORCH_CHECK" in line and "AOTI_TORCH_CHECK" not in line:
+                return True
+        return False
+
     test_case.assertTrue(
-        any(
-            ("device_assert" in code or "TORCH_CHECK" in code) is has_assert
-            for code in source_codes
-        )
+        any(has_assert_in_code(code) is has_assert for code in source_codes)
     )
     return result
 
@@ -2472,9 +2480,14 @@ class CommonTemplate:
         _, code = run_and_get_code(cfn, a, b, 0)
 
         # Check everything is fused into a single kernel
-        FileCheck().check_not("run(").check_regex(
-            r"triton_.*\.run\(arg[01]_1, arg[12]_1, buf1,"
-        ).check_not("run(").run(code[0])
+        if config.cpp_wrapper:
+            FileCheck().check_regex(r"call_triton_.*\(arg[01]_1, arg[12]_1, buf1,").run(
+                code[0]
+            )
+        else:
+            FileCheck().check_not("run(").check_regex(
+                r"triton_.*\.run\(arg[01]_1, arg[12]_1, buf1,"
+            ).check_not("run(").run(code[0])
 
     @skip_if_halide  # scan ops
     # TODO: support lifted symints when dynamic
@@ -4455,8 +4468,7 @@ class CommonTemplate:
                 )
             else:
                 if config.cpp_wrapper:
-                    # with cpp_wrapper, the pattern is .run( and then .convolution(
-                    FileCheck().check(".run(").check("convolution(").run(code[0])
+                    FileCheck().check("call_triton").check("convolution(").run(code[0])
                 else:
                     # without cpp_wrapper, the pattern is .convolution( and then .run(
                     FileCheck().check("convolution(").check(".run(").run(code[0])
@@ -15058,6 +15070,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         args = (inp, repeats, output_size)
         self.assertEqual(fn(*args), torch.compile(fn)(*args))
 
+    @unittest.skipIf(
+        config.cpp_wrapper,
+        "cpp_wrapper enables autotune_at_compile_time which disables this decomposition",
+    )
     @parametrize("dtype", [torch.int32, torch.int64])
     @parametrize("nd", [1, 2])
     def test_repeat_interleave_Tensor_decomp(self, dtype, nd):
@@ -15075,9 +15091,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         output, (code,) = run_and_get_code(f_compiled, input, repeat)
         reference = f(input, repeat)
         self.assertEqual(output, reference)
-        # we don't lower when the cpp_wrapper is used because it cannot generate
-        # proper examples during autotune
-        can_lower = (not config.cpp_wrapper) and (input.device.type != "mps")
+        can_lower = input.device.type != "mps"
         has_lowered = not re.search(r"repeat_interleave.Tensor", code)
         self.assertEqual(has_lowered, can_lower)
 
@@ -15098,6 +15112,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "triton.native_matmul": False,
         }
     )
+    @skip_if_cpp_wrapper("cpp output code is different")
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile
         def fn(inp):  # 1*N^2
@@ -16158,6 +16173,7 @@ if RUN_GPU:
         @skipCUDAIf(not SM90OrLater, "Requires sm90")
         @requires_cuda_and_triton
         @unittest.skipIf(TEST_WITH_ROCM, "no grouped_mm support")
+        @skip_if_cpp_wrapper("no c-shim for grouped_mm")
         @config.patch(implicit_fallbacks=True)
         def test_grouped_mm(self):
             @torch.compile(fullgraph=True)
@@ -16372,7 +16388,17 @@ if RUN_GPU:
 
             # make sure that rope is fused into 1 kernel
             code = run_and_get_triton_code(compiled_fn, q, k, cos, sin, pos_ids)
-            self.assertEqual(code.count(".run("), 1)
+            if config.cpp_wrapper:
+                # Count actual kernel invocations, not function definitions
+                # Kernel invocations end with ');' and don't start with 'static'
+                import re
+
+                kernel_calls = len(
+                    re.findall(r"^\s+call_triton_.*\);$", code, re.MULTILINE)
+                )
+                self.assertEqual(kernel_calls, 1)
+            else:
+                self.assertEqual(code.count(".run("), 1)
 
         def test_numpy_autograd(self):
             def my_torch(x):
@@ -16697,6 +16723,7 @@ if RUN_GPU:
             )
 
         @patch.object(config, "profile_bandwidth", True)
+        @skip_if_cpp_wrapper("cpp output code is different")
         def test_bandwidth_profiler(self):
             @torch.compile(backend="inductor")
             def fn(x):
@@ -16752,6 +16779,7 @@ if RUN_GPU:
 
         @skipIfRocm
         @unittest.skipIf(IS_FBCODE, "fbcode system python does not provide torch")
+        @skip_if_cpp_wrapper("cpp error msg is different")
         def test_indirect_device_assert(self):
             dir_path = os.path.dirname(os.path.realpath(__file__))
             test_path = os.path.join(dir_path, "indirect_assert_helper.py")

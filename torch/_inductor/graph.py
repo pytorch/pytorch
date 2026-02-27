@@ -2424,6 +2424,11 @@ class GraphLowering(torch.fx.Interpreter):
                         self.extract_autotune_inputs(real_inputs)
                 return self.codegen()
             else:
+                if not self.aot_mode:
+                    # Lazy kernel compilation does not require two passes
+                    # TODO: need to consolidate the logic between AOT and JIT
+                    return self.codegen()
+
                 # first pass
                 self.cpp_wrapper = False
                 compiled = self.compile_to_module().call
