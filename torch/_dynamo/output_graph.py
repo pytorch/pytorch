@@ -655,7 +655,7 @@ class OutputGraph(OutputGraphCommon):
         # Cudagraph annotation is set during inlining in
         # InliningInstructionTranslator.build_inline_tracer when a decorated
         # function is inlined.
-        self.cudagraph_annotation: Optional[_CudagraphAnnotation] = None
+        self.cudagraph_annotation: _CudagraphAnnotation | None = None
 
         self.region_tracker = GraphRegionTracker()
 
