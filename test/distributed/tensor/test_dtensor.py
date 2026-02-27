@@ -906,6 +906,7 @@ class DTensorTest(DTensorTestBase):
         loss = out1.sum()
         loss.backward()
 
+
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,
     skipped_tests=[
