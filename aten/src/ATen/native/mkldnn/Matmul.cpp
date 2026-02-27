@@ -423,7 +423,43 @@ void mkldnn_matmul(
 
 }
 
-static inline bool checksize(const Tensor& mat1, const Tensor& mat2){
+#if AT_MKLDNN_ACL_ENABLED() && !defined(FBCODE_CAFFE2)
+// Experimentally derived heuristics for MKLDNN+ACL on NEOVERSE cores
+static inline int64_t get_mkldnn_acl_addmm_min_dim() {
+  static auto value = [&] {
+    const int64_t default_min_dim = [&] {
+      return is_arm_neoverse() ? 8 : 0;
+    }();
+    const char* ptr = std::getenv("TORCH_MKLDNN_ADDMM_MIN_DIM");
+    return ptr != nullptr ? std::atoi(ptr) : default_min_dim;
+  }();
+  return value;
+}
+
+static inline int64_t get_mkldnn_acl_addmm_min_size() {
+  static auto value = [&] {
+    const int64_t default_min_size = [&] {
+      return is_arm_neoverse() ? 8 * 1024 : 0;
+    }();
+    const char* ptr = std::getenv("TORCH_MKLDNN_ADDMM_MIN_SIZE");
+    return ptr != nullptr ? std::atoi(ptr) : default_min_size;
+  }();
+  return value;
+}
+
+static inline int64_t get_mkldnn_acl_bmm_baddbmm_threshold() {
+  static auto value = [&] {
+    const int64_t default_threshold = [&] {
+      return is_arm_neoverse() ? 1L << 22 : 0;
+    }();
+    const char* ptr = std::getenv("TORCH_MKLDNN_BMM_BADDBMM_THRESHOLD");
+    return ptr != nullptr ? std::atoi(ptr) : default_threshold;
+  }();
+  return value;
+}
+#endif
+
+inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // if dim = 2, mat1's size = (m * n), mat2's size = (n * k)
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)
@@ -437,10 +473,26 @@ static inline bool checksize(const Tensor& mat1, const Tensor& mat2){
     return mat1.size(0) * mat1.size(1) > mkldnn_gemm_min_size;
   } else if (mat1.dim() == 2 && mat2.dim() == 2) {
     // aten::addmm
+#if AT_MKLDNN_ACL_ENABLED() && !defined(FBCODE_CAFFE2)
+    const int64_t mkldnn_acl_addmm_min_dim = get_mkldnn_acl_addmm_min_dim();
+    const int64_t mkldnn_acl_addmm_min_size = get_mkldnn_acl_addmm_min_size();
+    // M > MIN_DIM and N > MIN_DIM and K > MIN_DIM and M*N*K > MIN_SIZE
+    return mat1.size(0) > mkldnn_acl_addmm_min_dim
+        && mat1.size(1) > mkldnn_acl_addmm_min_dim
+        && mat2.size(1) > mkldnn_acl_addmm_min_dim
+        && mat1.size(0) * mat1.size(1) * mat2.size(1) > mkldnn_acl_addmm_min_size;
+#else
     return mat1.size(0) * mat1.size(1) * mat2.size(1) > mkldnn_gemm_min_size;
+#endif
   } else {
     // aten::bmm, aten::baddbmm
+#if AT_MKLDNN_ACL_ENABLED() && !defined(FBCODE_CAFFE2)
+    const int64_t mkldnn_acl_bmm_baddbmm_threshold = get_mkldnn_acl_bmm_baddbmm_threshold();
+    // BATCH_SIZE^2 * M * N * K >= THRESHOLD
+    return mat1.size(0) * mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) >= mkldnn_acl_bmm_baddbmm_threshold;
+#else
     return mat1.size(0) * mat1.size(1) * mat1.size(2) * mat2.size(2) > mkldnn_gemm_min_size;
+#endif
   }
 }
 
