@@ -1793,6 +1793,30 @@ def get_selected_tests(options) -> list[str]:
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
     if sys.platform == "win32" and not options.ignore_win_blocklist:
+        from torch.testing._internal.common_cuda import SM89OrLater
+
+        if SM89OrLater:
+            WINDOWS_BLOCKLIST.extend([
+                "functorch/test_aotdispatch",
+                "functorch/test_control_flow",
+                "inductor/test_inductor_scheduler",
+                "nn/test_convolution",
+                "test_cuda",
+                "test_nn",
+                "test_custom_ops",
+                "test_decomp",
+                "test_expanded_weights",
+                "test_jit",
+                "test_linalg",
+                "test_matmul_cuda",
+                "test_modules",
+                "test_ops",
+                "test_testing",
+                "test_transformers",
+                "test_nested_tensor",
+                "profiler/test_profiler",
+            ])
+
         target_arch = os.environ.get("VSCMD_ARG_TGT_ARCH")
         if target_arch != "x64":
             WINDOWS_BLOCKLIST.append("cpp_extensions_aot_no_ninja")
