@@ -19,6 +19,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   # HIP_PLATFORM is auto-detected by hipcc; unset to avoid build errors
   unset HIP_PLATFORM
   export PYTORCH_TEST_WITH_ROCM=1
+  export TRITON_HIP_USE_ASYNC_COPY=1
 fi
 
 # TODO: Reenable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
