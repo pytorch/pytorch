@@ -1383,7 +1383,18 @@ class VariableBuilder:
             )
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
+            # Reconstruct the _lru_cache_wrapper object inside dynamo using the
+            # original function and the cache parameters.
+            wrapped = UserFunctionVariable(value.__wrapped__, source=self.source)
+            kwds = {
+                k: SourcelessBuilder.create(self.tx, v)
+                for k, v in value.cache_parameters().items()
+            }
+            return (
+                UserFunctionVariable(functools.lru_cache, source=self.source)
+                .call_function(self.tx, [], kwds)
+                .call_function(self.tx, [wrapped], {})
+            )
         elif value is sys.exc_info or (
             sys.version_info >= (3, 11) and value is sys.exception
         ):
