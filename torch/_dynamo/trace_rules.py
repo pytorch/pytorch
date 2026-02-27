@@ -1584,6 +1584,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functionalize_replace",
         "torch._functionalize_sync",
         "torch._functionalize_was_storage_changed",
+        "torch._fused_adagrad_",
         "torch._fused_adam_",
         "torch._fused_adamw_",
         "torch._fused_dropout",

@@ -16,6 +16,7 @@ from .optimizer import (
     _to_scalar,
     _use_grad_for_differentiable,
     _view_as_real,
+    DeviceDict,
     Optimizer,
     ParamsT,
 )
@@ -73,6 +74,7 @@ class Adagrad(Optimizer):
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
             self._need_device_dtype_check_for_fused = True
+            self._step_supports_amp_scaling = True
 
         for group in self.param_groups:
             for p in group["params"]:
@@ -105,6 +107,20 @@ class Adagrad(Optimizer):
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
             fused = group.setdefault("fused", None)
+
+            for p in group["params"]:
+                p_state = self.state.get(p, [])
+                if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
+                    step_val = float(p_state["step"])
+                    p_state["step"] = (
+                        torch.tensor(
+                            step_val,
+                            dtype=_get_scalar_dtype(is_fused=fused),
+                            device=p.device,
+                        )
+                        if group["fused"]
+                        else torch.tensor(step_val, dtype=_get_scalar_dtype())
+                    )
 
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
@@ -139,6 +155,31 @@ class Adagrad(Optimizer):
                 params_with_grad.append(p)
                 grads.append(p.grad)
                 state = self.state[p]
+                if len(state) == 0:
+                    if group["fused"]:
+                        _device_dtype_check_for_fused(p)
+
+                    state["step"] = (
+                        torch.zeros(
+                            (),
+                            dtype=_get_scalar_dtype(is_fused=group["fused"]),
+                            device=p.device,
+                        )
+                        if group["fused"]
+                        else torch.tensor(0.0, dtype=_get_scalar_dtype())
+                    )
+
+                    initial_accumulator_value = self.defaults[
+                        "initial_accumulator_value"
+                    ]
+                    init_value = (
+                        complex(initial_accumulator_value, initial_accumulator_value)
+                        if torch.is_complex(p)
+                        else initial_accumulator_value
+                    )
+                    state["sum"] = torch.full_like(
+                        p, init_value, memory_format=torch.preserve_format
+                    )
                 state_sums.append(state["sum"])
                 state_steps.append(state["step"])
 
@@ -230,7 +271,7 @@ Adagrad.__doc__ = (
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
-        fused (bool, optional): whether the fused implementation (CPU only) is used.
+        fused (bool, optional): whether the fused implementation (CPU and CUDA only) is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. (default: None). Please note that the fused implementations does not
             support sparse or complex gradients.
@@ -526,12 +567,15 @@ def _fused_adagrad(
             "adagrad with fused=True does not support differentiable=True"
         )
 
-    lr = _to_scalar(lr)
-
-    grad_scale_dict = (
-        {grad_scale.device: grad_scale} if grad_scale is not None else None
+    grad_scale_dict: DeviceDict = (
+        {grad_scale.device: grad_scale} if grad_scale is not None else {}
     )
-    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
+    found_inf_dict: DeviceDict = (
+        {found_inf.device: found_inf} if found_inf is not None else {}
+    )
+    lr_dict: Optional[DeviceDict] = (
+        {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
+    )
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
         [params, grads, state_sums, state_steps]  # type: ignore[list-item]
@@ -551,14 +595,16 @@ def _fused_adagrad(
         device_state_steps = cast(list[Tensor], device_state_steps_)
 
         device_grad_scale, device_found_inf = None, None
-        if grad_scale is not None and grad_scale_dict is not None:
-            if device not in grad_scale_dict:
-                grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)  # type: ignore[index]
-            device_grad_scale = grad_scale_dict[device]  # type: ignore[index]
-        if found_inf is not None and found_inf_dict is not None:
-            if found_inf not in found_inf_dict:
-                found_inf_dict[device] = found_inf.to(device, non_blocking=True)  # type: ignore[index]
-            device_found_inf = found_inf_dict[device]  # type: ignore[index]
+        if grad_scale is not None:
+            device_grad_scale = grad_scale_dict.setdefault(
+                device, grad_scale.to(device, non_blocking=True)
+            )
+        if found_inf is not None:
+            device_found_inf = found_inf_dict.setdefault(
+                device, found_inf.to(device, non_blocking=True)
+            )
+        if lr_dict is not None and device not in lr_dict:
+            lr_dict[device] = lr.to(device=device, non_blocking=True)
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adagrad_(
             device_params,
