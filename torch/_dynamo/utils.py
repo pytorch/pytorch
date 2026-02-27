@@ -3788,11 +3788,11 @@ def _get_fake_value_impl(
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(  # noqa: B904
+            raise UserError(
                 UserErrorType.CONSTRAINT_VIOLATION,
                 str(cause),
                 case_name="constrain_as_size_example",
-            )
+            ) from cause
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
