@@ -367,10 +367,14 @@ class FrameStateSizeEntry:
         # dynamic, the C++ TENSOR_MATCH guard will exclude these values so
         # inputs fall through to the earlier, more specialized cache entry.
         # Already-dynamic dims become None and are ignored by the guard.
+        # Only update when a dimension actually transitions static → dynamic,
+        # otherwise warm-start iors would overwrite saved excluded_sizes.
         if isinstance(self.size, tuple):
-            self.excluded_sizes = tuple(
-                s if type(s) is int else None for s in self.size
-            )
+            new_size = self._merge_atom_tup(self.size, other.size)
+            if new_size != self.size:
+                self.excluded_sizes = tuple(
+                    s if type(s) is int else None for s in self.size
+                )
         # Same idea for scalars: record the static value about to become dynamic.
         if (
             type(self.scalar) is int
