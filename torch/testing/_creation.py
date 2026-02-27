@@ -6,7 +6,7 @@ import collections.abc
 import functools
 import math
 import warnings
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 
@@ -43,15 +43,15 @@ def _uniform_random_(t: torch.Tensor, low: float, high: float) -> torch.Tensor:
 
 
 def make_tensor(
-    *shape: Union[int, torch.Size, list[int], tuple[int, ...]],
+    *shape: int | torch.Size | list[int] | tuple[int, ...],
     dtype: torch.dtype,
-    device: Union[str, torch.device],
-    low: Optional[float] = None,
-    high: Optional[float] = None,
+    device: str | torch.device,
+    low: float | None = None,
+    high: float | None = None,
     requires_grad: bool = False,
     noncontiguous: bool = False,
     exclude_zero: bool = False,
-    memory_format: Optional[torch.memory_format] = None,
+    memory_format: torch.memory_format | None = None,
 ) -> torch.Tensor:
     r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
     values uniformly drawn from ``[low, high)``.
@@ -125,8 +125,8 @@ def make_tensor(
     """
 
     def modify_low_high(
-        low: Optional[float],
-        high: Optional[float],
+        low: float | None,
+        high: float | None,
         *,
         lowest_inclusive: float,
         highest_exclusive: float,
