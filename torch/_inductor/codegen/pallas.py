@@ -875,7 +875,12 @@ class PallasKernel(SIMDKernel):
         # Track if any load in this kernel used transpose
         # Used to avoid double transpose (load + store)
         self.permuted_input_buffers: dict[str, tuple[int, ...]] = {}
-        self._has_broadcast_shaped_full_load = False
+        # Precompute output buffer names from scheduler nodes so that the
+        # load path can check output shapes before stores are processed.
+        self._output_buffer_names: list[str] = []
+        for snode in self.features.scheduler_nodes():
+            for dep in snode.read_writes.writes:
+                self._output_buffer_names.append(dep.name)
         # Track which iteration variables are actually used in the kernel
         self.used_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
         # Track if any load/store uses flatten-based indexing (buf[...].flatten()[idx])
@@ -1593,20 +1598,15 @@ class PallasKernel(SIMDKernel):
                     load_expr = f"jnp.permute_dims({load_expr}, {perm})"
                     self.permuted_input_buffers[name] = perm
                 else:
-                    # Check if this unpermuted full-array load has a shape
-                    # matching the broadcast shape.  If so, the store may
-                    # need permute_dims when broadcast != output shape.
-                    info = self._get_buffer_info(name)
-                    if info:
-                        _, buf_size, _, _, _ = info
-                        buf_int = [self._safe_int(s) for s in buf_size]
-                        broadcast = self._get_expected_output_shape()
-                        if (
-                            len(buf_int) >= 2
-                            and None not in buf_int
-                            and buf_int == broadcast
-                        ):
-                            self._has_broadcast_shaped_full_load = True
+                    # When the input buffer shape matches the broadcast shape
+                    # but differs from the output shape, the data is in
+                    # broadcast order and needs reordering.  Apply the
+                    # permutation here at load time (not at store) so that
+                    # tiling and block specs work correctly.
+                    store_perm = self._get_broadcast_to_output_permutation(name)
+                    if store_perm is not None:
+                        load_expr = f"jnp.permute_dims({load_expr}, {store_perm})"
+                        self.permuted_input_buffers[name] = store_perm
 
             return load_expr
 
@@ -1855,49 +1855,53 @@ class PallasKernel(SIMDKernel):
 
         return True
 
-    def _get_store_permutation(self, name: str) -> "Optional[tuple[int, ...]]":
-        """Return permutation if broadcast shape differs from output shape.
+    def _get_broadcast_to_output_permutation(
+        self, input_name: str
+    ) -> "Optional[tuple[int, ...]]":
+        """Return permutation from broadcast shape to output shape.
 
-        Only active when the kernel has a full-array load whose shape matches
-        the broadcast shape.  In that case the loaded value is in broadcast
-        order and may need reordering for the output buffer.
+        When a full-array load's buffer shape matches the broadcast shape
+        (from iteration variables) but differs from the output buffer shape,
+        the data needs reordering.  Returns the permutation to apply at
+        load time so the value is in output-buffer order.
         """
-        if not self._has_broadcast_shaped_full_load:
+        info = self._get_buffer_info(input_name)
+        if not info:
             return None
-        broadcast_shape = self._get_expected_output_shape()
-        if not broadcast_shape or len(broadcast_shape) < 2:
+        _, buf_size, _, _, _ = info
+        buf_int = [self._safe_int(s) for s in buf_size]
+        if len(buf_int) < 2 or None in buf_int:
             return None
-        buf = V.graph.get_buffer(name)
-        if buf is None:
+        broadcast = self._get_expected_output_shape()
+        if not broadcast or buf_int != broadcast:
             return None
-        output_shape = [self._safe_int(s) for s in buf.get_size()]
-        if any(s is None for s in output_shape):
-            return None
-        if len(output_shape) != len(broadcast_shape):
-            return None
-        if broadcast_shape == output_shape:
-            return None
-        if sorted(broadcast_shape) != sorted(output_shape):
-            return None
-        n = len(broadcast_shape)
-        if len(set(broadcast_shape)) != n:
-            return None  # duplicate dims, ambiguous
-        return tuple(broadcast_shape.index(output_shape[i]) for i in range(n))
+        # Find an output buffer whose shape is a permutation of broadcast
+        for out_name in self._output_buffer_names:
+            out_buf = V.graph.get_buffer(out_name)
+            if out_buf is None:
+                continue
+            out_shape = [self._safe_int(s) for s in out_buf.get_size()]
+            if any(s is None for s in out_shape):
+                continue
+            if len(out_shape) != len(broadcast):
+                continue
+            if out_shape == broadcast:
+                continue  # shapes match, no permutation needed
+            if sorted(out_shape) != sorted(broadcast):
+                continue  # not a permutation
+            n = len(broadcast)
+            if len(set(broadcast)) != n:
+                continue  # duplicate dims, ambiguous
+            return tuple(broadcast.index(out_shape[i]) for i in range(n))
+        return None
 
     def _build_full_array_store_expr(
-        self,
-        out: str,
-        value: CSEVariable,
-        needs_transpose: bool,
-        store_perm: "Optional[tuple[int, ...]]" = None,
+        self, out: str, value: CSEVariable, needs_transpose: bool
     ) -> list[str]:
         """
         Build store expression for full array assignment.
 
         Handles scalar broadcast, shape matching, and optional transpose.
-        When *store_perm* is given, it is applied instead of reshape to
-        correctly reorder dimensions when the broadcast shape differs from
-        the output buffer shape.
         Returns a list of lines to emit (variable assignment + store).
         """
         lines = [f"_val = jnp.asarray({value})"]
@@ -1906,12 +1910,6 @@ class PallasKernel(SIMDKernel):
                 f"{out}[...] = "
                 f"jnp.full({out}.shape, _val) if _val.ndim == 0 "
                 f"else jnp.transpose(_val)"
-            )
-        elif store_perm is not None:
-            lines.append(
-                f"{out}[...] = "
-                f"jnp.full({out}.shape, _val) if _val.ndim == 0 "
-                f"else jnp.permute_dims(_val, {store_perm})"
             )
         else:
             lines.append(
@@ -1940,10 +1938,7 @@ class PallasKernel(SIMDKernel):
         if index_str == "...":
             # Full array store with shape matching
             needs_transpose = self._check_store_needs_transpose(name)
-            store_perm = self._get_store_permutation(name)
-            return self._build_full_array_store_expr(
-                out, value, needs_transpose, store_perm=store_perm
-            )
+            return self._build_full_array_store_expr(out, value, needs_transpose)
 
         if needs_flatten:
             self.has_flatten_indexing = True
