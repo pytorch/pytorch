@@ -16,7 +16,11 @@ from torch._higher_order_ops.utils import (
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    ProxyTorchDispatchMode,
+    track_tensor_tree,
+)
 from torch.types import _dtype
 from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
@@ -190,8 +194,12 @@ def inductor_compiled_code_functionalize(ctx, func, inputs):
 def inductor_compiled_code_proxy(mode, func, inputs):
     resolved = _resolve_inductor_callable(func)
 
-    # Run the fake impl to get example outputs for tracing
-    example_out = inductor_compiled_code(func, inputs)
+    # Disable proxy modes when computing example outputs. The original_gm
+    # may contain HOPs (e.g. flex_attention) that would otherwise be
+    # re-traced by the outer proxy mode, causing unnecessary retracing of
+    # their inner subgraphs (score_mod, mask_mod, etc.).
+    with disable_proxy_modes_tracing():
+        example_out = inductor_compiled_code(func, inputs)
 
     # Register in side table so the FX node stores a serializable int
     callable_idx = inductor_code_side_table.add_callable(resolved)
