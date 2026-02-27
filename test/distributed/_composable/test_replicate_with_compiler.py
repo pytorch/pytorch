@@ -252,6 +252,28 @@ class ReplicateTest(MultiProcessInductorTestCase):
     def test_compile_backward_only(self):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device_type)
 
+    def test_ddp_optimizer_splits_graph(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        torch._dynamo.config.optimize_ddp = "python_reducer"
+
+        model = Net()
+        compiled_model = torch.compile(replicate(model), fullgraph=False)
+
+        input = torch.randn([1, DIM])
+        loss = compiled_model(input).sum()
+
+        with compiled_autograd._enable(compiler_fn()):
+            loss.backward()
+
+        self.assertGreater(counters["inductor"]["ddp_buckets"], 0)
+
+        dist.destroy_process_group()
+
     def _test_bucketing(self, init_process_group=True, loop=1):
         if init_process_group:
             dist.init_process_group(

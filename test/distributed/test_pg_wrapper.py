@@ -22,6 +22,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
     requires_gloo,
+    requires_nccl,
     skip_if_lt_x_gpu,
     with_dist_debug_levels,
 )
@@ -370,12 +371,76 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
+        def test_reduce_scatter_tensor_coalesced_debug_mode(self):
+            torch.cuda.set_device(self.rank)
+            pg = self._create_wrapper_pg(with_new_group=True)
+            dev = torch.cuda.current_device()
+
+            out_shapes = [(2, 2), (3, 3)]
+            in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
+
+            outputs = [torch.zeros(s, device=dev) for s in out_shapes]
+            inputs = [torch.ones(s, device=dev) * (self.rank + 1) for s in in_shapes]
+
+            work = pg.reduce_scatter_tensor_coalesced(outputs, inputs)
+            work.wait()
+
+            for i, (output, _) in enumerate(zip(outputs, inputs)):
+                expected = torch.ones(out_shapes[i], device=dev) * sum(
+                    range(1, self.world_size + 1)
+                )
+                self.assertTrue(torch.allclose(output, expected))
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
         @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
         def test_debug_level_detail_no_gloo(self):
             with self.assertRaisesRegex(
                 AssertionError, "ProcessGroupWrapper unsupported without GLOO backend"
             ):
                 self._create_wrapper_pg()
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_wrapper_forwards_nccl_methods(self):
+            """
+            Tests that ProcessGroupWrapper correctly forwards NCCL-specific
+            utility methods to the wrapped backend. See issue #173538.
+            """
+            torch.cuda.set_device(self.rank)
+            device = torch.device(f"cuda:{self.rank}")
+            wrapper = self._create_wrapper_pg(with_new_group=False)
+
+            # Verify we're testing the wrapper
+            self.assertIsInstance(wrapper, _ProcessGroupWrapper)
+            unwrapped = wrapper.wrapped_pg
+
+            # Verify wrapper forwards property/method calls to wrapped backend
+            self.assertEqual(wrapper.supports_splitting, unwrapped.supports_splitting)
+            self.assertEqual(wrapper.supports_coalescing, unwrapped.supports_coalescing)
+            self.assertEqual(
+                wrapper.supports_time_estimate, unwrapped.supports_time_estimate
+            )
+            self.assertEqual(
+                wrapper.supports_tensor_alloc(device),
+                unwrapped.supports_tensor_alloc(device),
+            )
+            self.assertEqual(wrapper.get_error(), unwrapped.get_error())
+            self.assertIs(wrapper.options, unwrapped.options)
+
+            # Test eager_connect_single_device forwarding (should not raise)
+            wrapper.eager_connect_single_device(device)
+
+            # mem_allocator and allocate_tensor require NCCL >= 2.19 and GPU
+            # multicast support (e.g., not available on T4)
+            if wrapper.supports_tensor_alloc(device):
+                self.assertIs(wrapper.mem_allocator, unwrapped.mem_allocator)
+                tensor = wrapper.allocate_tensor(
+                    1024, dtype=torch.float32, device=device
+                )
+                self.assertEqual(tensor.shape, torch.Size([1024]))
 
         @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
@@ -482,10 +547,26 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
         pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collective_shape_mismatch(pg, use_accel=True)
 
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_reduce_scatter_tensor_coalesced_debug_mode(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+
+        out_shapes = [(2, 2), (3, 3)]
+        in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
+        outputs = [torch.zeros(s) for s in out_shapes]
+        inputs = [torch.ones(s) * (self.rank + 1) for s in in_shapes]
+
+        work = pg.reduce_scatter_tensor_coalesced(outputs, inputs)
+        work.wait()
+        for i, (output, _) in enumerate(zip(outputs, inputs)):
+            expected = torch.ones(out_shapes[i]) * sum(range(1, self.world_size + 1))
+            self.assertTrue(torch.allclose(output, expected))
+
 
 if __name__ == "__main__":
-    assert not (torch.cuda.is_initialized() or torch.xpu.is_initialized()), (
-        "test_pg_wrapper must not have initialized CUDA/XPU context on main process"
-    )
+    if torch.cuda.is_initialized() or torch.xpu.is_initialized():
+        raise AssertionError(
+            "test_pg_wrapper must not have initialized CUDA/XPU context on main process"
+        )
 
     run_tests()

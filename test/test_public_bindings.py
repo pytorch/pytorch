@@ -357,6 +357,7 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc.rpc_test",
             "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
             "torch.testing._internal.distributed.rpc_utils",
+            "torch.testing._internal.py312_intrinsics",
             "torch._inductor.codegen.cutlass.cuda_template",
             "torch._inductor.codegen.cutedsl._cutedsl_utils",
             "torch._inductor.codegen.cuda.gemm_template",
@@ -413,7 +414,10 @@ class TestPublicBindings(TestCase):
         for mod, exc in failures:
             if mod in private_allowlist:
                 # make sure mod is actually private
-                assert any(t.startswith("_") for t in mod.split("."))
+                if not any(t.startswith("_") for t in mod.split(".")):
+                    raise AssertionError(
+                        f"Expected private module name to include '_' segments: {mod}"
+                    )
                 continue
             errors.append(
                 f"{mod} failed to import with error {type(exc).__qualname__}: {str(exc)}"
@@ -520,7 +524,10 @@ class TestPublicBindings(TestCase):
                             else f"either define a `__all__` for `{modname}` or add a `_` at the beginning of the name"
                         )
                     else:
-                        assert is_all
+                        if not is_all:
+                            raise AssertionError(
+                                f"Expected {modname}.{elem} to be checked via __all__"
+                            )
                         why_is_public = (
                             f"it is not inside the module's (`{modname}`) `__all__`"
                         )

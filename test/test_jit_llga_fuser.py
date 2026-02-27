@@ -104,7 +104,8 @@ class JitLlgaTestCase(JitTestCase):
 
     def checkPatterns(self, graph, patterns):
         fusion_groups = self.findFusionGroups(graph)
-        assert len(fusion_groups) == len(patterns), "length of subgraphs not equal to length of given patterns"
+        if len(fusion_groups) != len(patterns):
+            raise AssertionError("length of subgraphs not equal to length of given patterns")
 
         for i in range(len(fusion_groups)):
             for pattern in patterns[i]:

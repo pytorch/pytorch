@@ -1,4 +1,4 @@
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias
+from typing import Any, TYPE_CHECKING, TypeAlias
 
 import torch.fx
 import torch.fx.traceback
@@ -69,7 +69,7 @@ def get_device(node: Node) -> torch.device:
     return node.meta["val"].device
 
 
-def get_stream(node: Node) -> Optional[int]:
+def get_stream(node: Node) -> int | None:
     maybe_annotation = node.meta.get("custom", None)
     if maybe_annotation is not None:
         return node.meta["custom"].get("stream", None)
@@ -120,16 +120,20 @@ def insert_wait_event_before_node(graph: Graph, node: Node, event_ind: int) -> N
 
 
 def populate_stream_timeline(
-    stream_to_timeline: dict[Optional[int], IndexedDict[Node, float]],
+    stream_to_timeline: dict[int | None, IndexedDict[Node, float]],
     graph: Graph,
-    stream_index: Optional[int],
+    stream_index: int | None,
 ) -> IndexedDict[Node, float]:
     if stream_index not in stream_to_timeline:
         stream_to_timeline[stream_index] = IndexedDict()
         total_time = 0.0
         for node in graph.nodes:
             # mlazos: not sure if we should include forward here too but don't think it matters
-            if is_bwd_node(node) and get_stream(node) == stream_index:
+            if (
+                node.op == "call_function"
+                and is_bwd_node(node)
+                and get_stream(node) == stream_index
+            ):
                 total_time += get_roofline_estimate(node)
                 stream_to_timeline[stream_index][node] = (
                     total_time  # NB: total time includes the node's runtime
@@ -145,7 +149,7 @@ def populate_stream_timeline(
 # we attempt to find the point which to deallocate based on the estimated timestamps.
 def handle_synced_deallocation(
     graph: Graph,
-    stream_to_exec_trace: dict[Optional[int], IndexedDict[Node, float]],
+    stream_to_exec_trace: dict[int | None, IndexedDict[Node, float]],
     node: Node,
     last_usage: Node,
 ) -> None:
@@ -254,12 +258,12 @@ def insert_backward_syncs(gm: torch.fx.GraphModule) -> None:
     """Inserts stream syncs for backward nodes if consumer and producer are on different streams"""
     node_to_wait_event_ind: dict[Node, int] = {}
     for node in gm.graph.nodes:
-        if is_bwd_node(node):
+        if node.op == "call_function" and is_bwd_node(node):
             flat_args = _get_flat_args(node, {})
             cur_node_stream = get_stream(node)
 
             for arg in flat_args:
-                if is_bwd_node(arg):
+                if arg.op == "call_function" and is_bwd_node(arg):
                     arg_stream = get_stream(arg)
                     if arg_stream != cur_node_stream and get_device(arg).type != "cpu":
                         insert_sync(gm.graph, node, arg, node_to_wait_event_ind)
@@ -274,9 +278,9 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
     # I think this is fine because you should have large tensors if you're using streams
     # although perhaps I could add a constant 10us per op ahead of the first stream op?
     # a trace of all the nodes running in a given stream
-    stream_to_exec_trace: dict[Optional[int], IndexedDict[Node, float]] = {}
+    stream_to_exec_trace: dict[int | None, IndexedDict[Node, float]] = {}
     for node in gm.graph.nodes:
-        if is_bwd_node(node):
+        if node.op == "call_function" and is_bwd_node(node):
             allocating_stream = get_stream(node)
             users = list(node.users.keys())
             if not users:
@@ -291,7 +295,7 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
                 )
 
 
-def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
+def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
     for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
         arg_stream = get_stream(epi_copy.args[1])
         copy_stream = get_stream(epi_copy)
@@ -301,7 +305,7 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
 
 def populate_fw_metadata_with_stream_indices(
     gm: torch.fx.GraphModule, fw_metadata: "ViewAndMutationMeta"
-):
+) -> None:
     """
     Populates fw_metadata.mutated_inp_stream_indices with stream indices from the compiled graph.
 

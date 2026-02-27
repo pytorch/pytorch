@@ -212,11 +212,15 @@ class DistTensorRandomInitTest(DTensorTestBase):
             and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
-        assert isinstance(model.weight, DTensor)
+        if not isinstance(model.weight, DTensor):
+            raise AssertionError(
+                f"Expected model.weight to be DTensor, got {type(model.weight)}"
+            )
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        assert WORLD is not None
+        if WORLD is None:
+            raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
         weight_gather = funcol.all_gather_tensor(
             weight_local,
@@ -269,11 +273,15 @@ class DistTensorRandomInitTest(DTensorTestBase):
             and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
-        assert isinstance(model.weight, DTensor)
+        if not isinstance(model.weight, DTensor):
+            raise AssertionError(
+                f"Expected model.weight to be DTensor, got {type(model.weight)}"
+            )
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        assert WORLD is not None
+        if WORLD is None:
+            raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
         weight_gather = funcol.all_gather_tensor(
             weight_local,
@@ -436,7 +444,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        assert WORLD is not None
+        if WORLD is None:
+            raise AssertionError("Expected WORLD to not be None")
         tensor_gather = funcol.all_gather_tensor(
             spmd_dtensor.to_local(),
             gather_dim=0,
@@ -582,7 +591,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
         ]
 
         coordinate = device_mesh.get_coordinate()
-        assert coordinate is not None
+        if coordinate is None:
+            raise AssertionError("Expected coordinate to not be None")
 
         for placements, shard_index in zip(placements_list, shard_index_list):
             dtensor = dtensor.redistribute(device_mesh, placements)
@@ -678,16 +688,17 @@ class DistTensorRandomOpTest(DTensorTestBase):
         (which uses uint64 view) and then re-setting it would fail with:
         OverflowError: can't convert negative int to unsigned
 
-        The fix ensures the seed getter uses uint64 view, preventing negative
-        values from appearing when the high bit is set.
+        The fix ensures the seed getter returns a tensor, preventing any
+        int conversion issues when the high bit is set.
         """
         from torch.distributed.tensor._random import _PhiloxState
 
         state = torch.zeros(16, dtype=torch.uint8, device="cpu")
         philox = _PhiloxState(state)
-        test_seed = 2**63 + 42  # This has the sign bit set when viewed as int64
+        # Create a seed with the sign bit set (valid uint64, negative as int64)
+        test_seed = torch.tensor([2**63 + 42], dtype=torch.uint64)
         philox.seed = test_seed
-        philox.seed = philox.seed
+        philox.seed = philox.seed.clone()
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
@@ -729,11 +740,15 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
             and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
-        assert isinstance(model.weight, DTensor)
+        if not isinstance(model.weight, DTensor):
+            raise AssertionError(
+                f"Expected model.weight to be DTensor, got {type(model.weight)}"
+            )
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        assert WORLD is not None
+        if WORLD is None:
+            raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
         weight_gather = funcol.all_gather_tensor(
             weight_local,

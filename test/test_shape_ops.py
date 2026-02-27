@@ -390,6 +390,13 @@ class TestShapeOps(TestCase):
                     op(X, min_val, max_val, out=Y_out)
                     self.assertEqual(Y_expected, torch.isnan(Y_out))
 
+    def test_clamp_scalar_nan_bounds(self, device):
+        x = torch.ones(3, device=device)
+        y = torch.clamp(x, None, float("nan"))
+        self.assertTrue(torch.isnan(y).all())
+        y = torch.clamp(x, float("nan"), None)
+        self.assertTrue(torch.isnan(y).all())
+
     def test_clamp_raises_arg_errors(self, device):
         X = torch.randn(100, dtype=torch.float, device=device)
         error_msg = "At least one of 'min' or 'max' must not be None"

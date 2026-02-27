@@ -114,5 +114,8 @@ if __name__ == "__main__":
     models = args.models or MODELS.keys()
 
     for model in models:
-        assert model in MODELS
+        if model not in MODELS:
+            raise AssertionError(
+                f"Unknown model: {model}. Available models: {list(MODELS.keys())}"
+            )
     run_bench(models, args)

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 from collections.abc import Callable
-from typing import Union
 from typing_extensions import TypeVarTuple
 
 import torch
@@ -47,20 +46,21 @@ map_impl = MapImpl()
 
 def map(
     f: Callable[[pytree.PyTree, tuple[pytree.PyTree, ...]], pytree.PyTree],
-    xs: Union[pytree.PyTree, torch.Tensor],
+    xs: pytree.PyTree | torch.Tensor,
     *args: TypeVarTuple,
 ):
     r"""
-    Performs a map of f with xs. Intuitively, you can think of the semantic being:
+    Performs a map of f with xs. Intuitively, you can think of the semantic being::
 
-    out = []
-    for idx in len(xs.size(0)):
-        xs_sliced = xs.select(0, idx)
-        out.append(f(xs_sliced, *args))
-    torch.stack(out)
+        out = []
+        for idx in len(xs.size(0)):
+            xs_sliced = xs.select(0, idx)
+            out.append(f(xs_sliced, *args))
+        torch.stack(out)
 
     .. warning::
-        `torch._higher_order_ops.map` is a prototype feature in PyTorch. It currently
+
+        ``torch._higher_order_ops.map`` is a prototype feature in PyTorch. It currently
         does not support autograd and you may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
@@ -78,10 +78,11 @@ def map(
     Return:
         the stacked output for each step of f
 
-    Example:
+    Example::
 
         def f(xs):
             return xs[0] + xs[1] + const1 + const2
+
 
         xs = [torch.randn(2, 3), torch.randn(2, 3)]
         const1 = torch.randn(2, 3)

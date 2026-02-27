@@ -54,7 +54,8 @@ class TestUnaryUfuncs(TestCase):
     def test_x_and_dtype(self, ufunc):
         x = self.get_x(ufunc)
         res = ufunc(x, dtype="float")
-        assert res.dtype == np.dtype("float")
+        if res.dtype != np.dtype("float"):
+            raise AssertionError(f"Expected dtype float, got {res.dtype}")
 
     @skip(True, reason="XXX: unary ufuncs ignore the dtype=... parameter")
     @parametrize_casting
@@ -66,7 +67,9 @@ class TestUnaryUfuncs(TestCase):
             with assert_raises(TypeError):
                 ufunc(x, dtype=dtype, casting=casting)
         else:
-            assert ufunc(x, dtype=dtype, casting=casting).dtype == dtype
+            result = ufunc(x, dtype=dtype, casting=casting)
+            if result.dtype != dtype:
+                raise AssertionError(f"Expected dtype {dtype}, got {result.dtype}")
 
     @parametrize_casting
     @parametrize_unary_ufuncs
@@ -79,8 +82,10 @@ class TestUnaryUfuncs(TestCase):
                 ufunc(x, out=out, casting=casting)
         else:
             result = ufunc(x, out=out, casting=casting)
-            assert result.dtype == out_dtype
-            assert result is out
+            if result.dtype != out_dtype:
+                raise AssertionError(f"Expected dtype {out_dtype}, got {result.dtype}")
+            if result is not out:
+                raise AssertionError("Expected result to be out")
 
     @parametrize_unary_ufuncs
     def test_x_and_out_broadcast(self, ufunc):
@@ -93,7 +98,8 @@ class TestUnaryUfuncs(TestCase):
         res_bcast = ufunc(x_b)
         # TODO: switching the order causes a graph break, failing the test.
         # See test/dynamo/test_misc.py -k test_numpy_graph_break
-        assert res_out is out
+        if res_out is not out:
+            raise AssertionError("Expected res_out to be out")
         assert_equal(res_out, res_bcast)
 
         out = np.empty((1, x.shape[0]))
@@ -101,7 +107,8 @@ class TestUnaryUfuncs(TestCase):
 
         res_out = ufunc(x, out=out)
         res_bcast = ufunc(x_b)
-        assert res_out is out
+        if res_out is not out:
+            raise AssertionError("Expected res_out to be out")
         assert_equal(res_out, res_bcast)
 
 
@@ -195,8 +202,10 @@ class TestBinaryUfuncs(TestCase):
                 ufunc(x, out=out, casting=casting)
         else:
             result = ufunc(x, y, out=out, casting=casting)
-            assert result.dtype == out_dtype
-            assert result is out
+            if result.dtype != out_dtype:
+                raise AssertionError(f"Expected dtype {out_dtype}, got {result.dtype}")
+            if result is not out:
+                raise AssertionError("Expected result to be out")
 
     @parametrize_binary_ufuncs
     def test_xy_and_out_broadcast(self, ufunc):
@@ -212,7 +221,8 @@ class TestBinaryUfuncs(TestCase):
 
         # TODO: switching the order causes a graph break, failing the test.
         # See test/dynamo/test_misc.py -k test_numpy_graph_break
-        assert res_out is out
+        if res_out is not out:
+            raise AssertionError("Expected res_out to be out")
         assert_equal(res_out, res_bcast)
 
 
@@ -265,13 +275,17 @@ class TestNdarrayDunderVsUfunc(TestCase):
         assert_equal(result, ufunc(a, b))
 
         if result.dtype != np.result_type(a, b):
-            assert result.dtype == np.result_type(a, b)
+            raise AssertionError(
+                f"Expected dtype {np.result_type(a, b)}, got {result.dtype}"
+            )
 
         # __rop__
         result = op(b, a)
         assert_equal(result, ufunc(b, a))
         if result.dtype != np.result_type(a, b):
-            assert result.dtype == np.result_type(a, b)
+            raise AssertionError(
+                f"Expected dtype {np.result_type(a, b)}, got {result.dtype}"
+            )
 
         # __iop__ : casts the result to self.dtype, raises if cannot
         can_cast = np.can_cast(
@@ -282,7 +296,9 @@ class TestNdarrayDunderVsUfunc(TestCase):
             result = iop(a, b)
             assert_equal(result, ufunc(a0, b))
             if result.dtype != np.result_type(a, b):
-                assert result.dtype == np.result_type(a0, b)
+                raise AssertionError(
+                    f"Expected dtype {np.result_type(a0, b)}, got {result.dtype}"
+                )
 
         else:
             with assert_raises((TypeError, RuntimeError)):  # XXX np.UFuncTypeError
@@ -302,13 +318,17 @@ class TestNdarrayDunderVsUfunc(TestCase):
         result = op(a, b)
         assert_equal(result, ufunc(a, b))
         if result.dtype != np.result_type(a, b):
-            assert result.dtype == np.result_type(a, b)
+            raise AssertionError(
+                f"Expected dtype {np.result_type(a, b)}, got {result.dtype}"
+            )
 
         # __rop__(other array)
         result = op(b, a)
         assert_equal(result, ufunc(b, a))
         if result.dtype != np.result_type(a, b):
-            assert result.dtype == np.result_type(a, b)
+            raise AssertionError(
+                f"Expected dtype {np.result_type(a, b)}, got {result.dtype}"
+            )
 
         # __iop__
         can_cast = np.can_cast(
@@ -319,7 +339,9 @@ class TestNdarrayDunderVsUfunc(TestCase):
             result = iop(a, b)
             assert_equal(result, ufunc(a0, b))
             if result.dtype != np.result_type(a, b):
-                assert result.dtype == np.result_type(a0, b)
+                raise AssertionError(
+                    f"Expected dtype {np.result_type(a0, b)}, got {result.dtype}"
+                )
         else:
             with assert_raises((TypeError, RuntimeError)):  # XXX np.UFuncTypeError
                 iop(a, b)
@@ -331,21 +353,31 @@ class TestNdarrayDunderVsUfunc(TestCase):
         a = np.array([1, 2, 3])
         result_op = op(a, a[:, None])
         result_ufunc = ufunc(a, a[:, None])
-        assert result_op.shape == result_ufunc.shape
+        if result_op.shape != result_ufunc.shape:
+            raise AssertionError(
+                f"Expected shape {result_ufunc.shape}, got {result_op.shape}"
+            )
         assert_equal(result_op, result_ufunc)
 
         if result_op.dtype != result_ufunc.dtype:
-            assert result_op.dtype == result_ufunc.dtype
+            raise AssertionError(
+                f"Expected dtype {result_ufunc.dtype}, got {result_op.dtype}"
+            )
 
         # __rop__
         a = np.array([1, 2, 3])
         result_op = op(a[:, None], a)
         result_ufunc = ufunc(a[:, None], a)
-        assert result_op.shape == result_ufunc.shape
+        if result_op.shape != result_ufunc.shape:
+            raise AssertionError(
+                f"Expected shape {result_ufunc.shape}, got {result_op.shape}"
+            )
         assert_equal(result_op, result_ufunc)
 
         if result_op.dtype != result_ufunc.dtype:
-            assert result_op.dtype == result_ufunc.dtype
+            raise AssertionError(
+                f"Expected dtype {result_ufunc.dtype}, got {result_op.dtype}"
+            )
 
         # __iop__ : in-place ops (`self += other` etc) do not broadcast self
         b = a[:, None].copy()
@@ -359,56 +391,74 @@ class TestNdarrayDunderVsUfunc(TestCase):
         result = iop(aa, a)
         result_ufunc = ufunc(aa0, a)
 
-        assert result.shape == result_ufunc.shape
+        if result.shape != result_ufunc.shape:
+            raise AssertionError(
+                f"Expected shape {result_ufunc.shape}, got {result.shape}"
+            )
         assert_equal(result, result_ufunc)
 
         if result_op.dtype != result_ufunc.dtype:
-            assert result_op.dtype == result_ufunc.dtype
+            raise AssertionError(
+                f"Expected dtype {result_ufunc.dtype}, got {result_op.dtype}"
+            )
 
 
 class TestUfuncDtypeKwd(TestCase):
     def test_binary_ufunc_dtype(self):
         # default computation uses float64:
         r64 = np.add(1, 1e-15)
-        assert r64.dtype == "float64"
-        assert r64 - 1 > 0
+        if r64.dtype != "float64":
+            raise AssertionError(f"Expected dtype float64, got {r64.dtype}")
+        if not r64 - 1 > 0:
+            raise AssertionError("Expected r64 - 1 > 0")
 
         # force the float32 dtype: loss of precision
         r32 = np.add(1, 1e-15, dtype="float32")
-        assert r32.dtype == "float32"
-        assert r32 == 1
+        if r32.dtype != "float32":
+            raise AssertionError(f"Expected dtype float32, got {r32.dtype}")
+        if r32 != 1:
+            raise AssertionError(f"Expected r32 == 1, got {r32}")
 
         # now force the cast
         rb = np.add(1.0, 1e-15, dtype=bool, casting="unsafe")
-        assert rb.dtype == bool
+        if rb.dtype != bool:
+            raise AssertionError(f"Expected dtype bool, got {rb.dtype}")
 
     def test_binary_ufunc_dtype_and_out(self):
         # all in float64: no precision loss
         out64 = np.empty(2, dtype=np.float64)
         r64 = np.add([1.0, 2.0], 1.0e-15, out=out64)
 
-        assert (r64 != [1.0, 2.0]).all()
-        assert r64.dtype == np.float64
+        if not (r64 != [1.0, 2.0]).all():
+            raise AssertionError("Expected r64 != [1.0, 2.0]")
+        if r64.dtype != np.float64:
+            raise AssertionError(f"Expected dtype float64, got {r64.dtype}")
 
         # all in float32: loss of precision, result is float32
         out32 = np.empty(2, dtype=np.float32)
         r32 = np.add([1.0, 2.0], 1.0e-15, dtype=np.float32, out=out32)
-        assert (r32 == [1, 2]).all()
-        assert r32.dtype == np.float32
+        if not (r32 == [1, 2]).all():
+            raise AssertionError("Expected r32 == [1, 2]")
+        if r32.dtype != np.float32:
+            raise AssertionError(f"Expected dtype float32, got {r32.dtype}")
 
         # dtype is float32, so computation is in float32: precision loss
         # the result is then cast to float64
         out64 = np.empty(2, dtype=np.float64)
         r = np.add([1.0, 2.0], 1.0e-15, dtype=np.float32, out=out64)
-        assert (r == [1, 2]).all()
-        assert r.dtype == np.float64
+        if not (r == [1, 2]).all():
+            raise AssertionError("Expected r == [1, 2]")
+        if r.dtype != np.float64:
+            raise AssertionError(f"Expected dtype float64, got {r.dtype}")
 
         # Internal computations are in float64, but the final cast to out.dtype
         # truncates the precision => precision loss.
         out32 = np.empty(2, dtype=np.float32)
         r = np.add([1.0, 2.0], 1.0e-15, dtype=np.float64, out=out32)
-        assert (r == [1, 2]).all()
-        assert r.dtype == np.float32
+        if not (r == [1, 2]).all():
+            raise AssertionError("Expected r == [1, 2]")
+        if r.dtype != np.float32:
+            raise AssertionError(f"Expected dtype float32, got {r.dtype}")
 
 
 if __name__ == "__main__":

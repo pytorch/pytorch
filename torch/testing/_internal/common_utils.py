@@ -49,9 +49,7 @@ from pathlib import Path
 from statistics import mean
 from typing import (
     Any,
-    Optional,
     TypeVar,
-    Union,
 )
 from collections.abc import Callable
 from collections.abc import Iterable, Iterator
@@ -116,7 +114,7 @@ class ProfilingMode(Enum):
 
 # Set by parse_cmd_line_args() if called
 DISABLED_TESTS_FILE = ""
-GRAPH_EXECUTOR : Optional[ProfilingMode] = None
+GRAPH_EXECUTOR : ProfilingMode | None = None
 LOG_SUFFIX = ""
 PYTEST_SINGLE_TEST = ""
 REPEAT_COUNT = 0
@@ -304,7 +302,7 @@ PRINT_REPRO_ON_FAILURE: bool = TestEnvironment.def_flag(
 )
 
 # possibly restrict OpInfo tests to a single sample input
-OPINFO_SAMPLE_INPUT_INDEX: Optional[int] = TestEnvironment.def_setting(
+OPINFO_SAMPLE_INPUT_INDEX: int | None = TestEnvironment.def_setting(
     "OPINFO_SAMPLE_INPUT_INDEX",
     env_var="PYTORCH_OPINFO_SAMPLE_INPUT_INDEX",
     default=None,
@@ -355,7 +353,7 @@ def gcIfJetson(fn):
 
 # Tries to extract the current test function by crawling the stack.
 # If unsuccessful, return None.
-def extract_test_fn() -> Optional[Callable]:
+def extract_test_fn() -> Callable | None:
     try:
         stack = inspect.stack()
         for frame_info in stack:
@@ -382,7 +380,7 @@ class TrackedInput:
 
 # Attempt to pull out tracked input information from the test function.
 # A TrackedInputIter is used to insert this information.
-def get_tracked_input() -> Optional[TrackedInput]:
+def get_tracked_input() -> TrackedInput | None:
     test_fn = extract_test_fn()
     if test_fn is None:
         return None
@@ -1323,12 +1321,12 @@ def run_tests(argv=None):
                 print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
-            if len(failed_tests) != 0:
-                raise AssertionError(
-                    "{} unit test(s) failed:\n\t{}".format(
-                        len(failed_tests), '\n\t'.join(failed_tests)
-                    )
+        if len(failed_tests) != 0:
+            raise AssertionError(
+                "{} unit test(s) failed:\n\t{}".format(
+                    len(failed_tests), '\n\t'.join(failed_tests)
                 )
+            )
 
     elif RUN_PARALLEL > 1:
         test_cases = discover_test_cases_recursively(suite)
@@ -1605,6 +1603,12 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (
 )
 
 TEST_CUDA_CUDSS = TEST_CUDA and (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12)
+TEST_CUDA_GRAPH_CONDITIONAL_NODES = TEST_CUDA_GRAPH and (
+    torch.version.cuda and (
+        (int(torch.version.cuda.split(".")[0]) >= 12 and int(torch.version.cuda.split(".")[1]) >= 4) or
+        (int(torch.version.cuda.split(".")[0]) >= 13)
+    )
+)
 
 TEST_CUDA_PYTHON_BINDINGS = _check_module_exists("cuda.bindings") and (
     torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 12
@@ -1896,7 +1900,7 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
 
 
 def make_dynamo_test(
-    fn: Optional[Callable[..., Any]] = None
+    fn: Callable[..., Any] | None = None
 ) -> Callable[..., Any]:
     """
     Decorator function to create a dynamo test case. A function annotate with
@@ -3084,8 +3088,8 @@ class UnittestPair(Pair):
 
     Define the :attr:`UnittestPair.CLS` in a subclass to indicate which class(es) of the inputs the pair should support.
     """
-    CLS: Union[type, tuple[type, ...]]
-    TYPE_NAME: Optional[str] = None
+    CLS: type | tuple[type, ...]
+    TYPE_NAME: str | None = None
 
     def __init__(self, actual, expected, **other_parameters):
         self._check_inputs_isinstance(actual, expected, cls=self.CLS)
@@ -4276,10 +4280,10 @@ class TestCase(expecttest.TestCase):
             self,
             x,
             y,
-            msg: Optional[Union[str, Callable[[str], str]]] = None,
+            msg: str | Callable[[str], str] | None = None,
             *,
-            atol: Optional[float] = None,
-            rtol: Optional[float] = None,
+            atol: float | None = None,
+            rtol: float | None = None,
             equal_nan=True,
             exact_dtype=True,
             # TODO: default this to True
@@ -4363,8 +4367,8 @@ class TestCase(expecttest.TestCase):
                 (lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg
             )
 
-    def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
+    def assertNotEqual(self, x, y, msg: str | None = None, *,                                       # type: ignore[override]
+                       atol: float | None = None, rtol: float | None = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
@@ -4384,7 +4388,7 @@ class TestCase(expecttest.TestCase):
     # _ignore_not_implemented_error is True
     def assertRaises(self, expected_exception, *args, **kwargs):
         if self._ignore_not_implemented_error:
-            context: Optional[AssertRaisesContextIgnoreNotImplementedError] = \
+            context: AssertRaisesContextIgnoreNotImplementedError | None = \
                 AssertRaisesContextIgnoreNotImplementedError(expected_exception, self)  # type: ignore[call-arg]
             try:
                 return context.handle('assertRaises', args, kwargs)  # type: ignore[union-attr, arg-type]
@@ -4698,7 +4702,7 @@ class TestCase(expecttest.TestCase):
         self,
         file: pathlib.Path,
         import_string: str,
-        expected_failure_message: Optional[str] = None
+        expected_failure_message: str | None = None
     ) -> None:
         """
         Attempts weights_only `torch.load` in a subprocess. This is used to test that
@@ -5526,20 +5530,63 @@ def dtype_name(dtype):
     return str(dtype).split('.')[1]
 
 
-@functools.lru_cache
-def get_cycles_per_ms() -> float:
-    """Measure and return approximate number of cycles per millisecond for torch.cuda._sleep
-    """
+def _cpu_sleep(cycles: int) -> None:
+    """Spin-wait for approximately the given number of cycles."""
+    for _ in range(cycles):
+        pass
 
-    def measure() -> float:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-        torch.cuda._sleep(1000000)
-        end.record()
-        end.synchronize()
-        cycles_per_ms = 1000000 / start.elapsed_time(end)
-        return cycles_per_ms
+
+def device_sleep(device: str, cycles: int) -> None:
+    """Sleep for the given number of cycles on the specified device.
+
+    For CPU, temporarily patches torch.cpu._sleep if needed.
+    For CUDA/other devices, uses torch.get_device_module(device)._sleep.
+    """
+    if device == "cpu":
+        orig = getattr(torch.cpu, "_sleep", None)
+        torch.cpu._sleep = _cpu_sleep
+        try:
+            torch.cpu._sleep(cycles)
+        finally:
+            if orig is None:
+                delattr(torch.cpu, "_sleep")
+            else:
+                torch.cpu._sleep = orig
+    else:
+        torch.get_device_module(device)._sleep(cycles)
+
+
+@functools.lru_cache
+def get_cycles_per_ms(device: str = "cuda") -> float:
+    """Measure and return approximate number of cycles per millisecond for device _sleep.
+
+    Args:
+        device: Device type to measure cycles for ("cuda" or "cpu").
+
+    Works for both CUDA (torch.cuda._sleep) and CPU (torch.cpu._sleep).
+    """
+    test_cycles = 1000000
+
+    if device == "cpu":
+        import time
+
+        def measure() -> float:
+            start = time.perf_counter()
+            _cpu_sleep(test_cycles)
+            end = time.perf_counter()
+            elapsed_ms = (end - start) * 1000
+            cycles_per_ms = test_cycles / elapsed_ms if elapsed_ms > 0 else 1000000
+            return cycles_per_ms
+    else:
+        def measure() -> float:
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            torch.cuda._sleep(test_cycles)
+            end.record()
+            end.synchronize()
+            cycles_per_ms = test_cycles / start.elapsed_time(end)
+            return cycles_per_ms
 
     # Get 10 values and remove the 2 max and 2 min and return the avg.
     # This is to avoid system disturbance that skew the results, e.g.

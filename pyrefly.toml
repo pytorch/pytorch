@@ -124,7 +124,7 @@ errors.implicit-import = false
 errors.deprecated = false # re-enable after we've fix import formatting
 
 permissive-ignores = true
-replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]
+replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*", "networkx.*"]
 search-path = ["tools/experimental"]
 
 # Dynamo sub-config - note, we experiment with stricter typing here
@@ -150,9 +150,8 @@ matches = "torch/_subclasses/**"
 implicit-import = false
 implicit-any = true
 
-
 [[sub-config]]
-matches = "torch/_functorch/_activation_checkpointing/remat_using_tags_for_fwd_loss_bwd_graph_pass.py"
+matches = "torch/_functorch/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true

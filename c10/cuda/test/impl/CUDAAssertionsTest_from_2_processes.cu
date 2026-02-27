@@ -86,7 +86,7 @@ void cuda_device_assertions_from_2_processes() {
         1);
     try {
       c10::cuda::device_synchronize();
-    } catch (const c10::Error& err) {
+    } catch (const c10::Error&) {
       ASSERT_TRUE(false); // This kernel should not have failed, but did.
     }
   }

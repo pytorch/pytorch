@@ -445,6 +445,19 @@ class _SingleLevelFunction(
     # vjp and backward are alias of each other
     vjp = backward
 
+    """
+    Bool that specifies if PyTorch should clear saved tensors after the first
+    access to ``ctx.saved_tensors``. When set to True, accessing saved_tensors
+    clears the internal references, allowing the tensors to be cleared as soon
+    as the Tensor returned by saved_tensors is deleted.
+
+    This is useful for reducing memory pressure in backward passes when you
+    only need to access saved tensors once.
+
+    Default is False.
+    """
+    clear_saved_tensors_on_access = False
+
     @staticmethod
     def jvp(ctx: Any, *grad_inputs: Any) -> Any:
         r"""Define a formula for differentiating the operation with forward mode automatic differentiation.

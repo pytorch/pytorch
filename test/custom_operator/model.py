@@ -13,7 +13,8 @@ def get_custom_op_library_path():
     else:
         library_filename = "libcustom_ops.so"
     path = os.path.abspath(f"build/{library_filename}")
-    assert os.path.exists(path), path
+    if not os.path.exists(path):
+        raise AssertionError(f"Library not found: {path}")
     return path
 
 

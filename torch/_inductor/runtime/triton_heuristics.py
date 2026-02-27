@@ -79,6 +79,7 @@ from .triton_compat import (
     Config,
     GPUTarget,
     HAS_WARP_SPEC,
+    IntelGPUError,
     KernelInterface,
     knobs,
     OutOfResources,
@@ -520,7 +521,7 @@ class CachingAutotuner(KernelInterface):
         for c in self.configs:
             try:
                 compile_results.append(self._precompile_config(c))
-            except (OutOfResources, PTXASError) as e:
+            except (OutOfResources, PTXASError, IntelGPUError) as e:
                 exc = e
         if len(compile_results) == 0:
             raise NoTritonConfigsError(
@@ -658,7 +659,12 @@ class CachingAutotuner(KernelInterface):
                 try:
                     launchers.append(result.make_launcher())
 
-                except (OutOfResources, PTXASError, torch.cuda.OutOfMemoryError) as e:
+                except (
+                    OutOfResources,
+                    PTXASError,
+                    torch.cuda.OutOfMemoryError,
+                    IntelGPUError,
+                ) as e:
                     exc = e
         if len(launchers) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
@@ -1691,8 +1697,8 @@ class StaticTritonCompileResult(CompileResult[_T]):
             return None
 
         def check_can_launch() -> _KernelType:
-            if triton_meta.get("device_type") not in ("cuda", "xpu"):
-                raise CannotStaticallyLaunchKernel("Non-cuda/XPU device")
+            if triton_meta.get("device_type") not in ("cuda", "xpu", "hip"):
+                raise CannotStaticallyLaunchKernel("Non-cuda/XPU/ROCm device")
 
             if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
                 raise CannotStaticallyLaunchKernel(
@@ -2364,15 +2370,28 @@ def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=F
 def _check_max_grid_x(size_hints, x, num_warps):
     # Check if maxGridSize is exceeded - if so then must scale XBLOCK further
     max_grid_x = 2147483647
+    max_block_x = TRITON_MAX_BLOCK["X"]
     warp_size = (
         64 if torch.version.hip else 32
     )  # TODO: query warp size once #129663 is merged
     num_blocks = (size_hints["x"] + x - 1) // x
 
-    while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints["x"]:
-        x *= 2  # Scale up XBLOCK if grid exceeds limits
-        num_blocks = num_blocks // 2
-    if (num_blocks * num_warps * warp_size) > max_grid_x:
+    if torch.version.hip:
+        # HIP has a 2^31-1 limit on total threads (num_blocks * num_warps * warp_size)
+        while (
+            (num_blocks * num_warps * warp_size) > max_grid_x
+            and x < size_hints["x"]
+            and x < max_block_x
+        ):
+            x *= 2
+            num_blocks = num_blocks // 2
+    else:
+        # NVIDIA has a 2^31-1 limit on number of blocks in grid (not total threads)
+        while num_blocks > max_grid_x and x < size_hints["x"] and x < max_block_x:
+            x *= 2
+            num_blocks = num_blocks // 2
+
+    if num_blocks > max_grid_x:
         raise AssertionError(
             "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
         )
@@ -3045,6 +3064,16 @@ triton_native_bmm_configs = _config_helper(bmm=True, persistent=False)
 triton_native_persistent_bmm_configs = _config_helper(bmm=True, persistent=True)
 
 
+def _get_tiling_scores(
+    inductor_meta: dict[str, Any],
+    size_hints: dict[str, int],
+) -> dict[str, float]:
+    """
+    Retrieve the tiling scores, providing suitable defaults if they are missing.
+    """
+    return inductor_meta.get("tiling_scores") or dict.fromkeys(size_hints, 1)
+
+
 def _reduction_configs(
     *,
     size_hints: dict[str, int],
@@ -3108,10 +3137,10 @@ def _reduction_configs(
     ):
         # For 3D case with tiling scores, create an adapted version
         if "y" in size_hints:
-            assert "tiling_scores" in inductor_meta
+            tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
             return adapt_config_for_tiling(
                 size_hints,
-                inductor_meta["tiling_scores"],
+                tiling_scores,
                 x,
                 r,
                 num_warps=num_warps,
@@ -3609,8 +3638,8 @@ def _persistent_reduction_configs(
         ]
     else:
         configs = []
-        assert "tiling_scores" in inductor_meta
-        x_y_scores = {dim: inductor_meta["tiling_scores"][dim] for dim in ("x", "y")}
+        tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
+        x_y_scores = {dim: tiling_scores[dim] for dim in ("x", "y")}
         for target_block_size in xblock_vals:
             if target_block_size * rnumel > MAX_PERSISTENT_BLOCK_NUMEL:
                 continue
@@ -4029,6 +4058,12 @@ class GridExpr:
             return items[0]
         return " + ".join(map(str, items))
 
+    def product(self, seq: list[int | str]) -> int | str:
+        items = self._constant_fold(math.prod, seq)
+        if len(items) <= 1:
+            return items[0]
+        return " * ".join(map(str, items))
+
     def _constant_fold(
         self, fn: Callable[[list[int]], int], seq: list[int | str]
     ) -> list[int | str]:
@@ -4169,70 +4204,39 @@ class ComboKernelGrid(GridExpr):
         no_x_dims = []
         xnumels = []
         ynumels = []
-        znumels = []
-        # Check if per-subkernel blocks is enabled
-        per_subkernel = "heuristic_0" in combo_meta
-        if per_subkernel:
-            for num in range(combo_meta["num_kernels"]):
-                assert (
-                    combo_meta[f"xnumel_{num}"] is None
-                    or combo_meta[f"xnumel_{num}"] > 0
-                )
-                no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
-                xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
-                if f"ynumel_{num}" in combo_meta:
-                    ynumels.append(
-                        (combo_meta[f"ynumel_{num}"] or f"ynumel_{num}", num)
-                    )
-                if f"znumel_{num}" in combo_meta:
-                    znumels.append(
-                        (combo_meta[f"znumel_{num}"] or f"znumel_{num}", num)
-                    )
 
-            self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta, per_subkernel)
-            if combo_meta["min_blocks"]:
-                self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
-            if ynumels:
-                self.y_grid = self.maximum(
-                    [
-                        self.ceildiv(ynumel, meta.get(f"YBLOCK_{num}"))
-                        for ynumel, num in ynumels
-                    ]
-                )
-            if znumels:
-                self.z_grid = self.maximum(
-                    [
-                        self.ceildiv(znumel, meta.get(f"ZBLOCK_{num}"))
-                        for znumel, num in znumels
-                    ]
-                )
-        else:
-            for num in range(combo_meta["num_kernels"]):
-                assert (
-                    combo_meta[f"xnumel_{num}"] is None
-                    or combo_meta[f"xnumel_{num}"] > 0
-                )
-                no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
-                xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
-                if f"ynumel_{num}" in combo_meta:
-                    ynumels.append(combo_meta[f"ynumel_{num}"] or f"ynumel_{num}")
-                if f"znumel_{num}" in combo_meta:
-                    znumels.append(combo_meta[f"znumel_{num}"] or f"znumel_{num}")
+        for num in range(combo_meta["num_kernels"]):
+            assert (
+                combo_meta[f"xnumel_{num}"] is None or combo_meta[f"xnumel_{num}"] > 0
+            )
+            no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
+            xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
+            if f"ynumel_{num}" in combo_meta:
+                ynumels.append(combo_meta[f"ynumel_{num}"] or f"ynumel_{num}")
 
-            self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta, False)
-            if combo_meta["min_blocks"]:
-                self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
-            if ynumels:
-                self.y_grid = self.ceildiv(self.maximum(ynumels), meta.get("YBLOCK"))
-            if znumels:
-                self.z_grid = self.ceildiv(self.maximum(znumels), meta.get("ZBLOCK"))
+        self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta)
+        if combo_meta["min_blocks"]:
+            self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
+        if ynumels:
+            self.prefix.extend(
+                [
+                    self.assign_tmp(
+                        "y_grid_raw_",
+                        self.ceildiv(self.maximum(ynumels), meta.get("YBLOCK")),
+                    ),
+                    self.assign_tmp(
+                        "y_grid_div_", self.ceildiv("y_grid_raw_", get_max_y_grid())
+                    ),
+                ]
+            )
+            self.y_grid = self.ceildiv("y_grid_raw_", "y_grid_div_")
+            self.z_grid = "y_grid_div_"
 
     def combo_x_grid(
         self,
         xnumels: list[int | str],
         no_x_dims: list[bool],
         meta: dict[str, int],
-        per_subkernel: bool,
     ) -> str | int:
         raise NotImplementedError
 
@@ -4243,16 +4247,8 @@ class SequentialComboKernelGrid(ComboKernelGrid):
         xnumels: list[int | str],
         no_x_dims: list[bool],
         meta: dict[str, int],
-        per_subkernel: bool,
     ) -> str | int:
         assert len(xnumels) == len(no_x_dims)
-        if per_subkernel:
-            return self.summation(
-                [
-                    self.ceildiv(x, 1 if no_x_dim else meta.get(f"XBLOCK_{i}"))
-                    for i, (x, no_x_dim) in enumerate(zip(xnumels, no_x_dims))
-                ]
-            )
         return self.summation(
             [
                 self.ceildiv(x, 1 if no_x_dim else meta.get("XBLOCK"))
@@ -4261,13 +4257,46 @@ class SequentialComboKernelGrid(ComboKernelGrid):
         )
 
 
+class SequentialFlattenComboKernelGrid(GridExpr):
+    """Flattened grid: (sum of x*y blocks, 1, 1) for per-subkernel with flattened dispatch."""
+
+    def generate(self, meta: dict[str, int]):
+        combo_meta = self.inductor_meta["combo_grid_meta"]
+        if combo_meta["default_config"]:
+            meta = {**combo_meta["default_config"], **meta}
+
+        total_blocks_list = []
+        for num in range(combo_meta["num_kernels"]):
+            xnumel = combo_meta[f"xnumel_{num}"]
+            assert xnumel is None or xnumel > 0
+            xnumel = xnumel or f"xnumel_{num}"
+            x_blocks = self.ceildiv(
+                xnumel,
+                1 if combo_meta[f"no_x_dim_{num}"] else meta.get(f"XBLOCK_{num}"),
+            )
+            y_blocks = (
+                self.ceildiv(
+                    combo_meta[f"ynumel_{num}"] or f"ynumel_{num}",
+                    meta.get(f"YBLOCK_{num}"),
+                )
+                if f"ynumel_{num}" in combo_meta
+                else 1
+            )
+            total_blocks_list.append(self.product([x_blocks, y_blocks]))
+
+        self.x_grid = self.summation(total_blocks_list)
+        if combo_meta["min_blocks"]:
+            self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
+        self.y_grid = 1
+        self.z_grid = 1
+
+
 class RoundRobinComboKernelGrid(ComboKernelGrid):
     def combo_x_grid(
         self,
         xnumels: list[int | str],
         no_x_dims: list[bool],
         meta: dict[str, int],
-        per_subkernel: bool,
     ) -> str:
         assert len(xnumels) == len(no_x_dims)
         num_kernels = self.inductor_meta["combo_grid_meta"]["num_kernels"]

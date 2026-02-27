@@ -5,7 +5,6 @@ import threading
 import weakref
 from dataclasses import dataclass
 from functools import partial, reduce
-from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -132,7 +131,7 @@ class AllToAllBase:
     def _size_cumsum(
         self,
         buf_size: int,
-        sizes: Union[torch.Tensor, list[int], None],
+        sizes: torch.Tensor | list[int] | None,
         world_size: int,
     ) -> torch.Tensor:
         if sizes is None or len(sizes) == 0:
@@ -403,8 +402,8 @@ class ProcessLocalGroup(dist.ProcessGroup):
         self,
         output_buffer: torch.Tensor,
         input_buffer: torch.Tensor,
-        output_split_sizes: Optional[list[int]],
-        input_split_sizes: Optional[list[int]],
+        output_split_sizes: list[int] | None,
+        input_split_sizes: list[int] | None,
         opts=AllToAllOptions(),
     ) -> torch.Tensor:
         coll = ProcessLocalGroup._start_coll(AllToAllBase(), self)
@@ -552,14 +551,15 @@ dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "
 @dataclass
 class WorldData:
     default_pg: dist.ProcessGroup
-    pg_map: dict[dist.ProcessGroup, tuple[str, Optional[Store]]]
+    pg_map: dict[dist.ProcessGroup, tuple[str, Store | None]]
     pg_names: dict[dist.ProcessGroup, str]
     pg_group_ranks: dict[dist.ProcessGroup, dict[int, int]]
     pg_backend_config: dict[dist.ProcessGroup, str]
     group_count: int
     tags_to_pg: dict[str, list[dist.ProcessGroup]]
     pg_to_tag: dict[dist.ProcessGroup, str]
-    pg_coalesce_state: dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]
+    pg_coalesce_state: dict[dist.ProcessGroup, list[_CollOp | P2POp]]
+    comms: list
 
 
 class ThreadLocalWorld:
@@ -568,7 +568,7 @@ class ThreadLocalWorld:
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
             ThreadLocalWorld._world.world = WorldData(
-                None, {}, {}, {}, {}, 0, {}, {}, {}
+                None, {}, {}, {}, {}, 0, {}, {}, {}, []
             )
         return ThreadLocalWorld._world.world
 
@@ -613,8 +613,12 @@ class ThreadLocalWorld:
         return self._get_world().pg_to_tag
 
     @property
-    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]:
+    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[_CollOp | P2POp]]:
         return self._get_world().pg_coalesce_state
+
+    @property
+    def comms(self):
+        return self._get_world().comms
 
 
 _old_pg_world = None
@@ -632,4 +636,9 @@ def _install_threaded_pg():
 
 
 def _uninstall_threaded_pg():
+    global _ctx_manager
     dist.distributed_c10d._world = _old_pg_world
+    # Restore autograd multithreading state that was disabled in _install_threaded_pg
+    if _ctx_manager is not None:
+        _ctx_manager.__exit__(None, None, None)
+        _ctx_manager = None

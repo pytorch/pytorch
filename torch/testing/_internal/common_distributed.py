@@ -24,7 +24,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -220,7 +220,14 @@ def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
     return True
 
 
-def skip_if_lt_x_gpu(x):
+def skip_if_lt_x_gpu(x, *, allow_cpu=False):
+    """Skip if fewer than x accelerators available.
+
+    Args:
+        x: Minimum number of accelerators required.
+        allow_cpu: If True, run the test on CPU-only machines (no accelerators).
+    """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -229,6 +236,8 @@ def skip_if_lt_x_gpu(x):
             if TEST_HPU and torch.hpu.device_count() >= x:
                 return func(*args, **kwargs)
             if TEST_XPU and torch.xpu.device_count() >= x:
+                return func(*args, **kwargs)
+            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
@@ -332,7 +341,7 @@ def with_nccl_blocking_wait(func):
     def wrapper(*args, **kwargs):
         # Save and unset TORCH_NCCL_ASYNC_ERROR_HANDLING
         try:
-            cached_nccl_async_error_handling: Union[str, None] = os.environ[
+            cached_nccl_async_error_handling: str | None = os.environ[
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
             ]
             del os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"]
@@ -342,7 +351,7 @@ def with_nccl_blocking_wait(func):
 
         # Save val of TORCH_NCCL_BLOCKING_WAIT and set it.
         try:
-            cached_nccl_blocking_wait: Union[str, None] = os.environ[
+            cached_nccl_blocking_wait: str | None = os.environ[
                 "TORCH_NCCL_BLOCKING_WAIT"
             ]
         except KeyError:
@@ -703,10 +712,10 @@ def init_multigpu_helper(world_size: int, backend: str):
     return rank_to_GPU
 
 
-tmp_dir: Optional[tempfile.TemporaryDirectory] = None
+tmp_dir: tempfile.TemporaryDirectory | None = None
 
 
-def initialize_temp_directories(init_method: Optional[str] = None) -> None:
+def initialize_temp_directories(init_method: str | None = None) -> None:
     global tmp_dir
     tmp_dir = tempfile.TemporaryDirectory()
     os.environ["TEMP_DIR"] = tmp_dir.name
@@ -729,7 +738,10 @@ def cleanup_temp_dir() -> None:
 
 
 # Most tests operate with this worldsize
-DEFAULT_WORLD_SIZE = 4
+if TEST_WITH_ROCM:
+    DEFAULT_WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
+else:
+    DEFAULT_WORLD_SIZE = 4
 
 # [How does MultiProcessTestCase work?]
 # Each MultiProcessTestCase instance uses 1 + `world_size()` processes, by
@@ -1683,7 +1695,7 @@ class MultiProcContinuousTest(TestCase):
     # rank of the current process
     rank: int = -2  # unset state
     # Rendezvous file
-    rdvz_file: Optional[str] = None
+    rdvz_file: str | None = None
     # timeout configured per class
     timeout: timedelta = timedelta(seconds=120)
     # Poison pill for rest of tests if one of them fails
@@ -1692,7 +1704,7 @@ class MultiProcContinuousTest(TestCase):
     _processes_spawned: bool = False
 
     @classmethod
-    def backend_str(cls) -> Optional[str]:
+    def backend_str(cls) -> str | None:
         """
         ProcessGroup backend str.
         To be customized by sub test classes, e.g. "nccl".
@@ -1766,7 +1778,19 @@ class MultiProcContinuousTest(TestCase):
         cls.world_size = world_size
 
         # Initialize the process group
-        cls._init_pg(rank, world_size, rdvz_file)
+        init_skip_reason = None
+        try:
+            cls._init_pg(rank, world_size, rdvz_file)
+        except SystemExit as ex:
+            exit_code = getattr(ex, "code", None)
+            skip_entry = next(
+                (v for v in TEST_SKIPS.values() if v.exit_code == exit_code),
+                None,
+            )
+            if skip_entry:
+                init_skip_reason = skip_entry.message
+            else:
+                raise
 
         # End of bootstrap
         logger.debug("Setup complete")
@@ -1778,6 +1802,11 @@ class MultiProcContinuousTest(TestCase):
             # None means exit
             if test_id is None:
                 break
+
+            # If init failed with a skip, respond with SkipTest for all tests
+            if init_skip_reason is not None:
+                completion_queue.put(unittest.SkipTest(init_skip_reason))
+                continue
 
             # Run the test
             try:
@@ -1904,6 +1933,19 @@ class MultiProcContinuousTest(TestCase):
 
         # Get world_size (handles both class variable and property)
         cls.world_size = cls._get_world_size(device_type)
+
+        # Check if the specified backend is available before spawning processes
+        backend = cls.backend_str() if callable(cls.backend_str) else cls.backend_str
+        if backend is not None:
+            backend_checks = {
+                "nccl": c10d.is_nccl_available,
+                "gloo": c10d.is_gloo_available,
+                "mpi": c10d.is_mpi_available,
+                "xccl": c10d.is_xccl_available,
+            }
+            check_fn = backend_checks.get(backend)
+            if check_fn is not None and not check_fn():
+                raise unittest.SkipTest(f"Backend '{backend}' is not available")
 
         logger.info(
             f"Testing class {cls.__name__} on {cls.world_size} {device_type}"  # noqa: G004

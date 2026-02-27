@@ -76,6 +76,7 @@
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/fx/graph.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
@@ -1570,12 +1571,16 @@ static PyObject* THPModule_setCheckSparseTensorInvariants(
     PyObject* _unused,
     PyObject* arg) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_check_sparse_tensor_invariants expects a bool, "
-      "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
+  if (arg == Py_None) {
+    at::globalContext().setCheckSparseTensorInvariants(std::nullopt);
+  } else {
+    TORCH_CHECK(
+        PyBool_Check(arg),
+        "set_check_sparse_tensor_invariants expects a bool or None, "
+        "but got ",
+        THPUtils_typename(arg));
+    at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1583,7 +1588,7 @@ static PyObject* THPModule_setCheckSparseTensorInvariants(
 static PyObject* THPModule_checkSparseTensorInvariants(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().checkSparseTensorInvariants())
+  if (at::globalContext().checkSparseTensorInvariants().value_or(false))
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -2265,6 +2270,10 @@ PyObject* initModule() {
   THPEvent_init(module);
   NodeBase_init(module);
   NodeIter_init(module);
+  Namespace_init(module);
+  FindNodesLookupTable_init(module);
+  NodeList_init(module);
+  GraphBase_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -2299,7 +2308,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-#if defined(USE_CUDA) && !defined(USE_ROCM)
+#if defined(USE_CUDA)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #if defined(USE_XPU) && !defined(_WIN32)

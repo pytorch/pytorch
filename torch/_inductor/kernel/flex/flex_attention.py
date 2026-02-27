@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import math
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, cast, Optional, TYPE_CHECKING, Union
@@ -16,7 +17,7 @@ from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
-from ...lowering import empty, empty_strided, lowerings, register_lowering
+from ...lowering import empty, empty_strided, lowerings, register_lowering, to_dtype
 from ...select_algorithm import (
     autotune_select_algorithm,
     SymbolicGridFn,
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 Expr = sympy.Expr
 
 
@@ -99,6 +101,7 @@ flex_attention_template = TritonTemplate(
     source=load_flex_template("flex_attention")
     + load_flex_template("utilities")
     + load_flex_template("common"),
+    always_freeze_layout=True,
 )
 
 
@@ -289,6 +292,8 @@ def flex_attention(
             kv_indices,
             full_kv_num_blocks,
             full_kv_indices,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
             mask_graph=mask_graph,
             subgraph=subgraph,
         )
@@ -526,6 +531,7 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=load_flex_template("flex_backwards") + load_flex_template("utilities"),
+    always_freeze_layout=True,
 )
 
 
@@ -734,6 +740,7 @@ def flex_attention_backward(*args, **kwargs):
         joint_placeholder_inps + list(score_mod_other_buffers),
         joint_graph,
     )
+
     freeze_irnodes(all_joint_outputs)
 
     joint_outputs = process_joint_outputs(
@@ -771,6 +778,20 @@ def flex_attention_backward(*args, **kwargs):
                 "Deterministic backward for flex_attention with block_mask using the FLASH backend "
                 "is not yet implemented. The TRITON backend supports deterministic backward."
             )
+        if torch.is_deterministic_algorithms_warn_only_enabled() and needs_block_mask:
+            warnings.warn(
+                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
+                "is not yet implemented. Running non-deterministic backward.",
+            )
+        # TODO: Implement dLSE support in flash-attention backward by folding
+        # grad_logsumexp into the dPsum preprocess step.
+        if grad_logsumexp is not None:
+            raise NotImplementedError(
+                "FLASH backend backward does not support differentiating through "
+                "logsumexp (dLSE). This happens when the loss depends on the LSE "
+                "output of flex_attention. "
+                "Use BACKEND='TRITON' or avoid differentiating through logsumexp."
+            )
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
@@ -781,6 +802,8 @@ def flex_attention_backward(*args, **kwargs):
             grad_out,
             scale,
             kernel_options,
+            SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE,
             fw_subgraph_buffer=None if score_is_trivial else fw_subgraph_buffer,
             joint_subgraph_buffer=None
             if score_is_trivial
@@ -805,13 +828,18 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     # Create delta which will is needed for the bwd's kernel
-    grad_lse_exp2 = lowerings[aten.mul](grad_logsumexp, 1 / math.log(2))
     mul_delta = lowerings[aten.mul](out, grad_out)
     delta = lowerings[aten.sum](mul_delta, axis=-1)
-    delta = lowerings[aten.sub](delta, grad_lse_exp2)
-    delta = ExternKernel.require_contiguous(delta)
-
-    grad_lse_exp2, delta = maybe_realize([grad_lse_exp2, delta])
+    delta = lowerings[prims.convert_element_type](delta, torch.float32)
+    if grad_logsumexp is not None:
+        grad_lse_exp2 = lowerings[aten.mul](grad_logsumexp, 1 / math.log(2))
+        grad_lse_exp2 = ExternKernel.require_contiguous(grad_lse_exp2)
+        delta = lowerings[aten.sub](delta, grad_lse_exp2)
+        delta = ExternKernel.require_contiguous(delta)
+        delta, grad_lse_exp2 = maybe_realize([delta, grad_lse_exp2])
+    else:
+        delta = ExternKernel.require_contiguous(delta)
+        (delta,) = maybe_realize([delta])
 
     # # see NOTE:[TritonTemplates with multiple outputs]
     query_size = [Bq, Hq, seq_len_q, qk_head_dim]
@@ -894,6 +922,12 @@ def flex_attention_backward(*args, **kwargs):
             cur_kernel_options.setdefault(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
+
+        # Intel GPU enables TMA by default
+        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M1", conf.block_m1)
         cur_kernel_options.setdefault("BLOCK_N1", conf.block_n1)
@@ -1006,7 +1040,16 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
-    return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
+    # Cast captured grads to match original buffer dtypes. Gradients are accumulated
+    # in fp32 for precision, then cast to the original dtype (e.g., bf16) here.
+    captured_grads = tuple(
+        to_dtype(g, orig.get_dtype())
+        if g is not None and g.get_dtype() != orig.get_dtype()
+        else g
+        for g, orig in zip(joint_outputs.captured_grads, score_mod_other_buffers)
+    )
+
+    return (grad_query, grad_key, grad_value, captured_grads)
 
 
 def get_bwd_subgraph_outputs(

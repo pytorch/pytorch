@@ -6,10 +6,10 @@ bool test_device_is_cuda(const torch::stable::Device& device) {
   return device.is_cuda();
 }
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agn_2_10, m) {
+STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def("test_device_is_cuda(Device device) -> bool");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agn_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
   m.impl("test_device_is_cuda", TORCH_BOX(&test_device_is_cuda));
 }

@@ -43,17 +43,24 @@ parametrize_value = parametrize(
 class TestArrayScalars(TestCase):
     @parametrize_value
     def test_array_scalar_basic(self, value):
-        assert value.ndim == 0
-        assert value.shape == ()
-        assert value.size == 1
-        assert value.dtype == np.dtype("int64")
+        if value.ndim != 0:
+            raise AssertionError(f"Expected ndim 0, got {value.ndim}")
+        if value.shape != ():
+            raise AssertionError(f"Expected shape (), got {value.shape}")
+        if value.size != 1:
+            raise AssertionError(f"Expected size 1, got {value.size}")
+        if value.dtype != np.dtype("int64"):
+            raise AssertionError(f"Expected dtype int64, got {value.dtype}")
 
     @parametrize_value
     def test_conversion_to_int(self, value):
         py_scalar = int(value)
-        assert py_scalar == 42
-        assert isinstance(py_scalar, int)
-        assert not isinstance(value, int)
+        if py_scalar != 42:
+            raise AssertionError(f"Expected 42, got {py_scalar}")
+        if not isinstance(py_scalar, int):
+            raise AssertionError(f"Expected int, got {type(py_scalar)}")
+        if isinstance(value, int):
+            raise AssertionError("Expected value to not be an int")
 
     @parametrize_value
     def test_decay_to_py_scalar(self, value):
@@ -64,26 +71,35 @@ class TestArrayScalars(TestCase):
         lst = [1, 2, 3]
 
         product = value * lst
-        assert isinstance(product, np.ndarray)
-        assert product.shape == (3,)
+        if not isinstance(product, np.ndarray):
+            raise AssertionError(f"Expected np.ndarray, got {type(product)}")
+        if product.shape != (3,):
+            raise AssertionError(f"Expected shape (3,), got {product.shape}")
         assert_equal(product, [42, 42 * 2, 42 * 3])
 
         # repeat with right-multiply
         product = lst * value
-        assert isinstance(product, np.ndarray)
-        assert product.shape == (3,)
+        if not isinstance(product, np.ndarray):
+            raise AssertionError(f"Expected np.ndarray, got {type(product)}")
+        if product.shape != (3,):
+            raise AssertionError(f"Expected shape (3,), got {product.shape}")
         assert_equal(product, [42, 42 * 2, 42 * 3])
 
     def test_scalar_comparisons(self):
         scalar = np.int64(42)
         arr = np.array(42)
 
-        assert arr == scalar
-        assert arr >= scalar
-        assert arr <= scalar
+        if not (arr == scalar):
+            raise AssertionError("Expected arr == scalar")
+        if not (arr >= scalar):
+            raise AssertionError("Expected arr >= scalar")
+        if not (arr <= scalar):
+            raise AssertionError("Expected arr <= scalar")
 
-        assert scalar == 42
-        assert arr == 42
+        if not (scalar == 42):
+            raise AssertionError("Expected scalar == 42")
+        if not (arr == 42):
+            raise AssertionError("Expected arr == 42")
 
 
 # @xfailIfTorchDynamo
@@ -124,11 +140,13 @@ class TestIsScalar(TestCase):
 
     @parametrize("value", scalars)
     def test_is_scalar(self, value):
-        assert np.isscalar(value)
+        if not np.isscalar(value):
+            raise AssertionError(f"Expected {value} to be scalar")
 
     @parametrize("value", not_scalars)
     def test_is_not_scalar(self, value):
-        assert not np.isscalar(value)
+        if np.isscalar(value):
+            raise AssertionError(f"Expected {value} to not be scalar")
 
 
 if __name__ == "__main__":

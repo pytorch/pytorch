@@ -37,6 +37,7 @@ from torch.distributed.tensor._redistribute import (
     _gen_transform_infos,
     _optimize_transform_infos,
     _TransformInfo,
+    disable_redistribute_transform_optimization,
     redistribute_local_tensor,
     use_min_cost_redistribution_plan,
 )
@@ -983,6 +984,34 @@ class RedistributeTest(DTensorTestBase):
             "Planner should collect all reduce ops from both src and dst",
         )
 
+    @with_comms
+    def test_redistribute_zero_size_shards(self):
+        # Adding this test to ensure sharding works when tensor size < mesh size.
+        # Tests correct redistribution with world size = 4, tensor dim size = 2,
+        # ranks 2 & 3 have empty local shards.
+        mesh = self.build_device_mesh()
+
+        full_tensor = torch.randn(2, 8, device=self.device_type)
+        dt = distribute_tensor(full_tensor, mesh, [Shard(0)])
+
+        # Verify some ranks have zero-size local tensors
+        if not self.is_local_tensor_enabled:
+            if self.rank < 2:
+                self.assertEqual(dt._local_tensor.shape, (1, 8))
+            else:
+                self.assertEqual(dt._local_tensor.shape, (0, 8))
+
+        # Test Shard(0) -> Replicate()
+        dt_rep = dt.redistribute(mesh, [Replicate()])
+        self.assertEqual(dt_rep._local_tensor.shape, (2, 8))
+        self.assertEqual(dt_rep.full_tensor(), dt.full_tensor())
+
+        # Test Shard(0) -> Shard(1)
+        dt_shard1 = dt.redistribute(mesh, [Shard(1)])
+        # With mesh=4 and dim 1 size=8, each rank has local shape (2, 2)
+        self.assertEqual(dt_shard1._local_tensor.shape, (2, 2))
+        self.assertEqual(dt_shard1.full_tensor(), dt.full_tensor())
+
 
 instantiate_parametrized_tests(RedistributeTest)
 
@@ -1268,9 +1297,10 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 all_combinations.append(shard_order)  # noqa: PERF402
             for i in range(len(all_combinations)):
                 for j in range(i + 1, len(all_combinations)):
-                    assert all_combinations[i] != all_combinations[j], (
-                        f"Duplicate elements found in all_combinations {all_combinations[i]}, {all_combinations[j]}"
-                    )
+                    if all_combinations[i] == all_combinations[j]:
+                        raise AssertionError(
+                            f"Duplicate elements found in all_combinations {all_combinations[i]}, {all_combinations[j]}"
+                        )
             expected_total_combination = 0
             N = test_input["mesh"].ndim
             M = test_input["tensor_rank"]
@@ -1730,7 +1760,7 @@ class DistributeWithStridedShardTest(DTensorTestBase):
             elif idx == 2:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]_S(0, 3)[1]S(0)[2]->S(0)[0]_S(0, 3)[1]R->S(0)RR->RRR->_S(0, 3)RR->_S(0, 3)[0]S(0)[1]R""",
+                    """S(0)[1]_S(0, 3)[0]S(0)[2]->S(0)[1]_S(0, 3)[0]R->R_S(0, 3)R->RRR->_S(0, 3)RR->_S(0, 3)[0]S(0)[1]R""",
                 )
             elif idx == 3:
                 self.assertExpectedInline(
@@ -2342,6 +2372,51 @@ class OptimizeFlattenedReductionsTest(TestCase):
             warning_msg = log_context.output[0]
             self.assertIn("non-ascending order", warning_msg)
             self.assertIn("reduce_scatter", warning_msg)
+
+    def test_disable_optimization_context_manager(self):
+        """The disable_redistribute_transform_optimization context manager prevents merging."""
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "B"]._flatten("A_B")
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        src_placements = (Partial("sum"), Partial("sum"), Replicate())
+        dst_placements = (Replicate(), Replicate(), Replicate())
+
+        # Without the kill switch, transforms should be merged into one flattened op.
+        result = _optimize_transform_infos(
+            transform_infos, mesh, src_placements, dst_placements
+        )
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
+
+        # With the kill switch, the original transforms should be returned as-is.
+        with disable_redistribute_transform_optimization():
+            result = _optimize_transform_infos(
+                transform_infos, mesh, src_placements, dst_placements
+            )
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+        self.assertIs(result[0], transform_infos[0])
+        self.assertIs(result[1], transform_infos[1])
+
+        # After exiting the context manager, optimization should be restored.
+        result = _optimize_transform_infos(
+            transform_infos, mesh, src_placements, dst_placements
+        )
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
 
 
 class MultiDimRedistributeOptimizationTest(DTensorTestBase):

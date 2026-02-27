@@ -78,6 +78,9 @@ if HAS_GPU:
     STRING_CONSTANT_C: tl.constexpr = tl.constexpr("CONSTANT_C")
     BOOL_CONSTANT_C: tl.constexpr = tl.constexpr(True)
     FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
+    # Compute at module level to avoid dynamo tracing issue with
+    # torch.backends.cuda.matmul.fp32_precision getter
+    USE_TF32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     if hasattr(triton, "constexpr_function"):
 
@@ -199,13 +202,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     def test_triton_kernel_functionalize(self):
-        from functorch import make_fx
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
             FunctionalTensorMode,
             PythonFunctionalizeAPI,
         )
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         kernel_side_table.reset_table()
 
@@ -323,10 +326,11 @@ def forward(self, x_1, output_1):
 
     @requires_gpu
     def test_triton_kernel_clone_wekdeps(self):
-        from functorch import make_fx
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._inductor.choices import InductorChoices
         from torch._inductor.compile_fx import compile_fx_inner
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         TENSOR_SIZE = 30_000_000
         BLOCK_SIZE = 1024
@@ -389,7 +393,7 @@ def forward(self, x_1, output_1):
 
         gm = make_fx(f, tracing_mode="fake")(t)
 
-        with inductor_config.patch({"inductor_choices_class": NoFusionChoices}):
+        with V.set_choices_handler(NoFusionChoices()):
             log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
             with ctx():
                 compiled_gm = compile_fx_inner(gm, [t])
@@ -866,7 +870,8 @@ def forward(self, x_1, output_1):
         prev_c = CONSTANT_C
         # If the behavior of triton kernels change, this test will fail
         CONSTANT_C = tl.constexpr(10)
-        assert CONSTANT_C != prev_c
+        if CONSTANT_C == prev_c:
+            raise AssertionError
 
         t = torch.randn(5, device=GPU_TYPE)
         torch_result = call_triton(t)
@@ -1031,7 +1036,7 @@ def forward(self, x_1, output_1):
             functools.partial(call_triton_add, grid_type=2, num=200, autotuned=True),
             functools.partial(call_triton_add, grid_type=3, autotuned=True),
         ]
-        from functorch import make_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         tracing_mode = "symbolic" if dynamic else "fake"
 
@@ -2795,6 +2800,41 @@ if HAS_GPU:
 class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
 
+    # Regression test for #169782
+    @make_mutation_test
+    def test_with_none_arg():
+        @triton.jit
+        def add_kernel_with_none_arg(
+            in_ptr0,
+            optional_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            if optional_ptr is not None:
+                y = tl.load(optional_ptr + offsets, mask=mask)
+                x = x + y
+            tl.store(out_ptr + offsets, x, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_kernel_with_none_arg,
+            {
+                "in_ptr0": t,
+                "optional_ptr": None,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            {},
+            ["out_ptr"],
+        )
+
     @make_mutation_test
     def test_out_of_order_kernel():
         @triton.jit
@@ -4152,7 +4192,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         result = f(x, x)
         self.assertEqual(result, x + x)
 
-        from functorch import make_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
@@ -4239,7 +4279,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         def foo(x, w):
             M, K = x.shape
             KB, N = w.shape
-            assert K == KB, f"incompatible dimensions {K}, {KB}"
+            assert K == KB, f"incompatible dimensions {K}, {KB}"  # noqa: S101
 
             z = torch.empty((M, N), device=x.device, dtype=x.dtype)
 
@@ -4261,7 +4301,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                 w.stride(1),
                 z.stride(0),
                 z.stride(1),
-                ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+                ALLOW_TF32=USE_TF32,
             )
             return z
 
@@ -4331,7 +4371,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
         # should always pass
-        assert add(x, y).mean() == 2, "Problem with add kernel"
+        if add(x, y).mean() != 2:
+            raise AssertionError("Problem with add kernel")
 
         # assert that the user_defined_* flags are properly set on the kernel before compilation
         self.assertEqual(isinstance(add_kernel, Autotuner), True)

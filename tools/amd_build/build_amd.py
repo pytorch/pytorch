@@ -225,8 +225,63 @@ mslk_dir = REPO_ROOT / "third_party/mslk/include/mslk/utils/"
 
 if not buck_build:
     mslk_original = mslk_dir / "tuning_cache.cuh"
+    if mslk_original.exists():
+        extra_files.append(mslk_original.as_posix())
 
-    extra_files.append(mslk_original.as_posix())
+# TODO Remove once the following submodules are updated to use hipify v2
+hipify_v1_to_v2_files = [
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/gemm/ck_extensions.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/bf16_grouped/bf16_grouped_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/bf16_grouped/kernels/bf16_grouped_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/ck_utility.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_blockwise_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_batched/kernels/fp8_rowwise_batched_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise/kernels/fp8_rowwise_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_rowwise_preshuffle/kernels/fp8_rowwise_preshuffle_common.h",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_tensorwise_gemm.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fused_moe/fused_moe_kernel.hip",
+    "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include/fbgemm_gpu/quantize/tuning_cache.hpp",
+    "third_party/mslk/csrc/moe/ck_extensions/fused_moe_kernel.hip",
+    "third_party/mslk/csrc/gemm/ck/bf16_grouped/bf16_grouped_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/bf16_grouped/kernels/bf16_grouped_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise/kernels/fp8_rowwise_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_batched/kernels/fp8_rowwise_batched_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_preshuffle/kernels/fp8_rowwise_preshuffle_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_tensorwise_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/fp8_blockwise_gemm.hip",
+]
+
+
+def hipify_v1_to_v2(line: str) -> str:
+    line = line.replace("hip::HIPStreamMasqueradingAsCUDA", "cuda::CUDAStream")
+    line = line.replace(
+        "hip::HIPStreamGuardMasqueradingAsCUDA", "cuda::CUDAStreamGuard"
+    )
+    line = line.replace(
+        "hip::getStreamFromPoolMasqueradingAsCUDA", "cuda::getStreamFromPool"
+    )
+    line = line.replace("getCurrentHIPStream", "getCurrentCUDAStream")
+    return line
+
+
+for hipify_v1_to_v2_file in hipify_v1_to_v2_files:
+    do_write = False
+    if os.path.exists(hipify_v1_to_v2_file):
+        with open(hipify_v1_to_v2_file) as sources:
+            lines = sources.readlines()
+        newlines = [hipify_v1_to_v2(line) for line in lines]
+        if lines == newlines:
+            print(f"{hipify_v1_to_v2_file} skipped")
+        else:
+            with open(hipify_v1_to_v2_file, "w") as sources:
+                for line in newlines:
+                    sources.write(line)
+            print(f"{hipify_v1_to_v2_file} updated")
+
 
 hipify_python.hipify(
     project_directory=proj_dir,
@@ -245,6 +300,10 @@ if not buck_build:
     # only update the file if it changes or doesn't exist
     do_write = True
     src_lines = None
+
+    if not mslk_move_src.exists():
+        _error = f"Error: Source file {mslk_move_src} does not exist"
+        sys.exit(_error)
     with open(mslk_move_src) as src:
         src_lines = src.readlines()
     if os.path.exists(mslk_move_dst):

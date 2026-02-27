@@ -357,7 +357,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # See https://github.com/pytorch/benchmark/issues/1561
         if model_name == "maml_omniglot":
             batch_size = 5
-            assert example_inputs[0].shape[0] == batch_size
+            if example_inputs[0].shape[0] != batch_size:
+                raise AssertionError(
+                    f"Expected batch size {batch_size}, but got {example_inputs[0].shape[0]}"
+                )
         if model_name == "vision_maskrcnn":
             batch_size = 1
         # global current_name, current_device
