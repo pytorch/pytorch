@@ -138,6 +138,14 @@ class SIMDKernelFeatures:
             buffer_names.update(node.used_buffer_names())
         buffers = [V.graph.get_buffer(name) for name in buffer_names]
 
+        for node in self.scheduler_nodes():
+            for buf in node.get_outputs():
+                if (
+                    hasattr(buf.node.layout, "dtype")
+                    and buf.node.layout.dtype == torch.int64
+                ):
+                    return torch.int64
+
         # In theory we can separately check xnumel and rnumel are <= int_max
         # but some indexers do use the full linear index so we need to be
         # conservative here.
