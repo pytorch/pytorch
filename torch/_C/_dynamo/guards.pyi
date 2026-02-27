@@ -307,6 +307,7 @@ class GuardManager:
         user_stack: Optional[traceback.StackSummary],
         ptype: Any,
         dispatch_keys: Any,
+        excluded_sizes: Optional[list[Optional[int]]] = None,
     ) -> None: ...
     def add_dynamic_indices_guard(
         self,
