@@ -30,16 +30,9 @@ else:
 
 
 REPO_ROOT = Path(__file__).absolute().parents[3]
-sys.path.insert(0, str(REPO_ROOT))
-
-from tools.setup_helpers.env import CMAKE_MINIMUM_VERSION_STRING
-
-
-sys.path.remove(str(REPO_ROOT))
-
 
 LINTER_CODE = "CMAKE_MINIMUM_REQUIRED"
-CMAKE_MINIMUM_VERSION = Version(CMAKE_MINIMUM_VERSION_STRING)
+CMAKE_MINIMUM_VERSION = Version("3.27")
 
 
 class LintSeverity(str, Enum):
