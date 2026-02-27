@@ -393,7 +393,15 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
         if self.dict_vt is None:
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
+            dict_proxy: dict[str, VariableTracker] = {}
+            if hasattr(self, "fn"):  # Use `.get_function()` instead?
+                dict_proxy = {
+                    name: VariableTracker.build(
+                        tx, value, source=self.source and AttrSource(self.source, name)
+                    )
+                    for name, value in self.fn.__dict__.items()
+                }
+            self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
         return self.dict_vt
 
     def call_method(
