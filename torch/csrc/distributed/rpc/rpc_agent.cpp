@@ -253,14 +253,14 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
   return workerInfo_;
 }
 
-std::shared_ptr<RpcAgent> RpcAgent::currentRpcAgent_ = nullptr;
+std::atomic<std::shared_ptr<RpcAgent>> RpcAgent::currentRpcAgent_;
 
 bool RpcAgent::isCurrentRpcAgentSet() {
-  return std::atomic_load(&currentRpcAgent_) != nullptr;
+  return currentRpcAgent_.load().get() != nullptr;
 }
 
 std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
-  std::shared_ptr<RpcAgent> agent = std::atomic_load(&currentRpcAgent_);
+  std::shared_ptr<RpcAgent> agent = currentRpcAgent_.load();
   TORCH_CHECK(
       agent,
       "Current RPC agent is not set! Did you initialize the RPC "
