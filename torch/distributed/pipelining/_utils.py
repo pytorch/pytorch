@@ -3,9 +3,13 @@
 
 import logging
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 from torch import fx
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.placement_types import Placement
 
 
 logger = logging.getLogger(__name__)
@@ -58,18 +62,105 @@ class PipeliningShapeError(RuntimeError):
     """Shape mismatch between configured and runtime values."""
 
 
+class PipeliningDTensorError(RuntimeError):
+    """DTensor metadata mismatch between configured and runtime values."""
+
+
+@dataclass
+class _DTensorMeta:
+    """
+    Metadata needed to reconstruct a DTensor from a local tensor.
+
+    This dataclass captures all information required to reconstruct a DTensor
+    on a receiving pipeline stage, including mesh identification for multi-mesh
+    scenarios where different DTensors may live on different submeshes within
+    a mesh universe.
+
+    Note: This dataclass is intentionally NOT frozen because the `mesh` field
+    is lazily populated during mesh resolution (in `_resolve_mesh`). After
+    metadata inference completes, instances are treated as read-only.
+    """
+
+    # Global tensor properties
+    global_shape: torch.Size
+    global_stride: tuple[int, ...]
+    dtype: torch.dtype
+
+    # DTensor distribution properties
+    placements: tuple[Placement, ...]  # e.g., (Shard(0), Replicate())
+
+    # Mesh identification - used to look up the correct DeviceMesh
+    mesh_dim_names: tuple[str, ...]  # e.g., ("tp",) or ("dp", "tp")
+    mesh_shape: Optional[tuple[int, ...]] = None  # Optional, for validation/uniqueness
+
+    # Cached mesh instance (lazily populated after lookup during _resolve_mesh)
+    mesh: Optional[DeviceMesh] = None
+
+    @staticmethod
+    def from_dtensor(dtensor: DTensor) -> "_DTensorMeta":
+        """Extract metadata from a DTensor."""
+
+        spec = dtensor._spec
+        device_mesh = dtensor.device_mesh
+
+        return _DTensorMeta(
+            global_shape=spec.shape,
+            global_stride=spec.stride,
+            dtype=dtensor.dtype,
+            placements=spec.placements,
+            mesh_dim_names=tuple(device_mesh.mesh_dim_names)
+            if device_mesh.mesh_dim_names
+            else (),
+            mesh_shape=tuple(device_mesh.mesh.shape),
+            mesh=device_mesh,
+        )
+
+
+def validate_dtensor_metadata(
+    desc: str,
+    expected: _DTensorMeta,
+    given_dtensor: DTensor,
+) -> None:
+    """Validate DTensor metadata matches expected configuration."""
+
+    if not isinstance(given_dtensor, DTensor):
+        raise PipeliningDTensorError(
+            f"{desc}: expected DTensor, got {type(given_dtensor)}"
+        )
+
+    given_meta = _DTensorMeta.from_dtensor(given_dtensor)
+
+    if expected.global_shape != given_meta.global_shape:
+        raise PipeliningDTensorError(
+            f"{desc} has a global shape mismatch: "
+            f"expected {expected.global_shape} actual {given_meta.global_shape}"
+        )
+
+    if expected.placements != given_meta.placements:
+        raise PipeliningDTensorError(
+            f"{desc} has a placements mismatch: "
+            f"expected {expected.placements} actual {given_meta.placements}"
+        )
+
+
 def validate_tensor_metadata(desc, expected, given):
-    if not expected.shape == given.shape:
+    # For DTensors, compare local shapes since that's what's communicated
+    if isinstance(given, DTensor):
+        given_local = given.to_local()
+    else:
+        given_local = given
+
+    if not expected.shape == given_local.shape:
         raise PipeliningShapeError(
-            f"{desc} has a shape mismatch: expected {expected.shape} actual {given.shape}"
+            f"{desc} has a shape mismatch: expected {expected.shape} actual {given_local.shape}"
         )
-    if not expected.dtype == given.dtype:
+    if not expected.dtype == given_local.dtype:
         raise PipeliningShapeError(
-            f"{desc} has a dtype mismatch: expected {expected.dtype} actual {given.dtype}"
+            f"{desc} has a dtype mismatch: expected {expected.dtype} actual {given_local.dtype}"
         )
-    if not expected.stride() == given.stride():
+    if not expected.stride() == given_local.stride():
         raise PipeliningShapeError(
-            f"{desc} has a stride mismatch: expected {expected.stride()} actual {given.stride()}"
+            f"{desc} has a stride mismatch: expected {expected.stride()} actual {given_local.stride()}"
         )
 
 
@@ -146,6 +237,26 @@ def generate_rank_to_stage_mapping(
         stages.sort()
 
     return rank_to_stages
+
+
+@dataclass(frozen=True)
+class _StageGradMeta:
+    """
+    Metadata about stage gradients, transmitted during backward metadata inference.
+
+    This is used in the two-phase metadata inference where:
+    - Phase 1 (forward): Stages 0 → N transmit forward activation metadata
+    - Phase 2 (backward): Stages N → 0 transmit gradient metadata
+
+    The gradient metadata allows receiving stages to properly reconstruct
+    DTensor gradients with the correct placements (which may differ from
+    forward activation placements, e.g., Replicate → Partial).
+    """
+
+    # Gradients of inputs (to be sent to previous stage)
+    input_grad_metas: tuple[Optional[_DTensorMeta], ...]
+    # Gradients of outputs (what this stage receives from next stage)
+    output_grad_metas: tuple[Optional[_DTensorMeta], ...]
 
 
 @dataclass
