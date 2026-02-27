@@ -194,9 +194,9 @@ class CacheBase:
                     "triton": triton_version,
                 },
             }
-            device_properties = torch.cuda.get_device_properties(
-                torch.cuda.current_device()
-            )
+            # Use device 0 for cache key generation so all DDP ranks
+            # produce the same system hash (#108971).
+            device_properties = torch.cuda.get_device_properties(0)
             if torch.version.cuda is not None:
                 system["device"]["name"] = device_properties.name
                 system["version"]["cuda"] = torch.version.cuda
@@ -470,6 +470,25 @@ def _ident(x: T) -> T:
     return x
 
 
+def _normalize_device_for_cache_key(device: torch.device) -> torch.device:
+    """
+    Normalize CUDA device ordinals to cuda:0 for cache key purposes.
+
+    In distributed training (DDP/FSDP), each rank uses a different device
+    ordinal (cuda:0, cuda:1, ..., cuda:7) but compiles the same model graph.
+    Without normalization, each rank produces a different cache key, causing
+    N redundant compilations instead of 1.
+
+    Only affects cache key computation — compiled code still targets the
+    actual device at runtime.
+
+    See https://github.com/pytorch/pytorch/issues/108971
+    """
+    if device.type == "cuda" and device.index is not None and device.index != 0:
+        return torch.device("cuda", 0)
+    return device
+
+
 def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
@@ -478,6 +497,11 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     meta = extract_tensor_metadata(t)
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+
+    # Normalize CUDA device ordinals so all DDP ranks produce the same
+    # cache key for the same graph. See pytorch/pytorch#108971.
+    if meta.device.type == "cuda" and meta.device.index != 0:
+        meta = dataclasses.replace(meta, device=_normalize_device_for_cache_key(meta.device))
 
     return meta
 
@@ -870,9 +894,10 @@ class FxGraphHashDetails:
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
         # This device index is usually already encoded by the device of the inputs
         # but fx graphs don't necessarily have tensor inputs. If there aren't any,
-        # we need to guard on the device index in case we allocate cuda tensors
+        # we need to guard on the device index in case we allocate cuda tensors.
+        # Normalize to 0 so all DDP ranks share one cache entry (#108971).
         if no_tensor_inputs and torch.accelerator.is_available():
-            self.default_cuda_device_index = torch.accelerator.current_device_index()
+            self.default_cuda_device_index = 0
 
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
