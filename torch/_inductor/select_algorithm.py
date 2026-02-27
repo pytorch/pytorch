@@ -3860,7 +3860,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         hint_override=hint_override,
                     )
                     strides = V.graph.sizevars.optimization_hints_with_override(
-                        input_node.get_stride(),
+                        get_strides_with_layout_constraints(input_node),
                         hint_override=hint_override,
                     )
                     storage_offset = V.graph.sizevars.optimization_hint_with_override(
@@ -4660,7 +4660,9 @@ class AlgorithmSelectorCache(PersistentCache):
             ]
         )
 
-        strides = ", ".join([str(n.get_stride()) for n in input_nodes])
+        strides = ", ".join(
+            [str(get_strides_with_layout_constraints(n)) for n in input_nodes]
+        )
         dtypes = ", ".join([str(n.get_dtype()) for n in input_nodes])
         if config.autotune_num_choices_displayed == 0:
             return
@@ -4732,7 +4734,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 hint_override=hint_override,
             ),
             V.graph.sizevars.optimization_hints_with_override(
-                node.get_stride(),
+                get_strides_with_layout_constraints(node),
                 hint_override=hint_override,
             ),
             node.get_device(),
@@ -4782,7 +4784,9 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device().type,
             str(node.get_dtype()),
             *sizevars.optimization_hints(node.get_size()),
-            *V.graph.sizevars.optimization_hints(node.get_stride()),
+            *V.graph.sizevars.optimization_hints(
+                get_strides_with_layout_constraints(node)
+            ),
             sizevars.optimization_hint(node.get_layout().offset),
         )
 
@@ -4824,7 +4828,7 @@ def autotune_select_algorithm(*args, **kwargs):
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
             torch._inductor.config.benchmark_epilogue_fusion
-            or use_pipelined_autotuning()
+            or torch._inductor.config.pipeline_max_autotune_gemm
         )
 
     if "precompilation_timeout_seconds" not in kwargs:
@@ -4885,6 +4889,15 @@ def realize_inputs(*args):
     if len(args) == 1:
         return ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(args[0]))
     return [realize_inputs(x) for x in args]
+
+
+def get_strides_with_layout_constraints(node):
+    if (
+        not isinstance(node, ir.ReinterpretView)
+        and node.get_name() in V.graph.buffer_layout_constraints
+    ):
+        return V.graph.buffer_layout_constraints[node.get_name()].stride
+    return node.get_stride()
 
 
 class SymbolicGridFn:
