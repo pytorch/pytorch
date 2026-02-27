@@ -22,7 +22,7 @@ from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, CompileId
 from torch._dynamo.package import CompilePackage
-from torch._dynamo.source import LocalSource
+from torch._dynamo.source import DefaultsSource, LocalSource
 from torch._dynamo.symbolic_convert import (
     ExceptionStack,
     InstructionTranslator,
@@ -1852,6 +1852,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
         object.__setattr__(src2, "_hash", 67890)
 
         self.assertEqual(pickle.dumps(src1), pickle.dumps(src2))
+
+        # Test sources with post_init
+        default_source = DefaultsSource("y", True)
+        self.assertEqual(default_source, pickle.loads(pickle.dumps(default_source)))
 
 
 class SimpleModule(torch.nn.Module):
