@@ -22,7 +22,7 @@ To get started, simply move your Tensor and Module to the ``mps`` device:
             print("MPS not available because the current PyTorch install was not "
                   "built with MPS enabled.")
         else:
-            print("MPS not available because the current MacOS version is not 12.3+ "
+            print("MPS not available because the current MacOS version is not 14.0+ "
                   "and/or you do not have an MPS-enabled device on this machine.")
 
     else:
