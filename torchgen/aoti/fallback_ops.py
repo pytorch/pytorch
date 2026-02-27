@@ -36,7 +36,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._fft_c2c.default": {},
     "aten._fft_r2c.default": {},
     "aten._flash_attention_backward.default": {},
-    "aten._flash_attention_forward.default": {},
+    "aten._flash_attention_forward.default": {"v2": ["page_table"]},
     "aten._flash_attention_forward.quantized": {},
     "aten._fused_moving_avg_obs_fq_helper_functional.default": {},
     "aten._fused_moving_avg_obs_fq_helper.default": {},
