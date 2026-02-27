@@ -231,6 +231,7 @@ class CommitList:
                 file,
                 [
                     "docker/",
+                    ".circleci",
                     ".github",
                     ".jenkins",
                     ".ci",
