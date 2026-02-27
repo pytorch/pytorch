@@ -681,6 +681,10 @@ class ShardingPropagator:
                 # _compute_placement_transition_cost, avoiding the overhead of
                 # generate_redistribute_costs / _gen_transform_infos planning.
                 # Returns None for StridedShard/symbolic/TupleStrategy inputs.
+                # Note: we know the optimal sequence of operations needed to perform redistribution
+                # after the PQ search, and we could plumb this information through the OutputSharding
+                # so the subsequent redistribute() call can skip doing another graph-based transforminfo search,
+                # but this is not implemented now.
                 op_strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
                     mesh, strategy_schema, single_dim_strategy_info, out_tensor_meta
                 )
