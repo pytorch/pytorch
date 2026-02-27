@@ -167,6 +167,18 @@ monotonic_binary_ops = [
     aten.logaddexp2.default,
 ]
 
+# Ops that preserve specific Partial types through the operation.
+# For example, torch.maximum preserves Partial("max") because
+# max(max(a), max(b)) == max(a, b).
+partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
+    aten.maximum.default: "max",
+    aten.maximum.out: "max",
+    prims.fmax.default: "max",
+    aten.minimum.default: "min",
+    aten.minimum.out: "min",
+    prims.fmin.default: "min",
+}
+
 pointwise_ops = (
     [
         # please keep the entries below alphabetically sorted
@@ -255,9 +267,7 @@ pointwise_ops = (
         aten.clamp_.default,
         aten.clamp_.Tensor,
         aten.clamp_min.default,
-        aten.clamp_min.Tensor,
         aten.clamp_max.default,
-        aten.clamp_max.Tensor,
         aten.clip.default,
         aten.clip.out,
         aten.clip_.default,
@@ -305,9 +315,7 @@ pointwise_ops = (
         aten.float_power_.Scalar,
         aten.float_power_.Tensor,
         aten.floor.out,
-        aten.fmax.default,
         aten.fmax.out,
-        aten.fmin.default,
         aten.fmin.out,
         aten.fmod.Scalar,
         aten.fmod.Scalar_out,
@@ -506,6 +514,16 @@ pointwise_ops = (
     + linear_nondecreasing_unary_ops
     + all_partial_preserving_unary_ops
     + monotonic_binary_ops
+    + [
+        op
+        for op in monotonic_max_preserving_binary_ops
+        if op not in partial_preserving_ops
+    ]
+    + [
+        op
+        for op in monotonic_min_preserving_binary_ops
+        if op not in partial_preserving_ops
+    ]
 )
 
 
@@ -517,18 +535,6 @@ linear_pointwise_ops: dict[OpOverload, int] = {
     **dict.fromkeys(binary_div_ops, 2),
     **dict.fromkeys(scalar_linear_ops, 0),
     **dict.fromkeys(neg_ops, 0),
-}
-
-# Ops that preserve specific Partial types through the operation.
-# For example, torch.maximum preserves Partial("max") because
-# max(max(a), max(b)) == max(a, b).
-partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
-    aten.maximum.default: "max",
-    aten.maximum.out: "max",
-    prims.fmax.default: "max",
-    aten.minimum.default: "min",
-    aten.minimum.out: "min",
-    prims.fmin.default: "min",
 }
 
 
