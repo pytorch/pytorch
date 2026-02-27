@@ -13,6 +13,7 @@ The workflow is:
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from typing import Any
 
@@ -20,6 +21,24 @@ from .triton_heuristics import CachingAutotuner
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class TritonKernelCompileResult:
+    cubin_path: str
+    mangled_name: str
+    num_warps: int
+    shared_mem: int
+    xblock: int
+    yblock: int
+    zblock: int
+    r0block: int
+    rsplit: int
+    rsplit_size: int
+    config_index: int | None
+    global_scratch: int | None
+    profile_scratch: int | None
+
 
 _pending_kernels: dict[str, Any] = {}
 
@@ -58,21 +77,7 @@ def run_triton_kernel_with_autotune(
     kernel_name: str,
     stream: Any,
     args: list[Any],
-) -> tuple[
-    str,  # cubin_path
-    str,  # mangled_name
-    int,  # num_warps
-    int,  # shared_mem
-    int,  # xblock
-    int,  # yblock
-    int,  # zblock
-    int,  # r0block
-    int,  # rsplit
-    int,  # rsplit_size
-    int | None,  # config_index
-    int | None,  # global_scratch
-    int | None,  # profile_scratch
-]:
+) -> TritonKernelCompileResult:
     """
     Run a Triton kernel with full autotuning using actual tensor arguments.
     """
@@ -158,18 +163,18 @@ def run_triton_kernel_with_autotune(
         profile_scratch,
     )
 
-    return (
-        cubin_path,
-        mangled_name,
-        num_warps,
-        shared_mem,
-        xblock,
-        yblock,
-        zblock,
-        r0block,
-        rsplit,
-        rsplit_size,
-        config_index,
-        global_scratch,
-        profile_scratch,
+    return TritonKernelCompileResult(
+        cubin_path=cubin_path,
+        mangled_name=mangled_name,
+        num_warps=num_warps,
+        shared_mem=shared_mem,
+        xblock=xblock,
+        yblock=yblock,
+        zblock=zblock,
+        r0block=r0block,
+        rsplit=rsplit,
+        rsplit_size=rsplit_size,
+        config_index=config_index,
+        global_scratch=global_scratch,
+        profile_scratch=profile_scratch,
     )
