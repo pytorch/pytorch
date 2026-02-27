@@ -774,33 +774,6 @@ class PT2ArchiveContents:
     extra_files: dict[str, Any]
 
 
-def _create_flat_tensor_from_bytes(
-    tensor_bytes: bytes,
-    tensor_meta: schema.TensorMeta,
-) -> torch.Tensor:
-    """
-    Create a flat tensor from raw bytes with dtype, device and requires_grad.
-    It will be re-strided based on size, stride, and storage_offset later.
-    """
-    dtype = deserialize_scalar_type(tensor_meta.dtype)
-    size = deserialize_size(tensor_meta.sizes)
-    device = deserialize_device(tensor_meta.device)
-
-    if len(tensor_bytes) != 0:
-        tensor = torch.frombuffer(
-            tensor_bytes, dtype=dtype, requires_grad=tensor_meta.requires_grad
-        ).to(device)
-    else:
-        # cannot call torch.frombuffer() on empty bytes
-        logger.warning(
-            "Cannot call torch.frombuffer() on empty bytes. "
-            "Creating a tensor with zeros as workaround."
-        )
-        tensor = torch.zeros(size, dtype=dtype, device=device)
-
-    return tensor
-
-
 def _build_file_map(
     archive_reader: PT2ArchiveReader,
     config: schema.PayloadConfig,
@@ -818,12 +791,42 @@ def _build_file_map(
         if payload_meta.path_name in file_map:
             continue
 
-        tensor_bytes = archive_reader.read_bytes(
-            os.path.join(base_dir, payload_meta.path_name)
-        )
         if payload_meta.tensor_meta is None:
             raise AssertionError("payload_meta.tensor_meta cannot be None")
-        tensor = _create_flat_tensor_from_bytes(tensor_bytes, payload_meta.tensor_meta)
+
+        tensor_meta = payload_meta.tensor_meta
+        dtype = deserialize_scalar_type(tensor_meta.dtype)
+        device = deserialize_device(tensor_meta.device)
+        record_name = os.path.join(base_dir, payload_meta.path_name)
+        # pyrefly: ignore [missing-attribute]
+        nbytes = archive_reader.archive_file.get_record_size(record_name)
+
+        if nbytes == 0:
+            size = deserialize_size(tensor_meta.sizes)
+            tensor = torch.zeros(size, dtype=dtype, device=device)
+            if tensor_meta.requires_grad:
+                tensor.requires_grad_(True)
+        else:
+            element_size = torch._utils._element_size(dtype)
+            if nbytes % element_size != 0:
+                raise ValueError(
+                    f"Record {record_name}: size {nbytes} is not a multiple of "
+                    f"element size {element_size} for dtype {dtype}"
+                )
+            numel = nbytes // element_size
+            # pyrefly: ignore [missing-attribute]
+            raw = archive_reader.archive_file.get_storage_from_record(
+                record_name, numel, dtype
+            )
+            # get_storage_from_record returns a tensor with empty DispatchKeySet,
+            # so we wrap the storage in a proper CPU tensor via set_().
+            tensor = torch.empty(0, dtype=dtype)
+            tensor.set_(raw.untyped_storage(), 0, (numel,), (1,))
+            if tensor_meta.requires_grad:
+                tensor.requires_grad_(True)
+            if device != torch.device("cpu"):
+                tensor = tensor.to(device)
+
         file_map[payload_meta.path_name] = tensor
 
     return file_map
