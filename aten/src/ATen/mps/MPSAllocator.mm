@@ -40,9 +40,15 @@ void MPSHeapAllocatorImpl::init_allocator() {
 
 void MPSHeapAllocatorImpl::init_buffer_pools() {
   // using a container for pools to simplify iterating over them
+  // Pool of large buffers with private storage mode
+  m_pools.emplace(BufferPool::Kind::PRIVATE_LARGE,
+                  std::make_unique<BufferPool>(m_device, UsageFlags::PRIVATE | UsageFlags::HAZARD));
   // Pool of large buffers with shared storage mode
   m_pools.emplace(BufferPool::Kind::SHARED_LARGE,
                   std::make_unique<BufferPool>(m_device, UsageFlags::SHARED | UsageFlags::HAZARD));
+  // Pool of small buffers with private storage mode
+  m_pools.emplace(BufferPool::Kind::PRIVATE_SMALL,
+                  std::make_unique<BufferPool>(m_device, UsageFlags::SMALL | UsageFlags::PRIVATE | UsageFlags::HAZARD));
   // Pool of small buffers with shared storage mode
   m_pools.emplace(BufferPool::Kind::SHARED_SMALL,
                   std::make_unique<BufferPool>(m_device, UsageFlags::SMALL | UsageFlags::SHARED | UsageFlags::HAZARD));
@@ -58,10 +64,12 @@ BufferPool& MPSHeapAllocatorImpl::get_pool(size_t requested_size, size_t aligned
 
   if (usage & UsageFlags::SCALAR) {
     poolKind = BufferPool::Kind::SCALAR;
-  } else if (aligned_size <= kMaxSmallAlloc) {
+  } else if (requested_size <= kMaxScalarAlloc && m_device.hasUnifiedMemory) {
     poolKind = BufferPool::Kind::SHARED_SMALL;
+  } else if (aligned_size <= kMaxSmallAlloc) {
+    poolKind = (usage & UsageFlags::SHARED) ? BufferPool::Kind::SHARED_SMALL : BufferPool::Kind::PRIVATE_SMALL;
   } else {
-    poolKind = BufferPool::Kind::SHARED_LARGE;
+    poolKind = (usage & UsageFlags::SHARED) ? BufferPool::Kind::SHARED_LARGE : BufferPool::Kind::PRIVATE_LARGE;
   }
   return *m_pools[poolKind];
 }
@@ -822,9 +830,16 @@ MPSAllocator& _getSharedAllocator() {
   return s_mps_shared_alloc;
 }
 
+MPSAllocator& _getPrivateAllocator() {
+  static MPSAllocator s_mps_private_alloc(HeapAllocator::UsageFlags::PRIVATE);
+  return s_mps_private_alloc;
+}
 } // anonymous namespace
 
-IMPSAllocator* getIMPSAllocator() {
+IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
+  if (!sharedAllocator) {
+    return &_getPrivateAllocator();
+  }
   auto& sa = _getSharedAllocator();
   if (sa.isSharedStorageSupported()) {
     return &sa;

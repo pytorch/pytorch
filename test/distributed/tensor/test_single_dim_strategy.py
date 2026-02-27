@@ -262,7 +262,8 @@ class TestExpandPlaceholder(TestCase):
                 op_schema.args_meta,
                 op_schema.kwargs_meta,
             )
-            assert isinstance(strategy, TupleStrategy)
+            if not isinstance(strategy, TupleStrategy):
+                raise AssertionError(f"Expected TupleStrategy, got {type(strategy)}")
             return strategy
 
         # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
@@ -289,7 +290,8 @@ class TestExpandPlaceholder(TestCase):
         )
         self.assertEqual(len(tuple_strategy.children), 2)
         for child_i, child in enumerate(tuple_strategy.children):
-            assert isinstance(child, OpStrategy)
+            if not isinstance(child, OpStrategy):
+                raise AssertionError(f"Expected OpStrategy, got {type(child)}")
             self.assertEqual(len(child.strategies), expected_num_strategies[child_i])
 
             # _select_min_cost_strategy can have multiple min-cost strategies,
@@ -347,7 +349,8 @@ class TestExpandPlaceholder(TestCase):
             strategy = expanded_strategy_fn(
                 torch.ops.aten.cat.default, op_schema.args_meta, op_schema.kwargs_meta
             )
-            assert isinstance(strategy, OpStrategy)
+            if not isinstance(strategy, OpStrategy):
+                raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
             return strategy
 
         # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
@@ -461,7 +464,8 @@ class TestExpandPlaceholder(TestCase):
         strategy = expanded_strategy_fn(
             torch.ops.aten.matmul.default, op_schema.args_meta, op_schema.kwargs_meta
         )
-        assert isinstance(strategy, OpStrategy)
+        if not isinstance(strategy, OpStrategy):
+            raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
 
         # For a 3D mesh with 8 single-dim strategies per mesh dim
         # (3 sharding + 4 per-input linearity + 1 implicit replicate),
@@ -473,7 +477,8 @@ class TestExpandPlaceholder(TestCase):
         for op_spec in strategy.strategies:
             output_spec = op_spec.output_spec
             input_specs = op_spec.input_specs
-            assert input_specs is not None
+            if input_specs is None:
+                raise AssertionError("Expected input_specs to not be None")
 
             # Verify tensor_meta is populated for output spec
             self.assertIsNotNone(
