@@ -2322,15 +2322,20 @@ create_native_op_schema(
     comparison_key.emplace_back(std::move(arg));
   };
 
-  const auto handle_non_tensor_arg = [&comparison_key,
-                                      &comparison_key_hash](c10::IValue arg) {
-    if (arg.isTensor() && !arg.toTensor().defined()) {
-      arg = c10::IValue();
-    }
-    comparison_key_hash =
-        c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-    comparison_key.emplace_back(std::move(arg));
-  };
+  const auto handle_non_tensor_or_undefined =
+      [&comparison_key, &comparison_key_hash](c10::IValue arg) {
+        // We reach here when arg is TensorFlavor::NON_TENSOR
+        // (not a Tensor at all or undefined Tensor)
+        // We coerce undefined Tensor to None, just as we do when
+        // converting IValues to PyObject. (same behaviour as
+        // handle_non_dtensor_arg)
+        if (arg.isTensor() && !arg.toTensor().defined()) {
+          arg = c10::IValue();
+        }
+        comparison_key_hash =
+            c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+        comparison_key.emplace_back(std::move(arg));
+      };
 
   const bool allow_implicit_replication =
       at::get_dtensor_allow_implicit_replication();
@@ -2402,7 +2407,7 @@ create_native_op_schema(
                 item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
               handle_exactly_tensor(item_py_tensor);
             } else { // non-tensor
-              handle_non_tensor_arg(item);
+              handle_non_tensor_or_undefined(item);
             }
           }
         } else {
@@ -2486,7 +2491,7 @@ create_native_op_schema(
                   item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
                 handle_exactly_tensor(item_py_tensor);
               } else { // non-tensor
-                handle_non_tensor_arg(item);
+                handle_non_tensor_or_undefined(item);
               }
             }
           } else {
