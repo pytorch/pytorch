@@ -5188,7 +5188,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._dynamo import invoke_subgraph_cache as isc
+        from torch._dynamo import invoke_subgraph_cache
         from torch._dynamo.utils import dynamo_timed
 
         fn_var = args[0]
@@ -5211,8 +5211,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # Auto-cache lookup
         if auto_cache:
             with dynamo_timed("invoke_subgraph_cache_lookup"):
-                flat = isc.flatten_args(tx, fn_args_vt, kwargs)
-                match = isc.find_cache_match(
+                flat = invoke_subgraph_cache.flatten_args_kwargs(tx, fn_args_vt, kwargs)
+                match = invoke_subgraph_cache.find_cache_match(
                     tx, fn_var, flat.flat_vts, flat.arg_sources
                 )
             if match is not None:
@@ -5222,7 +5222,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     match.body_name,
                 )
                 with dynamo_timed("invoke_subgraph_stamp_out"):
-                    return isc.stamp_out_cached_subgraph(tx, fn_args_vt, kwargs, match)
+                    return invoke_subgraph_cache.stamp_out_cached_subgraph(
+                        tx, fn_args_vt, kwargs, match
+                    )
 
         # Snapshot guards before tracing for auto-cache delta computation
         guards_before = None
@@ -5275,13 +5277,13 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         # Auto-cache save
         if auto_cache:
-            flat = isc.flatten_args(tx, fn_args_vt, kwargs)
-            if isc.is_auto_cacheable(body_r, flat.flat_vts):
-                condition = isc.build_auto_cache_condition(
+            flat = invoke_subgraph_cache.flatten_args_kwargs(tx, fn_args_vt, kwargs)
+            if invoke_subgraph_cache.is_auto_cacheable(body_r, flat.flat_vts):
+                condition = invoke_subgraph_cache.build_auto_cache_condition(
                     tx, flat.flat_vts, flat.arg_sources, guards_before
                 )
                 if condition is not None:
-                    isc.save_cache_entry(
+                    invoke_subgraph_cache.save_cache_entry(
                         tx,
                         fn_var,
                         flat.proxy_node_to_idx,

@@ -6,40 +6,42 @@ HOP dispatch while all cache build / lookup / stamp-out logic lives here.
 
 from __future__ import annotations
 
-import logging
-import types
 from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.fx
-from torch.fx.proxy import Proxy
-
 from torch._dynamo.guards import (
+    _extract_tensor_metadata,
     _SKIP_GUARD,
     GUARD_VALUE_DISPATCH,
-    _extract_tensor_metadata,
 )
+from torch.fx.proxy import Proxy
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.base import VariableTracker
-    from torch._guards import AutoCacheCondition, PureSubgraphCacheEntry, Source
+    from torch._guards import AutoCacheCondition
 
 
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
 
 
 # ---------------------------------------------------------------------------
-# FlattenedArgs — structured return type for flatten_args
+# FlattenedArgs — structured return type for flatten_args_kwargs
 # ---------------------------------------------------------------------------
 
 
 class FlattenedArgs(NamedTuple):
-    flat_vts: list[tuple[str, Any]]  # list[(tag, VariableTracker)]
+    # (tag, VariableTracker) pairs for each leaf input.
+    # Tags: "tensor", "symnode", "constant", "module".
+    flat_vts: list[tuple[str, Any]]
+    # fx.Node -> flat index, for O(1) deduplication of proxy nodes.
     proxy_node_to_idx: dict[torch.fx.Node, int]
+    # Proxy objects in flat index order, one per unique fx.Node.
     flat_proxies: list[Proxy]
-    arg_sources: list[Any]  # list[Source]
+    # Source objects collected from leaf VTs that have a source.
+    arg_sources: list[Any]
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +49,7 @@ class FlattenedArgs(NamedTuple):
 # ---------------------------------------------------------------------------
 
 
-def flatten_args(
+def flatten_args_kwargs(
     tx: InstructionTranslator,
     fn_args_vt: Any,
     kwargs: dict[str, Any],
@@ -102,6 +104,16 @@ def get_fn_id(fn_var: Any) -> int | None:
 
 
 def is_auto_cacheable(body_r: Any, flat_vts: list[tuple[str, Any]]) -> bool:
+    """Best-effort check for whether a traced subgraph result can be
+    auto-cached.
+
+    It is possible that a subgraph is morally reusable but does not fall
+    into the limited support that Dynamo has today. Current limitations:
+      - Output must be a single tensor, or a tuple/list of plain tensors.
+      - All flattened inputs must be one of: tensor, symnode, constant,
+        unspecialized NN module. Pytree-registered or custom VT types
+        are not yet supported.
+    """
     from torch._dynamo.variables.lists import ListVariable, TupleVariable
     from torch._dynamo.variables.tensor import TensorVariable
 
@@ -143,7 +155,14 @@ def build_auto_cache_condition(
     arg_sources: list[Any],
     guards_before: Any,
 ) -> AutoCacheCondition | None:
-    from torch._guards import AutoCacheCondition, ChainedSource
+    """Build an AutoCacheCondition from the guard delta after tracing.
+
+    Computes guards_after - guards_before to find guards introduced by
+    subgraph tracing, then filters to only those rooted at the function's
+    arg sources and encodes each via the GUARD_VALUE_DISPATCH table.
+    Returns None if any guard type is unsupported.
+    """
+    from torch._guards import AutoCacheCondition
 
     input_checks: list[tuple[str, Any]] = []
     for tag, vt in flat_vts:
@@ -162,28 +181,25 @@ def build_auto_cache_condition(
         elif tag == "module":
             input_checks.append(("module", None))
         else:
-            hc_log.debug(
-                "auto_guard_cache: cannot build condition -- unexpected input tag '%s' for %s",
-                tag,
-                type(vt).__name__,
+            raise RuntimeError(
+                f"Unexpected input tag '{tag}' for {type(vt).__name__} -- "
+                f"is_auto_cacheable should have rejected this"
             )
-            return None
 
     guards_after = tx.output.guards.inner.copy()
-    new_guards = guards_after - guards_before
+    delta_guards = guards_after - guards_before
 
-    arg_root_sources: set = set()
-    for s in arg_sources:
-        arg_root_sources.add(s.get_base() if isinstance(s, ChainedSource) else s)
+    # Collect all guards for arg sources (includes pre-existing ones like
+    # TENSOR_MATCH that were installed before the invoke_subgraph call).
+    source_guards: set = set()
+    for source in arg_sources:
+        source_guards.update(tx.output.guards.get_guards_for_source(source))
 
-    guard_tuples: list[tuple[Any, str, Any]] = []
-    for guard in new_guards:
+    all_relevant_guards = set(delta_guards) | source_guards
+
+    guard_tuples: list[tuple[Any, Any, Any]] = []
+    for guard in all_relevant_guards:
         source = guard.originating_source
-
-        root = source.get_base() if isinstance(source, ChainedSource) else source
-        if root not in arg_root_sources:
-            continue
-
         type_str = guard.create_fn_name()
         handler = GUARD_VALUE_DISPATCH.get(type_str)
 
@@ -198,7 +214,6 @@ def build_auto_cache_condition(
             )
             return None
 
-        # Resolve value
         try:
             if handler.resolve_base_only:
                 value = tx.output.resolve_source_value(source.base)
@@ -216,17 +231,10 @@ def build_auto_cache_condition(
         if type_str == "CONSTANT_MATCH" and isinstance(value, str):
             continue
 
-        # TENSOR_MATCH type check
-        if type_str == "TENSOR_MATCH" and not isinstance(value, torch.Tensor):
-            hc_log.debug(
-                "auto_guard_cache: cannot build condition -- TENSOR_MATCH source '%s' resolved to %s, not a tensor",
-                source.name,
-                type(value).__name__,
-            )
-            return None
-
         expected = handler.extract(guard, value)
-        guard_tuples.append((source, type_str, expected))
+        guard_tuples.append((source, handler, expected))
+
+    hc_log.debug("Number of guards %s", len(guard_tuples))
 
     return AutoCacheCondition(
         input_checks=input_checks,
@@ -239,9 +247,14 @@ def is_reusable(
     condition: AutoCacheCondition,
     flat_vts: list[tuple[str, Any]],
     new_arg_sources: list[Any],
-    cached_entry: PureSubgraphCacheEntry,
+    cached_entry: Any,
 ) -> bool:
-    # Structural check: input count, tags, and metadata must match
+    """Check if a cache entry's conditions match the current call."""
+    # Structural check: input count, tags, and metadata must match.
+    # Tensor metadata (shape, stride, dtype, device, requires_grad) is checked
+    # here because TENSOR_MATCH guards for subgraph inputs typically already
+    # exist in the outer graph before tracing and thus won't appear in the
+    # guard delta.
     if len(condition.input_checks) != len(flat_vts):
         hc_log.debug(
             "auto_guard_cache: reuse failed -- input count mismatch: cached %d vs current %d",
@@ -256,7 +269,9 @@ def is_reusable(
         if cached_tag != cur_tag:
             hc_log.debug(
                 "auto_guard_cache: reuse failed -- input %d tag mismatch: cached '%s' vs current '%s'",
-                i, cached_tag, cur_tag,
+                i,
+                cached_tag,
+                cur_tag,
             )
             return False
         if cached_tag == "tensor":
@@ -288,38 +303,31 @@ def is_reusable(
     def replacement_fn(s: Any) -> Any:
         return source_replacement.get(s, s)
 
-    for source, type_str, expected in condition.guards:
-        handler = GUARD_VALUE_DISPATCH.get(type_str)
-        if handler is None or handler is _SKIP_GUARD:
-            hc_log.debug(
-                "auto_guard_cache: reuse failed -- unknown guard type '%s' on '%s'",
-                type_str,
-                source.name,
-            )
-            return False
+    # Shared resolution context so source.get_value memoizes intermediate
+    # results (e.g. common base sources) across all guards in this check.
+    resolve_globals = {"G": tx.output.root_tx.f_globals, "L": tx.output.root_tx.f_locals}
+    resolve_locals: dict = {}
+    resolve_cache: dict = {}
 
+    for source, handler, expected in condition.guards:
         if source_replacement:
             new_source = source.clone(replacement_fn)
         else:
             new_source = source
 
         try:
-            if handler.resolve_base_only:
-                value = tx.output.resolve_source_value(new_source.base)
-            else:
-                value = tx.output.resolve_source_value(new_source)
+            resolve_src = new_source.base if handler.resolve_base_only else new_source
+            value = resolve_src.get_value(resolve_globals, resolve_locals, resolve_cache)
         except Exception:
             hc_log.debug(
-                "auto_guard_cache: reuse failed -- cannot resolve source '%s' for %s guard",
+                "auto_guard_cache: reuse failed -- cannot resolve source '%s'",
                 new_source.name,
-                type_str,
             )
             return False
 
         if not handler.check(value, expected):
             hc_log.debug(
-                "auto_guard_cache: reuse failed -- %s guard on '%s': expected %s, got mismatch",
-                type_str,
+                "auto_guard_cache: reuse failed -- guard on '%s': expected %s, got mismatch",
                 new_source.name,
                 expected,
             )
@@ -333,13 +341,11 @@ def find_cache_match(
     fn_var: Any,
     flat_vts: list[tuple[str, Any]],
     new_arg_sources: list[Any],
-) -> PureSubgraphCacheEntry | None:
+) -> Any:
     from torch._guards import InvokeSubgraphCache
 
-    invoke_subgraph_cache = (
-        tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
-            torch._higher_order_ops.invoke_subgraph
-        )
+    invoke_subgraph_cache = tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+        torch._higher_order_ops.invoke_subgraph
     )
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return None
@@ -367,12 +373,10 @@ def save_cache_entry(
     condition: AutoCacheCondition,
 ) -> None:
     from torch._dynamo.variables.tensor import TensorVariable
-    from torch._guards import InvokeSubgraphCache, PureSubgraphCacheEntry
+    from torch._guards import AutoCacheEntry, InvokeSubgraphCache
 
-    invoke_subgraph_cache = (
-        tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
-            torch._higher_order_ops.invoke_subgraph
-        )
+    invoke_subgraph_cache = tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+        torch._higher_order_ops.invoke_subgraph
     )
     if not isinstance(invoke_subgraph_cache, InvokeSubgraphCache):
         return
@@ -385,11 +389,10 @@ def save_cache_entry(
     single_tensor_output = isinstance(body_r, TensorVariable)
 
     output_metadata = [
-        (t.shape, t.stride(), t.dtype, t.device, t.requires_grad)
-        for t in example_value
+        (t.shape, t.stride(), t.dtype, t.device, t.requires_grad) for t in example_value
     ]
 
-    entry = PureSubgraphCacheEntry(
+    entry = AutoCacheEntry(
         body_name=body_name,
         body_gmod=body_gmod,
         config=config,
@@ -405,19 +408,20 @@ def stamp_out_cached_subgraph(
     tx: InstructionTranslator,
     fn_args_vt: Any,
     kwargs: dict[str, Any],
-    cached: PureSubgraphCacheEntry,
+    cached: Any,
 ) -> Any:
     from torch._dynamo.variables.builder import VariableBuilder
     from torch._dynamo.variables.higher_order_ops import add_call_function, make_attr
+    from torch._dynamo.variables.tensor import TensorVariable
 
-    flat = flatten_args(tx, fn_args_vt, kwargs)
+    flat = flatten_args_kwargs(tx, fn_args_vt, kwargs)
     flat_proxies = flat.flat_proxies
     new_arg_sources = flat.arg_sources
 
-    source_replacement = _build_source_replacement(
-        cached.arg_sources, new_arg_sources
-    )
+    source_replacement = _build_source_replacement(cached.arg_sources, new_arg_sources)
 
+    # TODO: consider extracting this placeholder-by-source lookup into a
+    # utility on OutputGraph so other features can reuse it.
     existing_source_to_node: dict = {}
     for node in tx.output.graph.find_nodes(op="placeholder"):
         ga = node.meta.get("grapharg", None)
@@ -436,9 +440,7 @@ def stamp_out_cached_subgraph(
 
             if new_source in existing_source_to_node:
                 node = existing_source_to_node[new_source]
-                new_lifted_args.append(
-                    torch.fx.Proxy(node, tx.output.current_tracer)
-                )
+                new_lifted_args.append(torch.fx.Proxy(node, tx.output.current_tracer))
             else:
                 value = tx.output.resolve_source_value(new_source)
                 vt = VariableBuilder(tx, new_source)(value)
@@ -468,7 +470,11 @@ def stamp_out_cached_subgraph(
         cached.config,
     )
 
+    # Validate output structure matches what was cached
     if cached.single_tensor_output:
+        assert isinstance(flat_variable.items[0], TensorVariable), (
+            f"Expected tensor output but got {type(flat_variable.items[0]).__name__}"
+        )
         return flat_variable.items[0]
     return flat_variable
 
@@ -478,9 +484,7 @@ def stamp_out_cached_subgraph(
 # ---------------------------------------------------------------------------
 
 
-def _build_source_replacement(
-    old_sources: list[Any], new_sources: list[Any]
-) -> dict:
+def _build_source_replacement(old_sources: list[Any], new_sources: list[Any]) -> dict:
     return {old: new for old, new in zip(old_sources, new_sources) if old != new}
 
 

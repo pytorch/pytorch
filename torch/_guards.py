@@ -640,6 +640,17 @@ class GuardsSet:
             self.inner: OrderedSet[Guard] = OrderedSet()
         else:
             self.inner = inner
+        # Index: originating_source → guards with that exact source.
+        # Rebuilt from inner in __init__ (for checkpoint restore) and
+        # maintained incrementally in add().
+        self._source_to_guards: dict[Source, list[Guard]] = {}
+        for guard in self.inner:
+            self._index_guard(guard)
+
+    def _index_guard(self, guard: Guard) -> None:
+        source = guard.originating_source
+        if source is not None:
+            self._source_to_guards.setdefault(source, []).append(guard)
 
     def __iter__(self) -> Iterator[Guard]:
         return iter(self.inner)
@@ -666,11 +677,16 @@ class GuardsSet:
         if guard.user_stack is None:
             guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
+        self._index_guard(guard)
 
     def update(self, *others: set[Guard]) -> None:
         for o in others:
             for g in o:
                 self.add(g, skip=1)
+
+    def get_guards_for_source(self, source: Source) -> list[Guard]:
+        """Return all guards with the given originating_source."""
+        return list(self._source_to_guards.get(source, []))
 
     def remove_guards_with_source(self, source: Source) -> None:
         """Delete all guards that contains a given source"""
@@ -679,6 +695,11 @@ class GuardsSet:
         self.inner = OrderedSet(
             g for g in self.inner if not is_from_source(g.originating_source, source)
         )
+        # Rebuild the index since is_from_source walks the chain, so
+        # multiple source keys may need removal.
+        self._source_to_guards = {}
+        for guard in self.inner:
+            self._index_guard(guard)
 
 
 """
@@ -738,7 +759,7 @@ class HopSubgraphCache:
 
 
 @dataclass
-class PureSubgraphCacheEntry:
+class AutoCacheEntry:
     body_name: str
     body_gmod: Any  # GraphModule
     config: Any  # NestedCompileRegionOptions | None
@@ -770,11 +791,10 @@ class AutoCacheCondition:
     # appear in the guard delta.
     input_checks: list[tuple[str, Any]]
 
-    # Guards captured during the trace (delta from before/after).
-    # Each entry: (source, type_str, expected_value)
-    # Keyword-dependent info (e.g. DICT_CONTAINS key/invert) is baked into
-    # expected by the dispatch table, so create_fn is not needed.
-    guards: list[tuple[Any, str, Any]]
+    # Guards captured during the trace (delta + source-mapped).
+    # Each entry: (source, handler, expected_value)
+    # handler is a pre-resolved GuardValueHandler from GUARD_VALUE_DISPATCH.
+    guards: list[tuple[Any, Any, Any]]
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
@@ -791,7 +811,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
         # fn_id → list of (condition, cache_entry) pairs. Walked linearly
         # on lookup; first matching condition wins.
         self.auto_subgraph_cache: dict[
-            int, list[tuple[AutoCacheCondition, PureSubgraphCacheEntry]]
+            int, list[tuple[AutoCacheCondition, AutoCacheEntry]]
         ] = defaultdict(list)
 
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None:
@@ -851,17 +871,21 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self,
         fn_id: int,
         condition: AutoCacheCondition,
-        entry: PureSubgraphCacheEntry,
+        entry: AutoCacheEntry,
     ) -> None:
-        self.auto_subgraph_cache[fn_id].insert(0, (condition, entry))
+        self.auto_subgraph_cache[fn_id].append((condition, entry))
 
     def find_auto_cache_entry(
         self,
         fn_id: int,
-        evaluator: Callable[[AutoCacheCondition, PureSubgraphCacheEntry], bool],
-    ) -> PureSubgraphCacheEntry | None:
-        for condition, entry in self.auto_subgraph_cache.get(fn_id, []):
+        evaluator: Callable[[AutoCacheCondition, AutoCacheEntry], bool],
+    ) -> AutoCacheEntry | None:
+        entries = self.auto_subgraph_cache.get(fn_id, [])
+        for i, (condition, entry) in enumerate(entries):
             if evaluator(condition, entry):
+                # MRU: move the hit entry to the front for faster future lookups
+                if i > 0:
+                    entries.insert(0, entries.pop(i))
                 return entry
         return None
 
