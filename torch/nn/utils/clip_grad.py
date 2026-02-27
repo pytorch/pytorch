@@ -38,7 +38,6 @@ def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
 
     def _no_grad_wrapper(*args, **kwargs):
         with torch.no_grad():
-            # pyrefly: ignore [invalid-param-spec]
             return func(*args, **kwargs)
 
     functools.update_wrapper(_no_grad_wrapper, func)

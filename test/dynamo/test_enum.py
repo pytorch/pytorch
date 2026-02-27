@@ -192,7 +192,7 @@ class EnumTests(torch._dynamo.test_case.TestCase):
             else:
                 return y - 2
 
-        opt_f = torch.compile(fullgraph=True)(f)
+        opt_f = torch.compile(fullgraph=True, backend="eager")(f)
         args = [torch.zeros(1), Bool.TRUE]
         ref_out = f(*args)
         opt_out = opt_f(*args)

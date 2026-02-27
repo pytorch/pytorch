@@ -302,16 +302,16 @@ def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
         return _combine_int_rank_results(rank_results)
 
     if isinstance(any_v, torch.device):
-        assert all(v.type == any_v.type for v in rank_results.values()), (
-            "device type should be the same"
-        )
+        if not all(v.type == any_v.type for v in rank_results.values()):
+            raise AssertionError("device type should be the same")
         # Just use the first device - the device type is what matters,
         # and LocalTensorMode runs on a single physical device anyway
         return any_v
 
-    assert all(v == any_v for v in rank_results.values()), (
-        "Non Tensor or int rank results must be equal for all ranks"
-    )
+    if not all(v == any_v for v in rank_results.values()):
+        raise AssertionError(
+            "Non Tensor or int rank results must be equal for all ranks"
+        )
 
     return any_v
 
@@ -363,11 +363,13 @@ def _for_each_rank_run_func(
     default_value: Tensor | None = None
     for r in sorted(ranks):
         if use_per_rank_rng:
-            assert lm is not None
+            if lm is None:
+                raise AssertionError
             if r in lm._per_rank_rng_states:
                 _set_rng_state(*lm._per_rank_rng_states[r])
         else:
-            assert global_rng_state is not None
+            if global_rng_state is None:
+                raise AssertionError
             _set_rng_state(*global_rng_state)
 
         rank_flat_args = [_map_to_rank_local_val(a, r) for a in flat_args]
@@ -380,7 +382,8 @@ def _for_each_rank_run_func(
         flat_rank_rets[r] = rank_ret
 
         if use_per_rank_rng:
-            assert lm is not None
+            if lm is None:
+                raise AssertionError
             lm._per_rank_rng_states[r] = _get_rng_state()
 
         if default_value is None and func is torch.ops.aten.split.Tensor:
@@ -548,22 +551,26 @@ class LocalIntNode:
 
     def ge(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] >= _int_on_rank(other, r) for r in self._local_ints}
-        assert len(r) == 1, (self, other)
+        if len(r) != 1:
+            raise AssertionError((self, other))
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 
     def le(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] <= _int_on_rank(other, r) for r in self._local_ints}
-        assert len(r) == 1, (self, other)
+        if len(r) != 1:
+            raise AssertionError((self, other))
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 
     def gt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] > _int_on_rank(other, r) for r in self._local_ints}
-        assert len(r) == 1, (self, other)
+        if len(r) != 1:
+            raise AssertionError((self, other))
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 
     def lt(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] < _int_on_rank(other, r) for r in self._local_ints}
-        assert len(r) == 1, (self, other)
+        if len(r) != 1:
+            raise AssertionError((self, other))
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 
     def wrap_int(self, num: int) -> "LocalIntNode | ConstantIntNode":
@@ -634,7 +641,8 @@ class _LocalDeviceHandle:
         """
         if isinstance(state, LocalTensor):
             lm = enabled_local_tensor_mode()
-            assert lm is not None
+            if lm is None:
+                raise AssertionError
 
             # Similar to get_rng_state but in reverse: we need to convert from
             # device-specific tensor format to full state tuple format.
@@ -689,7 +697,8 @@ class _LocalOffsetBasedRNGTracker:
         from torch.distributed.tensor.placement_types import Shard
 
         lm = enabled_local_tensor_mode()
-        assert lm is not None
+        if lm is None:
+            raise AssertionError
 
         state._per_rank_offsets = {}
 
@@ -740,7 +749,8 @@ class _LocalOffsetBasedRNGTracker:
         from torch.distributed.tensor._ops.utils import prod
 
         lm = enabled_local_tensor_mode()
-        assert lm is not None
+        if lm is None:
+            raise AssertionError
 
         dtensor_shape = spec.shape
         numel = prod(dtensor_shape)
@@ -767,7 +777,8 @@ class _LocalOffsetBasedRNGTracker:
     def _distribute_region(self, spec, generator=None):
         """Context manager for LocalTensor mode distribute region."""
         lm = enabled_local_tensor_mode()
-        assert lm is not None
+        if lm is None:
+            raise AssertionError
 
         # get base state
         if generator is not None:
@@ -787,7 +798,8 @@ class _LocalOffsetBasedRNGTracker:
                 any_rank_cpu, any_rank_cuda = any_rank_state
 
                 if self._device.type == "cuda":
-                    assert self._device.index in any_rank_cuda
+                    if self._device.index not in any_rank_cuda:
+                        raise AssertionError
                     any_rank_device_state = any_rank_cuda[self._device.index]
                 else:
                     any_rank_device_state = any_rank_cpu
@@ -867,15 +879,19 @@ def _compute_local_tensor_meta(
     # Assert that all tensors have the same dtype, layout and dispatch keys. Due
     # to uneven sharding, it is possible that tensors will have different shapes.
     for local_tensor in it:
-        assert dtype == local_tensor.dtype, (
-            "Tensors representing LocalTensor shards must have the same dtype"
-        )
-        assert layout == local_tensor.layout, (
-            "Tensors representing LocalTensor shards must have the same layout"
-        )
-        assert extra_dispatch_keys == _get_extra_dispatch_keys(local_tensor), (
-            "Tensors representing LocalTensor shards must have the same set of extra dispatch keys"
-        )
+        if dtype != local_tensor.dtype:
+            raise AssertionError(
+                "Tensors representing LocalTensor shards must have the same dtype"
+            )
+        if layout != local_tensor.layout:
+            raise AssertionError(
+                "Tensors representing LocalTensor shards must have the same layout"
+            )
+        if extra_dispatch_keys != _get_extra_dispatch_keys(local_tensor):
+            raise AssertionError(
+                "Tensors representing LocalTensor shards must have the "
+                "same set of extra dispatch keys"
+            )
 
     # Compute shape/stride.  We allow for non-SPMD'ness here
     local_shapes: dict[int, dict[int, int]] = defaultdict(dict)  # dim => rank => size
@@ -989,7 +1005,6 @@ class LocalTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
-            # pyrefly: ignore [bad-argument-type]
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -1017,9 +1032,10 @@ class LocalTensor(torch.Tensor):
         outer_size: torch.Size,
         outer_stride: tuple[int, ...],
     ) -> "LocalTensor":
-        assert flatten_spec is not None, (
-            "Expecting spec to be not None from `__tensor_flatten__` return value!"
-        )
+        if flatten_spec is None:
+            raise AssertionError(
+                "Expecting spec to be not None from `__tensor_flatten__` return value!"
+            )
         local_tensors = {
             _from_local_tensor_attr(a): t for a, t in inner_tensors.items()
         }
@@ -1046,9 +1062,8 @@ class LocalTensor(torch.Tensor):
                 local_tensor = arg
                 break
 
-        assert local_tensor is not None, (
-            "At least one of the arguments must be a LocalTensor"
-        )
+        if local_tensor is None:
+            raise AssertionError("At least one of the arguments must be a LocalTensor")
 
         # Check for unrecognized tensor subclasses (but allow regular tensors and scalars)
         has_unrecognized_types = _check_for_subclass(flat_args)
@@ -1119,9 +1134,8 @@ class LocalTensor(torch.Tensor):
 
         # Force all local tensor shards across ranks to be the same
         equal_obj = self._equal_local_tensors()
-        assert isinstance(equal_obj, torch.Tensor), (
-            "LocalTensor shards must be the same to reconcile"
-        )
+        if not isinstance(equal_obj, torch.Tensor):
+            raise AssertionError("LocalTensor shards must be the same to reconcile")
         cl = equal_obj.clone().detach()
         cl.requires_grad_(self.requires_grad)
         return cl
@@ -1232,7 +1246,8 @@ class LocalTensorMode(TorchDispatchMode):
             # assume is world size
             self.ranks = frozenset(range(ranks))
         else:
-            assert isinstance(ranks, frozenset)
+            if not isinstance(ranks, frozenset):
+                raise AssertionError
             self.ranks = ranks
         self._disable = True
         # Used to store the patched DeviceMesh methods
@@ -1317,9 +1332,11 @@ class LocalTensorMode(TorchDispatchMode):
         # For LocalTensors, verify they have compatible ranks
         for a in flat_args:
             if isinstance(a, LocalTensor):
-                assert a._ranks <= self.ranks, (
-                    f"Input LocalTensor {a} must be configured for a subset of the LocalTensorMode ranks {self.ranks}"
-                )
+                if a._ranks > self.ranks:
+                    raise AssertionError(
+                        f"Input LocalTensor {a} must be configured for a "
+                        f"subset of the LocalTensorMode ranks {self.ranks}"
+                    )
 
         if func.overloadpacket == torch.ops.aten.dim:
             return len(args[0]._size)
@@ -1458,7 +1475,8 @@ class LocalTensorMode(TorchDispatchMode):
         return self._per_rank_rng_states[next(iter(self.ranks))]
 
     def _patch_device_mesh(self) -> None:
-        assert self._old_device_mesh_methods is None
+        if self._old_device_mesh_methods is not None:
+            raise AssertionError
         saved = {}
         for name in _PATCHED_DEVICE_MESH_METHODS:
             saved[name] = getattr(DeviceMesh, name)
@@ -1468,7 +1486,8 @@ class LocalTensorMode(TorchDispatchMode):
 
     def _unpatch_device_mesh(self) -> None:
         saved, self._old_device_mesh_methods = self._old_device_mesh_methods, None
-        assert saved is not None
+        if saved is None:
+            raise AssertionError
         for name, value in saved.items():
             setattr(DeviceMesh, name, value)
 
@@ -1568,7 +1587,8 @@ class _LocalDeviceMesh:
         # rank (therefore below we are patching get_rank method). We are trying to
         # limit the invasiveness of local tensor.
         lm = enabled_local_tensor_mode()
-        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+        if lm is None:
+            raise AssertionError("Unexpectedly not in LocalTensorMode")
 
         # Check cache first (fast path without lock)
         mesh_id = id(self)
@@ -1588,7 +1608,8 @@ class _LocalDeviceMesh:
             for r in lm.ranks:
                 rank_tensor = self._layout.remap_to_tensor(rank_map)
                 rank_coords = (rank_tensor == r).nonzero().tolist()
-                assert len(rank_coords) == 1
+                if len(rank_coords) != 1:
+                    raise AssertionError
                 for d, c in enumerate(rank_coords[0][1:]):
                     coords[d][r] = c
 
@@ -1608,19 +1629,22 @@ class _LocalDeviceMesh:
     @staticmethod
     def _sym_get_coordinate(self: DeviceMesh, index: int) -> int:
         my_coordinate = self.get_coordinate()
-        assert my_coordinate is not None
+        if my_coordinate is None:
+            raise AssertionError
         return my_coordinate[index]
 
     @staticmethod
     def get_rank(self) -> int | SymInt:
         lm = enabled_local_tensor_mode()
-        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+        if lm is None:
+            raise AssertionError("Unexpectedly not in LocalTensorMode")
         return torch.SymInt(LocalIntNode(local_ints={r: r for r in lm.ranks}))
 
     @staticmethod
     def get_local_rank(self, mesh_dim: int | str | None = None) -> int | SymInt:
         lm = enabled_local_tensor_mode()
-        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+        if lm is None:
+            raise AssertionError("Unexpectedly not in LocalTensorMode")
 
         if self.ndim > 1 and mesh_dim is None:
             raise RuntimeError(
@@ -1637,7 +1661,8 @@ class _LocalDeviceMesh:
         # get_coordinate returns a list of SymInt, one per mesh dimension
         # We need to extract the coordinate for the specified mesh_dim
         coords = _LocalDeviceMesh.get_coordinate(self)
-        assert coords is not None
+        if coords is None:
+            raise AssertionError
         return coords[mesh_dim]
 
 
@@ -1734,6 +1759,40 @@ def maybe_run_for_local_tensor(func: Callable[_P, _R]) -> Callable[_P, _R]:
         return ret
 
     return wrapper
+
+
+def rank_map(cb: Callable[[int], Tensor]) -> Tensor:
+    """
+    Creates a tensor by mapping a callback over the current rank.
+
+    Under LocalTensorMode, calls cb(rank) for each simulated rank and returns
+    a LocalTensor. In real distributed (no LocalTensorMode), calls
+    cb(dist.get_rank()) and returns a plain Tensor.
+    """
+    lm = enabled_local_tensor_mode()
+    if lm is not None:
+        return lm.rank_map(cb)
+    else:
+        return cb(dist.get_rank())
+
+
+def tensor_map(tensor: Tensor, cb: Callable[[int, Tensor], Tensor | None]) -> Tensor:
+    """
+    Transforms a tensor by mapping a callback over the current rank and its
+    local shard.
+
+    Under LocalTensorMode, calls cb(rank, shard) for each simulated rank and
+    returns a LocalTensor. In real distributed (no LocalTensorMode), calls
+    cb(dist.get_rank(), tensor) and returns the result directly.
+    """
+    lm = enabled_local_tensor_mode()
+    if lm is not None:
+        assert isinstance(tensor, LocalTensor)
+        return lm.tensor_map(tensor, cb)
+    else:
+        r = cb(dist.get_rank(), tensor)
+        assert r is not None
+        return r
 
 
 def maybe_disable_local_tensor_mode() -> contextlib.AbstractContextManager:
@@ -1871,7 +1930,8 @@ class LocalRunnerMode:
 
     def __enter__(self) -> "LocalRunnerMode":
         global _LOCAL_RUNNER_MODE
-        assert _LOCAL_RUNNER_MODE is None, "LocalRunnerMode is already running"
+        if _LOCAL_RUNNER_MODE is not None:
+            raise AssertionError("LocalRunnerMode is already running")
         _LOCAL_RUNNER_MODE = self
 
         global _PROCESS_MODE
@@ -1913,9 +1973,8 @@ class LocalRunnerMode:
         self._run_lock.release()
 
     def _assert_holds_run_lock(self) -> None:
-        assert self._run_id == LocalRunnerMode.runner_context.id, (
-            "Calling thread does not hold the run lock"
-        )
+        if self._run_id != LocalRunnerMode.runner_context.id:
+            raise AssertionError("Calling thread does not hold the run lock")
 
     def _get_recv_object(self, src: int, dst: int) -> object | None:
         peers = [src] if src != -1 else list(self._ranks)
@@ -1928,7 +1987,8 @@ class LocalRunnerMode:
         return None
 
     def _signal_send(self, src: int, dst: int, obj: object) -> None:
-        assert obj is not None, "Cannot signal None"
+        if obj is None:
+            raise AssertionError("Cannot signal None")
         # Only a single thread a time executes so it is safe to mutate
         # read objects queue (executing thread is already holding the lock)
         self._recv_objects[dst][src].put(obj)
@@ -1950,7 +2010,8 @@ class LocalRunnerMode:
     @staticmethod
     def current() -> "LocalRunnerMode":
         global _LOCAL_RUNNER_MODE
-        assert _LOCAL_RUNNER_MODE is not None, "LocalRunnerMode is not enabled"
+        if _LOCAL_RUNNER_MODE is None:
+            raise AssertionError("LocalRunnerMode is not enabled")
         return _LOCAL_RUNNER_MODE
 
 
@@ -1965,9 +2026,8 @@ class _LocalPhiloxState:
     """
 
     def __init__(self, state: torch.Tensor):
-        assert isinstance(state, LocalTensor), (
-            "_LocalPhiloxState requires a LocalTensor"
-        )
+        if not isinstance(state, LocalTensor):
+            raise AssertionError("_LocalPhiloxState requires a LocalTensor")
         self._local_tensor = state
         self._per_rank_states = {
             rank: local_state.to("cpu")
@@ -2048,7 +2108,8 @@ class _LocalPhiloxState:
         if not enabled_local_tensor_mode():
             return
 
-        assert hasattr(self, "_per_rank_offsets")
+        if not hasattr(self, "_per_rank_offsets"):
+            raise AssertionError
 
         for rank in sorted(self._per_rank_states.keys()):
             offset_value = self._per_rank_offsets[rank]

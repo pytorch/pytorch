@@ -909,7 +909,7 @@ class <lambda>(torch.nn.Module):
 
     @requires_cuda
     def test_epilogue_copy_streams_external(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(x):
             with torch.Stream(device="cuda:0"):
                 x.mul_(3)

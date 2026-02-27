@@ -123,9 +123,13 @@ class FlatApply(HigherOrderOperator):
         registered with pytree.register_constant. The constant type goes directly
         into the spec.
         """
-        if not (isinstance(func, _op_types) or pytree._is_constant_holder(func)):
+        if not (
+            isinstance(func, _op_types)
+            or is_opaque_type(type(func))
+            or pytree._is_constant_holder(func)
+        ):
             raise AssertionError(
-                f"func must be an op type or constant holder, got {type(func)}"
+                f"func must be an op type, constant holder, or opaque callable, got {type(func)}"
             )
         if len(_unused) != 0:
             raise AssertionError(f"unexpected keyword arguments: {_unused}")

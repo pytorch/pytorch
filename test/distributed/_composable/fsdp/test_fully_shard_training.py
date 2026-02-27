@@ -94,13 +94,12 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
                 # Skip device check for CPU since torch.device("cpu") and
                 # torch.device("cpu", 0) are semantically equivalent but not equal
                 if device.type != "cpu":
-                    assert x.device == device, f"Expects {device} but got {x.device}"
-                    assert ys[0].device == device, (
-                        f"Expects {device} but got {ys[0].device}"
-                    )
-                    assert ys[1].device == device, (
-                        f"Expects {device} but got {ys[1].device}"
-                    )
+                    if not (x.device == device):
+                        raise AssertionError(f"Expects {device} but got {x.device}")
+                    if not (ys[0].device == device):
+                        raise AssertionError(f"Expects {device} but got {ys[0].device}")
+                    if not (ys[1].device == device):
+                        raise AssertionError(f"Expects {device} but got {ys[1].device}")
                 y = ys[0] + ys[1]
                 return x + y + 1
 
@@ -440,7 +439,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             and offload_policy.pin_memory
         ):
             return
-        assert test_device_type in ("cuda", "hpu", "xpu", "cpu"), f"{test_device_type}"
+        if test_device_type not in ("cuda", "hpu", "xpu", "cpu"):
+            raise AssertionError(f"Unexpected device type: {test_device_type}")
         torch.manual_seed(42)
         vocab_size = 1024
         model_args = ModelArgs(
@@ -735,7 +735,8 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         checkpoint_impl: str,
         module_grouping: str,
     ):
-        assert checkpoint_impl in ("composable", "utils", "wrapper")
+        if checkpoint_impl not in ("composable", "utils", "wrapper"):
+            raise AssertionError(f"Unexpected checkpoint_impl: {checkpoint_impl}")
         testing_compile = fully_shard != torch.distributed.fsdp.fully_shard
         if testing_compile and checkpoint_impl == "composable":
             return
@@ -776,7 +777,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # Apply FSDP
         fsdp_kwargs = {"reshard_after_forward": reshard_after_forward}
         if module_grouping == "mem_eff":
-            assert model_args.n_layers == 3
+            if not (model_args.n_layers == 3):
+                raise AssertionError(
+                    f"Expected n_layers == 3, got {model_args.n_layers}"
+                )
             fully_shard(model.layers[0], **fsdp_kwargs)
             fully_shard([model.layers[1], model.layers[2]], **fsdp_kwargs)
             fully_shard([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)

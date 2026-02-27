@@ -26,7 +26,6 @@ def _get_fast_path_sharding_prop_cache_stats():
     Get a tuple (hits, misses) for the fast path sharding propagation cache, used for debugging
     only.
     """
-    # pyrefly: ignore [missing-attribute]
     return torch._C._get_DTensor_sharding_propagator_cache_stats()
 
 
@@ -45,7 +44,6 @@ def _clear_fast_path_sharding_prop_cache():
     """
     Clears the cache for the fast path sharding propagation cache, used for debugging purpose only.
     """
-    # pyrefly: ignore [missing-attribute]
     torch._C._clear_DTensor_sharding_propagator_cache()
 
 

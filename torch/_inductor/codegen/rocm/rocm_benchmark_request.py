@@ -4,7 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 from ctypes import byref, c_int, c_size_t, c_void_p
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor import config
@@ -30,16 +30,16 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def __init__(
         self,
         kernel_name: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        input_tensor_meta: TensorMeta | list[TensorMeta],
+        output_tensor_meta: TensorMeta | list[TensorMeta],
         extra_args: Iterable[Any],
         source_code: str,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
         self.workspace_size: int = 0
-        self.workspace: Optional[torch.Tensor] = None
-        self.DLL: Optional[DLLWrapper] = None
+        self.workspace: torch.Tensor | None = None
+        self.DLL: DLLWrapper | None = None
         self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
