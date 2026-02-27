@@ -4699,10 +4699,13 @@ def pool2d_shape_check(
             lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
         )
 
+    effectiveKW = (kW - 1) * dilationW + 1
+    effectiveKH = (kH - 1) * dilationH + 1
+
     torch._check(
-        kW // 2 >= padW and kH // 2 >= padH,
-        lambda: "pad should be smaller than or equal to half of kernel size, but got "
-        f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}",
+        effectiveKW // 2 >= padW and effectiveKH // 2 >= padH,
+        lambda: "pad should be smaller than or equal to half of effective kernel size, but got "
+        f"padW = {padW}, padH = {padH}, effectiveKW = {effectiveKW}, effectiveKH = {effectiveKH}",
     )
 
     torch._check(
@@ -4787,11 +4790,16 @@ def pool3d_shape_check(
             ),
         )
 
+    effectiveKT = (kT - 1) * dilationT + 1
+    effectiveKW = (kW - 1) * dilationW + 1
+    effectiveKH = (kH - 1) * dilationH + 1
+
     torch._check(
-        kT / 2 >= pT and kW / 2 >= pW and kH / 2 >= pH,
+        effectiveKT / 2 >= pT and effectiveKW / 2 >= pW and effectiveKH / 2 >= pH,
         lambda: (
-            f"pad should be smaller than or equal to half of kernel size, but got "
-            f"kT: {kT} kW: {kW} kH: {kH} padT: {pT} padW: {pW} padH: {pH}"
+            f"pad should be smaller than or equal to half of effective kernel size, but got "
+            f"padT: {pT}, padW: {pW}, padH: {pH}, "
+            f"effectiveKT: {effectiveKT}, effectiveKW: {effectiveKW}, effectiveKH: {effectiveKH}"
         ),
     )
 
