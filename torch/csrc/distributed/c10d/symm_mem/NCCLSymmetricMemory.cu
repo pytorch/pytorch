@@ -7,7 +7,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
@@ -297,6 +297,10 @@ ncclWindow_t NCCLSymmetricMemory::get_signal_pad_handle() {
 
 size_t NCCLSymmetricMemory::get_offset() {
   return offset_;
+}
+
+std::string NCCLSymmetricMemory::get_group_name() {
+  return pai_->group_name_;
 }
 
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {

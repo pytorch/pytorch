@@ -481,6 +481,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
     except FileNotFoundError:
         return False
 
+    # pyrefly: ignore [unreachable]
     return False
 
 
@@ -525,6 +526,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
         # --version args not support.
         return False
 
+    # pyrefly: ignore [unreachable]
     return False
 
 
@@ -2211,7 +2213,9 @@ class CppBuilder:
             )
 
         if device_type == "cuda" and torch.version.hip is None:
-            from torch._inductor.codecache import _nvcc_arch_as_compile_option
+            from torch._inductor.codegen.cuda.compile_utils import (
+                _nvcc_arch_as_compile_option,
+            )
 
             current_arch = _nvcc_arch_as_compile_option()
             contents += textwrap.dedent(

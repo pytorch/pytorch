@@ -205,6 +205,7 @@ class Event(torch._C._CudaEventBase):
         """
         if stream is None:
             stream = torch.cuda.current_stream()
+        # pyrefly: ignore [bad-argument-type]
         super().record(stream)
 
     def wait(self, stream: Stream | torch.Stream | None = None) -> None:
@@ -218,6 +219,7 @@ class Event(torch._C._CudaEventBase):
         """
         if stream is None:
             stream = torch.cuda.current_stream()
+        # pyrefly: ignore [bad-argument-type]
         super().wait(stream)
 
     def query(self):

@@ -80,14 +80,14 @@ def aot_compile_warning():
 def aot_compile(
     f: Callable,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
     *,
-    dynamic_shapes: Optional[dict[str, Any]] = None,
-    options: Optional[dict[str, Any]] = None,
+    dynamic_shapes: dict[str, Any] | None = None,
+    options: dict[str, Any] | None = None,
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
     same_signature: bool = True,
-) -> Union[list[Any], str]:
+) -> list[Any] | str:
     """
     Note: this function is not stable yet
 

@@ -1567,7 +1567,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
     variant_pack[OFFSET] = dropoutoffset.mutable_data_ptr();
   }
   if (attn_bias.has_value()) {
-    TORCH_CHECK("bias not supported with nestedtensor");
+    TORCH_CHECK(false, "bias not supported with nestedtensor");
   }
   auto workspace_size = mha_graph.get_workspace_size();
   auto workspace_ptr =

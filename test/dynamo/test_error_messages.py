@@ -1008,7 +1008,7 @@ User code traceback:
     def test_assert_failure_in_generic_ctx_mgr(self, records):
         def fn(x):
             with GenericCtxMgr():
-                assert x is None
+                assert x is None  # noqa: S101
 
         with self.assertRaises(AssertionError):
             torch.compile(fn, backend="eager")(torch.randn(3))
@@ -1036,7 +1036,7 @@ User code traceback:
   File "test_error_messages.py", line N, in test_assert_failure_in_generic_ctx_mgr
     torch.compile(fn, backend="eager")(torch.randn(3))
   File "test_error_messages.py", line N, in fn
-    assert x is None
+    assert x is None  # noqa: S101
 """,
         )
 
@@ -2191,7 +2191,11 @@ Dynamo recompile limit exceeded
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0039.html""",
             )
 
-    @unittest.skipIf(not torch.utils._triton.has_triton_package(), "requires triton")
+    @unittest.skipIf(
+        not torch.utils._triton.has_triton()
+        or not hasattr(__import__("triton"), "set_allocator"),
+        "requires triton with set_allocator support",
+    )
     def test_triton_set_allocator(self):
         import triton
 

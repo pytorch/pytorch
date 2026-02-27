@@ -91,6 +91,16 @@ def draw_buffers(
                 group = (group[1],)
             else:
                 group = group[1]
+        elif isinstance(group, str):
+            # extern / template / nop nodes store a string like "extern"
+            # as the group instead of a shape tuple.  Extract the real
+            # output shape from the scheduler node's first output buffer.
+            try:
+                snode = node.meta["fusion_meta"].snode
+                size = snode.get_outputs()[0].node.maybe_get_size()
+                group = tuple(size) if size else ()
+            except Exception:
+                group = ()
 
         # gather meta data
         dtype = None
@@ -134,6 +144,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
     outputs = []
     group: Any = None
     # create call_function node for each Buffer and Kernel
+    # pyrefly: ignore [bad-assignment]
     for snode in snodes:
         if snode.is_extern():
             node_type = "extern"
@@ -761,10 +772,10 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
     """Log per-op runtime estimates and output tensor metadata for TLParse."""
 
     try:
-        to_size_hints = V.graph.sizevars.size_hints
+        to_optimization_hints = V.graph.sizevars.optimization_hints
 
         def to_list(x: Optional[Sequence[Any]]) -> list[Any]:
-            return list(to_size_hints(x)) if x is not None else []
+            return list(to_optimization_hints(x)) if x is not None else []
 
         def dtype_to_str(dtype: Any) -> Optional[str]:
             if dtype is None:

@@ -1297,9 +1297,10 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 all_combinations.append(shard_order)  # noqa: PERF402
             for i in range(len(all_combinations)):
                 for j in range(i + 1, len(all_combinations)):
-                    assert all_combinations[i] != all_combinations[j], (
-                        f"Duplicate elements found in all_combinations {all_combinations[i]}, {all_combinations[j]}"
-                    )
+                    if all_combinations[i] == all_combinations[j]:
+                        raise AssertionError(
+                            f"Duplicate elements found in all_combinations {all_combinations[i]}, {all_combinations[j]}"
+                        )
             expected_total_combination = 0
             N = test_input["mesh"].ndim
             M = test_input["tensor_rank"]
@@ -1759,7 +1760,7 @@ class DistributeWithStridedShardTest(DTensorTestBase):
             elif idx == 2:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]_S(0, 3)[1]S(0)[2]->S(0)[0]_S(0, 3)[1]R->S(0)RR->RRR->_S(0, 3)RR->_S(0, 3)[0]S(0)[1]R""",
+                    """S(0)[1]_S(0, 3)[0]S(0)[2]->S(0)[1]_S(0, 3)[0]R->R_S(0, 3)R->RRR->_S(0, 3)RR->_S(0, 3)[0]S(0)[1]R""",
                 )
             elif idx == 3:
                 self.assertExpectedInline(

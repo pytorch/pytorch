@@ -16,6 +16,7 @@ import time
 import unittest
 import warnings
 from copy import deepcopy
+from itertools import product
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
@@ -27,6 +28,11 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
+from torch.testing._internal.common_optimizers import (
+    _get_optim_inputs_including_global_cliquey_kwargs,
+    optim_db,
+    optims,
+)
 from torch.testing._internal.common_utils import (
     find_library_location,
     instantiate_parametrized_tests,
@@ -119,6 +125,7 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["device_id"] > 0)
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
+        self.assertTrue(device_capability["local_mem_size"] > 0)
         self.assertEqual(
             device_properties.driver_version, device_capability["driver_version"]
         )
@@ -2175,6 +2182,73 @@ if __name__ == "__main__":
                 self.assertNotEqual(p.data_ptr(), pg.data_ptr())
                 self.assertNotEqual(p.grad.data_ptr(), pg.grad.data_ptr())
 
+    def test_graph_optims_with_explicitly_capturable_param_groups(self):
+        n_warmup, n_replay = 3, 2
+        for optimizer, second_param_group_capturable in product(
+            (
+                torch.optim.Adam,
+                torch.optim.AdamW,
+                torch.optim.ASGD,
+                torch.optim.Adamax,
+                torch.optim.NAdam,
+                torch.optim.RAdam,
+                torch.optim.Adadelta,
+                torch.optim.RMSprop,
+                torch.optim.Rprop,
+            ),
+            (True, False),
+        ):
+            ref_p1, param1 = (
+                torch.nn.Parameter(torch.ones(1, device="xpu")) for _ in range(2)
+            )
+            ref_p2, param2 = (
+                torch.nn.Parameter(torch.ones(1, device="xpu")) for _ in range(2)
+            )
+            grads1, grads2 = (
+                [torch.randn_like(param1) for _ in range(n_warmup + n_replay)]
+                for _ in range(2)
+            )
+            ref_grads1, ref_grads2 = (
+                [t.clone() for t in tensors] for tensors in (grads1, grads2)
+            )
+            params = [
+                {"params": [param1], "capturable": True},
+                {"params": [param2], "capturable": second_param_group_capturable},
+            ]
+            opt = optimizer(params)
+            opt_ = optimizer(
+                [
+                    {"params": [ref_p1], "capturable": False},
+                    {"params": [ref_p2], "capturable": False},
+                ]
+            )
+
+            for i in range(n_warmup + n_replay):
+                ref_p1.grad = ref_grads1[i]
+                ref_p2.grad = ref_grads2[i]
+                opt_.step()
+
+            for i in range(n_warmup):
+                param1.grad = grads1[i]
+                param2.grad = grads2[i]
+                opt.step()
+
+            g = torch.xpu.XPUGraph()
+            if not second_param_group_capturable:
+                with self.assertRaisesRegex(RuntimeError, "Attempting XPU graph"):
+                    with torch.xpu.graph(g):
+                        opt.step()
+            else:
+                with torch.xpu.graph(g):
+                    opt.step()
+
+                for i in range(n_replay):
+                    param1.grad.copy_(grads1[n_warmup + i])
+                    param2.grad.copy_(grads2[n_warmup + i])
+                    g.replay()
+                self.assertEqual(ref_p1, param1)
+                self.assertEqual(ref_p2, param2)
+
     def test_xpu_graph_error_options(self):
         def fn():
             x = torch.zeros([2000], device="xpu")
@@ -2384,6 +2458,223 @@ class TestCachingHostAllocatorXpuGraph(TestCase):
                 self.assertEqual(new_data_ptr, old_data_ptr)
             else:
                 self.assertNotEqual(new_data_ptr, old_data_ptr)
+
+
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestXpuOptims(TestCase):
+    @optims(
+        [optim for optim in optim_db if optim.has_capturable_arg],
+        dtypes=[torch.float32],
+    )
+    def test_graph_optims(self, dtype, optim_info):
+        device = "xpu"
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",)
+        )
+
+        steps_warmup = 3
+        steps_train = 2
+
+        for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
+
+            kwargs["lr"] = 0.1
+            if optim_cls in (torch.optim.Adam, torch.optim.AdamW):
+                kwargs["betas"] = (0.9, 0.99)
+
+            for actually_do_graphs in (True, False):
+                params = [
+                    torch.randn((i + 5, i + 5), device=device) for i in range(2)
+                ] + [torch.randn((), device=device)]
+                params_control = [p.clone().requires_grad_() for p in params]
+                params_graphed = [p.clone().requires_grad_() for p in params]
+
+                grads = [
+                    [torch.randn_like(p) for p in params]
+                    for _ in range(steps_warmup + steps_train)
+                ]
+
+                # capturable=False
+                kwargs["capturable"] = False
+
+                opt = optim_cls(params_control, **kwargs)
+                for i in range(steps_warmup + steps_train):
+                    for j, p in enumerate(params_control):
+                        p.grad = grads[i][j]
+                    opt.step()
+
+                # capturable=True
+                kwargs["capturable"] = True
+                opt = optim_cls(params_graphed, **kwargs)
+
+                for i in range(steps_warmup):
+                    for j, p in enumerate(params_graphed):
+                        p.grad = grads[i][j]
+                    opt.step()
+
+                if actually_do_graphs:
+                    g = torch.xpu.XPUGraph()
+                    with torch.xpu.graph(g):
+                        opt.step()
+
+                for i in range(steps_train):
+                    if actually_do_graphs:
+                        for j, p in enumerate(params_graphed):
+                            p.grad.copy_(grads[i + steps_warmup][j])
+                        g.replay()
+                    else:
+                        for j, p in enumerate(params_graphed):
+                            p.grad = grads[i + steps_warmup][j]
+                        opt.step()
+
+                for p_control, p_graphed in zip(params_control, params_graphed):
+                    self.assertEqual(p_control, p_graphed)
+
+    @optims(
+        [
+            optim
+            for optim in optim_db
+            if "fused" in optim.supported_impls and "xpu" in optim.supports_fused_on
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_graph_scaling_fused_optimizers(self, dtype, optim_info):
+        device = "xpu"
+        optim_cls = optim_info.optim_cls
+
+        steps_warmup = 3
+        steps_train = 2
+
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+
+        for optim_input in optim_inputs:
+            kwargs = optim_input.kwargs
+            kwargs["fused"] = True
+
+            for actually_do_graphs in (
+                (True, False) if optim_info.has_capturable_arg else (True,)
+            ):
+                params = [torch.randn((i + 5, i + 5), device=device) for i in range(2)]
+                params_control = [p.clone().requires_grad_() for p in params]
+                params_graphed = [p.clone().requires_grad_() for p in params]
+
+                # `GradScaler` in-place updates gradients thus it's necessary to duplicate gradients.
+                grads = [
+                    [torch.randn_like(p) for p in params]
+                    for _ in range(steps_warmup + steps_train)
+                ]
+                with torch.no_grad():
+                    grads_control = [[g.clone() for g in gs] for gs in grads]
+                    grads_graphed = [[g.clone() for g in gs] for gs in grads]
+
+                # Gradient Scaler
+                scaler_for_control = torch.amp.GradScaler("xpu", init_scale=128.0)
+                with torch.no_grad():
+                    scaler_for_control._lazy_init_scale_growth_tracker(device)
+
+                scaler_for_graphed = torch.amp.GradScaler("xpu")
+                scaler_for_graphed.load_state_dict(scaler_for_control.state_dict())
+                with torch.no_grad():
+                    scaler_for_graphed._lazy_init_scale_growth_tracker(device)
+
+                # capturable=False
+                if optim_info.has_capturable_arg:
+                    kwargs["capturable"] = False
+                opt = optim_cls(params_control, **kwargs)
+
+                for i in range(steps_warmup + steps_train):
+                    for j, p in enumerate(params_control):
+                        p.grad = grads_control[i][j]
+                    scaler_for_control.step(opt)
+                    scaler_for_control.update()
+
+                # capturable=True
+                if optim_info.has_capturable_arg:
+                    kwargs["capturable"] = True
+                opt = optim_cls(params_graphed, **kwargs)
+
+                for i in range(steps_warmup):
+                    for j, p in enumerate(params_graphed):
+                        p.grad = grads_graphed[i][j]
+                    scaler_for_graphed.step(opt)
+                    scaler_for_graphed.update()
+
+                if actually_do_graphs:
+                    g = torch.xpu.XPUGraph()
+                    with torch.xpu.graph(g):
+                        scaler_for_graphed.step(opt)
+                        scaler_for_graphed.update()
+
+                for i in range(steps_train):
+                    if actually_do_graphs:
+                        for j, p in enumerate(params_graphed):
+                            p.grad.copy_(grads_graphed[i + steps_warmup][j])
+                        g.replay()
+                    else:
+                        for j, p in enumerate(params_graphed):
+                            p.grad = grads_graphed[i + steps_warmup][j]
+                        scaler_for_graphed.step(opt)
+                        scaler_for_graphed.update()
+
+                for p_control, p_graphed in zip(params_control, params_graphed):
+                    self.assertEqual(p_control, p_graphed)
+
+    @parametrize("foreach, fused", [(False, False), (True, False), (False, True)])
+    @optims(
+        [
+            optim
+            for optim in optim_db
+            if "foreach" in optim.supported_impls and "cuda" in optim.supports_fused_on
+        ],
+        dtypes=[torch.float32],
+    )
+    def test_graph_grad_scaling(self, dtype, optim_info, foreach, fused):
+        device = "xpu"
+        torch.cuda.empty_cache()
+
+        scaler = torch.amp.GradScaler(device="xpu", init_scale=4.0)
+        g = torch.xpu.XPUGraph()
+        s = torch.xpu.Stream()
+
+        weight = torch.ones((100,), device="xpu", requires_grad=True)
+        opt = optim_info.optim_cls([weight], lr=0.1, foreach=foreach, fused=fused)
+        static_input = torch.ones_like(weight)
+        static_grad = torch.ones_like(weight)
+
+        # warmup
+        s = torch.xpu.Stream()
+        s.wait_stream(torch.xpu.current_stream())
+        with torch.xpu.stream(s):
+            loss = (weight.half() * static_input).sum()
+            scaler.scale(loss).backward()
+        torch.xpu.current_stream().wait_stream(s)
+
+        opt.zero_grad(set_to_none=True)
+
+        # capture
+        with torch.xpu.stream(s):
+            g.capture_begin()
+            loss = (weight.half() * static_input).sum()
+            scaler.scale(loss).backward()
+            g.capture_end()
+
+        input_vals = [5, 20000, 5, 40000]
+        expected_scales = [4, 2, 2, 1]
+        expected_growth_trackers = [1, 0, 1, 0]
+        expected_grad_vals = [5 * 4, float("inf"), 5 * 2, float("inf")]
+
+        for data, scale, growth_tracker, grad_val in zip(
+            input_vals, expected_scales, expected_growth_trackers, expected_grad_vals
+        ):
+            static_input.fill_(data)
+            g.replay()
+            self.assertEqual(weight.grad, torch.full_like(weight.grad, grad_val))
+            scaler.step(opt)
+            scaler.update()
+            self.assertEqual(scaler._scale, scale)
+            self.assertEqual(scaler._growth_tracker, growth_tracker)
 
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
@@ -2672,6 +2963,7 @@ class TestMemPool(TestCase):
 
 instantiate_parametrized_tests(TestXpu)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
+instantiate_device_type_tests(TestXpuOptims, globals())
 
 if __name__ == "__main__":
     run_tests()
