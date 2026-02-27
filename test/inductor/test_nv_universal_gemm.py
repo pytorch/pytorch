@@ -234,12 +234,14 @@ class TestNVUniversalGemm(TestCase):
         b = b_base.transpose(0, 1)  # (batch, k, n) with stride (n, batch*n, 1)
 
         # Verify batch stride is not largest (i.e., batch_stride_largest_or_zero would be False)
-        assert a.stride()[0] != a.shape[1] * a.shape[2], (
-            "Test setup error: a should have non-standard batch stride"
-        )
-        assert b.stride()[0] != b.shape[1] * b.shape[2], (
-            "Test setup error: b should have non-standard batch stride"
-        )
+        if a.stride()[0] == a.shape[1] * a.shape[2]:
+            raise AssertionError(
+                "Test setup error: a should have non-standard batch stride"
+            )
+        if b.stride()[0] == b.shape[1] * b.shape[2]:
+            raise AssertionError(
+                "Test setup error: b should have non-standard batch stride"
+            )
 
         expected = bmm(a, b)
 
@@ -341,7 +343,8 @@ class TestNVUniversalGemm(TestCase):
 
         m_per_group_2 = [32, 96, 48, 80]
         total_m_2 = sum(m_per_group_2)
-        assert total_m_1 == total_m_2, "Total M must match for cache key test"
+        if total_m_1 != total_m_2:
+            raise AssertionError("Total M must match for cache key test")
         offsets_2 = torch.tensor(
             [sum(m_per_group_2[: i + 1]) for i in range(g)],
             device=device,
