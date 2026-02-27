@@ -35,6 +35,7 @@ from torch._ops import OpOverload
 from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
+from torch.distributed.tensor._decompositions import DecompShardingStrategy
 from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._op_schema import (
     DTensorSpec,
@@ -1060,13 +1061,7 @@ def _query_dtensor_rules(
         # seed (Shard(0) on the first input). Rules requiring other input
         # placements (e.g., Shard(1), Partial, or sharding on non-first inputs)
         # will not be found, so this under-reports DTensor's capabilities.
-        try:
-            from torch.distributed.tensor._decompositions import DecompShardingStrategy
-        except ImportError:
-            DecompShardingStrategy = None  # type: ignore[assignment, misc]
-        if DecompShardingStrategy is not None and DecompShardingStrategy.has_decomp(
-            aten_op
-        ):
+        if DecompShardingStrategy.has_decomp(aten_op):
             try:
                 mesh = init_device_mesh("cpu", (world_size,))
                 # Interleave DTensorSpec and non-tensor args at original positions
@@ -1350,19 +1345,13 @@ def _print_comparison_summary(
     )
 
 
-def _has_dtensor_support(aten_op: OpOverload | None) -> bool:
+def _has_dtensor_support(aten_op: OpOverload) -> bool:
     """Check if an aten op has any DTensor sharding strategy registered."""
-    if aten_op is None:
-        return False
     propagator = DTensor._op_dispatcher.sharding_propagator
     if aten_op in propagator.op_single_dim_strategy_funcs:
         return True
     if aten_op in propagator.op_strategy_funcs:
         return True
-    try:
-        from torch.distributed.tensor._decompositions import DecompShardingStrategy
-    except ImportError:
-        return False
     return DecompShardingStrategy.has_decomp(aten_op)
 
 
@@ -1417,7 +1406,7 @@ def compare_operator(
     stats = ComparisonStats()
 
     aten_op = _discover_aten_op(opinfos, device, dtype)
-    if not _has_dtensor_support(aten_op):
+    if aten_op is None or not _has_dtensor_support(aten_op):
         stats.no_dtensor_support = True
         return stats
 
