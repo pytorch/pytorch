@@ -1315,7 +1315,7 @@ assume_aligned_inputs: bool = False
 # use 32-bit indices regardless of tensor sizes. If assume_32bit_indexing contradicts
 # with example inputs we throw. This is useful when all dynamic shapes are unbacked and
 # you know you only operate with 32-bit sizes.
-assume_32bit_indexing: bool = True
+assume_32bit_indexing: bool = False
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
@@ -2529,6 +2529,11 @@ class eager_numerics:
     )
 
     disable_ftz: bool = False
+
+    # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
+    # Triton bundles its own libdevice.10.bc which may use different polynomial
+    # coefficients than CUDA's version, causing ~1 ULP differences in pow.
+    use_pytorch_libdevice: bool = False
 
 
 # Mode to emulate PyTorch eager numerics when doing lower precision compute
