@@ -33,7 +33,8 @@ class LocalTensorTestBase(TestCase):
         mode = local_tensor_mode()
         with nullcontext() if mode is None else mode.disable():
             if isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor):
-                assert isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)
+                if not (isinstance(lhs, LocalTensor) and isinstance(rhs, LocalTensor)):
+                    raise AssertionError("Expected both lhs and rhs to be LocalTensor")
                 super().assertEqual(lhs._ranks, rhs._ranks)
                 for r in lhs._ranks:
                     super().assertEqual(
@@ -87,7 +88,8 @@ class LocalTensorRankTest(LocalTensorTestBase):
 
     @property
     def rank(self):
-        assert dist.is_initialized(), "Process group is not initialized!"
+        if not dist.is_initialized():
+            raise AssertionError("Process group is not initialized!")
         return dist.get_rank()
 
 
