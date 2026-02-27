@@ -1,4 +1,3 @@
-from typing import Optional
 
 def exportdb_error_message(case_name: str) -> str:
     from .examples import all_examples
@@ -18,7 +17,7 @@ def exportdb_error_message(case_name: str) -> str:
         return f"{case_name} is unsupported."
 
 
-def get_class_if_classified_error(e: Exception) -> Optional[str]:
+def get_class_if_classified_error(e: Exception) -> str | None:
     """
     Returns a string case name if the export error e is classified.
     Returns None otherwise.

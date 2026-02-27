@@ -105,7 +105,10 @@ def avoid_vpmaddubsw_overflow_linear(
             x1 = X[i, k + 1] - X_min
             w0 = W[j, k] - 128 - W_min
             w1 = W[j, k + 1] - 128 - W_min
-            assert -(1 << 15) <= x0 * w0 + x1 * w1 < (1 << 15)
+            if not (-(1 << 15) <= x0 * w0 + x1 * w1 < (1 << 15)):
+                raise AssertionError(
+                    f"Product sum {x0 * w0 + x1 * w1} out of int16 range"
+                )
 
 
 # Reference quantized Linear operator
@@ -113,7 +116,8 @@ def qlinear_ref(X_q, X_scale, X_zp, W_q, W_scale, W_zp, b_q, Y_scale, Y_zp, dtyp
     X_q = np.reshape(X_q, (-1, X_q.shape[X_q.ndim - 1]))
     row_offsets_ref = X_q.sum(axis=1).astype(np.int32).reshape((-1, 1))
     col_offsets_ref = W_q.sum(axis=1).astype(np.int32).reshape((1, -1))
-    assert X_q.ndim == 2
+    if X_q.ndim != 2:
+        raise AssertionError(f"Expected X_q.ndim == 2, got {X_q.ndim}")
     batch_size, input_channels = X_q.shape
     Prod_XqWq_ref = (
         np.matmul(X_q.astype(np.int32), W_q.astype(np.int32).T)
@@ -2181,7 +2185,11 @@ class TestQuantizedOps(TestCase):
 
             quantized_out = torch.topk(qX, k, dim=dim, largest=large, sorted=sort)
 
-            assert len(unquantized_out) == len(quantized_out)
+            if len(unquantized_out) != len(quantized_out):
+                raise AssertionError(
+                    f"Expected len(unquantized_out) == len(quantized_out), "
+                    f"got {len(unquantized_out)} != {len(quantized_out)}"
+                )
             torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
             torch.testing.assert_close(quantized_out[1], unquantized_out[1])
 
@@ -3060,7 +3068,11 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(
                     lstm_prepared[0].layers[0].layer_fw.cell.split_gates, split_gates
                 )
-                assert isinstance(lstm_prepared[0], torch.ao.nn.quantizable.LSTM)
+                if not isinstance(lstm_prepared[0], torch.ao.nn.quantizable.LSTM):
+                    raise AssertionError(
+                        f"Expected lstm_prepared[0] to be an instance of "
+                        f"torch.ao.nn.quantizable.LSTM, got {type(lstm_prepared[0])}"
+                    )
 
                 # Calibrate
                 y = lstm_prepared(x)
@@ -3070,7 +3082,11 @@ class TestQuantizedOps(TestCase):
                 lstm_quantized = torch.ao.quantization.convert(
                     lstm_prepared, convert_custom_config_dict=custom_config_dict
                 )
-                assert type(lstm_quantized[0]) is torch.ao.nn.quantized.LSTM
+                if type(lstm_quantized[0]) is not torch.ao.nn.quantized.LSTM:
+                    raise AssertionError(
+                        f"Expected type(lstm_quantized[0]) to be "
+                        f"torch.ao.nn.quantized.LSTM, got {type(lstm_quantized[0])}"
+                    )
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -4510,7 +4526,8 @@ class TestQuantizedLinear(TestCase):
                        qparams=hu.qparams(dtypes=torch.qint8)))
     @override_qengines
     def test_qlinear_qnnpack_free_memory_and_unpack(self, W):
-        assert qengine_is_qnnpack
+        if not qengine_is_qnnpack:
+            raise AssertionError("Expected qengine_is_qnnpack to be True")
         W, (W_scale, W_zp, torch_type) = W
         qlinear_prepack = torch.ops.quantized.linear_prepack
         qlinear_unpack = torch.ops.quantized.linear_unpack
@@ -4872,7 +4889,8 @@ class TestQuantizedLinear(TestCase):
 
                 self.assertEqual(x.dim(), qy.dim())
                 self.assertEqual(y_ref.float(), qy.float())
-                assert not torch.isnan(qy).any()
+                if torch.isnan(qy).any():
+                    raise AssertionError("Output qy contains NaN values")
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
@@ -5347,8 +5365,8 @@ class TestQuantizedConv(TestCase):
         input_dtype=torch.quint8,
         weight_dtype=torch.qint8,
     ):
-        assert not (use_channelwise and use_transpose), \
-               "Cannot generate channelwise qconv_transpose_tensors "
+        if use_channelwise and use_transpose:
+            raise AssertionError("Cannot generate channelwise qconv_transpose_tensors ")
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
@@ -5454,7 +5472,8 @@ class TestQuantizedConv(TestCase):
             bias_float, requires_grad=False) if use_bias else None
         result_ref = conv_op(X)
         if post_op == 'relu':
-            assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
+            if use_transpose:
+                raise AssertionError("Cannot fuse ReLU with ConvTranspose")
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
         elif post_op == 'add':
@@ -7136,20 +7155,25 @@ class TestQuantizedConv(TestCase):
                 relu = torch.nn.ReLU()
                 result_ref = relu(result_ref)
         elif post_op.unary_attr == "relu":
-            assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
+            if use_transpose:
+                raise AssertionError("Cannot fuse ReLU with ConvTranspose")
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
         elif post_op.unary_attr == "hardtanh":
-            assert not use_transpose, "Cannot fuse hardtanh with ConvTranspose"
-            assert len(post_op.scalars) == 2, "For post op hardtanh, expect 2 parameters passed in"
+            if use_transpose:
+                raise AssertionError("Cannot fuse hardtanh with ConvTranspose")
+            if len(post_op.scalars) != 2:
+                raise AssertionError("For post op hardtanh, expect 2 parameters passed in")
             hardtanh = torch.nn.Hardtanh(min_val=post_op.scalars[0], max_val=post_op.scalars[1])
             result_ref = hardtanh(result_ref)
         elif post_op.unary_attr == "hardswish":
-            assert not use_transpose, "Cannot fuse hardswish with ConvTranspose"
+            if use_transpose:
+                raise AssertionError("Cannot fuse hardswish with ConvTranspose")
             hardswish = torch.nn.Hardswish()
             result_ref = hardswish(result_ref)
         elif post_op.unary_attr == "swish":
-            assert not use_transpose, "Cannot fuse silu with ConvTranspose"
+            if use_transpose:
+                raise AssertionError("Cannot fuse silu with ConvTranspose")
             silu = torch.nn.SiLU()
             result_ref = silu(result_ref)
 
@@ -7882,8 +7906,8 @@ class TestQuantizedConv(TestCase):
         use_bias, use_channelwise, use_transpose, bfloat16_output,
         device=torch.device("cpu"),
     ):
-        assert not (use_channelwise and use_transpose), \
-               "Cannot generate channelwise qconv_transpose_tensors "
+        if use_channelwise and use_transpose:
+            raise AssertionError("Cannot generate channelwise qconv_transpose_tensors ")
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         # Padded input size should be at least as big as dilated kernel
@@ -7987,20 +8011,25 @@ class TestQuantizedConv(TestCase):
                 relu = torch.nn.ReLU()
                 result_ref = relu(result_ref)
         elif post_op.unary_attr == "relu":
-            assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
+            if use_transpose:
+                raise AssertionError("Cannot fuse ReLU with ConvTranspose")
             relu = torch.nn.ReLU()
             result_ref = relu(result_ref)
         elif post_op.unary_attr == "hardtanh":
-            assert not use_transpose, "Cannot fuse hardtanh with ConvTranspose"
-            assert len(post_op.scalars) == 2, "For post op hardtanh, expect 2 parameters passed in"
+            if use_transpose:
+                raise AssertionError("Cannot fuse hardtanh with ConvTranspose")
+            if len(post_op.scalars) != 2:
+                raise AssertionError("For post op hardtanh, expect 2 parameters passed in")
             hardtanh = torch.nn.Hardtanh(min_val=post_op.scalars[0], max_val=post_op.scalars[1])
             result_ref = hardtanh(result_ref)
         elif post_op.unary_attr == "hardswish":
-            assert not use_transpose, "Cannot fuse hardswish with ConvTranspose"
+            if use_transpose:
+                raise AssertionError("Cannot fuse hardswish with ConvTranspose")
             hardswish = torch.nn.Hardswish()
             result_ref = hardswish(result_ref)
         elif post_op.unary_attr == "swish":
-            assert not use_transpose, "Cannot fuse silu with ConvTranspose"
+            if use_transpose:
+                raise AssertionError("Cannot fuse silu with ConvTranspose")
             silu = torch.nn.SiLU()
             result_ref = silu(result_ref)
 
@@ -8084,13 +8113,15 @@ class TestQuantizedConv(TestCase):
             self.assertTrue(result.dtype == qconv_output_dtype)
 
         self.assertEqual(result.float(), result_ref.float(), atol=1e-6, rtol=1e-5)
-        assert not torch.isnan(result).any()
+        if torch.isnan(result).any():
+            raise AssertionError("Output result contains NaN values")
 
     def _test_qconv_fp8_helper(self, nd, pointwise_post_op):
         # nd = 1,2,3 -> conv1d/2d/3d
         if pointwise_post_op.binary_attr != "none":
             # Only conv2d supports binary post op
-            assert nd == 2
+            if nd != 2:
+                raise AssertionError(f"Expected nd == 2, got {nd}")
         groups_list = [1, 3]
         input_channels_per_group = 2
         output_channels_per_group = 2
@@ -8880,13 +8911,21 @@ class TestQuantizedWithMinMax(TestCase):
                     weight_quantized = quant_fn_with_rowwise_min_max(
                         weight, rowwise_min_max
                     )
-                    assert weight_quantized.dtype == torch.uint8
+                    if weight_quantized.dtype != torch.uint8:
+                        raise AssertionError(
+                            f"Expected weight_quantized.dtype == torch.uint8, "
+                            f"got {weight_quantized.dtype}"
+                        )
 
                     # Confirm that the quantization is matching the one without rowwise_min_max
                     weight_quantized_no_rowwise_min_max = quant_fn(weight)
-                    assert torch.equal(
+                    if not torch.equal(
                         weight_quantized, weight_quantized_no_rowwise_min_max
-                    )
+                    ):
+                        raise AssertionError(
+                            "weight_quantized does not equal "
+                            "weight_quantized_no_rowwise_min_max"
+                        )
 
                     # Confirtm that incorrect rowwise_min_max will result in different quantization output
                     incorrect_rowwise_min_max = torch.stack(
@@ -8895,10 +8934,18 @@ class TestQuantizedWithMinMax(TestCase):
                     weight_incorrectly_quantized = quant_fn_with_rowwise_min_max(
                         weight, incorrect_rowwise_min_max
                     )
-                    assert weight_incorrectly_quantized.dtype == torch.uint8
-                    assert not torch.equal(
+                    if weight_incorrectly_quantized.dtype != torch.uint8:
+                        raise AssertionError(
+                            f"Expected weight_incorrectly_quantized.dtype == torch.uint8, "
+                            f"got {weight_incorrectly_quantized.dtype}"
+                        )
+                    if torch.equal(
                         weight_incorrectly_quantized, weight_quantized_no_rowwise_min_max
-                    )
+                    ):
+                        raise AssertionError(
+                            "weight_incorrectly_quantized should not equal "
+                            "weight_quantized_no_rowwise_min_max"
+                        )
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_quantization.py")

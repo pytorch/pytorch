@@ -1,5 +1,4 @@
 import copy
-from typing import Optional
 
 import torch
 from torch._export.pass_base import (
@@ -45,8 +44,8 @@ class _FunctionalizeSideEffectfulOpsPass(_ExportPassBaseDeprecatedDoNotUse):
 
     def __init__(self) -> None:
         super().__init__()
-        self._dep_token: Optional[ProxyValue] = None
-        self._next_dep_token_index: Optional[int] = None
+        self._dep_token: ProxyValue | None = None
+        self._next_dep_token_index: int | None = None
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         # Early return if no non-functional assertions.
