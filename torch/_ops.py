@@ -281,12 +281,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
     def __init__(
-        self,
-        name,
-        *,
-        cacheable=False,
-        supports_training_input_mutation=False,
-        no_overloaded_args=False,
+        self, name, *, cacheable=False, supports_training_input_mutation=False
     ):
         super().__init__()
         if type(self) is HigherOrderOperator:
@@ -305,7 +300,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
         # training. Mutations must be handled by auto_functionalize before
         # reaching autograd.
         self._supports_training_input_mutation = supports_training_input_mutation
-        self._no_overloaded_args = no_overloaded_args
 
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
@@ -398,25 +392,22 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             # Keep the following 1:1 with handle_torch_function_no_python_arg_parser
             # in torch/csrc/utils/python_arg_parser.cpp
 
-            if self._no_overloaded_args:
-                overloaded_args = ()
-            else:
-                overloaded_args_list = []
+            overloaded_args_list = []
 
-                def has_python_key(tensor):
-                    return torch._C._dispatch_keys(tensor).has("Python")
+            def has_python_key(tensor):
+                return torch._C._dispatch_keys(tensor).has("Python")
 
-                def check_overloaded(arg):
-                    if isinstance(arg, torch.Tensor) and has_python_key(arg):
-                        overloaded_args_list.append(arg)
+            def check_overloaded(arg):
+                if isinstance(arg, torch.Tensor) and has_python_key(arg):
+                    overloaded_args_list.append(arg)
 
-                for arg in (*args, *kwargs.values()):
-                    check_overloaded(arg)
-                    if isinstance(arg, (list, tuple)):
-                        for a in arg:
-                            check_overloaded(a)
+            for arg in (*args, *kwargs.values()):
+                check_overloaded(arg)
+                if isinstance(arg, (list, tuple)):
+                    for a in arg:
+                        check_overloaded(a)
 
-                overloaded_args = tuple(overloaded_args_list)
+            overloaded_args = tuple(overloaded_args_list)
 
             # Step 1: dispatch on any user TorchDispatchModes
             from torch.utils._python_dispatch import _pop_mode_temporarily
@@ -543,7 +534,6 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             return torch.overrides.handle_torch_function(
                 self, flat_args, *args, **kwargs
             )
-        del flat_args
 
         dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
