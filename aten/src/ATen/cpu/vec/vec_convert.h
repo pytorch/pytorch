@@ -27,6 +27,36 @@ struct VecConvert {
   }
 };
 
+// Specialized for float-to-int vector conversion.
+// It ensures the result staying within the destination
+// type's limits without any undefined behavior.
+template <
+    typename dst_t,
+    int dst_n,
+    typename src_t,
+    int src_n,
+    typename =
+        std::enable_if_t<is_integer_v<dst_t> && is_floating_point_v<src_t>>>
+struct VecRoundConvert {
+  static inline VectorizedN<dst_t, dst_n> apply(
+      const VectorizedN<src_t, src_n>& src) {
+    constexpr int count = std::min(
+        VectorizedN<src_t, src_n>::size(), VectorizedN<dst_t, dst_n>::size());
+    __at_align__ src_t src_buf[VectorizedN<src_t, src_n>::size()];
+    src.store(src_buf);
+    __at_align__ dst_t dst_buf[VectorizedN<dst_t, dst_n>::size()];
+    constexpr auto min_val =
+        static_cast<src_t>(std::numeric_limits<dst_t>::min());
+    constexpr auto max_val =
+        static_cast<src_t>(std::numeric_limits<dst_t>::max());
+    for (int i = 0; i < count; i++) {
+      dst_buf[i] = static_cast<dst_t>(
+          std::min(std::max(std::round(src_buf[i]), min_val), max_val));
+    }
+    return VectorizedN<dst_t, dst_n>::loadu(dst_buf, count);
+  }
+};
+
 template <typename dst_t, typename src_t>
 inline std::enable_if_t<std::is_same_v<dst_t, src_t>, Vectorized<src_t>> convert(
     const Vectorized<src_t>& src) {
@@ -47,6 +77,23 @@ template <
     std::enable_if_t<dst_n != 1, int> = 0>
 inline VectorizedN<dst_t, dst_n> convert(const VectorizedN<src_t, src_n>& src) {
   return VecConvert<dst_t, dst_n, src_t, src_n>::apply(src);
+}
+
+template <
+    typename dst_t,
+    int dst_n,
+    typename src_t,
+    int src_n,
+    std::enable_if_t<dst_n != 1, int> = 0>
+inline VectorizedN<dst_t, dst_n> round_convert(
+    const VectorizedN<src_t, src_n>& src) {
+  return VecRoundConvert<dst_t, dst_n, src_t, src_n>::apply(src);
+}
+
+template <typename dst_t, typename src_t>
+inline std::enable_if_t<!std::is_same_v<dst_t, src_t>, Vectorized<dst_t>>
+round_convert(const Vectorized<src_t>& src) {
+  return VecRoundConvert<dst_t, 1, src_t, 1>::apply(src);
 }
 
 template <
