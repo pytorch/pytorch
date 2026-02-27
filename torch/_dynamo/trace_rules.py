@@ -3822,7 +3822,7 @@ def _force_inline() -> Iterator[None]:
 
 
 def check_verbose(
-    obj: Any, is_inlined_call: bool = False, frame: Optional[Any] = None
+    obj: Any, is_inlined_call: bool = False, frame: Any | None = None
 ) -> SkipResult:
     if _force_inline_flag:
         return SkipResult(
@@ -3915,7 +3915,7 @@ def check_verbose(
         )
 
 
-def check(obj: Any, is_inlined_call: bool = False, frame: Optional[Any] = None) -> bool:
+def check(obj: Any, is_inlined_call: bool = False, frame: Any | None = None) -> bool:
     return check_verbose(obj, is_inlined_call, frame).skipped
 
 
