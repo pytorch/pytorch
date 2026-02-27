@@ -1783,21 +1783,23 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     def test_permute_contiguous_3d_all_perms(self):
-        """Test 3D permutations with distinct dim sizes.
+        """Test all non-identity 3D permutations with distinct dim sizes.
 
         Using distinct sizes (4, 8, 16) ensures reshape vs permute bugs
         are caught — if dimensions were equal, a wrong reshape could
         accidentally produce correct results.
 
-        (1, 0, 2), (0, 2, 1), and (2, 1, 0) work via shape-comparison
-        permutation detection.  (2, 0, 1) and (1, 2, 0) fail because the
-        range tree collapses their iteration dimensions.
+        (1, 0, 2), (0, 2, 1), and (2, 1, 0) work via full-rank
+        permutation detection.  (2, 0, 1) works via collapsed-dimension
+        permutation detection.  (1, 2, 0) works on CPU but fails on TPU
+        due to scatter store codegen limitations.
         """
-
-        # Permutations that currently work
-        working = [(1, 0, 2), (0, 2, 1), (2, 1, 0)]
-        # Permutations that don't work yet (range tree collapses dims)
-        broken = [(2, 0, 1), (1, 2, 0)]
+        working = [
+            (1, 0, 2), (0, 2, 1), (2, 1, 0),  # full-rank detection
+            (2, 0, 1),                           # collapsed-dim detection
+        ]
+        # (1, 2, 0) works on CPU but the scatter store pattern fails on TPU
+        broken = [(1, 2, 0)]
 
         x = torch.randn(4, 8, 16, device=self.DEVICE)
 
@@ -1819,22 +1821,47 @@ class PallasTestsMixin:
                     result = compiled(x)
                     expected = fn(x)
                     if torch.allclose(result, expected):
-                        pass  # Unexpectedly passed — great!
+                        pass  # Unexpectedly passed
                     else:
-                        self.skipTest(f"Known issue: 3D perm {perm} not yet supported")
+                        self.skipTest(f"Known issue: 3D perm {perm} (scatter store on TPU)")
                 except Exception:
-                    self.skipTest(f"Known issue: 3D perm {perm} not yet supported")
+                    self.skipTest(f"Known issue: 3D perm {perm} (scatter store on TPU)")
 
     def test_permute_contiguous_4d(self):
-        """Test 4D permutations with distinct dim sizes.
+        """Test 4D permutations with distinct dim sizes (2, 4, 8, 16).
 
-        Some 4D permutations work via shape-comparison permutation
-        detection.  Others fail due to range tree dimension collapsing.
-        These are tracked so they start passing once support is added.
+        13 of 23 non-identity permutations work on both CPU and TPU.
+        5 fail due to duplicate collapsed ranges preventing permutation
+        detection.  5 more work on CPU but fail on TPU due to scatter
+        store codegen limitations.
         """
-        perms = [(0, 2, 3, 1), (0, 3, 1, 2), (3, 2, 1, 0)]
+        working = [
+            (0, 2, 1, 3), (0, 3, 2, 1), (1, 0, 3, 2), (1, 3, 0, 2),
+            (1, 3, 2, 0), (2, 0, 3, 1), (2, 1, 0, 3), (2, 1, 3, 0),
+            (2, 3, 0, 1), (3, 0, 1, 2), (3, 0, 2, 1), (3, 1, 0, 2),
+            (3, 2, 1, 0),
+        ]
+        broken = [
+            # Duplicate collapsed ranges
+            (0, 1, 3, 2), (2, 0, 1, 3), (2, 3, 1, 0),
+            (3, 1, 2, 0), (3, 2, 0, 1),
+            # Scatter store fails on TPU
+            (0, 2, 3, 1), (0, 3, 1, 2), (1, 0, 2, 3),
+            (1, 2, 0, 3), (1, 2, 3, 0),
+        ]
+
         x = torch.randn(2, 4, 8, 16, device=self.DEVICE)
-        for perm in perms:
+
+        for perm in working:
+            with self.subTest(perm=perm):
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+        for perm in broken:
             with self.subTest(perm=perm):
                 def fn(x, p=perm):
                     return x.permute(*p).contiguous()
@@ -1843,11 +1870,11 @@ class PallasTestsMixin:
                     result = compiled(x)
                     expected = fn(x)
                     if torch.allclose(result, expected):
-                        pass  # Unexpectedly passed — great!
+                        pass  # Unexpectedly passed
                     else:
-                        self.skipTest(f"Known issue: 4D perm {perm} not yet supported")
+                        self.skipTest(f"Known issue: 4D perm {perm}")
                 except Exception:
-                    self.skipTest(f"Known issue: 4D perm {perm} not yet supported")
+                    self.skipTest(f"Known issue: 4D perm {perm}")
 
     def test_warpgroup_size_2d_aligned_32x8(self):
         """Test 2D tensor with 32x8 = 256 elements (2 warpgroups)."""

@@ -875,6 +875,8 @@ class PallasKernel(SIMDKernel):
         # Track if any load in this kernel used transpose
         # Used to avoid double transpose (load + store)
         self.permuted_input_buffers: dict[str, tuple[int, ...]] = {}
+        self.collapsed_reshape_inputs: dict[str, tuple[int, ...]] = {}
+        self.collapsed_output_shape: Optional[tuple[int, ...]] = None
         # Precompute output buffer names from scheduler nodes so that the
         # load path can check output shapes before stores are processed.
         self._output_buffer_names: list[str] = []
@@ -1218,6 +1220,116 @@ class PallasKernel(SIMDKernel):
                 return None  # identity permutation
             return tuple(perm)
         return None
+
+    def _get_collapsed_load_permutation(
+        self, name: str, index: sympy.Expr
+    ) -> Optional[tuple[tuple[int, ...], tuple[int, ...]]]:
+        """Handle permutation when range tree has collapsed dimensions.
+
+        When simplify_and_reorder merges contiguous dims, the range tree
+        has fewer variables than the buffer's rank.  This method detects
+        the permutation in the collapsed space and returns
+        (collapsed_input_shape, perm) so the caller can generate:
+            jnp.permute_dims(load.reshape(collapsed_shape), perm)
+        """
+        info = self._get_buffer_info(name)
+        if not info:
+            return None
+        _, buf_size, _, _, is_contiguous = info
+        in_shape = [self._safe_int(s) for s in buf_size]
+        if len(in_shape) < 2 or None in in_shape:
+            return None
+        if not is_contiguous:
+            return None
+
+        iter_used = self._get_used_iter_vars(index)
+        ordered = [s for s, e in self.range_tree_nodes.items()
+                   if s in iter_used and not e.is_reduction]
+        n = len(ordered)
+        if n < 2 or n >= len(in_shape):
+            return None
+        ranges = [self._safe_int(self.range_tree_nodes[v].length)
+                  for v in ordered]
+        if None in ranges:
+            return None
+        import math as _math
+        if _math.prod(ranges) != _math.prod(in_shape):
+            return None
+
+        # Compute input coefficients
+        simplified = V.graph.sizevars.simplify(index)
+        in_coeffs = [self._get_index_coefficient(simplified, v)
+                     for v in ordered]
+        if not all(isinstance(c, int) and c > 0 for c in in_coeffs):
+            return None
+
+        # Group consecutive input dims (right-to-left) to match ranges
+        in_groups = self._group_dims_to_ranges(in_shape, ranges)
+        if in_groups is None:
+            return None
+
+        for out_name in self._output_buffer_names:
+            out_buf = V.graph.get_buffer(out_name)
+            if out_buf is None:
+                continue
+            out_shape = [self._safe_int(s) for s in out_buf.get_size()]
+            if any(s is None for s in out_shape) or len(out_shape) < 2:
+                continue
+            if _math.prod(out_shape) != _math.prod(in_shape):
+                continue
+            out_groups = self._group_dims_to_ranges(out_shape, ranges)
+            if out_groups is None:
+                continue
+
+            if in_groups == out_groups:
+                return None  # same grouping order
+
+            # Check all group sizes are distinct (ambiguous otherwise)
+            if len(set(in_groups)) != n or len(set(out_groups)) != n:
+                return None
+
+            # Build perm: for each output group, find the input group
+            # with the same size.
+            perm = []
+            used = [False] * n
+            for i in range(n):
+                for j in range(n):
+                    if not used[j] and in_groups[j] == out_groups[i]:
+                        perm.append(j)
+                        used[j] = True
+                        break
+                else:
+                    return None
+            if perm == list(range(n)):
+                return None
+            collapsed_in = tuple(in_groups)
+            return (collapsed_in, tuple(perm))
+        return None
+
+    @staticmethod
+    def _group_dims_to_ranges(
+        dims: list[int], ranges: list[int]
+    ) -> Optional[list[int]]:
+        """Group consecutive dims (right-to-left) to match range values.
+
+        Returns collapsed shape (left-to-right) or None if no valid grouping.
+        """
+        available = list(ranges)
+        groups: list[int] = []
+        product = 1
+        for i in range(len(dims) - 1, -1, -1):
+            product *= dims[i]
+            try:
+                idx = available.index(product)
+            except ValueError:
+                continue
+            groups.append(product)
+            available.pop(idx)
+            product = 1
+        if product != 1 or available:
+            return None
+        groups.reverse()
+        return groups
 
     def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
         """Get the index expression string and whether it needs flattening."""
@@ -1653,6 +1765,16 @@ class PallasKernel(SIMDKernel):
                 if perm is not None:
                     load_expr = f"jnp.permute_dims({load_expr}, {perm})"
                     self.permuted_input_buffers[name] = perm
+                else:
+                    collapsed = self._get_collapsed_load_permutation(name, index)
+                    if collapsed is not None:
+                        collapsed_shape, cperm = collapsed
+                        load_expr = f"jnp.permute_dims({load_expr}, {cperm})"
+                        self.permuted_input_buffers[name] = cperm
+                        self.collapsed_reshape_inputs[name] = collapsed_shape
+                        self.collapsed_output_shape = tuple(
+                            collapsed_shape[p] for p in cperm
+                        )
 
             return load_expr
 
@@ -2998,6 +3120,14 @@ class PallasKernel(SIMDKernel):
                 "_pallas_out_shapes = tuple("
                 "s if len(s) > 0 else (1,) for s in out_shapes)"
             )
+            # Override output shape for collapsed permutation kernels.
+            # This makes the kernel operate in collapsed shape space
+            # (e.g. (16, 32) instead of (16, 4, 8)), avoiding reshapes
+            # inside the kernel that TPU Mosaic cannot compile.
+            if self.collapsed_output_shape is not None:
+                code.writeline(
+                    f"_pallas_out_shapes = ({self.collapsed_output_shape},)"
+                )
             # Reshape aliased inputs to match promoted output shapes
             for input_idx, out_idx in alias_pairs:
                 param = ctx.kernel_input_params[input_idx]
@@ -3013,6 +3143,17 @@ class PallasKernel(SIMDKernel):
             if self.tile_cpu_tpu:
                 self._codegen_tiled_specs(ctx)
             else:
+                # Reshape collapsed inputs before building specs
+                for param in ctx.kernel_input_params:
+                    buf_name = None
+                    for graph_name, inner_name in self.args.input_buffers.items():
+                        if inner_name == param:
+                            buf_name = graph_name
+                            break
+                    cshape = self.collapsed_reshape_inputs.get(buf_name) if buf_name else None
+                    if cshape is not None:
+                        code.writeline(f"{param} = {param}.reshape({cshape})")
+
                 code.writeline("indexer = lambda n: lambda i: [jnp.int32(i)] * n")
                 code.writeline("out_specs_pallas = tuple(")
                 code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
@@ -3435,6 +3576,17 @@ from torch._inductor.runtime.runtime_utils import (
         )
         code.writeline("    for s in out_shapes")
         code.writeline(")")
+
+        # Reshape collapsed inputs before building specs
+        for param in ctx.kernel_input_params:
+            buf_name = None
+            for graph_name, inner_name in self.args.input_buffers.items():
+                if inner_name == param:
+                    buf_name = graph_name
+                    break
+            cshape = self.collapsed_reshape_inputs.get(buf_name) if buf_name else None
+            if cshape is not None:
+                code.writeline(f"{param} = {param}.reshape({cshape})")
 
         # Build per-input permutation flags
         perm_flags = []
