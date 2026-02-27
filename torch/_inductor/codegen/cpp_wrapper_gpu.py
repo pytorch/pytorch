@@ -116,27 +116,39 @@ static inline void loadLazyCompileFuncs() {
     }
 }
 
+static inline std::string getStringAttr(PyObject* obj, const char* attr) {
+    RAIIPyObject val = PyObject_GetAttrString(obj, attr);
+    AOTI_TORCH_CHECK(val, "Failed to get attribute");
+    return PyUnicode_AsUTF8(val);
+}
+
+static inline int getIntAttr(PyObject* obj, const char* attr) {
+    RAIIPyObject val = PyObject_GetAttrString(obj, attr);
+    AOTI_TORCH_CHECK(val, "Failed to get attribute");
+    return PyLong_AsLong(val);
+}
+
+static inline int getOptionalIntAttr(PyObject* obj, const char* attr, int sentinel = -1) {
+    RAIIPyObject val = PyObject_GetAttrString(obj, attr);
+    AOTI_TORCH_CHECK(val, "Failed to get attribute");
+    return (val.get() != Py_None) ? PyLong_AsLong(val) : sentinel;
+}
+
 static inline LazyKernelCompileResult extractCompileResult(PyObject* result) {
     LazyKernelCompileResult compile_result;
-    compile_result.cubin_path = PyUnicode_AsUTF8(PyTuple_GetItem(result, 0));
-    compile_result.mangled_name = PyUnicode_AsUTF8(PyTuple_GetItem(result, 1));
-    compile_result.num_warps = PyLong_AsLong(PyTuple_GetItem(result, 2));
-    compile_result.shared_mem = PyLong_AsLong(PyTuple_GetItem(result, 3));
-    compile_result.xblock = PyLong_AsLong(PyTuple_GetItem(result, 4));
-    compile_result.yblock = PyLong_AsLong(PyTuple_GetItem(result, 5));
-    compile_result.zblock = PyLong_AsLong(PyTuple_GetItem(result, 6));
-    compile_result.r0block = PyLong_AsLong(PyTuple_GetItem(result, 7));
-    compile_result.rsplit = PyLong_AsLong(PyTuple_GetItem(result, 8));
-    compile_result.rsplit_size = PyLong_AsLong(PyTuple_GetItem(result, 9));
-
-    // None becomes -1 sentinel
-    PyObject* config_index_obj = PyTuple_GetItem(result, 10);
-    PyObject* global_scratch_obj = PyTuple_GetItem(result, 11);
-    PyObject* profile_scratch_obj = PyTuple_GetItem(result, 12);
-    compile_result.config_index = (config_index_obj != Py_None) ? PyLong_AsLong(config_index_obj) : -1;
-    compile_result.global_scratch = (global_scratch_obj != Py_None) ? PyLong_AsLong(global_scratch_obj) : -1;
-    compile_result.profile_scratch = (profile_scratch_obj != Py_None) ? PyLong_AsLong(profile_scratch_obj) : -1;
-
+    compile_result.cubin_path = getStringAttr(result, "cubin_path");
+    compile_result.mangled_name = getStringAttr(result, "mangled_name");
+    compile_result.num_warps = getIntAttr(result, "num_warps");
+    compile_result.shared_mem = getIntAttr(result, "shared_mem");
+    compile_result.xblock = getIntAttr(result, "xblock");
+    compile_result.yblock = getIntAttr(result, "yblock");
+    compile_result.zblock = getIntAttr(result, "zblock");
+    compile_result.r0block = getIntAttr(result, "r0block");
+    compile_result.rsplit = getIntAttr(result, "rsplit");
+    compile_result.rsplit_size = getIntAttr(result, "rsplit_size");
+    compile_result.config_index = getOptionalIntAttr(result, "config_index");
+    compile_result.global_scratch = getOptionalIntAttr(result, "global_scratch");
+    compile_result.profile_scratch = getOptionalIntAttr(result, "profile_scratch");
     return compile_result;
 }
 

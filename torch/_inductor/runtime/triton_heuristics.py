@@ -4027,7 +4027,7 @@ class GridExpr:
     def __post_init__(self) -> None:
         assert self.mode in ("python", "cpp")
 
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         raise NotImplementedError
 
     def ceildiv(self, numel: str | int, block: int | str | None) -> str | int:
@@ -4118,7 +4118,8 @@ class GridExpr:
             "RSPLIT": f"{kernel_name}_result.rsplit",
             "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
         }
-        self.generate(meta)
+        # assertions are done based on real values, so we can skip here
+        self.generate(meta, needs_assertion=False)
 
     @classmethod
     def from_meta_lazy(
@@ -4140,32 +4141,32 @@ class GridExpr:
 
 
 class Grid1D(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
 
 
 class Grid2D(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
 
 
 class Grid3D(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
         self.z_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
 
 
 class BatchMatmulGrid3D(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         self.z_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
         self.x_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
 
 
 class Grid2DWithYZOverflow(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.prefix.extend(
             [
@@ -4182,11 +4183,10 @@ class Grid2DWithYZOverflow(GridExpr):
 
 
 class MixOrderReductionGrid(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
-        # Only assert when we have actual integer values (not in lazy mode)
-        if isinstance(split_size, int) and isinstance(xblock, int):
+        if needs_assertion:
             assert split_size, "Missing RSPLIT_SIZE"
             assert xblock, "Missing XBLOCK"
             assert split_size % xblock == 0, f"{split_size=}, {xblock=}"
@@ -4194,17 +4194,15 @@ class MixOrderReductionGrid(GridExpr):
 
 
 class CooperativeReductionGrid(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         self.x_grid = str(meta["RSPLIT"])
         self.y_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
 
 
 class SplitScanGrid(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
-        xblock = meta.get("XBLOCK", 1)
-        # Only assert when we have actual integer values (not in lazy mode)
-        if isinstance(xblock, int):
-            assert xblock == 1
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
+        if needs_assertion:
+            assert meta.get("XBLOCK", 1) == 1
         self.x_grid = self.ceildiv("r0_numel", meta.get("R0_BLOCK"))
         self.y_grid = "xnumel"
 
@@ -4219,12 +4217,12 @@ class FixedGrid(GridExpr):
             "extra_launcher_args": ["_grid_0", "_grid_1", "_grid_2"],
         }
 
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         self.x_grid, self.y_grid, self.z_grid = self.inductor_meta["fixed_grid"]
 
 
 class PrecomputedGrid(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         for candidate in self.inductor_meta["precomputed_grids"]:
             if all(meta.get(k) == v for k, v in candidate["config"].items()):
                 self.x_grid, self.y_grid, self.z_grid = candidate[self.mode]
@@ -4235,7 +4233,7 @@ class PrecomputedGrid(GridExpr):
 
 
 class ComboKernelGrid(GridExpr):
-    def generate(self, meta: dict[str, int]):
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         combo_meta = self.inductor_meta["combo_grid_meta"]
         if combo_meta["default_config"]:
             meta = {**combo_meta["default_config"], **meta}
@@ -4298,7 +4296,7 @@ class SequentialComboKernelGrid(ComboKernelGrid):
 class SequentialFlattenComboKernelGrid(GridExpr):
     """Flattened grid: (sum of x*y blocks, 1, 1) for per-subkernel with flattened dispatch."""
 
-    def generate(self, meta: dict[str, int]):
+    def generate(self, meta: dict[str, int], needs_assertion: bool = True) -> None:
         combo_meta = self.inductor_meta["combo_grid_meta"]
         if combo_meta["default_config"]:
             meta = {**combo_meta["default_config"], **meta}
