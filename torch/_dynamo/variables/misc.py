@@ -15,6 +15,7 @@ Key classes include:
 - DebuggingVariable: Handles print and logging
 """
 
+import builtins
 import dataclasses
 import enum
 import functools
@@ -2004,6 +2005,32 @@ class ObjectVariable(VariableTracker):
 
     def python_type(self) -> type[object]:
         return object
+
+    def is_python_hashable(self) -> Literal[True]:
+        return True
+
+    def get_python_hash(self) -> int:
+        return hash(self.value)
+
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, ObjectVariable):
+            return False
+        return self.value == other.value
+
+    def reconstruct(self, codegen):
+        # Preserve the original object if it was not created inside dynamo(?)
+        if self.source is not None:
+            return self.source.reconstruct(codegen)
+        # codegen a new object
+        codegen.add_push_null(
+            lambda: codegen.extend_output(
+                [
+                    codegen.create_load_python_module(builtins),
+                    codegen.create_load_attr("object"),
+                ]
+            )
+        )
+        codegen.call_function(0, False)
 
 
 class DebuggingVariable(VariableTracker):
