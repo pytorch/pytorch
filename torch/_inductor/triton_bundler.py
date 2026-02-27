@@ -5,7 +5,6 @@ import os
 import shutil
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
@@ -105,8 +104,8 @@ class TritonBundler:
     - TritonBundler.read_and_emit is called when a cache entry is read
     """
 
-    _entries: Optional[list[TritonBundleEntry]] = None
-    _static_autotuners: Optional[list[StaticallyLaunchedAutotuner]] = None
+    _entries: list[TritonBundleEntry] | None = None
+    _static_autotuners: list[StaticallyLaunchedAutotuner] | None = None
 
     # __grp__kernel_name.json contains metadata with source code paths
     # we use this as sentinel value for search and replace
@@ -204,7 +203,7 @@ class TritonBundler:
 
     @classmethod
     def load_autotuners(
-        cls, static_autotuners: Optional[list[StaticallyLaunchedAutotuner]]
+        cls, static_autotuners: list[StaticallyLaunchedAutotuner] | None
     ) -> list[str]:
         """
         Load statically launchable CachingAutotuners into async_compile.CompiledTritonKernels
@@ -245,7 +244,7 @@ class TritonBundler:
     @classmethod
     def collect(
         cls,
-    ) -> tuple[TritonBundle, Optional[TritonBundlerMetadata]]:
+    ) -> tuple[TritonBundle, TritonBundlerMetadata | None]:
         """
         This is the main function called when a cache write happens. This function
         converts all the previously remembered kernels into bundled format so that
@@ -324,7 +323,7 @@ class TritonBundler:
             return TritonBundle([], []), None
 
     @staticmethod
-    def read_and_emit(bundle: TritonBundle) -> Optional[TritonBundlerMetadata]:
+    def read_and_emit(bundle: TritonBundle) -> TritonBundlerMetadata | None:
         """
         This is the main function called when a cache read happens. This function
         converts the bundled format back into individual files and writes them

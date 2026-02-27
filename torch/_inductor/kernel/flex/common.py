@@ -5,7 +5,7 @@ import math
 from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -18,7 +18,7 @@ from torch.utils._pytree import tree_map, tree_map_only
 if TYPE_CHECKING:
     from torch._inductor.codegen.cuda_combined_scheduling import _IntLike
 else:
-    _IntLike = Union[int, sympy.Expr]
+    _IntLike = int | sympy.Expr
 
 
 from ...ir import (
@@ -46,7 +46,7 @@ from ...select_algorithm import realize_inputs
 from ...utils import load_template
 
 
-SubgraphResults = Union[list[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
+SubgraphResults = list[ComputedBuffer | None] | ComputedBuffer | None
 
 
 def zeros_and_scatter_lowering(shape: list[int], indices, values):
@@ -96,7 +96,7 @@ def zeros_and_scatter_lowering(shape: list[int], indices, values):
 
 def get_fwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
-) -> list[Optional[ComputedBuffer]]:
+) -> list[ComputedBuffer | None]:
     subgraph_buffer = (
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
@@ -134,7 +134,7 @@ def build_subgraph_module_buffer(
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
 
-    def convert_output_node_to_buffer(output_buffer) -> Optional[ComputedBuffer]:
+    def convert_output_node_to_buffer(output_buffer) -> ComputedBuffer | None:
         if output_buffer is None:
             return None
         if isinstance(output_buffer, ComputedBuffer):
@@ -168,7 +168,7 @@ def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> Subgraph
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
-def maybe_realize(args: list[Optional[IRNode]]):
+def maybe_realize(args: list[IRNode | None]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
     return tree_map(
         lambda x: (
@@ -200,7 +200,7 @@ def create_placeholder(
     name: str,
     dtype: torch.dtype,
     device: torch.device,
-    size: Optional[list[int]] = None,
+    size: list[int] | None = None,
 ) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(

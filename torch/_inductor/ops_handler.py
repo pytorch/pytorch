@@ -6,16 +6,7 @@ import itertools
 import re
 import warnings
 from io import StringIO
-from typing import (
-    Any,
-    Generic,
-    Literal,
-    NamedTuple,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Generic, Literal, NamedTuple, TYPE_CHECKING, TypeVar
 from unittest.mock import patch
 
 import sympy
@@ -42,7 +33,7 @@ AtomicMode = Literal[
     "atomic_cas",
     "atomic_xchg",
 ]
-StoreMode = Optional[Union[AtomicMode, Literal["tma"]]]
+StoreMode = AtomicMode | Literal["tma"] | None
 ReductionType = Literal[
     "argmax",
     "argmin",
@@ -95,7 +86,7 @@ class OpsHandler(Generic[T]):
     all the metaprogramming has run.
     """
 
-    def constant(self, value: Union[bool, float, int], dtype: torch.dtype) -> T:
+    def constant(self, value: bool | float | int, dtype: torch.dtype) -> T:
         """Produces a scalar constant of type dtype."""
         raise NotImplementedError
 
@@ -147,7 +138,7 @@ class OpsHandler(Generic[T]):
         self,
         x: T,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> T:
         """
@@ -251,7 +242,7 @@ class OpsHandler(Generic[T]):
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
         value: T,
-    ) -> Union[T, tuple[T, ...]]:
+    ) -> T | tuple[T, ...]:
         """
         Perform a 'reduction_type' reduction on 'value' of dtype 'src_dtype',
         using 'dtype' as the accumulation dtype for the reduction.  The result
@@ -305,8 +296,8 @@ class OpsHandler(Generic[T]):
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[T] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
         raise NotImplementedError
@@ -740,7 +731,7 @@ class OpsHandler(Generic[T]):
         self,
         *inputs: T,
         asm: str,
-        constraints: Optional[str] = None,
+        constraints: str | None = None,
         dtype: torch.dtype = torch.float32,
         is_pure: bool = True,
         pack: int = 1,
@@ -1039,8 +1030,8 @@ class KernelFormatterHandler(DefaultHandler):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[str, tuple[str, ...]],
-    ) -> Union[str, tuple[str, ...]]:
+        value: str | tuple[str, ...],
+    ) -> str | tuple[str, ...]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
@@ -1128,8 +1119,8 @@ class OpCounterCSE(DefaultHandler):
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[T] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: T | None = None,
     ) -> T:
         """
         See [Note: Inductor bucketize op]
@@ -1157,7 +1148,7 @@ class OpCounterCSE(DefaultHandler):
 
 
 class ExtractConstantsHandler(NoopHandler):
-    def __init__(self, device: Optional[torch.device]):
+    def __init__(self, device: torch.device | None):
         self.device = device
 
     def constant(self, value: Any, dtype: torch.dtype) -> torch._inductor.ir.Constant:
@@ -1177,7 +1168,7 @@ class SimpleCSEHandler(WrapperHandler):
 
     def __init__(self, inner: Any):
         super().__init__(inner)
-        self.cse_cache: dict[str, Union[Any, tuple[Any, ...]]] = {}
+        self.cse_cache: dict[str, Any | tuple[Any, ...]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:

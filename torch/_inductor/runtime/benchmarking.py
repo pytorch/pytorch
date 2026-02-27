@@ -5,7 +5,7 @@ from collections.abc import Callable
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Concatenate, Optional, Union
+from typing import Any, Concatenate
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -107,7 +107,7 @@ class Benchmarker:
         pass
 
     def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
-        inferred_device: Optional[torch.device] = None
+        inferred_device: torch.device | None = None
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
             # Some callables take nested structures as arguments so use the
             # flattened form to find any tensors
@@ -134,9 +134,9 @@ class Benchmarker:
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: Optional[tuple[Any, ...]] = None,
-        fn_kwargs: Optional[dict[str, Any]] = None,
-        device: Optional[Union[str, torch.device]] = None,
+        fn_args: tuple[Any, ...] | None = None,
+        fn_kwargs: dict[str, Any] | None = None,
+        device: str | torch.device | None = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the
@@ -167,7 +167,7 @@ class Benchmarker:
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        inferred_device: Optional[torch.device] = None
+        inferred_device: torch.device | None = None
         if device is not None:
             inferred_device = (
                 torch.device(device) if isinstance(device, str) else device
