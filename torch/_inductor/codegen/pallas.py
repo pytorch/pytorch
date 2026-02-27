@@ -2803,7 +2803,7 @@ class PallasKernel(SIMDKernel):
             _, grid, _ = pallas_compute_tiling(
                 tuple(ref_shape),
                 skip_last_n=self.tile_skip_last_n,
-                exact_only=True,
+                exact_only=len(ref_shape) < 2,
             )
             _MAX_GRID_PRODUCT = 64
             grid_product = 1
@@ -3423,7 +3423,7 @@ from torch._inductor.runtime.runtime_utils import (
         code.writeline(
             f"_tile, _grid, _ax2g = pallas_compute_tiling("
             f"out_shapes[0], "
-            f"skip_last_n={skip_n}, exact_only=True)"
+            f"skip_last_n={skip_n}, exact_only=len(out_shapes[0]) < 2)"
         )
         code.writeline("_ng = len(_grid)")
         code.writeline("_ref = out_shapes[0]")
