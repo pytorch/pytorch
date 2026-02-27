@@ -548,7 +548,7 @@ class EnterDeviceContextManagerLine(WrapperLine):
                     code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
             # Use torch.cuda.current_device() so cached compiled code works
-            # on any device, enabling FxGraphCache sharing across DDP ranks.
+            # on any device, enabling FxGraphCache sharing across distributed ranks.
             # See pytorch/pytorch#108971.
             code.writeline("with torch.cuda._DeviceGuard(torch.cuda.current_device()):")
             code.do_indent()

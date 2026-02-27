@@ -652,7 +652,7 @@ class CachingAutotuner(KernelInterface):
         device_interface = self.get_device_interface()
 
         # Use current device instead of compile-time device so cached
-        # compiled code works across DDP ranks (pytorch/pytorch#108971).
+        # compiled code works across distributed ranks (pytorch/pytorch#108971).
         runtime_device = device_interface.current_device()
         with DeviceGuard(device_interface, runtime_device):
             launchers = []
@@ -1798,7 +1798,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
         # Use current device for loading kernel binary so cached compiled
-        # code works across DDP ranks (pytorch/pytorch#108971).
+        # code works across distributed ranks (pytorch/pytorch#108971).
         import torch
         device = torch.cuda.current_device() if torch.cuda.is_available() else 0
         self.kernel.load_kernel(device)

@@ -472,7 +472,7 @@ def _normalize_device_for_cache_key(device: torch.device) -> torch.device:
     """
     Normalize CUDA device ordinals to cuda:0 for cache key purposes.
 
-    In distributed training (DDP/FSDP), each rank uses a different device
+    In distributed training, each rank uses a different device
     ordinal (cuda:0, cuda:1, ..., cuda:7) but compiles the same model graph.
     Without normalization, each rank produces a different cache key, causing
     N redundant compilations instead of 1.
@@ -496,8 +496,8 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
 
-    # Normalize CUDA device ordinals so all DDP ranks produce the same
-    # cache key for the same graph. See pytorch/pytorch#108971.
+    # Normalize CUDA device ordinals so all ranks in distributed training
+    # produce the same cache key for the same graph. See pytorch/pytorch#108971.
     if meta.device.type == "cuda" and meta.device.index != 0:
         meta = dataclasses.replace(meta, device=_normalize_device_for_cache_key(meta.device))
 
