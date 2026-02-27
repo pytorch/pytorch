@@ -60,6 +60,9 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::ComplexDouble:
       dtype.code = DLDataTypeCode::kDLComplex;
       break;
+    case ScalarType::BComplex32:
+        TORCH_CHECK_BUFFER(false, "BComplex32 type is not supported by dlpack");
+        break;
     case ScalarType::BFloat16:
       dtype.code = DLDataTypeCode::kDLBfloat;
       break;

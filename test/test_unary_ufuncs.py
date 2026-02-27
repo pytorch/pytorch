@@ -241,7 +241,7 @@ class TestUnaryUfuncs(TestCase):
             torch_kwargs, numpy_kwargs = op.sample_kwargs(t.device, dtype, t)
             if dtype is torch.bfloat16:
                 a = t.cpu().to(torch.float32).numpy()
-            elif dtype is torch.complex32:
+            elif dtype in (torch.complex32, torch.bcomplex32):
                 a = t.cpu().to(torch.complex64).numpy()
             else:
                 a = t.cpu().numpy()

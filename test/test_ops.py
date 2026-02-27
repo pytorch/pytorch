@@ -601,10 +601,11 @@ class TestCommon(TestCase):
             if skip_bfloat and (
                 (
                     isinstance(sample.input, torch.Tensor)
-                    and sample.input.dtype == torch.bfloat16
+                    and sample.input.dtype in {torch.bfloat16, torch.bcomplex32}
                 )
                 or any(
-                    isinstance(arg, torch.Tensor) and arg.dtype == torch.bfloat16
+                    isinstance(arg, torch.Tensor)
+                    and arg.dtype in {torch.bfloat16, torch.bcomplex32}
                     for arg in sample.args
                 )
             ):
@@ -1546,7 +1547,8 @@ class TestCommon(TestCase):
             # However, we only want to apply it to Tensors with dtype `torch.complex32`..
             transformed_sample = sample.transform(
                 lambda x: x.to(torch.complex64)
-                if isinstance(x, torch.Tensor) and x.dtype is torch.complex32
+                if isinstance(x, torch.Tensor)
+                and x.dtype in (torch.complex32, torch.bcomplex32)
                 else x
             )
             expected = op(

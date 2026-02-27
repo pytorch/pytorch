@@ -25,6 +25,9 @@ template<> inline cudaDataType getCudaDataType<double>() {
 template<> inline cudaDataType getCudaDataType<c10::complex<c10::Half>>() {
   return CUDA_C_16F;
 }
+template<> inline cudaDataType getCudaDataType<c10::complex<c10::BFloat16>>() {
+  return CUDA_C_16BF;
+}
 template<> inline cudaDataType getCudaDataType<c10::complex<float>>() {
   return CUDA_C_32F;
 }
