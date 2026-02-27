@@ -144,7 +144,7 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
     string(REGEX MATCHALL "[0-9]+\\.[0-9]+" compute_capabilities "${compute_capabilities}")
 
     if(run_result EQUAL 0)
-      string(REPLACE "2.1" "2.1(2.0)" compute_capabilities "${compute_capabilities}")
+      list(TRANSFORM compute_capabilities REPLACE "2.1" "2.1(2.0)" REGEX "^2\.1$" OUTPUT_VARIABLE compute_capabilities)
       set(CUDA_GPU_DETECT_OUTPUT ${compute_capabilities}
         CACHE INTERNAL "Returned GPU architectures from detect_gpus tool" FORCE)
     endif()
