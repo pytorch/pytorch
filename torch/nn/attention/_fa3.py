@@ -458,7 +458,7 @@ def _fa3_flash_attention_forward_out_impl(
     dropout_p: float,
     is_causal: bool,
     return_debug_mask: bool,
-    out: torch.Tensor | None = None,
+    out: torch.Tensor,
     *,
     scale: float | None = None,
     window_size_left: int = -1,

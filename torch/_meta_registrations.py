@@ -6373,7 +6373,7 @@ def meta__flash_attention_forward_out(
     dropout_p: float,
     is_causal: bool,
     return_debug_mask: bool,
-    out: Tensor | None = None,
+    out: Tensor = None,  # type: ignore[assignment]
     scale: float | None = None,
     window_size_left: int | None = None,
     window_size_right: int | None = None,
@@ -6381,54 +6381,25 @@ def meta__flash_attention_forward_out(
     alibi_slopes: Tensor | None = None,
     page_table: Tensor | None = None,
 ):
-    batch_size = query.size(0) if cum_seq_q is None else cum_seq_q.numel() - 1
-    max_seqlen_batch_q = query.size(1) if cum_seq_q is None else max_q
-    max_seqlen_batch_k = key.size(1) if cum_seq_k is None else max_k
-    num_heads = query.size(-2)
-    head_dim = query.size(-1)
-
-    if cum_seq_q is None:
-        logsumexp = torch.empty(
-            (batch_size, num_heads, max_seqlen_batch_q),
-            dtype=torch.float,
-            device=query.device,
-        )
-    else:
-        total_q = query.size(0)
-        logsumexp = torch.empty(
-            (num_heads, total_q), dtype=torch.float, device=query.device
-        )
-
-    if return_debug_mask:
-        blocksize_c = 128 if head_dim > 64 else 256
-        max_seqlen_k = math.ceil(max_seqlen_batch_q / blocksize_c)
-        if max_seqlen_batch_k <= 128:
-            max_seqlen_k = 128
-        elif max_seqlen_batch_k <= 256:
-            max_seqlen_k = 256
-        debug_mask = torch.empty(
-            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
-            dtype=query.dtype,
-            device=query.device,
-        )
-    else:
-        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
-
-    # See Note [Seed and Offset]
-    # See [Note] BC breaking change to flash seed/offset
-    seed, offset = None, None
-    if torch.version.hip and torch.cuda.is_available():
-        seed = torch.empty((), dtype=torch.long, device="meta")
-        offset = torch.empty((), dtype=torch.long, device="meta")
-    else:
-        seed = torch.empty((2), dtype=torch.uint64, device="meta")
-        offset = torch.empty((), dtype=torch.uint64, device="meta")
-    return (
-        logsumexp,
-        seed,
-        offset,
-        debug_mask,
+    _, logsumexp, seed, offset, debug_mask = meta__flash_attention_forward(
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
+        window_size_left,
+        window_size_right,
+        seqused_k,
+        alibi_slopes,
+        page_table,
     )
+    return logsumexp, seed, offset, debug_mask
 
 
 @register_meta([aten._flash_attention_forward.quantized])
