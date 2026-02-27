@@ -724,6 +724,7 @@ print(t.is_pinned())
     @setBlasBackendsToDefaultFinally
     @serialTest()
     def test_cublas_unified_workspace(self):
+        torch.cuda.reset_peak_memory_stats()
         # We run a cuBLAS matmul, guaranteeing a workspace present on the current stream
         torch.backends.cuda.preferred_blas_library("cublas")
         x = torch.randn(128, 128, device="cuda")
