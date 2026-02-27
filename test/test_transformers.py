@@ -3041,6 +3041,15 @@ class TestSDPACudaOnly(NNTestCase):
             out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
             out.backward(grad)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_low_dropout(self):
+        q = torch.randn(2, 8, 128, 128, dtype=torch.half, device='cuda')
+        dropout_p = 0.00000000001
+        out1 = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=dropout_p)
+        out2 = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.)
+        with self.assertRaisesRegex(AssertionError, "AssertionError not raised"):
+            self.assertNotEqual(out1, out2)
+
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_broken_166211(self):
