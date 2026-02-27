@@ -586,6 +586,19 @@ void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   c10::cuda::device_synchronize();
 }
 
+int CUDAHooks::getDeviceCapability(DeviceIndex device_index) const {
+  if (!hasCUDA()) {
+    return 0;
+  }
+  cudaDeviceProp* prop;
+  if (device_index == -1) {
+    prop = at::cuda::getCurrentDeviceProperties();
+  } else {
+    prop = at::cuda::getDeviceProperties(device_index);
+  }
+  return prop->major * 10 + prop->minor;
+}
+
 // Sigh, the registry doesn't support namespaces :(
 using at::CUDAHooksRegistry;
 using at::RegistererCUDAHooksRegistry;
