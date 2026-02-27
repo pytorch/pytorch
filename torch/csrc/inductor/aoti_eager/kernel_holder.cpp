@@ -198,11 +198,15 @@ bool AOTIPythonKernelHolder::cache_lookup(
     const torch::jit::Stack* stack,
     AOTIKernelMetadata& aoti_kernel_metadata) {
   TORCH_CHECK_NOT_IMPLEMENTED(
-      op.schema().returns().size() == 1,
-      "Not implemented for operations that return either multiple values or no value.");
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      op.schema().returns()[0].type()->isSubtypeOf(c10::TensorType::get()),
-      "Not implemented for operations that return a non-Tensor value.");
+      op.schema().returns().size() >= 1,
+      "Not implemented for operations that return no value.");
+  for (const auto& ret : op.schema().returns()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        ret.type()->isSubtypeOf(c10::TensorType::get()),
+        "Not implemented for operations that return a non-Tensor value. "
+        "Got return type: ",
+        ret.type()->str());
+  }
 
   auto inputs_metadata =
       unpack_input_parameters(op.schema().arguments(), *stack);
