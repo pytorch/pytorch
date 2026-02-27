@@ -2527,11 +2527,6 @@ class eager_numerics:
 
     disable_ftz: bool = False
 
-    # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
-    # Triton bundles its own libdevice.10.bc which may use different polynomial
-    # coefficients than CUDA's version, causing ~1 ULP differences in pow.
-    use_pytorch_libdevice: bool = False
-
 
 # Mode to emulate PyTorch eager numerics when doing lower precision compute
 # (fp16, bf16).  PyTorch eager computes bf16/fp16 by upcasting inputs to fp32
