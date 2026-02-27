@@ -111,7 +111,6 @@ LLM_OP_DB_NAMES = {
     "nn.functional.rms_norm",
     # Attention/linear
     "nn.functional.linear",
-    "matmul",
     "bmm",
     # Softmax
     "softmax",
@@ -367,7 +366,6 @@ EAGER_EQUIV_XFAILS = {
         "nn.functional.rms_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
-        "matmul": {fp16, fp32},
     },
     "inductor_default": {
         "reciprocal": {fp32},
@@ -378,7 +376,6 @@ EAGER_EQUIV_XFAILS = {
         "nn.functional.silu": {fp16, fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
-        "matmul": {fp16, fp32},
     },
     "inductor_numerics": {
         "reciprocal": {fp32},
@@ -389,7 +386,6 @@ EAGER_EQUIV_XFAILS = {
         "nn.functional.layer_norm": {fp32},
         "softmax": {fp32},
         "log_softmax": {fp32},
-        "matmul": {fp16, fp32},
     },
 }
 
@@ -397,15 +393,12 @@ DETERMINISM_XFAILS = {}
 
 BATCH_INVARIANCE_XFAILS = {
     "aot_eager_decomp_partition": {
-        "matmul": {ALL},
         "nn.functional.linear": {ALL},
     },
     "inductor_default": {
-        "matmul": {ALL},
         "nn.functional.linear": {ALL},
     },
     "inductor_numerics": {
-        "matmul": {ALL},
         "nn.functional.linear": {ALL},
     },
 }
