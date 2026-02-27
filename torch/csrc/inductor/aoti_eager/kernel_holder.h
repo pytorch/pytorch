@@ -21,6 +21,11 @@ struct AOTIKernelMetadata {
   std::vector<ParameterMetadata> parameter_metadata_list_;
   // AOTI model runner to run the AOTI kernel
   std::shared_ptr<AOTIModelContainerRunner> kernel_runner_;
+  // Whether this kernel was compiled with dynamic shapes. When true, cache
+  // matching skips exact size/stride comparison on tensors and matches by
+  // dtype/device/rank instead, allowing a single compiled kernel to serve
+  // multiple input shapes.
+  bool is_dynamic_{false};
   AOTIKernelMetadata() : kernel_runner_(nullptr) {}
 
   // Check whether the given parameter metadata list is the same as the
@@ -32,10 +37,16 @@ struct AOTIKernelMetadata {
     }
 
     for (size_t i = 0; i < parameter_metadata_list_.size(); ++i) {
-      if (parameter_metadata_list_[i] == parameter_metadata_list[i]) {
-        continue;
+      if (is_dynamic_) {
+        // Dynamic shapes: match by type/dtype/device/rank, skip exact sizes
+        if (!parameter_metadata_list_[i].dynamic_check(
+                parameter_metadata_list[i])) {
+          return false;
+        }
       } else {
-        return false;
+        if (!(parameter_metadata_list_[i] == parameter_metadata_list[i])) {
+          return false;
+        }
       }
     }
 
@@ -64,12 +75,15 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   c10::impl::PyInterpreter* pyinterpreter_;
   // Cache the produced kernels by AOTI and its metadata
   std::vector<AOTIKernelMetadata> aoti_kernel_cache_;
+  // Whether to compile with dynamic shapes support
+  bool dynamic_;
 
  public:
   AOTIPythonKernelHolder(
       c10::DispatchKey dispatch_key,
       std::string_view ns,
-      std::string_view op_name_with_overload);
+      std::string_view op_name_with_overload,
+      bool dynamic = false);
 
   void operator()(
       const c10::OperatorHandle& op,

@@ -92,6 +92,15 @@ bool TensorMetadata::operator==(const TensorMetadata& other) const {
   }
 }
 
+bool TensorMetadata::dynamic_check(const TensorMetadata& other) const {
+  // Match by dtype, device, and rank (number of dimensions) but skip
+  // exact sizes/strides so one compiled kernel serves multiple shapes.
+  return this->dtype_ == other.dtype_ && this->device_ == other.device_ &&
+      this->dispatch_key_set_ == other.dispatch_key_set_ &&
+      this->requires_grad_ == other.requires_grad_ &&
+      this->sizes_.size() == other.sizes_.size();
+}
+
 std::ostream& operator<<(
     std::ostream& stream,
     const TensorMetadata& tensor_metadata) {
@@ -208,6 +217,45 @@ bool ParameterMetadata::equal_to(const c10::Scalar& scalar) const {
   }
 
   return false;
+}
+
+bool ParameterMetadata::dynamic_check(const ParameterMetadata& other) const {
+  if (tag_ != other.tag_ || order_ != other.order_) {
+    return false;
+  }
+
+  switch (tag_) {
+    case TENSOR: {
+      const auto& self_tm = std::get<TensorMetadata>(value_);
+      const auto& other_tm = std::get<TensorMetadata>(other.value_);
+      return self_tm.dynamic_check(other_tm);
+    }
+    case TENSOR_LIST: {
+      const auto& self_list = std::get<std::vector<TensorMetadata>>(value_);
+      const auto& other_list =
+          std::get<std::vector<TensorMetadata>>(other.value_);
+      if (self_list.size() != other_list.size()) {
+        return false;
+      }
+      for (size_t i = 0; i < self_list.size(); ++i) {
+        if (!self_list[i].dynamic_check(other_list[i])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    // Non-tensor parameters use exact matching even in dynamic mode
+    case SCALAR:
+      return equal_to(std::get<c10::Scalar>(other.value_));
+    case STRING:
+      return std::get<std::string>(value_) ==
+          std::get<std::string>(other.value_);
+    case DEVICE:
+      return std::get<c10::Device>(value_) ==
+          std::get<c10::Device>(other.value_);
+    default:
+      return false;
+  }
 }
 
 } // namespace torch::inductor

@@ -157,12 +157,14 @@ std::vector<ParameterMetadata> unpack_input_parameters(
 AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     c10::DispatchKey dispatch_key,
     std::string_view ns,
-    std::string_view op_name_with_overload)
+    std::string_view op_name_with_overload,
+    bool dynamic)
     : dispatch_key_(dispatch_key),
       ns_(std::string(ns)),
       op_name_with_overload_(std::string(op_name_with_overload)),
       device_(c10::dispatchKeyToDeviceType(dispatch_key_), 0),
-      pyinterpreter_(getPyInterpreter()) {
+      pyinterpreter_(getPyInterpreter()),
+      dynamic_(dynamic) {
   auto device_name = c10::DeviceTypeName(device_.type());
   auto& registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
@@ -462,6 +464,7 @@ void AOTIPythonKernelHolder::cache_miss(
   AOTIKernelMetadata aoti_kernel_metadata;
   aoti_kernel_metadata.parameter_metadata_list_ = std::move(inputs_metadata);
   aoti_kernel_metadata.kernel_runner_ = kernel;
+  aoti_kernel_metadata.is_dynamic_ = dynamic_;
   aoti_kernel_cache_.push_back(std::move(aoti_kernel_metadata));
 
   auto inputs = unpack_tensors(op.schema().arguments(), *stack, device_);
@@ -529,7 +532,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       py::str(ns_str).ptr(),
       py::str(op_name_with_overload_).ptr(),
       py::str(c10::DeviceTypeName(device_.type(), true)).ptr(),
-      py::bool_(false).ptr(),
+      py::bool_(dynamic_).ptr(),
       op_py_func.ptr(),
       args_kwargs.first.ptr(),
       args_kwargs.second.ptr(),
