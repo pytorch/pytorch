@@ -394,22 +394,32 @@ def expand_to_full_mesh_op_strategy(
     # The out tensor must match the output placement, so we duplicate it.
     args_strategy = op_schema.args_strategy
     kwargs_strategy = op_schema.kwargs_strategy
-    if kwargs_strategy and op_schema.is_out_variant_op():
-        # Expected placements: outputs + args + kwargs
-        expected_len = input_index + len(args_strategy) + 1
-        # For each strategy, append output placement for each kwarg tensor if needed
-        expanded_strategies = []
-        for strategy in single_mesh_dim_strategies:
-            # some strategies may be the all replicate case, which auto appends
-            if len(strategy) < expected_len:
-                # Strategy doesn't include kwargs placements, append them
-                # The out tensor should match the output placement
+    if op_schema.is_out_variant_op():
+        assert "out" in op_schema.kwargs_schema, (
+            f"out variant op {op_schema.op} missing 'out' in kwargs_schema"
+        )
+        n_kwargs_tensors = len(kwargs_strategy)
+        expected_len = input_index + len(args_strategy) + n_kwargs_tensors
+        if n_kwargs_tensors == 1:
+            # Only the out= kwarg tensor — auto-append output placement.
+            expanded_strategies = []
+            for strategy in single_mesh_dim_strategies:
+                assert len(strategy) == expected_len - 1, (
+                    f"Strategy length {len(strategy)} != expected {expected_len - 1} "
+                    f"(outputs={input_index} + args={len(args_strategy)}) "
+                    f"for {op_schema.op}"
+                )
+                # out kwarg must match output placement
                 expanded_strategies.append(list(strategy) + [strategy[0]])
-
-            else:
-                # Strategy already has enough placements
-                expanded_strategies.append(list(strategy))
-        single_mesh_dim_strategies = expanded_strategies
+            single_mesh_dim_strategies = expanded_strategies
+        elif n_kwargs_tensors > 1:
+            # TODO: support ops with tensor kwargs beyond out=.
+            # Strategy author must spell out placements for all tensor kwargs.
+            for strategy in single_mesh_dim_strategies:
+                assert len(strategy) == expected_len, (
+                    f"Strategy length {len(strategy)} != expected {expected_len} "
+                    f"for op with {n_kwargs_tensors} tensor kwargs: {op_schema.op}"
+                )
 
     # Expand the single_mesh_dim_strategies to full mesh dim strategies.
     all_mesh_dim_strategies = [single_mesh_dim_strategies] * mesh.ndim
