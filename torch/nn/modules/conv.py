@@ -179,7 +179,7 @@ class _ConvNd(Module):
 
         self.reset_parameters()
 
-    def reset_parameters(self) -> None:
+    """def reset_parameters(self) -> None:
         # Setting a=sqrt(5) in kaiming_uniform is the same as initializing with
         # uniform(-1/sqrt(k), 1/sqrt(k)), where k = weight.size(1) * prod(*kernel_size)
         # For more details see: https://github.com/pytorch/pytorch/issues/15314#issuecomment-477448573
@@ -188,6 +188,25 @@ class _ConvNd(Module):
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             if fan_in != 0:
                 bound = 1 / math.sqrt(fan_in)
+                init.uniform_(self.bias, -bound, bound)"""
+    def reset_parameters(self) -> None:
+        # Use torch.no_grad() to allow in-place modification of weights/bias
+        with torch.no_grad():
+            # Check if the weight tensor is in channels_last_3d format to ensure numerical consistency
+            if self.weight.is_contiguous(memory_format=torch.channels_last_3d):
+                # Create a temporary contiguous copy to ensure the RNG populates values in a layout-agnostic way
+                temp_weight = self.weight.contiguous() 
+                init.kaiming_uniform_(temp_weight, a=math.sqrt(5))
+                # Copy the initialized values back to the original tensor while maintaining the memory format
+                self.weight.copy_(temp_weight.to(memory_format=torch.channels_last_3d))
+            else:
+                # Standard initialization for default contiguous memory format
+                init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+                
+            if self.bias is not None:
+                # Bias initialization remains independent of weight memory format
+                fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+                bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
                 init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self):
