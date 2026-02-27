@@ -672,7 +672,9 @@ def constant_pad_nd_single_dim_strategy(
     # the last dim backwards. Determine which dims have non-zero padding.
     padded_dims = set()
     for i in range(len(pad) // 2):
-        if not guard_or_false(pad[i * 2] == 0) and guard_or_false(pad[i * 2 + 1] == 0):
+        if not (
+            guard_or_false(pad[i * 2] == 0) and guard_or_false(pad[i * 2 + 1] == 0)
+        ):
             padded_dims.add(ndim - 1 - i)
 
     # Shard on any non-padded dim: output and input share the same placement.
@@ -682,11 +684,18 @@ def constant_pad_nd_single_dim_strategy(
         if dim not in padded_dims:
             strategies.append([_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)])
 
-    # Linearity: pad(a+b, 0) == pad(a, 0) + pad(b, 0), but only when the
-    # pad value is 0. Non-zero pad values would be duplicated across shards.
+    # Partial rules: at padded positions every rank writes the same constant v,
+    # so reduce(v, v, ..., v) = v for avg/max/min (idempotent). P(sum) only
+    # works when v=0 since sum(v, ..., v) = N*v != v otherwise.
+    # When all pad amounts are zero the op is a no-op, so all reduce ops hold.
     value = args_schema[2] if len(args_schema) > 2 else 0
-    if guard_or_false(value == 0):
-        strategies.append([Partial(), Partial()])
+    no_padding = all(guard_or_false(pad[i] == 0) for i in range(len(pad)))
+    if no_padding or guard_or_false(value == 0):
+        reduce_ops = ("sum", "avg", "max", "min")
+    else:
+        reduce_ops = ("avg", "max", "min")
+    for reduce_op in reduce_ops:
+        strategies.append([Partial(reduce_op), Partial(reduce_op)])
 
     return strategies
 

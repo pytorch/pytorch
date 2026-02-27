@@ -14,10 +14,7 @@ from torch._logging import LazyString
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._nonlinear_redux import (
-    argminmax_handler,
-    minmax_dim_handler,
-)
+from torch.distributed.tensor._nonlinear_redux import argminmax_handler
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -161,8 +158,6 @@ class OpDispatcher:
             aten.as_strided.default: as_strided_handler,
             aten.argmin.default: argminmax_handler,
             aten.argmax.default: argminmax_handler,
-            aten.max.dim: minmax_dim_handler,
-            aten.min.dim: minmax_dim_handler,
         }
 
     # ********************************************************************************************

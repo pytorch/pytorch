@@ -872,7 +872,7 @@ class DistMathOpsTest(DTensorTestBase):
     def test_max_min_dim_sharded(self):
         """max.dim/min.dim on sharded tensors produce correct values and indices."""
         device_mesh = self.build_device_mesh()
-        t = torch.randn(8, 6, device=self.device_type)
+        t = torch.randn(128, 64, device=self.device_type)
 
         for op in [torch.max, torch.min]:
             expected_vals, expected_idx = op(t, dim=1)

@@ -1118,8 +1118,19 @@ def validate_sharding_rule_sample(
     # run and compare
     ref_output = op(*full_args, **full_kwargs)
     local_output = op(*local_args, **local_kwargs)
-    output_dt = DTensor.from_local(local_output, device_mesh, output_placements)
-    full_output = output_dt.redistribute(device_mesh, (Replicate(),)).to_local()
-    return ref_output.shape == full_output.shape and torch.allclose(
-        ref_output, full_output, atol=1e-5, rtol=1e-5
-    )
+
+    ref_tensors = [
+        t for t in pytree.tree_leaves(ref_output) if isinstance(t, torch.Tensor)
+    ]
+    local_tensors = [
+        t for t in pytree.tree_leaves(local_output) if isinstance(t, torch.Tensor)
+    ]
+
+    for ref, local, plc in zip(ref_tensors, local_tensors, output_placements):
+        dt = DTensor.from_local(local, device_mesh, (plc,))
+        full = dt.redistribute(device_mesh, (Replicate(),)).to_local()
+        if ref.shape != full.shape or not torch.allclose(
+            ref, full, atol=1e-5, rtol=1e-5
+        ):
+            return False
+    return True
