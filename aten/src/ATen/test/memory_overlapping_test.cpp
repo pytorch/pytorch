@@ -69,7 +69,10 @@ TEST(MemoryOverlapTest, ContiguousExpandedTensor) {
   for (auto size : sizes) {
     Tensor t = at::rand(size);
     for (auto size_to_add : {1, 2, 3, 4}) {
+// there's some bug in current s390x compiler, gcc-14
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wrestrict")
       std::vector<int64_t> expanded_size(size);
+C10_DIAGNOSTIC_POP()
       expanded_size.insert(expanded_size.begin(), size_to_add);
       auto expanded = t.expand(expanded_size);
       EXPECT_TRUE(t.is_contiguous());
