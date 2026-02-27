@@ -172,7 +172,7 @@ while the trailing entries will be padded.
     since the nested and the non-nested tensors differ in memory layout.
 
 Args:
-    padding (float): The padding value for the trailing entries.
+    padding (Number): The padding value for the trailing entries.
 
 Keyword args:
     output_size (Tuple[int]): The size of the output tensor.

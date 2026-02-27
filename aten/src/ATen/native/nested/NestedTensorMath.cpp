@@ -41,7 +41,7 @@ int64_t num_bytes(IntArrayRef sizes) {
 Tensor pad_tensor_to_shape(
     const Tensor& t,
     IntArrayRef goal_shape,
-    double value = 0) {
+    const Scalar& value) {
   std::vector<int64_t> padding;
   auto tup = t.sizes();
   TORCH_CHECK(
@@ -236,7 +236,7 @@ Tensor nested_from_padded_generic(
         size.data_ptr<int64_t>(), size.data_ptr<int64_t>() + size.numel());
     at::Tensor mask_i = padded_transformed.new_full(
         sizes_i, true, kBool, std::nullopt, std::nullopt, std::nullopt);
-    masks.push_back(pad_tensor_to_shape(mask_i, target_size_arr));
+    masks.push_back(pad_tensor_to_shape(mask_i, target_size_arr, false));
   }
   at::Tensor final_mask = at::stack(masks);
   at::Tensor new_buffer = padded_transformed.masked_select(final_mask).to(padded.device());
@@ -246,7 +246,7 @@ Tensor nested_from_padded_generic(
 
 Tensor NestedTensor_to_padded_tensor_generic(
     const Tensor& t,
-    double padding,
+    const Scalar& padding,
     OptionalIntArrayRef output_size) {
   // TODO: support noncontiguous case
   // error out for now

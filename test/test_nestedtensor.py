@@ -1415,6 +1415,21 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         padded = torch.nested.to_padded_tensor(nt, pad)
         self.assertEqual(padded, correct_output)
 
+    def test_to_padded_tensor_int64_padding_precision(self, device):
+        # Large int64 values beyond float64 precision (2^53) must not lose precision
+        padding_value = -7704671799122851728
+        nt = torch.nested.nested_tensor(
+            [
+                torch.tensor([1, padding_value], device=device, dtype=torch.int64),
+                torch.tensor([padding_value], device=device, dtype=torch.int64),
+            ]
+        )
+        padded = torch.nested.to_padded_tensor(nt, padding=padding_value)
+        self.assertEqual(padded[0, 0], 1)
+        self.assertEqual(padded[0, 1], padding_value)
+        self.assertEqual(padded[1, 0], padding_value)
+        self.assertEqual(padded[1, 1], padding_value)
+
     # TODO: test noncontiguous to_padded_tensor
     # For now this tests the functionality of noncontiguous_to_padded_tensor
     # and the error message of to_padded_tensor

@@ -8,7 +8,7 @@ namespace at::native {
 
 TORCH_API Tensor NestedTensor_to_padded_tensor_generic(
     const Tensor& t,
-    double padding,
+    const Scalar& padding,
     OptionalIntArrayRef output_size);
 
 template <typename Func>
