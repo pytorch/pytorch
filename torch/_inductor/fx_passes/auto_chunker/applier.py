@@ -1,7 +1,7 @@
 import copy
 import logging
 import operator
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -62,14 +62,14 @@ class ChunkingApplier:
         self.num_chunk = num_chunk
 
         # tangent node to the all-one tensor
-        self.overriden_tangent: dict[Node, Optional[Node]] = {}
+        self.overriden_tangent: dict[Node, Node | None] = {}
 
         self.subgraph_input: list[Node] = []
         self.subgraph_body: list[Node] = []
         self.subgraph_output: list[Node] = []
         self._categorize_subgraph_nodes()
 
-        self.chunk_sizes: Optional[list[int]] = None
+        self.chunk_sizes: list[int] | None = None
 
         # First index is node index,
         # Second index is chunk index.
@@ -78,7 +78,7 @@ class ChunkingApplier:
         # check self.chunk_subgraph_input for more details
         self.chunked_subgraph_input: list[list[Node]] = []
 
-        self.accumulators: dict[Node, Optional[Node]] = {}
+        self.accumulators: dict[Node, Node | None] = {}
         self.chunks_for_recovering: dict[Node, list[Node]] = {}
         for node in self.subgraph_output:
             meta = get_chunking_meta(node)

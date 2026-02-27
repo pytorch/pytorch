@@ -231,7 +231,6 @@ def stage_backward_weight(
     weight_grads: list[torch.Tensor | None] = []
     for index, weight in enumerate(weights):
         grad_acc = _get_grad_fn_or_grad_acc(weight)
-        # pyrefly: ignore [unsupported-operation]
         grad_acc_to_weight[grad_acc] = weight, index
         weight_grads.append(weight.grad)
 
@@ -242,12 +241,11 @@ def stage_backward_weight(
         for grads_tuple, intermediate in zip(
             param_group["grads"], param_group["intermediates"]
         ):
-            non_none_grads = [g for g in grads_tuple if g is not None]
-            if non_none_grads:
-                summed_grad = sum(non_none_grads)
-                valid_edges.append(GradientEdge(intermediate, 0))
-                # pyrefly: ignore [bad-argument-type]
-                valid_grad_outputs.append(summed_grad)
+            for i, grad in enumerate(grads_tuple):
+                if grad is not None:
+                    valid_edges.append(GradientEdge(intermediate, i))
+                    # pyrefly: ignore [bad-argument-type]
+                    valid_grad_outputs.append(grad)
 
         # Break a reference cycle caused inside stage_backward_input->get_hook->hook
         # The summarized cycle is:

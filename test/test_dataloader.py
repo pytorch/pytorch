@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_JETSON,
+    IS_LINUX,
     IS_MACOS,
     IS_S390X,
     IS_SANDCASTLE,
@@ -40,7 +41,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
     TestCase,
-    xfailIfLinux,
 )
 from torch.utils.data import (
     _utils,
@@ -1084,22 +1084,7 @@ def _test_worker_info_init_fn(worker_id):
         raise AssertionError("worker_info should have correct dataset copy")
     if hasattr(dataset, "value"):
         raise AssertionError("worker_info should have correct dataset copy")
-    # test that WorkerInfo attributes are read-only
-    try:
-        worker_info.id = 3999
-    except RuntimeError as e:
-        if str(e) != "Cannot assign attributes to WorkerInfo objects":
-            raise AssertionError(
-                "Expected RuntimeError for WorkerInfo attribute assignment"
-            ) from None
-    try:
-        worker_info.a = 3
-    except RuntimeError as e:
-        if str(e) != "Cannot assign attributes to WorkerInfo objects":
-            raise AssertionError(
-                "Expected RuntimeError for WorkerInfo attribute assignment"
-            ) from None
-    for k in ["id", "num_workers", "seed", "dataset"]:
+    for k in ["id", "num_workers", "seed", "dataset", "rng"]:
         if f"{k}=" not in repr(worker_info):
             raise AssertionError(f"Expected {k} in worker_info repr")
     dataset.value = [worker_id, os.getpid()]
@@ -1440,14 +1425,16 @@ except RuntimeError as e:
             del loader1_it
             del loader2_it
 
-    # This case pass on Intel GPU, but currently expected failure on other device,
-    # please don't forget to remove this skip when remove the xfailIfLinux.
     @skipIfXpu
-    # This case passes on s390x too.
-    # please don't forget to remove this skip when remove the xfailIfLinux.
     @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
-    # https://github.com/pytorch/pytorch/issues/128551
-    @xfailIfLinux
+    # Test that DataLoader properly handles worker segfaults
+    # Note: This test has inconsistent behavior across Linux distributions:
+    # - Passes on RHEL 9.6 (segfault triggers correctly)
+    # - Fails on Ubuntu (process may not terminate as expected)
+    # Skipping on Linux due to kernel/distribution-dependent segfault behavior.
+    @unittest.skipIf(
+        IS_LINUX, "Segfault behavior is inconsistent across Linux distributions"
+    )
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()

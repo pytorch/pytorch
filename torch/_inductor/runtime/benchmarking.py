@@ -244,6 +244,30 @@ class Benchmarker:
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
 
+    @time_and_count
+    def benchmark_gpu_with_cuda_graph(
+        self: Self,
+        _callable: Callable[[], Any],
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark a GPU callable using CUDA graph capture and replay.
+
+        This captures the callable into a CUDA graph and benchmarks the graph replay,
+        which eliminates kernel launch overhead for fair comparison between different
+        implementations.
+        """
+        # Warmup
+        _callable()
+        torch.cuda.synchronize()
+
+        # Capture into CUDA graph
+        cuda_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(cuda_graph, capture_error_mode="thread_local"):
+            _callable()
+        torch.cuda.synchronize()
+
+        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
+
 
 class TritonBenchmarker(Benchmarker):
     @cached_property
