@@ -328,7 +328,15 @@ kernel void index_reduce(
 
   T source_elem = source[source_offset];
 
-  AtomicType<T>::atomic_binary_op(self, self_offset, source_elem, ReduceOp);
+  // For sub-32-bit types, atomic<uint> requires 4-byte alignment. The buffer
+  // pointer may not be aligned, so back up to the nearest 4-byte boundary
+  // and compensate in the element offset.
+  auto addr = reinterpret_cast<ulong>(self);
+  auto misalign_elems = (addr % alignof(AtomicType_t<T>)) / sizeof(T);
+  auto aligned_self = reinterpret_cast<device AtomicType_t<T>*>(
+      reinterpret_cast<device char*>(self) - misalign_elems * sizeof(T));
+  AtomicType<T>::atomic_binary_op(
+      aligned_self, self_offset + misalign_elems, source_elem, ReduceOp);
 }
 
 #define REGISTER_INDEX_REDUCE_OP(ReduceOp, T, IT)                  \
