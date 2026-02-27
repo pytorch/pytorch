@@ -112,7 +112,8 @@ class Layout(LayoutBase):
         if is_tuple(self.shape):
             return Layout(self.shape[i], self.stride[i])  # type: ignore[index]
         else:
-            assert i == 0
+            if i != 0:
+                raise AssertionError
             return Layout(self.shape, self.stride)
 
     # size(layout)   Size of the domain
@@ -162,7 +163,8 @@ def cosize(layout: Layout) -> int:
 # Layout coalesce -- flatten and combine as many modes as possible while preserving the int-to-int function
 def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
     if is_tuple(profile):
-        assert len(layout) >= len(profile)
+        if len(layout) < len(profile):
+            raise AssertionError
         return make_layout(
             # pyrefly: ignore [bad-argument-type]
             chain(
@@ -204,7 +206,8 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
 # Layout filter -- replace all stride-0 modes with size-1 and then coalesce to remove them
 def filter(layout: Layout, profile: LayoutProfile = None) -> Layout:
     if is_tuple(profile):
-        assert len(layout) >= len(profile)
+        if len(layout) < len(profile):
+            raise AssertionError
         return make_layout(
             # pyrefly: ignore [bad-argument-type]
             chain(
@@ -235,7 +238,8 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     elif is_int(layoutB):
         return composition(layoutA, Layout(layoutB))
     elif is_tuple(layoutB):
-        assert len(layoutA) >= len(layoutB)
+        if len(layoutA) < len(layoutB):
+            raise AssertionError
         return make_layout(
             # pyrefly: ignore [bad-argument-type]
             chain(
@@ -265,7 +269,8 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
         for curr_shape, curr_stride in zip(
             reversed(flatten(flat_A.shape)[1:]), reversed(flatten(flat_A.stride)[1:])
         ):
-            assert curr_shape % rest_stride == 0 or rest_stride % curr_shape == 0  # type: ignore[operator]
+            if not (curr_shape % rest_stride == 0 or rest_stride % curr_shape == 0):  # type: ignore[operator]
+                raise AssertionError
             new_shape = min(max(1, curr_shape // rest_stride), rest_shape)  # type: ignore[operator]
 
             if new_shape != 1:
@@ -310,7 +315,8 @@ def complement(layout: LayoutOrIntTuple, max_idx: int = 1) -> Layout:
 
         in_bound = current_idx <= shape * stride
         # To support symbolic value which can't be evaluated now
-        assert (type(in_bound) is not bool) or in_bound
+        if (type(in_bound) is bool) and not in_bound:
+            raise AssertionError
 
         result_shape.append(stride // current_idx)
         result_stride.append(current_idx)
@@ -372,7 +378,8 @@ def logical_divide(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     elif is_int(layoutB):
         return logical_divide(layoutA, Layout(layoutB))
     elif is_tuple(layoutB):
-        assert len(layoutA) >= len(layoutB)
+        if len(layoutA) < len(layoutB):
+            raise AssertionError
         return make_layout(
             # pyrefly: ignore [bad-argument-type]
             chain(
@@ -398,7 +405,8 @@ def logical_product(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     elif is_int(layoutB):
         return logical_divide(layoutA, Layout(layoutB))
     elif is_tuple(layoutB):
-        assert len(layoutA) >= len(layoutB)
+        if len(layoutA) < len(layoutB):
+            raise AssertionError
         return make_layout(
             # pyrefly: ignore [bad-argument-type]
             chain(
@@ -425,7 +433,8 @@ def hier_unzip(
     if layoutB is None:
         return make_layout(Layout(1, 0), layoutA)
     elif is_tuple(layoutB):
-        assert len(layoutA) >= len(layoutB)
+        if len(layoutA) < len(layoutB):
+            raise AssertionError
         # A layout with shape ((A,a),(B,b),(C,c))
         split = make_layout(
             hier_unzip(splitter, layoutA[i], layoutB[i])  # type: ignore[arg-type]
