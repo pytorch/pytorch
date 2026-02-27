@@ -26,3 +26,4 @@ torch_parse_device_string: TORCH_VERSION_2_10_0
 torch_dtype_float4_e2m1fn_x2: TORCH_VERSION_2_11_0
 torch_dtype_float8_e8m0fnu: TORCH_VERSION_2_11_0
 torch_from_blob: TORCH_VERSION_2_11_0
+torch_from_blob_v2: TORCH_VERSION_2_12_0

@@ -91,7 +91,6 @@ class FuzzedSparseTensor(FuzzedTensor):
         return x
 
     def _make_tensor(self, params, state):
-        # pyrefly: ignore [missing-attribute]
         size, _, _ = self._get_size_and_steps(params)
         density = params['density']
         nnz = math.ceil(sum(size) * density)
@@ -101,10 +100,8 @@ class FuzzedSparseTensor(FuzzedTensor):
         is_coalesced = params['coalesced']
         sparse_dim = params['sparse_dim'] if self._sparse_dim else len(size)
         sparse_dim = min(sparse_dim, len(size))
-        # pyrefly: ignore [missing-attribute]
         tensor = self.sparse_tensor_constructor(size, self._dtype, sparse_dim, nnz, is_coalesced)
 
-        # pyrefly: ignore [missing-attribute]
         if self._cuda:
             tensor = tensor.cuda()
         sparse_dim = tensor.sparse_dim()
@@ -120,7 +117,6 @@ class FuzzedSparseTensor(FuzzedTensor):
             "sparse_dim": sparse_dim,
             "dense_dim": dense_dim,
             "is_hybrid": is_hybrid,
-            # pyrefly: ignore [missing-attribute]
             "dtype": str(self._dtype),
         }
         return tensor, properties

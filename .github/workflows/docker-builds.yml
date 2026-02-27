@@ -51,10 +51,8 @@ jobs:
         docker-image-name: [
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
-          pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm,
-          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
-          pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11,
           pytorch-linux-jammy-py3.10-clang15,
           pytorch-linux-jammy-py3.11-clang15,
           pytorch-linux-jammy-py3.12-clang15,
@@ -86,8 +84,6 @@ jobs:
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
-            runner: linux.arm64.m7g.4xlarge
-          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-clang21
             runner: linux.arm64.m7g.4xlarge
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
             runner: linux.arm64.m7g.4xlarge
