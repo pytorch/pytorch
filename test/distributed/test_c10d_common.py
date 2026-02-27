@@ -1154,7 +1154,11 @@ class AbstractCommTest:
             ranks=ranks,
             backend="gloo",
         )
-        assert dist.get_world_size(process_group) == dist.get_world_size(verify_pg)
+        if dist.get_world_size(process_group) != dist.get_world_size(verify_pg):
+            raise AssertionError(
+                f"World sizes mismatch: {dist.get_world_size(process_group)} "
+                f"vs {dist.get_world_size(verify_pg)}"
+            )
 
         initial_num = (
             self._verify_sequence_number_across_pg(
@@ -2268,8 +2272,9 @@ class LocalRankTest(MultiProcessTestCase):
 
 if __name__ == "__main__":
     if device_type != "cpu":
-        assert not torch.get_device_module()._initialized, (
-            f"test_distributed must not have initialized {device_type} context on main process"
-        )
+        if torch.get_device_module()._initialized:
+            raise AssertionError(
+                f"test_distributed must not have initialized {device_type} context on main process"
+            )
 
     run_tests()
