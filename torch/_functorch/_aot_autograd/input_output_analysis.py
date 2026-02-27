@@ -381,16 +381,23 @@ def compute_overlapping_inputs(
     ):
         no_overlap_indices = list(set(aliased_input_indices) - actual_aliased_indices)
 
+        # Filter out None sources (e.g., DDPOptimizer intermediate values)
         overlapping_sources = [
-            aot_config.aot_autograd_arg_pos_to_source[i] for i in actual_aliased_indices
+            s
+            for i in actual_aliased_indices
+            if (s := aot_config.aot_autograd_arg_pos_to_source[i]) is not None
         ]
         non_overlapping_sources = [
-            aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices
+            s
+            for i in no_overlap_indices
+            if (s := aot_config.aot_autograd_arg_pos_to_source[i]) is not None
         ]
 
-        tracing_context.guards_context.aotautograd_guards.append(
-            StorageOverlap(overlapping_sources, non_overlapping_sources)
-        )
+        # Only add guard if we have meaningful sources
+        if overlapping_sources or non_overlapping_sources:
+            tracing_context.guards_context.aotautograd_guards.append(
+                StorageOverlap(overlapping_sources, non_overlapping_sources)
+            )
 
     return actual_aliased_indices
 
