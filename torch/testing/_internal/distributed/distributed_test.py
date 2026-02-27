@@ -5333,12 +5333,8 @@ class DistributedTest:
                     rank * local_batch_size : (rank + 1) * local_batch_size
                 ]
 
-                if iteration % 2 == 0:
-                    # accumulate grads locally
-                    with ddp_model.no_sync():
-                        step_model(ddp_model, ddp_input, ddp_target)
-                else:
-                    # sync grads
+                # sync grads every other iteration
+                with ddp_model.no_sync(enabled=(iteration % 2 == 0)):
                     step_model(ddp_model, ddp_input, ddp_target)
 
                 for i, j in zip(

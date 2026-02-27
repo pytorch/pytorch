@@ -1583,7 +1583,7 @@ class DistributedDataParallel(Module, Joinable):
             )
 
     @contextmanager
-    def no_sync(self):
+    def no_sync(self, *, enabled: bool = True):
         r"""
         Context manager to disable gradient synchronizations across DDP processes.
 
@@ -1595,15 +1595,24 @@ class DistributedDataParallel(Module, Joinable):
 
             >>> # xdoctest: +SKIP("undefined variables")
             >>> ddp = torch.nn.parallel.DistributedDataParallel(model, pg)
-            >>> with ddp.no_sync():
-            >>>     for input in inputs:
-            >>>         ddp(input).backward()  # no synchronization, accumulate grads
-            >>> ddp(another_input).backward()  # synchronize grads
+            >>> for i, input in enumerate(inputs):
+            >>>     # accumulate grads locally; only sync during the last iteration
+            >>>     last_iter = i == len(inputs) - 1
+            >>>     with ddp.no_sync(enabled=not last_iter):
+            >>>         ddp(input).backward()
 
         .. warning::
             The forward pass should be included inside the context manager, or
             else gradients will still be synchronized.
+
+        Args:
+            enabled (bool, optional): Whether this context manager is enabled.
+                ``no_sync`` does nothing when ``enabled=False``. Default: ``True``
         """
+        if not enabled:
+            yield
+            return
+
         old_require_backward_grad_sync = self.require_backward_grad_sync
         self.require_backward_grad_sync = False
         try:
