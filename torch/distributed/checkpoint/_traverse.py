@@ -158,7 +158,7 @@ def get_element(
     cur_value = cast(CONTAINER_TYPE, root_dict)
     for part in path:
         if type(part) is int:
-            if not isinstance(cur_value, list) or len(cur_value) < part:
+            if not isinstance(cur_value, list) or len(cur_value) <= part:
                 return default_value
         elif not isinstance(cur_value, Mapping) or part not in cur_value:
             return default_value
