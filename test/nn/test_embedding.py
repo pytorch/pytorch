@@ -1128,7 +1128,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         weight = torch.ones(10, 5, dtype=torch.float32, device=device)
 
         # Test case 1: Empty indices with offset pointing beyond bounds
-        # This was the original bug - offsets[1]=2 > len(indices)=0
         indices = torch.zeros(0, dtype=idx_dtype, device=device)
         offsets = torch.tensor([0, 2, 0], dtype=offset_dtype, device=device)
 

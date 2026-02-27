@@ -384,15 +384,26 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices_,
                   offset_n);
       
       // Validate all offsets are within bounds and monotonically non-decreasing
-      for (int64_t i = 0; i < offsets_cpu.size(0); ++i) {
+      // Skip first element (offset_0 == 0 already validated) and last element (offset_n already validated)
+      int64_t numOffsets = offsets_cpu.size(0);
+      for (int64_t i = 1; i < numOffsets; ++i) {
         index_t offset_i = offsets_data[i];
-        TORCH_CHECK(offset_i >= 0 && offset_i <= numIndices,
-                    "offsets[", i, "] = ", offset_i, " is out of bounds [0, ", numIndices, "]");
-        if (i > 0) {
-          TORCH_CHECK(offset_i >= offsets_data[i-1],
-                      "offsets must be monotonically non-decreasing, but got offsets[", i-1, "] = ",
-                      offsets_data[i-1], " > offsets[", i, "] = ", offset_i);
+        index_t offset_prev = offsets_data[i-1];
+        
+        // For last element, skip upper bound check (already validated above)
+        if (i < numOffsets - 1) {
+          TORCH_CHECK(offset_i >= 0 && offset_i <= numIndices,
+                      "offsets[", i, "] = ", offset_i, " is out of bounds [0, ", numIndices, "]");
+        } else {
+          // Last element: only check >= 0 (upper bound already checked above)
+          TORCH_CHECK(offset_i >= 0,
+                      "offsets[", i, "] = ", offset_i, " must be >= 0");
         }
+        
+        // Check monotonicity
+        TORCH_CHECK(offset_i >= offset_prev,
+                    "offsets must be monotonically non-decreasing, but got offsets[", i-1, "] = ",
+                    offset_prev, " > offsets[", i, "] = ", offset_i);
       }
     }
   });
