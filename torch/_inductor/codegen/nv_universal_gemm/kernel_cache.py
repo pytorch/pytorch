@@ -12,13 +12,13 @@ dict for O(1) lookup (~0.1 μs).
 
 import logging
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 
 log = logging.getLogger(__name__)
 
 # Global cache: kernel_name -> kernel object
-_kernel_by_name_cache: Optional[dict[str, Any]] = None
+_kernel_by_name_cache: dict[str, Any] | None = None
 
 
 def _build_kernel_cache() -> dict[str, Any]:
@@ -35,7 +35,7 @@ def _build_kernel_cache() -> dict[str, Any]:
 def get_compatible_kernels(
     args: Any,
     cc: int,
-    metadata_filter: Optional[Callable[[Any], bool]] = None,
+    metadata_filter: Callable[[Any], bool] | None = None,
 ) -> list[Any]:
     """Get kernels compatible with the given arguments from the cache."""
     global _kernel_by_name_cache
