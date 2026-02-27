@@ -1,0 +1,64 @@
+{{def_kernel("X", "W")}}
+    # Depthwise conv1d – channels-last (NLC) layout
+    # Each group has exactly 1 input channel (groups == in_channels == out_channels)
+    # 3D tiling: BLOCK_N x BLOCK_L x BLOCK_C
+    # Matches the hand-written NLC kernel from depthwise_conv1d_benchmark.py
+
+    BATCH = {{size("X", 0)}}
+    CHANNELS = {{size("X", 1)}}
+    IN_L = {{size("X", 2)}}
+    OUT_L = {{size(None, 2)}}
+
+    stride_xn = {{stride("X", 0)}}
+    stride_xc = {{stride("X", 1)}}
+    stride_xl = {{stride("X", 2)}}
+
+    stride_wc = {{stride("W", 0)}}
+    stride_wk = {{stride("W", 2)}}
+
+    # Grid: (cdiv(BATCH, BLOCK_N), cdiv(OUT_L, BLOCK_L), cdiv(CHANNELS, BLOCK_C))
+    pid_n = tl.program_id(0).to(INDEX_DTYPE)
+    pid_l = tl.program_id(1).to(INDEX_DTYPE)
+    pid_c = tl.program_id(2).to(INDEX_DTYPE)
+
+    n_start = pid_n * BLOCK_N
+    l_start = pid_l * BLOCK_L
+    c_start = pid_c * BLOCK_C
+
+    n_offs = n_start + tl.arange(0, BLOCK_N)
+    l_offs = l_start + tl.arange(0, BLOCK_L)
+    c_offs = c_start + tl.arange(0, BLOCK_C)
+    n_mask = n_offs < BATCH
+    l_mask = l_offs < OUT_L
+    c_mask = c_offs < CHANNELS
+
+    n3 = n_offs[:, None, None]
+    nm3 = n_mask[:, None, None]
+    c3 = c_offs[None, None, :]
+    cm3 = c_mask[None, None, :]
+
+    in_base = n3 * stride_xn + c3 * stride_xc
+
+    acc = tl.zeros((BLOCK_N, BLOCK_L, BLOCK_C), dtype=tl.float32)
+
+    for k in range(KERNEL_SIZE):
+        wk = tl.load(
+            W + c_offs * stride_wc + k * stride_wk,
+            mask=c_mask,
+            other=0.0,
+        ).to(tl.float32)
+        l_in = l_offs * CONV_STRIDE - PADDING + k
+        mask_in = (l_in >= 0) & (l_in < IN_L)
+        x_vals = tl.load(
+            X + in_base + l_in[None, :, None] * stride_xl,
+            mask=nm3 & mask_in[None, :, None] & cm3,
+            other=0.0,
+        ).to(tl.float32)
+        acc += x_vals * wk[None, None, :]
+
+    mask = nm3 & l_mask[None, :, None] & cm3
+    idx_n = n_offs[:, None, None]
+    idx_c = c_offs[None, None, :]
+    idx_l = l_offs[None, :, None]
+
+    {{store_output(("idx_n", "idx_c", "idx_l"), "acc", "mask", val_shape=("BLOCK_N", "BLOCK_L", "BLOCK_C"))}}
