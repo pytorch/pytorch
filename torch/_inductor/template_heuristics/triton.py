@@ -77,6 +77,21 @@ ConvConfig = BaseConfig
 
 
 @dataclasses.dataclass
+class DepthwiseConvConfig:
+    """
+    Configuration for depthwise conv1d Triton template.
+    Uses BLOCK_N x BLOCK_L x BLOCK_C tiling (channels-last NLC layout).
+    Matches the hand-written NLC kernel from depthwise_conv1d_benchmark.py.
+    """
+
+    block_n: int
+    block_l: int
+    block_c: int
+    num_stages: int
+    num_warps: int
+
+
+@dataclasses.dataclass
 class BlackwellGPUGemmConfig(GemmConfig):
     """
     Gemm configuration used for templates with features explicitly
@@ -654,6 +669,63 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             ConvConfig(128, 256, 128, 2, 8),
         ]
 
+        # Depthwise conv1d configs: BLOCK_N x BLOCK_L x BLOCK_C tiling
+        # Derived from autotuning results on H100 for depthwise conv1d
+        # channels-last (NLC) layout with shape x=[3072, 128, 202]
+        # Matches _nlc_autotune_configs from depthwise_conv1d_benchmark.py
+        self.depthwise_conv_configs: list[DepthwiseConvConfig] = [
+            # BLOCK_C=32, BLOCK_L=32
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=32, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=32, block_c=32, num_stages=5, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=32, block_c=32, num_stages=4, num_warps=4
+            ),
+            # BLOCK_C=32, BLOCK_L=64
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=32, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=64, block_c=32, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=32, BLOCK_L=256
+            DepthwiseConvConfig(
+                block_n=16, block_l=256, block_c=32, num_stages=5, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=256, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=256, block_c=32, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=64
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=64, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=64, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=64, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=128
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=128, num_stages=3, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=128, num_stages=3, num_warps=4
+            ),
+        ]
+
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
             FlexConfig(128, 64, 3, 4),
             FlexConfig(128, 128, 3, 4),
@@ -1018,6 +1090,21 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return partial(
             self.preprocess_mm_configs, configs=self.conv_configs, op_name="conv"
         )
+
+    def get_depthwise_conv_configs(self) -> list[TritonConfig]:
+        """Return TritonConfig list for depthwise conv1d autotuning."""
+        return [
+            TritonConfig(
+                {
+                    "BLOCK_N": cfg.block_n,
+                    "BLOCK_L": cfg.block_l,
+                    "BLOCK_C": cfg.block_c,
+                },
+                num_stages=cfg.num_stages,
+                num_warps=cfg.num_warps,
+            )
+            for cfg in self.depthwise_conv_configs
+        ]
 
     # Flex attn helpers
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:

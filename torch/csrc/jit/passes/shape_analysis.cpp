@@ -106,10 +106,6 @@ void PropertyPropBase::setUnshapedType(Node* node) {
   }
 }
 
-namespace prim {
-using namespace ::c10::prim;
-}
-
 #define SHAPE_ASSERT(cond) \
   if (!(cond))             \
   throw propagation_error()
