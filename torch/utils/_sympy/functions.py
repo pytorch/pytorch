@@ -1328,17 +1328,6 @@ class Identity(sympy.Function):
     def _eval_is_integer(self):
         return self.args[0].is_integer  # type: ignore[attr-defined]
 
-    @property
-    def is_number(self):
-        # Treat Identity as numeric only when the argument is comparable.
-        # This avoids creating numeric non-comparable Identity(I) terms.
-        return bool(self.args[0].is_number and self.args[0].is_comparable)
-
-    @property
-    def is_comparable(self):
-        # Delegate comparability to the wrapped argument.
-        return bool(self.args[0].is_comparable)
-
     def _eval_expand_identity(self, **hints):
         # Removes the identity op.
         return self.args[0]
