@@ -10,6 +10,7 @@ import torch._refs as refs
 import torch._refs.linalg as linalg
 from torch import Tensor
 from torch._prims_common import (
+    canonicalize_dims,
     check_fp_or_complex,
     check_is_matrix,
     Dim,
@@ -183,7 +184,8 @@ def vector_norm(
             elif dim is None:
                 return to_result_dtype(x).flatten()[0]
             else:
-                new_shape = [s for d, s in enumerate(x.shape) if d not in dim]
+                cdims = canonicalize_dims(x.ndim, dim)
+                new_shape = [s for d, s in enumerate(x.shape) if d not in cdims]
                 return to_result_dtype(x.view(new_shape)).contiguous()
 
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):

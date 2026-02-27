@@ -13,11 +13,14 @@ namespace {
 static constexpr int64_t kILP = 4;
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kBlockSize = 512;
+static constexpr dim3 kBlockSizeDim = dim3(32, 16);
 
 // TODO(crcrpar): Add `n>5` for `low prec params & their higher prec copy`
 // TensorListMetadata has to be < 4KB - the limit for kernel launch argument
 static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
 static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
+static constexpr int depth_to_max_blocks_dim[5] = {490, 490, 490, 490, 490};
+static constexpr int depth_to_max_tensors_dim[5] = {50, 40, 34, 29, 25};
 static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
 static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
     72,
@@ -44,6 +47,17 @@ struct TensorListMetadata {
   int64_t numel_for_tensor[depth_to_max_tensors[n - 1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n - 1]];
   int block_to_chunk[depth_to_max_blocks[n - 1]];
+  int start_tensor_this_launch;
+};
+
+template <int n>
+struct TensorListDimMetadata {
+  const void* addresses[n][depth_to_max_tensors_dim[n - 1]];
+  int64_t num_rows[depth_to_max_tensors_dim[n - 1]];
+  int64_t num_cols[depth_to_max_tensors_dim[n - 1]];
+  int64_t prod_of_other_dim[depth_to_max_tensors_dim[n - 1]];
+  unsigned char block_to_tensor[depth_to_max_blocks_dim[n - 1]];
+  int block_to_chunk[depth_to_max_blocks_dim[n - 1]];
   int start_tensor_this_launch;
 };
 
@@ -373,6 +387,106 @@ void multi_tensor_apply_for_fused_optimizer(
     multi_tensor_apply_kernel<<<
         loc_block_info,
         kBlockSize,
+        0,
+        at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  }
+}
+
+template <typename T, typename... ArgTypes>
+void multi_tensor_apply_dim(
+    std::vector<std::vector<at::Tensor>>& tensor_lists,
+    int reduce_dim, // 0 = reduce rows, 1 = reduce cols
+    T callable,
+    ArgTypes... args) {
+  constexpr int depth = 2; // 1 input and 1 output tensor list.
+  TORCH_CHECK(
+      tensor_lists.size() == depth,
+      "Number of tensor lists has to match the depth.");
+  const size_t n_tensors = tensor_lists[0].size();
+  TensorListDimMetadata<depth> tensorListMeta;
+  tensorListMeta.start_tensor_this_launch = 0;
+
+  int loc_block_info = 0;
+  int loc_tensor_info = 0;
+  int processed = 0;
+
+  for (size_t t = 0; t < n_tensors; t++) {
+    const auto& tensor = tensor_lists[0][t];
+    if (tensor.numel() == 0)
+      continue;
+
+    TORCH_CHECK(
+        tensor.dim() >= 2,
+        "Dimensional foreach_norm requires tensors with at least 2 dimensions");
+
+    processed++;
+    tensorListMeta.num_rows[loc_tensor_info] = tensor.size(-2);
+    tensorListMeta.num_cols[loc_tensor_info] = tensor.size(-1);
+    tensorListMeta.prod_of_other_dim[loc_tensor_info] = c10::multiply_integers(
+        tensor.sizes().begin(), tensor.sizes().end() - 2);
+
+    tensorListMeta.addresses[0][loc_tensor_info] =
+        tensor_lists[0][t].const_data_ptr();
+    tensorListMeta.addresses[1][loc_tensor_info] =
+        tensor_lists[1][t].mutable_data_ptr();
+    loc_tensor_info++;
+
+    int outer_dim_size =
+        reduce_dim == tensor.dim() - 1 ? tensor.size(-2) : tensor.size(-1);
+    outer_dim_size *= tensorListMeta.prod_of_other_dim[loc_tensor_info - 1];
+    const int CHUNK_SIZE = kBlockSizeDim.y;
+    const int64_t num_chunks_per_tensor =
+        (outer_dim_size + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    for (int64_t idx = 0; idx < num_chunks_per_tensor; idx++) {
+      tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
+      tensorListMeta.block_to_chunk[loc_block_info] = idx;
+      loc_block_info++;
+
+      const bool tensors_full =
+          (loc_tensor_info == depth_to_max_tensors_dim[depth - 1] &&
+           idx == num_chunks_per_tensor - 1);
+      const bool blocks_full =
+          (loc_block_info == depth_to_max_blocks_dim[depth - 1]);
+
+      if (tensors_full || blocks_full) {
+        multi_tensor_apply_kernel<<<
+            loc_block_info,
+            kBlockSizeDim,
+            0,
+            at::cuda::getCurrentCUDAStream()>>>(
+            tensorListMeta, callable, args...);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+        // Reset logic similar to existing multi_tensor_apply
+        loc_block_info = 0;
+        if (idx == num_chunks_per_tensor - 1) {
+          loc_tensor_info = 0;
+          tensorListMeta.start_tensor_this_launch = processed;
+        } else {
+          // Copy current tensor info to slot 0
+          tensorListMeta.num_rows[0] =
+              tensorListMeta.num_rows[loc_tensor_info - 1];
+          tensorListMeta.num_cols[0] =
+              tensorListMeta.num_cols[loc_tensor_info - 1];
+          tensorListMeta.prod_of_other_dim[0] =
+              tensorListMeta.prod_of_other_dim[loc_tensor_info - 1];
+          for (int d = 0; d < depth; d++) {
+            tensorListMeta.addresses[d][0] =
+                tensorListMeta.addresses[d][loc_tensor_info - 1];
+          }
+          loc_tensor_info = 1;
+          tensorListMeta.start_tensor_this_launch = processed - 1;
+        }
+      }
+    }
+  }
+
+  // Launch remaining work
+  if (loc_block_info != 0) {
+    multi_tensor_apply_kernel<<<
+        loc_block_info,
+        kBlockSizeDim,
         0,
         at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();

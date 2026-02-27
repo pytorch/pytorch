@@ -472,6 +472,41 @@ void foreach_tensor_zero_slow_(TensorList tensors) {
 
 std::vector<Tensor> foreach_tensor_norm_slow(
     TensorList tensors,
+    at::IntArrayRef dim,
+    bool keepdim,
+    const Scalar& ord,
+    std::optional<ScalarType> dtype) {
+  check_foreach_api_restrictions(tensors);
+
+  // Extract ord value to check for infinity
+  const auto p = [&]() -> double {
+    if (ord.isIntegral(false)) {
+      return ord.to<int64_t>();
+    } else if (ord.isFloatingPoint()) {
+      return ord.to<double>();
+    } else {
+      TORCH_CHECK(
+          false, "foreach_tensor_norm_slow expects ord to be integer or float");
+    }
+  }();
+
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    // If the tensor is empty and norm == infinity, we cannot compute the norm
+    // because the operation does not have an identity
+    if (p == std::numeric_limits<double>::infinity()) {
+      TORCH_SYM_CHECK(
+          t.sym_numel().sym_gt(0),
+          "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity");
+    }
+    result.emplace_back(at::linalg_vector_norm(t, ord, dim, keepdim, dtype));
+  }
+  return result;
+}
+
+std::vector<Tensor> foreach_tensor_norm_slow(
+    TensorList tensors,
     const Scalar& ord,
     std::optional<ScalarType> dtype) {
   check_foreach_api_restrictions(tensors);

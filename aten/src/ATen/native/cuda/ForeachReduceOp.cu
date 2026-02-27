@@ -397,6 +397,167 @@ inline void check_foreach_norm_dtype(
 }
 } // anonymous namespace
 
+template <typename T, NormType norm_type, typename out_t, int reduce_dim>
+struct LpNormDimFunctor {
+  using out_opmath_t = typename at::opmath_type<out_t>;
+
+  __device__ __forceinline__ out_opmath_t warp_reduce(out_opmath_t val) {
+    constexpr int HALF_WARP_SIZE = 16;
+
+#if !defined(USE_ROCM)
+    constexpr unsigned int FULL_WARP_MASK = 0xffffffff; // use all 32 bits
+    for (int offset = HALF_WARP_SIZE; offset > 0; offset /= 2) {
+      if constexpr (norm_type == NormType::LInf) {
+        val = max_propagate_nan(
+            val, __shfl_down_sync(FULL_WARP_MASK, val, offset));
+      } else {
+        val += __shfl_down_sync(FULL_WARP_MASK, val, offset);
+      }
+    }
+#else
+    // unsigned int FULL_WARP_MASK = 0xffffffff does not work on ROCM
+    constexpr int WARP_SIZE = 32;
+    for (int offset = HALF_WARP_SIZE; offset > 0; offset /= 2) {
+      if constexpr (norm_type == NormType::LInf) {
+        val = max_propagate_nan(val, __shfl_down(val, offset, WARP_SIZE));
+      } else {
+        val += __shfl_down(val, offset, WARP_SIZE);
+      }
+    }
+#endif
+    return val;
+  }
+
+  __device__ __forceinline__ void lp_row_norm(TensorListDimMetadata<2>& tl) {
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const auto num_rows = tl.num_rows[tensor_loc];
+    const auto num_cols = tl.num_cols[tensor_loc];
+
+    const int warp_id = threadIdx.y;
+    const int lane = threadIdx.x;
+
+    T* data = (T*)tl.addresses[0][tensor_loc];
+
+    constexpr int ROWS_PER_CHUNK = 16; // blockDim.y
+
+    const int chunk_row_start = chunk_idx * ROWS_PER_CHUNK;
+
+    const int row = chunk_row_start + warp_id;
+
+    if (row >= num_rows)
+      return;
+
+    out_opmath_t val = out_opmath_t(0);
+    T* row_ptr = data + row * num_cols;
+
+    if (num_cols % kILP == 0 && is_aligned(row_ptr)) {
+      // fast path using Instruction-Level Parallelism (ILP)
+      out_opmath_t vals[kILP] = {0};
+      T r_x[kILP];
+
+      for (int64_t i_start = lane; i_start * kILP < num_cols;
+           i_start += blockDim.x) {
+        load_store(r_x, row_ptr, 0, i_start);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          const auto elem = static_cast<out_opmath_t>(r_x[ii]);
+          if constexpr (norm_type == NormType::LInf) {
+            vals[ii] = max_propagate_nan(vals[ii], ::abs(elem));
+          } else {
+            vals[ii] += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+          }
+        }
+      }
+
+      for (int ii = 0; ii < kILP; ii++) {
+        if constexpr (norm_type == NormType::LInf) {
+          val = max_propagate_nan(val, vals[ii]);
+        } else {
+          val += vals[ii];
+        }
+      }
+    } else {
+      for (int64_t i = lane; i < num_cols; i += 32) {
+        const auto elem = static_cast<out_opmath_t>(row_ptr[i]);
+        if constexpr (norm_type == NormType::LInf) {
+          val = max_propagate_nan(val, ::abs(elem));
+        } else {
+          val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+        }
+      }
+    }
+
+    val = warp_reduce(val);
+
+    if (lane == 0) {
+      if constexpr (norm_type == NormType::L2) {
+        val = ::sqrt(val);
+      }
+      out_t* output_ptr = (out_t*)tl.addresses[1][tensor_loc];
+      output_ptr[row] = static_cast<out_t>(val);
+    }
+  }
+
+  __device__ __forceinline__ void lp_col_norm(TensorListDimMetadata<2>& tl) {
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const auto num_rows = tl.num_rows[tensor_loc];
+    const auto num_cols = tl.num_cols[tensor_loc];
+    const auto prod_of_other_dim = tl.prod_of_other_dim[tensor_loc];
+
+    const int warp_id = threadIdx.y;
+    const int lane = threadIdx.x;
+
+    T* data = (T*)tl.addresses[0][tensor_loc];
+
+    constexpr int COLS_PER_CHUNK = 16; // blockDim.y
+
+    // can think of N-dimensional tensors as a large 2-dimensional tensor
+    // (matrix) stacked horizontally next to each other. This col is the col of
+    // that larger matrix. Note: the index for the start of that column needs to
+    // be adjusted due to how the memory is laid out (see col_start_index).
+    const int chunk_col_start = chunk_idx * COLS_PER_CHUNK;
+    const int col = chunk_col_start + warp_id;
+    if (col >= num_cols * prod_of_other_dim)
+      return;
+    int64_t col_start_index =
+        num_rows * num_cols * (col / num_cols) + (col % num_cols);
+
+    out_opmath_t val = out_opmath_t(0);
+
+    for (int64_t i = lane; i < num_rows; i += 32) {
+      const auto elem =
+          static_cast<out_opmath_t>(data[i * num_cols + col_start_index]);
+      if constexpr (norm_type == NormType::LInf) {
+        val = max_propagate_nan(val, ::abs(elem));
+      } else {
+        val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+      }
+    }
+
+    val = warp_reduce(val);
+
+    if (lane == 0) {
+      if constexpr (norm_type == NormType::L2) {
+        val = ::sqrt(val);
+      }
+      out_t* output_ptr = (out_t*)tl.addresses[1][tensor_loc];
+      output_ptr[col] = static_cast<out_t>(val);
+    }
+  }
+
+  __device__ __forceinline__ void operator()(
+      int64_t /*unused_chunk_size*/,
+      TensorListDimMetadata<2>& tl) {
+    if constexpr (reduce_dim == 1) {
+      lp_row_norm(tl);
+    } else {
+      lp_col_norm(tl);
+    }
+  }
+};
+
 #define AT_DISPATCH_OUT_DTYPES(TYPE, NAME, ...)             \
   AT_DISPATCH_SWITCH(                                       \
       TYPE,                                                 \
@@ -424,6 +585,145 @@ template <>
 struct ForeachNormDispatchName<false> {
   static constexpr const char* value = "foreach_tensor_powsum_cuda";
 };
+
+std::vector<Tensor> foreach_tensor_norm_cuda(
+    TensorList tensors,
+    at::IntArrayRef dim,
+    bool keepdim,
+    const Scalar& ord,
+    std::optional<ScalarType> dtype) {
+  const auto p = [&]() -> double {
+    if (ord.isIntegral(false)) {
+      return ord.to<int64_t>();
+    } else if (ord.isFloatingPoint()) {
+      return ord.to<double>();
+    } else {
+      TORCH_CHECK(
+          false, "foreach_tensor_norm_cuda expects ord to be integer or float");
+    }
+  }();
+  check_foreach_api_restrictions(tensors);
+  const bool has_int_or_complex =
+      std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
+        const auto scalar_type = t.scalar_type();
+        return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
+            at::isComplexType(scalar_type);
+      });
+  auto tensors_dim = tensors[0].dim();
+  const bool has_same_dim = std::all_of(
+      tensors.begin() + 1, tensors.end(), [tensors_dim](const auto& t) {
+        return t.dim() == tensors_dim;
+      });
+
+  const bool all_contiguous =
+      std::all_of(tensors.begin(), tensors.end(), [](const auto& t) {
+        return t.is_contiguous();
+      });
+  if (!can_use_fast_route(tensors) || !has_same_dim || !all_contiguous ||
+      has_int_or_complex ||
+      !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
+        p == std::numeric_limits<double>::infinity())) {
+    return foreach_tensor_norm_slow(tensors, dim, keepdim, ord, dtype);
+  }
+  check_foreach_norm_dtype(
+      dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda");
+
+  const size_t ntensors = tensors.size();
+
+  const auto options = tensors[0].options();
+  const ScalarType output_dtype =
+      dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
+
+  std::vector<at::Tensor> output_tensors;
+  output_tensors.reserve(ntensors);
+  const auto res_option = options.dtype(output_dtype);
+  int64_t reduce_dim = c10::maybe_wrap_dim(dim[0], tensors_dim);
+  for (const auto t : c10::irange(ntensors)) {
+    auto output_tensor_size = tensors[t].sizes().vec();
+    if (keepdim) {
+      output_tensor_size[reduce_dim] = 1;
+    } else {
+      output_tensor_size.erase(output_tensor_size.begin() + reduce_dim);
+    }
+
+    output_tensors.push_back(at::native::empty_cuda(
+        output_tensor_size,
+        optTypeMetaToScalarType(res_option.dtype_opt()),
+        res_option.layout_opt(),
+        res_option.device_opt(),
+        res_option.pinned_memory_opt(),
+        res_option.memory_format_opt()));
+  }
+
+  std::vector<at::Tensor> input_tensors;
+  if (tensors_dim == 2 || reduce_dim != tensors_dim - 1) {
+    // If tensor is already 2D matrix
+    // Or if not a row norm, in which case reshaping doesn't help since tensors
+    // are not contiguous across reduce dimension, then use as is.
+    input_tensors = tensors.vec();
+  } else {
+    // view tensor as 2D matrix to compute row norm
+    // Note, this works even if output_tensors are multidimensional since
+    // tensors are contiguous and kernel views tensor as contiguous 1D-array.
+    input_tensors.reserve(ntensors);
+    for (const auto t : c10::irange(ntensors)) {
+      if (tensors[t].size(-1) != 0)
+        input_tensors.push_back(tensors[t].view({-1, tensors[t].size(-1)}));
+    }
+  }
+
+  auto tensor_lists = std::vector<std::vector<Tensor>>{
+      std::move(input_tensors), output_tensors};
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      c10::kBFloat16,
+      tensor_lists[0][0].scalar_type(),
+      "foreach_tensor_norm_cuda_scalar_type",
+      [&]() {
+        AT_DISPATCH_OUT_DTYPES(
+            output_dtype, "foreach_tensor_norm_cuda_out_dtype", [&]() {
+              if (reduce_dim == tensors_dim - 1) { // row norm
+                reduce_dim = 1;
+                if (p == static_cast<double>(1)) {
+                  multi_tensor_apply_dim(
+                      tensor_lists,
+                      reduce_dim,
+                      LpNormDimFunctor<scalar_t, NormType::L1, out_t, 1>());
+                } else if (p == static_cast<double>(2)) {
+                  multi_tensor_apply_dim(
+                      tensor_lists,
+                      reduce_dim,
+                      LpNormDimFunctor<scalar_t, NormType::L2, out_t, 1>());
+                } else {
+                  multi_tensor_apply_dim(
+                      tensor_lists,
+                      reduce_dim,
+                      LpNormDimFunctor<scalar_t, NormType::LInf, out_t, 1>());
+                }
+              } else { // col norm
+                if (p == static_cast<double>(1)) {
+                  multi_tensor_apply_dim(
+                      tensor_lists,
+                      reduce_dim,
+                      LpNormDimFunctor<scalar_t, NormType::L1, out_t, 0>());
+                } else if (p == static_cast<double>(2)) {
+                  multi_tensor_apply_dim(
+                      tensor_lists,
+                      reduce_dim,
+                      LpNormDimFunctor<scalar_t, NormType::L2, out_t, 0>());
+                } else {
+                  multi_tensor_apply_dim(
+                      tensor_lists,
+                      reduce_dim,
+                      LpNormDimFunctor<scalar_t, NormType::LInf, out_t, 0>());
+                }
+              }
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
+      });
+  return output_tensors;
+}
 
 // Internal implementation for foreach_tensor_norm_cuda and
 // foreach_tensor_powsum_cuda apply_root: if true, applies sqrt for L2 norm; if

@@ -19,6 +19,7 @@ from torch._ops import OpOverload
 from torch._prims import _prim_elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
     BoolLike,
+    canonicalize_dims,
     corresponding_complex_dtype,
     corresponding_real_dtype,
     elementwise_dtypes,
@@ -8437,6 +8438,30 @@ def meta_foreach_norm(tensors, ord=2, dtype=None):
         if out_dtype.is_complex:
             out_dtype = corresponding_real_dtype(out_dtype)
         results.append(t.new_empty((), dtype=out_dtype))
+    return results
+
+
+@register_meta(aten._foreach_norm.dim)
+def meta_foreach_norm_dim(tensors, dim, keepdim=False, ord=2, dtype=None):
+    if float(ord) == float("inf"):
+        for t in tensors:
+            torch._check(
+                t.numel() > 0,
+                lambda: "_foreach_norm cannot compute infinity norm on empty tensor",
+            )
+    results = []
+    for t in tensors:
+        out_dtype = dtype if dtype is not None else t.dtype
+        if out_dtype.is_complex:
+            out_dtype = corresponding_real_dtype(out_dtype)
+        cdims = canonicalize_dims(t.ndim, dim)
+        if keepdim:
+            new_shape = list(t.shape)
+            for d in cdims:
+                new_shape[d] = 1
+        else:
+            new_shape = [s for d, s in enumerate(t.shape) if d not in cdims]
+        results.append(t.new_empty(new_shape, dtype=out_dtype))
     return results
 
 

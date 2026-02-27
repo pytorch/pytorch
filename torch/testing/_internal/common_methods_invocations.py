@@ -9983,6 +9983,42 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
                 disable_fastpath = False
             yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath, dtype=out_dtype)
 
+        # Test dim argument with sample inputs interspersed with empty tensors
+        # and test higher dimensional tensor
+        # Use fewer combinations for autodiff tests
+        ords = (2,) if requires_grad else (1, 2, float('inf'))
+        keepdims = (False,) if requires_grad else (True, False)
+        dims = (-1, -2)
+        higher_dims = (True, False)
+        for ord, keepdim, dim, higher_dim in product(
+            ords,
+            keepdims,
+            dims,
+            higher_dims,
+        ):
+            if higher_dim:
+                if dtype not in floating_types_and(torch.half, torch.bfloat16):
+                    continue
+                input = [torch.randn((i, 2 * i, 3 * i, 4 * i),
+                                     device=device,
+                                     dtype=dtype,
+                                     requires_grad=requires_grad)
+                         for i in range(1, 5)]
+            else:
+                # linalg.vector_norm cannot compute the inf norm on an empty tensor because the operation does not have an identity
+                # empty tensors have dim() == 1 thus dim = -2 does not work if they are in the list.
+                _foreach_inputs_kwargs["intersperse_empty_tensors"] = ord != float('inf') and dim != -2
+                input = sample_inputs_foreach(None, device, dtype, 20, zero_size=False, **_foreach_inputs_kwargs)
+
+            disable_fastpath = dtype not in floating_types_and(torch.half, torch.bfloat16)
+            yield ForeachSampleInput(
+                input,
+                ord=ord,
+                dim=[dim],
+                keepdim=keepdim,
+                disable_fastpath=disable_fastpath,
+            )
+
         # Also test nan propagation with a single tensor, but skip autograd testing
         if not requires_grad:
             nan_inputs = [
