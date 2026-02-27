@@ -3300,10 +3300,12 @@ class AOTInductorTestsTemplate:
         mod(inp)
         mod2 = torch.fx.symbolic_trace(mod, concrete_args=[inp])
         so = torch._export.aot_compile(mod2, (inp,))
-        assert so is not None
+        if so is None:
+            raise AssertionError("Expected aot_compile to return non-None")
         # compile the 2nd time with cache hit
         so = torch._export.aot_compile(mod2, (inp,))
-        assert so is not None
+        if so is None:
+            raise AssertionError("Expected aot_compile to return non-None (cache hit)")
 
     def test_normal_functional(self):
         class Model(torch.nn.Module):
@@ -6943,30 +6945,39 @@ class AOTInductorTestsTemplate:
 
         def _group_quantize_tensor_xpu(w, n_bit=4, q_group_size=16):
             # w [k, n] = [32, 48]
-            assert w.dim() == 2
+            if w.dim() != 2:
+                raise AssertionError(f"Expected 2D tensor, got {w.dim()}D")
             # w [n, k] = [48, 32]
             w = w.transpose(0, 1).contiguous()
-            assert q_group_size > 1
-            assert w.shape[-1] % q_group_size == 0
+            if q_group_size <= 1:
+                raise AssertionError(f"Expected q_group_size > 1, got {q_group_size}")
+            if w.shape[-1] % q_group_size != 0:
+                raise AssertionError(
+                    f"w.shape[-1] ({w.shape[-1]}) must be divisible by q_group_size ({q_group_size})"
+                )
 
             # to_quant: [n * k / group_size, group_size]
             to_quant = w.reshape(-1, q_group_size)
-            assert torch.isnan(to_quant).sum() == 0
+            if torch.isnan(to_quant).sum() != 0:
+                raise AssertionError("to_quant contains NaN values")
 
             max_val = to_quant.amax(dim=1, keepdim=True)
             min_val = to_quant.amin(dim=1, keepdim=True)
             max_int = 2**n_bit - 1
             min_int = 0
             scales = (max_val - min_val).clamp(min=1e-6) / max_int
-            assert torch.isnan(scales).sum() == 0
+            if torch.isnan(scales).sum() != 0:
+                raise AssertionError("scales contains NaN values")
 
             zeros = min_int - min_val.div(scales).round()
             zeros = torch.clamp(zeros, min_int, max_int)
             zeros = zeros.to(torch.int8)
-            assert torch.isnan(zeros).sum() == 0
+            if torch.isnan(zeros).sum() != 0:
+                raise AssertionError("zeros contains NaN values")
 
             out = to_quant.div(scales).add(zeros).round().clamp_(min_int, max_int)
-            assert torch.isnan(out).sum() == 0
+            if torch.isnan(out).sum() != 0:
+                raise AssertionError("out contains NaN values")
 
             # [n, k]
             out = out.to(dtype=torch.int32).reshape(w.shape)
@@ -7924,20 +7935,17 @@ torch._inductor.aoti_load_package("{model_path}")
         - s55 is a backed symint from a DIFFERENT tensor's .size(0)
         - s55 can be 0 at runtime
 
-        The AOTInductor C++ runtime crashes with SIGFPE because:
+        Previously, the AOTInductor C++ runtime crashed with SIGFPE because:
         - The -1 computation is: (u1*520) / (s55*52)
         - When s55=0, this is division by zero
+
+        Now, we expect a proper RuntimeError to be raised with a meaningful
+        error message instead of crashing the process.
 
         Key pattern from exported_model_graph_aoti.txt line 1182:
         view_90: "bf16[s55, ((10*u1)//s55), 52]" = _broadcast_impl.view(getitem_1, -1, 52)
         - _broadcast_impl has shape [u1, 520] (u1 is unbacked from .item())
         - getitem_1 is s55 (backed from embeddings_1.size(0))
-
-        This bypasses guards because s55 is a backed symint that can be 0,
-        and u1 is an unbacked symint - they are independent.
-
-        Model fix: D86125095 (early return when num_cache_hit_items == 0)
-        See: https://fb.workplace.com/groups/1028545332188949/posts/3341672205981424/
         """
 
         class Model(torch.nn.Module):
@@ -7966,7 +7974,7 @@ torch._inductor.aoti_load_package("{model_path}")
 
                 # The problematic view: uses s55 (backed from embeddings, can be 0)
                 # but the tensor data has size u1 (unbacked) - DECOUPLED from s55
-                # When s55=0: -1 = (u1*520) / (s55*52) = 0/0 = SIGFPE
+                # When s55=0: -1 = (u1*520) / (s55*52) = 0/0
                 # This mimics line 1182:
                 #   view_90 = _broadcast_impl.view(getitem_1, -1, 52)
                 result = data.view(s55, -1, 52)
@@ -7995,22 +8003,59 @@ torch._inductor.aoti_load_package("{model_path}")
         ep = torch.export.export(
             model, compile_inputs, dynamic_shapes=dynamic_shapes, strict=False
         )
+
         package_path = torch._inductor.aoti_compile_and_package(ep)
+
+        with zipfile.ZipFile(package_path, "r") as z:
+            for name in z.namelist():
+                if name.endswith("wrapper.cpp"):
+                    content = z.read(name).decode("utf-8", errors="replace")
+                    # Verify that division and modulo operations are guarded
+                    # The new implementation emits AOTI_TORCH_CHECK calls before
+                    # computing size expressions that contain division/modulo
+                    FileCheck().check("AOTI_TORCH_CHECK(").check("by zero").run(content)
+
         optimized = torch._inductor.aoti_load_package(package_path)
 
         # Run with s55=0 (embeddings is empty) and u1=0 (batch_sizes sum to 0)
         # data has shape [0, 520] (u1=0)
-        # view(s55=0, -1, 52): -1 = 0*520 / (0*52) = 0/0 = SIGFPE
+        # view(s55=0, -1, 52): -1 = 0*520 / (0*52) = 0/0 = division by zero
         # sum=0, u1=0
         run_batch_sizes = torch.tensor([0], dtype=torch.int64, device=self.device)
         run_embeddings = torch.randn(0, 104, device=self.device)  # s55=0
         run_inputs = (run_batch_sizes, run_embeddings)
 
-        # This should crash with SIGFPE in C++ runtime (unless bug is fixed)
-        result = optimized(*run_inputs)
+        # Should raise RuntimeError instead of crashing with SIGFPE.
+        # The generated AOTI_TORCH_CHECK logs the error (including "by zero") to stderr
+        # before returning an error code, which is then converted to a RuntimeError.
+        # We capture stderr at the file descriptor level to verify the message is logged.
+        import tempfile
 
-        # Verify result is empty tensor with correct shape
-        self.assertEqual(result.shape, torch.Size([0, 0, 52]))
+        # Save original stderr fd and redirect to temp file to capture C++ LOG(ERROR) output
+        original_stderr_fd = os.dup(2)
+        with tempfile.NamedTemporaryFile(mode="w+", delete=False) as temp_stderr:
+            temp_stderr_path = temp_stderr.name
+
+        try:
+            with open(temp_stderr_path, "w") as new_stderr:
+                os.dup2(new_stderr.fileno(), 2)
+                try:
+                    with self.assertRaises(RuntimeError):
+                        optimized(*run_inputs)
+                finally:
+                    # Flush and restore original stderr
+                    new_stderr.flush()
+                    os.dup2(original_stderr_fd, 2)
+                    os.close(original_stderr_fd)
+
+            # Read captured stderr and verify the "by zero" message was logged
+            with open(temp_stderr_path) as f:
+                stderr_content = f.read()
+            self.assertIn("by zero", stderr_content)
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_stderr_path):
+                os.unlink(temp_stderr_path)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

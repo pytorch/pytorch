@@ -445,7 +445,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         args1 = {"a": torch.randn(10), "b": torch.randn(10)}
         args2 = dict(args1)
-        assert fn(args1) is args1
+        if fn(args1) is not args1:
+            raise AssertionError("Expected fn(args1) to be args1")
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertIs(opt_fn(args2), args2)
@@ -706,7 +707,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             def fn(x):
                 c = CustomDict()
                 c["key"] = x
-                assert "key" in c
+                assert "key" in c  # noqa: S101
                 return c["key"] + 1
 
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1360,6 +1361,117 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Unsupported, "Observed exception"):
             opt_fn(x)
+
+    def test_property_backed_by_dunder_dict(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            return obj.x
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), opt_fn(obj))
+
+    def test_property_backed_by_dunder_dict_mutated(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+            @x.setter
+            def x(self, value):
+                self.__dict__["x"] = value
+
+        def fn(obj):
+            a = obj.x
+            obj.x = a + 1
+            return obj.x
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(Obj(3)), opt_fn(obj))
+
+    def test_property_backed_by_dunder_dict_pending_side_effects(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            a = obj.__dict__["x"]
+            obj.__dict__["x"] = a + 1
+            return obj.__dict__["x"]
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(Obj(3)), opt_fn(obj))
+
+    def test_dunder_dict_getitem_guard_recompiles(self):
+        class Obj:
+            def __init__(self):
+                self.__dict__["x"] = 3
+
+            @property
+            def x(self):
+                return 999
+
+        def fn(obj, t):
+            return t + obj.__dict__["x"]
+
+        obj = Obj()
+        t = torch.tensor(0.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(obj, t), torch.tensor(3.0))
+        self.assertEqual(cnt.frame_count, 1)
+
+        obj.__dict__["x"] = 5
+        self.assertEqual(opt_fn(obj, t), torch.tensor(5.0))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_dunder_dict_get_with_property(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            return obj.__dict__.get("x")
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), opt_fn(obj))
+
+    def test_dunder_dict_getitem_tensor(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            return obj.x + 1
+
+        obj = Obj(torch.tensor(3.0))
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), opt_fn(obj))
 
     def test_get_default_nowrap_functions_as_dict_key(self):
         def fn(x):

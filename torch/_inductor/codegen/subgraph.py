@@ -93,7 +93,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     self.benchmark_inputs.append(input_gen_fns[i](inp))
                 else:
                     self.benchmark_inputs.append(
-                        ir_node_to_tensor(inp, guard_shape=False)
+                        ir_node_to_tensor(inp, replace_symbols_with_hints=True)
                     )
 
         # Trace with symbolic inputs for guard detection
@@ -161,9 +161,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         safe_name = self.name.replace("::", "_").replace(".", "_")
 
+        # Symbolic inputs produce code with symbolic sizes resolved at runtime
+        # via sym_input_values. Without symbols (static shapes), compile with
+        # benchmark_inputs whose sizes match the actual benchmark tensors.
+        compile_inputs = (
+            self.example_inputs if self.sym_inputs else self.benchmark_inputs
+        )
+        log.debug("Benchmark compile %s: sym_inputs=%s", self.name, self.sym_inputs)
+
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
-            example_inputs=self.benchmark_inputs,
+            example_inputs=compile_inputs,
             shape_env=V.graph._shape_env,
             cpp_wrapper=V.graph.cpp_wrapper,
             aot_mode=V.graph.aot_mode,
@@ -187,7 +195,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 **self.config_patches,
             }
             with config.patch(benchmark_config):
-                bm_graph_lowering.run(*self.benchmark_inputs)
+                bm_graph_lowering.run(*compile_inputs)
                 return bm_graph_lowering.compile_to_module()
 
     def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:

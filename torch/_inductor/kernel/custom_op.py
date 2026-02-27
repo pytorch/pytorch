@@ -24,7 +24,6 @@ from torch._inductor.select_algorithm import (
 )
 from torch._inductor.utils import convert_symint_to_expr
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -244,45 +243,30 @@ def _merge_config_and_runtime_kwargs(
     config_params: dict[str, Any],
     runtime_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
-    """Merge config parameters with runtime kwargs. Runtime kwargs take precedence.
-       If there are conflicts, log a warning and use runtime value.
+    """Merge config parameters with runtime kwargs. Config params take precedence,
+    since they represent the values being autotuned.
 
     Args:
-        config_params: Parameters from CustomOpConfig
+        config_params: Parameters from CustomOpConfig (autotuning knobs)
         runtime_kwargs: Runtime non-tensor kwargs from _extract_tensor_inputs
 
     Returns:
-        Merged kwargs dictionary with runtime values taking precedence
+        Merged kwargs dictionary with config values taking precedence
     """
-    merged_kwargs = config_params.copy()
-
-    # Check for conflicts and let runtime kwargs dominate
-    conflicts = OrderedSet(config_params.keys()).intersection(runtime_kwargs.keys())
-
-    for key in conflicts:
-        log.warning(
-            "Parameter '%s' specified both in CustomOpConfig (%s) "
-            "and at runtime (%s). Using runtime value.",
-            key,
-            config_params[key],
-            runtime_kwargs[key],
-        )
-
-    # Runtime kwargs override config params
-    merged_kwargs.update(runtime_kwargs)
-
+    merged_kwargs = runtime_kwargs.copy()
+    merged_kwargs.update(config_params)
     return merged_kwargs
 
 
 def _adapt_user_input_gen_fns(
     inputs: list[Any],
-    arg_names: list[str],
+    op_overload: torch._ops.OpOverload,
     user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]],
 ) -> dict[int, Callable[[Any], torch.Tensor]]:
     """Convert user input generators from name-based to index-based format.
     Inductor autotune's input_gen_fns expects index of arg_names as key.
     """
-
+    arg_names = [arg.name for arg in op_overload._schema.arguments]
     name_to_index = {name: i for i, name in enumerate(arg_names)}
     index_based_fns = {}
 
@@ -290,11 +274,9 @@ def _adapt_user_input_gen_fns(
         if name in name_to_index:
             index_based_fns[name_to_index[name]] = gen_fn
         else:
-            log.warning(
-                "Unknown argument name '%s' in input_gen_fns. "
-                "Available argument names: %s",
-                name,
-                list(name_to_index.keys()),
+            raise ValueError(
+                f"Unknown argument name '{name}' in input_gen_fns. "
+                f"Available argument names: {list(name_to_index.keys())}"
             )
 
     def create_internal_input_gen_fn(
@@ -427,25 +409,24 @@ def _default_input_gen_fn(fake_tensor: torch.Tensor) -> torch.Tensor:
 
 
 def _create_fallback_choice(
-    name: str,
     op_overload: torch._ops.OpOverload,
-    kwargs: dict[str, Any],
 ) -> ExternKernelChoice:
-    """Create fallback choice that calls the op eagerly.
+    """Create or reuse fallback choice that calls the op eagerly.
 
-    Re-registration of the same name is allowed and will overwrite the previous
-    kernel. This is safe because the same name should always have equivalent behavior.
-
-    TODO: Automatically detect and handle out variants (has_out_variant=True)
-    for ops that support them.
+    Since kwargs are passed at bind time via maybe_append_choice rather than
+    baked into the kernel, the same ExternKernelChoice is reused across
+    compilations for the same op_overload.
     """
-    fallback_name = f"{name}_fallback"
+    fallback_name = (
+        f"{op_overload.name().replace('::', '_').replace('.', '_')}_fallback"
+    )
 
-    def fallback_wrapper(*args: Any) -> Any:
-        return op_overload(*args, **kwargs)
+    existing = ExternKernelChoice.lookup(fallback_name)
+    if existing is not None:
+        return existing
 
     return ExternKernelChoice(
-        kernel=fallback_wrapper,
+        kernel=op_overload,
         name=fallback_name,
         has_out_variant=False,
         op_overload=op_overload,
@@ -510,14 +491,9 @@ def autotune_custom_op(
     # Convert user input generation functions BEFORE creating choices
     input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] = {}
     if user_input_gen_fns:
-        import inspect
-
-        arg_names = (
-            list(inspect.signature(decompositions[0]).parameters.keys())
-            if decompositions
-            else []
+        input_gen_fns = _adapt_user_input_gen_fns(
+            inputs, op_overload, user_input_gen_fns
         )
-        input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
@@ -544,7 +520,7 @@ def autotune_custom_op(
     output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
     output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
 
-    fallback_choice = _create_fallback_choice(name, op_overload, fallback_kwargs)
+    fallback_choice = _create_fallback_choice(op_overload)
     fallback_choice.maybe_append_choice(
         choices=choices,
         input_nodes=list(inputs),
@@ -554,6 +530,7 @@ def autotune_custom_op(
             size=output_size,
             stride=output_stride,
         ),
+        **fallback_kwargs,
     )
 
     if not choices:
@@ -574,12 +551,25 @@ def autotune_custom_op(
         benchmark_with_cudagraphs=benchmark_with_cudagraphs,
     )
 
-    # Test mode: force decomposition to win (pick first choice with a graph)
-    if config.test_configs.force_custom_op_decomposition and winning_choice.gm is None:
+    # Test mode: force specific choice to win
+    force_choice = config.test_configs.force_custom_op_decomposition
+    if force_choice is True and winning_choice.gm is None:
+        # Force decomposition: pick first choice with a graph
         for choice in choices:
             if choice.gm is not None:
                 log.info(
                     "Test mode: forcing decomposition %s over fallback",
+                    getattr(choice, "name", type(choice).__name__),
+                )
+                winning_choice = choice
+                selected_result = choice.output_node()
+                break
+    elif force_choice is False and winning_choice.gm is not None:
+        # Force fallback: pick first choice without a graph
+        for choice in choices:
+            if choice.gm is None:
+                log.info(
+                    "Test mode: forcing fallback %s over decomposition",
                     getattr(choice, "name", type(choice).__name__),
                 )
                 winning_choice = choice
@@ -778,12 +768,11 @@ def _lower_single_impl(
     tensor_inputs: list[Any],
     name: str,
     config_patches: Optional[dict[str, Any]] = None,
-    default_impl: Optional[Callable[..., Any]] = None,
 ) -> Any:
     """Lower a single implementation by tracing and inlining it.
 
     Uses error_on_new_guards() during tracing to detect if the impl adds guards.
-    If it does and default_impl is provided, falls back to default_impl.
+    Returns None if the impl adds guards, signaling caller to skip this choice.
     """
     from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
     from torch.fx.experimental.proxy_tensor import make_fx
@@ -793,11 +782,8 @@ def _lower_single_impl(
 
     merged_kwargs = _merge_config_and_runtime_kwargs(impl_kwargs, runtime_kwargs)
 
-    def make_impl_wrapper(fn):
-        def impl_wrapper(*tensors):
-            return fn(*tensors, **merged_kwargs)
-
-        return impl_wrapper
+    def impl_wrapper(*tensors):
+        return impl(*tensors, **merged_kwargs)
 
     shape_env = V.fake_mode.shape_env
 
@@ -805,44 +791,33 @@ def _lower_single_impl(
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
         decomposition_table = select_decomp_table()
 
-        # Try tracing with error_on_new_guards; fall back to default_impl if guards are added
-        impl_to_use = impl
-        if shape_env is not None and impl != default_impl and default_impl is not None:
-            try:
-                with shape_env.error_on_new_guards():
-                    impl_gm = make_fx(
-                        make_impl_wrapper(impl),
-                        decomposition_table=decomposition_table,
-                        tracing_mode="symbolic",
-                    )(*fake_inputs)
-            except (_ShapeEnvGuardError, AssertionError) as e:
-                # _ShapeEnvGuardError may be wrapped in AssertionError by dynamo
-                is_guard_error = isinstance(e, _ShapeEnvGuardError) or (
-                    isinstance(e, AssertionError)
-                    and "Guard attempted while ShapeEnv guards are frozen" in str(e)
-                )
-                if not is_guard_error:
-                    raise
-                log.info(
-                    "Implementation %s adds guards, falling back to %s",
-                    impl.__name__,
-                    default_impl.__name__,
-                )
-                counters["inductor"]["custom_op_decomp_guard_skips"] += 1
-                impl_to_use = default_impl
+        context = (
+            shape_env.error_on_new_guards
+            if shape_env is not None
+            else contextlib.nullcontext
+        )
+        try:
+            with context():
                 impl_gm = make_fx(
-                    make_impl_wrapper(default_impl),
+                    impl_wrapper,
                     decomposition_table=decomposition_table,
                     tracing_mode="symbolic",
                 )(*fake_inputs)
-        else:
-            impl_gm = make_fx(
-                make_impl_wrapper(impl),
-                decomposition_table=decomposition_table,
-                tracing_mode="symbolic",
-            )(*fake_inputs)
+        except (_ShapeEnvGuardError, AssertionError) as e:
+            is_guard_error = isinstance(e, _ShapeEnvGuardError) or (
+                isinstance(e, AssertionError)
+                and "Guard attempted while ShapeEnv guards are frozen" in str(e)
+            )
+            if not is_guard_error:
+                raise
+            log.info(
+                "Implementation %s adds guards, skipping custom op lowering",
+                impl.__name__,
+            )
+            counters["inductor"]["custom_op_decomp_guard_skips"] += 1
+            return None
 
-    log.info("Inlining implementation: %s", impl_to_use.__name__)
+    log.info("Inlining implementation: %s", impl.__name__)
     ops_before = len(V.graph.operations)
     result = inline_subgraph_to_ir_nodes(impl_gm, tensor_inputs, name)
 
@@ -976,7 +951,6 @@ def _range_based_lowering_fn(
             tensor_inputs,
             name,
             config_patches=group.config_patches,
-            default_impl=default_impl,
         )
 
     def dispatch_fn(*fake_tensors):
