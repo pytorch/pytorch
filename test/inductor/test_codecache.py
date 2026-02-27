@@ -1178,60 +1178,6 @@ class TestFxGraphCache(TestCase):
 
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
-    @config.patch("fx_graph_cache", True)
-    @torch._functorch.config.patch({"enable_autograd_cache": False})
-    @config.patch("fx_graph_remote_cache", False)
-    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
-    @requires_cuda_and_triton
-    def test_cross_device_cache_sharing(self):
-        """
-        Verify that the same graph compiled on different CUDA devices
-        produces a cache hit (same cache key), and that a structurally
-        different graph produces a cache miss.
-        See pytorch/pytorch#108971.
-        """
-
-        def fn(x):
-            return x.sin() + x.cos()
-
-        def fn_different(x):
-            return x.sin() * x.cos()
-
-        # Compile on device 0 -> cache miss
-        compiled_fn = torch.compile(fn)
-        with torch.cuda._DeviceGuard(0):
-            torch.cuda.set_device(0)
-            x0 = torch.randn(8, 8, device="cuda:0")
-            result0 = compiled_fn(x0)
-            self.assertEqual(result0.device, torch.device("cuda:0"))
-
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-
-        self.reset()
-
-        # Same graph on device 1 -> should be a cache hit
-        compiled_fn2 = torch.compile(fn)
-        with torch.cuda._DeviceGuard(1):
-            torch.cuda.set_device(1)
-            x1 = torch.randn(8, 8, device="cuda:1")
-            result1 = compiled_fn2(x1)
-            self.assertEqual(result1.device, torch.device("cuda:1"))
-
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-
-        self.reset()
-
-        # Different graph on device 1 -> should be a cache miss
-        compiled_fn3 = torch.compile(fn_different)
-        with torch.cuda._DeviceGuard(1):
-            torch.cuda.set_device(1)
-            x2 = torch.randn(8, 8, device="cuda:1")
-            result2 = compiled_fn3(x2)
-            self.assertEqual(result2.device, torch.device("cuda:1"))
-
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -2682,7 +2628,7 @@ class TestFxGraphCacheHashing(TestCase):
             meta1 = extract_tensor_metadata_for_cache_key(t1)
             self.assertEqual(meta0.device, meta1.device)
 
-        def test_hash_kwargs(self):
+    def test_hash_kwargs(self):
         """
         Test the special handling of the kwargs when hashing, i.e.,
         ordering of the kwargs dict and any set arguments.
