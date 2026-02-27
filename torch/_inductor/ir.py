@@ -37,6 +37,7 @@ import torch._export.serde.schema as export_schema
 import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
+import torch.fx.experimental._config as _fx_config
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
@@ -58,6 +59,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
     GuardOnDataDependentSymNode,
+    has_free_unbacked_symbols,
     IterateExprs,
     rebind_unbacked,
     resolve_unbacked_bindings,
@@ -2978,7 +2980,9 @@ class ExpandView(BaseView):
                 old_size[i]
             ):
                 pass
-            else:
+            elif not has_free_unbacked_symbols(
+                old_size
+            ) and not has_free_unbacked_symbols(new_size):
                 # Sanity check: Expect broadcast compatibility
                 #
                 # NB: new_size[i] == old_size[i] is expected to already be
@@ -3428,9 +3432,14 @@ class View(GenericView):
                 V.graph.sizevars.check_equals(size_new, size_old)
             else:
                 # With backed symbols, one of Eq/Lt/Gt must be true,
-                # so reaching here is a bug. With unbacked symbols,
-                # guard_or_false can't resolve all comparisons.
-                if free_unbacked_symbols(size_old) or free_unbacked_symbols(size_new):
+                # so reaching here is a bug. With unbacked symbols
+                # (or backed_size_oblivious mode), guard_or_false
+                # can't resolve all comparisons.
+                if (
+                    free_unbacked_symbols(size_old)
+                    or free_unbacked_symbols(size_new)
+                    or _fx_config.backed_size_oblivious
+                ):
                     raise GuardOnDataDependentSymNode(sympy.Eq(size_new, size_old))
                 raise AssertionError
 
@@ -9118,8 +9127,16 @@ class Conditional(ExternKernel):
         fx_operands: Argument = V.graph.current_node.args[-1]
 
         assert isinstance(fx_operands, Sequence), type(fx_operands)
-        assert all(isinstance(n, Node) for n in fx_operands)
-        fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
+        # Build fake_operands from FX nodes' metadata
+        # For FX Nodes, get the fake tensor from meta["val"]
+        # For non-Nodes (e.g., symbolic integers from sym_size lowering), pass directly
+        fake_operands: list[Any] = []
+        for fx_op in fx_operands:
+            if isinstance(fx_op, Node):
+                fake_operands.append(fx_op.meta["val"])
+            else:
+                # Symbolic integer or constant - pass directly
+                fake_operands.append(fx_op)
         fake_outputs = V.graph.current_node.meta["val"]
 
         def _require_exact_strides(

@@ -133,7 +133,8 @@ def make_test_case(
         code_string_count = {}
 
     func = getattr(tests, test_name)
-    assert callable(func), "not a callable"
+    if not callable(func):
+        raise AssertionError("not a callable")
     func = slowTest(func) if slow else func
 
     @config.patch(cpp_wrapper=True)
@@ -286,13 +287,12 @@ if RUN_GPU:
             )
         ],
         BaseTest("test_dtypeview_fusion"),
-        # skip if not enough SMs
+        # skip the next two tests if not enough SMs, logic for this is handled by TestSelectAlgorithm.setUp()
         BaseTest(
             "test_addmm",
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
-        # skip if not enough SMs
         BaseTest(
             "test_linear_relu",
             device=None,
@@ -302,19 +302,6 @@ if RUN_GPU:
         if item.device == "xpu" and item.name in XPU_BASE_TEST_SKIP:
             continue
         make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
-
-    from torch._inductor.utils import is_big_gpu
-
-    if GPU_TYPE in ("cuda", "xpu") and is_big_gpu():
-        skip_list = ["test_addmm", "test_linear_relu"]
-        # need to skip instead of omit, otherwise fbcode ci can be flaky
-        for test_name in skip_list:
-            test_failures_gpu_wrapper[f"{test_name}_{device_type}"] = (
-                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
-            )
-            test_failures_gpu_wrapper[f"{test_name}_gpu_dynamic_shapes"] = (
-                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
-            )
 
     test_torchinductor.copy_tests(
         GpuWrapperTemplate, TestGpuWrapper, "gpu_wrapper", test_failures_gpu_wrapper
