@@ -2,7 +2,6 @@ import os
 import signal
 from threading import Thread
 from time import sleep
-from typing import Optional
 
 
 _IN_TOPLEVEL_PROCESS = True
@@ -46,8 +45,8 @@ def _async_compile_initializer(orig_ppid: int) -> None:
     _IN_TOPLEVEL_PROCESS = False
 
 
-_watchdog_thread: Optional[Thread] = None
-_original_parent: Optional[int] = None
+_watchdog_thread: Thread | None = None
+_original_parent: int | None = None
 
 
 def has_parent_changed() -> bool:
