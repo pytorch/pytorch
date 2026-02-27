@@ -2741,6 +2741,216 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(ref, res)
         self.assertEqual(foo1.field, foo2.field)
 
+    def test_dict_with_descriptor(self):
+        class MyDescriptor:
+            def __get__(self, obj, objtype=None):
+                if obj is None:
+                    return self
+                return obj.__dict__.get("_value", 0)
+
+            def __set__(self, obj, value):
+                obj.__dict__["_value"] = value
+
+        class MyClass:
+            prop = MyDescriptor()
+
+            def __init__(self):
+                self.prop = 42
+
+        def fn(obj):
+            obj.__dict__["extra"] = 99
+            return obj.prop + obj.__dict__["extra"]
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        obj = MyClass()
+        res = fn(obj)
+
+        obj2 = MyClass()
+        out = opt_fn(obj2)
+        self.assertEqual(res, out)
+        self.assertEqual(obj2.__dict__["_value"], 42)
+        self.assertEqual(obj2.__dict__["extra"], 99)
+
+    def test_dict_with_slots(self):
+        class SlottedClass:
+            __slots__ = ("x",)
+
+            def __init__(self, x):
+                self.x = x
+
+        def fn(obj):
+            # SlottedClass doesn't have __dict__, so this should fail or be handled
+            return obj.x * 2
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        obj = SlottedClass(5)
+        res = fn(obj)
+        out = opt_fn(obj)
+        self.assertEqual(res, out)
+
+    def test_dict_with_slots_and_dict(self):
+        class SlottedWithDict:
+            __slots__ = ("x", "__dict__")
+
+            def __init__(self, x):
+                self.x = x
+
+        def fn(obj):
+            obj.__dict__["custom"] = 100
+            return obj.x + obj.__dict__["custom"]
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        obj = SlottedWithDict(7)
+        res = fn(obj)
+
+        obj2 = SlottedWithDict(7)
+        out = opt_fn(obj2)
+        self.assertEqual(res, out)
+        self.assertEqual(obj2.__dict__["custom"], 100)
+
+    def test_dict_descriptor_interaction(self):
+        class DescriptorWithDict:
+            def __get__(self, obj, objtype=None):
+                if obj is None:
+                    return self
+                return obj.__dict__.get("_internal", "default")
+
+            def __set__(self, obj, value):
+                obj.__dict__["_internal"] = f"desc_{value}"
+
+        class MyClass:
+            desc = DescriptorWithDict()
+
+            def __init__(self):
+                pass
+
+        def fn(obj):
+            obj.desc = "hello"
+            obj.__dict__["_internal"] = "direct"
+            return obj.desc
+
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        obj = MyClass()
+        ref = fn(obj)
+
+        obj2 = MyClass()
+        out = opt_fn(obj2)
+        self.assertEqual(ref, out)
+        self.assertEqual(out, "direct")
+
+    def test_mutable_mapping_dict_update(self):
+        """Test that MutableMappingVariable handles __dict__ updates correctly."""
+        from collections import OrderedDict
+
+        class CustomMapping(OrderedDict):
+            pass
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(mapping):
+            mapping.__dict__["custom_attr"] = 42
+            return mapping.__dict__["custom_attr"]
+
+        mapping = CustomMapping()
+        out = fn(mapping)
+        self.assertEqual(out, 42)
+        self.assertIn("custom_attr", mapping.__dict__)
+        self.assertEqual(mapping.__dict__["custom_attr"], 42)
+
+    def test_mutable_mapping_dict_access_pattern(self):
+        """Test accessing attributes through __dict__ on MutableMapping subclasses."""
+        from collections import OrderedDict
+
+        class TrackedDict(OrderedDict):
+            pass
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(d):
+            # Pattern: check if attribute exists in __dict__
+            if "tracker" not in d.__dict__:
+                d.__dict__["tracker"] = []
+            d.__dict__["tracker"].append(1)
+            return len(d.__dict__["tracker"])
+
+        d = TrackedDict()
+        out = fn(d)
+        self.assertEqual(out, 1)
+        self.assertIn("tracker", d.__dict__)
+        self.assertEqual(d.__dict__["tracker"], [1])
+
+    def test_mutable_mapping_lazy_dict_initialization(self):
+        """Test lazy initialization pattern with MutableMapping __dict__."""
+        from collections import defaultdict
+
+        class LazyMapping(dict):
+            pass
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(mapping):
+            # Lazy initialization in __dict__
+            if not hasattr(mapping, "_cache"):
+                mapping.__dict__["_cache"] = {}
+            mapping.__dict__["_cache"]["key"] = "value"
+            return mapping.__dict__["_cache"]["key"]
+
+        m = LazyMapping()
+        out = fn(m)
+        self.assertEqual(out, "value")
+        self.assertIn("_cache", m.__dict__)
+        self.assertEqual(m.__dict__["_cache"]["key"], "value")
+
+    def test_mutable_mapping_dict_with_property_setter(self):
+        """Test MutableMapping with property setters that access __dict__."""
+        from collections import OrderedDict
+
+        class PropertyMapping(OrderedDict):
+            def __init__(self):
+                super().__init__()
+                self.__dict__["_value"] = 0
+
+            @property
+            def value(self):
+                return self.__dict__.get("_value", 0)
+
+            @value.setter
+            def value(self, v):
+                self.__dict__["_value"] = v
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(m):
+            m.value = 100
+            return m.value
+
+        m = PropertyMapping()
+        out = fn(m)
+        self.assertEqual(out, 100)
+        self.assertIn("_value", m.__dict__)
+        self.assertEqual(m.__dict__["_value"], 100)
+
+    def test_mutable_mapping_dict_multiple_accesses(self):
+        """Test multiple accesses and mutations to MutableMapping __dict__."""
+        from collections import OrderedDict
+
+        class MultiAccessMapping(OrderedDict):
+            pass
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def fn(mapping):
+            # Multiple accesses to __dict__
+            mapping.__dict__["a"] = 1
+            mapping.__dict__["b"] = mapping.__dict__["a"] + 1
+            mapping.__dict__["c"] = mapping.__dict__["b"] + 1
+            return mapping.__dict__["a"] + mapping.__dict__["b"] + mapping.__dict__["c"]
+
+        m = MultiAccessMapping()
+        out = fn(m)
+        self.assertEqual(out, 6)  # 1 + 2 + 3
+        self.assertIn("a", m.__dict__)
+        self.assertIn("b", m.__dict__)
+        self.assertIn("c", m.__dict__)
+        self.assertEqual(m.__dict__["a"], 1)
+        self.assertEqual(m.__dict__["b"], 2)
+        self.assertEqual(m.__dict__["c"], 3)
+
     def test_get_attr_function(self):
         def fn(g, x):
             return g(x)
