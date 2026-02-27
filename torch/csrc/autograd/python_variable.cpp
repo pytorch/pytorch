@@ -2322,6 +2322,16 @@ create_native_op_schema(
     comparison_key.emplace_back(std::move(arg));
   };
 
+  const auto handle_non_tensor_arg = [&comparison_key,
+                                      &comparison_key_hash](c10::IValue arg) {
+    if (arg.isTensor() && !arg.toTensor().defined()) {
+      arg = c10::IValue();
+    }
+    comparison_key_hash =
+        c10::hash_combine(comparison_key_hash, c10::IValue::hash(arg));
+    comparison_key.emplace_back(std::move(arg));
+  };
+
   const bool allow_implicit_replication =
       at::get_dtensor_allow_implicit_replication();
 
@@ -2392,15 +2402,7 @@ create_native_op_schema(
                 item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
               handle_exactly_tensor(item_py_tensor);
             } else { // non-tensor
-              c10::IValue arg = item;
-              if (arg.isTensor() && !arg.toTensor().defined()) {
-                // Coerce undefined Tensor to None, following pattern in
-                // handle_non_dtensor_arg()
-                arg = c10::IValue();
-              }
-              comparison_key_hash =
-                  hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-              comparison_key.emplace_back(std::move(arg));
+              handle_non_tensor_arg(item);
             }
           }
         } else {
@@ -2484,15 +2486,7 @@ create_native_op_schema(
                   item_flavor == TensorFlavor::NON_DTENSOR_TENSOR_SUBCLASS) {
                 handle_exactly_tensor(item_py_tensor);
               } else { // non-tensor
-                c10::IValue arg = item;
-                if (arg.isTensor() && !arg.toTensor().defined()) {
-                  // Coerce undefined Tensor to None, following pattern in
-                  // handle_non_dtensor_arg()
-                  arg = c10::IValue();
-                }
-                comparison_key_hash =
-                    hash_combine(comparison_key_hash, c10::IValue::hash(arg));
-                comparison_key.emplace_back(std::move(arg));
+                handle_non_tensor_arg(item);
               }
             }
           } else {
