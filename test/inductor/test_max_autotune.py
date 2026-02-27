@@ -1291,7 +1291,8 @@ class TestMaxAutotune(TestCase):
 
             expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
-            assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+            if not same(expect, actual, tol=1e-2):
+                raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -2553,9 +2554,15 @@ class TestMaxAutotune(TestCase):
             if flexible_layout:
                 flexible_layout_called = True
                 if always_freeze:
-                    assert isinstance(node.data.layout, ir.FixedLayout)
+                    if not isinstance(node.data.layout, ir.FixedLayout):
+                        raise AssertionError(
+                            f"Expected FixedLayout, got {type(node.data.layout)}"
+                        )
                 else:
-                    assert isinstance(node.data.layout, ir.FlexibleLayout)
+                    if not isinstance(node.data.layout, ir.FlexibleLayout):
+                        raise AssertionError(
+                            f"Expected FlexibleLayout, got {type(node.data.layout)}"
+                        )
             return result
 
         def fn(x, y):
@@ -2591,6 +2598,57 @@ class TestMaxAutotune(TestCase):
                 mm_template.always_freeze_layout = original_always_freeze
 
         self.assertTrue(flexible_layout_called)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "test_configs.max_mm_configs": 1,
+        }
+    )
+    def test_deffered_layout_constraint_reintepret(self):
+        batch, m, k, n = 4608, 40, 112, 1119
+
+        # Shape: batch x m x k (contiguous)
+        a = torch.randn(batch, m, k, dtype=torch.bfloat16, device=GPU_TYPE)
+
+        padded_batch_stride = k * n + 48
+        b = torch.empty_strided(
+            size=(batch, k, n),
+            stride=(padded_batch_stride, 1, k),
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+        )
+        b.copy_(torch.randn_like(b))
+        c = torch.randn(batch, k, m, dtype=torch.bfloat16, device=GPU_TYPE)
+
+        def fn(a, b, c):
+            # Apply a pointwise op to b to make it FlexibleLayout in Inductor
+            # This ensures Inductor doesn't treat it as a fixed/external layout
+            # Ends up double padding
+            b_flex = b + 0
+            return (
+                torch.bmm(a, b_flex).to(torch.float32),
+                b + 1.0,
+                torch.bmm(b_flex.permute(0, 2, 1), c).to(torch.float32),
+            )
+
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+        ):
+            compiled_fn = torch.compile(fn)
+
+            # Previously would CUDA IMA
+            _, code = run_and_get_code(compiled_fn, a, b, c)
+
+            FileCheck().check("triton_tem_fused").run(code[0])
 
 
 @instantiate_parametrized_tests
@@ -2912,12 +2970,14 @@ class TestMaxAutotunePrecompile(TestCase):
                     ):
                         asc("test_call", fake_choices, [], Mock())
             for fake_choice in fake_choices:
-                assert fake_choice.thread_id is not None, (
-                    "Expected all ChoiceCaller's precompile method to have been called"
-                )
-                assert fake_choice.thread_id != main_thread_id, (
-                    "Expected all ChoiceCaller's precompile method to have been called on separate thread"
-                )
+                if fake_choice.thread_id is None:
+                    raise AssertionError(
+                        "Expected all ChoiceCaller's precompile method to have been called"
+                    )
+                if fake_choice.thread_id == main_thread_id:
+                    raise AssertionError(
+                        "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                    )
         finally:
             V.set_debug_handler(old_debug_handler)
 

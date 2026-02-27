@@ -5332,22 +5332,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if prefix_is_reduction(prefix) and not self.inside_reduction:
                 continue
 
-            numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(numel)
-            if not isinstance(numel_hint, (int, sympy.Integer)):
-                # This default heuristic hint was picked carefully: it is
-                # large, to ensure that we don't shrink the block size (since
-                # if you don't have many elements, it'd be wasteful to pick a
-                # large block size).  Since we don't know how many elements we
-                # might have, we should be OK with some inefficiency to make
-                # sure we handle the large case well.  8192 is the largest
-                # block size we support, so we pick that.
-                #
-                # If we have a better hint for unbacked SymInts (e.g., because
-                # a user told us, or we are tracking upper bounds) we could
-                # use that here.
-                size_hint = 8192
-            else:
-                size_hint = next_power_of_2(int(numel_hint))
+            numel_hint = V.graph.sizevars.optimization_hint(numel)
+            size_hint = next_power_of_2(int(numel_hint))
             size_hints[prefix] = size_hint
 
         if name is None:

@@ -31,7 +31,7 @@ import inspect
 import operator
 from collections.abc import Generator, Iterable, Sequence
 from types import TracebackType
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -157,8 +157,8 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
 
     def __init__(
         self,
-        value: Optional[TorchFunctionMode],
-        source: Optional[Source] = None,
+        value: TorchFunctionMode | None,
+        source: Source | None = None,
         **kwargs: Any,
     ) -> None:
         if value is not None:
@@ -245,9 +245,9 @@ class TorchFunctionModeStackStateManager:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         set_torch_function_mode_stack(self.stack)
         self.stack = []

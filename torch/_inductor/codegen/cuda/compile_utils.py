@@ -3,7 +3,6 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
 
 import torch
 from torch._inductor import config
@@ -68,7 +67,7 @@ def _cutlass_include_paths() -> list[str]:
     ]
 
 
-def _cuda_compiler() -> Optional[str]:
+def _cuda_compiler() -> str | None:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
     if config.is_fbcode():
@@ -240,9 +239,7 @@ class CUDACompileSourceCapturingContext:
 
         _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
 
-        def my_compile(
-            source_code, dst_file_ext, extra_args: Optional[list[str]] = None
-        ):
+        def my_compile(source_code, dst_file_ext, extra_args: list[str] | None = None):
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 
