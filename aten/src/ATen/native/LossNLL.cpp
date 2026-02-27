@@ -686,9 +686,9 @@ Tensor nll_loss_nd_symint(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
-    TORCH_CHECK_VALUE(
-        false,
+  if (self.dim() != 1) {
+    TORCH_SYM_CHECK(
+        self.sym_sizes()[0].sym_eq(target.sym_sizes()[0]),
         "Expected input batch_size (",
         self.sym_sizes()[0],
         ") to match target batch_size (",
