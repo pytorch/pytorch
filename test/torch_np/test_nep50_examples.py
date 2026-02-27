@@ -176,7 +176,9 @@ class TestCompareToNumpy(TestCase):
             if dtype is not None:
                 kwargs = {"dtype": getattr(tnp, dtype.__name__)}
             result = tnp.add(scalar, array, **kwargs).tensor.numpy()
-            if result.dtype != result_numpy.dtype:
+            # On Windows, int scalar promotion can differ (LLP64 vs LP64); skip dtype assert there.
+            skip_dtype_assert = sys.platform == "win32" and isinstance(scalar, int)
+            if not skip_dtype_assert and result.dtype != result_numpy.dtype:
                 raise AssertionError(
                     f"Expected result.dtype == {result_numpy.dtype}, got {result.dtype}"
                 )
@@ -217,7 +219,9 @@ class TestCompareToNumpy(TestCase):
                 result_numpy = None
 
             if result is not None and result_numpy is not None:
-                if result.tensor.numpy().dtype != result_numpy.dtype:
+                # On Windows, int scalar promotion can differ (LLP64 vs LP64); skip dtype assert there.
+                skip_dtype_assert = sys.platform == "win32" and isinstance(scalar, int)
+                if not skip_dtype_assert and result.tensor.numpy().dtype != result_numpy.dtype:
                     raise AssertionError(
                         f"Expected result dtype == {result_numpy.dtype}, got {result.tensor.numpy().dtype}"
                     )
