@@ -852,11 +852,11 @@ class TestExpandPlaceholder(TestCase):
             kwargs_schema={"out": OpStrategy([OpSpec(out_spec)])},
         )
 
-        # Define strategies: output can be Shard(0) or Replicate
-        # [output, input1, input2, out_kwarg]
+        # Define strategies WITHOUT the out kwarg (auto-appended by infra).
+        # [output, input1, input2]
         single_mesh_dim_strategies = [
-            [Shard(0), Shard(0), Shard(0), Shard(0)],  # All sharded
-            [Replicate(), Replicate(), Replicate(), Replicate()],  # All replicated
+            [Shard(0), Shard(0), Shard(0)],  # All sharded
+            [Replicate(), Replicate(), Replicate()],  # All replicated
         ]
 
         result = expand_to_full_mesh_op_strategy(
