@@ -3330,6 +3330,33 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    def test_generator_iteration_over_subclass(self):
+        class YieldTensor(torch.Tensor):
+            @staticmethod
+            def wrap(t):
+                return torch.Tensor._make_subclass(
+                    YieldTensor, t, require_grad=t.requires_grad
+                )
+
+            def iter_vals(self):
+                flat = torch.Tensor.reshape(self, -1)
+                for chunk in flat.split(1):
+                    yield from chunk
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = YieldTensor.wrap(x * 2)
+                total = torch.zeros((), dtype=y.dtype, device=y.device)
+                for value in y.iter_vals():
+                    total = total + value
+                return total
+
+        m = Module()
+        x = torch.arange(8.0, requires_grad=True)
+        output1 = m(x)
+        output2 = torch.compile(m)(x)
+        self.assertEqual(output1, output2)
+
 
 instantiate_parametrized_tests(SubclassTests)
 
