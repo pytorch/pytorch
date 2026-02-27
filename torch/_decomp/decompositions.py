@@ -4261,10 +4261,9 @@ def nll_loss_forward(
         )
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    if not no_batch_dim:
-        torch._check(
-            self.shape[0] == target.shape[0],
-            lambda: f"size mismatch (got input: {self.shape}, target: {target.shape})",
+    if not (no_batch_dim or (self.shape[0] == target.shape[0])):
+        raise AssertionError(
+            f"size mismatch (got input: {self.shape}, target: {target.shape})"
         )
 
     n_classes = self.shape[-1]
