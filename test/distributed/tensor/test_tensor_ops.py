@@ -280,7 +280,8 @@ class DistTensorOpsTest(DTensorTestBase):
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        assert dist_tensor.shape == (4, 8)
+        if not (dist_tensor.shape == (4, 8)):
+            raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
         ones_like_dt = torch.ones_like(dist_tensor)
         ones_expected = torch.ones(dist_tensor.shape)
@@ -293,7 +294,8 @@ class DistTensorOpsTest(DTensorTestBase):
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        assert dist_tensor.shape == (4, 8)
+        if not (dist_tensor.shape == (4, 8)):
+            raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
         # inplace partial sum should keep partial
         torch.fill_(dist_tensor, 8)
@@ -309,7 +311,8 @@ class DistTensorOpsTest(DTensorTestBase):
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        assert dist_tensor.shape == (4, 8)
+        if not (dist_tensor.shape == (4, 8)):
+            raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
         zeros_like_dt = torch.zeros_like(dist_tensor)
         zeros_expected = torch.zeros(dist_tensor.shape)
@@ -756,7 +759,8 @@ class DistTensorOpsTest(DTensorTestBase):
                 input_dt = distribute_tensor(global_input, device_mesh, [i, j])
                 ref = torch.index_put(global_input, global_index, global_value)
                 output_dt = torch.index_put(input_dt, global_index, value_dt)
-                assert isinstance(output_dt, DTensor)
+                if not isinstance(output_dt, DTensor):
+                    raise AssertionError(f"Expected DTensor, got {type(output_dt)}")
                 # for value is a scalar case, output placement must be replicate
                 self.assertEqual(output_dt.placements, (Replicate(), Replicate()))
                 self.assertEqual(output_dt.full_tensor(), ref)
@@ -774,7 +778,8 @@ class DistTensorOpsTest(DTensorTestBase):
         for accumulate in [True, False]:
             ref = torch.index_put(global_input, global_index, global_value, accumulate)
             output_dt = torch.index_put(input_dt, global_index, value_dt, accumulate)
-            assert isinstance(output_dt, DTensor)
+            if not isinstance(output_dt, DTensor):
+                raise AssertionError(f"Expected DTensor, got {type(output_dt)}")
             # Output should be sharded on non-indexed dims (dim 1 or 2).
             # The exact placement depends on cost-based strategy selection.
             for p in output_dt.placements:
@@ -973,7 +978,8 @@ class DistTensorOpsTest(DTensorTestBase):
         def to_copy_single_dim_strategy(op, args_schema, kwargs_schema):
             call_count[0] += 1
             self_meta = args_schema[0]
-            assert isinstance(self_meta, TensorMeta)
+            if not isinstance(self_meta, TensorMeta):
+                raise AssertionError(f"Expected TensorMeta, got {type(self_meta)}")
             single_dim_strategies = []
             for dim in range(len(self_meta.shape)):
                 single_dim_strategies.append(
