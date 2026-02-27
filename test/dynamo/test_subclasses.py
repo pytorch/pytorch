@@ -74,7 +74,8 @@ def get_view_test_cases():
         # view is not a leaf and has the same requires grad as its basic case
         x, _ = get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
         x = x.clone() if base_is_nt else x
-        assert not x.is_leaf
+        if x.is_leaf:
+            raise AssertionError("Expected x to not be a leaf")
         return x.unsqueeze(-1)
 
     def mk_leaf(base_is_nt, requires_grad_1, requires_grad_2):
@@ -234,7 +235,8 @@ class ScaledTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
-        assert len(inner_tensors) == 2
+        if len(inner_tensors) != 2:
+            raise AssertionError(f"Expected 2 inner tensors, got {len(inner_tensors)}")
         return ScaledTensor(
             inner_tensors["_data"],
             inner_tensors["_scale"],
@@ -3053,7 +3055,7 @@ class GraphModule(torch.nn.Module):
                 if outer_stride is None:
                     outer_stride = a.stride()
 
-                assert (
+                assert (  # noqa: S101
                     a.device == b.device
                     and a.layout == b.layout
                     and a.requires_grad == b.requires_grad
@@ -3072,11 +3074,11 @@ class GraphModule(torch.nn.Module):
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                assert meta is None
+                assert meta is None  # noqa: S101
                 a, b = inner_tensors["a"], inner_tensors["b"]
                 if type(a) is torch.Tensor:
-                    assert outer_size is not None
-                    assert outer_stride is not None
+                    assert outer_size is not None  # noqa: S101
+                    assert outer_stride is not None  # noqa: S101
                 return TT(a, b, outer_size, outer_stride)
 
         @torch.compile(dynamic=True)
@@ -3327,6 +3329,33 @@ class <lambda>(torch.nn.Module):
         )
 """,  # noqa: B950
         )
+
+    def test_generator_iteration_over_subclass(self):
+        class YieldTensor(torch.Tensor):
+            @staticmethod
+            def wrap(t):
+                return torch.Tensor._make_subclass(
+                    YieldTensor, t, require_grad=t.requires_grad
+                )
+
+            def iter_vals(self):
+                flat = torch.Tensor.reshape(self, -1)
+                for chunk in flat.split(1):
+                    yield from chunk
+
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = YieldTensor.wrap(x * 2)
+                total = torch.zeros((), dtype=y.dtype, device=y.device)
+                for value in y.iter_vals():
+                    total = total + value
+                return total
+
+        m = Module()
+        x = torch.arange(8.0, requires_grad=True)
+        output1 = m(x)
+        output2 = torch.compile(m)(x)
+        self.assertEqual(output1, output2)
 
 
 instantiate_parametrized_tests(SubclassTests)
