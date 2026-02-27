@@ -541,11 +541,7 @@ class CompiledFxGraph(OutputCode):
         self.metrics_deltas = metrics_deltas
         self.counter_deltas = counter_deltas
         self.guards_expr = None
-        try:
-            backend = torch.utils._triton.triton_backend()
-            self.extern_libs_key = torch.utils._triton._extern_libs_key(backend)
-        except Exception:
-            self.extern_libs_key = None
+        self.extern_libs_key = None
         self.cudagraph_info = None
         self.partition_maps = graph.partition_maps
         self.fx_kwargs = {}

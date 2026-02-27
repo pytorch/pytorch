@@ -114,18 +114,6 @@ def _set_triton_libdevice_path_impl() -> None:
         )
 
 
-def _set_triton_compile_env() -> None:
-    """Ensure Triton compilation env vars (ptxas, libdevice, etc.) are set.
-
-    Called from _extern_libs_key() before reading backend options, and
-    also from compile workers.  Individual setup functions are
-    @functools.cache so repeated calls are free.
-    """
-    _set_triton_ptxas_path()
-    # When adding new env var setup (e.g. _set_triton_libdevice_path),
-    # add the call here so it runs in both main process and workers.
-
-
 def _worker_compile_triton(
     load_kernel: Callable[[], CachingAutotuner],
     extra_env: dict[str, str],

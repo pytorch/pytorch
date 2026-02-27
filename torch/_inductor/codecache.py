@@ -1142,22 +1142,6 @@ class GuardedCache(Generic[T]):
         for candidate, content, in_local in cls.iterate_over_candidates(
             local, remote_cache, key
         ):
-            # Validate extern_libs (e.g. libdevice) match the current env.
-            # This is checked here rather than in the cache key because
-            # TRITON_LIBDEVICE_PATH may be set after key computation.
-            cached_extern_libs = getattr(candidate, "extern_libs_key", None)
-            if cached_extern_libs is not None:
-                try:
-                    backend = torch.utils._triton.triton_backend()
-                    current_extern_libs = torch.utils._triton._extern_libs_key(
-                        backend
-                    )
-                except Exception:
-                    current_extern_libs = None
-                if current_extern_libs != cached_extern_libs:
-                    result_status = "guard_miss"
-                    continue
-
             assert hasattr(candidate, "guards_expr")
             if not candidate.guards_expr:  # type: ignore[attr-defined]
                 # No guards to evaluate, so this is a hit.
@@ -1468,6 +1452,17 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         if graph is None:
             return None, cache_info
 
+        # Validate extern_libs (e.g. libdevice) match the current env.
+        if graph.extern_libs_key is not None:
+            try:
+                backend = torch.utils._triton.triton_backend()
+                current = torch.utils._triton._extern_libs_key(backend)
+            except Exception:
+                current = None
+            if current != graph.extern_libs_key:
+                cache_info["cache_status_detailed"] = "guard_miss"
+                return None, cache_info
+
         if pickled_content is not None:
             CacheArtifactManager.record_artifact(
                 InductorCacheArtifact.type(), key, pickled_content
@@ -1524,6 +1519,13 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
         )
+        try:
+            backend = torch.utils._triton.triton_backend()
+            compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
+                backend
+            )
+        except Exception:
+            pass
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 

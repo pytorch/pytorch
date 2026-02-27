@@ -200,9 +200,6 @@ def _extern_libs_key(backend: Any) -> str:
     These files affect codegen but are not covered by triton_key() (Python
     sources only) or backend.hash() (ptxas version and arch only).
     """
-    from torch._inductor.runtime.compile_tasks import _set_triton_compile_env
-
-    _set_triton_compile_env()
     opts = backend.parse_options({})
     extern_libs = getattr(opts, "extern_libs", None)
     if not extern_libs:
