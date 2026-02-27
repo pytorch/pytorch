@@ -66,6 +66,7 @@ from torch._logging import dtrace_structured, LazyString, structured, trace_stru
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
+from torch.fx.experimental._config import AggressiveGuardFreeMode
 from torch.fx.experimental.recording import (
     FakeTensorMeta,
     record_shapeenv_event,
@@ -3985,6 +3986,9 @@ class ShapeEnv:
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
+        # Separate counter tracking only replacement changes, used by
+        # SymNode.expr
+        self._replacements_version_counter = 0
 
         # Each time divisible is changed this should be set to True, this is set in _update_version_counter.
         self._resimplify_floor_div_axioms = True
@@ -4156,6 +4160,7 @@ class ShapeEnv:
             # source locations are OK to diverge
             "var_to_range_sloc",
             "replacements_slocs",
+            "_replacements_version_counter",
             "_resimplify_floor_div_axioms",
             "_expr_sym_node_id",
             "specialization_stacks",
@@ -6615,6 +6620,25 @@ class ShapeEnv:
 
         return None
 
+    def _maybe_evaluate_range_only(
+        self,
+        expr: sympy.Basic,
+        fallback: Optional[sympy.Basic] = None,
+    ) -> Optional[sympy.Basic]:
+        """
+        Lightweight range-based evaluation using only bound_sympy (value range
+        analysis), without expensive simplification, axiom matching, or symbol
+        reallocation.
+
+        Returns the resolved value if range analysis determines it, otherwise
+        returns fallback.
+        """
+        var_ranges = {x: self.var_to_range.get(x) for x in expr.free_symbols}
+        out = bound_sympy(expr, var_ranges)  # type: ignore[arg-type]
+        if out.is_singleton():
+            return out.lower
+        return fallback
+
     @_lru_cache
     def _maybe_evaluate_static(
         self,
@@ -6710,6 +6734,12 @@ class ShapeEnv:
     def replace(self, expr: _SympyT) -> _SympyT:
         """
         Apply symbol replacements to any symbols in the given expression.
+
+        IMPORTANT: The output of this method MUST depend only on
+        self.replacements and the input expr. Do not add dependencies on other
+        mutable state. SymNode.expr uses _replacements_version_counter (which
+        tracks only replacement changes) to cache calls to this method, so
+        depending on other state would cause stale cache results.
         """
         replacements = {}
         # pyrefly: ignore [missing-attribute]
@@ -7150,6 +7180,7 @@ class ShapeEnv:
         # them)
         if a not in self.replacements_slocs:
             self.replacements_slocs[a] = self._get_sloc()
+        self._replacements_version_counter += 1
         self._update_version_counter()
 
         # When specializing 'a == tgt', the equality should be also conveyed to
@@ -7169,6 +7200,15 @@ class ShapeEnv:
 
         a: b + c
         c: d
+
+        IMPORTANT: The output of this method MUST depend only on
+        self.replacements and the input symbol. Do not add dependencies on other
+        mutable state. SymNode.expr uses _replacements_version_counter (which
+        tracks only replacement changes) to cache calls to replace() (and
+        transitively this method), so depending on other state would cause
+        stale cache results. (Note: _set_replacement,  may read other fields
+        like var_to_range, but those are side effects that do not affect the
+        returned value.)
         """
         if a not in self.replacements:
             return a
@@ -7815,9 +7855,31 @@ class ShapeEnv:
 
             # Try to quickly evaluate trivially true/false comparisons
             # using var_to_range, before calling expensive _maybe_evaluate_static.
-            fast_result = self._maybe_fast_eval_comparison(expr)
-            if fast_result is not None:
-                return fast_result
+            if (
+                torch.fx.experimental._config.aggressive_guard_free_semantics
+                < AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS
+            ):
+                fast_result = self._maybe_fast_eval_comparison(expr)
+                if fast_result is not None:
+                    return fast_result
+
+            # Aggressive guard-free semantics:
+            # VALUE_RANGE_ANALYSIS: use value range analysis (bound_sympy) before returning fallback
+            # SKIP_RANGE_ANALYSIS: skip range analysis entirely, just return fallback_value
+            aggressive_level = (
+                torch.fx.experimental._config.aggressive_guard_free_semantics
+            )
+            if hint is None and aggressive_level > 0 and fallback_value is not None:
+                if aggressive_level >= AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS:
+                    # Skip range analysis entirely
+                    self._log_suppressed_dde(orig_expr, fallback_value)
+                    return fallback_value
+                else:
+                    # Level 1: try range analysis first
+                    range_result = self._maybe_evaluate_range_only(expr, fallback_value)
+                    if range_result is fallback_value:
+                        self._log_suppressed_dde(orig_expr, fallback_value)
+                    return range_result
 
             static_expr = self._maybe_evaluate_static(
                 expr, size_oblivious=size_oblivious
