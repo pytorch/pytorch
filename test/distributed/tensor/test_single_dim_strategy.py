@@ -858,6 +858,53 @@ class TestExpandPlaceholder(TestCase):
                 f"Output placement {output_spec.placements} should match out kwarg placement (Replicate(),)",
             )
 
+    def test_out_variant_auto_appends_output_placement(self):
+        """Test that expand_to_full_mesh_op_strategy auto-appends the output placement
+        for the out= kwarg tensor in .out variant ops.
+
+        Single-dim strategies only specify [output, *inputs] without the out kwarg.
+        The infra should auto-append s[0] (the output placement) so strategy authors
+        don't need to manually include it.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        arg_spec = DTensorSpec(mesh, (Shard(0),), meta)
+        out_spec = DTensorSpec(mesh, (Shard(0),), meta)
+
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(arg_spec)]),
+                OpStrategy([OpSpec(arg_spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(out_spec)])},
+        )
+
+        # Strategies WITHOUT the out kwarg placement (only [output, input1, input2])
+        single_mesh_dim_strategies = [
+            [Shard(0), Shard(0), Shard(0)],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+        )
+
+        self.assertIsInstance(result, OpStrategy)
+        self.assertGreater(len(result.strategies), 0)
+
+        # Every strategy should have 3 input specs (2 args + 1 out kwarg)
+        for strategy in result.strategies:
+            self.assertEqual(len(strategy.input_specs), 3)
+            # The out kwarg placement should match the output placement
+            out_kwarg_placement = strategy.input_specs[2].placements
+            output_placement = strategy.output_spec.placements
+            self.assertEqual(out_kwarg_placement, output_placement)
+
     def test_expand_multi_output_strategy(self):
         """Test expanding single-dim strategies for multi-output ops.
 
