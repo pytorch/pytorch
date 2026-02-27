@@ -22,7 +22,7 @@ import functools
 import inspect
 import types
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -212,7 +212,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         proxy: Proxy,
         value: Any,
         ctor_args_kwargs: Any = None,
-        source: Optional[Source] = None,
+        source: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
@@ -246,6 +246,16 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 self.proxy = hoisted_vt.as_proxy()
 
         return self.proxy
+
+    def __str__(self) -> str:
+        value = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
+        )
+        return f"{self.__class__.__name__}({value})"
+
+    __repr__ = __str__
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
@@ -392,8 +402,14 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         hints=[],
                     )
 
-                args_const = [x.as_python_constant() for x in args]
-                kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
+                def get_real_value(x: VariableTracker) -> Any:
+                    # For TorchScriptObjectVariable, get the real object directly
+                    if isinstance(x, TorchScriptObjectVariable):
+                        return x.get_real_value()
+                    return x.as_python_constant()
+
+                args_const = [get_real_value(x) for x in args]
+                kwargs_const = {k: get_real_value(v) for k, v in kwargs.items()}
 
                 method = getattr(real_obj, name)
 

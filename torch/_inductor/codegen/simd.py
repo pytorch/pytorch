@@ -2665,6 +2665,53 @@ class SIMDScheduling(BaseScheduling):
 
         Returns a list of tilings ranked by dimensionality.
         """
+
+        def collapse_dims(
+            dims: Sequence[sympy.Expr], fallback_numel: sympy.Expr
+        ) -> tuple[sympy.Expr, ...]:
+            """
+            Collapse dimensions to the maximum allowed number of tiles.
+            """
+            if not dims:
+                return (fallback_numel,)
+            max_tiles = get_max_tiles(2)
+            num_leading_dims = max(0, len(dims) - max_tiles)
+            first_trailing_dim = num_leading_dims + 1
+            collapsed_leading_dim = sympy_product(dims[:first_trailing_dim])
+            return (collapsed_leading_dim,) + tuple(dims[first_trailing_dim:])
+
+        def tile_var_ranges(
+            var_ranges, ranges_to_tile, total_numel
+        ) -> tuple[sympy.Expr, ...]:
+            # Pattern match the subexpression pertaining to each index variable.
+            tiling = []
+            for var, numel in var_ranges:
+                index = BlockPatternMatcher.get_subexpr_involving_symbol(dep.index, var)
+
+                # Heuristic to bound the maximum dimensionality of the block.
+                num_dims = max(
+                    2,
+                    index.count(FloorDiv) + index.count(ModularIndexing),
+                    len(ranges_to_tile),
+                )
+
+                # Attempt to pattern match the index expr.
+                # Failed matches default to the full range.
+                match_result = BlockPatternMatcher.match_mod_div_block_expr(
+                    index, var, numel, num_dims
+                )
+                dims = match_result[0] if match_result is not None else [numel]
+                tiling.extend(dims)
+
+            # Prune dimensions of size 1.
+            tiling = [
+                dim
+                for dim in tiling
+                if not V.graph.sizevars.statically_known_equals(dim, sympy.S.One)
+            ]
+
+            return collapse_dims(tiling, total_numel)
+
         is_pointwise = reduction_numel == 1
         tilings = OrderedSet[immutable_dict[str, sympy.Expr]]()
         for node in EnableReduction.filter(node_schedule):
@@ -2678,8 +2725,9 @@ class SIMDScheduling(BaseScheduling):
                 continue
 
             # Use the node ranges as the default tiling candidate.
-            ranges_to_tile = node_ranges[0 if is_pointwise else 1]
-            node_tilings = [ranges_to_tile]
+            default_pointwise_tiling = collapse_dims(node_ranges[0], pointwise_numel)
+            default_reduction_tiling = collapse_dims(node_ranges[1], reduction_numel)
+            node_tilings = [(default_pointwise_tiling, default_reduction_tiling)]
 
             # Search the indexing expressions for more candidates.
             # If we see modular indexing, try to subdivide ranges into their implied
@@ -2710,61 +2758,33 @@ class SIMDScheduling(BaseScheduling):
                 ):
                     continue
 
-                # Partition var ranges into pointwise and reduction splits.
+                # Partition var ranges into pointwise and reduction splits, tiling them
+                # separately.
                 reduction_start_idx = pointwise_end_idx + 1
-                var_ranges = (
-                    all_var_ranges[:reduction_start_idx]
+                pointwise_var_ranges = all_var_ranges[:reduction_start_idx]
+                reduction_var_ranges = (
+                    None if is_pointwise else all_var_ranges[reduction_start_idx:]
+                )
+                pointwise_tiling = tile_var_ranges(
+                    pointwise_var_ranges, node_ranges[0], pointwise_numel
+                )
+                reduction_tiling = (
+                    (sympy.S.One,)
                     if is_pointwise
-                    else all_var_ranges[reduction_start_idx:]
-                )
-
-                # Pattern match the subexpression pertaining to each index variable.
-                index_tiling = []
-                for var, numel in var_ranges:
-                    index = BlockPatternMatcher.get_subexpr_involving_symbol(
-                        dep.index, var
-                    )
-
-                    # Heuristic to bound the maximum dimensionality of the block.
-                    num_dims = max(
-                        2,
-                        index.count(FloorDiv) + index.count(ModularIndexing),
-                        len(ranges_to_tile),
-                    )
-
-                    # Attempt to pattern match the index expr.
-                    # Failed matches default to the full range.
-                    match_result = BlockPatternMatcher.match_mod_div_block_expr(
-                        index, var, numel, num_dims
-                    )
-                    dims = match_result[0] if match_result is not None else [numel]
-                    index_tiling.extend(dims)
-
-                # Prune dimensions of size 1.
-                index_tiling = [
-                    dim
-                    for dim in index_tiling
-                    if not V.graph.sizevars.statically_known_equals(dim, sympy.S.One)
-                ]
-
-                if len(index_tiling) > 0:
-                    node_tilings.append(index_tiling)
-
-            # Flatten leading dimensions, assigning labels to each dim.
-            for node_tiling in node_tilings:
-                num_leading_dims = max(0, len(node_tiling) - get_max_tiles(2))
-                first_trailing_dim = num_leading_dims + 1
-                collapsed_leading_dim = sympy_product(node_tiling[:first_trailing_dim])
-                collapsed_splits = (collapsed_leading_dim,) + tuple(
-                    node_tiling[first_trailing_dim:]
-                )
-                tilings.add(
-                    cls.complete_partial_tiling(
-                        cls.create_partial_tiling(collapsed_splits, is_pointwise),
-                        pointwise_numel,
-                        reduction_numel,
+                    else tile_var_ranges(
+                        reduction_var_ranges, node_ranges[1], reduction_numel
                     )
                 )
+
+                if len(pointwise_tiling) and len(reduction_tiling) > 0:
+                    node_tilings.append((pointwise_tiling, reduction_tiling))
+
+            # Each memory dependency contributes one pointwise and reduction tiling. We
+            # take the Cartesian product of these, yielding all possible joint tilings.
+            for pointwise_tiling, reduction_tiling in itertools.product(
+                *zip(*node_tilings)
+            ):
+                tilings.add(cls.create_tiling(pointwise_tiling, reduction_tiling))
 
         # Rank tilings by the number of dimensions. E.g., prefer 2D to 1D.
         # Since this is a stable sort, ties are broken by schedule order.
