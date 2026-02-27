@@ -112,13 +112,11 @@ def _strong_wolfe(
 
         # compute new trial value
         t = _cubic_interpolate(
-            # pyrefly: ignore [index-error]
             # pyrefly: ignore [unbound-name]
             bracket[0],
             # pyrefly: ignore [unbound-name]
             bracket_f[0],
             bracket_gtd[0],  # type: ignore[possibly-undefined]
-            # pyrefly: ignore [index-error]
             # pyrefly: ignore [unbound-name]
             bracket[1],
             # pyrefly: ignore [unbound-name]
@@ -164,7 +162,6 @@ def _strong_wolfe(
         # pyrefly: ignore [unbound-name]
         if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
-            # pyrefly: ignore [unsupported-operation]
             # pyrefly: ignore [unbound-name]
             bracket[high_pos] = t
             # pyrefly: ignore [unbound-name]
@@ -178,11 +175,9 @@ def _strong_wolfe(
             if abs(gtd_new) <= -c2 * gtd:
                 # Wolfe conditions satisfied
                 done = True
-            # pyrefly: ignore [index-error]
             # pyrefly: ignore [unbound-name]
             elif gtd_new * (bracket[high_pos] - bracket[low_pos]) >= 0:
                 # old high becomes new low
-                # pyrefly: ignore [unsupported-operation]
                 # pyrefly: ignore [unbound-name]
                 bracket[high_pos] = bracket[low_pos]
                 # pyrefly: ignore [unbound-name]
@@ -192,7 +187,6 @@ def _strong_wolfe(
                 bracket_gtd[high_pos] = bracket_gtd[low_pos]
 
             # new point becomes new low
-            # pyrefly: ignore [unsupported-operation]
             # pyrefly: ignore [unbound-name]
             bracket[low_pos] = t
             # pyrefly: ignore [unbound-name]
@@ -281,7 +275,6 @@ class LBFGS(Optimizer):
 
     def _numel(self):
         if self._numel_cache is None:
-            # pyrefly: ignore [bad-assignment]
             self._numel_cache = sum(
                 2 * p.numel() if torch.is_complex(p) else p.numel()
                 for p in self._params

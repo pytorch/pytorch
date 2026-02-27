@@ -149,7 +149,7 @@ def register_tensor_creation_op(op):
         if kwargs is None:
             kwargs = {}
 
-        # pyrefly: ignore [bad-index, index-error]
+        # pyrefly: ignore [bad-index]
         st = args[0]
 
         new_st = creation_op(st.sharding_spec(), st.size(), *args[1:], **kwargs)  # type: ignore[operator]

@@ -5,7 +5,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 import torch
 from torch._dynamo.package import (
@@ -134,7 +134,7 @@ class PrecompileContext:
         artifact.edit_contents(edit_fn)
 
     @classmethod
-    def serialize_artifact_by_key(cls, key: str) -> Optional[BackendCacheArtifact[Any]]:
+    def serialize_artifact_by_key(cls, key: str) -> BackendCacheArtifact[Any] | None:
         """
         Return the backend cache artifact with the associated key
         """

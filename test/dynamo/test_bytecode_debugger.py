@@ -487,7 +487,7 @@ Stack (TOS at end):
         def test_logic(sess, initial):
             output = yield "h"
             self.assertIn("Commands:", output)
-            self.assertIn("step", output)
+            self.assertIn("s [n]", output)
             self.assertIn("cont", output)
             self.assertIn("verbose", output)
             self.assertIn("__stack__", output)
