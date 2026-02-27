@@ -26,3 +26,10 @@ miopenStatus_t miopenSetConvolutionFindMode(
     miopenConvolutionFindMode_t findMode);
 }
 #endif
+
+#if MIOPEN_VERSION_MAJOR > 3 || (MIOPEN_VERSION_MAJOR == 3 && MIOPEN_VERSION_MINOR >= 6)
+// miopen 3.6 added tuning policy APIs (miopenGet/SetTuningPolicy)
+#define MIOPEN_HAS_TUNING_POLICY 1
+#else
+#define MIOPEN_HAS_TUNING_POLICY 0
+#endif
