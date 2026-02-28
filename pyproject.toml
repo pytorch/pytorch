@@ -22,6 +22,9 @@ requires = [
 ]
 build-backend = "scikit_build_core.build"
 
+[tool.scikit-build]
+build-dir = "build"
+
 [tool.scikit-build.cmake]
 # Build type is determined by cmake/EnvVarForwarding.cmake from DEBUG,
 # REL_WITH_DEB_INFO, or CMAKE_BUILD_TYPE env vars (defaulting to Release).
@@ -63,7 +66,8 @@ MAX_JOBS = {env = "MAX_JOBS"}
 # Read wheel version from version.txt. For release builds,
 # PYTORCH_BUILD_VERSION overrides this (handled by generate_torch_version.py).
 provider = "scikit_build_core.metadata.regex"
-provider-path = "version.txt"
+input = "version.txt"
+regex = "^(?P<value>.+)$"
 
 [tool.scikit-build.wheel]
 # CMake install destinations (lib/, include/, share/cmake/) are relative to

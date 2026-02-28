@@ -42,6 +42,10 @@ project(${SKBUILD_PROJECT_NAME}
         VERSION ${SKBUILD_PROJECT_VERSION}
         LANGUAGES CXX C)
 
+# Compatibility alias: legacy CMake files reference Torch_SOURCE_DIR (capital T),
+# but SKBUILD_PROJECT_NAME is lowercase "torch", so we set it explicitly.
+set(Torch_SOURCE_DIR ${CMAKE_SOURCE_DIR})
+
 # Forward environment variables to CMake variables, replicating the behavior
 # previously handled by setup.py / tools/setup_helpers/cmake.py.
 include(cmake/EnvVarForwarding.cmake)
@@ -1480,6 +1484,7 @@ endif()
 include(cmake/FileMirroring.cmake)
 
 # Package data: install non-Python files needed in the wheel.
+set(TORCH_SRC_DIR "${PROJECT_SOURCE_DIR}/torch")
 include(cmake/PackageData.cmake)
 
 # Post-build steps: header wrapping, license bundling, compile_commands merging.

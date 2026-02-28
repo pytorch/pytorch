@@ -54,42 +54,46 @@ install(CODE "
 
 # --- Compile commands merging ---
 # Merge compile_commands.json from build subdirectories.
+# Write the script to a file to avoid CMake stripping newlines from multiline
+# command arguments when passed through Ninja.
+file(WRITE "${CMAKE_BINARY_DIR}/merge_compile_commands.py"
+"import json, pathlib, itertools\n\
+build = pathlib.Path('${CMAKE_BINARY_DIR}')\n\
+ninja = list(build.glob('*compile_commands.json'))\n\
+cmake_sub = list((build / 'torch' / 'lib' / 'build').glob('*/compile_commands.json')) if (build / 'torch' / 'lib' / 'build').exists() else []\n\
+cmds = [e for f in itertools.chain(ninja, cmake_sub) for e in json.loads(f.read_text())]\n\
+for c in cmds:\n\
+    if c.get('command', '').startswith('gcc '):\n\
+        c['command'] = 'g++ ' + c['command'][4:]\n\
+out = pathlib.Path('${PROJECT_SOURCE_DIR}/compile_commands.json')\n\
+new = json.dumps(cmds, indent=2)\n\
+if not out.exists() or out.read_text() != new:\n\
+    out.write_text(new)\n\
+")
 add_custom_target(merge_compile_commands ALL
-  COMMAND "${Python_EXECUTABLE}" -c "
-import json, pathlib, itertools
-build = pathlib.Path('${CMAKE_BINARY_DIR}')
-ninja = list(build.glob('*compile_commands.json'))
-cmake_sub = list((build / 'torch' / 'lib' / 'build').glob('*/compile_commands.json')) if (build / 'torch' / 'lib' / 'build').exists() else []
-cmds = [e for f in itertools.chain(ninja, cmake_sub) for e in json.loads(f.read_text())]
-for c in cmds:
-    if c.get('command', '').startswith('gcc '):
-        c['command'] = 'g++ ' + c['command'][4:]
-out = pathlib.Path('${PROJECT_SOURCE_DIR}/compile_commands.json')
-new = json.dumps(cmds, indent=2)
-if not out.exists() or out.read_text() != new:
-    out.write_text(new)
-"
+  COMMAND "${Python_EXECUTABLE}" "${CMAKE_BINARY_DIR}/merge_compile_commands.py"
   COMMENT "Merging compile_commands.json..."
   VERBATIM
 )
 
 # --- License concatenation ---
 # Build the bundled license file for wheel distribution.
+file(WRITE "${CMAKE_BINARY_DIR}/bundle_licenses.py"
+"import sys, pathlib\n\
+third_party = pathlib.Path('${PROJECT_SOURCE_DIR}/third_party')\n\
+sys.path.insert(0, str(third_party))\n\
+from build_bundled import create_bundled\n\
+license_file = pathlib.Path('${PROJECT_SOURCE_DIR}/LICENSE')\n\
+bsd_text = license_file.read_text()\n\
+with license_file.open('a') as f:\n\
+    f.write('\\n\\n')\n\
+    create_bundled(str(third_party.resolve()), f, include_files=True)\n\
+bundled = license_file.read_text()\n\
+license_file.write_text(bsd_text)\n\
+pathlib.Path('${CMAKE_BINARY_DIR}/LICENSES_BUNDLED.txt').write_text(bundled)\n\
+")
 add_custom_target(bundle_licenses ALL
-  COMMAND "${Python_EXECUTABLE}" -c "
-import sys, pathlib
-third_party = pathlib.Path('${PROJECT_SOURCE_DIR}/third_party')
-sys.path.insert(0, str(third_party))
-from build_bundled import create_bundled
-license_file = pathlib.Path('${PROJECT_SOURCE_DIR}/LICENSE')
-bsd_text = license_file.read_text()
-with license_file.open('a') as f:
-    f.write('\\n\\n')
-    create_bundled(str(third_party.resolve()), f, include_files=True)
-bundled = license_file.read_text()
-license_file.write_text(bsd_text)
-pathlib.Path('${CMAKE_BINARY_DIR}/LICENSES_BUNDLED.txt').write_text(bundled)
-"
+  COMMAND "${Python_EXECUTABLE}" "${CMAKE_BINARY_DIR}/bundle_licenses.py"
   COMMENT "Generating bundled license file..."
   VERBATIM
 )
