@@ -5,7 +5,7 @@ import hashlib
 import itertools
 import math
 import typing_extensions
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import sympy  # noqa: TC002
 
@@ -91,9 +91,7 @@ kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 class PallasKernelWrapper:
     """Wrapper to provide .run() interface for Pallas kernels"""
 
-    def __init__(
-        self, kernel_fn: Callable[..., Any], kernel_path: Optional[str] = None
-    ):
+    def __init__(self, kernel_fn: Callable[..., Any], kernel_path: str | None = None):
         self.kernel_fn = kernel_fn
         self.kernel_path = kernel_path
         kernel_code_log.info("Pallas kernel path: %s", kernel_path)
@@ -269,7 +267,7 @@ class PallasKernelOverrides(OpOverrides):
     def to_dtype(
         x: str,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types: bool = True,
     ) -> str:
         jax_dtype = torch_dtype_to_jax(dtype)
@@ -1212,14 +1210,14 @@ class PallasKernel(SIMDKernel):
             return index_str, needs_flatten
 
     @staticmethod
-    def _safe_int(val: Any) -> Optional[int]:
+    def _safe_int(val: Any) -> int | None:
         """Convert value to int, returning None on failure."""
         try:
             return int(val)
         except (TypeError, ValueError):
             return None
 
-    def _compute_prefix_numel(self, prefixes: OrderedSet) -> Optional[int]:
+    def _compute_prefix_numel(self, prefixes: OrderedSet) -> int | None:
         """Compute total numel for given prefixes (e.g., pointwise prefixes)."""
         result = 1
         for p in prefixes:
@@ -1230,7 +1228,7 @@ class PallasKernel(SIMDKernel):
                 result *= numel
         return result
 
-    def _compute_reduction_numel(self) -> Optional[int]:
+    def _compute_reduction_numel(self) -> int | None:
         """Compute total reduction numel."""
         result = 1
         for tree in self.range_trees:
@@ -1305,7 +1303,7 @@ class PallasKernel(SIMDKernel):
 
         return True
 
-    def _get_buffer_info(self, name: str) -> Optional[tuple[Any, Any, Any, list, bool]]:
+    def _get_buffer_info(self, name: str) -> tuple[Any, Any, Any, list, bool] | None:
         """Get buffer metadata (buf_obj, buf_size, buf_numel, actual_strides, is_contiguous).
 
         Returns None if the buffer doesn't exist.
@@ -2333,7 +2331,7 @@ class PallasKernel(SIMDKernel):
 
     def _detect_scatter_pattern(
         self, index: sympy.Expr, output_name: str = ""
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Detect scatter operation pattern. Returns scatter info dict or None."""
         indirect_syms = self._get_indirect_vars(index)
         if len(indirect_syms) != 1:
@@ -2354,7 +2352,7 @@ class PallasKernel(SIMDKernel):
 
     def _detect_point_scatter(
         self, output_name: str, indirect_var: str, indirect_coeff: int
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Detect single-element scatter pattern."""
         if not output_name:
             return None
@@ -2387,7 +2385,7 @@ class PallasKernel(SIMDKernel):
 
     def _detect_iter_scatter(
         self, index: sympy.Expr, indirect_var: str, indirect_coeff: int
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Detect scatter pattern with iteration variables."""
         used_iter_vars = self._get_used_iter_vars(index)
 
@@ -2435,8 +2433,8 @@ class PallasKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:  # type: ignore[override]
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:  # type: ignore[override]
         """
         Generate code for reduction operations in JAX/Pallas.
 
@@ -2480,8 +2478,8 @@ class PallasKernel(SIMDKernel):
         has_pointwise = any(p in self.numels for p in pointwise_prefixes)
 
         # Get the pointwise and reduction numels
-        pointwise_numel: Optional[int] = self._compute_prefix_numel(pointwise_prefixes)
-        reduction_numel: Optional[int] = self._compute_reduction_numel()
+        pointwise_numel: int | None = self._compute_prefix_numel(pointwise_prefixes)
+        reduction_numel: int | None = self._compute_reduction_numel()
 
         # Count the number of pointwise and reduction dimensions
         n_reduction_dims = sum(
@@ -2791,7 +2789,7 @@ class PallasKernel(SIMDKernel):
 
         return True
 
-    def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
+    def codegen_kernel(self, name: str | None = None) -> str:  # type: ignore[override]
         """
         Generate the complete Pallas kernel code as a Python string.
 
@@ -3542,10 +3540,27 @@ from torch._inductor.runtime.runtime_utils import (
             )
 
             # Register and call via tpu_torch_pallas
-            code.writeline(
-                f"kernel_key = '{kernel_name_str}_' + "
-                f"'_'.join(str(s) for s in {ctx.output_params[0]}.shape)"
+            # Include all output and input shapes in the key to avoid stale
+            # cache hits when the same kernel name is compiled with different
+            # input/output ranks (e.g. broadcasting vs non-broadcasting calls).
+            shape_key_parts = []
+            for p in ctx.output_params:
+                shape_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            output_key_expr = (
+                " + 'x' + ".join(shape_key_parts) if shape_key_parts else "''"
             )
+            input_key_parts = []
+            for p in ctx.kernel_input_params:
+                input_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            input_key_expr = (
+                " + 'x' + ".join(input_key_parts) if input_key_parts else "''"
+            )
+            code.writeline(
+                f"kernel_key = '{kernel_name_str}_out_' + "
+                f"{output_key_expr}"
+                f" + '_in_' + {input_key_expr}"
+            )
+
             code.writeline(
                 f"if not tpu_torch_pallas.lookup_custom_kernel('{kernel_name_str}', kernel_key):"
             )
@@ -3672,7 +3687,7 @@ from torch._inductor.runtime.runtime_utils import (
         suffix = ".detach().contiguous()" if contiguous else ".detach()"
         code.writeline(f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})")
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
+    def call_kernel(self, name: str, node: IRNode | None = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
         wrapper = V.graph.wrapper_code
         arg_defs, call_args, _, _ = self.args.python_argdefs()

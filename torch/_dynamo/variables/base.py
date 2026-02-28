@@ -19,7 +19,7 @@ import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from contextvars import ContextVar
 from enum import Enum
-from typing import Any, NoReturn, Optional, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 from torch._guards import Guard
 from torch.fx.proxy import Node
@@ -195,7 +195,7 @@ class AttributeMutationNew(AttributeMutation):
     the Python world.
     """
 
-    def __init__(self, cls_source: Optional[Source] = None) -> None:
+    def __init__(self, cls_source: Source | None = None) -> None:
         super().__init__(SourceType.New)
         self.cls_source = cls_source
 
@@ -296,7 +296,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cls,
         fn: Callable[["VariableTracker"], None],
         value: Any,
-        cache: Optional[dict[int, Any]] = None,
+        cache: dict[int, Any] | None = None,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
@@ -449,7 +449,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def as_proxy(self) -> Any:
         raise NotImplementedError(str(self))
 
-    def maybe_fx_node(self) -> Optional[Node]:
+    def maybe_fx_node(self) -> Node | None:
         try:
             proxy = self.as_proxy()
             import torch.fx
@@ -821,7 +821,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def build(
         tx: Any,
         value: Any,
-        source: Optional[Source] = None,
+        source: Source | None = None,
         realize: bool = False,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
@@ -896,8 +896,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def __init__(
         self,
         *,
-        source: Optional[Source] = None,
-        mutation_type: Optional[MutationType] = None,
+        source: Source | None = None,
+        mutation_type: MutationType | None = None,
     ) -> None:
         super().__init__()
         self.source = source
