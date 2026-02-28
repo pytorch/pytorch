@@ -10,6 +10,9 @@
 #include <torch/csrc/dynamo/stackref_bridge.h>
 #include <torch/csrc/utils/python_compat.h>
 
+#include <algorithm>
+#include <optional>
+
 extern "C" {
 extern PyObject* guard_complete_hook;
 }
@@ -87,8 +90,30 @@ py::list _get_frame_value_stack_with_depth(
     depth = stacksize;
   }
 
+  // When stacktop/stackpointer is available, use it as the authoritative
+  // depth. The caller's tracked depth can lag behind (e.g. after a CALL
+  // instruction pops arguments but the effect hasn't been applied to the
+  // Python-side tracker yet).
 #if IS_PYTHON_3_14_PLUS
-  // For Python 3.14+, use stackpointer-based access
+  if (iframe->stackpointer != nullptr) {
+    int actual_depth =
+        (int)(iframe->stackpointer - (iframe->localsplus + nlocalsplus));
+    if (actual_depth >= 0) {
+      depth = std::min(actual_depth, depth);
+    }
+  }
+#else
+  bool have_stack_pointer = false;
+  if (iframe->stacktop > 0) {
+    int actual_depth = iframe->stacktop - nlocalsplus;
+    if (actual_depth >= 0) {
+      depth = std::min(actual_depth, depth);
+      have_stack_pointer = true;
+    }
+  }
+#endif
+
+#if IS_PYTHON_3_14_PLUS
   if (iframe->stackpointer == nullptr) {
     return result;
   }
@@ -102,12 +127,16 @@ py::list _get_frame_value_stack_with_depth(
     }
   }
 #else
-  // Python 3.11/3.12/3.13 - read 'depth' values from the stack area
   int stack_start = nlocalsplus;
   for (int i = 0; i < depth; i++) {
     PyObject* obj = iframe->localsplus[stack_start + i];
     if (obj == nullptr) {
       result.append(get_null_stack_value());
+    } else if (!have_stack_pointer && Py_REFCNT(obj) <= 0) {
+      // Without a reliable stack pointer (current frame, stacktop == -1),
+      // the caller's tracked depth may overestimate. Stop at entries that
+      // look like freed objects to avoid dereferencing stale pointers.
+      break;
     } else {
       result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
     }
