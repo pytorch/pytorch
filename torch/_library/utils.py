@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 from collections.abc import Callable, Iterable, Iterator
-from typing import Any, Literal, overload
+from typing import Any, Literal, Optional, overload, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -350,7 +350,7 @@ def has_tensor_arg(schema: _C.FunctionSchema) -> bool:
     )
 
 
-def get_device_arg_index(schema: _C.FunctionSchema) -> int | None:
+def get_device_arg_index(schema: _C.FunctionSchema) -> Union[int, None]:
     """
     Given a schema, returns the id of the `device: torch.device` argument.
     If it does not exist, returns None.
@@ -551,7 +551,7 @@ def get_layout_constraint_tag(
 @overload
 def get_layout_constraint_tag(
     fn: Any, *, with_default: Literal[False]
-) -> _C.Tag | None: ...
+) -> Optional[_C.Tag]: ...
 
 
 def get_layout_constraint_tag(fn, *, with_default=True):
@@ -587,8 +587,8 @@ _RANDOM_FUNCTIONS = {
 def is_impure(
     op: Callable,
     *,
-    args: tuple[Any, ...] | None = None,
-    kwargs: dict[str, Any] | None = None,
+    args: Optional[tuple[Any, ...]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
     impure_random: bool = True,
 ) -> bool:
     """

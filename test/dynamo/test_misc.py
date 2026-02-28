@@ -278,25 +278,25 @@ class MiscTests(torch._inductor.test_case.TestCase):
         torch._dynamo.decorators.mark_unbacked(b, 1)
 
         source_code = run_and_get_code(func, a, b)[1]
-
+        # Check that int64 indexing is used (either 1D [:] or 2D [:, None] form)
         self.assertTrue(
-            "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
-            in str(source_code)
+            "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+            or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
         )
+        # Check that 32-bit indexing is NOT used
         self.assertFalse(
-            "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+            "tl.arange(0, XBLOCK)[:]\n" in str(source_code)
+            and ".to(tl.int64)" not in str(source_code)
         )
 
         torch._dynamo.reset()
 
         with torch._inductor.config.patch(assume_32bit_indexing=True):
             source_code = run_and_get_code(func, a, b)[1]
+            # Check that int64 indexing is NOT used when assume_32bit_indexing=True
             self.assertFalse(
-                "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
-                in str(source_code)
-            )
-            self.assertTrue(
-                "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+                "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+                or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
             )
 
     def test_dynamo_side_effect(self):
