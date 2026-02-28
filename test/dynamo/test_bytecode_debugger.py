@@ -27,11 +27,16 @@ class InteractiveDebugSession:
     def __init__(self, fn, args, test_logic):
         self.test_logic = test_logic
         self.output_buffer = StringIO()
+        self._test_error: BaseException | None = None
 
         with patch("builtins.input", self._fake_input):
             with redirect_stdout(self.output_buffer):
                 with debug() as self.ctx:
                     self.result = fn(*args)
+
+        # Re-raise any assertion error captured from the test generator
+        if self._test_error is not None:
+            raise self._test_error
 
         # Ensure test_logic completed by sending final output
         if hasattr(self.test_logic, "send"):
@@ -57,6 +62,14 @@ class InteractiveDebugSession:
                 return next(self.test_logic)
             return self.test_logic.send(output)
         except StopIteration:
+            return "q"
+        except Exception as e:
+            # Capture test failures (e.g. AssertionError) and exit the
+            # debugger cleanly.  Without this, the exception propagates
+            # through sys.monitoring callbacks, gets converted to
+            # KeyboardInterrupt by the "q" handler, and is silently
+            # swallowed by the debug() context manager.
+            self._test_error = e
             return "q"
 
 
