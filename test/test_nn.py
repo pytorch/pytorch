@@ -13252,6 +13252,32 @@ if __name__ == '__main__':
         output = model(input)
         torch.autograd.gradcheck(model, input)
 
+    def test_softplus_large_beta_numerical_stability(self, device):
+        # Test numerical stability with large beta values (issue #171249)
+        # Previously, softplus returned inf for positive inputs when beta was very large
+        # because exp(beta * x) would overflow. The fix uses a numerically stable formula.
+        input = torch.tensor([0.5, -1.0, 2.0], device=device)
+        beta = 1e30
+        threshold = 1e30
+
+        output = F.softplus(input, beta=beta, threshold=threshold)
+
+        # All outputs should be finite (no inf or nan)
+        self.assertTrue(torch.isfinite(output).all().item(),
+                        f"Expected all finite outputs, got {output}")
+
+        # When beta * x > threshold, output should equal x (for positive x)
+        # When beta * x <= threshold (i.e., x <= 0 for large beta), output should be ~0
+        expected = torch.tensor([0.5, 0., 2.0], device=device)
+        self.assertEqual(output, expected)
+
+        # Test backward pass stability
+        input_grad = torch.tensor([0.5, -1.0, 2.0], device=device, requires_grad=True)
+        output_grad = F.softplus(input_grad, beta=beta, threshold=threshold)
+        output_grad.sum().backward()
+        self.assertTrue(torch.isfinite(input_grad.grad).all().item(),
+                        f"Expected all finite gradients, got {input_grad.grad}")
+
     def test_softshrink_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
