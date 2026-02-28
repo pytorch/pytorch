@@ -3390,11 +3390,14 @@ def _check_for_subclass(flat_args: Sequence[object]) -> bool:
 
 
 def _check_for_subclass_arg(x: object) -> bool:
+    # Use issubclass(type(x), Parameter) rather than isinstance(x, Parameter)
+    # because isinstance uses C++ checks that return True for wrapper subclasses
+    # (e.g. Parameter(TwoTensor(...))), which still need subclass dispatch.
     return (
         not isinstance(x, FakeTensor)
         and isinstance(x, Tensor)
         and type(x) is not Tensor
-        and type(x) is not torch.nn.Parameter
+        and not issubclass(type(x), torch.nn.Parameter)
     )
 
 

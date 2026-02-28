@@ -30,6 +30,7 @@ from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
 from torch._subclasses.fake_tensor import (
     _CacheKeyState,
+    _check_for_subclass_arg,
     DynamicOutputShapeException,
     extract_tensor_metadata,
     FakeTensor,
@@ -2859,6 +2860,25 @@ class FakeTensorPreferDeviceType(TestCase):
                 result = x + y
                 self.assertEqual(result.device.type, "cpu")
                 self.assertTrue(isinstance(result, FakeTensor))
+
+    def test_check_for_subclass_arg_parameter_subclass(self):
+        """Parameter subclasses should not be flagged, but wrapper subclasses
+        wrapped in Parameter should still be flagged."""
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class ParameterSubclass(torch.nn.Parameter):
+            pass
+
+        self.assertFalse(_check_for_subclass_arg(torch.randn(10)))
+        self.assertFalse(_check_for_subclass_arg(torch.nn.Parameter(torch.randn(10))))
+        self.assertFalse(_check_for_subclass_arg(ParameterSubclass(torch.randn(10))))
+
+        with FakeTensorMode() as mode:
+            self.assertFalse(_check_for_subclass_arg(mode.from_tensor(torch.randn(10))))
+
+        # Wrapper subclass wrapped in Parameter should still be flagged
+        tt_param = torch.nn.Parameter(TwoTensor(torch.randn(4, 4), torch.randn(4, 4)))
+        self.assertTrue(_check_for_subclass_arg(tt_param))
 
 
 if __name__ == "__main__":
