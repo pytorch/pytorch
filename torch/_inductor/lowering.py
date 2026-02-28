@@ -629,7 +629,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
 
 
 def _add_with_alpha_fma(a, b, alpha):
-    """Compute a + alpha * b using FMA for CUDA floating-point precision.  """
+    """Compute a + alpha * b using FMA for CUDA floating-point precision."""
     dtype = get_promoted_dtype(
         a,
         b,
