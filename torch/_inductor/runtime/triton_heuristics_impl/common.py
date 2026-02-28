@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import copy
 import functools
 import logging
 import math
@@ -22,9 +23,11 @@ from ..hints import (
     ReductionHint,
     TileHint,
     TRITON_MAX_BLOCK,
+    TRITON_MAX_RSPLIT,
 )
 from ..runtime_utils import (
     conditional_product,
+    last_power_of_2,
     next_power_of_2,
     triton_config_to_hashable,
 )
@@ -943,68 +946,6 @@ def filter_reduction_configs_for_determinism(
     return configs
 
 
-@register_triton_heuristic("reduction", None)
-def reduction_common(
-    size_hints,
-    reduction_hint=False,
-    triton_meta=None,
-    filename=None,
-    inductor_meta=None,
-    return_configs=False,
-):
-    """args to @triton.heuristics()"""
-    inductor_meta = {} if inductor_meta is None else inductor_meta
-    inductor_meta["reduction_hint"] = reduction_hint
-    if inductor_meta.get("no_x_dim"):
-        size_hints["x"] = 1
-
-    configs = _handle_combo_kernel_per_subkernel_blocks(
-        size_hints,
-        inductor_meta,
-        triton_meta,
-        filename=filename,
-        reduction_hint=reduction_hint,
-    )
-    if configs is not None:
-        return cached_autotune(
-            None,
-            configs,
-            triton_meta=triton_meta,
-            inductor_meta=inductor_meta,
-            heuristic_type=HeuristicType.REDUCTION,
-            filename=filename,
-        )
-
-    assert triton_meta is not None
-
-    num_dynamic = 0
-    for k in triton_meta["signature"]:
-        if "ks" in k:
-            num_dynamic += 1
-
-    configs = _reduction_configs(
-        size_hints=size_hints,
-        inductor_meta=inductor_meta,
-        triton_meta=triton_meta,
-        num_dynamic=num_dynamic,
-    )
-
-    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
-    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
-
-    if return_configs:
-        return configs
-
-    return cached_autotune(
-        size_hints,
-        configs=configs,
-        triton_meta=triton_meta,
-        inductor_meta=inductor_meta,
-        heuristic_type=HeuristicType.REDUCTION,
-        filename=filename,
-    )
-
-
 def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Config]):
     tma_min_block_sizes: dict[str, int]
     if (tma_min_block_sizes := inductor_meta.get("tma_min_block_sizes")) and configs:
@@ -1149,3 +1090,452 @@ def _handle_combo_kernel_per_subkernel_blocks(
         )
         for num_warps, num_stages in unique_warp_stage_pairs
     ]
+
+
+def _persistent_reduction_configs(
+    size_hints,
+    reduction_hint=False,
+    inductor_meta=None,
+    triton_meta=None,
+):
+    if triton_meta is None:
+        raise NotImplementedError("Missing triton_meta for persistent reduction")
+
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    xnumel = size_hints["x"]
+    rnumel = get_total_reduction_numel(size_hints)
+
+    MAX_PERSISTENT_BLOCK_NUMEL = 4096
+
+    if triton_meta.get("native_matmul"):
+        if len(size_hints) == 3:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
+            ]
+        elif len(size_hints) == 4:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
+            ]
+        else:
+            raise NotImplementedError("native matmul only supports mm/bmm pattern")
+
+    max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
+        "max_autotune_pointwise"
+    )
+
+    if torch.version.hip:
+        xblock_vals = [1, 4, 8, 16, 32, 64, 128, 256]
+    else:
+        xblock_vals = [1, 8, 32, 128]
+
+    if "y" not in size_hints:
+        configs = [
+            triton_config_reduction(
+                size_hints,
+                xblock,
+                rnumel,
+                register_intensive=True,
+                reduction_hint=reduction_hint,
+            )
+            for xblock in xblock_vals
+            if xblock == 1
+            or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
+        ]
+    else:
+        configs = []
+        tiling_scores = _get_tiling_scores(inductor_meta, size_hints)
+        x_y_scores = {dim: tiling_scores[dim] for dim in ("x", "y")}
+        for target_block_size in xblock_vals:
+            if target_block_size * rnumel > MAX_PERSISTENT_BLOCK_NUMEL:
+                continue
+
+            block_sizes = match_target_block_product(
+                size_hints, x_y_scores, target_block_size
+            )
+            configs.append(
+                triton_config_tiled_reduction(
+                    size_hints, block_sizes["x"], block_sizes["y"], rnumel
+                )
+            )
+
+    tiny_configs = [
+        triton_config_reduction(
+            size_hints,
+            2 * (256 // rnumel) if rnumel <= 256 else 1,
+            rnumel,
+        )
+    ]
+
+    # defer to more autotuning, initially
+    if "y" in size_hints:
+        pass
+    # TODO(jansel): we should be able to improve these heuristics
+    elif not max_autotune_enabled:  # Do not filter configs when tuning
+        if reduction_hint == ReductionHint.INNER and rnumel >= 256:
+            if rnumel > 1024 or xnumel // 8 < 128 or inductor_meta.get("RSPLIT_SIZE"):
+                configs = configs[:1]
+            else:
+                if not torch.cuda.is_available():
+                    # TODO(Intel): CUDA uses num_warps = 1 to disable shared memory.
+                    # We apply different configurations from #168335.
+                    # We currently let cost model in Triton to decide whether to use shared memory.
+                    loads_and_stores = inductor_meta.get(
+                        "num_load", 0
+                    ) + inductor_meta.get("num_store", 0)
+                    x_block = 8
+                    if xnumel // x_block < 128 or loads_and_stores >= 5:
+                        x_block = 1
+                    num_warps, min_num_warps, reduction_hint = None, None, None
+                else:
+                    x_block = min(1024 // rnumel, 8)
+                    num_warps, min_num_warps = 1, 1
+                configs = [
+                    triton_config_reduction(
+                        size_hints,
+                        x_block,
+                        rnumel,
+                        register_intensive=True,
+                        num_warps=num_warps,
+                        min_num_warps=min_num_warps,
+                        reduction_hint=reduction_hint,
+                    )
+                ]
+
+        elif reduction_hint == ReductionHint.OUTER:
+            configs = configs[-1:]
+        elif reduction_hint == ReductionHint.OUTER_TINY:
+            configs = tiny_configs
+    else:
+        if torch.version.hip:
+            # If autotune is enabled append tiny configs
+            for conf in tiny_configs:
+                if conf not in configs:
+                    configs.append(conf)
+
+    for c in configs:
+        # we don't need Rn_BLOCK for persistent reduction
+        for prefix in size_hints:
+            if prefix_is_reduction(prefix):
+                c.kwargs.pop(f"{prefix.upper()}BLOCK")
+
+    return configs
+
+
+@register_triton_heuristic("reduction", None)
+def reduction_common(
+    size_hints,
+    reduction_hint=False,
+    triton_meta=None,
+    filename=None,
+    inductor_meta=None,
+    return_configs=False,
+):
+    """args to @triton.heuristics()"""
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
+        size_hints["x"] = 1
+
+    configs = _handle_combo_kernel_per_subkernel_blocks(
+        size_hints,
+        inductor_meta,
+        triton_meta,
+        filename=filename,
+        reduction_hint=reduction_hint,
+    )
+    if configs is not None:
+        return cached_autotune(
+            None,
+            configs,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
+            heuristic_type=HeuristicType.REDUCTION,
+            filename=filename,
+        )
+
+    assert triton_meta is not None
+
+    num_dynamic = 0
+    for k in triton_meta["signature"]:
+        if "ks" in k:
+            num_dynamic += 1
+
+    configs = _reduction_configs(
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
+        num_dynamic=num_dynamic,
+    )
+
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+
+    if return_configs:
+        return configs
+
+    return cached_autotune(
+        size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.REDUCTION,
+        filename=filename,
+    )
+
+
+@register_triton_heuristic("cooperative_reduction", None)
+def cooperative_reduction_common(
+    size_hints,
+    reduction_hint,
+    triton_meta,
+    filename,
+    inductor_meta,
+):
+    if triton_meta is None:
+        raise NotImplementedError("Missing triton_meta for cooperative reduction")
+
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
+        size_hints["x"] = 1
+
+    # Cooperative reductions currently only support a single reduction dimension.
+    assert len(size_hints) == 2, (
+        "Cooperative reductions don't support tiling reduction dims"
+    )
+    xnumel, rnumel = size_hints["x"], size_hints["r0_"]
+
+    # Note that we must never create more CTAs than there are SMs, because we
+    # depend on synchronizing between the CTAs in x_grid_barrier, and that will
+    # deadlock if some of the CTAs are not running. In order to maximize use of
+    # the GPU, we want to create as many CTAs as possible, while keeping things
+    # in powers of 2.
+    target = last_power_of_2(triton_meta["device"].multi_processor_count)
+    split = max(1, min(target // xnumel, TRITON_MAX_RSPLIT))
+    assert rnumel >= split
+    assert split <= TRITON_MAX_RSPLIT
+    if inductor_meta["persistent_reduction"]:
+        configs = _persistent_reduction_configs(
+            {"x": xnumel, "r0_": rnumel // split},
+            reduction_hint,
+            inductor_meta,
+            triton_meta,
+        )
+    else:
+        configs = _reduction_configs(
+            size_hints={"x": xnumel, "r0_": rnumel // split},
+            inductor_meta=inductor_meta,
+            triton_meta=triton_meta,
+        )
+    for config in configs:
+        config.kwargs["RSPLIT"] = split
+    # TODO(jansel): add more configs in max_autotune
+
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+    return cached_autotune(
+        size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.REDUCTION,
+        filename=filename,
+    )
+
+
+@register_triton_heuristic("persistent_reduction", None)
+def persistent_reduction_common(
+    size_hints,
+    reduction_hint=False,
+    triton_meta=None,
+    filename=None,
+    inductor_meta=None,
+    return_configs=False,
+):
+    """Generate persistent reductions + mix-order if available"""
+    if triton_meta is None:
+        raise NotImplementedError("Missing triton_meta for persistent reduction")
+
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
+        size_hints["x"] = 1
+
+    configs = _handle_combo_kernel_per_subkernel_blocks(
+        size_hints,
+        inductor_meta,
+        triton_meta,
+        filename=filename,
+        reduction_hint=reduction_hint,
+    )
+    if configs is not None:
+        return cached_autotune(
+            None,
+            configs,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
+            heuristic_type=HeuristicType.PERSISTENT_REDUCTION,
+            filename=filename,
+        )
+
+    configs = _persistent_reduction_configs(
+        size_hints, reduction_hint, inductor_meta, triton_meta
+    )
+
+    # This key is not added to the inductor meta as its clear from the heuristic
+    # choice that it is persistent. Add it and remove it below so that persistent
+    # configs can be filtered appropriately by _maybe_filter_configs_for_tma_restrictions
+    persistent_reduction_key = "persistent_reduction"
+    inductor_meta[persistent_reduction_key] = True
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    inductor_meta.pop(persistent_reduction_key)
+
+    max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
+        "max_autotune_pointwise"
+    )
+
+    if inductor_meta.get("RSPLIT_SIZE"):
+        new_configs = []
+        rsplit_size = inductor_meta.get("RSPLIT_SIZE")
+        rnumel_hint = size_hints["r0_"]
+        min_x_block = 1
+        if rnumel_hint <= 512:
+            min_x_block = 4
+        # If TMA tensor descriptors are in use, Triton requires the last dimension
+        # of a descriptor's block_shape to cover at least 16 bytes.
+        # Codegen records such minimums in `tma_min_block_sizes`.
+        # Ensuring our RSPLIT-driven XBLOCK override does not violate them.
+        required_x_block = 1
+        tma_min_block_sizes_any = inductor_meta.get("tma_min_block_sizes")
+        tma_min_block_sizes: dict[str, int] | None = (
+            tma_min_block_sizes_any
+            if isinstance(tma_min_block_sizes_any, dict)
+            else None
+        )
+        if tma_min_block_sizes is not None:
+            required_x_block = max(
+                required_x_block, tma_min_block_sizes.get("XBLOCK", 1)
+            )
+        x_block = min(max(rsplit_size // 32, min_x_block, required_x_block), 16)
+        for c in configs:
+            c.kwargs["RSPLIT_SIZE"] = rsplit_size
+            # small XBLOCK to use less registers/smem
+            c.kwargs["XBLOCK"] = x_block
+
+            num_iters = rsplit_size // x_block
+
+            # With large rnumel, we have higher chance of out-of-shared memory
+            # To avoid adding too much autotuning overhead, we just constrain NUM_STAGES
+            # if rnumel is large
+            MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
+            c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), MAX_NUM_STAGES)
+
+            if rnumel_hint <= 1024:
+                c.num_warps //= 2
+                c.num_warps = max(c.num_warps, 1)
+                new_configs.append(c)
+
+                if max_autotune_enabled:
+                    # less warps so potentially each sm can run more thread blocks
+                    # Inside each thread block, we handle the split sequentially,
+                    # more thread blocks is beneficial here.
+                    newc = copy.deepcopy(c)
+                    newc.num_warps = 2
+                    new_configs.append(newc)
+            else:
+                # more warps for larger rows
+                new_configs.append(c)
+
+                if max_autotune_enabled and c.num_warps < 32:
+                    newc = copy.deepcopy(c)
+                    newc.num_warps *= 2
+                    new_configs.append(newc)
+
+        configs = unique_configs(new_configs)
+
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+
+    if return_configs:
+        return configs
+
+    return cached_autotune(
+        size_hints,
+        configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        filename=filename,
+        heuristic_type=HeuristicType.PERSISTENT_REDUCTION,
+    )
+
+
+@register_triton_heuristic("split_scan", None)
+def split_scan_common(
+    size_hints,
+    reduction_hint=False,
+    triton_meta=None,
+    filename=None,
+    inductor_meta=None,
+):
+    """Heuristic for TritonSplitScanKernel"""
+    if triton_meta is None:
+        raise NotImplementedError("Missing triton_meta for split scan")
+
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
+        size_hints["x"] = 1
+
+    assert triton_meta is not None
+    if len(size_hints) != 2:
+        raise NotImplementedError(f"size_hints: {size_hints}")
+
+    configs = _reduction_configs(
+        size_hints=size_hints, inductor_meta=inductor_meta, triton_meta=triton_meta
+    )
+
+    # Fixup configs to enforce the minimum Rn_BLOCK size
+    min_rblock = inductor_meta.get("min_split_scan_rblock", 256)
+    for cfg in configs:
+        for var in list(cfg.kwargs.keys()):
+            if var.startswith("R") and cfg.kwargs[var] < min_rblock:
+                cfg.kwargs[var] = min_rblock
+
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+    return cached_autotune(
+        size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.SPLIT_SCAN,
+        filename=filename,
+    )
+
+
+@register_triton_heuristic("foreach", None)
+def foreach(triton_meta, filename=None, inductor_meta=None):
+    """
+    Compile a triton foreach kernel
+    """
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    configs = []
+
+    # Naive autotuning path for num_warps
+    if not (
+        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
+    ):
+        configs.append(Config({}, num_stages=1, num_warps=8))
+    else:
+        for warps in [1, 2, 4, 8]:
+            configs.append(Config({}, num_stages=1, num_warps=warps))
+
+    return cached_autotune(
+        None,
+        configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.TEMPLATE,
+        filename=filename,
+    )

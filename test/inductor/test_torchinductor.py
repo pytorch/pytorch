@@ -2194,7 +2194,9 @@ class CommonTemplate:
         feature to resolve the issue in reduction configs which may exceed the maxGridSize
         """
         from torch._inductor.runtime.runtime_utils import next_power_of_2
-        from torch._inductor.runtime.triton_heuristics import triton_config_reduction
+        from torch._inductor.runtime.triton_heuristics_impl.common import (
+            triton_config_reduction,
+        )
 
         size_hints = {"x": 67108864, "r0_": 8192}
         for _ in range(4):
