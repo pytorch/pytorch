@@ -1019,6 +1019,43 @@ class TestOpSchemaMetaProperties(TestCase):
             self.assertIsNotNone(d_weight)
             self.assertIsNotNone(d_bias)
 
+    def test_constant_pad_nd_allows_shard_on_non_padded_dim(self):
+        """constant_pad_nd should allow sharding on non-padded dims."""
+        from torch.distributed.tensor._ops._matrix_ops import (
+            constant_pad_nd_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        # Pad only dim 1: [1, 1] means pad last dim by 1 on each side
+        strategies = constant_pad_nd_single_dim_strategy(
+            torch.ops.aten.constant_pad_nd.default,
+            (input_meta, [1, 1], 0.0),
+            {},
+        )
+        # Should include a strategy that shards on dim 0
+        shard_dims = {s[0].dim for s in strategies if hasattr(s[0], "dim")}
+        self.assertIn(0, shard_dims)
+
+    def test_constant_pad_nd_bans_shard_on_padded_dim(self):
+        """constant_pad_nd should ban sharding on padded dims."""
+        from torch.distributed.tensor._ops._matrix_ops import (
+            constant_pad_nd_single_dim_strategy,
+        )
+
+        input_meta = TensorMeta(
+            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
+        )
+        # Pad only dim 1
+        strategies = constant_pad_nd_single_dim_strategy(
+            torch.ops.aten.constant_pad_nd.default,
+            (input_meta, [1, 1], 0.0),
+            {},
+        )
+        shard_dims = {s[0].dim for s in strategies if hasattr(s[0], "dim")}
+        self.assertNotIn(1, shard_dims, "Should not shard on padded dim")
+
 
 class TestExpandToFullMeshOpStrategy(TestCase):
     """Tests for expand_to_full_mesh_op_strategy function.
