@@ -389,9 +389,7 @@ class TensorVariable(VariableTracker):
             )
 
         install_guard(
-            self.source.make_guard(
-                functools.partial(GuardBuilder.HASATTR, attr=name)
-            )
+            self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
         )
         return VariableTracker.build(tx, real_value, attr_source)
 
