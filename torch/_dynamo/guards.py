@@ -38,7 +38,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING
+from typing import Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union
 from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
@@ -199,7 +199,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-guard_manager_testing_hook_fn: Callable[[Any, Any, Any], Any] | None = None
+guard_manager_testing_hook_fn: Optional[Callable[[Any, Any, Any], Any]] = None
 
 try:
     import numpy as np
@@ -270,21 +270,21 @@ class GuardManagerWrapper:
     the check_nopybind from C++.
     """
 
-    def __init__(self, root: RootGuardManager | None = None) -> None:
+    def __init__(self, root: Optional[RootGuardManager] = None) -> None:
         if root is None:
             self.root = RootGuardManager()
         else:
             self.root = root
 
-        self.diff_guard_root: RootGuardManager | None = None
-        self.closure_vars: dict[str, Any] | None = None
-        self.args: list[str] | None = None
+        self.diff_guard_root: Optional[RootGuardManager] = None
+        self.closure_vars: Optional[dict[str, Any]] = None
+        self.args: Optional[list[str]] = None
         self.code_parts: list[str] = []
-        self.verbose_code_parts: list[str] | None = None
-        self.global_scope: dict[str, Any] | None = None
-        self.guard_fail_fn: Callable[[GuardFail], None] | None = None
-        self.cache_entry: CacheEntry | None = None
-        self.extra_state: ExtraState | None = None
+        self.verbose_code_parts: Optional[list[str]] = None
+        self.global_scope: Optional[dict[str, Any]] = None
+        self.guard_fail_fn: Optional[Callable[[GuardFail], None]] = None
+        self.cache_entry: Optional[CacheEntry] = None
+        self.extra_state: Optional[ExtraState] = None
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
         self.no_tensor_aliasing_sources: list[str] = []
 
@@ -607,7 +607,7 @@ class GuardManagerWrapper:
         return parts
 
     def get_manager_line(
-        self, guard_manager: GuardManager, accessor_str: str | None = None
+        self, guard_manager: GuardManager, accessor_str: Optional[str] = None
     ) -> str:
         source = guard_manager.get_source()
         t = guard_manager.__class__.__name__
@@ -737,7 +737,7 @@ def uninteresting_files() -> set[str]:
     return {inspect.getfile(m) for m in mods}
 
 
-_CLOSURE_VARS: dict[str, object] | None = None
+_CLOSURE_VARS: Optional[dict[str, object]] = None
 
 
 def _get_closure_vars() -> dict[str, object]:
@@ -778,7 +778,7 @@ def _ast_unparse(node: ast.AST) -> str:
 strip_function_call = torch._C._dynamo.strip_function_call
 
 
-def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
+def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
     extra = ""
     if guard is not None:
         if guard.user_stack:
@@ -803,9 +803,9 @@ def get_verbose_code_part(code_part: str, guard: Guard | None) -> str:
 
 
 def get_verbose_code_parts(
-    code_parts: str | list[str],
-    guard: Guard | None,
-    recompile_hint: str | None = None,
+    code_parts: Union[str, list[str]],
+    guard: Optional[Guard],
+    recompile_hint: Optional[str] = None,
 ) -> list[str]:
     if not isinstance(code_parts, list):
         code_parts = [code_parts]
@@ -832,7 +832,7 @@ def get_verbose_code_parts(
     return verbose_code_parts
 
 
-def _get_closure_var_hint(source: Source | None) -> str | None:
+def _get_closure_var_hint(source: Optional[Source]) -> Optional[str]:
     """
     Walk up the source chain to find a CellContentsSource ancestor.
     Returns a hint like 'guard on "varname".attr' or None if not found.
@@ -841,7 +841,7 @@ def _get_closure_var_hint(source: Source | None) -> str | None:
         return None
 
     full_name = source.name
-    current: Source | None = source
+    current: Optional[Source] = source
     while current is not None:
         if isinstance(current, CellContentsSource) and current.freevar_name:
             # Compute the path suffix by comparing names
@@ -854,7 +854,7 @@ def _get_closure_var_hint(source: Source | None) -> str | None:
     return None
 
 
-def convert_int_to_concrete_values(dim: Any) -> int | None:
+def convert_int_to_concrete_values(dim: Any) -> Optional[int]:
     if dim is None:
         return None
     if not is_symbolic(dim):
@@ -864,15 +864,15 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
         return dim.node.maybe_as_int()
 
 
-def convert_to_concrete_values(size_or_stride: list[Any]) -> list[int | None]:
+def convert_to_concrete_values(size_or_stride: list[Any]) -> list[Optional[int]]:
     return [convert_int_to_concrete_values(dim) for dim in size_or_stride]
 
 
 def get_tensor_guard_code_part(
     value: torch.Tensor,
     name: str,
-    sizes: list[int | None],
-    strides: list[int | None],
+    sizes: list[Optional[int]],
+    strides: list[Optional[int]],
     pytype: type,
     dispatch_keys: DispatchKeySet,
 ) -> str:
@@ -928,14 +928,14 @@ class NNModuleAttrAccessorInfo:
     present_in_generic_dict: bool = False
 
     # Either the actual name or _parameters/_buffers/_modules
-    l1_key: str | None = None
+    l1_key: Optional[str] = None
 
     # Actual parameter/buffer/submodule name
-    l2_key: str | None = None
+    l2_key: Optional[str] = None
 
 
 def getitem_on_dict_manager(
-    source: DictGetItemSource | DictSubclassGetItemSource,
+    source: Union[DictGetItemSource, DictSubclassGetItemSource],
     base_guard_manager: DictGuardManager,
     base_example_value: Any,
     example_value: Any,
@@ -1016,13 +1016,13 @@ class GuardBuilder(GuardBuilderBase):
         f_code: types.CodeType,
         id_ref: Callable[[object, str], int],
         source_ref: Callable[[Source], str],
-        lookup_weakrefs: Callable[[object], weakref.ref[object] | None],
+        lookup_weakrefs: Callable[[object], Optional[weakref.ref[object]]],
         local_scope: dict[str, object],
         global_scope: dict[str, object],
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
         save_guards: bool = False,
-        runtime_global_scope: dict[str, object] | None = None,
+        runtime_global_scope: Optional[dict[str, object]] = None,
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
     ) -> None:
@@ -1163,7 +1163,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
 
     @staticmethod
-    def _get_generic_dict_manager_example_value(example_value: Any) -> Any | None:
+    def _get_generic_dict_manager_example_value(example_value: Any) -> Optional[Any]:
         # due to a bug in 3.13.0 (introduced by https://github.com/python/cpython/pull/116115,
         # reported in https://github.com/python/cpython/issues/125608,
         # fixed by https://github.com/python/cpython/pull/125611), we cannot take
@@ -1345,11 +1345,9 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(
         self,
         source: Source,
-        example_value: KeysView[Any]
-        | set[Any]
-        | frozenset[Any]
-        | dict[Any, Any]
-        | None,
+        example_value: Optional[
+            Union[KeysView[Any], set[Any], frozenset[Any], dict[Any, Any]]
+        ],
     ) -> GuardManagerType:
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
@@ -1798,7 +1796,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         code_parts: list[str],
         verbose_code_parts: list[str],
-        closure_vars: dict[str, object] | None = None,
+        closure_vars: Optional[dict[str, object]] = None,
         is_epilogue: bool = True,
     ) -> None:
         if closure_vars is None:
@@ -1834,7 +1832,7 @@ class GuardBuilder(GuardBuilderBase):
     def get(
         self,
         guard_or_source: Guard | Source,
-        closure_vars: dict[str, Any] | None = None,
+        closure_vars: Optional[dict[str, Any]] = None,
     ) -> Any:
         if isinstance(guard_or_source, Source):
             src = guard_or_source
@@ -1850,7 +1848,7 @@ class GuardBuilder(GuardBuilderBase):
     # to call this before generating some code that makes use of 'guard',
     # because without this call, we won't actually bind the variable
     # you reference in the actual guard closure (oops!)
-    def arg_ref(self, guard: str | Guard) -> str:
+    def arg_ref(self, guard: Union[str, Guard]) -> str:
         name: str
         if isinstance(guard, str):
             name = guard
@@ -1939,7 +1937,7 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     def NOT_PRESENT_IN_GENERIC_DICT(
-        self, guard: Guard, attr: Any | None = None
+        self, guard: Guard, attr: Optional[Any] = None
     ) -> None:
         assert attr is not None
         ref = self.arg_ref(guard)
@@ -2071,7 +2069,7 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    def ID_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
+    def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         # TODO - Run a CI with the following uncommented to find the remaining places
         # val = self.get(guard)
         # if inspect.isclass(val):
@@ -2081,7 +2079,7 @@ class GuardBuilder(GuardBuilderBase):
         return self.id_match_unchecked(guard, recompile_hint)
 
     def id_match_unchecked(
-        self, guard: Guard, recompile_hint: str | None = None
+        self, guard: Guard, recompile_hint: Optional[str] = None
     ) -> None:
         # ___check_obj_id is same as `id(x) == y`
         if isinstance(guard.originating_source, TypeSource):
@@ -2119,7 +2117,7 @@ class GuardBuilder(GuardBuilderBase):
                 if weak_id is not None:
                     self.id_matched_objs[local_name] = weak_id
 
-    def NOT_NONE_MATCH(self, guard: Guard, value: Any | None = None) -> None:
+    def NOT_NONE_MATCH(self, guard: Guard, value: Optional[Any] = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
         assert isinstance(val, torch.Tensor)
@@ -2182,7 +2180,7 @@ class GuardBuilder(GuardBuilderBase):
 
         def hooks_ids_fn(
             hooks: tuple[Callable[[torch.Tensor], Any], Callable[[Any], torch.Tensor]],
-        ) -> tuple[int, ...] | None:
+        ) -> Optional[tuple[int, ...]]:
             if not are_inline_hooks(hooks):
                 return None
 
@@ -2263,7 +2261,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    def EQUALS_MATCH(self, guard: Guard, recompile_hint: str | None = None) -> None:
+    def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
         if np:
@@ -2708,7 +2706,7 @@ class GuardBuilder(GuardBuilderBase):
                 source_pairs: list[tuple[Source, Source]] = []
                 derived_equalities: list[  # type: ignore[type-arg]
                     # pyrefly: ignore [implicit-any]
-                    tuple[Source, Source | Symbol, Callable]
+                    tuple[Source, Union[Source, Symbol], Callable]
                 ] = []
                 phantom_symbols: dict[str, Symbol] = {}
                 relaxed_sources: set[Source] = set()
@@ -2920,7 +2918,7 @@ class GuardBuilder(GuardBuilderBase):
                 closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
             )
 
-    def TENSOR_MATCH(self, guard: Guard, value: Any | None = None) -> None:
+    def TENSOR_MATCH(self, guard: Guard, value: Optional[Any] = None) -> None:
         if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
             return
         # For tensors that are part of the Dynamo extracted Fx graph module, an
@@ -3137,8 +3135,8 @@ class GuardBuilder(GuardBuilderBase):
         self,
         guard: Guard,
         code_list: list[str],
-        provided_guarded_object: Any | None = None,
-        provided_func_name: str | None = None,
+        provided_guarded_object: Optional[Any] = None,
+        provided_func_name: Optional[str] = None,
     ) -> None:
         # WARNING: It is important that cur_frame/caller do NOT stay in
         # the current frame, because they will keep things live longer
@@ -3314,7 +3312,7 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
 class ShapeCodeParts:
     python_code_parts: _ShapeGuardsHelper
     verbose_code_parts: _ShapeGuardsHelper
-    cpp_code_parts: _CppShapeGuardsHelper | None
+    cpp_code_parts: Optional[_CppShapeGuardsHelper]
     python_fallback: bool
     shape_env_sources: list[Source]
 
@@ -3322,11 +3320,11 @@ class ShapeCodeParts:
 @dataclasses.dataclass
 class GuardsState:
     output_graph: OutputGraphGuardsState
-    shape_code_parts: ShapeCodeParts | None
+    shape_code_parts: Optional[ShapeCodeParts]
 
 
 class _Missing:
-    def __init__(self, reason: str | None = None) -> None:
+    def __init__(self, reason: Optional[str] = None) -> None:
         self._reason = reason
 
     def __repr__(self) -> str:
@@ -3515,7 +3513,7 @@ class GuardsStatePickler(pickle.Pickler):
     # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: Any
-    ) -> tuple[Callable[..., Any], tuple[Any, ...]] | Any:
+    ) -> Union[tuple[Callable[..., Any], tuple[Any, ...]], Any]:
         import sympy
 
         if id(obj) in self.empty_values:
@@ -3796,12 +3794,12 @@ class CheckFunctionManager:
         self,
         f_code: types.CodeType,
         output_graph: OutputGraphCommon,
-        cache_entry: CacheEntry | None = None,
-        guard_fail_fn: Callable[[GuardFail], None] | None = None,
+        cache_entry: Optional[CacheEntry] = None,
+        guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
-        shape_code_parts: ShapeCodeParts | None = None,
-        runtime_global_scope: dict[str, Any] | None = None,
+        shape_code_parts: Optional[ShapeCodeParts] = None,
+        runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
         strict_error: bool = False,
     ) -> None:
@@ -3811,7 +3809,7 @@ class CheckFunctionManager:
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
         )
-        self.output_graph: OutputGraphCommon | None = output_graph
+        self.output_graph: Optional[OutputGraphCommon] = output_graph
         assert self.output_graph is not None
 
         # Only used for serialization.
@@ -3826,8 +3824,8 @@ class CheckFunctionManager:
         self.additional_used_local_vars: OrderedSet[str] = OrderedSet()
         self.additional_used_global_vars: OrderedSet[str] = OrderedSet()
         self.runtime_global_scope = runtime_global_scope
-        self.global_state: torch._C._dynamo.guards.GlobalStateGuard | None = None
-        self.torch_function_mode_stack_check_fn: Callable[[], bool] | None = None
+        self.global_state: Optional[torch._C._dynamo.guards.GlobalStateGuard] = None
+        self.torch_function_mode_stack_check_fn: Optional[Callable[[], bool]] = None
 
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
@@ -3955,7 +3953,7 @@ class CheckFunctionManager:
             # account for, we simply increment at the toplevel instead.
             CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
-        self.guards_state: bytes | None = None
+        self.guards_state: Optional[bytes] = None
         if save_guards:
             from torch._dynamo.output_graph import OutputGraphCommon
 
@@ -4194,7 +4192,7 @@ class CheckFunctionManager:
         self,
         builder: GuardBuilder,
         guards_out: list[Guard],
-        guard_fail_fn: Callable[[GuardFail], None] | None,
+        guard_fail_fn: Optional[Callable[[GuardFail], None]],
     ) -> None:
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = builder.argnames
@@ -4216,7 +4214,7 @@ class CheckFunctionManager:
         self.torch_function_mode_stack = None
 
         def add_code_part(
-            code_part: str, guard: Guard | None, log_only: bool = False
+            code_part: str, guard: Optional[Guard], log_only: bool = False
         ) -> None:
             verbose_code_part = get_verbose_code_part(code_part, guard)
             guards_log.debug("%s", verbose_code_part)
@@ -4426,7 +4424,7 @@ class CheckFunctionManager:
             pass  # cannot weakref bool object
         return id(obj)
 
-    def lookup_weakrefs(self, obj: object) -> weakref.ref[object] | None:
+    def lookup_weakrefs(self, obj: object) -> Optional[weakref.ref[object]]:
         """Lookup the _weakrefs created in id_ref function for ID_MATCH'd objects"""
         if id(obj) in self._weakrefs:
             return self._weakrefs[id(obj)]
@@ -4568,9 +4566,9 @@ def format_user_stack_trace(
 def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
-    compile_id: CompileId | None,
+    compile_id: Optional[CompileId],
     # pyrefly: ignore [implicit-any]
-    backend: Callable | None,
+    backend: Optional[Callable],
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -4704,7 +4702,7 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reasons(
-    cache_entry: CacheEntry | None,
+    cache_entry: Optional[CacheEntry],
     frame: DynamoFrameType,
     # pyrefly: ignore [implicit-any]
     backend: Callable,
@@ -4773,7 +4771,7 @@ def get_and_maybe_log_recompilation_reasons(
 
 
 def update_diff_guard_managers_for_existing_cache_entries(
-    cache_entry: CacheEntry | None,
+    cache_entry: Optional[CacheEntry],
 ) -> OrderedSet[str]:
     first_cache_entry = cache_entry
 
@@ -4835,7 +4833,7 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
 
 def make_dupe_guard(
     obj_source: Source, dupe_source: Source | None
-) -> functools.partial[Any] | None:
+) -> Optional[functools.partial[Any]]:
     # Note - we may end up in a situation where we invoke something like
     # def fn(x, y)
     # with fn(x, x)

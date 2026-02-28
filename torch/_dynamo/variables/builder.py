@@ -37,7 +37,7 @@ import types
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
-from typing import Any, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, NoReturn, Optional, overload, TYPE_CHECKING, Union
 
 import sympy
 
@@ -2215,14 +2215,14 @@ class VariableBuilder:
     @overload
     def _wrap_lazy_constant(
         self,
-        value: int | float | bool | str,
+        value: Union[int, float, bool, str],
         wrap_fn: None = None,
     ) -> VariableTracker: ...
 
     def _wrap_lazy_constant(
         self,
-        value: int | float | bool | str,
-        wrap_fn: Callable[[Any], VariableTracker] | None = None,
+        value: Union[int, float, bool, str],
+        wrap_fn: Optional[Callable[[Any], VariableTracker]] = None,
     ) -> VariableTracker:
         """Wrap a primitive constant, deferring guard installation if allowed."""
         if not self.allow_lazy_constant:

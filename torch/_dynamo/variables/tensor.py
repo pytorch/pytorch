@@ -1144,7 +1144,7 @@ class TensorVariable(VariableTracker):
 
     def _collect_backward_inputs(
         self, vars_iter: Iterable[VariableTracker], error_on_non_leaf: bool = False
-    ) -> list[VariableTracker] | None:
+    ) -> Optional[list[VariableTracker]]:
         """
         Collect unique leaf tensors from vars_iter for backward.
 
@@ -1201,11 +1201,11 @@ class TensorVariable(VariableTracker):
     def method_backward(
         self,
         tx: "InstructionTranslator",
-        gradient: VariableTracker | None = None,
-        retain_graph: VariableTracker | None = None,
-        create_graph: VariableTracker | None = None,
-        inputs: VariableTracker | None = None,
-    ) -> VariableTracker | None:
+        gradient: Optional[VariableTracker] = None,
+        retain_graph: Optional[VariableTracker] = None,
+        create_graph: Optional[VariableTracker] = None,
+        inputs: Optional[VariableTracker] = None,
+    ) -> Optional[VariableTracker]:
         """
         Trace tensor.backward() by rewriting as autograd.grad() + accumulate_grad.
 

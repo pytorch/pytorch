@@ -2,7 +2,7 @@ import hashlib
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from functools import lru_cache
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch.fx.graph
 
@@ -50,7 +50,7 @@ class CustomGraphPass(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Any | None:
+    def uuid(self) -> Optional[Any]:
         """
         Return an ID to uniquely identify your custom pass implementation. Return None
         to skip inductor code caching entirely.
@@ -82,7 +82,7 @@ class CustomGraphModulePass(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Any | None:
+    def uuid(self) -> Optional[Any]:
         """
         Return an ID to uniquely identify your custom pass implementation. Return None
         to skip inductor code caching entirely.
@@ -102,9 +102,9 @@ class CustomInferenceAwareGraphPass(CustomGraphPass):
         """
 
 
-CustomGraphPassType: TypeAlias = (
-    CustomGraphPass | Callable[[torch.fx.graph.Graph], None] | None
-)
+CustomGraphPassType: TypeAlias = Optional[
+    Union[CustomGraphPass, Callable[[torch.fx.graph.Graph], None]]
+]
 
 
 @lru_cache(1)
@@ -165,14 +165,14 @@ class CustomPartitionerFn(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Any | None:
+    def uuid(self) -> Optional[Any]:
         """
         Return an ID to uniquely identify your custom partitioner implementation.
         Return None to skip inductor code caching entirely.
         """
 
 
-CustomPartitionerFnType: TypeAlias = CustomPartitionerFn | None
+CustomPartitionerFnType: TypeAlias = Optional[CustomPartitionerFn]
 
 
 class CustomRuntimeEstimator(ABC):
@@ -219,7 +219,7 @@ class CustomRuntimeEstimator(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Any | None:
+    def uuid(self) -> Optional[Any]:
         """
         Return an ID to uniquely identify your custom runtime estimator implementation.
         Return None to skip AOTAutograd caching entirely.
@@ -278,7 +278,7 @@ class CustomKnapsackSolver(ABC):
         """
 
     @abstractmethod
-    def uuid(self) -> Any | None:
+    def uuid(self) -> Optional[Any]:
         """
         Return an ID to uniquely identify your custom knapsack solver implementation.
         Return None to skip AOTAutograd caching entirely.

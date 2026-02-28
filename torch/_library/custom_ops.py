@@ -6,7 +6,7 @@ import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, overload, Union
+from typing import Any, Optional, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -17,7 +17,7 @@ from . import autograd, utils
 from .effects import EffectType
 
 
-device_types_t = str | Sequence[str] | None
+device_types_t = Optional[Union[str, Sequence[str]]]
 log = logging.getLogger(__name__)
 
 
@@ -27,10 +27,10 @@ def custom_op(
     fn: None = None,
     /,
     *,
-    mutates_args: str | Iterable[str],
+    mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
-    schema: str | None = None,
-    tags: Sequence[_C.Tag] | None = None,
+    schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
@@ -40,23 +40,23 @@ def custom_op(
     fn: Callable[..., object],
     /,
     *,
-    mutates_args: str | Iterable[str],
+    mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
-    schema: str | None = None,
-    tags: Sequence[_C.Tag] | None = None,
+    schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> "CustomOpDef": ...
 
 
 @exposed_in("torch.library")
 def custom_op(
     name: str,
-    fn: Callable | None = None,
+    fn: Optional[Callable] = None,
     /,
     *,
-    mutates_args: str | Iterable[str],
+    mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
-    schema: str | None = None,
-    tags: Sequence[_C.Tag] | None = None,
+    schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> Union[Callable[[Callable[..., object]], "CustomOpDef"], "CustomOpDef"]:
     """Wraps a function into custom operator.
 
@@ -220,7 +220,7 @@ class CustomOpDef:
         name: str,
         schema: str,
         fn: Callable,
-        tags: Sequence[_C.Tag] | None = None,
+        tags: Optional[Sequence[_C.Tag]] = None,
     ) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
@@ -230,14 +230,14 @@ class CustomOpDef:
 
         self._init_fn = fn
 
-        self._backend_fns: dict[str | None, Callable] = {}
-        self._abstract_fn: Callable | None = None
-        self._setup_context_fn: Callable | None = None
-        self._backward_fn: Callable | None = None
+        self._backend_fns: dict[Union[str, None], Callable] = {}
+        self._abstract_fn: Optional[Callable] = None
+        self._setup_context_fn: Optional[Callable] = None
+        self._backward_fn: Optional[Callable] = None
         self._torch_dispatch_fns: dict[type, Callable] = {}
-        self._vmap_fn: Callable | None = None
-        self._autocast_cuda_dtype: _dtype | None = None
-        self._autocast_cpu_dtype: _dtype | None = None
+        self._vmap_fn: Optional[Callable] = None
+        self._autocast_cuda_dtype: Optional[_dtype] = None
+        self._autocast_cpu_dtype: Optional[_dtype] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
@@ -323,7 +323,7 @@ class CustomOpDef:
                 self._disabled_kernel.discard(device_type)
 
     def register_kernel(
-        self, device_types: device_types_t, fn: Callable | None = None, /
+        self, device_types: device_types_t, fn: Optional[Callable] = None, /
     ) -> Callable:
         """Register an implementation for a device type for this operator.
 
@@ -365,7 +365,7 @@ class CustomOpDef:
 
         def inner(fn):
             if device_types is None or isinstance(device_types, str):
-                dtypes: list[str | None] = [device_types]
+                dtypes: list[Union[str, None]] = [device_types]
             else:
                 dtypes = list(device_types)
             for device_type in dtypes:
@@ -501,11 +501,11 @@ class CustomOpDef:
         self._abstract_fn = fn
         return fn
 
-    def register_effect(self, effect: EffectType | None) -> None:
+    def register_effect(self, effect: Optional[EffectType]) -> None:
         self._lib._register_effectful_op(self._qualname, effect)
 
     def register_torch_dispatch(
-        self, torch_dispatch_class: Any, fn: Callable | None = None, /
+        self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /
     ) -> Callable:
         r"""Registers a torch_dispatch rule for the given operator and ``torch_dispatch_class``.
 
@@ -540,7 +540,7 @@ class CustomOpDef:
         backward: Callable,
         /,
         *,
-        setup_context: Callable | None = None,
+        setup_context: Optional[Callable] = None,
     ) -> None:
         r"""Register a backward formula for this custom op.
 
@@ -727,7 +727,7 @@ class CustomOpDef:
 
     def register_vmap(
         self,
-        func: Callable | None = None,
+        func: Optional[Callable] = None,
     ):
         r"""Register a vmap implementation to support :func:`torch.vmap` for this custom op.
 
@@ -973,8 +973,8 @@ def get_library_allowing_overwrite(
 
 
 def _maybe_get_opdef(
-    op: CustomOpDef | _ops.OpOverload | str,
-) -> CustomOpDef | None:
+    op: Union[CustomOpDef, _ops.OpOverload, str],
+) -> Optional[CustomOpDef]:
     if isinstance(op, CustomOpDef):
         return op
     if isinstance(op, _ops.OpOverload):
