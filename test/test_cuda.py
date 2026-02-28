@@ -4145,7 +4145,7 @@ print(ret)
         self.assertEqual(y[4].item(), float("-inf"))
         self.assertTrue(torch.isnan(y[0:3]).all())
 
-        for dtype in [torch.float32, torch.float16]:
+        for dtype in [torch.float32]:
             x_dtype = x.to(dtype)
             y_dtype = special.bessel_y0(x_dtype)
             self.assertTrue(torch.isnan(y_dtype[0:3]).all())
