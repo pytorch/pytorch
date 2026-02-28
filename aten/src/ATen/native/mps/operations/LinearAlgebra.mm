@@ -1084,6 +1084,12 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
                                 "Output dim sizes larger than 2**32 elements for matmul not supported on MPS device.");
   }
 
+  TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(),
+              "expected scalar type ",
+              batch1.scalar_type(),
+              " but found ",
+              batch2.scalar_type());
+
   if (batch1.numel() == 0 || batch2.numel() == 0) {
     result.zero_();
     return result;

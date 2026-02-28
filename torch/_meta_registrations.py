@@ -2330,6 +2330,11 @@ def meta__fused_moving_avg_obs_fq_helper(
 def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
     torch._check(b.dim() == 2, lambda: "b must be 2D")
+    if not exp_config.skip_dtype_check_in_meta_registrations:
+        torch._check(
+            a.dtype == b.dtype,
+            lambda: f"expected mat1 and mat2 to have the same dtype, but got: {a.dtype} != {b.dtype}",
+        )
     N, M1 = a.shape
     M2, P = b.shape
     torch._check(
@@ -4549,6 +4554,11 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
 
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+    if is_bmm and not exp_config.skip_dtype_check_in_meta_registrations:
+        torch._check(
+            batch1.dtype == batch2.dtype,
+            lambda: f"expected scalar type {batch1.dtype} but found {batch2.dtype}",
+        )
 
     batch1_sizes = batch1.size()
     batch2_sizes = batch2.size()

@@ -70,6 +70,7 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.traceback import preserve_node_meta
 from torch.utils._ordered_set import OrderedSet
 
+from ..fx.experimental import _config as exp_config
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
 from .._functorch.partitioners import default_partition
@@ -1797,6 +1798,7 @@ def gen_register_replacement(
 
 
 @functorch_config.patch(functionalize_rng_ops=False)  # type: ignore[misc]
+@exp_config.patch(skip_dtype_check_in_meta_registrations=True)
 def gen_pattern_and_search_gm(
     search_fn: SearchFn,
     example_inputs: Sequence[Any],
