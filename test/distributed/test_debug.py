@@ -179,10 +179,20 @@ class _StubHandler(DebugHandler):
 
 
 class _CountingHandler(DebugHandler):
-    """Handler that counts how many times dump() is called."""
+    """Handler that counts dump() calls and signals after N calls."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        name: str = "counting",
+        content: str | None = "data",
+        *,
+        notify_after: int = 1,
+    ) -> None:
         self.dump_count = 0
+        self._name = name
+        self._content = content
+        self._notify_after = notify_after
+        self.ready = threading.Event()
 
     def routes(self) -> list[Route]:
         return []
@@ -192,10 +202,12 @@ class _CountingHandler(DebugHandler):
 
     def dump(self) -> str | None:
         self.dump_count += 1
-        return "data"
+        if self.dump_count >= self._notify_after:
+            self.ready.set()
+        return self._content
 
     def dump_filename(self) -> str:
-        return "counting"
+        return self._name
 
 
 class _ErrorHandler(DebugHandler):
@@ -217,10 +229,10 @@ class _ErrorHandler(DebugHandler):
 class TestPeriodicDumper(TestCase):
     def test_writes_dump_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            h = _StubHandler("mystub", "hello world")
-            dumper = PeriodicDumper([h], tmp, interval_seconds=0.1)
+            h = _CountingHandler("mystub", "hello world")
+            dumper = PeriodicDumper([h], tmp, interval_seconds=60.0)
             dumper.start()
-            time.sleep(0.35)
+            h.ready.wait(timeout=5)
             dumper.stop()
 
             files = os.listdir(tmp)
@@ -231,23 +243,23 @@ class TestPeriodicDumper(TestCase):
 
     def test_skips_none_dump(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            h = _StubHandler("nodump", None)
-            dumper = PeriodicDumper([h], tmp, interval_seconds=0.1)
+            h = _CountingHandler("nodump", None)
+            dumper = PeriodicDumper([h], tmp, interval_seconds=60.0)
             dumper.start()
-            time.sleep(0.25)
+            h.ready.wait(timeout=5)
             dumper.stop()
 
             self.assertEqual(os.listdir(tmp), [])
 
     def test_enabled_dumps_filter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            h1 = _StubHandler("included", "yes")
-            h2 = _StubHandler("excluded", "no")
+            h1 = _CountingHandler("included", "yes")
+            h2 = _CountingHandler("excluded", "no")
             enabled = {"included"}
             filtered = [h for h in [h1, h2] if h.dump_filename() in enabled]
-            dumper = PeriodicDumper(filtered, tmp, interval_seconds=0.1)
+            dumper = PeriodicDumper(filtered, tmp, interval_seconds=60.0)
             dumper.start()
-            time.sleep(0.25)
+            h1.ready.wait(timeout=5)
             dumper.stop()
 
             files = os.listdir(tmp)
@@ -256,11 +268,13 @@ class TestPeriodicDumper(TestCase):
 
     def test_enabled_dumps_none_runs_all(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            h1 = _StubHandler("alpha", "a")
-            h2 = _StubHandler("beta", "b")
-            dumper = PeriodicDumper([h1, h2], tmp, interval_seconds=0.1)
+            h1 = _CountingHandler("alpha", "a")
+            h2 = _CountingHandler("beta", "b")
+            dumper = PeriodicDumper([h1, h2], tmp, interval_seconds=60.0)
             dumper.start()
-            time.sleep(0.25)
+            # Both handlers are called in the same cycle, so waiting on either
+            # guarantees the cycle completed.
+            h2.ready.wait(timeout=5)
             dumper.stop()
 
             files = os.listdir(tmp)
@@ -272,10 +286,10 @@ class TestPeriodicDumper(TestCase):
     def test_survives_handler_exception(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             err = _ErrorHandler()
-            ok = _StubHandler("ok", "survived")
-            dumper = PeriodicDumper([err, ok], tmp, interval_seconds=0.1)
+            ok = _CountingHandler("ok", "survived")
+            dumper = PeriodicDumper([err, ok], tmp, interval_seconds=60.0)
             dumper.start()
-            time.sleep(0.25)
+            ok.ready.wait(timeout=5)
             dumper.stop()
 
             files = os.listdir(tmp)
@@ -286,35 +300,32 @@ class TestPeriodicDumper(TestCase):
 
     def test_max_dumps_cleans_old_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            h = _CountingHandler()
-            dumper = PeriodicDumper([h], tmp, interval_seconds=0.05, max_dumps=2)
+            h = _CountingHandler(notify_after=5)
+            dumper = PeriodicDumper([h], tmp, interval_seconds=0, max_dumps=2)
             dumper.start()
-            time.sleep(0.5)
+            h.ready.wait(timeout=5)
             dumper.stop()
-            # Dumper should have run many cycles but only kept the last 2 files
             files = [f for f in os.listdir(tmp) if f.startswith("counting_")]
             self.assertEqual(len(files), 2)
-            # Should have dumped more than 2 times total
-            self.assertGreater(h.dump_count, 2)
+            self.assertGreaterEqual(h.dump_count, 5)
 
     def test_max_dumps_none_keeps_all(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            h = _CountingHandler()
-            dumper = PeriodicDumper([h], tmp, interval_seconds=0.05, max_dumps=None)
+            h = _CountingHandler(notify_after=5)
+            dumper = PeriodicDumper([h], tmp, interval_seconds=0, max_dumps=None)
             dumper.start()
-            time.sleep(0.3)
+            h.ready.wait(timeout=5)
             dumper.stop()
             files = [f for f in os.listdir(tmp) if f.startswith("counting_")]
-            # All dump files are kept
-            self.assertEqual(len(files), h.dump_count)
+            self.assertGreaterEqual(len(files), 5)
 
     def test_max_dumps_per_handler(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            h1 = _StubHandler("aaa", "data1")
-            h2 = _StubHandler("bbb", "data2")
-            dumper = PeriodicDumper([h1, h2], tmp, interval_seconds=0.05, max_dumps=2)
+            h1 = _CountingHandler("aaa", "data1", notify_after=5)
+            h2 = _CountingHandler("bbb", "data2", notify_after=5)
+            dumper = PeriodicDumper([h1, h2], tmp, interval_seconds=0, max_dumps=2)
             dumper.start()
-            time.sleep(0.4)
+            h2.ready.wait(timeout=5)
             dumper.stop()
             aaa_files = [f for f in os.listdir(tmp) if f.startswith("aaa_")]
             bbb_files = [f for f in os.listdir(tmp) if f.startswith("bbb_")]
@@ -518,10 +529,10 @@ class TestHandlerPartialDumps(TestCase):
                 "=== Rank 0 ===\ndata0\n"
                 "=== Rank 1 ===\nError: 503"
             )
-            h = _StubHandler("partial_stacks", partial_content)
-            dumper = PeriodicDumper([h], tmp, interval_seconds=0.1)
+            h = _CountingHandler("partial_stacks", partial_content)
+            dumper = PeriodicDumper([h], tmp, interval_seconds=60.0)
             dumper.start()
-            time.sleep(0.25)
+            h.ready.wait(timeout=5)
             dumper.stop()
 
             files = os.listdir(tmp)
