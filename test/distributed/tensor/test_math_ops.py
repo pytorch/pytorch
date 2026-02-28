@@ -869,6 +869,33 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(out.placements, (Replicate(),))
 
     @with_comms
+    def test_max_min_dim_sharded(self):
+        """max.dim/min.dim on sharded tensors produce correct values and indices."""
+        device_mesh = self.build_device_mesh()
+        t = torch.randn(128, 64, device=self.device_type)
+
+        for op in [torch.max, torch.min]:
+            expected_vals, expected_idx = op(t, dim=1)
+
+            # Shard on non-reduction dim: should work directly
+            dt = distribute_tensor(t, device_mesh, [Shard(0)])
+            dt_vals, dt_idx = op(dt, dim=1)
+            self.assertEqual(dt_vals.full_tensor(), expected_vals)
+            self.assertEqual(dt_idx.full_tensor(), expected_idx)
+
+            # Shard on reduction dim: forces redistribute to Replicate
+            dt = distribute_tensor(t, device_mesh, [Shard(1)])
+            dt_vals, dt_idx = op(dt, dim=1)
+            self.assertEqual(dt_vals.full_tensor(), expected_vals)
+            self.assertEqual(dt_idx.full_tensor(), expected_idx)
+
+            # Partial input: forces redistribute to Replicate
+            dt = distribute_tensor(t, device_mesh, [Partial()])
+            dt_vals, dt_idx = op(dt, dim=1)
+            self.assertEqual(dt_vals.full_tensor(), expected_vals)
+            self.assertEqual(dt_idx.full_tensor(), expected_idx)
+
+    @with_comms
     @skip_if_lt_x_gpu(4)
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
