@@ -50,10 +50,21 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> list
     if metadata is None:
         return []
     prefix = torch_api_key_word_prefix(backend_index)
+
+    # 1. Define the meta-declaration only if requested
+    meta_decl = ""
+    if metadata.ext_structured_meta:
+        # Get the arguments for the meta function (usually same as impl but without 'out')
+        meta_args = structured.meta_arguments(g)
+        meta_decl = (
+            f"// Alias to the base meta class for easy access to native meta logic\n"
+            f"using base = at::meta::structured_{meta_name};\n"
+            f"void meta({', '.join(a.decl() for a in meta_args)});\n"
+        )
     return [
         f"""\
 struct {prefix}structured_{metadata.kernel} : public at::meta::structured_{meta_name} {{
-void impl({", ".join(a.decl() for a in out_args)});
+{meta_decl}void impl({", ".join(a.decl() for a in out_args)});
 }};
 """
     ]
@@ -68,13 +79,7 @@ def compute_native_function_declaration(
     metadata = backend_index.get_kernel(g)
     if isinstance(g, NativeFunctionsGroup):
         if metadata is not None and metadata.structured:
-            if backend_index.external:
-                # Structured hasn't been tested with external backends yet.
-                raise AssertionError(
-                    "Structured external backend functions are not implemented yet."
-                )
-            else:
-                return gen_structured(g, backend_index)
+            return gen_structured(g, backend_index)
         else:
             return list(
                 mapMaybe(lambda f: gen_unstructured(f, backend_index), g.functions())
