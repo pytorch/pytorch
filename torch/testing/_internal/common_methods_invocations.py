@@ -23010,14 +23010,9 @@ op_db: list[OpInfo] = [
         ref=reference_pdist,
         sample_inputs_func=sample_inputs_pdist,
         dtypes=floating_types(),
+        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.float32),
         supports_out=False,
         supports_gradgrad=False,
-        skips=(
-            DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
-            # NotImplementedError: The operator 'aten::_pdist_forward' is not
-            # currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
-        )
     ),
     OpInfo(
         "nn.functional.poisson_nll_loss",
@@ -24834,9 +24829,6 @@ python_ref_db = [
                 dtypes=(torch.float32,),
                 device_type='cpu',
             ),
-            # NotImplementedError: The operator 'aten::_pdist_forward' is not
-            # currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
         )),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
