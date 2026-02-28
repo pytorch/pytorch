@@ -144,6 +144,7 @@ class _DebugContext:
         self._active = False
         self._tracked_codes: set[types.CodeType] = set()
         self._old_trace: Callable[..., Any] | None = None
+        self._prev_callback: Callable[..., Any] | None = None
         self._return_from_frame: types.FrameType | None = None
         self._stop_after_return: bool = False
         self._next_in_frame: types.FrameType | None = None
@@ -177,6 +178,10 @@ class _DebugContext:
         """Get all code objects that have been tracked by the debugger."""
         return list(self._code_info.keys())
 
+    @staticmethod
+    def is_programmatic_breakpoint(inst: Instruction) -> bool:
+        return inst.opname == "LOAD_CONST" and inst.argval is BREAKPOINT_MARKER
+
     def _get_or_create_code_info(self, code: types.CodeType) -> CodeInfo:
         """Get or create CodeInfo for a code object."""
         if code not in self._code_info:
@@ -205,6 +210,13 @@ class _DebugContext:
                 default=0,
             )
 
+            # Pre-populate breakpoints from BREAKPOINT_MARKER instructions
+            programmatic_breakpoints: set[int] = {
+                i
+                for i, inst in enumerate(instructions)
+                if self.is_programmatic_breakpoint(inst)
+            }
+
             self._code_info[code] = CodeInfo(
                 code=code,
                 instructions=instructions,
@@ -212,6 +224,7 @@ class _DebugContext:
                 offset_to_index=offset_to_index,
                 index_width=max(1, len(str(max_index))),
                 offset_width=max(1, len(str(max_offset))),
+                breakpoints=programmatic_breakpoints,
             )
         return self._code_info[code]
 
@@ -789,13 +802,7 @@ class _DebugContext:
                 arg_str = f" {inst.argval}" if inst.arg is not None else ""
                 print(f"Running [{idx}] {inst.opname}{arg_str}", flush=True)
 
-        # Check for BREAKPOINT_MARKER (inserted by PyCodegen)
         inst = state.offset_to_inst.get(offset)
-        hit_breakpoint_marker = (
-            inst is not None
-            and inst.opname == "LOAD_CONST"
-            and inst.argval is BREAKPOINT_MARKER
-        )
 
         # Check if current instruction has a breakpoint (by index)
         current_index = state.offset_to_index.get(offset, -1)
@@ -816,22 +823,18 @@ class _DebugContext:
         if state.step_count > 0:
             state.step_count -= 1
             # But still stop for breakpoints and return targets
-            if hit_breakpoint or hit_breakpoint_marker or hit_return_target:
+            if hit_breakpoint or hit_return_target:
                 state.step_count = 0  # Cancel remaining steps
             else:
                 return  # Continue without prompting
 
-        should_stop = (
-            state.step_mode
-            or hit_breakpoint
-            or hit_breakpoint_marker
-            or hit_return_target
-        )
+        should_stop = state.step_mode or hit_breakpoint or hit_return_target
         if should_stop:
             if hit_breakpoint:
-                print(f"Breakpoint hit at instruction {current_index}")
-            elif hit_breakpoint_marker:
-                print("Breakpoint hit (programmatic)")
+                if inst is not None and self.is_programmatic_breakpoint(inst):
+                    print("Breakpoint hit (programmatic)")
+                else:
+                    print(f"Breakpoint hit at instruction {current_index}")
             elif hit_return_target:
                 print(f"About to return from {code.co_name}")
             self._interactive_prompt(state)
@@ -997,9 +1000,13 @@ class _DebugContext:
 
     def __enter__(self) -> Self:
         """Start the debug context."""
-        from torch._C._dynamo.eval_frame import set_bytecode_debugger_callback
+        from torch._C._dynamo.eval_frame import (
+            get_bytecode_debugger_callback,
+            set_bytecode_debugger_callback,
+        )
 
         self._active = True
+        self._prev_callback = get_bytecode_debugger_callback()
         self._code_info.clear()
         self._frame_states.clear()
         self._tracked_codes.clear()
@@ -1045,19 +1052,48 @@ class _DebugContext:
         exc_tb: types.TracebackType | None,
     ) -> bool:
         """End the debug context."""
+        if not self._active:
+            return False
         from torch._C._dynamo.eval_frame import set_bytecode_debugger_callback
 
         self._active = False
-        # Clear the C callback
-        set_bytecode_debugger_callback(None)
+        prev = self._prev_callback
+        set_bytecode_debugger_callback(prev)
 
         if _HAS_SYS_MONITORING:
-            # Python 3.12+: Clean up sys.monitoring
-            sys.monitoring.set_events(self._tool_id, 0)
-            try:
-                sys.monitoring.free_tool_id(self._tool_id)
-            except ValueError:
-                pass
+            if prev is None:
+                sys.monitoring.set_events(self._tool_id, 0)
+                try:
+                    sys.monitoring.free_tool_id(self._tool_id)
+                except ValueError:
+                    pass
+            else:
+                # Restore outer context's monitoring callbacks and events
+                assert isinstance(prev, types.MethodType)
+                outer = cast("_DebugContext", prev.__self__)
+                sys.monitoring.register_callback(
+                    self._tool_id,
+                    sys.monitoring.events.INSTRUCTION,
+                    outer._monitoring_instruction_callback,
+                )
+                sys.monitoring.register_callback(
+                    self._tool_id,
+                    sys.monitoring.events.PY_RETURN,
+                    outer._monitoring_return_callback,
+                )
+                sys.monitoring.register_callback(
+                    self._tool_id,
+                    sys.monitoring.events.RAISE,
+                    outer._monitoring_raise_callback,
+                )
+                sys.monitoring.set_events(self._tool_id, sys.monitoring.events.RAISE)
+                for code in outer._tracked_codes:
+                    sys.monitoring.set_local_events(
+                        self._tool_id,
+                        code,
+                        sys.monitoring.events.INSTRUCTION
+                        | sys.monitoring.events.PY_RETURN,
+                    )
         else:
             # Python 3.11 and below: Restore old trace
             sys.settrace(self._old_trace)
@@ -1090,3 +1126,12 @@ def debug() -> Generator[_DebugContext, None, None]:
             yield ctx
     except KeyboardInterrupt:
         print("\n=== Debug session ended ===")
+
+
+def breakpoint() -> None:
+    """Programmatic breakpoint for user code.
+
+    Place this in code compiled by Dynamo. During tracing, Dynamo inserts a
+    BREAKPOINT_MARKER into the compiled bytecode. When the bytecode debugger
+    is active, execution pauses at this marker.
+    """

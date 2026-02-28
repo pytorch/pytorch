@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <unordered_set>
 
 extern "C" {
 extern PyObject* guard_complete_hook;
@@ -22,6 +23,36 @@ extern PyObject* guard_complete_hook;
 // finalizes.
 namespace {
 PyObject* bytecode_debugger_callback_obj = nullptr;
+std::unordered_set<PyCodeObject*> breakpoint_code_objects;
+
+// RAII guard that calls __exit__ on a Python context manager when destroyed.
+struct DebugContextGuard {
+  py::object ctx;
+
+  explicit DebugContextGuard(py::object c) : ctx(std::move(c)) {
+    ctx.attr("__enter__")();
+  }
+
+  ~DebugContextGuard() {
+    // Save any pending Python exception (e.g. KeyboardInterrupt from the
+    // debugger's 'q' command) so calling __exit__ doesn't clobber it.
+    PyObject *exc_type, *exc_value, *exc_tb;
+    PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
+    try {
+      ctx.attr("__exit__")(py::none(), py::none(), py::none());
+    } catch (py::error_already_set& e) {
+      e.restore();
+      PyErr_Clear();
+    }
+    if (exc_type != nullptr) {
+      PyErr_Restore(exc_type, exc_value, exc_tb);
+    }
+  }
+
+  DebugContextGuard(const DebugContextGuard&) = delete;
+  DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+};
+
 } // namespace
 
 void set_bytecode_debugger_callback(py::object callback) {
@@ -38,6 +69,10 @@ py::object get_bytecode_debugger_callback() {
   }
   return py::reinterpret_borrow<py::object>(
       py::handle(bytecode_debugger_callback_obj));
+}
+
+void register_breakpoint_code(py::object code) {
+  breakpoint_code_objects.insert((PyCodeObject*)code.ptr());
 }
 
 // NullStackValue singleton for representing NULL stack values
@@ -378,6 +413,17 @@ PyObject* dynamo__custom_eval_frame(
     }
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
+    // Auto-activate debugger for code objects with breakpoints.
+    // DebugContextGuard calls __enter__ on construction and __exit__ on
+    // destruction, so the debug session is scoped to this eval_custom call.
+    std::optional<DebugContextGuard> debug_guard;
+    if (breakpoint_code_objects.count(cached_code) &&
+        bytecode_debugger_callback_obj == nullptr) {
+      auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
+                     .attr("_DebugContext")();
+      ctx.attr("_stop_at_new_code") = false;
+      debug_guard.emplace(std::move(ctx));
+    }
     // Call bytecode debugger callback if set, to allow instruction-level
     // debugging of the Dynamo-generated code
     py::object debugger_cb = get_bytecode_debugger_callback();

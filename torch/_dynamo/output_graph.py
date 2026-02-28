@@ -658,6 +658,7 @@ class OutputGraph(OutputGraphCommon):
         self.cudagraph_annotation: _CudagraphAnnotation | None = None
 
         self.region_tracker = GraphRegionTracker()
+        self._emit_debugger_breakpoint: bool = False
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -1698,6 +1699,12 @@ class OutputGraph(OutputGraphCommon):
         self.side_effects.prune_dead_object_new(tx)
 
         self.add_output_instructions(prefix_insts)
+
+        if self._emit_debugger_breakpoint:
+            from .bytecode_transformation import create_breakpoint
+
+            self.add_output_instructions(create_breakpoint())
+            self._emit_debugger_breakpoint = False
 
         assert not (self.pregraph_bytecode and self.export), (
             "export does not support pregraph_bytecode"
