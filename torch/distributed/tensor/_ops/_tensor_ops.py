@@ -13,14 +13,12 @@ from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
-    OutputSharding,
     PlacementList,
     RuntimeSchemaInfo,
     StrategyType,
     TensorMeta,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops._common_rules import pointwise_rule
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
     register_single_dim_strategy,
@@ -33,7 +31,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_partial,
     normalize_dim,
     register_op_strategy,
-    register_prop_rule,
     shift_shard_dims_after_insert,
     shift_shard_dims_after_remove,
 )
@@ -963,6 +960,84 @@ def index_select_single_dim_strategy(
 
 
 @register_single_dim_strategy(
+    aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True)
+)
+def index_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    values_meta, multi_indices_meta = args_schema
+    assert isinstance(values_meta, TensorMeta)
+    assert isinstance(multi_indices_meta, (list, tuple))
+
+    indexed_dims = [i for i, idx in enumerate(multi_indices_meta) if idx is not None]
+    non_indexed_dims = [
+        i for i in range(len(values_meta.shape)) if i not in set(indexed_dims)
+    ]
+
+    index_metas = [idx for idx in multi_indices_meta if idx is not None]
+    assert all(isinstance(m, TensorMeta) for m in index_metas)
+    broadcast_ndim = max(len(m.shape) for m in index_metas)
+    num_indices = len(indexed_dims)
+
+    # Determine where index output dims are inserted in the result
+    all_consecutive = all(
+        indexed_dims[i + 1] - indexed_dims[i] == 1 for i in range(len(indexed_dims) - 1)
+    )
+    insert_dim = indexed_dims[0] if all_consecutive else 0
+
+    def values_dim_to_output_dim(d: int) -> int:
+        if d < insert_dim:
+            return d
+        return d + broadcast_ndim - sum(1 for idx_dim in indexed_dims if d > idx_dim)
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+
+    # Shard values on a non-indexed dim, all indices replicated
+    for d in non_indexed_dims:
+        out_dim = values_dim_to_output_dim(d)
+        rule: list[Placement | _ShardingPlaceholder] = [_ShardingPlaceholder(out_dim)]
+        rule.append(_ShardingPlaceholder(d))
+        rule.extend([Replicate()] * num_indices)
+        strategies.append(rule)
+
+    # Shard indices on the same broadcast dim.  Each index tensor may
+    # have a different ndim, so we map broadcast dim → tensor dim via
+    # left-padding.  Tensors with size 1 on that dim are replicated
+    # (broadcast semantics).
+    for bd in range(broadcast_ndim):
+        per_tensor: list[tuple[int, int]] = []  # (tensor_dim, size)
+        for m in index_metas:
+            offset = broadcast_ndim - len(m.shape)
+            if bd < offset:
+                per_tensor.append((-1, 1))  # implicit broadcast
+            else:
+                td = bd - offset
+                per_tensor.append((td, m.shape[td]))
+        if all(s == 1 for _, s in per_tensor):
+            continue  # all broadcast-only, skip
+        out_dim = bd + insert_dim
+        rule: list[Placement | _ShardingPlaceholder] = [_ShardingPlaceholder(out_dim)]
+        rule.append(Replicate())
+        for td, s in per_tensor:
+            if s > 1:
+                rule.append(_ShardingPlaceholder(td))
+            else:
+                rule.append(Replicate())
+        strategies.append(rule)
+
+    # Partial passthrough from values
+    for reduce_op in Partial.LINEAR_REDUCE_OPS:
+        rule: list[Placement | _ShardingPlaceholder] = [
+            Partial(reduce_op),
+            Partial(reduce_op),
+        ]
+        rule.extend([Replicate()] * num_indices)
+        strategies.append(rule)
+
+    return strategies
+
+
+@register_single_dim_strategy(
     [aten.index_put.default, aten._index_put_impl_.default],
     schema_info=RuntimeSchemaInfo(needs_pytree=True),
 )
@@ -1045,135 +1120,6 @@ def index_put_single_dim_strategy(
         ]
     )
     return strategies
-
-
-@register_prop_rule(aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True))
-def prop_index(op_schema: OpSchema) -> OutputSharding:
-    """
-    Expect replicated on the first input; _mostly_ pointwise on the second input.
-
-    TODO: exception: when the dtype of second input is "bool", then a torch.nonzero needs to be triggered first.
-    """
-    # Current sharding constraints:
-    # For values:
-    #   1. We currently require that the dimension of values_spec be replicated or partial
-    #      if they are being indexed on.
-    #   2. Other dimensions of values_spec can remain sharded if they are so.
-    # For indices:
-    #   Indices can be either sharded or replicated. All index tensors need to be sharded
-    #   in a compatible way, following the pointwise rule (including resolving Partial
-    #   into either sharded or replicated)
-
-    values_spec, multi_indices_spec = op_schema.args_schema
-    if not isinstance(values_spec, DTensorSpec):
-        raise AssertionError(f"Expected DTensorSpec, got {type(values_spec)}")
-    if not isinstance(multi_indices_spec, list):
-        raise AssertionError(f"Expected list, got {type(multi_indices_spec)}")
-    multi_indices_spec = cast(list[DTensorSpec | None], multi_indices_spec)
-    valid_indices_spec: list[tuple[int, DTensorSpec]] = [
-        (i, a) for i, a in enumerate(multi_indices_spec) if a is not None
-    ]
-
-    # 1. All indices have to be sharded equally. Moreover, indices can be broadcast.
-    #    Here, we piggyback on the pointwise sharding rule for indices.
-    indices_out = pointwise_rule(
-        OpSchema(
-            op=op_schema.op,
-            args_schema=tuple(v[1] for v in valid_indices_spec),
-            kwargs_schema={},
-        )
-    )
-    need_reshard_on_indices = indices_out.output_spec is None
-
-    if not need_reshard_on_indices:
-        # this means that our inputs are already sharded properly and we will use that as our indices_spec
-        if not isinstance(indices_out.output_spec, DTensorSpec):
-            raise AssertionError(
-                f"Expected DTensorSpec, got {type(indices_out.output_spec)}"
-            )
-        indices_spec: DTensorSpec = indices_out.output_spec
-    else:
-        if indices_out.redistribute_schema is None:
-            raise AssertionError("redistribute_schema should not be None")
-        valid_indices_suggestion = indices_out.redistribute_schema
-        for i, v in enumerate(valid_indices_suggestion.args_spec):
-            multi_indices_spec[valid_indices_spec[i][0]] = v
-        # we'll need to call pointwise_rule again to see what's our ideal indices_spec and then
-        # use that to compute our ideal values_spec
-        indices_output_spec = pointwise_rule(valid_indices_suggestion).output_spec
-        if not isinstance(indices_output_spec, DTensorSpec):
-            raise AssertionError(
-                f"Expected DTensorSpec, got {type(indices_output_spec)}"
-            )
-        indices_spec = indices_output_spec
-
-    lookup_dims = {v[0] for v in valid_indices_spec}
-
-    need_reshard_on_values = tuple(
-        (isinstance(vp, Shard) and (vp.dim in lookup_dims or isinstance(ip, Shard)))
-        for vp, ip in zip(values_spec.placements, indices_spec.placements)
-    )
-
-    if not need_reshard_on_indices and not any(need_reshard_on_values):
-        value_placements = values_spec.placements
-
-        all_dims_consecutive = all(
-            b[0] - a[0] == 1
-            for b, a in zip(valid_indices_spec[1:], valid_indices_spec[:-1])
-        )
-        if all_dims_consecutive:
-            # if all index vectors are consecutives, insert at the dimension of the first index
-            insert_dim: int = valid_indices_spec[0][0]
-        else:
-            # else, insert on the first dimension
-            insert_dim = 0
-
-        def place(vp: Placement, ip: Placement) -> Placement:
-            if isinstance(vp, Shard):
-                return Shard(
-                    vp.dim
-                    if vp.dim < insert_dim
-                    # accounts for the offset in output dimensions
-                    else vp.dim
-                    + indices_spec.ndim
-                    - sum(1 if vp.dim > v[0] else 0 for v in valid_indices_spec)
-                )
-            if isinstance(ip, Shard):
-                return Shard(ip.dim + insert_dim)
-            # Partial or Replicated
-            return vp
-
-        value_placements = tuple(
-            place(vp, ip)
-            for vp, ip in zip(values_spec.placements, indices_spec.placements)
-        )
-        result = OutputSharding(
-            output_spec=DTensorSpec(
-                mesh=values_spec.mesh,
-                placements=value_placements,
-            )
-        )
-        return result
-    else:
-        result = OutputSharding(
-            output_spec=None,
-            redistribute_schema=OpSchema(
-                op=op_schema.op,
-                args_schema=(
-                    DTensorSpec(
-                        mesh=values_spec.mesh,
-                        placements=tuple(
-                            Replicate() if need_reshard_on_values[i] else v
-                            for i, v in enumerate(values_spec.placements)
-                        ),
-                        tensor_meta=values_spec.tensor_meta,
-                    ),
-                    multi_indices_spec,
-                ),
-                kwargs_schema=op_schema.kwargs_schema,
-            ),
-        )
-        return result
 
 
 @register_op_strategy(
