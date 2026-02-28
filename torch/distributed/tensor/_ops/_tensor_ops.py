@@ -932,40 +932,34 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_prop_rule(aten.index_select.default, schema_info=RuntimeSchemaInfo(1))
-def prop_index_select(op_schema: OpSchema) -> OutputSharding:
-    values_spec, dim, indices_spec = op_schema.args_schema
+@register_single_dim_strategy(
+    aten.index_select.default, schema_info=RuntimeSchemaInfo(1)
+)
+def index_select_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    values_meta, dim, index_meta = args_schema
+    assert isinstance(values_meta, TensorMeta)
+    assert isinstance(dim, int)
 
-    if not isinstance(values_spec, DTensorSpec):
-        raise AssertionError(f"Expected DTensorSpec, got {type(values_spec)}")
-    if not isinstance(dim, int):
-        raise AssertionError(f"Expected int, got {type(dim)}")
-    if not isinstance(indices_spec, DTensorSpec):
-        raise AssertionError(f"Expected DTensorSpec, got {type(indices_spec)}")
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
 
-    all_indices_spec: list[DTensorSpec | None] = [
-        indices_spec if dim == i else None for i in range(values_spec.ndim)
-    ]
-
-    result = prop_index(
-        OpSchema(
-            op=op_schema.op,
-            args_schema=(values_spec, all_indices_spec),
-            kwargs_schema=op_schema.kwargs_schema,
+    # Shard values on any non-indexed dim (output has same ndim)
+    for d in range(len(values_meta.shape)):
+        if d == dim:
+            continue
+        strategies.append(
+            [_ShardingPlaceholder(d), _ShardingPlaceholder(d), Replicate()]
         )
-    )
-    if result.redistribute_schema:
-        schema_suggestion = result.redistribute_schema
-        result.redistribute_schema = OpSchema(
-            op=op_schema.op,
-            args_schema=(
-                schema_suggestion.args_schema[0],
-                dim,
-                schema_suggestion.args_schema[1][dim],  # type: ignore[index]
-            ),
-            kwargs_schema=op_schema.kwargs_schema,
-        )
-    return result
+
+    # Shard index → output sharded on the indexed dim
+    strategies.append([_ShardingPlaceholder(dim), Replicate(), _ShardingPlaceholder(0)])
+
+    # Partial passthrough from values
+    for reduce_op in Partial.LINEAR_REDUCE_OPS:
+        strategies.append([Partial(reduce_op), Partial(reduce_op), Replicate()])
+
+    return strategies
 
 
 @register_single_dim_strategy(
