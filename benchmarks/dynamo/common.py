@@ -3296,6 +3296,11 @@ def parse_args(args=None):
         help="Mark batch dimension as unbacked using mark_unbacked. Implies --dynamic-shapes",
     )
     parser.add_argument(
+        "--compare-backed-unbacked",
+        action="store_true",
+        help="Run both dynamic-batch-only (backed) and unbacked-batch-only, then compare results side by side",
+    )
+    parser.add_argument(
         "--specialize-int", action="store_true", help="Run with specialize_int=True."
     )
     parser.add_argument(
@@ -3808,7 +3813,118 @@ def main(runner, original_dir=None, args=None):
         else:
             # single process path just uses the main process
             args.world_size = 1
-            process_entry(0, runner, original_dir, args)
+            if args.compare_backed_unbacked:
+                _run_compare_backed_unbacked(runner, args)
+            else:
+                process_entry(0, runner, original_dir, args)
+
+
+def _run_compare_backed_unbacked(runner, args):
+    """Run backed and unbacked per-model, alternating, and compare speedup."""
+    import re
+    import subprocess
+
+    def print_comparison(all_results):
+        print(f"\n{'=' * 60}", flush=True)
+        print("COMPARISON", flush=True)
+        print(f"{'=' * 60}", flush=True)
+        print(
+            f"  {'model':<40s} {'backed':>10s} {'unbacked':>10s} {'diff':>8s}", flush=True
+        )
+        print(f"  {'-' * 40} {'-' * 10} {'-' * 10} {'-' * 8}", flush=True)
+        for name, modes in all_results.items():
+            if "backed" in modes and "unbacked" in modes:
+                b = modes["backed"]
+                u = modes["unbacked"]
+                diff_pct = (u - b) / b * 100
+                print(f"  {name:<40s} {b:>9.3f}x {u:>9.3f}x {diff_pct:>+7.1f}%", flush=True)
+            elif "backed" in modes:
+                print(
+                    f"  {name:<40s} {modes['backed']:>9.3f}x {'N/A':>10s} {'N/A':>8s}",
+                    flush=True,
+                )
+            elif "unbacked" in modes:
+                print(
+                    f"  {name:<40s} {'N/A':>10s} {modes['unbacked']:>9.3f}x {'N/A':>8s}",
+                    flush=True,
+                )
+        print(f"{'=' * 60}", flush=True)
+
+    # Build base command, stripping --compare-backed-unbacked and --only + value
+    filtered = []
+    skip_next = False
+    for a in sys.argv:
+        if a == "--compare-backed-unbacked":
+            continue
+        if skip_next:
+            skip_next = False
+            continue
+        if a == "--only":
+            skip_next = True
+            continue
+        filtered.append(a)
+    base_cmd = [sys.executable, "-B"] + filtered
+
+    # Get model list from runner
+    runner.args = args
+    args.filter = args.filter or [r"."]
+    args.exclude = args.exclude or [r"^$"]
+    args.exclude_exact = args.exclude_exact or []
+    models = list(runner.iter_model_names(args))
+
+    if args.only:
+        models = [args.only]
+
+    all_results = {}
+    for model in models:
+        print(f"\n--- {model} ---", flush=True)
+        for mode, flag in [
+            ("backed", "--dynamic-batch-only"),
+            ("unbacked", "--unbacked-batch-only"),
+        ]:
+            cmd = base_cmd + ["--only", model, flag]
+            print(f"  {mode}...", end=" ", flush=True)
+            try:
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                )
+                stdout, stderr = proc.communicate(timeout=600)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                print("TIMEOUT", flush=True)
+                continue
+            except Exception as e:
+                print(f"ERROR ({e})", flush=True)
+                continue
+
+            speedup_match = re.search(r"(\d+\.\d+)x", stdout)
+            if speedup_match:
+                speedup = float(speedup_match.group(1))
+                print(f"{speedup:.3f}x", flush=True)
+                if model not in all_results:
+                    all_results[model] = {}
+                all_results[model][mode] = speedup
+            else:
+                err_match = re.search(
+                    r"(Error|Exception|Traceback).*", stdout + stderr, re.IGNORECASE
+                )
+                if err_match:
+                    print("FAILED", flush=True)
+                else:
+                    print("SKIP", flush=True)
+
+        # Print running diff for this model
+        if (
+            model in all_results
+            and "backed" in all_results[model]
+            and "unbacked" in all_results[model]
+        ):
+            b = all_results[model]["backed"]
+            u = all_results[model]["unbacked"]
+            diff_pct = (u - b) / b * 100
+            print(f"  => diff: {diff_pct:+.1f}%", flush=True)
+
+    print_comparison(all_results)
 
 
 def write_csv_when_exception(args, name: str, status: str, device=None):
