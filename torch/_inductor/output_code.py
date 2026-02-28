@@ -395,9 +395,13 @@ class CompiledFxGraphConstants:
     the value of constants directly off of the original saved object.
     """
 
-    def unwrap(self, g: CompiledFxGraph) -> dict[str, Union[torch.Tensor, type]]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, Any]:
         assert g.constants is not None
-        return {**g.constants, **g.opaque_value_type_classes}
+        return {
+            **g.constants,
+            **g.torchbind_constants,
+            **g.opaque_value_type_classes,
+        }
 
 
 class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
@@ -412,13 +416,18 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.gm = gm
 
-    def unwrap(self, g: CompiledFxGraph) -> dict[str, Union[torch.Tensor, type]]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, Any]:
         frozen_params = {
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
         }
         constants = g.constants or {}
-        return {**constants, **frozen_params, **g.opaque_value_type_classes}
+        return {
+            **constants,
+            **frozen_params,
+            **g.torchbind_constants,
+            **g.opaque_value_type_classes,
+        }
 
 
 @dataclasses.dataclass

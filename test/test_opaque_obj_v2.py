@@ -352,6 +352,93 @@ register_opaque_type(Color, typ="reference")
 register_opaque_type(ColorWithDescriptor, typ="reference")
 
 
+# Minimal setup for testing torchbind_constants on FX graph cache hits.
+# The tensor subclass + register_torch_dispatch is required: the dispatch handler
+# creates CacheMeta mid-trace, making it a get_attr constant in the AOTAutograd
+# graph and thus a torchbind_constant in the Inductor graph.
+class CacheMeta(OpaqueBase):
+    pass
+
+
+register_opaque_type(CacheMeta, typ="reference")
+
+
+@torch.library.custom_op("_cache_meta_base::apply", mutates_args=[])
+def _cache_meta_apply(data: torch.Tensor, meta: CacheMeta) -> torch.Tensor:
+    assert meta is not None, "opaque object is None at runtime (cache bug)"
+    return data * 2
+
+
+@_cache_meta_apply.register_fake
+def _(data: torch.Tensor, meta: CacheMeta) -> torch.Tensor:
+    return torch.empty_like(data)
+
+
+_cache_meta_apply.register_autograd(
+    lambda ctx, grad_output: (grad_output * 2, None),
+    setup_context=lambda ctx, inputs, output: None,
+)
+
+
+@torch.library.custom_op("_cache_meta::call", mutates_args=[])
+def _cache_meta_call(x: torch.Tensor) -> torch.Tensor:
+    return x * 2
+
+
+@_cache_meta_call.register_fake
+def _(x: torch.Tensor) -> torch.Tensor:
+    return torch.empty_like(x)
+
+
+_cache_meta_call.register_autograd(
+    lambda ctx, grad_output: (grad_output * 2,),
+    setup_context=lambda ctx, inputs, output: None,
+)
+
+
+class WrappedTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, data):
+        return torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.shape,
+            dtype=data.dtype,
+            device=data.device,
+            requires_grad=data.requires_grad,
+        )
+
+    def __init__(self, data):
+        self._data = data
+
+    def __repr__(self):
+        return f"WrappedTensor({self.shape})"
+
+    def __tensor_flatten__(self):
+        return ["_data"], {}
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        return WrappedTensor(inner_tensors["_data"])
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        unwrap = lambda t: t._data if isinstance(t, WrappedTensor) else t
+        out = func(
+            *pytree.tree_map(unwrap, args),
+            **pytree.tree_map(unwrap, kwargs or {}),
+        )
+        return pytree.tree_map(
+            lambda t: WrappedTensor(t) if isinstance(t, torch.Tensor) else t,
+            out,
+        )
+
+
+@_cache_meta_call.register_torch_dispatch(WrappedTensor)
+def _(mode, func, types, args, kwargs):
+    meta = CacheMeta()
+    return WrappedTensor(torch.ops._cache_meta_base.apply(args[0]._data, meta))
+
+
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
 # object
 class TensorWithCounter(torch.Tensor):
@@ -2049,6 +2136,27 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub(
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+
+    @functorch_config.patch({"enable_autograd_cache": False})
+    @inductor_config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    def test_reference_opaque_obj_survives_cache_hit(self):
+        torch._dynamo.reset()
+        torch._inductor.codecache.FxGraphCache.clear()
+        torch._inductor.codecache.PyCodeCache.cache_clear()
+        counters.clear()
+
+        def fn(x):
+            return torch.ops._cache_meta.call(x)
+
+        x = WrappedTensor(torch.randn(4, device="cuda", requires_grad=True))
+
+        torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        torch._dynamo.reset()
+        torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     def test_opaque_class_literal_attribute_inlined(self):
         """Test that literal attributes on opaque classes are inlined without source tracking.
