@@ -372,15 +372,18 @@ def run(cnt):
         path2 = normalize_path_separator(os.path.join(temp_dir2.name, "example.py"))
         cnts = CompileCounter()
 
-        assert path1 != path2
+        if path1 == path2:
+            raise AssertionError("Expected path1 != path2")
 
         def write_load_and_run(path):
             with open(path, "w") as file:
                 file.write(content)
             spec = importlib.util.spec_from_file_location("example", path1)
-            assert spec is not None
+            if spec is None:
+                raise AssertionError("Expected spec to not be None")
             module = importlib.util.module_from_spec(spec)
-            assert spec.loader is not None
+            if spec.loader is None:
+                raise AssertionError("Expected spec.loader to not be None")
             spec.loader.exec_module(module)
             module.run(cnts)
 

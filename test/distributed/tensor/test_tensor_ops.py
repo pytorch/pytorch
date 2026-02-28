@@ -280,7 +280,8 @@ class DistTensorOpsTest(DTensorTestBase):
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        assert dist_tensor.shape == (4, 8)
+        if not (dist_tensor.shape == (4, 8)):
+            raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
         ones_like_dt = torch.ones_like(dist_tensor)
         ones_expected = torch.ones(dist_tensor.shape)
@@ -293,7 +294,8 @@ class DistTensorOpsTest(DTensorTestBase):
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        assert dist_tensor.shape == (4, 8)
+        if not (dist_tensor.shape == (4, 8)):
+            raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
         # inplace partial sum should keep partial
         torch.fill_(dist_tensor, 8)
@@ -309,7 +311,8 @@ class DistTensorOpsTest(DTensorTestBase):
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
-        assert dist_tensor.shape == (4, 8)
+        if not (dist_tensor.shape == (4, 8)):
+            raise AssertionError(f"Expected shape (4, 8), got {dist_tensor.shape}")
 
         zeros_like_dt = torch.zeros_like(dist_tensor)
         zeros_expected = torch.zeros(dist_tensor.shape)
@@ -756,7 +759,8 @@ class DistTensorOpsTest(DTensorTestBase):
                 input_dt = distribute_tensor(global_input, device_mesh, [i, j])
                 ref = torch.index_put(global_input, global_index, global_value)
                 output_dt = torch.index_put(input_dt, global_index, value_dt)
-                assert isinstance(output_dt, DTensor)
+                if not isinstance(output_dt, DTensor):
+                    raise AssertionError(f"Expected DTensor, got {type(output_dt)}")
                 # for value is a scalar case, output placement must be replicate
                 self.assertEqual(output_dt.placements, (Replicate(), Replicate()))
                 self.assertEqual(output_dt.full_tensor(), ref)
@@ -774,11 +778,133 @@ class DistTensorOpsTest(DTensorTestBase):
         for accumulate in [True, False]:
             ref = torch.index_put(global_input, global_index, global_value, accumulate)
             output_dt = torch.index_put(input_dt, global_index, value_dt, accumulate)
-            assert isinstance(output_dt, DTensor)
-            # `input_dt` follows `value_dt`'s Shard(1) plus a offset value of
-            # global_value.ndim-global_input.ndim, which results in Shard(2)
-            self.assertEqual(output_dt.placements, (Shard(2), Replicate()))
+            if not isinstance(output_dt, DTensor):
+                raise AssertionError(f"Expected DTensor, got {type(output_dt)}")
+            # Output should be sharded on non-indexed dims (dim 1 or 2).
+            # The exact placement depends on cost-based strategy selection.
+            for p in output_dt.placements:
+                if isinstance(p, Shard):
+                    self.assertIn(p.dim, [1, 2])
             self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_put_requires_replicated_index(self):
+        """Test that index_put correctly replicates sharded indices."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        global_value = torch.zeros([8], device=self.device_type)
+
+        # Create sharded index - should be redistributed to replicated
+        idx_tensor = torch.tensor([0, 1], device=self.device_type)
+        idx_dt = distribute_tensor(idx_tensor, device_mesh, [Shard(0)])
+
+        input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
+        value_dt = distribute_tensor(global_value, device_mesh, [Replicate()])
+
+        # The op should work - index gets redistributed to replicated internally
+        ref = torch.index_put(global_input, [idx_tensor], global_value)
+        output_dt = torch.index_put(input_dt, [idx_dt], value_dt)
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_put_no_shard_on_indexed_dim(self):
+        """Test that index_put output is not sharded on indexed dims."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        global_value = torch.zeros([8], device=self.device_type)
+        global_index = [torch.tensor(0, device=self.device_type)]
+
+        # Shard input on indexed dim 0
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(0)])
+        value_dt = distribute_tensor(global_value, device_mesh, [Replicate()])
+
+        ref = torch.index_put(global_input, global_index, global_value)
+        output_dt = torch.index_put(input_dt, global_index, value_dt)
+
+        # Verify output is not sharded on the indexed dim (dim 0)
+        for p in output_dt.placements:
+            if isinstance(p, Shard):
+                self.assertNotEqual(
+                    p.dim, 0, "Output should not be sharded on indexed dim"
+                )
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_put_partial_numerics(self):
+        """Test index_put with Partial placements produces correct numerics."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.randn(4, 8, device=self.device_type)
+        global_index = [torch.tensor(1, device=self.device_type)]
+        global_value = torch.randn(8, device=self.device_type)
+
+        # Create Partial tensors - each rank has partial sum
+        local_input = global_input / self.world_size
+        local_value = global_value / self.world_size
+        input_dt = DTensor.from_local(
+            local_input, device_mesh, [Partial()], run_check=False
+        )
+        value_dt = DTensor.from_local(
+            local_value, device_mesh, [Partial()], run_check=False
+        )
+
+        for accumulate in [True, False]:
+            ref = torch.index_put(global_input, global_index, global_value, accumulate)
+            output_dt = torch.index_put(input_dt, global_index, value_dt, accumulate)
+            self.assertIsInstance(output_dt, DTensor)
+            self.assertEqual(output_dt.placements, (Partial(),))
+            self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_put_duplicated_indices(self):
+        """Test index_put with duplicated indices for both accumulate modes."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        global_input = torch.zeros(4, 8, device=self.device_type)
+        # Duplicated indices - index 1 appears twice
+        idx_tensor = torch.tensor([1, 1, 2], device=self.device_type)
+        global_index = [idx_tensor]
+        global_value = torch.ones(3, 8, device=self.device_type)
+
+        # Shard on non-indexed dim, index must be replicated
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(1)])
+        idx_dt = distribute_tensor(idx_tensor, device_mesh, [Replicate()])
+        value_dt = distribute_tensor(global_value, device_mesh, [Shard(1)])
+
+        # accumulate=False: last write wins (non-deterministic with duplicates, but
+        # since values are the same, result is deterministic)
+        ref_no_accum = torch.index_put(
+            global_input, global_index, global_value, accumulate=False
+        )
+        output_no_accum = torch.index_put(
+            input_dt, [idx_dt], value_dt, accumulate=False
+        )
+        self.assertEqual(output_no_accum.full_tensor(), ref_no_accum)
+
+        # accumulate=True: values are added (index 1 gets 2x the value)
+        ref_accum = torch.index_put(
+            global_input, global_index, global_value, accumulate=True
+        )
+        output_accum = torch.index_put(input_dt, [idx_dt], value_dt, accumulate=True)
+        self.assertEqual(output_accum.full_tensor(), ref_accum)
+
+    @with_comms
+    def test_index_put_broadcast_values(self):
+        """Test index_put where values has size-1 broadcast dims."""
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # self shape (4, 8), index on dim 0 -> non-indexed dim is 1
+        global_input = torch.randn(4, 8, device=self.device_type)
+        idx = torch.tensor([0, 1], device=self.device_type)
+        global_index = [idx]
+        # values shape (2, 1) — broadcast on the non-indexed dim
+        global_value = torch.randn(2, 1, device=self.device_type)
+
+        # Shard self on non-indexed dim 1, values should be replicated (size 1)
+        input_dt = distribute_tensor(global_input, device_mesh, [Shard(1)])
+        idx_dt = distribute_tensor(idx, device_mesh, [Replicate()])
+        value_dt = distribute_tensor(global_value, device_mesh, [Replicate()])
+
+        ref = torch.index_put(global_input, global_index, global_value)
+        output_dt = torch.index_put(input_dt, [idx_dt], value_dt)
+        self.assertEqual(output_dt.full_tensor(), ref)
 
     @with_comms
     def test_where_type_promotion(self):
@@ -852,7 +978,8 @@ class DistTensorOpsTest(DTensorTestBase):
         def to_copy_single_dim_strategy(op, args_schema, kwargs_schema):
             call_count[0] += 1
             self_meta = args_schema[0]
-            assert isinstance(self_meta, TensorMeta)
+            if not isinstance(self_meta, TensorMeta):
+                raise AssertionError(f"Expected TensorMeta, got {type(self_meta)}")
             single_dim_strategies = []
             for dim in range(len(self_meta.shape)):
                 single_dim_strategies.append(

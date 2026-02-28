@@ -34,7 +34,14 @@ import torch.nn
 from torch._guards import Source
 
 from .. import graph_break_hints, trace_rules, variables
-from ..exc import raise_observed_exception, unimplemented, UnspecializeRestartAnalysis
+from ..exc import (
+    handle_observed_exception,
+    ObservedAttributeError,
+    raise_observed_exception,
+    unimplemented,
+    UnspecializeRestartAnalysis,
+    Unsupported,
+)
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
 from ..source import (
@@ -278,23 +285,12 @@ class NNModuleVariable(VariableTracker):
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
         base = tx.output.get_submodule(self.module_key)
 
-        if object_has_getattribute(base):
-            unimplemented(
-                gb_type="Custom __getattribute__ in nn.Module dict key check",
-                context=f"has_key_in_generic_dict {self} {key}",
-                explanation="Dynamo does not support checking key existence "
-                "on `nn.Module` instances that have a custom "
-                "`__getattribute__` method defined.",
-                hints=[
-                    "Avoid defining `__getattribute__` in your module.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
-
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
 
+        # Use object.__getattribute__ to access __dict__ directly,
+        # bypassing any custom __getattribute__ on the module.
         base_dict = object.__getattribute__(base, "__dict__")
         return key in base_dict
 
@@ -307,17 +303,30 @@ class NNModuleVariable(VariableTracker):
     ) -> Optional[VariableTracker]:
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
-            unimplemented(
-                gb_type="Custom __getattribute__ in nn.Module attribute access",
-                context=f"var_getattr {self} {name}",
-                explanation="Dynamo does not support checking key existence "
-                "on `nn.Module` instances that have a custom "
-                "`__getattribute__` method defined.",
-                hints=[
-                    "Avoid defining `__getattribute__` in your module.",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
+            getattribute_fn = inspect.getattr_static(type(base), "__getattribute__")
+            new_source = (
+                AttrSource(obj_source, "__getattribute__") if obj_source else None
             )
+            try:
+                return variables.UserMethodVariable(
+                    getattribute_fn,
+                    self,
+                    source=new_source,
+                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+            except ObservedAttributeError:
+                handle_observed_exception(tx)
+            except Unsupported:
+                unimplemented(
+                    gb_type="Custom __getattribute__ in nn.Module attribute access",
+                    context=f"var_getattr {self} {name}",
+                    explanation="Dynamo could not trace through the custom "
+                    "`__getattribute__` method on this `nn.Module`.",
+                    hints=[
+                        "Simplify your `__getattribute__` implementation, "
+                        "or replace it with a targeted `@property`.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
 
         getattr_fn = get_custom_getattr(base, ignore_nn_module_getattr=True)
         if getattr_fn is None:
@@ -352,6 +361,9 @@ class NNModuleVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
+        # NB: We look up attributes in __dict__ directly, bypassing any custom
+        # __getattribute__. Custom __getattribute__ is only traced through as a
+        # fallback (via _custom_getattr_fallback) for attributes not found here.
         base_dict = object.__getattribute__(base, "__dict__")
         object_member = True
         all_class_attribute_names = set()
