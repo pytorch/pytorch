@@ -11,9 +11,10 @@ from typing import Any, NamedTuple, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._dynamo.guards import (
-    _extract_tensor_metadata,
-    _SKIP_GUARD,
+    extract_tensor_metadata,
     GUARD_VALUE_DISPATCH,
+    SKIP_GUARD,
+    UnsupportedGuardCheckSpec,
 )
 from torch.fx.proxy import Proxy
 
@@ -173,7 +174,7 @@ def build_auto_cache_condition(
                     "auto_guard_cache: cannot build condition -- tensor input has no example_value"
                 )
                 return None
-            input_checks.append(("tensor", _extract_tensor_metadata(example)))
+            input_checks.append(("tensor", extract_tensor_metadata(example)))
         elif tag == "symnode":
             input_checks.append(("symnode", vt.python_type()))
         elif tag == "constant":
@@ -203,10 +204,10 @@ def build_auto_cache_condition(
         type_str = guard.create_fn_name()
         handler = GUARD_VALUE_DISPATCH.get(type_str)
 
-        if handler is _SKIP_GUARD:
+        if handler is SKIP_GUARD:
             continue
 
-        if handler is None:
+        if handler is None or isinstance(handler, UnsupportedGuardCheckSpec):
             hc_log.debug(
                 "auto_guard_cache: cannot build condition -- unsupported guard type '%s' on source '%s'",
                 type_str,
@@ -215,10 +216,7 @@ def build_auto_cache_condition(
             return None
 
         try:
-            if handler.resolve_base_only:
-                value = tx.output.resolve_source_value(source.base)
-            else:
-                value = tx.output.resolve_source_value(source)
+            value = tx.output.resolve_source_value(source)
         except Exception:
             hc_log.debug(
                 "auto_guard_cache: cannot build condition -- failed to resolve source '%s' for %s guard",
@@ -282,7 +280,7 @@ def is_reusable(
                     i,
                 )
                 return False
-            cur_meta = _extract_tensor_metadata(example)
+            cur_meta = extract_tensor_metadata(example)
             if cur_meta != cached_val:
                 hc_log.debug(
                     "auto_guard_cache: reuse failed -- input %d tensor metadata mismatch",
@@ -316,8 +314,7 @@ def is_reusable(
             new_source = source
 
         try:
-            resolve_src = new_source.base if handler.resolve_base_only else new_source
-            value = resolve_src.get_value(resolve_globals, resolve_locals, resolve_cache)
+            value = new_source.get_value(resolve_globals, resolve_locals, resolve_cache)
         except Exception:
             hc_log.debug(
                 "auto_guard_cache: reuse failed -- cannot resolve source '%s'",
