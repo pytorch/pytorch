@@ -1403,8 +1403,10 @@ class TestFP8Matmul(TestCase):
                 else:
                     # cuBLAS requires column-major: shape [M, K//128], stride [1, M]
                     x_scales = x_scales.t().contiguous().t()
-                    assert (x_scales.shape[0] == M and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
-                    assert (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]), f"{x_scales.stride=}"
+                    if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
+                        raise AssertionError(f"{x_scales.shape=}")
+                    if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
+                        raise AssertionError(f"{x_scales.stride=}")
             else:
                 lhs_recipe = ScalingType.BlockWise128x128
                 x_hp = hp_from_128x128(x_fp8, x_scales_original)
@@ -1433,8 +1435,10 @@ class TestFP8Matmul(TestCase):
                 else:
                     # cuBLAS requires column-major: shape [N, K//128], stride [1, N]
                     y_scales = y_scales.t().contiguous().t()
-                    assert (y_scales.shape[0] == N and y_scales.shape[1] == K // 128), f"{y_scales.shape=}"
-                    assert (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]), f"{y_scales.stride=}"
+                    if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
+                        raise AssertionError(f"{y_scales.shape=}")
+                    if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
+                        raise AssertionError(f"{y_scales.stride=}")
             else:
                 rhs_recipe = ScalingType.BlockWise128x128
                 y_hp = hp_from_128x128(y_fp8, y_scales_original)
@@ -1632,20 +1636,26 @@ class TestFP8Matmul(TestCase):
             if is_xpu:
                 # XPU scale_a shape: [M, K//128], row-major contiguous (stride(1)==1)
                 x_scales = x_scales.contiguous()
-                assert (x_scales.shape[0] == M and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
-                assert x_scales.stride(1) == 1, f"{x_scales.stride()=}"
+                if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{x_scales.shape=}")
+                if not x_scales.stride(1) == 1:
+                    raise AssertionError(f"{x_scales.stride()=}")
             else:
                 # cuBLAS requires column-major: shape [M, K//128], stride [1, M]
                 x_scales = x_scales.t().contiguous().t()
-                assert (x_scales.shape[0] == M and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
-                assert (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]), f"{x_scales.stride=}"
+                if not (x_scales.shape[0] == M and x_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{x_scales.shape=}")
+                if not (x_scales.stride(0) == 1 and x_scales.stride(1) in [1, M]):
+                    raise AssertionError(f"{x_scales.stride=}")
         else:
             lhs_recipe = ScalingType.BlockWise128x128
             if is_xpu:
                 # XPU scale_a shape: [M//128, K//128], row-major contiguous (stride(1)==1)
                 x_scales = x_scales.contiguous()
-                assert (x_scales.shape[0] == M // 128 and x_scales.shape[1] == K // 128), f"{x_scales.shape=}"
-                assert x_scales.stride(1) == 1, f"{x_scales.stride()=}"
+                if not (x_scales.shape[0] == M // 128 and x_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{x_scales.shape=}")
+                if not x_scales.stride(1) == 1:
+                    raise AssertionError(f"{x_scales.stride()=}")
             else:
                 # cuBLAS requires L4-padded column-major: shape [L4, M//128] where L4=round_up(K//128, 4)
                 x_scales, pad_amount = _pad_128x128_scales(x_scales)
@@ -1660,13 +1670,17 @@ class TestFP8Matmul(TestCase):
                 # Use clone(contiguous_format) instead of contiguous() to guarantee stride(1)==1
                 # even when the last dim is size-1 (e.g. N=128 -> N//128=1).
                 y_scales = y_scales.t().clone(memory_format=torch.contiguous_format)
-                assert (y_scales.shape[0] == K // 128 and y_scales.shape[1] == N), f"{y_scales.shape=}"
-                assert y_scales.stride(1) == 1, f"{y_scales.stride()=}"
+                if not (y_scales.shape[0] == K // 128 and y_scales.shape[1] == N):
+                    raise AssertionError(f"{y_scales.shape=}")
+                if not y_scales.stride(1) == 1:
+                    raise AssertionError(f"{y_scales.stride()=}")
             else:
                 # cuBLAS requires column-major: shape [N, K//128], stride [1, N]
                 y_scales = y_scales.t().contiguous().t()
-                assert (y_scales.shape[0] == N and y_scales.shape[1] == K // 128), f"{y_scales.shape=}"
-                assert (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]), f"{y_scales.stride=}"
+                if not (y_scales.shape[0] == N and y_scales.shape[1] == K // 128):
+                    raise AssertionError(f"{y_scales.shape=}")
+                if not (y_scales.stride(0) == 1 and y_scales.stride(1) in [1, N]):
+                    raise AssertionError(f"{y_scales.stride=}")
         else:
             rhs_recipe = ScalingType.BlockWise128x128
             if is_xpu:
@@ -1675,8 +1689,10 @@ class TestFP8Matmul(TestCase):
                 # Use clone(contiguous_format) instead of contiguous() to guarantee stride(1)==1
                 # even when the last dim is size-1 (e.g. N=128 -> N//128=1).
                 y_scales = y_scales.t().clone(memory_format=torch.contiguous_format)
-                assert (y_scales.shape[0] == K // 128 and y_scales.shape[1] == N // 128), f"{y_scales.shape=}"
-                assert y_scales.stride(1) == 1, f"{y_scales.stride()=}"
+                if not (y_scales.shape[0] == K // 128 and y_scales.shape[1] == N // 128):
+                    raise AssertionError(f"{y_scales.shape=}")
+                if not y_scales.stride(1) == 1:
+                    raise AssertionError(f"{y_scales.stride()=}")
             else:
                 # cuBLAS requires L4-padded: shape [L4, N//128] where L4=round_up(K//128, 4)
                 y_scales, pad_amount = _pad_128x128_scales(y_scales)
