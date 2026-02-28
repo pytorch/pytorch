@@ -289,7 +289,7 @@ Stack (TOS at end):
             instruction_lines = [
                 line
                 for line in list_range.split("\n")
-                if re.match(r"\s*>>?>?\s*\*?\s*\d+\s+\[", line)
+                if re.match(r"\s*(?:>>>)?\s*\*?\s*\d+\s+\[", line)
             ]
             self.assertEqual(len(instruction_lines), 3)
 
@@ -299,7 +299,7 @@ Stack (TOS at end):
             instruction_lines = [
                 line
                 for line in list_count.split("\n")
-                if re.match(r"\s*>>?>?\s*\*?\s*\d+\s+\[", line)
+                if re.match(r"\s*(?:>>>)?\s*\*?\s*\d+\s+\[", line)
             ]
             self.assertEqual(len(instruction_lines), 2)
 
