@@ -874,7 +874,9 @@ def _sfdp_params_check(match):
     return True
 
 
-def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
+def _sfdp_extra_check(
+    scale_factor_op=None, disable_cuda=False, check_scale_value=False
+):
     def fn(match):
         if (
             disable_cuda
@@ -888,6 +890,39 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
             scale_factor = scale_factor_node.args[1]
             # make sure the scale_factor a float/int. SymInt?
             if not isinstance(scale_factor, (float, int)):
+                return False
+        if check_scale_value:
+            has_scale = any("scale" in k for k in match.kwargs)
+            assert not has_scale, (
+                match.kwargs,
+                "do not check scale value when it's in kwargs",
+            )
+            div_nodes = filter_nodes(match.nodes, aten.div.Tensor)
+            inv_scale_factor: Optional[float] = None
+            for div_node in div_nodes:
+                node = div_node
+                div_args = getattr(div_node, "args", None)
+                if (
+                    isinstance(div_args, (tuple, list))
+                    and len(div_args) > 1
+                    and hasattr(div_args[1], "target")
+                    and hasattr(div_args[1].target, "name")
+                    and div_args[1].target.name() == "aten::full"
+                ):
+                    node = div_args[1]
+                node_args = getattr(node, "args", None)
+                if (
+                    isinstance(node_args, (tuple, list))
+                    and len(node_args) > 1
+                    and isinstance(node.args[1], (float, int))
+                ):
+                    if inv_scale_factor is None:
+                        inv_scale_factor = node.args[1]
+                    else:
+                        assert inv_scale_factor == node.args[1]
+            query_node = match.kwargs["query"]
+            expected_inv_scale = math.sqrt(query_node.meta["val"].size(-1))
+            if expected_inv_scale != inv_scale_factor:
                 return False
         return _sfdp_params_check(match)
 
@@ -1012,42 +1047,42 @@ def _get_sfdp_patterns(input_device: Optional[torch.device] = None):
                 _sfdp_replacement_5,
                 [g(), g(), g(), b()],
                 {},
-                _sfdp_params_check,
+                _sfdp_extra_check(check_scale_value=True),
             ),
             (
                 _sfdp_pattern_6,
                 _sfdp_replacement_6,
                 [g(), g(), g(), b()],
                 d,
-                _sfdp_params_check,
+                _sfdp_extra_check(check_scale_value=True),
             ),
             (
                 _sfdp_pattern_7,
                 _sfdp_replacement_7,
                 [g(), g(), g()],
                 d,
-                _sfdp_params_check,
+                _sfdp_extra_check(check_scale_value=True),
             ),
             (
                 _sfdp_pattern_8,
                 _sfdp_replacement_8,
                 [g(), g(), g()],
                 {},
-                _sfdp_params_check,
+                _sfdp_extra_check(check_scale_value=True),
             ),
             (
                 _sfdp_pattern_9,
                 _sfdp_replacement_9,
                 [g(), g(), g()],
                 d,
-                _sfdp_params_check,
+                _sfdp_extra_check(check_scale_value=True),
             ),
             (
                 _sfdp_pattern_10,
                 _sfdp_replacement_10,
                 [g(), g(), g()],
                 {},
-                _sfdp_params_check,
+                _sfdp_extra_check(check_scale_value=True),
             ),
             (
                 _sfdp_pattern_11,
@@ -1115,28 +1150,28 @@ def _get_sfdp_patterns(input_device: Optional[torch.device] = None):
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
                 d,
-                _sfdp_params_check,
+                _sfdp_extra_check(check_scale_value=True),
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
                 d,
-                _sfdp_params_check,
+                _sfdp_extra_check(check_scale_value=True),
             ),
             (
                 _sfdp_pattern_19,
                 _sfdp_replacement_19,
                 [g(), g(), g(), b_bool(), b_float()],
                 d,
-                _sfdp_params_check,
+                _sfdp_extra_check(check_scale_value=True),
             ),
             (
                 _sfdp_pattern_20,
                 _sfdp_replacement_20,
                 [g(), g(), g(), m_2d()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor),
+                _sfdp_extra_check(aten.div.Tensor, check_scale_value=True),
             ),
             (
                 _sfdp_pattern_21,
