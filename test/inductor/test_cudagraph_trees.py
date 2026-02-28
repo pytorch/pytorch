@@ -230,6 +230,67 @@ if HAS_CUDA_AND_TRITON:
             self.run_twc(foo_opt, zeros)
             self.assertEqual(self.get_root_children(), [0, 0])
 
+        def test_pinned_memory_to_device_non_blocking(self):
+            # Test that pinned memory is preserved through lift_fresh_copy during
+            # torch.compile with reduce-overhead mode, enabling correct CUDA graph
+            # capture with non_blocking host-to-device copies.
+            # This verifies the fix for the issue where .to(device, non_blocking=True)
+            # on a pinned tensor would fail under CUDA graphs due to lift_fresh_copy
+            # not preserving the pin_memory attribute.
+
+            def foo(x):
+                # Create a pinned tensor and copy to device non_blocking
+                numel = torch.tensor(x.numel(), pin_memory=True).to(
+                    x.device, non_blocking=True
+                )
+                return numel
+
+            # Test with reduce-overhead mode (cudagraph trees)
+            foo_opt = torch.compile(foo, mode="reduce-overhead")
+
+            x = torch.rand([10], device="cuda")
+
+            # Warmup
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                eager_out = foo(x)
+
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                compiled_out = foo_opt(x)
+
+            # Verify numerical correctness
+            expected = torch.tensor(10, device="cuda")
+            self.assertEqual(eager_out, expected)
+            self.assertEqual(compiled_out, expected)
+
+        def test_pinned_memory_with_tensor_constant(self):
+            # Test that tensor constants with pin_memory=True work correctly
+            # with CUDA graph trees when using non_blocking copy.
+
+            def foo(grad):
+                # This pattern is common when computing gradient metadata
+                grad_numel = torch.tensor(grad.numel(), pin_memory=True)
+                return grad_numel.to(grad.device, non_blocking=True) * grad.sum()
+
+            foo_opt = torch.compile(foo, mode="reduce-overhead")
+
+            x = torch.rand([5, 4], device="cuda", requires_grad=False)
+
+            # Warmup
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                out = foo_opt(x)
+
+            # Test with different input
+            y = torch.rand([3, 3], device="cuda", requires_grad=False)
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                compiled_out = foo_opt(y)
+                eager_out = foo(y)
+
+            self.assertEqual(compiled_out, eager_out)
+
         def check_rng(self):
             @torch.compile(mode="reduce-overhead")
             def foo():

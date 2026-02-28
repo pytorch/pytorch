@@ -9,6 +9,7 @@
 #include <ATen/Operators.h>
 #else
 #include <ATen/ops/clone.h>
+#include <ATen/ops/empty_like.h>
 $ops_headers
 #endif
 

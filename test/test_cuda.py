@@ -314,6 +314,59 @@ print(t.is_pinned())
         self.assertEqual(r, 0)
         self.assertFalse(t.is_pinned())
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_pinned_memory_to_device_with_cudagraph(self):
+        # Test that pin_memory is preserved through lift_fresh_copy during
+        # torch.compile, which is required for correct CUDA graph capture
+        # with non_blocking copies.
+        # See https://github.com/pytorch/pytorch/issues/171894
+
+        def f(example_grad: torch.Tensor) -> torch.Tensor:
+            grad_numel = torch.tensor(example_grad.numel(), pin_memory=True).to(
+                example_grad.device, non_blocking=True
+            )
+            return grad_numel
+
+        compile_f = torch.compile(f, backend="aot_eager")
+
+        x = torch.rand(10, device="cuda")
+
+        # Warmup runs
+        eager_result = f(x)
+        compiled_result = compile_f(x)
+
+        # Test numerical correctness between eager and compiled
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(eager_result, torch.tensor(10, device="cuda"))
+
+        # Test with CUDA graphs for compiled function
+        torch._dynamo.reset()
+        compile_f = torch.compile(f, backend="aot_eager")
+
+        s = torch.cuda.Stream()
+        with torch.cuda.stream(s):
+            s.wait_stream(torch.cuda.current_stream())
+            # warmup
+            for _ in range(3):
+                compiled_out = compile_f(x)
+            torch.cuda.current_stream().wait_stream(s)
+
+        g_compiled = torch.cuda.CUDAGraph()
+        with torch.cuda.stream(s):
+            g_compiled.capture_begin()
+            compiled_out = compile_f(x)
+            g_compiled.capture_end()
+
+        g_compiled.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(
+            compiled_out,
+            torch.tensor(10, device="cuda"),
+            "Compiled function with CUDA graph should produce correct result",
+        )
+
     def test_memory_allocation(self):
         gc.collect()
         torch.cuda.empty_cache()

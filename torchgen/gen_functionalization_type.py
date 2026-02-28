@@ -126,6 +126,12 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
     return self.reshape_symint(size);
   } else {
     auto output = at::_ops::view::call(self, size);
+    // Preserve pinned memory status when cloning (important for CUDA graphs)
+    if (output.is_pinned()) {
+      auto result = at::empty_like(output, output.options().pinned_memory(true), at::MemoryFormat::Contiguous);
+      result.copy_(output);
+      return result;
+    }
     return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
   }
 }
@@ -156,14 +162,27 @@ at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
             )
 
         if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
+            # Preserve pinned memory status when cloning (important for CUDA graphs)
             return_cloned_output = """\
+  if (output.is_pinned()) {
+    auto result = at::empty_like(output, output.options().pinned_memory(true), at::MemoryFormat::Contiguous);
+    result.copy_(output);
+    return result;
+  }
   return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);"""
         else:
             # If the return type is a list, we need to clone each tensor in the list.
+            # Preserve pinned memory status when cloning (important for CUDA graphs)
             return_cloned_output = f"""\
   {view_copy_sig.returns_type().cpp_type()} out_clone;
   for (const auto i : c10::irange(output.size())) {{
-    out_clone.push_back(output[i].clone(/*memory_format=*/at::MemoryFormat::Contiguous));
+    if (output[i].is_pinned()) {{
+      auto result = at::empty_like(output[i], output[i].options().pinned_memory(true), at::MemoryFormat::Contiguous);
+      result.copy_(output[i]);
+      out_clone.push_back(result);
+    }} else {{
+      out_clone.push_back(output[i].clone(/*memory_format=*/at::MemoryFormat::Contiguous));
+    }}
   }}
   return out_clone;"""
 

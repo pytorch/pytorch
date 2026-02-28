@@ -2300,6 +2300,62 @@ def forward(self, arg0_1):
         )
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA required")
+    def test_lift_fresh_copy_preserves_pin_memory(self):
+        # Test that lift_fresh_copy preserves the is_pinned() attribute
+        # This is important for CUDA graphs with non_blocking copies
+        # See https://github.com/pytorch/pytorch/issues/171894
+        for pin_memory in [True, False]:
+            with self.subTest(pin_memory=pin_memory):
+                tensor = torch.tensor([1.0, 2.0, 3.0], pin_memory=pin_memory)
+                self.assertEqual(tensor.is_pinned(), pin_memory)
+
+                copied = torch.ops.aten.lift_fresh_copy.default(tensor)
+
+                self.assertEqual(copied.is_pinned(), pin_memory)
+                self.assertEqual(tensor, copied)
+                # Verify it's actually a copy (different storage)
+                self.assertNotEqual(
+                    tensor.untyped_storage()._cdata, copied.untyped_storage()._cdata
+                )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA required")
+    def test_view_copy_preserves_pin_memory(self):
+        # Test that view_copy ops preserve pin_memory (needed for CUDA graphs).
+        # Covers all codegen paths: view_copy, single tensor, and list returns.
+        from torch.func import functionalize
+
+        for pin_memory in [True, False]:
+            with self.subTest(pin_memory=pin_memory):
+                x = torch.randn(4, pin_memory=pin_memory)
+                x_2d = torch.randn(2, 4, pin_memory=pin_memory)
+
+                # view_copy special case
+                result = functionalize(
+                    lambda t: t.view(-1), remove="mutations_and_views"
+                )(x)
+                self.assertEqual(result.is_pinned(), pin_memory)
+
+                # Single tensor return (squeeze_copy, transpose_copy)
+                result = functionalize(
+                    lambda t: t.squeeze(), remove="mutations_and_views"
+                )(x)
+                self.assertEqual(result.is_pinned(), pin_memory)
+                result = functionalize(
+                    lambda t: t.transpose(0, 1), remove="mutations_and_views"
+                )(x_2d)
+                self.assertEqual(result.is_pinned(), pin_memory)
+
+                # List of tensors return (split_copy, unbind_copy)
+                for r in functionalize(
+                    lambda t: t.split(2), remove="mutations_and_views"
+                )(x):
+                    self.assertEqual(r.is_pinned(), pin_memory)
+                for r in functionalize(
+                    lambda t: t.unbind(0), remove="mutations_and_views"
+                )(x_2d):
+                    self.assertEqual(r.is_pinned(), pin_memory)
+
 
 @xfail_inherited_tests(
     [
