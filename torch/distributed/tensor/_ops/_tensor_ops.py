@@ -953,9 +953,7 @@ def index_select_single_dim_strategy(
         )
 
     # Shard index → output sharded on the indexed dim
-    strategies.append(
-        [_ShardingPlaceholder(dim), Replicate(), _ShardingPlaceholder(0)]
-    )
+    strategies.append([_ShardingPlaceholder(dim), Replicate(), _ShardingPlaceholder(0)])
 
     # Partial passthrough from values
     for reduce_op in Partial.LINEAR_REDUCE_OPS:
