@@ -2004,27 +2004,41 @@ class GuardBuilder(GuardBuilderBase):
             val, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool) -> None:
+    def DICT_CONTAINS(self, guard: Guard, key: str) -> None:
         dict_ref = self.arg_ref(guard)
 
-        maybe_not = "not " if invert else ""
-        code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
+        code = f"___dict_contains({key!r}, {dict_ref})"
         if code in self.already_added_code_parts:
             return
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
-            not invert,
+            True,
             key,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
         )
         self.already_added_code_parts.add(code)
 
-    def SET_CONTAINS(self, guard: Guard, key: Any, invert: bool) -> None:
+    def DICT_NOT_CONTAINS(self, guard: Guard, key: str) -> None:
+        dict_ref = self.arg_ref(guard)
+
+        code = f"not ___dict_contains({key!r}, {dict_ref})"
+        if code in self.already_added_code_parts:
+            return
+        self._set_guard_export_info(guard, [code])
+
+        self.get_guard_manager(guard).add_dict_contains_guard(
+            False,
+            key,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+        self.already_added_code_parts.add(code)
+
+    def SET_CONTAINS(self, guard: Guard, key: Any) -> None:
         set_ref = self.arg_ref(guard)
         item = key
-        contains = not invert  # install_dict_contains_guard inverts "contains"
 
         code = f"set.__contains__({set_ref}, {item!r})"
         if code in self.already_added_code_parts:
@@ -2033,7 +2047,25 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
-            contains,
+            True,
+            item,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+        self.already_added_code_parts.add(code)
+
+    def SET_NOT_CONTAINS(self, guard: Guard, key: Any) -> None:
+        set_ref = self.arg_ref(guard)
+        item = key
+
+        code = f"not set.__contains__({set_ref}, {item!r})"
+        if code in self.already_added_code_parts:
+            return
+
+        self._set_guard_export_info(guard, [code])
+
+        self.get_guard_manager(guard).add_set_contains_guard(
+            False,
             item,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
