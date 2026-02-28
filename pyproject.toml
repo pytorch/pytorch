@@ -22,30 +22,11 @@ requires = [
 ]
 build-backend = "scikit_build_core.build"
 
-[tool.scikit-build]
+[tool.scikit-build.cmake]
 # Build type is determined by cmake/EnvVarForwarding.cmake from DEBUG,
 # REL_WITH_DEB_INFO, or CMAKE_BUILD_TYPE env vars (defaulting to Release).
 # Setting to empty string tells scikit-build-core not to override it.
-cmake.build-type = ""
-
-# Read wheel version from version.txt. For release builds,
-# PYTORCH_BUILD_VERSION overrides this (handled by generate_torch_version.py).
-metadata.version.provider = "scikit_build_core.metadata.regex"
-metadata.version.provider-path = "version.txt"
-
-# CMake install destinations (lib/, include/, share/cmake/) are relative to
-# CMAKE_INSTALL_PREFIX. This setting places them under torch/ in the wheel,
-# matching the existing layout (e.g., torch/lib/libtorch_cpu.so).
-wheel.install-dir = "torch"
-
-# Python packages to include in the wheel.
-wheel.packages = ["torch", "torchgen", "functorch"]
-
-# Editable installs use redirect mode: Python files are found in the source
-# tree, and CMake-built artifacts are rebuilt on import if stale.
-[tool.scikit-build.editable]
-mode = "redirect"
-rebuild = true
+build-type = ""
 
 [tool.scikit-build.cmake.define]
 # Core build options — read from environment variables.
@@ -77,6 +58,26 @@ PYTORCH_ROCM_ARCH = {env = "PYTORCH_ROCM_ARCH"}
 TORCH_BUILD_VERSION = {env = "PYTORCH_BUILD_VERSION"}
 PYTORCH_BUILD_NUMBER = {env = "PYTORCH_BUILD_NUMBER"}
 MAX_JOBS = {env = "MAX_JOBS"}
+
+[tool.scikit-build.metadata.version]
+# Read wheel version from version.txt. For release builds,
+# PYTORCH_BUILD_VERSION overrides this (handled by generate_torch_version.py).
+provider = "scikit_build_core.metadata.regex"
+provider-path = "version.txt"
+
+[tool.scikit-build.wheel]
+# CMake install destinations (lib/, include/, share/cmake/) are relative to
+# CMAKE_INSTALL_PREFIX. This setting places them under torch/ in the wheel,
+# matching the existing layout (e.g., torch/lib/libtorch_cpu.so).
+install-dir = "torch"
+# Python packages to include in the wheel.
+packages = ["torch", "torchgen", "functorch"]
+
+[tool.scikit-build.editable]
+# Editable installs use redirect mode: Python files are found in the source
+# tree, and CMake-built artifacts are rebuilt on import if stale.
+mode = "redirect"
+rebuild = true
 
 [dependency-groups]
 dev = [
