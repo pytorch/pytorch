@@ -216,7 +216,7 @@ class TestTorchDlPack(TestCase):
         # in the current stream to make sure that it was correctly populated.
         with stream_a:
             x = make_tensor((5,), dtype=dtype, device=device) + 1
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z, x)
@@ -237,7 +237,7 @@ class TestTorchDlPack(TestCase):
         with stream_a:
             x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
-            z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
+            z = torch.from_dlpack(x.__dlpack__(stream=stream_b))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
