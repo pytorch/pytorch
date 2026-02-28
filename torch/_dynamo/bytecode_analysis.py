@@ -17,7 +17,7 @@ import dataclasses
 import dis
 import itertools
 import sys
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
@@ -203,8 +203,8 @@ class FixedPointBox:
 
 @dataclasses.dataclass
 class StackSize:
-    low: int | float
-    high: int | float
+    low: Union[int, float]
+    high: Union[int, float]
     fixed_point: FixedPointBox
 
     def zero(self) -> None:
@@ -227,7 +227,7 @@ class StackSize:
             self.fixed_point.value = False
 
 
-def stacksize_analysis(instructions: list["Instruction"]) -> int | float:
+def stacksize_analysis(instructions: list["Instruction"]) -> Union[int, float]:
     assert instructions
     fixed_point = FixedPointBox()
     stack_sizes = {

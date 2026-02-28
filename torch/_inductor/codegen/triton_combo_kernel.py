@@ -4,7 +4,7 @@ import textwrap
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, cast, Optional, Union
 
 import sympy
 from sympy import Integer, Symbol
@@ -440,19 +440,20 @@ class ComboKernel(Kernel):
         self.sub_kernels: list[TritonKernel] = []
         self.iter_vars_count = itertools.count()
         self.grids: list[list[int]] = []
-        self.min_x_blocks_list: list[int | str] = []
-        self.x_numels_list: list[int | str] = []
+        self.min_x_blocks_list: list[Union[int, str]] = []
+        self.x_numels_list: list[Union[int, str]] = []
         self.y_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
-        self.dispatch_class: (
+        self.dispatch_class: Optional[
             type[
-                ComboKernel.SequentialDispatch
-                | ComboKernel.SequentialFlattenGridDispatch
-                | ComboKernel.RoundRobinDispatch
+                Union[
+                    ComboKernel.SequentialDispatch,
+                    ComboKernel.SequentialFlattenGridDispatch,
+                    ComboKernel.RoundRobinDispatch,
+                ]
             ]
-            | None
-        ) = None
+        ] = None
         self.block_args: list[str] = []
         # there following are used when autotuning is disabled
         self.block_size_1d = 1024  # Try tuning this value
@@ -568,8 +569,8 @@ class ComboKernel(Kernel):
         Kernels with no_x_dim being true has no tunable XBLOCK. They have a fixed number of X blocks.
         Grid calculation needs to make sure that they are assigned with enough number of blocks.
         """
-        min_x_blocks: int | str = 0
-        x_numels: int | str = 0
+        min_x_blocks: Union[int, str] = 0
+        x_numels: Union[int, str] = 0
         for tree in sub_kernel.range_trees:
             simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
             if tree.prefix == "x":
@@ -741,6 +742,22 @@ class ComboKernel(Kernel):
         dispatch = self.dispatch_class
         assert dispatch is not None
 
+        # Compute the max persistent R0_BLOCK across sub-kernels.
+        # This is used by _reduction_configs() to avoid generating configs
+        # where XBLOCK * max_persistent_rblock creates pathologically large
+        # tiles that cause extreme ROCm compilation times.
+        # The max_persistent_rblock mirrors how R0_BLOCK is computed in
+        # codegen_static_numels_sub_kernel() for persistent reductions.
+        max_persistent_rblock = 0
+        for sub in self.sub_kernels:
+            if sub.persistent_reduction:
+                for tree in sub.range_trees:
+                    if tree.is_reduction:
+                        simplified_numel = V.graph.sizevars.simplify(tree.numel)
+                        if isinstance(simplified_numel, (Integer, int)):
+                            val = next_power_of_2(int(simplified_numel))
+                            max_persistent_rblock = max(max_persistent_rblock, val)
+
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(size_hints_list),
@@ -748,6 +765,8 @@ class ComboKernel(Kernel):
             "mutated_arg_names": mutated_args,
             **self.triton_kernel_cls.inductor_meta_common(),
         }
+        if max_persistent_rblock > 0:
+            inductor_meta["max_persistent_rblock"] = max_persistent_rblock
 
         sub_kernel = selected_kernel
         if heuristics == "foreach":
@@ -879,7 +898,7 @@ class ComboKernel(Kernel):
                     )
         return extra_args
 
-    def codegen_kernel(self, name: str | None = None) -> str:
+    def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
         heuristics_list, size_hints_list = [], []

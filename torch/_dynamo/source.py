@@ -21,7 +21,7 @@ import dataclasses
 import enum
 import functools
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch import device as device_type
 from torch._guards import (
@@ -118,7 +118,7 @@ def is_constant_source(source: Source) -> bool:
     return False
 
 
-def _get_source_debug_name(source: Source | None) -> str:
+def _get_source_debug_name(source: Optional[Source]) -> str:
     if source is None:
         return "<unknown source>"
     else:
@@ -152,7 +152,7 @@ class LocalSource(Source):
 
     # Whether we know this input is dynamic (based on example_inputs)
     # For non tensors, we simply look at the first index of the tuple
-    dynamism: frozenset[str] | None = None
+    dynamism: Optional[frozenset[str]] = None
 
     # Whether the item at this source is the _content_ of a cell that is
     # dereferenced from the root frame, i.e., it's a part of the `co_cellvars`
@@ -456,7 +456,7 @@ class UnspecializedParamBufferSource(AttrSource):
 # present within the final view shape metadata.
 @dataclass_with_cached_hash(frozen=True)
 class EphemeralSource(Source):
-    desc: str | None = None
+    desc: Optional[str] = None
 
     @property
     def guard_source(self) -> GuardSource:
@@ -503,7 +503,7 @@ class TensorProperty(enum.Enum):
 @dataclass_with_cached_hash(frozen=True)
 class TensorPropertySource(ChainedSource):
     prop: TensorProperty
-    idx: int | None = None  # None for STORAGE_OFFSET
+    idx: Optional[int] = None  # None for STORAGE_OFFSET
 
     def __post_init__(self) -> None:
         assert self.base is not None
@@ -639,7 +639,7 @@ class AttrProxySource(ChainedSource):
 
 @dataclass_with_cached_hash(frozen=True)
 class DefaultsSource(ChainedSource):
-    idx_key: int | str
+    idx_key: Union[int, str]
     is_kw: bool = False
     field: str = dataclasses.field(init=False, repr=False, compare=False)
     _name: str = dataclasses.field(init=False, repr=False, compare=False)
@@ -1155,7 +1155,7 @@ class BackwardStateSource(Source):
 @functools.lru_cache
 def get_local_source_name(
     source: Source, *, only_allow_input: bool = False
-) -> str | None:
+) -> Optional[str]:
     if isinstance(source, ChainedSource):
         return get_local_source_name(source.base, only_allow_input=only_allow_input)
     if not isinstance(source, LocalSource):
