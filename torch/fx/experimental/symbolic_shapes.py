@@ -120,7 +120,7 @@ DimList = list
 log = logging.getLogger(__name__)
 
 
-from torch.fx.experimental.size_hinting import (
+from torch.fx.experimental._size_hinting import (
     _guarding_hint_or_throw_base,
     _optimization_hint_base,
 )
