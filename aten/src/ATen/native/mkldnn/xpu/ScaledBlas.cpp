@@ -100,6 +100,7 @@ bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
       scale.size(1) == ceil_div<int64_t>(t.size(1), 128) &&
       (scale.is_contiguous() || scale.t().is_contiguous()));
 }
+}
 
 bool is_blockwise_128x128_scaling(
     const at::Tensor& t,
@@ -298,6 +299,12 @@ Tensor& _scaled_mm_out_xpu(
       {
           std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
           std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
+          std::make_pair(
+              ScalingType::BlockWise128x128, ScalingType::BlockWise1x128),
+          std::make_pair(
+              ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
+          std::make_pair(
+              ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
       },
       mat1,
       mat2,
