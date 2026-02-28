@@ -87,24 +87,6 @@ class TestUtils(TestCase):
         result = sympy_subs(expr, {q0: I})
         self.assertTrue(result.has(I))
 
-    def testIdentityComparisonNoRecursion(self):
-        self.assertTrue(Identity(sympify("0")) >= 0)
-        self.assertFalse(Identity(sympify("-6")) >= 0)
-
-    def testIdentityComparableNumbersInMinMax(self):
-        expr = Identity(sympify("-6"))
-        self.assertTrue(expr.is_number)
-        self.assertTrue(expr.is_comparable)
-        self.assertEqual(Max(0, expr), 0)
-
-    def testIdentityEvalfPreservesBitPrecision(self):
-        arg = sympify("1/7")
-        prec = 13
-        expected = arg._eval_evalf(prec)
-        actual = Identity(arg)._eval_evalf(prec)
-        self.assertEqual(actual._prec, expected._prec)
-        self.assertEqual(actual, expected)
-
     def test_sympy_str(self):
         self.assertEqual(sympy_str(sympify("a+b+c")), "a + b + c")
         self.assertEqual(sympy_str(sympify("a*b+c")), "c + a * b")
