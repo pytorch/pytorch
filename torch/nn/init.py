@@ -116,12 +116,15 @@ def _no_grad_trunc_normal_(
                     break
                 result = torch.where(
                     mask,
-                    torch.normal(
-                        mean,
-                        std,
+                    # creating a DTensor if result is a DTensor
+                    # which cannot be achieved using torch.normal()
+                    result.new_empty(
                         size=result.shape,
                         dtype=result.dtype,
                         device=result.device,
+                    ).normal_(
+                        mean,
+                        std,
                         generator=generator,
                     ),
                     result,
