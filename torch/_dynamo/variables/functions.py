@@ -643,6 +643,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Improper override_cudagraphs() call. Please fix your call to override_cudagraphs(). "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
+        elif self.fn is torch._dynamo.bytecode_debugger.breakpoint:
+            tx.output._emit_debugger_breakpoint = True
+            return variables.CONSTANT_VARIABLE_NONE
         # Handle a `nonstrict_trace(fn)` call
         elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
