@@ -2138,6 +2138,103 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
     return _symm_mem_pools[device]
 
 
+# Memory lending APIs.
+# These allow symmetric memory to be temporarily lent to the default CUDA
+# caching allocator, enabling regular CUDA allocations to use the memory
+# during idle periods (e.g., during MLP when attention's symm mem is unused).
+
+# Track which tensors are currently lent out.
+_lent_tensors: set[int] = set()
+
+
+def lend(tensor: torch.Tensor) -> None:
+    r"""
+    lend(tensor) -> None
+
+    Lend a symmetric memory tensor's backing memory to the default CUDA caching
+    allocator. While lent, the allocator may hand out this memory for regular
+    CUDA allocations. The symmetric memory tensor must NOT be used until
+    :func:`reclaim` is called.
+
+    This is useful when symmetric memory is only needed during certain phases
+    (e.g., async tensor parallel in the MLP) and can be reused for other
+    allocations outside of that phase (e.g., attention, optimizer step).
+
+    **Synchronization**: This function uses the current CUDA stream to ensure
+    proper ordering. The caching allocator's internal stream tracking handles
+    the rest. The next symmetric memory operation's built-in barrier handles
+    inter-device synchronization.
+
+    Args:
+        tensor (torch.Tensor): A tensor allocated via
+            :func:`torch.distributed._symmetric_memory.empty`.
+
+    Example::
+
+        >>> # Allocate symm mem for async TP in MLP
+        >>> tp_buf = symm_mem.empty(size, dtype=torch.bfloat16, device="cuda")
+        >>> hdl = symm_mem.rendezvous(tp_buf, group)
+        >>>
+        >>> for layer in layers:
+        >>>     # --- MLP phase: use symm mem for async TP ---
+        >>>     symm_mem.reclaim(tp_buf)
+        >>>     mlp_out = async_tp_mlp(hidden, tp_buf, hdl)
+        >>>
+        >>>     # --- Attention phase: lend symm mem for reuse ---
+        >>>     symm_mem.lend(tp_buf)
+        >>>     attn_out = attention(hidden)  # intermediates can use lent memory
+    """
+    tensor_id = id(tensor)
+    if tensor_id in _lent_tensors:
+        raise RuntimeError("lend: tensor is already lent out")
+
+    device = tensor.device
+    if device.type != "cuda":
+        raise ValueError(f"lend: expected a CUDA tensor, got {device.type}")
+
+    ptr = tensor.data_ptr()
+    size = tensor.untyped_storage().nbytes()
+    device_index = device.index if device.index is not None else torch.cuda.current_device()
+
+    torch._C._cuda_insertExternalBlock(device_index, ptr, size)
+    _lent_tensors.add(tensor_id)
+
+
+def reclaim(tensor: torch.Tensor) -> None:
+    r"""
+    reclaim(tensor) -> None
+
+    Reclaim a symmetric memory tensor's backing memory from the default CUDA
+    caching allocator. All regular allocations that were using this memory
+    must have been freed before calling this.
+
+    After reclaiming, the tensor is usable for symmetric memory operations
+    again.
+
+    **Synchronization**: The caching allocator's internal stream tracking
+    ensures that all compute using the borrowed memory has completed. The
+    next symmetric memory operation's built-in start barrier provides
+    inter-device synchronization.
+
+    Args:
+        tensor (torch.Tensor): A tensor that was previously passed to
+            :func:`lend`.
+
+    Raises:
+        RuntimeError: If the memory is still in use by regular allocations.
+    """
+    tensor_id = id(tensor)
+    if tensor_id not in _lent_tensors:
+        raise RuntimeError("reclaim: tensor was not lent out")
+
+    device = tensor.device
+    ptr = tensor.data_ptr()
+    device_index = device.index if device.index is not None else torch.cuda.current_device()
+
+    torch._C._cuda_removeExternalBlock(device_index, ptr)
+    _lent_tensors.discard(tensor_id)
+
+
 # One-sided communication APIs.
 def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     r"""
@@ -2191,4 +2288,6 @@ __all__ = [
     "set_signal_pad_size",
     "get_signal_pad_size",
     "get_mem_pool",
+    "lend",
+    "reclaim",
 ]

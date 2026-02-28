@@ -1575,5 +1575,369 @@ class SymmMemPoolTest(MultiProcContinuousTest):
         self.assertEqual(y, expected)
 
 
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_lend_reclaim_basic(self):
+        """Test that lend makes symm mem available to the allocator and reclaim takes it back."""
+        self._init_process()
+
+        numel = 1024
+        dtype = torch.float
+
+        # Allocate a symmetric memory tensor
+        t = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        t.fill_(self.rank)
+        data_ptr = t.data_ptr()
+        nbytes = t.untyped_storage().nbytes()
+
+        # Lend the memory to the default allocator
+        symm_mem.lend(t)
+
+        # The allocator should now be able to serve allocations from this region.
+        # Allocate a tensor of the same size — it should reuse the lent memory.
+        regular_tensor = torch.empty(numel, dtype=dtype, device=self.device)
+        regular_ptr = regular_tensor.data_ptr()
+        # The regular tensor should land within the lent block's address range
+        self.assertTrue(
+            data_ptr <= regular_ptr < data_ptr + nbytes,
+            f"Expected regular_tensor ptr {regular_ptr:#x} to be within "
+            f"[{data_ptr:#x}, {data_ptr + nbytes:#x})",
+        )
+
+        # Free the regular tensor so we can reclaim
+        del regular_tensor
+
+        # Reclaim the memory
+        symm_mem.reclaim(t)
+
+        # After reclaim, the symm mem tensor should still be usable for
+        # symmetric operations (rendezvous should succeed).
+        group_name = dist.group.WORLD.group_name
+        symm_mem.rendezvous(t, group=group_name)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_lend_reclaim_double_lend_errors(self):
+        """Test that lending the same tensor twice raises an error."""
+        self._init_process()
+
+        t = symm_mem.empty(1024, dtype=torch.float, device=self.device)
+        symm_mem.lend(t)
+
+        with self.assertRaisesRegex(RuntimeError, "already lent out"):
+            symm_mem.lend(t)
+
+        # Clean up
+        symm_mem.reclaim(t)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_reclaim_without_lend_errors(self):
+        """Test that reclaiming a tensor that was not lent raises an error."""
+        self._init_process()
+
+        t = symm_mem.empty(1024, dtype=torch.float, device=self.device)
+
+        with self.assertRaisesRegex(RuntimeError, "was not lent out"):
+            symm_mem.reclaim(t)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_reclaim_while_allocated_errors(self):
+        """Test that reclaiming while lent memory is still in use raises an error."""
+        self._init_process()
+
+        numel = 1024
+        dtype = torch.float
+        t = symm_mem.empty(numel, dtype=dtype, device=self.device)
+
+        symm_mem.lend(t)
+
+        # Allocate from the lent memory — this keeps the block in use
+        regular_tensor = torch.empty(numel, dtype=dtype, device=self.device)
+
+        # Reclaim should fail because the block is still allocated
+        with self.assertRaisesRegex(RuntimeError, "is still allocated|is split"):
+            symm_mem.reclaim(t)
+
+        # Clean up: free the regular tensor, then reclaim
+        del regular_tensor
+        symm_mem.reclaim(t)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_lend_reclaim_multiple_cycles(self):
+        """Test that lend/reclaim can be repeated multiple times."""
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        numel = 1024
+        dtype = torch.float
+        t = symm_mem.empty(numel, dtype=dtype, device=self.device)
+
+        for i in range(3):
+            # Use for symmetric op
+            t.fill_(self.rank + i)
+            symm_mem.rendezvous(t, group=group_name)
+
+            # Lend during "MLP phase"
+            symm_mem.lend(t)
+            regular = torch.empty(numel, dtype=dtype, device=self.device)
+            regular.fill_(42)
+            del regular
+
+            # Reclaim for next "attention phase"
+            symm_mem.reclaim(t)
+
+        # Final symmetric op should still work
+        t.fill_(self.rank)
+        result = torch.ops.symm_mem.one_shot_all_reduce(t, "sum", group_name)
+        expected_sum = sum(range(self.world_size))
+        self.assertTrue(result.eq(expected_sum).all())
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_lend_reclaim_reduces_peak_memory(self):
+        """Test that lending symm mem avoids new allocations in the default pool.
+
+        symm_mem.empty() allocates through a private pool with a custom
+        allocator, so its memory is invisible to torch.cuda.memory_reserved()
+        (which tracks the default caching allocator's cudaMalloc'd memory).
+
+        The test measures memory_reserved() — the total amount of memory the
+        default caching allocator has obtained from CUDA. Without lending,
+        torch.empty() triggers a cudaMalloc. With lending, the lent block is
+        already in the free list so no cudaMalloc is needed.
+        """
+        self._init_process()
+
+        buf_size = 1024 * 1024  # 1M elements
+        dtype = torch.float  # 4 bytes each => 4MB per buffer
+
+        # --- Baseline: no lending ---
+        # Clear default allocator caches so we start from a known state
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats(self.device)
+
+        # Allocate symm mem (goes through private pool, doesn't affect
+        # default allocator's reserved memory)
+        symm_buf = symm_mem.empty(buf_size, dtype=dtype, device=self.device)
+        symm_buf.fill_(1.0)
+
+        reserved_before = torch.cuda.memory_reserved(self.device)
+
+        # Regular allocation without lending — needs new memory from CUDA
+        regular_buf = torch.empty(buf_size, dtype=dtype, device=self.device)
+        regular_buf.fill_(2.0)
+
+        reserved_without_lending = torch.cuda.memory_reserved(self.device)
+        new_reserved_without = reserved_without_lending - reserved_before
+
+        del regular_buf
+        del symm_buf
+
+        # --- With lending ---
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats(self.device)
+
+        # Allocate symm mem
+        symm_buf = symm_mem.empty(buf_size, dtype=dtype, device=self.device)
+        symm_buf.fill_(1.0)
+
+        # Lend — inserts block into default allocator's free list
+        symm_mem.lend(symm_buf)
+
+        reserved_before = torch.cuda.memory_reserved(self.device)
+
+        # Regular allocation with lending — should reuse lent memory,
+        # no new cudaMalloc needed
+        regular_buf = torch.empty(buf_size, dtype=dtype, device=self.device)
+        regular_buf.fill_(2.0)
+
+        reserved_with_lending = torch.cuda.memory_reserved(self.device)
+        new_reserved_with = reserved_with_lending - reserved_before
+
+        del regular_buf
+        symm_mem.reclaim(symm_buf)
+        del symm_buf
+
+        # Without lending, the default allocator had to reserve new memory
+        # (via cudaMalloc). With lending, it reused the lent block, so no
+        # new reservation was needed.
+        self.assertGreater(
+            new_reserved_without,
+            new_reserved_with,
+            f"Expected lending to avoid new cudaMalloc. "
+            f"New reserved without lending: {new_reserved_without / 1e6:.1f}MB, "
+            f"New reserved with lending: {new_reserved_with / 1e6:.1f}MB",
+        )
+
+        # With lending, no new memory should have been reserved at all
+        self.assertEqual(
+            new_reserved_with,
+            0,
+            f"Expected zero new reservations with lending, "
+            f"got {new_reserved_with / 1e6:.1f}MB",
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_lend_reclaim_same_stream(self):
+        """Lend and allocate on the same stream — block should be reused."""
+        self._init_process()
+
+        numel = 1024
+        dtype = torch.float
+        stream = torch.cuda.Stream(self.device)
+
+        with torch.cuda.stream(stream):
+            t = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            t.fill_(1.0)
+            data_ptr = t.data_ptr()
+
+            symm_mem.lend(t)
+
+            # Allocate on the same stream — should reuse lent block
+            regular = torch.empty(numel, dtype=dtype, device=self.device)
+            self.assertEqual(regular.data_ptr(), data_ptr)
+
+            del regular
+            symm_mem.reclaim(t)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_lend_reclaim_different_stream(self):
+        """Lend on one stream, allocate on another.
+
+        The caching allocator's get_free_block filters by stream, so the
+        lent block (recorded on stream A) won't be found by an allocation
+        on stream B. This test documents this behavior.
+        """
+        self._init_process()
+
+        numel = 1024
+        dtype = torch.float
+        stream_a = torch.cuda.Stream(self.device)
+        stream_b = torch.cuda.Stream(self.device)
+
+        with torch.cuda.stream(stream_a):
+            t = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            t.fill_(1.0)
+            data_ptr = t.data_ptr()
+            nbytes = t.untyped_storage().nbytes()
+
+            symm_mem.lend(t)
+
+        # Allocate on a different stream — the allocator won't match
+        # the lent block because it's associated with stream_a
+        with torch.cuda.stream(stream_b):
+            regular = torch.empty(numel, dtype=dtype, device=self.device)
+            # The regular tensor should NOT reuse the lent block
+            self.assertFalse(
+                data_ptr <= regular.data_ptr() < data_ptr + nbytes,
+                "Expected allocation on a different stream to NOT reuse lent block",
+            )
+            del regular
+
+        symm_mem.reclaim(t)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_lend_reclaim_does_not_affect_private_pool(self):
+        """Lent blocks go into the default pool, not private pools.
+
+        An allocation under a MemPool context should NOT see the lent block.
+        """
+        self._init_process()
+
+        numel = 1024
+        dtype = torch.float
+
+        t = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        data_ptr = t.data_ptr()
+        nbytes = t.untyped_storage().nbytes()
+
+        symm_mem.lend(t)
+
+        # Allocate under a different private pool — should NOT reuse lent block
+        other_pool = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(other_pool):
+            regular = torch.empty(numel, dtype=dtype, device=self.device)
+            self.assertFalse(
+                data_ptr <= regular.data_ptr() < data_ptr + nbytes,
+                "Lent block should not be visible to allocations in a private pool",
+            )
+            del regular
+
+        # But allocation in the default pool SHOULD reuse it
+        default_regular = torch.empty(numel, dtype=dtype, device=self.device)
+        self.assertEqual(default_regular.data_ptr(), data_ptr)
+        del default_regular
+
+        symm_mem.reclaim(t)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_lend_reclaim_split_and_merge(self):
+        """Lend a large block, allocate a smaller tensor from it (splitting),
+        then free and reclaim (requiring merge back)."""
+        self._init_process()
+
+        # Allocate 4MB of symm mem (lands in large_blocks pool)
+        large_numel = 1024 * 1024
+        dtype = torch.float  # 4 bytes => 4MB
+        t = symm_mem.empty(large_numel, dtype=dtype, device=self.device)
+        data_ptr = t.data_ptr()
+        nbytes = t.untyped_storage().nbytes()
+
+        symm_mem.lend(t)
+
+        # Allocate a smaller tensor that still lands in large_blocks (> 1MB).
+        # The allocator should split the lent 4MB block.
+        small_numel = 384 * 1024  # 384K * 4 bytes = 1.5MB > kSmallSize(1MB)
+        small = torch.empty(small_numel, dtype=dtype, device=self.device)
+        # Should land within the lent block's address range
+        self.assertTrue(
+            data_ptr <= small.data_ptr() < data_ptr + nbytes,
+            f"Expected small tensor ptr {small.data_ptr():#x} within "
+            f"[{data_ptr:#x}, {data_ptr + nbytes:#x})",
+        )
+
+        # Can't reclaim while the block is split/allocated
+        with self.assertRaisesRegex(RuntimeError, "is still allocated|is split"):
+            symm_mem.reclaim(t)
+
+        # Free the small tensor — should merge back into the full block
+        del small
+
+        # Now reclaim should succeed
+        symm_mem.reclaim(t)
+
+        # Verify symm mem tensor still works
+        group_name = dist.group.WORLD.group_name
+        t.fill_(self.rank)
+        symm_mem.rendezvous(t, group=group_name)
+
+
 if __name__ == "__main__":
     run_tests()

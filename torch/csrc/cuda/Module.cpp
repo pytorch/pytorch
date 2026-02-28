@@ -1468,6 +1468,26 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def(
+      "_cuda_insertExternalBlock",
+      [](c10::DeviceIndex device, size_t ptr_as_int, size_t size) {
+        // The block is associated with the current CUDA stream so that
+        // the allocator's stream-safety tracking is correct.
+        cudaStream_t stream = at::cuda::getCurrentCUDAStream(device);
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        void* ptr = reinterpret_cast<void*>(ptr_as_int);
+        c10::cuda::CUDACachingAllocator::insertExternalBlock(
+            device, ptr, size, stream);
+      });
+
+  m.def(
+      "_cuda_removeExternalBlock",
+      [](c10::DeviceIndex device, size_t ptr_as_int) {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        void* ptr = reinterpret_cast<void*>(ptr_as_int);
+        return c10::cuda::CUDACachingAllocator::removeExternalBlock(device, ptr);
+      });
+
+  m.def(
       "_cuda_checkPoolLiveAllocations",
       [](c10::DeviceIndex device,
          at::cuda::MempoolId_t mempool_id,

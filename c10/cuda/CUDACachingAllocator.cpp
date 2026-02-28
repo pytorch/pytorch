@@ -198,6 +198,8 @@ struct Block {
   BlockPool* pool{nullptr}; // owning memory pool
   void* ptr{nullptr}; // memory address
   bool allocated{false}; // in-use flag
+  bool is_external{false}; // externally-owned memory (e.g. lent from symm mem)
+                           // GC must never free/release external blocks
   bool mapped{true}; // is the virtual address range this Block references
                      // backed by physical pages. Always true when
                      // expandable_segment_ is null. When false
@@ -1750,6 +1752,7 @@ class DeviceCachingAllocator {
 
       block = new Block(device, stream, size, pool, block->ptr);
       block->expandable_segment_ = remaining->expandable_segment_;
+      block->is_external = remaining->is_external;
       block->prev = remaining->prev;
       if (block->prev) {
         block->prev->next = block;
@@ -2725,6 +2728,94 @@ class DeviceCachingAllocator {
     no_split_pools.insert(mempool_id);
   }
 
+  // Insert an externally-owned block of memory into the default pool's free
+  // list. This allows the caching allocator to hand out this memory for
+  // regular allocations. The block is marked is_external=true so that GC
+  // never attempts to cudaFree it.
+  //
+  // The caller retains ownership of the underlying memory and is responsible
+  // for calling removeExternalBlock() before freeing it.
+  void insertExternalBlock(
+      void* ptr,
+      size_t size,
+      cudaStream_t stream) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    auto& pool = size <= kSmallSize ? small_blocks : large_blocks;
+    auto* block = new Block(device_id, stream, size, &pool, ptr);
+    block->is_external = true;
+    block->mapped = true;
+
+    pool.insert_into_blocks(block);
+
+    StatTypes stat_types = get_stat_types_for_pool(pool);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.segment[stat_type].increase(1);
+      stats.reserved_bytes[stat_type].increase(size);
+    });
+  }
+
+  // Remove an externally-owned block from the default pool. All allocations
+  // that were served from this block must have been freed before calling this.
+  // Returns the size of the block that was removed.
+  //
+  // Preconditions:
+  //   - The block at `ptr` is free (not allocated, no pending events)
+  //   - The block is not split (all sub-allocations have been freed and merged)
+  size_t removeExternalBlock(void* ptr) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    // Search both pools for the block
+    Block* found = nullptr;
+    BlockPool* pool_ptr = nullptr;
+
+    for (auto* pool : {&large_blocks, &small_blocks}) {
+      for (auto it = pool->blocks.begin(); it != pool->blocks.end(); ++it) {
+        Block* block = *it;
+        if (block->ptr == ptr && block->is_external) {
+          found = block;
+          pool_ptr = pool;
+          break;
+        }
+      }
+      if (found)
+        break;
+    }
+
+    TORCH_CHECK(
+        found != nullptr,
+        "removeExternalBlock: block at ",
+        ptr,
+        " not found in free pools. Was it already removed?");
+    TORCH_CHECK(
+        !found->allocated,
+        "removeExternalBlock: block at ",
+        ptr,
+        " is still allocated. Free all tensors using this memory first.");
+    TORCH_CHECK(
+        !found->is_split(),
+        "removeExternalBlock: block at ",
+        ptr,
+        " is split. Free all sub-allocations first.");
+    TORCH_CHECK(
+        found->event_count == 0 && found->stream_uses.empty(),
+        "removeExternalBlock: block at ",
+        ptr,
+        " has pending events or stream uses.");
+
+    size_t block_size = found->size;
+    pool_ptr->blocks.erase(found);
+
+    StatTypes stat_types = get_stat_types_for_pool(*pool_ptr);
+    for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.segment[stat_type].decrease(1);
+      stats.reserved_bytes[stat_type].decrease(block_size);
+    });
+
+    delete found;
+    return block_size;
+  }
+
   // See Note [Interaction with CUDA graph capture]
 
   // Called by CUDAGraph::capture_begin
@@ -3344,6 +3435,7 @@ class DeviceCachingAllocator {
         Block* block = *it;
         ++it;
         if (!block->is_split() && !block->expandable_segment_ &&
+            !block->is_external &&
             static_cast<double>(block->gc_count()) >= age_threshold) {
           block_freed = true;
           gc_reclaimed += block->size;
@@ -3505,7 +3597,7 @@ class DeviceCachingAllocator {
         if (!is_first) {
           --it;
         }
-        if (!(*cur)->expandable_segment_) {
+        if (!(*cur)->expandable_segment_ && !(*cur)->is_external) {
           totalReleased += (*cur)->size;
           release_block(*cur, context);
         }
@@ -3516,6 +3608,9 @@ class DeviceCachingAllocator {
       if (totalReleased < key.size)
         return false;
     } else {
+      if ((*it)->is_external) {
+        return false;
+      }
       release_block(*it, context);
     }
     return true;
@@ -3723,7 +3818,7 @@ class DeviceCachingAllocator {
         // so just gather what needs to be freed
         // to avoid invalidating the iterator
         to_unmap.push_back(block);
-      } else if (!block->prev && !block->next) {
+      } else if (!block->prev && !block->next && !block->is_external) {
         release_block(block, context);
       }
     }
@@ -4432,6 +4527,20 @@ class NativeCachingAllocator : public CUDAAllocator {
   void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
     device_allocator[device]->setNoSplit(std::move(mempool_id));
+  }
+
+  void insertExternalBlock(
+      c10::DeviceIndex device,
+      void* ptr,
+      size_t size,
+      cudaStream_t stream) override {
+    assertValidDevice(device);
+    device_allocator[device]->insertExternalBlock(ptr, size, stream);
+  }
+
+  size_t removeExternalBlock(c10::DeviceIndex device, void* ptr) override {
+    assertValidDevice(device);
+    return device_allocator[device]->removeExternalBlock(ptr);
   }
 
   // CUDAGraph interactions

@@ -176,6 +176,31 @@ class CUDAAllocator : public DeviceAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
+  // Insert externally-owned memory into the default pool's free list.
+  // The allocator can hand it out for regular allocations but will never
+  // free it. Call removeExternalBlock() before freeing the memory.
+  virtual void insertExternalBlock(
+      c10::DeviceIndex device,
+      void* ptr,
+      size_t size,
+      cudaStream_t stream) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support insertExternalBlock. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
+  // Remove externally-owned memory from the default pool. The block must be
+  // free (all allocations from it must have been released).
+  virtual size_t removeExternalBlock(c10::DeviceIndex device, void* ptr) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support removeExternalBlock. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
       c10::DeviceIndex /*device*/,
@@ -434,6 +459,16 @@ inline void setUseOnOOM(
 }
 inline void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->setNoSplit(device, mempool_id);
+}
+inline void insertExternalBlock(
+    c10::DeviceIndex device,
+    void* ptr,
+    size_t size,
+    cudaStream_t stream) {
+  get()->insertExternalBlock(device, ptr, size, stream);
+}
+inline size_t removeExternalBlock(c10::DeviceIndex device, void* ptr) {
+  return get()->removeExternalBlock(device, ptr);
 }
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
