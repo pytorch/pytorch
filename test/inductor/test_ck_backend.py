@@ -84,7 +84,8 @@ class TestCKBackend(TestCase):
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(256, 2048, **tensor_options)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -134,7 +135,8 @@ class TestCKBackend(TestCase):
 
         torch._dynamo.mark_dynamic(a, 0)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -180,7 +182,8 @@ class TestCKBackend(TestCase):
         a = torch.randn(2240, 256, **tensor_options)
         b = torch.randn(2048, 256, **tensor_options).transpose(0, 1)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -212,7 +215,8 @@ class TestCKBackend(TestCase):
         a = torch.empty_strided((50257, 32768), (1, 50304), **tensor_options)
         b = torch.empty_strided((32768, 768), (768, 1), **tensor_options)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -252,7 +256,8 @@ class TestCKBackend(TestCase):
         a = torch.randn(m, k, **tensor_options)
         b = torch.randn(k, n, **tensor_options)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -323,7 +328,8 @@ class TestCKBackend(TestCase):
         # quantize input x
         x_fp8, x_inverse_scale = f_quantize(x, dtype_float8)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
             y = torch._scaled_mm(
@@ -383,7 +389,8 @@ class TestCKBackend(TestCase):
         x_cl = x.to(memory_format=torch.channels_last)
         w_cl = w.to(memory_format=torch.channels_last)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
@@ -427,7 +434,8 @@ class TestCKBackend(TestCase):
         a = torch.randn(16, 2240, 256, **tensor_options)
         b = torch.randn(16, 2048, 256, **tensor_options).transpose(1, 2)
 
-        assert "rocm" in dir(config)
+        if "rocm" not in dir(config):
+            raise AssertionError("'rocm' not found in dir(config)")
 
         with (
             config.patch(
