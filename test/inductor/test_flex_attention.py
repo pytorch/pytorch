@@ -599,9 +599,12 @@ class TestFlexAttention(InductorTestCase):
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        assert isinstance(golden_out, torch.Tensor)
-        assert isinstance(ref_out, torch.Tensor)
-        assert isinstance(compiled_out, torch.Tensor)
+        if not isinstance(golden_out, torch.Tensor):
+            raise AssertionError(f"Expected torch.Tensor, got {type(golden_out)}")
+        if not isinstance(ref_out, torch.Tensor):
+            raise AssertionError(f"Expected torch.Tensor, got {type(ref_out)}")
+        if not isinstance(compiled_out, torch.Tensor):
+            raise AssertionError(f"Expected torch.Tensor, got {type(compiled_out)}")
 
         if not requires_grad:
             self._check_out(
@@ -645,7 +648,8 @@ class TestFlexAttention(InductorTestCase):
         device: str,
         page_size: int = 128,
     ) -> tuple[Tensor, Tensor, BlockMask, _score_mod_signature]:
-        assert block_mask is not None, "Must provide block_mask"
+        if block_mask is None:
+            raise AssertionError("Must provide block_mask")
         Q_B, Q_H, Q_S, _ = q.shape
         KV_B, KV_H, KV_S, QK_D = k.shape
         _, _, _, V_D = v.shape
@@ -801,7 +805,10 @@ class TestFlexAttention(InductorTestCase):
         V_D: int = D,
         block_mask: Optional[BlockMask] = None,
     ):
-        assert Q_H % KV_H == 0
+        if Q_H % KV_H != 0:
+            raise AssertionError(
+                f"Expected Q_H % KV_H == 0, got {Q_H} % {KV_H} = {Q_H % KV_H}"
+            )
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
 
@@ -1389,10 +1396,16 @@ class TestFlexAttention(InductorTestCase):
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
 
         Bq, Bkv = batch_dims
-        assert Bq > 1 and Bkv == 1
+        if not (Bq > 1 and Bkv == 1):
+            raise AssertionError(
+                f"Expected Bq > 1 and Bkv == 1, got Bq={Bq}, Bkv={Bkv}"
+            )
 
         block_mask = create_block_mask(noop_mask, Bq, 1, S, S, device=device)
 
@@ -1514,10 +1527,16 @@ class TestFlexAttention(InductorTestCase):
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
 
         Bq, Bkv = batch_dims
-        assert Bq > 1 and Bkv == 1
+        if not (Bq > 1 and Bkv == 1):
+            raise AssertionError(
+                f"Expected Bq > 1 and Bkv == 1, got Bq={Bq}, Bkv={Bkv}"
+            )
 
         def mask_mod(b, h, q, kv):
             return q >= kv
@@ -1534,7 +1553,6 @@ class TestFlexAttention(InductorTestCase):
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
-    @skip_on_rocm  # TODO: NaNs on ROCM
     def test_GQA(self, device, dtype: torch.dtype, score_mod: Callable):
         inputs = (
             score_mod,
@@ -1587,8 +1605,13 @@ class TestFlexAttention(InductorTestCase):
         def coerce_to_strides(val, shape, strides):
             strides, offset = strides
             val_max = [x * (y - 1) for x, y in zip(strides, shape)]
-            assert sum(val_max) + offset < B * H * S * D * 2
-            assert strides[-1] == 1
+            if sum(val_max) + offset >= B * H * S * D * 2:
+                raise AssertionError(
+                    f"Expected sum(val_max) + offset < B * H * S * D * 2, "
+                    f"got {sum(val_max) + offset} >= {B * H * S * D * 2}"
+                )
+            if strides[-1] != 1:
+                raise AssertionError(f"Expected strides[-1] == 1, got {strides[-1]}")
             return torch.as_strided(val, shape, strides, offset).requires_grad_(
                 requires_grad
             )
@@ -1955,7 +1978,8 @@ class TestFlexAttention(InductorTestCase):
         H = 32
         W = S // H
         WINDOW = 3
-        assert W * H == S
+        if W * H != S:
+            raise AssertionError(f"Expected W * H == S, got {W * H} != {S}")
 
         def get_x_y(idx):
             # This should be a floor divide, but we don't support that properly
@@ -2507,7 +2531,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @skip_on_rocm  # TODO: Investigate
     def test_multiple_mask_calls(self, device):
         make_tensor = functools.partial(
             torch.randn,
@@ -3640,11 +3663,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_flex_attention_stride_ordering(self, device, mode, permute_order, shape):
         from torch._inductor.ir import get_stride_order
 
-        if torch.version.hip and mode == "paged_attention":
-            raise self.skipTest(
-                "TODO: figure out why mode_paged_attention_permute_order3_shape0 on MI200 caused mem fault"
-            )
-
         dtype = torch.float32
         # Setup
         requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
@@ -4365,8 +4383,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query, key, value, return_lse=True, kernel_options=kernel_options
         )
 
-        assert torch.equal(out_eager, out_compiled)
-        assert torch.equal(lse_eager, lse_compiled)
+        if not torch.equal(out_eager, out_compiled):
+            raise AssertionError("out_eager and out_compiled are not equal")
+        if not torch.equal(lse_eager, lse_compiled):
+            raise AssertionError("lse_eager and lse_compiled are not equal")
 
         grads_eager = torch.autograd.grad(out_eager.sum(), (query, key, value))
         grads_compile = torch.autograd.grad(out_compiled.sum(), (query, key, value))
@@ -4426,9 +4446,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             l = torch.randint(0, T, (B,), device=device)
             model(x, l)
 
-        assert counter.frame_count == 1, (
-            f"Expected 1 graph, but got {counter.frame_count} graphs"
-        )
+        if counter.frame_count != 1:
+            raise AssertionError(
+                f"Expected 1 graph, but got {counter.frame_count} graphs"
+            )
 
     @supported_platform
     @skip_on_cpu
@@ -4789,7 +4810,8 @@ class GraphModule(torch.nn.Module):
         class AsStridedErrorTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, elem):
-                assert isinstance(elem, torch.Tensor)
+                if not isinstance(elem, torch.Tensor):
+                    raise AssertionError(f"Expected torch.Tensor, got {type(elem)}")
                 return torch.Tensor._make_wrapper_subclass(
                     cls,
                     elem.shape,
@@ -4812,7 +4834,8 @@ class GraphModule(torch.nn.Module):
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                assert meta is None
+                if meta is not None:
+                    raise AssertionError(f"Expected meta to be None, got {meta}")
                 elem = inner_tensors["elem"]
                 return AsStridedErrorTensor(elem)
 
@@ -4980,7 +5003,8 @@ class GraphModule(torch.nn.Module):
             def _init_tables(self, N: int, R: int) -> None:
                 P = N - R
                 S = int(P**0.5)
-                assert S * S == P
+                if S * S != P:
+                    raise AssertionError(f"Expected S * S == P, got {S * S} != {P}")
                 rng = torch.arange(-(S - 1), S, dtype=torch.float32)
                 dY, dX = torch.meshgrid(rng, rng, indexing="ij")
                 rel = torch.stack(
@@ -5323,21 +5347,21 @@ class GraphModule(torch.nn.Module):
             *positional_args,
             **keyword_args,
         )
-        assert kernel_code is not None, "Failed to retrieve compiled kernel code"
-        assert "num_consumer_groups" in kernel_code[0], (
-            "num_consumer_groups missing in kernel definition"
-        )
-        assert "num_buffers_warp_spec" in kernel_code[0], (
-            "num_buffers_warp_spec missing in kernel definition"
-        )
+        if kernel_code is None:
+            raise AssertionError("Failed to retrieve compiled kernel code")
+        if "num_consumer_groups" not in kernel_code[0]:
+            raise AssertionError("num_consumer_groups missing in kernel definition")
+        if "num_buffers_warp_spec" not in kernel_code[0]:
+            raise AssertionError("num_buffers_warp_spec missing in kernel definition")
 
         # Validate correctness
         C1 = flex_compiled(q, k, v)
         C2 = flex_attention(q, k, v)
 
-        assert torch.allclose(C1, C2, atol=1e-2, rtol=1e-2), (
-            "Warp specialized kernel result differs from reference"
-        )
+        if not torch.allclose(C1, C2, atol=1e-2, rtol=1e-2):
+            raise AssertionError(
+                "Warp specialized kernel result differs from reference"
+            )
 
     @supported_platform
     @skip_on_cpu
@@ -5504,6 +5528,91 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(out.shape, (B, H, S, D))
 
+    @supported_platform
+    def test_callable_class_mask_mod(self, device):
+        # Test that callable class instances work as mask_mod with flex_attention
+
+        B, H, S, D = 1, 8, 64, 64
+
+        class CausalOrWindowMask:
+            __name__ = "causal_or_window"
+
+            def __init__(self, window_size):
+                self.window_size = window_size
+
+            def __call__(self, b, h, q_idx, kv_idx):
+                causal = q_idx >= kv_idx
+                in_window = (kv_idx - q_idx) < self.window_size
+                return causal | in_window
+
+            def __eq__(self, other):
+                if not isinstance(other, CausalOrWindowMask):
+                    return NotImplemented
+                return self.window_size == other.window_size
+
+            def __hash__(self):
+                return hash(self.window_size)
+
+        mask_mod = CausalOrWindowMask(window_size=64)
+
+        query = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        key = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        value = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+
+        @torch.compile(fullgraph=True)
+        def f(q, k, v):
+            block_mask = create_block_mask(mask_mod, B, H, S, S, device=q.device)
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        _ = f(query, key, value)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_flex_attention_always_freezes_layout(self, device):
+        """Test that flex attention always freezes FlexibleLayout inputs.
+
+        When always_freeze_layout=True on flex attention templates,
+        get_stride_and_maybe_freeze_layout should freeze FlexibleLayout
+        immediately rather than using layout constraints.
+        """
+        from torch._inductor import ir
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+
+        B, H, S, D = 2, 4, 128, 64
+        dtype = torch.float16
+
+        query = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        key = torch.randn(B, H, S, D, device=device, dtype=dtype)
+        value = torch.randn(B, H, S, D, device=device, dtype=dtype)
+
+        flexible_layout_called = False
+        orig_stride_call = TritonTemplateKernel.get_stride_and_maybe_freeze_layout
+
+        def tracking_get_stride(self, node):
+            nonlocal flexible_layout_called
+            flexible_layout = isinstance(node.data.layout, ir.FlexibleLayout)
+            result = orig_stride_call(self, node)
+            if flexible_layout:
+                flexible_layout_called = True
+                if not isinstance(node.data.layout, ir.FixedLayout):
+                    raise AssertionError(
+                        f"Expected FixedLayout, got {type(node.data.layout)}"
+                    )
+            return result
+
+        with patch.object(
+            TritonTemplateKernel,
+            "get_stride_and_maybe_freeze_layout",
+            tracking_get_stride,
+        ):
+            compiled_flex = torch.compile(flex_attention, fullgraph=True)
+            compiled_flex(query, key, value)
+
+        self.assertTrue(
+            flexible_layout_called,
+            "get_stride_and_maybe_freeze_layout should be called with FlexibleLayout nodes",
+        )
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
@@ -5558,41 +5667,77 @@ class TestBlockMask(InductorTestCase):
             return (q + (offset[b] * 128)) >= kv
 
         block_mask = create_block_mask(causal_mask, 4, 2, 512, 512, device=device)
-        assert block_mask.kv_num_blocks.shape == (4, 2, 4)
-        assert block_mask.kv_indices.shape == (4, 2, 4, 4)
+        if block_mask.kv_num_blocks.shape != (4, 2, 4):
+            raise AssertionError(
+                f"Expected shape (4, 2, 4), got {block_mask.kv_num_blocks.shape}"
+            )
+        if block_mask.kv_indices.shape != (4, 2, 4, 4):
+            raise AssertionError(
+                f"Expected shape (4, 2, 4, 4), got {block_mask.kv_indices.shape}"
+            )
 
         # Index on batch dimension
         new_block_mask = block_mask[0]
-        assert new_block_mask.kv_num_blocks.shape == (1, 2, 4)
-        assert new_block_mask.kv_indices.shape == (1, 2, 4, 4)
+        if new_block_mask.kv_num_blocks.shape != (1, 2, 4):
+            raise AssertionError(
+                f"Expected shape (1, 2, 4), got {new_block_mask.kv_num_blocks.shape}"
+            )
+        if new_block_mask.kv_indices.shape != (1, 2, 4, 4):
+            raise AssertionError(
+                f"Expected shape (1, 2, 4, 4), got {new_block_mask.kv_indices.shape}"
+            )
 
         # Index on batch and head dimension
         new_block_mask = block_mask[0, 1]
-        assert new_block_mask.kv_num_blocks.shape == (
+        if new_block_mask.kv_num_blocks.shape != (
             1,
             1,
             4,
-        )
-        assert new_block_mask.kv_indices.shape == (1, 1, 4, 4)
+        ):
+            raise AssertionError(
+                f"Expected shape (1, 1, 4), got {new_block_mask.kv_num_blocks.shape}"
+            )
+        if new_block_mask.kv_indices.shape != (1, 1, 4, 4):
+            raise AssertionError(
+                f"Expected shape (1, 1, 4, 4), got {new_block_mask.kv_indices.shape}"
+            )
 
         # Index on batch and head dimension with -1 semantics
         new_block_mask = block_mask[-1, -2]
-        assert new_block_mask.kv_num_blocks.shape == (
+        if new_block_mask.kv_num_blocks.shape != (
             1,
             1,
             4,
-        )
-        assert new_block_mask.kv_indices.shape == (1, 1, 4, 4)
+        ):
+            raise AssertionError(
+                f"Expected shape (1, 1, 4), got {new_block_mask.kv_num_blocks.shape}"
+            )
+        if new_block_mask.kv_indices.shape != (1, 1, 4, 4):
+            raise AssertionError(
+                f"Expected shape (1, 1, 4, 4), got {new_block_mask.kv_indices.shape}"
+            )
 
         # slicing on batch and head dimension
         new_block_mask = block_mask[0:2, 1:2]
-        assert new_block_mask.kv_num_blocks.shape == (2, 1, 4)
-        assert new_block_mask.kv_indices.shape == (2, 1, 4, 4)
+        if new_block_mask.kv_num_blocks.shape != (2, 1, 4):
+            raise AssertionError(
+                f"Expected shape (2, 1, 4), got {new_block_mask.kv_num_blocks.shape}"
+            )
+        if new_block_mask.kv_indices.shape != (2, 1, 4, 4):
+            raise AssertionError(
+                f"Expected shape (2, 1, 4, 4), got {new_block_mask.kv_indices.shape}"
+            )
 
         # slicing on batch, head, and query dimension
         new_block_mask = block_mask[0:2, 1:2, torch.tensor([1], dtype=torch.int32)]
-        assert new_block_mask.kv_num_blocks.shape == (2, 1, 1)
-        assert new_block_mask.kv_indices.shape == (2, 1, 1, 4)
+        if new_block_mask.kv_num_blocks.shape != (2, 1, 1):
+            raise AssertionError(
+                f"Expected shape (2, 1, 1), got {new_block_mask.kv_num_blocks.shape}"
+            )
+        if new_block_mask.kv_indices.shape != (2, 1, 1, 4):
+            raise AssertionError(
+                f"Expected shape (2, 1, 1, 4), got {new_block_mask.kv_indices.shape}"
+            )
 
         # slicing on batch, head, and query dimension
         q_index = torch.tensor([0], dtype=torch.int32)
@@ -5609,8 +5754,10 @@ class TestBlockMask(InductorTestCase):
         )
 
         if block_mask.full_kv_num_blocks is not None:
-            assert new_block_mask.full_kv_num_blocks is not None
-            assert new_block_mask.full_kv_indices is not None
+            if new_block_mask.full_kv_num_blocks is None:
+                raise AssertionError("Expected full_kv_num_blocks to not be None")
+            if new_block_mask.full_kv_indices is None:
+                raise AssertionError("Expected full_kv_indices to not be None")
             torch.testing.assert_close(
                 new_block_mask.full_kv_num_blocks,
                 block_mask.full_kv_num_blocks[:, :, q_index],
@@ -5651,22 +5798,50 @@ class TestBlockMask(InductorTestCase):
             return (q + (offset[b] * 128)) >= kv
 
         block_mask = create_block_mask(causal_mask, 1, 1, 512, 512, device=device)
-        assert block_mask.kv_indices.device.type == device.type
-        assert block_mask.kv_num_blocks.device.type == device.type
-        assert block_mask.q_indices.device.type == device.type
-        assert block_mask.q_num_blocks.device.type == device.type
+        if block_mask.kv_indices.device.type != device.type:
+            raise AssertionError(
+                f"Expected device type {device.type}, got {block_mask.kv_indices.device.type}"
+            )
+        if block_mask.kv_num_blocks.device.type != device.type:
+            raise AssertionError(
+                f"Expected device type {device.type}, got {block_mask.kv_num_blocks.device.type}"
+            )
+        if block_mask.q_indices.device.type != device.type:
+            raise AssertionError(
+                f"Expected device type {device.type}, got {block_mask.q_indices.device.type}"
+            )
+        if block_mask.q_num_blocks.device.type != device.type:
+            raise AssertionError(
+                f"Expected device type {device.type}, got {block_mask.q_num_blocks.device.type}"
+            )
 
         block_mask = block_mask.to("cpu")
-        assert block_mask.kv_indices.is_cpu
-        assert block_mask.kv_num_blocks.is_cpu
-        assert block_mask.q_indices.is_cpu
-        assert block_mask.q_num_blocks.is_cpu
+        if not block_mask.kv_indices.is_cpu:
+            raise AssertionError("Expected kv_indices to be on CPU")
+        if not block_mask.kv_num_blocks.is_cpu:
+            raise AssertionError("Expected kv_num_blocks to be on CPU")
+        if not block_mask.q_indices.is_cpu:
+            raise AssertionError("Expected q_indices to be on CPU")
+        if not block_mask.q_num_blocks.is_cpu:
+            raise AssertionError("Expected q_num_blocks to be on CPU")
 
         block_mask = block_mask.to(device)
-        assert block_mask.kv_indices.device.type == device.type
-        assert block_mask.kv_num_blocks.device.type == device.type
-        assert block_mask.q_indices.device.type == device.type
-        assert block_mask.q_num_blocks.device.type == device.type
+        if block_mask.kv_indices.device.type != device.type:
+            raise AssertionError(
+                f"Expected device type {device.type}, got {block_mask.kv_indices.device.type}"
+            )
+        if block_mask.kv_num_blocks.device.type != device.type:
+            raise AssertionError(
+                f"Expected device type {device.type}, got {block_mask.kv_num_blocks.device.type}"
+            )
+        if block_mask.q_indices.device.type != device.type:
+            raise AssertionError(
+                f"Expected device type {device.type}, got {block_mask.q_indices.device.type}"
+            )
+        if block_mask.q_num_blocks.device.type != device.type:
+            raise AssertionError(
+                f"Expected device type {device.type}, got {block_mask.q_num_blocks.device.type}"
+            )
 
     @supported_platform
     def test_compiling_create_block_mask(self, device):
@@ -6166,10 +6341,14 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         )
         out.sum().backward()
 
-        assert out.isfinite().all().item()
-        assert q.grad.isfinite().all().item()
-        assert k.grad.isfinite().all().item()
-        assert v.grad.isfinite().all().item()
+        if not out.isfinite().all().item():
+            raise AssertionError("out contains non-finite values")
+        if not q.grad.isfinite().all().item():
+            raise AssertionError("q.grad contains non-finite values")
+        if not k.grad.isfinite().all().item():
+            raise AssertionError("k.grad contains non-finite values")
+        if not v.grad.isfinite().all().item():
+            raise AssertionError("v.grad contains non-finite values")
 
     @supported_platform
     @skip_on_cpu
@@ -6196,10 +6375,13 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             q, k, v, score_mod=score_mod, block_mask=block_mask
         )
         out.sum().backward()
-        assert out.isfinite().all().item()
-        assert q.grad.isfinite().all().item()
+        if not out.isfinite().all().item():
+            raise AssertionError("out contains non-finite values")
+        if not q.grad.isfinite().all().item():
+            raise AssertionError("q.grad contains non-finite values")
         # assert k.grad.isfinite().all().item()
-        assert v.grad.isfinite().all().item()
+        if not v.grad.isfinite().all().item():
+            raise AssertionError("v.grad contains non-finite values")
 
     @supported_platform
     @skip_on_cpu
@@ -6226,10 +6408,13 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             q, k, v, score_mod=score_mod, block_mask=block_mask
         )
         out.sum().backward()
-        assert out.isfinite().all().item()
-        assert q.grad.isfinite().all().item()
+        if not out.isfinite().all().item():
+            raise AssertionError("out contains non-finite values")
+        if not q.grad.isfinite().all().item():
+            raise AssertionError("q.grad contains non-finite values")
         # assert k.grad.isfinite().all().item()
-        assert v.grad.isfinite().all().item()
+        if not v.grad.isfinite().all().item():
+            raise AssertionError("v.grad contains non-finite values")
 
     @supported_platform
     @skip_on_cpu
@@ -7553,8 +7738,8 @@ class TestLearnableBiases(InductorTestCase):
         loss = torch.nn.functional.mse_loss(attn_output, random_target)
         loss.backward()
 
-        assert bias.grad, "No gradient computed for bias"
-        assert torch.any(bias.grad != 0), "Gradient for bias is 0"
+        assert bias.grad, "No gradient computed for bias"  # noqa: S101
+        assert torch.any(bias.grad != 0), "Gradient for bias is 0"  # noqa: S101
 
     @skip_on_cpu
     def test_backprop_error_case(self, device):
@@ -7582,8 +7767,10 @@ class TestLearnableBiases(InductorTestCase):
 
         _ = test(x, y).mean().backward()
 
-        assert x.grad.norm() > 0
-        assert y.grad.norm() > 0
+        if not (x.grad.norm() > 0):
+            raise AssertionError(f"Expected x.grad.norm() > 0, got {x.grad.norm()}")
+        if not (y.grad.norm() > 0):
+            raise AssertionError(f"Expected y.grad.norm() > 0, got {y.grad.norm()}")
 
     @skip_on_cpu
     @common_utils.parametrize(

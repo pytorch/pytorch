@@ -116,12 +116,9 @@ jobs:
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
-      {%- elif config["gpu_arch_type"] == "cuda" and config["gpu_arch_version"] in ["12.6"] %}
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu  # 12.6 build can use maxwell (sm_50) runner
       {%- elif config["gpu_arch_type"] == "cuda" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu
       {%- else %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
@@ -136,6 +133,7 @@ jobs:
       id-token: write
       contents: read
     steps:
+      !{{ common.checkout(deep_clone=False) }}
       - name: Setup XPU
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
       - name: Login to ECR
@@ -145,7 +143,6 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -154,13 +151,12 @@ jobs:
           docker-image-name: !{{ config["container_image"] }}
           custom-tag-prefix: !{{ config["container_image_tag_prefix"] }}
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown XPU
@@ -173,6 +169,7 @@ jobs:
       id-token: write
       contents: read
     steps:
+      !{{ common.checkout(deep_clone=False) }}
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: !{{ common.download_artifact_action }}
@@ -180,7 +177,6 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ runner.temp }}/artifacts/"
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -200,13 +196,12 @@ jobs:
           docker-image-name: !{{ config["container_image"] }}
           custom-tag-prefix: !{{ config["container_image_tag_prefix"] }}
           docker-build-dir: .ci/docker
-          working-directory: pytorch
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -215,5 +210,50 @@ jobs:
 
 {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config) }}
+{%- endif %}
+{% endfor %}
+
+{%- for lt_config in libtorch_extraction_configs %}
+  !{{ lt_config["build_name"] }}-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - !{{ lt_config["source_wheel_build_name"] }}-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: !{{ lt_config["desired_cuda"] }}
+      LIBTORCH_VARIANT: !{{ lt_config["libtorch_variant"] }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          show-progress: false
+      - uses: !{{ common.download_artifact_action }}
+        name: Download Wheel Artifact
+        with:
+          name: !{{ lt_config["source_wheel_build_name"] }}
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform linux \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: !{{ common.upload_artifact_action }}
+        if: always()
+        with:
+          name: !{{ lt_config["build_name"] }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+{%- if branches == "nightly" %}
+  !{{ upload.upload_extracted_libtorch(lt_config) }}
 {%- endif %}
 {% endfor %}

@@ -18,19 +18,27 @@ class FakeScriptObject:
         # Use object.__setattr__ to bypass our custom __setattr__ during initialization
         object.__setattr__(self, "wrapped_obj", wrapped_obj)
         object.__setattr__(self, "script_class_name", script_class_name)
-        try:
-            with _disable_current_modes():
-                real_obj = copy.deepcopy(x)
-        except (RuntimeError, TypeError) as e:
-            log.warning(  # noqa: G200
-                "Unable to deepcopy the custom object %s due to %s. "
-                "Defaulting to the user given object. This might be "
-                "dangerous as side effects may be directly applied "
-                "to the object.",
-                script_class_name,
-                str(e),
-            )
-            real_obj = x
+
+        from torch._library.opaque_object import is_opaque_type
+
+        # We dont want to deepcopy when tracing with opaque objects because
+        # if a mutation happens intentionally (Ex. caching in device mesh)
+        # then we want it to be recorded on the real object
+        real_obj = x
+        if not is_opaque_type(type(x)):
+            try:
+                with _disable_current_modes():
+                    real_obj = copy.deepcopy(x)
+            except (RuntimeError, TypeError) as e:
+                log.warning(  # noqa: G200
+                    "Unable to deepcopy the custom object %s due to %s. "
+                    "Defaulting to the user given object. This might be "
+                    "dangerous as side effects may be directly applied "
+                    "to the object.",
+                    script_class_name,
+                    str(e),
+                )
+
         object.__setattr__(self, "real_obj", real_obj)
 
     def __getattribute__(self, name):
@@ -55,6 +63,40 @@ class FakeScriptObject:
             "functionality, consider creating a custom TorchBind Object instead"
             "(but note that this is more difficult)."
         )
+
+    def __eq__(self, other):
+        if isinstance(other, FakeScriptObject):
+            return self.real_obj == other.real_obj
+        return self.real_obj == other
+
+    def __hash__(self) -> int:
+        return hash(self.real_obj)
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "FakeScriptObject":
+        if id(self) in memo:
+            return memo[id(self)]
+        new_obj = FakeScriptObject.__new__(FakeScriptObject)
+        memo[id(self)] = new_obj
+        object.__setattr__(
+            new_obj, "wrapped_obj", copy.deepcopy(self.wrapped_obj, memo)
+        )
+        object.__setattr__(new_obj, "script_class_name", self.script_class_name)
+        new_real_obj = copy.deepcopy(self.real_obj, memo)
+        object.__setattr__(new_obj, "real_obj", new_real_obj)
+        for name, value in self.__dict__.items():
+            if name not in ("wrapped_obj", "script_class_name", "real_obj"):
+                if isinstance(value, FakeScriptMethod):
+                    object.__setattr__(
+                        new_obj,
+                        name,
+                        FakeScriptMethod(new_obj, value.method_name, value.schema),
+                    )
+                else:
+                    if hasattr(new_real_obj, name):
+                        object.__setattr__(new_obj, name, getattr(new_real_obj, name))
+                    else:
+                        object.__setattr__(new_obj, name, value)
+        return new_obj
 
 
 class FakeScriptMethod:
@@ -154,7 +196,6 @@ def maybe_to_fake_obj(
     x: Any,
 ) -> Union[FakeScriptObject, torch.ScriptObject]:
     import torch.utils._pytree as pytree
-    from torch.utils._python_dispatch import _disable_current_modes
 
     # When tracing with real mode, people should implement meta kernels that can
     # handle the case of real script object + fake tensor inputs.

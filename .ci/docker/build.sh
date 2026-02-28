@@ -81,13 +81,6 @@ elif [[ "$image" == *riscv* ]]; then
   DOCKERFILE="ubuntu-cross-riscv/Dockerfile"
 fi
 
-_UCX_COMMIT=7836b165abdbe468a2f607e7254011c07d788152
-_UCC_COMMIT=430e241bf5d38cbc73fc7a6b89155397232e3f96
-if [[ "$image" == *rocm* ]]; then
-  _UCX_COMMIT=29831d319e6be55cb8c768ca61de335c934ca39e
-  _UCC_COMMIT=9f4b242cbbd8b1462cbc732eb29316cdfa124b77
-fi
-
 tag=$(echo $image | awk -F':' '{print $2}')
 # If no tag (no colon in image name), use the image name itself
 if [[ -z "$tag" ]]; then
@@ -104,8 +97,6 @@ case "$tag" in
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
   pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11)
@@ -114,8 +105,6 @@ case "$tag" in
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
@@ -125,20 +114,7 @@ case "$tag" in
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
-    ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks)
-    CUDA_VERSION=12.8.1
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.0.2
@@ -146,19 +122,15 @@ case "$tag" in
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm)
-    CUDA_VERSION=12.9.1
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm)
+    CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang15-onnx)
@@ -193,14 +165,12 @@ case "$tag" in
     else
       ANACONDA_PYTHON_VERSION=3.12
     fi
-    GCC_VERSION=11
+    GCC_VERSION=13
     VISION=yes
-    ROCM_VERSION=7.1
+    ROCM_VERSION=7.2
     NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
@@ -208,14 +178,12 @@ case "$tag" in
     ;;
   pytorch-linux-noble-rocm-nightly-py3)
     ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
+    GCC_VERSION=13
     VISION=yes
     ROCM_VERSION=nightly
     NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
     PYTORCH_ROCM_ARCH="gfx942"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
@@ -322,16 +290,6 @@ case "$tag" in
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-clang21)
-    ANACONDA_PYTHON_VERSION=3.10
-    CLANG_VERSION=21
-    ACL=yes
-    VISION=yes
-    OPENBLAS=yes
-    # snadampal: skipping llvm src build install because the current version
-    # from pytorch/llvm:9.0.1 is x86 specific
-    SKIP_LLVM_SRC_BUILD_INSTALL=yes
-    ;;
   pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
@@ -419,8 +377,6 @@ docker buildx build \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
-       --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
-       --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
        --build-arg "ONNX=${ONNX}" \

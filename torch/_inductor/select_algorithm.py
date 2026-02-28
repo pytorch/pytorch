@@ -419,6 +419,7 @@ class TritonTemplateKernel(TritonKernel):
         prologue_loads_all_inputs=False,
         hint_override: Optional[int] = None,
         triton_meta: Optional[dict[str, object]] = None,
+        always_freeze_layout: bool = False,
     ) -> None:
         if tma_store:
             pass
@@ -540,6 +541,11 @@ class TritonTemplateKernel(TritonKernel):
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
+
+        # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
+        # always freeze the layout immediately, bypassing layout constraints.
+        # This is used by FlexAttention templates which require frozen layouts.
+        self.always_freeze_layout = always_freeze_layout
 
         # Extra functions to be exposed during partial template rendering.
         self.extra_template_env_fns: list[Callable[..., Any]] = []
@@ -1557,10 +1563,11 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_workspace_deallocation(self.workspace_arg)
 
     def kernel_benchmark_extra_args(self) -> list[str]:
+        # Grid args are only used for benchmarking, not correctness
         return [
             str(x)
             for x in self.grid_fn(
-                *V.graph.sizevars.size_hints(self.call_sizes), self.meta
+                *V.graph.sizevars.optimization_hints(self.call_sizes), self.meta
             )
         ]
 
@@ -1581,8 +1588,9 @@ class TritonTemplateKernel(TritonKernel):
         node_name = node.get_name()
 
         if isinstance(layout, ir.FlexibleLayout):
-            if not use_aten_gemm_kernels():
-                # No ExternKernel fallback available, freeze immediately
+            if not use_aten_gemm_kernels() or self.always_freeze_layout:
+                # No ExternKernel fallback available, or always_freeze_layout is set
+                # (e.g., for FlexAttention templates), freeze immediately
                 node.data.freeze_layout()
             else:
                 # Compute what strides WOULD be if frozen, without actually freezing
@@ -1768,6 +1776,7 @@ class TritonTemplate(KernelTemplate):
         debug=False,
         cache_codegen_enabled_for_template=False,
         prologue_loads_all_inputs=False,
+        always_freeze_layout: bool = False,
     ) -> None:
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
@@ -1781,6 +1790,10 @@ class TritonTemplate(KernelTemplate):
         # When prologue_loads_all_inputs is true, prologue_supported_inputs is populated during def_kernel
         # by adding all inputs.
         self.prologue_loads_all_inputs = prologue_loads_all_inputs
+        # When always_freeze_layout is True, the kernel will always freeze layouts
+        # immediately instead of using layout constraints. This is used by
+        # FlexAttention templates which require frozen layouts.
+        self.always_freeze_layout = always_freeze_layout
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
@@ -1902,6 +1915,7 @@ class TritonTemplate(KernelTemplate):
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
             "prologue_loads_all_inputs": self.prologue_loads_all_inputs,
+            "always_freeze_layout": self.always_freeze_layout,
         }
 
         if HAS_WARP_SPEC:
@@ -2263,6 +2277,16 @@ class TritonTemplate(KernelTemplate):
 
 
 class ExternKernelChoice:
+    """Represents an external kernel that can participate in autotuning.
+
+    Each instance is registered as a singleton by name in ``_registry`` and
+    on the ``extern_kernels`` module so that codegen can emit a stable
+    reference.  Use ``lookup(name)`` to retrieve an existing instance
+    before creating a new one to avoid duplicate registrations.
+    """
+
+    _registry: dict[str, "ExternKernelChoice"] = {}
+
     def __init__(
         self,
         kernel,
@@ -2291,6 +2315,11 @@ class ExternKernelChoice:
         self.src_hash = None
         # By default GraphModule is None for extern kernels if not set
         self.gm = None
+        ExternKernelChoice._registry[name] = self
+
+    @classmethod
+    def lookup(cls, name: str) -> Optional["ExternKernelChoice"]:
+        return cls._registry.get(name)
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -2321,7 +2350,11 @@ class ExternKernelChoice:
     ):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         return ExternKernelCaller(
-            self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
+            self,
+            input_nodes,
+            layout,
+            kwargs,
+            has_out_variant=self.has_out_variant,
         )
 
     @property
@@ -2356,6 +2389,10 @@ class ExternKernelChoice:
 
 
 class TritonTemplateCaller(ir.TritonTemplateCallerBase):
+    """
+    Represents a ChoiceCaller for a TritonTemplate
+    """
+
     def __init__(
         self,
         name,
@@ -2392,16 +2429,24 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
         self.hint_override = hint_override
 
+        self.n_regs = None
+
     def benchmark(self, *args, out):
         assert self.bmreq is not None
-        if config.profile_bandwidth_with_do_bench_using_profiling:
+        if (
+            config.profile_bandwidth_with_do_bench_using_profiling
+            and not self._benchmark_with_cudagraphs
+        ):
             algo = self.bmreq.make_run_fn(*args, out=out)
             return do_bench_using_profiling(algo)
+        self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
         assert self.bmreq is not None
         self.bmreq.precompile()
+
+        self.n_regs = self.bmreq.n_regs
 
     def __str__(self) -> str:
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.description})"
@@ -2522,7 +2567,9 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
-        # pyrefly: ignore [missing-attribute]
+        assert self.bmreq is not None
+        # pyrefly: ignore[missing-attribute]
+        self.bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
         return self.bmreq.benchmark(*args, out=out)
 
     def benchmark_collective(self, *args, out):
@@ -3009,12 +3056,20 @@ class AlgorithmSelectorCache(PersistentCache):
         best_config_future=None,
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
         is_collective=False,
+        min_speedup_threshold: float = 1.0,  # Only pick non-fallback if faster by this ratio
+        benchmark_with_cudagraphs: bool = False,  # Use CUDA graphs for ExternKernelCaller benchmarking
     ):
         from .codegen.cutlass.kernel import CUTLASSTemplateCaller
+        from .codegen.subgraph import SubgraphChoiceCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
             choices = preprocessing_fn(choices)
+
+        # Apply benchmark_with_cudagraphs to all choices
+        if benchmark_with_cudagraphs:
+            for choice in choices:
+                choice._benchmark_with_cudagraphs = True
 
         # Templates selected with input_gen_fns require specific input data to avoid IMA
         # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
@@ -3033,10 +3088,17 @@ class AlgorithmSelectorCache(PersistentCache):
         if len(choices) == 1:
             if not isinstance(choices[0], CUTLASSTemplateCaller):
                 # CUTLASSTemplateCaller still needs to go through the autotuning process to retrieve workspace size.
-                return choices[0].output_node()
+                node = choices[0].output_node()
+                if return_choice:
+                    return node, choices[0]
+                return node
 
         if config.deterministic:
-            return self.pick_deterministic_choice(choices).output_node()
+            choice = self.pick_deterministic_choice(choices)
+            node = choice.output_node()
+            if return_choice:
+                return node, choice
+            return node
 
         inputs_key = create_inputs_key(input_nodes)
 
@@ -3090,13 +3152,20 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     # Await precompilation future, thread pool
                     precompile_start_ts = time.time()
+                    final_choices = choices
                     if precompile_future:
-                        precompile_future.result()
+                        try:
+                            precompile_future.result()
+                        except NoValidChoicesError:
+                            log.error(
+                                "Runtime error for autotuning triton choices, defaulting to extern kernels.",
+                            )
+                            final_choices = extern_kernels
                     precompile_elapse = time.time() - precompile_start_ts
 
                     # Await autotuning in subproc pool
                     autotune_start_ts = time.time()
-                    results = AsyncAutotuner.get_results(choices, inputs_key)
+                    results = AsyncAutotuner.get_results(final_choices, inputs_key)
                     autotune_wait_ts = time.time() - autotune_start_ts
                     AlgorithmSelectorCache.log_results(
                         name,
@@ -3200,7 +3269,45 @@ class AlgorithmSelectorCache(PersistentCache):
             return node
 
         # if we got any timings at all, pick the best of those
-        choice = min(timings, key=timings.__getitem__)
+        best_choice = min(timings, key=timings.__getitem__)
+
+        # Apply min_speedup_threshold: only pick non-fallback if it beats fallback by threshold
+        if min_speedup_threshold > 1.0:
+
+            def is_fallback(c: ChoiceCaller) -> bool:
+                return isinstance(c, ExternKernelCaller) and getattr(
+                    c.choice, "use_fallback_kernel", False
+                )
+
+            fallback_choices = [c for c in timings if is_fallback(c)]
+            if fallback_choices and not is_fallback(best_choice):
+                fallback_time = min(timings[c] for c in fallback_choices)
+                best_time = timings[best_choice]
+                speedup = fallback_time / best_time if best_time > 0 else 0
+
+                if speedup < min_speedup_threshold:
+                    # Best choice doesn't beat fallback by enough, use fallback instead
+                    log.debug(
+                        "Best choice %s speedup %.2fx < threshold %.2fx, using fallback",
+                        best_choice.name,
+                        speedup,
+                        min_speedup_threshold,
+                    )
+                    best_choice = min(fallback_choices, key=lambda c: timings[c])
+
+        # Test-only: force choosing decomposition (non-fallback) if available
+        if config.test_configs.force_custom_op_decomposition:
+
+            def is_fallback(c: ChoiceCaller) -> bool:
+                return isinstance(c, ExternKernelCaller) and getattr(
+                    c.choice, "use_fallback_kernel", False
+                )
+
+            non_fallback_choices = [c for c in timings if not is_fallback(c)]
+            if non_fallback_choices:
+                best_choice = min(non_fallback_choices, key=lambda c: timings[c])
+
+        choice = best_choice
         node = choice.output_node()
 
         log.debug("Autotuning selected choice: %s", node)
@@ -3761,7 +3868,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         hint_override=hint_override,
                     )
                     strides = V.graph.sizevars.optimization_hints_with_override(
-                        input_node.get_stride(),
+                        get_strides_with_layout_constraints(input_node),
                         hint_override=hint_override,
                     )
                     storage_offset = V.graph.sizevars.optimization_hint_with_override(
@@ -3795,7 +3902,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Also check the output tensor for storage size
         out_base = out if out._base is None else out._base
-        out_offset = V.graph.sizevars.size_hint(layout.offset)
+        # Only used for benchmarking tensor setup, not correctness.
+        # Offset is almost always 0; use that as fallback.
+        out_offset = V.graph.sizevars.optimization_hint(layout.offset, fallback=0)
         needed_out_size = torch._prims_common.compute_required_storage_length(
             out.size(), out.stride(), out_offset
         )
@@ -4559,7 +4668,9 @@ class AlgorithmSelectorCache(PersistentCache):
             ]
         )
 
-        strides = ", ".join([str(n.get_stride()) for n in input_nodes])
+        strides = ", ".join(
+            [str(get_strides_with_layout_constraints(n)) for n in input_nodes]
+        )
         dtypes = ", ".join([str(n.get_dtype()) for n in input_nodes])
         if config.autotune_num_choices_displayed == 0:
             return
@@ -4631,7 +4742,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 hint_override=hint_override,
             ),
             V.graph.sizevars.optimization_hints_with_override(
-                node.get_stride(),
+                get_strides_with_layout_constraints(node),
                 hint_override=hint_override,
             ),
             node.get_device(),
@@ -4681,7 +4792,9 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device().type,
             str(node.get_dtype()),
             *sizevars.optimization_hints(node.get_size()),
-            *V.graph.sizevars.optimization_hints(node.get_stride()),
+            *V.graph.sizevars.optimization_hints(
+                get_strides_with_layout_constraints(node)
+            ),
             sizevars.optimization_hint(node.get_layout().offset),
         )
 
@@ -4723,7 +4836,7 @@ def autotune_select_algorithm(*args, **kwargs):
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
             torch._inductor.config.benchmark_epilogue_fusion
-            or use_pipelined_autotuning()
+            or torch._inductor.config.pipeline_max_autotune_gemm
         )
 
     if "precompilation_timeout_seconds" not in kwargs:
@@ -4784,6 +4897,15 @@ def realize_inputs(*args):
     if len(args) == 1:
         return ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(args[0]))
     return [realize_inputs(x) for x in args]
+
+
+def get_strides_with_layout_constraints(node):
+    if (
+        not isinstance(node, ir.ReinterpretView)
+        and node.get_name() in V.graph.buffer_layout_constraints
+    ):
+        return V.graph.buffer_layout_constraints[node.get_name()].stride
+    return node.get_stride()
 
 
 class SymbolicGridFn:

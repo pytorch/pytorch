@@ -563,7 +563,19 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI || !is_macOS_15_0_or_newer) {
     auto shape = mpsShape_ ? mpsShape_ : getMPSShape(_tensor);
     check_mps_shape(shape);
-    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf shape:shape dataType:dataType] autorelease];
+    if (!_tensor.storage_offset()) {
+      _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf shape:shape dataType:dataType] autorelease];
+    } else {
+      // initWithMTLBuffer:shape:dataType: has no offset parameter; use MPSNDArray to apply storage_offset.
+      // This arises e.g. for channels_last tensors with a non-zero storage offset (gatherTensorData=false path).
+      MPSNDArrayDescriptor* desc = [MPSNDArrayDescriptor descriptorWithDataType:dataType shape:shape];
+      desc.preferPackedRows = YES;
+      MPSNDArray* ndArray = [[[MPSNDArray alloc] initWithBuffer:srcBuf
+                                                         offset:_tensor.storage_offset() * _tensor.element_size()
+                                                     descriptor:desc] autorelease];
+      TORCH_INTERNAL_ASSERT(ndArray);
+      _value = [[[MPSGraphTensorData alloc] initWithMPSNDArray:ndArray] autorelease];
+    }
   } else {
     IntArrayRef view_shape;
     if (mpsShape_) {

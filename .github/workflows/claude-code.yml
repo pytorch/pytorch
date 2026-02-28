@@ -10,38 +10,22 @@ on:
 
 jobs:
   claude-code:
-    # Early exit conditions:
+    # Early exit conditions (fast gate — avoids spinning up a runner for unauthorized users):
     # 1. Must be pytorch org
-    # 2. Must be triggered by pilot user
-    # 3. Must mention @claude
+    # 2. Must mention @claude
+    # 3. Must be org member/collaborator OR an allowed bot
+    # Note: issue_comment and pull_request_review_comment share the same payload paths
     if: |
       github.repository_owner == 'pytorch' &&
-      contains(fromJSON('[
-        "huydhn",
-        "seemethere",
-        "malfet",
-        "ZainRizvi",
-        "jeanschmidt",
-        "atalman",
-        "wdvr",
-        "izaitsevfb",
-        "yangw-dev",
-        "ezyang",
-        "drisspg",
-        "albanD",
-        "eellison",
-        "pytorch-auto-revert[bot]",
-        "janeyx99",
-        "SherlockNoMad",
-        "svekars",
-        "sekyondaMeta",
-        "AlannaBurke",
-        "ngimel"
-      ]'), github.actor) &&
       (
-        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+        (github.event_name != 'issues' &&
+         contains(github.event.comment.body, '@claude') &&
+         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
+          github.actor == 'pytorch-auto-revert[bot]')) ||
+        (github.event_name == 'issues' &&
+         contains(github.event.issue.body, '@claude') &&
+         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) ||
+          github.actor == 'pytorch-auto-revert[bot]'))
       )
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -52,6 +36,32 @@ jobs:
       issues: write
       id-token: write
     steps:
+      - name: Verify write access
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const allowedBots = ['pytorch-auto-revert[bot]'];
+            const actor = context.actor;
+
+            console.log(`Actor: ${actor}`);
+            console.log(`Repository: ${context.repo.owner}/${context.repo.repo}`);
+            console.log(`author_association: ${{ github.event.comment.author_association || github.event.issue.author_association }}`);
+
+            if (allowedBots.includes(actor)) {
+              console.log(`${actor} is an allowed bot, skipping permission check`);
+              return;
+            }
+
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: actor
+            });
+            console.log(`Permission: ${data.permission}`);
+            if (!['admin', 'write'].includes(data.permission)) {
+              core.setFailed(`${actor} does not have write access (has: ${data.permission})`);
+            }
+
       # Fork PR support enabled by using izaitsevfb/claude-code-action@forked-pr-fix
 
       - uses: actions/checkout@v4
@@ -69,9 +79,9 @@ jobs:
         with:
           # We filter by github.actor at workflow level, there is no point of filtering here as well
           allowed_bots: "*"
-          claude_args: "--model global.anthropic.claude-opus-4-5-20251101-v1:0"
-          settings: '{"alwaysThinkingEnabled": true}'
           use_bedrock: "true"
+          claude_args: "--model global.anthropic.claude-opus-4-6-v1"
+          settings: '{"alwaysThinkingEnabled": true}'
 
       - name: Upload usage metrics
         if: always()

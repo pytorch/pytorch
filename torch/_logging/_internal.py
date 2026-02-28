@@ -1162,6 +1162,13 @@ def _init_logs(log_file_name=None) -> None:
     # configuration
     trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
 
+    # If TORCH_COMPILE_DEBUG=1 is set but no TORCH_TRACE, automatically use
+    # the torch_compile_debug directory for trace logs (to simplify tlparse usage)
+    if trace_dir_name is None and os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1":
+        import torch._dynamo.config as dynamo_config
+
+        trace_dir_name = os.path.join(dynamo_config.debug_dir_root, "tlparse")
+
     if dtrace_dir_name := os.environ.get(DTRACE_ENV_VAR, None):
         GET_DTRACE_STRUCTURED = True
         trace_dir_name = dtrace_dir_name
@@ -1260,6 +1267,10 @@ class LazyTraceHandler(logging.StreamHandler):
                     delete=False,
                 )
                 log.info("LazyTraceHandler: logging to %s", self.stream.name)
+                # Log tlparse path via inductor logger so it shows when
+                # TORCH_LOGS="inductor" is enabled
+                inductor_log = logging.getLogger("torch._inductor")
+                inductor_log.info("tlparse raw data: %s", self.stream.name)
             else:
                 # We go poof, remove and no-op
                 trace_log.removeHandler(self)

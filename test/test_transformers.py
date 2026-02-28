@@ -1113,7 +1113,7 @@ class TestTransformers(NNTestCase):
                 )[0]
 
     @tf32_on_and_off(0.003)
-    @parametrize("batch_size", [0, 5])
+    @parametrize("batch_size", [1, 5])
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
                   (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
@@ -1595,19 +1595,67 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
-    @parametrize("kernel", PLATFORM_SPECIFIC_SDPA)
-    def test_invalid_sequence_lengths(self, device, kernel: SDPBackend):
-        with sdpa_kernel(backends=[kernel]):
-            # Passing in a q,k,v with 0 length sequences will error
-            dtype = torch.float16
-            make_tensor = partial(torch.rand, device=device, dtype=dtype)
-            size = SdpaShape(2, 2, 0, 8)
-            q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-            with self.assertWarnsRegex(UserWarning, "All fused kernels do not support zero seq_len_q or seq_len_kv."):
-                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                    q, k, v, None, 0.0, False))
+    def test_zero_sequence_lengths(self, device):
+        dtype = torch.float16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype)
+        size = SdpaShape(2, 2, 0, 8)
+        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+        self.assertEqual(out.shape, (2, 2, 0, 8))
+        self.assertEqual(out, torch.zeros(2, 2, 0, 8, dtype=dtype, device=device))
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_sdpa_unbacked_no_dde(self, device):
+        """
+        Test that scaled_dot_product_attention with dynamic symbolic dimensions
+        does not raise GuardOnDataDependentSymNode when checking for empty tensors.
+        This tests the TORCH_GUARD_OR_FALSE fix in attention.cpp.
+        Regression test for D94287846.
+        """
+
+        def func(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v)
+
+        dtype = torch.float32
+        q = torch.rand(4, 2, 8, 16, dtype=dtype, device=device)
+        k = torch.rand(4, 2, 8, 16, dtype=dtype, device=device)
+        v = torch.rand(4, 2, 8, 16, dtype=dtype, device=device)
+
+        torch._dynamo.mark_dynamic(q, 0)
+        torch._dynamo.mark_dynamic(k, 0)
+        torch._dynamo.mark_dynamic(v, 0)
+
+        torch._dynamo.reset()
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(q, k, v)
+        expected = func(q, k, v)
+        self.assertEqual(result.shape, expected.shape)
+
+    @skipIfTorchDynamo("mark_dynamic is not traceable")
+    def test_sdpa_empty_unbacked_no_dde(self, device):
+        """
+        Test that scaled_dot_product_attention with zero sequence length and
+        dynamic dimensions does not raise GuardOnDataDependentSymNode.
+        This tests the early return path in attention.cpp with symbolic shapes.
+        Regression test for D94287846.
+        """
+
+        def func(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v)
+
+        dtype = torch.float32
+        q = torch.rand(2, 2, 0, 8, dtype=dtype, device=device)
+        k = torch.rand(2, 2, 0, 8, dtype=dtype, device=device)
+        v = torch.rand(2, 2, 0, 8, dtype=dtype, device=device)
+
+        torch._dynamo.mark_dynamic(q, 2)
+        torch._dynamo.mark_dynamic(k, 2)
+        torch._dynamo.mark_dynamic(v, 2)
+
+        torch._dynamo.reset()
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(q, k, v)
+        self.assertEqual(result.shape, (2, 2, 0, 8))
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
@@ -2115,6 +2163,27 @@ class TestSDPA(NNTestCase):
         x = torch.full((1, 32, 23, 80), 256.0, dtype=torch.half, device=device)
         y = torch.nn.functional.scaled_dot_product_attention(x, x, x)
         self.assertFalse(y.isnan().any().item())
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_sdpa_zero_sized_tensors(self, device, dtype):
+        zero_size_configs = [
+            (0, 4, 10, 64),
+            (2, 4, 0, 64),
+            (2, 4, 10, 0),
+            (0, 0, 0, 0),
+        ]
+        for b, h, s, d in zero_size_configs:
+            q = torch.zeros(b, h, s, d, dtype=dtype, device=device, requires_grad=True)
+            k = torch.zeros(b, h, s, d, dtype=dtype, device=device, requires_grad=True)
+            v = torch.zeros(b, h, s, 32, dtype=dtype, device=device, requires_grad=True)
+            out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            self.assertEqual(out.shape, (b, h, s, 32))
+            self.assertEqual(out, torch.zeros(b, h, s, 32, dtype=dtype, device=device))
+            out.sum().backward()
+            self.assertEqual(q.grad.shape, q.shape)
+            self.assertEqual(k.grad.shape, k.shape)
+            self.assertEqual(v.grad.shape, v.shape)
+
 
 class TestSDPACpuOnly(NNTestCase):
     """ Used to test CPU only functionality of scaled_dot_product_attention """
@@ -2972,6 +3041,15 @@ class TestSDPACudaOnly(NNTestCase):
             out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
             out.backward(grad)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_low_dropout(self):
+        q = torch.randn(2, 8, 128, 128, dtype=torch.half, device='cuda')
+        dropout_p = 0.00000000001
+        out1 = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=dropout_p)
+        out2 = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.)
+        with self.assertRaisesRegex(AssertionError, "AssertionError not raised"):
+            self.assertNotEqual(out1, out2)
+
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_broken_166211(self):
@@ -3343,12 +3421,12 @@ class TestSDPACudaOnly(NNTestCase):
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
         prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
-        # cuDNN prioritization requires cuDNN >= 9.9.0 (90900) per sdp_utils.cpp:83
+        # cuDNN prioritization requires cuDNN > 9.15.0 (91500) per sdp_utils.cpp:83
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         is_hopper_or_newer = device_capability and (device_capability[0] == 9 or device_capability[0] == 10)
-        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version >= 90900
+        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version > 91500
 
-        # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN >= 9.9.0 (per #162073)
+        # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN > 9.15.0 (per #169849)
         # For older cuDNN versions or other architectures, Flash Attention is preferred
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)

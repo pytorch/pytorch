@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 import networkx as nx
 
@@ -23,11 +23,11 @@ class GraphInfoProvider:
         graph_nodes_in_order: list[str],
         graph_edges: list[tuple[str, str]],
         all_recomputable_banned_nodes: list[str],
-        all_node_runtimes: Optional[dict[str, float]] = None,
-        all_node_memories: Optional[dict[str, float]] = None,
-        recorded_knapsack_input_memories: Optional[list[float]] = None,
-        recorded_knapsack_input_runtimes: Optional[list[float]] = None,
-        joint_graph: Optional[Graph] = None,
+        all_node_runtimes: dict[str, float] | None = None,
+        all_node_memories: dict[str, float] | None = None,
+        recorded_knapsack_input_memories: list[float] | None = None,
+        recorded_knapsack_input_runtimes: list[float] | None = None,
+        joint_graph: Graph | None = None,
     ) -> None:
         self.graph_nodes_in_order = graph_nodes_in_order
         self.graph_edges = graph_edges

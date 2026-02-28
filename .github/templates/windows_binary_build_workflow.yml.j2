@@ -110,32 +110,31 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_libuv.bat"
 {%- else %}
       !{{ set_runner_specific_vars() }}
       !{{ common.setup_ec2_windows() }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False) }}
 {%- endif %}
       - name: Populate binary env
         shell: bash
@@ -153,7 +152,7 @@ jobs:
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
 {%- if os != "windows-arm64" %}
-      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
+      !{{ common.wait_and_kill_ssh_windows() }}
 {% endif %}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -195,23 +194,22 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
 {%- else %}
       !{{ common.setup_ec2_windows() }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False) }}
       !{{ set_runner_specific_vars() }}
 {%- endif %}
       - uses: !{{ common.download_artifact_action }}
@@ -228,9 +226,55 @@ jobs:
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_test.sh"
 {%- if os != "windows-arm64" %}
-      !{{ common.wait_and_kill_ssh_windows('pytorch') }}
+      !{{ common.wait_and_kill_ssh_windows() }}
 {%- endif %}
   {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config, True) }}
+  {%- endif %}
+{%- endfor %}
+
+{%- for lt_config in libtorch_extraction_configs %}
+  !{{ lt_config["build_name"] }}-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - !{{ lt_config["source_wheel_build_name"] }}-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: !{{ lt_config["desired_cuda"] }}
+      LIBTORCH_VARIANT: !{{ lt_config["libtorch_variant"] }}
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          show-progress: false
+      - uses: !{{ common.download_artifact_action }}
+        name: Download Wheel Artifact
+        with:
+          name: !{{ lt_config["source_wheel_build_name"] }}
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: !{{ common.upload_artifact_action }}
+        if: always()
+        with:
+          name: !{{ lt_config["build_name"] }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  {%- if branches == "nightly" %}
+  !{{ upload.upload_extracted_libtorch(lt_config, True) }}
   {%- endif %}
 {%- endfor %}

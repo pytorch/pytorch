@@ -174,7 +174,9 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.distributed_c10d._resolve_group_name_by_ranks_and_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
+    "torch.distributed.destroy_process_group": SkipFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
+    "torch._utils._chunk_or_narrow_cat": UserFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_symbolic_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
@@ -357,6 +359,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
+    "torch._dynamo.override_cudagraphs": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.size_hint": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
@@ -367,6 +370,7 @@ manual_torch_name_rule_map: dict[
     "torch.fx.experimental.symbolic_shapes.sym_or": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_scalar": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.has_static_value": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.has_free_unbacked_symbols": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
     "torch.set_default_device": UserFunctionVariable,
@@ -463,6 +467,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
         "torch._C._accelerator_getStream",
+        "torch._C._accelerator_getAllocatorSettings",
         "torch._C._accelerator_setAllocatorSettings",
         "torch._C._accelerator_setStream",
         "torch._C._accelerator_synchronizeDevice",
@@ -3806,7 +3811,7 @@ def _force_inline() -> Iterator[None]:
     When active, check_verbose() will skip all inline/skip decision logic and
     always return SkipResult(False, ...), meaning functions will be inlined.
 
-    See _make_inlined() in higher_order_ops.py which uses this to ensure that
+    See _make_inlined() in utils.py which uses this to ensure that
     a python function is fully traced to produce the needed variable trackers.
     """
     global _force_inline_flag
@@ -3818,12 +3823,39 @@ def _force_inline() -> Iterator[None]:
         _force_inline_flag = old_val
 
 
-def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
+def check_verbose(
+    obj: Any, is_inlined_call: bool = False, frame: Any | None = None
+) -> SkipResult:
     if _force_inline_flag:
         return SkipResult(
             False,
             "don't skip because we're inside _force_inline() context",
         )
+
+    # For eval frame callback (not inlined calls), allow tracing inbuilt
+    # nn.Module.forward methods when the module has hooks. Any hook can cause
+    # a graph break (via @torch._dynamo.disable, print, unsupported ops, etc.),
+    # which skips the entire _call_impl frame. By allowing forward to be traced,
+    # Dynamo can capture the module's operations in a new graph after the break.
+    if (
+        not is_inlined_call
+        and frame is not None
+        and isinstance(obj, types.CodeType)
+        and obj.co_name == "forward"
+    ):
+        from .utils import nnmodule_has_hooks
+
+        module = frame.f_locals.get("self")
+        if (
+            module is not None
+            and isinstance(module, torch.nn.Module)
+            and module.__class__.__module__.startswith(("torch.nn.", "torch.ao."))
+            and nnmodule_has_hooks(module, check_forward_hooks=True)
+        ):
+            return SkipResult(
+                False,
+                "inbuilt nn.Module.forward allowed - module has hooks",
+            )
 
     if isinstance(
         obj,
@@ -3885,8 +3917,8 @@ def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
         )
 
 
-def check(obj: Any, is_inlined_call: bool = False) -> bool:
-    return check_verbose(obj, is_inlined_call).skipped
+def check(obj: Any, is_inlined_call: bool = False, frame: Any | None = None) -> bool:
+    return check_verbose(obj, is_inlined_call, frame).skipped
 
 
 # skip common third party libs

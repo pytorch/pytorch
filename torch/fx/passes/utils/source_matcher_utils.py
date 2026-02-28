@@ -72,6 +72,11 @@ def get_source_partitions(
     """
     modules: dict[type, dict[str, list[Node]]] = {}
 
+    def add_to_partition(src: Any, fqn: str, node: Node) -> None:
+        diff_modules = modules.setdefault(src, {})
+        partition = diff_modules.setdefault(fqn, [])
+        partition.append(node)
+
     for node in graph.nodes:
         # The metadata source_fn should contain a tuple of a unique name for the
         # source, and the source function if the node is decomposed from a
@@ -82,22 +87,45 @@ def get_source_partitions(
         # be different from "source_fn_stack", for example for the add_ node
         # decomposed from batch norm. We should remove the check on "source_fn_stack"
         # after we fix "torch_fn". T199561090
-        if (source_fn_st := node.meta.get("source_fn_stack", None)) is None and (
-            torch_fn := node.meta.get("torch_fn", None)
-        ) is not None:
-            node_fqn, source_fn = torch_fn
-            source_fn_name = source_fn.split(".")[1]
-            if source_fn_name in wanted_sources:
-                diff_modules = modules.setdefault(source_fn_name, {})
-                partition = diff_modules.setdefault(node_fqn, [])
-                partition.append(node)
+        source_fn_st = node.meta.get("source_fn_stack", None)
+        if source_fn_st is None:
+            matched = False
+            torch_fn = node.meta.get("torch_fn", None)
+            if torch_fn is not None:
+                node_fqn, source_fn = torch_fn
+                source_fn_name = source_fn.split(".")[1]
+                if source_fn_name in wanted_sources:
+                    add_to_partition(source_fn_name, node_fqn, node)
+                    matched = True
+            # Fallback: when source_fn_stack is not populated (e.g. strict=False export),
+            # use nn_module_stack to resolve the originating module type.
+            # Only apply to call_function nodes to avoid incorrectly including
+            # placeholder, get_attr, or output nodes in partitions.
+            if not matched and node.op == "call_function":
+                nn_module_stack = node.meta.get("nn_module_stack", None)
+                if nn_module_stack is not None:
+                    # Get the innermost module (last entry in the ordered dict)
+                    innermost_fqn, innermost_cls = list(nn_module_stack.values())[-1]
+                    for src in wanted_sources:
+                        if isinstance(src, type):
+                            if isinstance(innermost_cls, type) and issubclass(
+                                innermost_cls, src
+                            ):
+                                add_to_partition(src, innermost_fqn, node)
+                                break
+                            elif isinstance(innermost_cls, str):
+                                src_str = src.__module__ + "." + src.__qualname__
+                                if innermost_cls == src_str:
+                                    add_to_partition(src, innermost_fqn, node)
+                                    break
+                        elif innermost_cls == src:
+                            add_to_partition(src, innermost_fqn, node)
+                            break
 
-        if (source_fn_st := node.meta.get("source_fn_stack", None)) is not None:
+        if source_fn_st is not None:
             source_fn = source_fn_st[-1]
             if source_fn[1] in wanted_sources:
-                diff_modules = modules.setdefault(source_fn[1], {})
-                partition = diff_modules.setdefault(source_fn[0], [])
-                partition.append(node)
+                add_to_partition(source_fn[1], source_fn[0], node)
 
     def make_partition(nodes: list[Node], module_type: type) -> SourcePartition:
         input_nodes = set()

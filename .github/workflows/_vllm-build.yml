@@ -14,7 +14,7 @@ on:
       build_environment:
         required: true
         type: string
-        description: The build environment name, e.g. linux-jammy-cuda12.9-py3.12-gcc11
+        description: The build environment name, e.g. linux-jammy-cuda13.0-py3.12-gcc11
       pytorch_branch:
         required: false
         type: string

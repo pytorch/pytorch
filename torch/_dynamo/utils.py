@@ -307,13 +307,11 @@ def increment_op_count(cnt: int) -> None:
 def calculate_time_spent() -> dict[str, float]:
     total_by_key = {}
     for phase, timing in cumulative_time_spent_ns.items():
-        # pyrefly: ignore [unsupported-operation]
         total_by_key[phase] = timing / 1e9
 
     total_by_key["total_wall_time"] = total_by_key.get(
         "entire_frame_compile", 0
     ) + total_by_key.get("entire_backward_compile", 0)
-    # pyrefly: ignore [bad-return]
     return total_by_key
 
 
@@ -2442,7 +2440,6 @@ def is_jit_model(
     Union[
         torch.jit._trace.TopLevelTracedModule,
         torch.jit._script.RecursiveScriptModule,
-        # pyrefly: ignore [invalid-param-spec]
         torch.jit.ScriptFunction[Any, Any],
         torch.jit.ScriptModule,
     ]
@@ -2828,16 +2825,13 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, Union[V, Any]]]:
     if istype(obj, (dict, OrderedDict)):
         return obj.items()
     elif isinstance(obj, OrderedDict):
-        # pyrefly: ignore [bad-argument-type]
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
-        # pyrefly: ignore [bad-argument-type]
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
 def nn_module_new(cls: Any) -> Any:
     obj = object_new(cls)
-    # pyrefly: ignore [bad-argument-type]
     torch.nn.Module.__init__(obj)
     return obj
 
@@ -2973,6 +2967,7 @@ def iter_contains(
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import ConstantVariable
+    from .variables.constant import CONSTANT_VARIABLE_FALSE, CONSTANT_VARIABLE_TRUE
 
     if search.is_python_constant():
         found_const = any(
@@ -2993,7 +2988,7 @@ def iter_contains(
         if must_check_tensor_id:
             if x.is_tensor():
                 if search is _get_fake_tensor(x):  # Object equivalence
-                    return ConstantVariable.create(True)
+                    return CONSTANT_VARIABLE_TRUE
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
@@ -3007,7 +3002,7 @@ def iter_contains(
                     tx, [check, found], {}
                 )
     if found is None:
-        found = ConstantVariable.create(False)
+        found = CONSTANT_VARIABLE_FALSE
     return found
 
 
@@ -4863,7 +4858,7 @@ class GmWrapper(torch.nn.Module):
         self.unflatten_fn = unflatten_fn
 
     def forward(self, *args: Any) -> Any:
-        # pyrefly: ignore [annotation-mismatch, redefinition]
+        # pyrefly: ignore [redefinition]
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
 
@@ -5243,3 +5238,20 @@ def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
+
+
+def _make_inlined(
+    tx: InstructionTranslator, f: Callable[..., Any]
+) -> Callable[..., VariableTracker]:
+    assert callable(f), "Expect f to be a python callable."
+
+    def inline_call(
+        *args: VariableTracker, **kwargs: VariableTracker
+    ) -> VariableTracker:
+        from torch._dynamo.trace_rules import _force_inline
+        from torch._dynamo.variables.functions import UserFunctionVariable
+
+        with _force_inline():
+            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+
+    return inline_call

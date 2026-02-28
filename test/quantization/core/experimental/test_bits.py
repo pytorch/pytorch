@@ -11,7 +11,8 @@ import itertools
 
 class Int16Tensor(torch.Tensor):
     def __new__(cls, elem):
-        assert elem.dtype == torch.bits16
+        if elem.dtype != torch.bits16:
+            raise AssertionError(f"Expected dtype torch.bits16, got {elem.dtype}")
         return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
 
     def __init__(self, elem):
