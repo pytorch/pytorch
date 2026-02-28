@@ -129,6 +129,39 @@ if TEST_CUDA:
 
 _cycles_per_ms = None
 
+_wait_for_cpu_kernel = None
+
+
+def get_wait_for_cpu_kernel():
+    """Returns a compiled CUDA spin-wait kernel that blocks the GPU stream until
+    the host sets a pinned int32 flag to non-zero. Requires SM70+.
+
+    Usage::
+
+        kernel = get_wait_for_cpu_kernel()
+        flag = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
+        with torch.cuda.stream(s):
+            kernel(grid=(1, 1, 1), block=(1, 1, 1), args=[flag])
+        # stream s is now blocked until:
+        flag[0] = 1
+    """
+    global _wait_for_cpu_kernel
+    if _wait_for_cpu_kernel is None:
+        from torch.cuda import _compile_kernel
+
+        _wait_for_cpu_kernel = _compile_kernel(
+            r"""
+            __global__ void wait_for_cpu(int *pinned_cpu_flag) {
+                int flag = 0;
+                do {
+                    asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
+                } while (flag == 0);
+            }
+            """,
+            "wait_for_cpu",
+        )
+    return _wait_for_cpu_kernel
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -6455,8 +6488,8 @@ class TestMemPool(TestCase):
         cap_stream = torch.cuda.Stream()
         side_stream = torch.cuda.Stream()
 
-        g1 = torch.cuda.CUDAGraph(keep_graph=True)
-        g2 = torch.cuda.CUDAGraph(keep_graph=True)
+        g1 = torch.cuda.CUDAGraph()
+        g2 = torch.cuda.CUDAGraph()
 
         numel = (8 * 1024 * 1024) // 4
 
@@ -6481,6 +6514,7 @@ class TestMemPool(TestCase):
         with torch.cuda.stream(cap_stream):
             g2.capture_begin(pool=shared_pool)
             data2 = torch.empty(numel, device="cuda")
+            data2.fill_(42.0)
             data2_ptr = data2.data_ptr()
             g2.capture_end()
 
@@ -6488,6 +6522,92 @@ class TestMemPool(TestCase):
         torch.cuda.synchronize()
 
         self.assertEqual(data_ptr, data2_ptr)
+
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:False"
+        )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
+    @unittest.skipIf(
+        not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
+    )
+    def test_graph_capture_pre_capture_stream_use(self):
+        # Tests that a block with pre-capture stream uses is correctly handled
+        # when freed during a subsequent capture on the same pool.
+        # Exercises the insert_events path in endAllocateToPool.
+        spin_wait_kernel = get_wait_for_cpu_kernel()
+
+        torch.cuda.memory._set_allocator_settings(
+            "graph_capture_record_stream_reuse:True"
+        )
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+        shared_pool = torch.cuda.graph_pool_handle()
+        cap_stream = torch.cuda.Stream()
+        side_stream = torch.cuda.Stream()
+        flag_cpu = torch.zeros(1, dtype=torch.int32, device="cpu").pin_memory()
+
+        g1 = torch.cuda.CUDAGraph()
+        g2 = torch.cuda.CUDAGraph()
+        g3 = torch.cuda.CUDAGraph()
+        g4 = torch.cuda.CUDAGraph()
+
+        numel = (8 * 1024 * 1024) // 4
+
+        # First capture: allocate data in the shared pool, keep it alive.
+        with torch.cuda.stream(cap_stream):
+            g1.capture_begin(pool=shared_pool)
+            data = torch.empty(numel, device="cuda")
+            data_ptr = data.data_ptr()
+            g1.capture_end()
+
+        torch.cuda.synchronize()
+
+        # Between captures: block side_stream with a spin-wait kernel
+        # (pre-capture stream use). The kernel holds the stream busy until
+        # we explicitly set the flag from the host.
+        with torch.cuda.stream(side_stream):
+            spin_wait_kernel(grid=(1, 1, 1), block=(1, 1, 1), args=[flag_cpu])
+            data.record_stream(side_stream)
+
+        # Second capture: free data during capture.
+        with torch.cuda.stream(cap_stream):
+            g2.capture_begin(pool=shared_pool)
+            del data
+            g2.capture_end()
+
+        # Trigger process_events. The spin kernel is still holding side_stream,
+        # so cudaEventQuery returns cudaErrorNotReady and the block stays pending.
+        torch.empty(1, device="cuda")
+
+        # Allocate from the same pool: block must NOT be reused yet.
+        with torch.cuda.stream(cap_stream):
+            g3.capture_begin(pool=shared_pool)
+            not_reused = torch.empty(numel, device="cuda")
+            not_reused_ptr = not_reused.data_ptr()
+            g3.capture_end()
+
+        self.assertNotEqual(data_ptr, not_reused_ptr)
+
+        # Release the spin kernel so side_stream can finish.
+        flag_cpu[0] = 1
+        torch.cuda.synchronize()
+
+        # Trigger process_events to reclaim the block.
+        torch.empty(1, device="cuda")
+
+        # Fourth capture: the block should now be reusable.
+        with torch.cuda.stream(cap_stream):
+            g4.capture_begin(pool=shared_pool)
+            reused = torch.empty(numel, device="cuda")
+            reused_ptr = reused.data_ptr()
+            g4.capture_end()
+
+        self.assertEqual(data_ptr, reused_ptr)
 
         torch.cuda.memory._set_allocator_settings(
             "graph_capture_record_stream_reuse:False"
@@ -8190,17 +8310,7 @@ class TestCudaDeviceParametrized(TestCase):
     def test_graph_external_wait_and_record(self):
         torch.cuda.empty_cache()
 
-        kernel_source = r"""
-        __global__ void wait_for_cpu(int *pinned_cpu_flag) {
-            int flag = 0;
-            do {
-                    asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
-            } while (flag == 0);
-        }
-        """
-        from torch.cuda import _compile_kernel
-
-        spin_wait_kernel = _compile_kernel(kernel_source, "wait_for_cpu")
+        spin_wait_kernel = get_wait_for_cpu_kernel()
 
         x = torch.ones(4, device="cuda")
         x_cpu = torch.zeros(x.shape, device="cpu").pin_memory()

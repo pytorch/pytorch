@@ -2762,6 +2762,9 @@ class DeviceCachingAllocator {
       }
 
       // Free deferred blocks associated with the ended pool, if any.
+      // cudaStreamEndCapture would have failed if any stream used during
+      // capture hadn't been joined back, so all stream uses on these
+      // blocks are known to be complete and we can safely clear them.
       if (!deferred_blocks.empty()) {
         auto pool_it = graph_pools.find(mempool_id);
         if (pool_it != graph_pools.end()) {
@@ -2770,8 +2773,27 @@ class DeviceCachingAllocator {
           std::vector<Block*> blocks_to_erase;
           for (auto& [block, markers] : deferred_blocks) {
             if (block->pool->owner_PrivatePool == private_pool) {
-              block->stream_uses.clear();
-              free_block(block, context);
+              // At capture end, handle blocks associated with non-capturing
+              // streams. Remove only stream uses introduced during capture
+              // (guaranteed complete), and for any leftover pre-capture uses,
+              // insert events to track their completion. This aligns with
+              // insert_events_deferred_until_no_capture semantics.
+              remove_cudagraph_stream_uses(block);
+              if (block->stream_uses.empty()) {
+                free_block(block, context);
+              } else {
+                // Pre-capture stream uses remain; record events so
+                // process_events can free the block once they complete.
+                insert_events(block);
+                // block->event_count should likely be non-zero here since
+                // block->stream_uses is not empty. Defensive: still free if
+                // event_count is zero, but this should be rare.
+                if (block->event_count == 0) {
+                  free_block(block, context);
+                }
+              }
+              // Must erase from deferred_blocks regardless of which branch we
+              // took.
               blocks_to_erase.push_back(block);
             }
           }
