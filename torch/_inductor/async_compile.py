@@ -13,7 +13,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -66,13 +66,13 @@ if TYPE_CHECKING:
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
-_t0: Optional[float] = None
+_t0: float | None = None
 
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 log = logging.getLogger(__name__)
 
-_triton_kernel_metrics: Optional[dict[str, dict[str, Any]]] = None
+_triton_kernel_metrics: dict[str, dict[str, Any]] | None = None
 
 size_hints_regex = re.compile(
     r"size_hints=(\{.*?\})",
@@ -212,7 +212,7 @@ class CompiledTritonKernels:
         CompiledTritonKernels._cache[key] = future
 
     @staticmethod
-    def get(kernel_src: str) -> Optional[CodeCacheFuture]:
+    def get(kernel_src: str) -> CodeCacheFuture | None:
         key = CompiledTritonKernels.key(kernel_src)
         return CompiledTritonKernels._cache.get(key, None)
 
@@ -234,7 +234,7 @@ class AsyncCompile:
     Utilities to compile in thread pools or subprocess pools (in the case of Triton).
     """
 
-    _ready_future: Optional[Future[Any]] = None
+    _ready_future: Future[Any] | None = None
 
     def __init__(self) -> None:
         pass
