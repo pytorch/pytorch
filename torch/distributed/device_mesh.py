@@ -731,7 +731,10 @@ else:
                 # yet and need a follow-up,
                 # TODO: compiler + device_mesh slicing.
                 with torch._subclasses.fake_tensor.unset_fake_temporarily():
-                    submesh = self._create_sub_mesh(sliced_mesh_layout, mesh_dim_names)
+                    with torch._C._DisableTorchDispatch():
+                        submesh = self._create_sub_mesh(
+                            sliced_mesh_layout, mesh_dim_names
+                        )
                 return submesh
 
         def get_group(self, mesh_dim: int | str | None = None) -> ProcessGroup:
