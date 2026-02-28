@@ -9,7 +9,7 @@ import sympy
 from sympy import Expr
 
 from torch import SymInt
-from torch.fx.experimental.size_hinting import (
+from torch.fx.experimental._size_hinting import (
     _guarding_hint_or_throw_base,
     _maybe_realize_expr,
     _optimization_hint_base,
