@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
 import torch
+from torch.utils._pallas import has_torch_tpu
 
 
 get_cuda_stream: Optional[Callable[[int], int]]
@@ -522,7 +523,7 @@ class CpuInterface(DeviceInterface):
 class MpsInterface(DeviceInterface):
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:
-        return torch.backends.mps.is_macos_or_newer(14, 0)
+        return True
 
     @classmethod
     def is_dtype_supported(
@@ -530,7 +531,7 @@ class MpsInterface(DeviceInterface):
     ) -> bool:
         if dtype in [torch.float64, torch.complex128]:
             return False
-        return dtype != torch.bfloat16 or cls.is_bf16_supported(including_emulation)
+        return True
 
     @staticmethod
     def is_available() -> bool:
@@ -554,6 +555,48 @@ class MpsInterface(DeviceInterface):
         def get_device_properties(device: torch.types.Device = None) -> Any:
             return namedtuple("MPSProperties", ["multi_processor_count"])(
                 torch.backends.mps.get_core_count()  # type: ignore[arg-type]
+            )
+
+        @staticmethod
+        def current_device() -> int:
+            return 0
+
+
+class TpuInterface(DeviceInterface):
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
+        return True
+
+    @classmethod
+    def is_dtype_supported(
+        cls, dtype: torch.dtype, including_emulation: bool = False
+    ) -> bool:
+        return dtype not in (
+            torch.float64,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.half,
+        )
+
+    @staticmethod
+    def is_available() -> bool:
+        return has_torch_tpu()
+
+    @staticmethod
+    def current_device() -> int:
+        return 0
+
+    @staticmethod
+    def get_compute_capability(device: torch.types.Device = None) -> str:
+        return ""
+
+    # pyrefly: ignore [bad-override]
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: torch.types.Device = None) -> Any:
+            return namedtuple("TPUProperties", ["multi_processor_count"])(
+                1  # type: ignore[arg-type]
             )
 
         @staticmethod
@@ -605,5 +648,6 @@ def init_device_reg() -> None:
 
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
+    register_interface_for_device("tpu", TpuInterface)
 
     _device_initialized = True

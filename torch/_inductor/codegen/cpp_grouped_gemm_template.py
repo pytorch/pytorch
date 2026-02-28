@@ -1,7 +1,8 @@
 import contextlib
 import logging
+import os
 from collections.abc import Callable
-from typing import Any, cast, Optional, TypeVar
+from typing import Any, cast, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -46,7 +47,12 @@ extern "C" {{export_declaration}}
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOuts[0], config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
     ) }}
 {%- if num_threads > 1 %}
+    {%- set use_dynamic_threads = ((config.cpp.threads < 1) and (num_threads == cpu_count)) or config.cpp.dynamic_threads %}
+    {%- if use_dynamic_threads %}
+    #pragma omp parallel
+    {%- else %}
     #pragma omp parallel num_threads({{num_threads}})
+    {%- endif %}
     {
         {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}
@@ -160,8 +166,8 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         beta: int = 1,
         alpha: int = 1,
         has_bias: bool = False,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        act_mapping: Optional[dict[int, ir.IRNode]] = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
+        act_mapping: dict[int, ir.IRNode] | None = None,
         gemm_grouped_num: int = 1,
     ) -> None:
         """
@@ -201,9 +207,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         alpha: int = 1,
         has_bias: tuple[bool, ...] = (False, False),
         trans_w: bool = False,
-        input_indices: Optional[list[int]] = None,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        act_mapping: Optional[dict[int, ir.IRNode]] = None,  # gemm idx to its act buf
+        input_indices: list[int] | None = None,
+        epilogue_creator: Callable[[ir.Buffer], ir.Pointwise] | None = None,
+        act_mapping: dict[int, ir.IRNode] | None = None,  # gemm idx to its act buf
     ) -> DataProcessorTemplateWrapper:
         # Input nodes order: x, optional[x1], ... w0, w1, ... optional[b0], optional[b1], ...
         gemm_grouped_num = len(has_bias)
@@ -356,9 +362,9 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
     def render(  # type: ignore[override,return,no-untyped-def]
         self,
         kernel: CppTemplateKernel,
-        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        template_buffer_node: ir.CppTemplateBuffer | None = None,
+        flag_template_buffer_has_other_users: bool | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> str:
         assert self.act_mapping
@@ -423,7 +429,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
         epilogues: list[ir.IRNode] = []
-        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]] = []
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] = []
         gemm_output_buffers: list[ir.Buffer] = []
         for out_buf_idx in range(self.gemm_grouped_num):
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut" + str(
@@ -437,7 +443,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             "epilogue_creator is not supported yet in Grouped GEMM Template"
         )
 
-        kernel_args: dict[str, Optional[ir.IRNode]] = {}
+        kernel_args: dict[str, ir.IRNode | None] = {}
         for x_idx in range(wgt_start_idx):
             kernel_args["X" + str(x_idx)] = act_deduplicated[x_idx]
         for w_idx in range(self.gemm_grouped_num):
@@ -506,6 +512,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             Y_list={"Y" + str(idx): Y for idx, Y in enumerate(Y_list)},
             Y_2d_list=Y_2d_list,
             multi_output_buffers=multi_output_buffers,
+            cpu_count=os.cpu_count(),
         )
         with contextlib.ExitStack() as stack:
             stack.enter_context(

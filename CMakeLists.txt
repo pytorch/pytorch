@@ -40,7 +40,7 @@ string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
 if(env_cxx_standard GREATER -1)
   message(
     WARNING
-      "C++ standard version definition detected in environment variable."
+      "C++ standard version definition detected in environment variable. "
       "PyTorch requires -std=c++20. Please remove -std=c++ settings in your environment."
   )
 endif()
