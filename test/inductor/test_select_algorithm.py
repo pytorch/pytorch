@@ -294,7 +294,7 @@ class TestSelectAlgorithm(TestCase):
 
     @pytest.mark.xfail(
         condition=torch.version.cuda,
-        reason="C++ wrapper dynamic shapes fails on CUDA, fixed on ROCm",
+        reason="C++ wrapper dynamic shapes fails on CUDA",
     )
     @patches
     def test_mm_plus_mm3(self):
