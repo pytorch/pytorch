@@ -686,9 +686,21 @@ Tensor nll_loss_nd_symint(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
-    TORCH_CHECK_VALUE(
-        false,
+  if (self.dim() != 1) {
+    auto sizes_match = self.sym_sizes()[0].sym_eq(target.sym_sizes()[0]);
+    if (TORCH_GUARD_OR_FALSE(sizes_match.sym_not())) {
+      // Statically known mismatch - raise ValueError for eager mode
+      TORCH_CHECK_VALUE(
+          false,
+          "Expected input batch_size (",
+          self.sym_sizes()[0],
+          ") to match target batch_size (",
+          target.sym_sizes()[0],
+          ").");
+    }
+    // For unbacked symbolic shapes, emit runtime check.
+    TORCH_SYM_CHECK(
+        sizes_match,
         "Expected input batch_size (",
         self.sym_sizes()[0],
         ") to match target batch_size (",
