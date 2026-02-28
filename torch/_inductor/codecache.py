@@ -194,7 +194,9 @@ class CacheBase:
                     "triton": triton_version,
                 },
             }
-            device_properties = torch.cuda.get_device_properties(0)
+            device_properties = torch.cuda.get_device_properties(
+                0 if config.normalize_cuda_device_for_cache else torch.cuda.current_device()
+            )
             if torch.version.cuda is not None:
                 system["device"]["name"] = device_properties.name
                 system["version"]["cuda"] = torch.version.cuda
@@ -498,7 +500,7 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
 
     # Normalize CUDA device ordinals so all ranks in distributed training
     # produce the same cache key for the same graph. See pytorch/pytorch#108971.
-    if meta.device.type == "cuda" and meta.device.index != 0:
+    if config.normalize_cuda_device_for_cache and meta.device.type == "cuda" and meta.device.index != 0:
         meta = dataclasses.replace(meta, device=_normalize_device_for_cache_key(meta.device))
 
     return meta
@@ -894,7 +896,11 @@ class FxGraphHashDetails:
         # but fx graphs don't necessarily have tensor inputs. If there aren't any,
         # we need to guard on the device index in case we allocate cuda tensors
         if no_tensor_inputs and torch.accelerator.is_available():
-            self.default_cuda_device_index = 0
+            self.default_cuda_device_index = (
+                0
+                if config.normalize_cuda_device_for_cache
+                else torch.accelerator.current_device_index()
+            )
 
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (

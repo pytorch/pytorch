@@ -127,6 +127,13 @@ non_blocking_remote_cache_write: bool = Config(
     default=True,
 )
 
+# [Experimental] Normalize CUDA device ordinals in FxGraphCache keys and
+# generated code so that distributed ranks sharing the same model/graph
+# (e.g. DDP, FSDP) can reuse a single cache entry.  Only safe when each
+# rank uses exactly one GPU (the common case).  Multi-device-per-rank
+# graphs should not enable this flag.
+normalize_cuda_device_for_cache: bool = False
+
 # Enable autotune local cache.
 #
 # See bundled_autotune_remote_cache for the effect this flag has on the bundled
