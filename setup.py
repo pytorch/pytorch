@@ -399,56 +399,45 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None))
-CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None))
+RERUN_CMAKE = str2bool(os.environ.pop("CMAKE_FRESH", None)) or "--cmake" in sys.argv
+CMAKE_ONLY = str2bool(os.environ.pop("CMAKE_ONLY", None)) or "--cmake-only" in sys.argv
 filtered_args = []
 for i, arg in enumerate(sys.argv):
-    if arg == "--cmake":
-        RERUN_CMAKE = True
-        continue
-    if arg == "--cmake-only":
-        # Stop once cmake terminates. Leave users a chance to adjust build
-        # options.
-        CMAKE_ONLY = True
+    if arg in ("--cmake", "--cmake-only"):
         continue
     if arg == "rebuild" or arg == "build":
         arg = "build"  # rebuild is gone, make it build
         EMIT_BUILD_WARNING = True
-    if arg == "develop":
-        print(
-            (
-                "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation',"
-                " for more info see https://github.com/pytorch/pytorch/issues/152276"
-            ),
-            file=sys.stderr,
-        )
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-e",
-                ".",
-                "-v",
-                "--no-build-isolation",
-            ],
-            env={**os.environ},
-        )
-        sys.exit(result.returncode)
-    if arg == "install":
-        print(
-            (
-                "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation',"
-                " for more info see https://github.com/pytorch/pytorch/issues/152276"
-            ),
-            file=sys.stderr,
-        )
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"],
-            env={**os.environ},
-        )
-        sys.exit(result.returncode)
+    if arg in ("develop", "install"):
+        # CMAKE_ONLY only runs cmake and exits (via sys.exit in build_deps)
+        # before setup() is called, so there's no need to go through pip.
+        # Replace the command with "build" so setuptools doesn't complain
+        # about an unrecognized command if we somehow reach setup().
+        if CMAKE_ONLY:
+            arg = "build"
+        else:
+            editable = arg == "develop"
+            print(
+                (
+                    f"WARNING: Redirecting 'python setup.py {arg}' to "
+                    f"'pip install {'-e ' if editable else ''}. -v --no-build-isolation',"
+                    " for more info see https://github.com/pytorch/pytorch/issues/152276"
+                ),
+                file=sys.stderr,
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    *(("-e", ".") if editable else (".",)),
+                    "-v",
+                    "--no-build-isolation",
+                ],
+                env={**os.environ},
+            )
+            sys.exit(result.returncode)
     if arg == "--":
         filtered_args += sys.argv[i:]
         break
