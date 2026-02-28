@@ -2390,23 +2390,22 @@ class OutputGraph(OutputGraphCommon):
                 # while creating the graph module because self.graph and root
                 # are out of sync. This only happens for `get_attr` nodes, so
                 # here we clean up the get_attr nodes that are unused.
-                with dynamo_timed("insert_deferred_runtime_asserts"):
-                    for attr in dir(root):
-                        subgraph = getattr(root, attr)
-                        if isinstance(subgraph, fx.GraphModule):
-                            insert_deferred_runtime_asserts(
-                                subgraph,
-                                self.shape_env,
-                                name,
-                                export=self.export,
-                            )
-                    self.remove_unused_get_attr_nodes()
-                    insert_deferred_runtime_asserts(
-                        fx.GraphModule(root, self.graph),
-                        self.shape_env,
-                        name,
-                        export=self.export,
-                    )
+                for attr in dir(root):
+                    subgraph = getattr(root, attr)
+                    if isinstance(subgraph, fx.GraphModule):
+                        insert_deferred_runtime_asserts(
+                            subgraph,
+                            self.shape_env,
+                            name,
+                            export=self.export,
+                        )
+                self.remove_unused_get_attr_nodes()
+                insert_deferred_runtime_asserts(
+                    fx.GraphModule(root, self.graph),
+                    self.shape_env,
+                    name,
+                    export=self.export,
+                )
             # NB: deferred runtime asserts can keep graphargs live, so make sure
             # those are inserted before pruning
             self.remove_unused_graphargs()
