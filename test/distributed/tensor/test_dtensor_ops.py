@@ -283,8 +283,6 @@ dtensor_compiled_fails = {
     xfail("expand_as"),
     xfail("hsplit"),
     xfail("linalg.diagonal"),
-    xfail("max", "reduction_with_dim"),
-    xfail("min", "reduction_with_dim"),
     xfail("movedim"),
     xfail("narrow"),
     xfail("permute"),
