@@ -589,8 +589,10 @@ class DistMatrixOpsTest(DTensorTestBase):
                 ),
             ).redistribute(device_mesh, [Replicate()])
             dist_local_res = dist_res.to_local()
-            assert not torch.isnan(local_result).any()
-            assert not torch.isnan(dist_local_res).any()
+            if torch.isnan(local_result).any():
+                raise AssertionError("NaN values found in local_result")
+            if torch.isnan(dist_local_res).any():
+                raise AssertionError("NaN values found in dist_local_res")
             self.assertEqual(dist_local_res.detach(), local_result.detach())
 
             # TODO: add test backward
