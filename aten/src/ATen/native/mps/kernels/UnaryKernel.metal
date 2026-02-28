@@ -91,7 +91,8 @@ struct abs_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
-    return T(::precise::sqrt(dot(x, x)), 0);
+    const auto abs_2 = ::precise::abs(float2(x));
+    return T(c10::metal::hypot(abs_2.x, abs_2.y));
   }
 };
 

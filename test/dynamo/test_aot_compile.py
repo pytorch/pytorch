@@ -1481,9 +1481,7 @@ from user code:
 
             from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
-            gm = dynamo_graph_capture_for_export(model, restore_state_dict=True)(
-                input_ids_dt
-            )
+            gm = dynamo_graph_capture_for_export(model)(input_ids_dt)
 
             fake_mode = gm.meta["fake_mode"]
 

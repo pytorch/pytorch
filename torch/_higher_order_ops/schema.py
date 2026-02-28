@@ -115,7 +115,7 @@ class HopSchemaGenerator:
         is_mutated: bool = False,
         kw_only: bool = False,
     ) -> None:
-        if callable(example_value):
+        if callable(example_value) and not is_opaque_type(type(example_value)):
             if not isinstance(
                 example_value, (torch.fx.GraphModule, torch._ops.OperatorBase)
             ):

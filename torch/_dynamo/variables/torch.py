@@ -63,7 +63,7 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -1154,9 +1154,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if not config.enable_dynamo_decompositions:
-                return None
-
+            # Decompose via addcmul_ so tensor weights (e.g. 0-dim tensor
+            # from tensor betas in Adam) stay in tensor arguments instead of
+            # hitting float() in the native lerp_scalar lowering.
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
@@ -2480,11 +2480,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from torch._dynamo.utils import _make_inlined
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
-            func_to_graphable,
             is_graphable_type,
             is_valid_output,
             to_graphable,
         )
+        from torch._higher_order_ops.invoke_leaf_function import _LeafCallable
         from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
 
@@ -2593,23 +2593,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 fake_tensor_tls.allow_non_fake_inputs_override = old_val
             return res
 
-        # `flat_apply` wants a TreeSpec for the function input.
-        _, f_spec = func_to_graphable(patched_fn)
+        f_callable = _LeafCallable(patched_fn)
 
-        # TreeSpec isn't graphable, so we register the function and input
-        # specs as attributes on the graph module.
-        f_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-            f"{fn.__name__}_spec", f_spec
+        f_callable_proxy = tx.output.register_static_attr_and_return_proxy(
+            f"{fn.__name__}_callable", f_callable
         )
         input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             fn.__name__ + "_input_spec",
             # pyrefly: ignore [unbound-name]
             input_spec,
         )
-        f_spec_proxy.node.type = type(f_spec)
+        f_callable_proxy.node.type = type(f_callable)
         # pyrefly: ignore [unbound-name]
         input_spec_proxy.node.type = type(input_spec)
-        all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
+        all_args = (f_callable_proxy, input_spec_proxy, *proxified_flat_args)
 
         # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
         # the call and wrap output into a VariableTracker.
@@ -2754,8 +2751,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
         from torch._dynamo.utils import _make_inlined
-        from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import (
+            _LeafCallable,
             invoke_leaf_function,
             make_leaf_function_wrappers,
         )
@@ -2765,6 +2762,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         decorated_fn = self.value
         real_impl = decorated_fn._torchdynamo_leaf_real_fn
         fake_impl = decorated_fn._torchdynamo_leaf_fake_fn
+        mutates_args = decorated_fn._torchdynamo_leaf_mutates_args
 
         if fake_impl is None:
             raise ValueError(
@@ -2776,6 +2774,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
+
         flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
             VariableTracker.build(tx, (args_with_states, kwargs_with_states))
         ).unpack_var_sequence(tx)
@@ -2784,6 +2783,19 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ]
         input_spec = input_spec_var.as_python_constant()
 
+        mutated_flat_indices = ""
+        if mutates_args:
+            from torch._higher_order_ops.invoke_leaf_function import (
+                _resolve_mutated_flat_indices,
+            )
+
+            try:
+                mutated_flat_indices = _resolve_mutated_flat_indices(
+                    real_impl, mutates_args, len(flat_arg_proxies), input_spec
+                )
+            except ValueError as e:
+                raise UserError(UserErrorType.INVALID_INPUT, str(e)) from e
+
         # Single-element mutable list so the wrappers can write back the output
         # TreeSpec. Read captured_out_spec[0] after the wrappers have been called.
         captured_out_spec: list[pytree.TreeSpec | None] = [None]
@@ -2791,22 +2803,23 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             real_impl, fake_impl, captured_out_spec
         )
 
-        _, real_impl_spec = func_to_graphable(wrapped_real_impl)
-        _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
+        real_impl_callable = _LeafCallable(wrapped_real_impl)
+        fake_impl_callable = _LeafCallable(wrapped_fake_impl)
 
-        def make_spec_proxy(name: str, spec: Any) -> Any:
+        def make_callable_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)
             proxy.node.type = type(spec)
             return proxy
 
-        real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
-        fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
-        input_spec_proxy = make_spec_proxy("input_spec", input_spec)
+        real_impl_proxy = make_callable_proxy("real_fn", real_impl_callable)
+        fake_impl_proxy = make_callable_proxy("fake_fn", fake_impl_callable)
+        input_spec_proxy = make_callable_proxy("input_spec", input_spec)
 
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
             input_spec_proxy,
+            mutated_flat_indices,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(

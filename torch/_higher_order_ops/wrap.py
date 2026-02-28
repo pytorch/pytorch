@@ -69,7 +69,7 @@ class InductorCompiledCode(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("inductor_compiled_code")
+        super().__init__("inductor_compiled_code", no_overloaded_args=True)
 
     def __call__(self, func, *args, **kwargs):
         # pyrefly: ignore [missing-attribute]
@@ -79,6 +79,8 @@ class InductorCompiledCode(HigherOrderOperator):
 inductor_compiled_code = InductorCompiledCode()
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCPU)
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
+inductor_compiled_code.fallthrough(DispatchKey.Negative)
+inductor_compiled_code.fallthrough(DispatchKey.Conjugate)
 
 
 _inductor_compiled_callable_id = itertools.count()

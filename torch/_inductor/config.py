@@ -2450,6 +2450,16 @@ class lookup_table:
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 
+    # Force custom op autotuning choice selection:
+    # - None: normal autotuning (default)
+    # - True: force decomposition to win
+    # - False: force fallback to win
+    force_custom_op_decomposition: Optional[bool] = None
+
+    # Force custom op autotuning to prevent grouping ranges by implementation.
+    # When True, each range is treated as a separate impl group, forcing torch.cond dispatch.
+    force_no_impl_grouping: bool = False
+
     max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False

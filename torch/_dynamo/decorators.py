@@ -28,7 +28,6 @@ from .eval_frame import (
     RunOnlyContext,
     skip_code,
 )
-from .exc import IncorrectUsage
 from .external_utils import (
     get_nonrecursive_disable_wrapper,
     wrap_dunder_call_ctx_manager,
@@ -314,14 +313,15 @@ def _invoke_leaf_function_python(
     fake_impl: Callable[..., Any],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    mutates_args: frozenset[str] | None = None,
 ) -> Any:
     """Call invoke_leaf_function HOP directly from Python.
 
     This enables @leaf_function to work with make_fx
     without relying on Dynamo to intercept the call.
     """
-    from torch._higher_order_ops.flat_apply import func_to_graphable
     from torch._higher_order_ops.invoke_leaf_function import (
+        _LeafCallable,
         convert_modules_to_states,
         invoke_leaf_function,
         make_leaf_function_wrappers,
@@ -352,15 +352,40 @@ def _invoke_leaf_function_python(
         real_impl, fake_impl, captured_out_spec
     )
 
-    _, real_fn_spec = func_to_graphable(wrapped_real)
-    _, fake_fn_spec = func_to_graphable(wrapped_fake)
-    flat_out = invoke_leaf_function(real_fn_spec, fake_fn_spec, input_spec, *flat_args)
+    real_fn_callable = _LeafCallable(wrapped_real)
+    fake_fn_callable = _LeafCallable(wrapped_fake)
+
+    mutated_flat_indices = ""
+    if mutates_args:
+        from torch._higher_order_ops.invoke_leaf_function import (
+            _resolve_mutated_flat_indices,
+        )
+
+        mutated_flat_indices = _resolve_mutated_flat_indices(
+            real_impl, mutates_args, len(flat_args), input_spec
+        )
+
+    flat_out = invoke_leaf_function(
+        real_fn_callable, fake_fn_callable, input_spec, mutated_flat_indices, *flat_args
+    )
 
     assert captured_out_spec[0] is not None
     return pytree.tree_unflatten(flat_out, captured_out_spec[0])
 
 
-def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+@overload
+def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
+@overload
+def leaf_function(
+    *, mutates_args: set[str]
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]: ...
+
+
+def leaf_function(
+    fn: Optional[Callable[_P, _R]] = None, *, mutates_args: Optional[set[str]] = None
+) -> Callable[_P, _R] | Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Decorator to mark a function as a leaf function for :func:`torch.compile`.
 
@@ -536,15 +561,39 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
           Logging/printing inside the leaf function is fine since it doesn't affect
           correctness.
 
-        - **In-place mutations on inputs**: In-place mutations on input tensors are
-          detected and will raise an error. Clone inputs before mutating.
+        - **In-place mutations on inputs**: Undeclared in-place mutations on input
+          tensors are detected and will raise an error. Either declare mutations via
+          ``mutates_args`` or clone inputs before mutating.
 
           Bad::
 
             @leaf_function
             def my_leaf_fn(x):
-                x.add_(1)  # Will raise: "In-place mutation detected"
+                x.add_(1)  # Will raise: "Undeclared in-place mutation"
                 return (x,)
+
+          Good::
+
+            @leaf_function(mutates_args={"buf"})
+            def my_leaf_fn(x, buf):
+                buf.add_(1)  # OK: declared in mutates_args
+                return (x + buf,)
+
+          For pytree args (lists, tuples, dicts of tensors), use the parameter name
+          to declare mutation on all contained tensors::
+
+            @leaf_function(mutates_args={"buffers"})
+            def my_leaf_fn(x, buffers):
+                for buf in buffers:
+                    buf.add_(1)  # OK: 'buffers' declared in mutates_args
+                return (x + sum(buffers),)
+
+          Or use bracket notation for fine-grained control::
+
+            @leaf_function(mutates_args={"buffers[0]"})
+            def my_leaf_fn(x, buffers):
+                buffers[0].add_(1)  # OK: 'buffers[0]' declared
+                return (x + buffers[1],)  # buffers[1] is not cloned
 
         - **Closures in fake implementation**: Tensors or modules captured from enclosing scopes
           in the fake implementation will cause compilation errors. The real function can
@@ -615,10 +664,33 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     Args:
         fn: The function being decorated.
+        mutates_args: Set of Python expressions (as strings) identifying arguments
+            that the function mutates in-place. Each string is evaluated against
+            the function's parameters. Examples: ``'buf'`` for a plain tensor,
+            ``'model.running_mean'`` for an nn.Module buffer,
+            ``'buffers'`` to mark all tensors in a list, ``'buffers[0]'`` for a
+            specific element, ``'state["key"]'`` for a dict entry.
     """
+    if fn is None:
+        return functools.partial(leaf_function, mutates_args=mutates_args)
+
     from . import trace_rules
 
     _check_mutually_exclusive_decorators(fn, "leaf_function")
+
+    if mutates_args:
+        import inspect
+        import re
+
+        params = set(inspect.signature(fn).parameters)
+        for expr in mutates_args:
+            root = re.split(r"[.\[]", expr, maxsplit=1)[0]
+            if root not in params:
+                raise ValueError(
+                    f"mutates_args expression '{expr}' refers to parameter '{root}', "
+                    f"which is not a parameter of '{fn.__name__}'. "
+                    f"Available parameters: {', '.join(params)}"
+                )
 
     @functools.wraps(fn)
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -628,18 +700,21 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
                 "requires a fake implementation. Please provide one using the @<func>.register_fake "
                 "decorator. See the leaf_function docstring for details."
             )
-        # This wrapper call enables @leaf_function to work with make_fx tracing
 
         return _invoke_leaf_function_python(
-            fn,
+            fn,  # pyrefly: ignore [bad-argument-type]
             # pyrefly: ignore [bad-argument-type]
             inner._torchdynamo_leaf_fake_fn,
             args,
             kwargs,
+            mutates_args=inner._torchdynamo_leaf_mutates_args,  # pyrefly: ignore [missing-attribute]
         )  # type: ignore[attr-defined]
 
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = None  # type: ignore[attr-defined]
+    inner._torchdynamo_leaf_mutates_args = (  # pyrefly: ignore [missing-attribute]
+        frozenset(mutates_args) if mutates_args else frozenset()
+    )  # type: ignore[attr-defined]
 
     # Follow nonstrict_trace implementation
     wrapped_id = id(inner)
@@ -672,7 +747,7 @@ def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
             != variables.TorchInGraphFunctionVariable
             and trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable
         ):
-            raise IncorrectUsage(
+            raise RuntimeError(
                 "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
                 "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
             )

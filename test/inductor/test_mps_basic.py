@@ -191,6 +191,25 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_sdpa_split_qkv(self):
+        # regression test for metal compiler bug where fused (x / A) % B
+        # produces wrong results, causing incorrect reads from non-contiguous.
+        n_head, n_embd, seq_len = 6, 384, 1024
+        x = torch.randn(16, seq_len, n_embd, device="mps")
+        c_attn = torch.nn.Linear(n_embd, 3 * n_embd).to("mps").eval()
+        qkv = c_attn(x)
+        q, k, v = qkv.split(n_embd, dim=2)
+        q = q.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+        k = k.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+        v = v.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+
+        def fn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, is_causal=True
+            )
+
+        self.common(fn, (q, k, v), atol=1e-4, rtol=1e-4, check_lowp=False)
+
 
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
