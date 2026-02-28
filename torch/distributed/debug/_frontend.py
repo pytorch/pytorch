@@ -6,7 +6,7 @@ import socket
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +18,8 @@ from torch.distributed.debug._store import get_world_size, tcpstore_client
 
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+_DEFAULT_FETCH_TIMEOUT: float = 60.0
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +53,8 @@ class Route:
 
 
 class DebugHandler(ABC):
+    fetch_timeout: float = _DEFAULT_FETCH_TIMEOUT
+
     @abstractmethod
     def routes(self) -> list[Route]: ...
 
@@ -72,49 +76,66 @@ class DebugHandler(ABC):
 # ---------------------------------------------------------------------------
 
 
-def fetch_thread_pool(urls: list[str]) -> Iterable[Response]:
+def fetch_thread_pool(urls: list[str], timeout: float) -> list[Response]:
     # late import for optional dependency
     import requests
 
     max_workers = 20
 
     def get(url: str) -> Response:
-        resp = requests.post(url)
-        return Response(resp.status_code, resp.text)
+        try:
+            resp = requests.post(url, timeout=timeout)
+            return Response(resp.status_code, resp.text)
+        except requests.exceptions.Timeout as e:
+            return Response(408, f"Timeout: {e}")
+        except requests.exceptions.ConnectionError as e:
+            return Response(503, f"ConnectionError: {e}")
+        except Exception as e:
+            return Response(502, f"{type(e).__name__}: {e}")
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        resps = executor.map(get, urls)
+        resps = list(executor.map(get, urls))
 
     return resps
 
 
-def fetch_aiohttp(urls: list[str]) -> Iterable[Response]:
+def fetch_aiohttp(urls: list[str], timeout: float) -> list[Response]:
     # late import for optional dependency
     # pyrefly: ignore [missing-import]
     import aiohttp
 
     async def fetch(session: aiohttp.ClientSession, url: str) -> Response:
-        async with session.post(url) as resp:
-            text = await resp.text()
-            return Response(resp.status, text)
+        try:
+            async with session.post(url) as resp:
+                text = await resp.text()
+                return Response(resp.status, text)
+        except asyncio.TimeoutError as e:
+            return Response(408, f"TimeoutError: {e}")
+        except aiohttp.ClientError as e:
+            return Response(503, f"{type(e).__name__}: {e}")
+        except Exception as e:
+            return Response(502, f"{type(e).__name__}: {e}")
 
-    async def gather(urls: list[str]) -> Iterable[Response]:
-        async with aiohttp.ClientSession() as session:
-            return await asyncio.gather(*[fetch(session, url) for url in urls])
+    async def gather(urls: list[str]) -> list[Response]:
+        client_timeout = aiohttp.ClientTimeout(total=timeout)
+        async with aiohttp.ClientSession(timeout=client_timeout) as session:
+            return list(await asyncio.gather(*[fetch(session, url) for url in urls]))
 
     return asyncio.run(gather(urls))
 
 
-def fetch_all(endpoint: str, args: str = "") -> tuple[list[str], Iterable[Response]]:
+def fetch_all(
+    endpoint: str, args: str = "", *, timeout: float
+) -> tuple[list[str], list[Response]]:
     store = tcpstore_client()
     keys = [f"rank{r}" for r in range(get_world_size())]
     addrs = store.multi_get(keys)
     addrs = [f"{addr.decode()}/handler/{endpoint}?{args}" for addr in addrs]
 
     try:
-        resps = fetch_aiohttp(addrs)
+        resps = fetch_aiohttp(addrs, timeout=timeout)
     except ImportError:
-        resps = fetch_thread_pool(addrs)
+        resps = fetch_thread_pool(addrs, timeout=timeout)
 
     return addrs, resps
 
@@ -122,6 +143,19 @@ def fetch_all(endpoint: str, args: str = "") -> tuple[list[str], Iterable[Respon
 def format_json(blob: str):
     parsed = json.loads(blob)
     return json.dumps(parsed, indent=2)
+
+
+def format_fetch_summary(addrs: list[str], resps: list[Response]) -> str | None:
+    """Return a summary string if any workers failed, or None if all succeeded."""
+    failed = [(i, r) for i, r in enumerate(resps) if r.status_code != 200]
+    if not failed:
+        return None
+    total = len(addrs)
+    ok = total - len(failed)
+    lines = [f"PARTIAL DATA: {ok}/{total} workers responded"]
+    for rank, resp in failed:
+        lines.append(f"  Rank {rank}: {resp.text}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -241,10 +275,12 @@ class PeriodicDumper:
         handlers: list[DebugHandler],
         output_dir: str,
         interval_seconds: float = 60.0,
+        max_dumps: int | None = None,
     ) -> None:
         self._handlers = handlers
         self._output_dir = output_dir
         self._interval_seconds = interval_seconds
+        self._max_dumps = max_dumps
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -263,6 +299,7 @@ class PeriodicDumper:
             self._thread.join()
 
     def _run(self) -> None:
+        dumps_done = 0
         while not self._stop_event.is_set():
             for handler in self._handlers:
                 try:
@@ -280,6 +317,9 @@ class PeriodicDumper:
                         f.write(content)
                 except Exception:
                     logger.exception("Failed to write dump to %s", path)
+            dumps_done += 1
+            if self._max_dumps is not None and dumps_done >= self._max_dumps:
+                break
             self._stop_event.wait(self._interval_seconds)
 
 
@@ -428,7 +468,12 @@ def main(
     dump_interval: float,
     handlers: list[DebugHandler],
     enabled_dumps: set[str],
+    fetch_timeout: float = 60.0,
+    max_dumps: int | None = None,
 ) -> None:
+    for handler in handlers:
+        handler.fetch_timeout = fetch_timeout
+
     logger.setLevel(logging.INFO)
 
     server = FrontendServer(port=port, handlers=handlers)
@@ -444,13 +489,15 @@ def main(
             ],
             dump_dir,
             dump_interval,
+            max_dumps=max_dumps,
         )
         dumper.start()
-        logger.info(
-            "Periodic dumper started, writing to %s every %.0fs",
-            dump_dir,
-            dump_interval,
+        msg = (
+            f"Periodic dumper started, writing to {dump_dir} every {dump_interval:.0f}s"
         )
+        if max_dumps is not None:
+            msg += f" (max {max_dumps} dumps)"
+        logger.info(msg)
 
     try:
         server.join()
