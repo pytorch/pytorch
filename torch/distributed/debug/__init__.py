@@ -33,6 +33,7 @@ def start_debug_server(
     enabled_dumps: set[str] | None = None,
     handlers: list["DebugHandler"] | None = None,
     fetch_timeout: float = 60.0,
+    max_dumps: int | None = None,
 ) -> None:
     """
     Start the debug server stack on all workers. The frontend debug server is
@@ -75,6 +76,8 @@ def start_debug_server(
         fetch_timeout (float): Timeout in seconds for fetching data from individual
             workers. Defaults to 60. Workers that don't respond within this time
             will be reported as unavailable.
+        max_dumps (int | None): Maximum number of dump cycles to perform. If None
+            (default), dumps continue indefinitely until the server is stopped.
     """
     global _WORKER_SERVER, _DEBUG_SERVER_PROC
 
@@ -109,6 +112,7 @@ def start_debug_server(
             "enabled_dumps": enabled_dumps,
             "handlers": handlers,
             "fetch_timeout": fetch_timeout,
+            "max_dumps": max_dumps,
         }
 
         if start_method is not None:
