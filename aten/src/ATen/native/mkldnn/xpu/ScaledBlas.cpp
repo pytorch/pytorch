@@ -239,14 +239,12 @@ Tensor& _scaled_gemm(
 //        TensorWise: scalar tensor;
 //        RowWise: [M, 1];
 //        BlockWise1x128: [M, K//128];
-/        BlockWise128x128: [M//128, K//128]
+//        BlockWise128x128: [M//128, K//128]
 //    - `scale_b`: inverse scale of `mat2`; shape depends on scaling scheme:
 //        TensorWise: scalar tensor;
-
-        RowWise: [1, N];
+//        RowWise: [1, N];
 //        BlockWise1x128: [K//128, N];
-/
-       BlockWise128x128: [K//128, N//128]
+//        BlockWise128x128: [K//128, N//128]
 //    - `scale_result`: a scalar tensor with the scale of the output (not
 //    currently supported on XPU)
 //    - `use_fast_accum`: not supported on XPU, silently ignored
