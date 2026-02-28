@@ -937,24 +937,46 @@ class CachingAutotuner(KernelInterface):
 
         expected_arg_names = getattr(launcher, 'def_arg_names', None)
         if expected_arg_names is not None:
+            # Launcher exposes explicit argument names (excluding stream).
             expected_count = len(expected_arg_names)
-            arg_names_str = ', '.join(expected_arg_names)
+            positional_count = len(args)
+            # Guard the dangerous case where too many positional args overwrite the stream.
+            if positional_count > expected_count:
+                arg_names_str = ", ".join(expected_arg_names)
+                raise TypeError(
+                    f"Kernel '{self.fn.__name__}' expected at most {expected_count} positional "
+                    f"arguments ({arg_names_str}) but got {positional_count}. "
+                    f"Please check the number and order of positional arguments passed to the kernel."
+                )
+            # First `positional_count` expected args are satisfied by positional arguments.
+            remaining_expected = expected_arg_names[positional_count:]
+            matched_kwargs = [name for name in remaining_expected if name in kwargs]
+            total_provided = positional_count + len(matched_kwargs)
+            if total_provided != expected_count:
+                # Some expected arguments are missing (or provided under wrong names).
+                missing = [name for name in remaining_expected if name not in kwargs]
+                missing_str = ", ".join(missing) if missing else "unknown"
+                arg_names_str = ", ".join(expected_arg_names)
+                raise TypeError(
+                    f"Kernel '{self.fn.__name__}' expected {expected_count} arguments "
+                    f"({arg_names_str}) but only {total_provided} were provided "
+                    f"via positional and keyword arguments. Missing arguments: {missing_str}."
+                )
         else:
-            # Fallback for manually mocked launchers that only have __code__
+            # Fallback for manually mocked launchers that only have __code__.
+            # We don't know the keyword names here, so we only guard against
+            # too many positional arguments (which can overwrite the stream).
             expected_params = getattr(launcher, "__code__", None)
             if expected_params is None:
                 return
             expected_count = expected_params.co_argcount - 1  # Excluding stream
-            arg_names_str = f"{expected_count} unnamed args"
-
-        actual_count = len(args)
-
-        if actual_count != expected_count:
-            raise TypeError(
-                f"Kernel '{self.fn.__name__}' expected {expected_count} arguments "
-                f"({arg_names_str}) but got {actual_count}. "
-                f"Please check the number of arguments passed to the kernel."
-            )
+            positional_count = len(args)
+            if positional_count > expected_count:
+                raise TypeError(
+                    f"Kernel '{self.fn.__name__}' expected at most {expected_count} positional "
+                    f"arguments but got {positional_count}. "
+                    f"Please check the number and order of positional arguments passed to the kernel."
+                )
 
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher"""
