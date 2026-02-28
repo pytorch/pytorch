@@ -9,7 +9,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import size_hint
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -83,7 +83,7 @@ def get_ir_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int
 
 def get_fx_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
     numel = functools.reduce(operator.mul, size, 1)
-    result = size_hint(numel, fallback=fallback)
+    result = optimization_hint(numel, fallback=fallback)
     return result
 
 
@@ -479,9 +479,6 @@ def estimate_nccl_collective_runtime_from_fx_node(
                 dtype=dtype,
                 device=device,
             )
-
-        def try_size_hint(s: sympy.Expr) -> int:
-            return V.graph.sizevars.optimization_hint(s, fallback=0)
 
         def to_real_tensor(e: Any) -> Any:
             if isinstance(e, torch.fx.Node):

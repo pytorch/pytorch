@@ -110,7 +110,11 @@ from torch.compiler._cache import (
 )
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
-from torch.fx.experimental.symbolic_shapes import has_hint, ShapeEnv, size_hint
+from torch.fx.experimental.symbolic_shapes import (
+    guarding_hint_or_throw,
+    has_guarding_hint,
+    ShapeEnv,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
@@ -1194,7 +1198,9 @@ class GuardedCache(Generic[T]):
         Get the backed SymInt objects from the input list. Note that we can never
         have guards that depend on unbacked symint.
         """
-        return [s for s in inputs if isinstance(s, torch.SymInt) and has_hint(s)]
+        return [
+            s for s in inputs if isinstance(s, torch.SymInt) and has_guarding_hint(s)
+        ]
 
     @classmethod
     def _get_shape_env(cls: type[GuardedCache[T]]) -> ShapeEnv | None:
@@ -1431,7 +1437,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         assert shape_env is not None
 
         symints = FxGraphCache._filter_backed_symints(example_inputs)
-        hints = [size_hint(s) for s in symints]
+        hints = [guarding_hint_or_throw(s) for s in symints]
 
         # If this config is turned on, everything is a guard hit and we check nothing
         if config.unsafe_skip_cache_dynamic_shape_guards:

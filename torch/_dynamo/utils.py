@@ -4310,18 +4310,16 @@ def defake(x: Any) -> Any:
     size: torch._prims_common.ShapeType
     stride: torch._prims_common.StrideType
     if x._has_symbolic_sizes_strides:
-        size = []
-        for s in x.size():
-            if isinstance(s, torch.SymInt):
-                size.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                size.append(s)
-        stride = []
-        for s in x.stride():
-            if isinstance(s, torch.SymInt):
-                stride.append(s.node.shape_env.size_hint(s.node.expr))
-            else:
-                stride.append(s)
+        # optimization_hint is appropriate here because defake only needs a
+        # plausible concrete shape to allocate a real tensor; it does not need
+        # to install guards. For unbacked symbols the heuristic fallback is fine.
+        size = [
+            torch.fx.experimental.symbolic_shapes.optimization_hint(s) for s in x.size()
+        ]
+        stride = [
+            torch.fx.experimental.symbolic_shapes.optimization_hint(s)
+            for s in x.stride()
+        ]
     else:
         size = x.size()
         stride = x.stride()
