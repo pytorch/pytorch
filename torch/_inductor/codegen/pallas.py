@@ -1082,45 +1082,110 @@ class PallasKernel(SIMDKernel):
         """Check if index expression contains indirect variables."""
         return len(self._get_indirect_vars(index)) > 0
 
-    def _get_expected_output_shape(self) -> list:
-        """Get the expected output shape from iteration variables.
 
-        Iteration variables are shaped for broadcasting. For 2D outputs:
-        - First var (e.g., y0) gets shape (1, N) - innermost dimension
-        - Second var (e.g., x1) gets shape (M, 1) - outermost dimension
-        The broadcast result is (M, N).
+    @staticmethod
+    def _c_contiguous_strides(shape: list[int]) -> list[int]:
+        """Return C-contiguous strides for the given shape."""
+        n = len(shape)
+        strides = [1] * n
+        for i in range(n - 2, -1, -1):
+            strides[i] = strides[i + 1] * shape[i + 1]
+        return strides
+
+    @staticmethod
+    def _map_coeffs_to_dims(
+        coeffs: list[int], strides: list[int]
+    ) -> Optional[list[int]]:
+        """Map coefficient values to dimension indices via stride matching.
+
+        Returns a list where entry k is the dimension whose stride equals
+        coeffs[k], or None if the mapping is ambiguous or incomplete.
         """
-        # Collect variable lengths
-        var_items = list(self.range_tree_nodes.items())
-        broadcast_vars = []
-        for var_sym, entry in var_items:
-            length = self._safe_int(entry.length)
-            if length is not None:
-                broadcast_vars.append(length)
+        stride_to_dim: dict[int, int] = {}
+        for d, s in enumerate(strides):
+            if s in stride_to_dim:
+                return None  # duplicate strides
+            stride_to_dim[s] = d
+        mapping: list[int] = []
+        for c in coeffs:
+            d = stride_to_dim.get(c)
+            if d is None:
+                return None
+            mapping.append(d)
+        if len(set(mapping)) != len(coeffs):
+            return None
+        return mapping
 
-        if len(broadcast_vars) <= 1:
-            return broadcast_vars
+    @staticmethod
+    def _get_actual_out_strides(out_buf, n: int) -> Optional[list[int]]:
+        """Extract actual output buffer strides from its layout."""
+        layout = getattr(out_buf, "get_layout", lambda: None)()
+        if layout is None:
+            return None
+        stride_raw = getattr(layout, "stride", None)
+        if stride_raw is None or len(stride_raw) != n:
+            return None
+        from torch._inductor.codegen.pallas import PallasKernel
+        strides = [PallasKernel._safe_int(s) for s in stride_raw]
+        if any(s is None for s in strides):
+            return None
+        return strides
 
-        # For 2D case: variables are reshaped in reverse order
-        # First var is innermost (last dim), second var is outermost (first dim)
-        # So output shape is [second_var_length, first_var_length, ...]
-        return list(reversed(broadcast_vars))
+    def _compute_store_coeffs(
+        self, ordered: list
+    ) -> Optional[dict]:
+        """Compute store-side linearization coefficients from range tree nesting.
+
+        The tree structure encodes the output iteration order: later
+        trees (prefix ``x``) are innermost, earlier trees (``y``, ``z``)
+        are outer.  Within a tree, dict order goes inner-to-outer.
+        The innermost variable gets coefficient 1; each successive
+        variable (moving outward) multiplies by the previous range.
+
+        Returns ``{sympy.Symbol: int}`` mapping each RT var to its store
+        coefficient, or ``None`` on failure.
+        """
+        prefix_groups: dict[str, list] = {}
+        prefix_order: list[str] = []
+        for v in ordered:
+            node = self.range_tree_nodes[v]
+            p = node.prefix
+            if p not in prefix_groups:
+                prefix_groups[p] = []
+                prefix_order.append(p)
+            prefix_groups[p].append(v)
+        inner_to_outer: list = []
+        for p in reversed(prefix_order):
+            inner_to_outer.extend(prefix_groups[p])
+        coeffs: dict = {}
+        coeff = 1
+        for v in inner_to_outer:
+            sz = self._safe_int(self.range_tree_nodes[v].length)
+            if sz is None:
+                return None
+            coeffs[v] = coeff
+            coeff *= sz
+        return coeffs
 
     def _get_full_load_permutation(
         self, name: str, index: sympy.Expr
     ) -> Optional[tuple[int, ...]]:
         """Return permutation for a full-array load, or None.
 
-        Two-phase detection:
-        1. Index-coefficient analysis: non-ascending coefficients prove the
-           load accesses data in permuted order.
-        2. Broadcast-shape fallback: when coefficients are ascending (the
-           range tree may have reordered dimensions), check whether the
-           input buffer shape matches the broadcast shape but differs from
-           the output -- indicating a transpose the range tree obscured.
+        Computes the permutation by mapping each range-tree variable to
+        both an output dimension (via store coefficients + actual output
+        strides) and an input dimension (via load coefficients + input
+        C-contiguous strides).  The permutation is then:
 
-        Once a permutation is confirmed, the exact mapping is determined
-        by comparing input and output buffer shapes.
+            perm[out_dim] = in_dim   for each RT variable
+
+        Using actual output strides (not C-contiguous) is critical: the
+        scheduler may choose a non-standard output layout (e.g. column-
+        major) to optimise for transposed inputs.
+
+        When all dimensions collapse to a single flat RT variable (e.g.
+        (2,2,2,2,2) with all dims size 2), infers the permutation
+        directly from output strides vs input C-contiguous strides.
         """
         info = self._get_buffer_info(name)
         if not info:
@@ -1132,93 +1197,85 @@ class PallasKernel(SIMDKernel):
         if not is_contiguous:
             return None  # .contiguous() at JAX boundary handles this
 
-        # Phase 1: coefficient analysis.
+        # Extract index coefficients for each non-reduction RT variable.
         iter_used = self._get_used_iter_vars(index)
         ordered = [s for s, e in self.range_tree_nodes.items()
                    if s in iter_used and not e.is_reduction]
         if len(ordered) != len(in_shape):
+            # All dims may have collapsed to a single flat RT variable
+            # (e.g. (2,2,2,2,2) → single x0 of length 32).  In this
+            # case, infer the permutation directly from output strides
+            # vs input C-contiguous strides.
+            n = len(in_shape)
+            if (
+                len(ordered) == 1
+                and self._safe_int(
+                    self.range_tree_nodes[ordered[0]].length
+                ) == math.prod(in_shape)
+            ):
+                in_strides = self._c_contiguous_strides(in_shape)
+                for out_name in self._output_buffer_names:
+                    out_buf = V.graph.get_buffer(out_name)
+                    if out_buf is None:
+                        continue
+                    out_shape = [self._safe_int(s)
+                                 for s in out_buf.get_size()]
+                    if (
+                        any(s is None for s in out_shape)
+                        or len(out_shape) != n
+                    ):
+                        continue
+                    actual = self._get_actual_out_strides(out_buf, n)
+                    if actual is None:
+                        break
+                    # Map each output dim to the input dim with the
+                    # same stride.
+                    perm = self._map_coeffs_to_dims(actual, in_strides)
+                    if perm is None:
+                        break
+                    if list(perm) == list(range(n)):
+                        return None
+                    return tuple(perm)
             return None
         coeffs = [self._get_index_coefficient(
             V.graph.sizevars.simplify(index), v) for v in ordered]
         if not all(isinstance(c, int) and c > 0 for c in coeffs):
             return None
-        access_is_permuted = coeffs != sorted(coeffs)
 
-        if access_is_permuted:
-            # Verify the non-ascending coefficients aren't just matching
-            # the output buffer's stride pattern (which would mean the
-            # access follows the output's iteration layout, not a
-            # permutation).
-            n = len(coeffs)
+        n = len(ordered)
+        in_strides = self._c_contiguous_strides(in_shape)
+        store_coeffs = self._compute_store_coeffs(ordered)
+
+        # --- Primary path: dimension-mapping with actual output strides ---
+        if store_coeffs is not None:
             for out_name in self._output_buffer_names:
                 out_buf = V.graph.get_buffer(out_name)
                 if out_buf is None:
                     continue
-                layout = getattr(out_buf, "get_layout", lambda: None)()
-                if layout is None:
+                out_shape = [self._safe_int(s) for s in out_buf.get_size()]
+                if (
+                    any(s is None for s in out_shape)
+                    or len(out_shape) != n
+                ):
                     continue
-                out_stride = getattr(layout, "stride", None)
-                if out_stride is None or len(out_stride) != n:
-                    continue
-                out_s = [self._safe_int(s) for s in out_stride]
-                if any(s is None for s in out_s):
-                    continue
-                if list(coeffs) == out_s:
-                    access_is_permuted = False
-                    break
 
-        if not access_is_permuted:
-            # Ascending coefficients: could be a view/reshape OR a true
-            # permute where the range tree reordered dimensions.
-            # Distinguish via the broadcast shape: if the input shape
-            # matches the iteration-variable pattern but differs from the
-            # output, it is a genuine permute.
-            broadcast = self._get_expected_output_shape()
-            if not broadcast or in_shape != broadcast:
-                return None  # view/reshape -- no permutation needed
+                actual = self._get_actual_out_strides(out_buf, n)
+                if actual is not None:
+                    rt_to_out = self._map_coeffs_to_dims(
+                        [store_coeffs[v] for v in ordered], actual
+                    )
+                    rt_to_in = self._map_coeffs_to_dims(
+                        list(coeffs), in_strides
+                    )
+                    if rt_to_out is not None and rt_to_in is not None:
+                        perm = [0] * n
+                        for k in range(n):
+                            perm[rt_to_out[k]] = rt_to_in[k]
+                        if list(perm) == list(range(n)):
+                            return None
+                        return tuple(perm)
+                break
 
-        # Permutation confirmed.  Determine the mapping from shapes.
-        for out_name in self._output_buffer_names:
-            out_buf = V.graph.get_buffer(out_name)
-            if out_buf is None:
-                continue
-            out_shape = [self._safe_int(s) for s in out_buf.get_size()]
-            if any(s is None for s in out_shape):
-                continue
-            if len(out_shape) != len(in_shape):
-                continue
-            if in_shape == out_shape:
-                if not access_is_permuted:
-                    return None  # shapes match, no permutation needed
-                # Same shapes but permuted access (e.g. (8,8) transpose).
-                # Derive permutation from coefficients.
-                rev = list(reversed(coeffs))  # outermost-first
-                desc = sorted(rev, reverse=True)
-                if len(set(desc)) != len(desc):
-                    return None  # duplicate coefficients, ambiguous
-                return tuple(desc.index(c) for c in rev)
-            if sorted(in_shape) != sorted(out_shape):
-                continue  # not a permutation of each other
-            n = len(in_shape)
-            if len(set(in_shape)) == n:
-                # All dims distinct: unambiguous permutation from shapes
-                return tuple(in_shape.index(out_shape[i]) for i in range(n))
-            # Duplicate dims: greedily match each output dim to an unused
-            # input dim of the same size.  This is unambiguous as long as
-            # the permutation is unique (which it is for clone kernels).
-            perm = []
-            used: list[bool] = [False] * n
-            for i in range(n):
-                for j in range(n):
-                    if not used[j] and in_shape[j] == out_shape[i]:
-                        perm.append(j)
-                        used[j] = True
-                        break
-                else:
-                    return None  # can't match
-            if perm == list(range(n)):
-                return None  # identity permutation
-            return tuple(perm)
         return None
 
     def _get_collapsed_load_permutation(
@@ -1291,28 +1348,9 @@ class PallasKernel(SIMDKernel):
                 return None
             var_to_in_dim.append(dim)
 
-        # Compute store-side coefficients from the range tree nesting.
-        # The tree structure encodes the output iteration order: later
-        # trees (e.g. prefix 'x') are innermost, earlier trees ('y', 'z')
-        # are outer.  Within a tree, dict order goes inner → outer.
-        # The innermost variable has coefficient 1, and each successive
-        # variable (moving outward) has coeff *= previous range.
-        prefix_groups: dict[str, list[sympy.Symbol]] = {}
-        prefix_order: list[str] = []
-        for v in ordered:
-            p = self.range_tree_nodes[v].prefix
-            if p not in prefix_groups:
-                prefix_groups[p] = []
-                prefix_order.append(p)
-            prefix_groups[p].append(v)
-        inner_to_outer: list[sympy.Symbol] = []
-        for p in reversed(prefix_order):
-            inner_to_outer.extend(prefix_groups[p])
-        store_coeffs: dict[sympy.Symbol, int] = {}
-        coeff = 1
-        for v in inner_to_outer:
-            store_coeffs[v] = coeff
-            coeff *= self._safe_int(self.range_tree_nodes[v].length)
+        store_coeffs = self._compute_store_coeffs(ordered)
+        if store_coeffs is None:
+            return None
 
         # Find the output-side mapping using store coefficients.
         for out_name in self._output_buffer_names:
@@ -1785,6 +1823,16 @@ class PallasKernel(SIMDKernel):
             slice_str = f"{prefix}{offset_val}::{stride}"
         return slice_str, False
 
+    @staticmethod
+    def _gather_permute_expr(load_expr: str, perm: tuple[int, ...]) -> str:
+        """Generate gather-based permutation instead of jnp.permute_dims.
+
+        Avoids a Mosaic compiler bug where jnp.permute_dims produces
+        corrupted output tensors on TPU for 3D+ arrays.  Uses
+        pallas_permute which flattens to 1D and does a 1D gather.
+        """
+        return f"pallas_permute({load_expr}, {perm})"
+
     def _build_load_expr(
         self,
         buf: str,
@@ -1809,7 +1857,7 @@ class PallasKernel(SIMDKernel):
             if index_str == "...":
                 perm = self._get_full_load_permutation(name, index)
                 if perm is not None:
-                    load_expr = f"jnp.permute_dims({load_expr}, {perm})"
+                    load_expr = self._gather_permute_expr(load_expr, perm)
                     self.permuted_input_buffers[name] = perm
                 else:
                     collapsed = self._get_collapsed_load_permutation(name, index)
@@ -2891,6 +2939,13 @@ class PallasKernel(SIMDKernel):
 
         if not ref_shape:
             return False
+
+        # For collapsed permutation kernels, override ref_shape with the
+        # collapsed output shape so all compatibility checks operate in
+        # collapsed-shape space.
+        if self.collapsed_output_shape is not None:
+            ref_shape = list(self.collapsed_output_shape)
+
         ref_nd = len(ref_shape)
 
         all_bufs = list(self.args.input_buffers) + out_bufs
@@ -2902,9 +2957,17 @@ class PallasKernel(SIMDKernel):
             _, buf_size, _, _, _ = info
             if len(buf_size) == 0:
                 continue  # scalar
-            int_size = [self._safe_int(s) for s in buf_size]
-            if any(s is None for s in int_size):
-                return False
+
+            # Use collapsed shapes when available so dimension checks
+            # operate in the same space as the kernel.
+            if buf_name in self.collapsed_reshape_inputs:
+                int_size = list(self.collapsed_reshape_inputs[buf_name])
+            elif self.collapsed_output_shape is not None and buf_name in out_bufs:
+                int_size = list(self.collapsed_output_shape)
+            else:
+                int_size = [self._safe_int(s) for s in buf_size]
+                if any(s is None for s in int_size):
+                    return False
             buf_nd = len(int_size)
 
             if buf_nd == ref_nd:
@@ -2973,23 +3036,14 @@ class PallasKernel(SIMDKernel):
             return False
 
         # On CPU (interpret mode) each tile iteration has significant
-        # Python/JAX overhead, so cap the grid size to avoid regressions
-        # on large tensors.  On TPU the grid executes natively.
+        # Python/JAX overhead, so cap the grid size.  Store the cap
+        # so _codegen_tiled_specs can pass it to pallas_compute_tiling,
+        # which will scale up tiles to stay within the limit.
         is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
         if not is_tpu:
-            from ..runtime.runtime_utils import pallas_compute_tiling
-
-            _, grid, _ = pallas_compute_tiling(
-                tuple(ref_shape),
-                skip_last_n=self.tile_skip_last_n,
-                exact_only=len(ref_shape) < 2,
-            )
-            _MAX_GRID_PRODUCT = 64
-            grid_product = 1
-            for g in grid:
-                grid_product *= g
-            if grid_product > _MAX_GRID_PRODUCT:
-                return False
+            self._cpu_max_grid_product = 64
+        else:
+            self._cpu_max_grid_product = None
 
         return True
 
@@ -3258,7 +3312,7 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 from torch._inductor.runtime.runtime_utils import (
-    pallas_compute_tiling, pallas_make_block_spec,
+    pallas_compute_tiling, pallas_make_block_spec, pallas_permute,
     pallas_gpu_align_output_specs, pallas_gpu_pad_inputs,
     pallas_gpu_unpad_results, pallas_partial_reduce,
     torch_dtype_to_jax_runtime,
@@ -3618,19 +3672,48 @@ from torch._inductor.runtime.runtime_utils import (
         """
         code = ctx.code
         skip_n = self.tile_skip_last_n
-        code.writeline(
-            f"_tile, _grid, _ax2g = pallas_compute_tiling("
-            f"out_shapes[0], "
-            f"skip_last_n={skip_n}, exact_only=len(out_shapes[0]) < 2)"
-        )
+        has_transpose = "True" if self.tile_has_transpose else "False"
+
+        # Collect permutations from all input buffers so tiling alignment
+        # accounts for how dims map into input layouts.
+        all_perms = []
+        for param in ctx.kernel_input_params:
+            buf_name = None
+            for graph_name, inner_name in self.args.input_buffers.items():
+                if inner_name == param:
+                    buf_name = graph_name
+                    break
+            perm = self.permuted_input_buffers.get(buf_name) if buf_name else None
+            all_perms.append(perm)
+
+        if any(p is not None for p in all_perms):
+            perms_literal = repr(all_perms)
+            mgp = getattr(self, "_cpu_max_grid_product", None)
+            mgp_arg = f", max_grid_product={mgp}" if mgp else ""
+            code.writeline(
+                f"_tile, _grid, _ax2g = pallas_compute_tiling("
+                f"_pallas_out_shapes[0], "
+                f"transpose={has_transpose}, "
+                f"skip_last_n={skip_n}, exact_only=len(_pallas_out_shapes[0]) < 2, "
+                f"permutations={perms_literal}{mgp_arg})"
+            )
+        else:
+            mgp = getattr(self, "_cpu_max_grid_product", None)
+            mgp_arg = f", max_grid_product={mgp}" if mgp else ""
+            code.writeline(
+                f"_tile, _grid, _ax2g = pallas_compute_tiling("
+                f"_pallas_out_shapes[0], "
+                f"transpose={has_transpose}, "
+                f"skip_last_n={skip_n}, exact_only=len(_pallas_out_shapes[0]) < 2{mgp_arg})"
+            )
         code.writeline("_ng = len(_grid)")
-        code.writeline("_ref = out_shapes[0]")
+        code.writeline("_ref = _pallas_out_shapes[0]")
 
         code.writeline("out_specs_pallas = tuple(")
         code.writeline(
             "    pallas_make_block_spec(s, _ref, _tile, _ax2g, _ng, is_output=True)"
         )
-        code.writeline("    for s in out_shapes")
+        code.writeline("    for s in _pallas_out_shapes")
         code.writeline(")")
 
         # Reshape collapsed inputs before building specs
