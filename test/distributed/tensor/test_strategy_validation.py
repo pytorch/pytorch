@@ -28,7 +28,6 @@ from torch.distributed.tensor._ops.strategy_validation import (
     normalize_placement,
     normalize_placement_str,
     parse_placement,
-    placement_tuple_to_str,
     PlacementCombination,
     query_single_dim_strategy,
     resolve_op_names,
@@ -63,16 +62,6 @@ class TestPlacementUtilities(TestCase):
         p = parse_placement("P(max)")
         self.assertIsInstance(p, Partial)
         self.assertEqual(p.reduce_op, "max")
-
-    def test_placement_tuple_to_str(self):
-        s = placement_tuple_to_str((Replicate(),))
-        self.assertEqual(s, "(R)")
-
-        s = placement_tuple_to_str((Shard(0), Replicate()))
-        self.assertEqual(s, "(S(0), R)")
-
-        s = placement_tuple_to_str((Partial("sum"),))
-        self.assertEqual(s, "(P(sum))")
 
     def test_is_fully_replicated(self):
         self.assertTrue(is_fully_replicated((Replicate(),)))
@@ -146,49 +135,49 @@ class TestPlacementNormalization(TestCase):
     def test_normalize_combo_key_trivial_output(self):
         """Combo keys with trivial output shard should normalize output to R."""
         # P(max) -> S(0) on output [1,1,1] should become P(max) -> R
-        combo = (("P(max)",), "S(0)")
+        combo = (("P(max)",), ("S(0)",))
         input_shapes = ((4, 3),)
-        output_shape = (1, 1, 1)
+        output_shapes = ((1, 1, 1),)
 
-        result = normalize_combo_key(combo, input_shapes, output_shape)
-        self.assertEqual(result, (("P(max)",), "R"))
+        result = normalize_combo_key(combo, input_shapes, output_shapes)
+        self.assertEqual(result, (("P(max)",), ("R",)))
 
     def test_normalize_combo_key_trivial_input(self):
         """Combo keys with trivial input shard should normalize input to R."""
         # S(0),R -> R on input [1,4],[4,4] should become R,R -> R
-        combo = (("S(0)", "R"), "R")
+        combo = (("S(0)", "R"), ("R",))
         input_shapes = ((1, 4), (4, 4))
-        output_shape = (4, 4)
+        output_shapes = ((4, 4),)
 
-        result = normalize_combo_key(combo, input_shapes, output_shape)
-        self.assertEqual(result, (("R", "R"), "R"))
+        result = normalize_combo_key(combo, input_shapes, output_shapes)
+        self.assertEqual(result, (("R", "R"), ("R",)))
 
     def test_normalize_combo_key_all_trivial(self):
         """All-size-1 tensor should normalize all shards to R."""
         # S(0),S(1) -> S(2) on shape [1,1,1] should become R,R -> R
-        combo = (("S(0)", "S(1)"), "S(2)")
+        combo = (("S(0)", "S(1)"), ("S(2)",))
         input_shapes = ((1, 1, 1), (1, 1, 1))
-        output_shape = (1, 1, 1)
+        output_shapes = ((1, 1, 1),)
 
-        result = normalize_combo_key(combo, input_shapes, output_shape)
-        self.assertEqual(result, (("R", "R"), "R"))
+        result = normalize_combo_key(combo, input_shapes, output_shapes)
+        self.assertEqual(result, (("R", "R"), ("R",)))
 
     def test_normalize_combo_key_no_change(self):
         """Normal-sized tensors should not change."""
-        combo = (("S(0)", "S(1)"), "S(0)")
+        combo = (("S(0)", "S(1)"), ("S(0)",))
         input_shapes = ((4, 3), (4, 3))
-        output_shape = (4, 3)
+        output_shapes = ((4, 3),)
 
-        result = normalize_combo_key(combo, input_shapes, output_shape)
+        result = normalize_combo_key(combo, input_shapes, output_shapes)
         self.assertEqual(result, combo)
 
     def test_normalize_combo_key_partial_unchanged(self):
         """Partial placements should never be normalized."""
-        combo = (("P(max)", "P(sum)"), "P(max)")
+        combo = (("P(max)", "P(sum)"), ("P(max)",))
         input_shapes = ((1, 1), (1, 1))  # Even with all-size-1
-        output_shape = (1, 1)
+        output_shapes = ((1, 1),)
 
-        result = normalize_combo_key(combo, input_shapes, output_shape)
+        result = normalize_combo_key(combo, input_shapes, output_shapes)
         self.assertEqual(result, combo)  # Partials unchanged
 
     def test_normalize_deduplicates_equivalent_rules(self):
@@ -204,22 +193,22 @@ class TestPlacementNormalization(TestCase):
         After normalization, they should all become P(max) -> R.
         """
         input_shapes = ((1, 1, 1, 1),)
-        output_shape = (1, 1, 1)
+        output_shapes = ((1, 1, 1),)
 
         normalized_rules = set()
         for shard_dim in [0, 1, 2]:
-            combo = (("P(max)",), f"S({shard_dim})")
-            normalized = normalize_combo_key(combo, input_shapes, output_shape)
+            combo = (("P(max)",), (f"S({shard_dim})",))
+            normalized = normalize_combo_key(combo, input_shapes, output_shapes)
             normalized_rules.add(normalized)
 
         # Also add the explicit R version
-        combo_r = (("P(max)",), "R")
-        normalized_r = normalize_combo_key(combo_r, input_shapes, output_shape)
+        combo_r = (("P(max)",), ("R",))
+        normalized_r = normalize_combo_key(combo_r, input_shapes, output_shapes)
         normalized_rules.add(normalized_r)
 
         # All should have normalized to the same rule
         self.assertEqual(len(normalized_rules), 1)
-        self.assertEqual(normalized_rules.pop(), (("P(max)",), "R"))
+        self.assertEqual(normalized_rules.pop(), (("P(max)",), ("R",)))
 
 
 class TestInputPlacements(TestCase):
@@ -1189,6 +1178,107 @@ class TestQuerySingleDimStrategyKwargs(TestCase):
                 propagator.op_single_dim_strategy_funcs[aten_add] = original
             else:
                 propagator.op_single_dim_strategy_funcs.pop(aten_add, None)
+
+
+class TestCompareRules(TestCase):
+    """Test _compare_rules populates per-op statistics correctly."""
+
+    def test_true_positives_tracked_by_op(self):
+        from torch.distributed.tensor._ops.strategy_validation import (
+            _compare_rules,
+            ComparisonStats,
+        )
+
+        combo_a = (("S(0)",), ("R",))
+        combo_b = (("S(1)",), ("R",))
+        stats = ComparisonStats()
+        _compare_rules(
+            ground_truth_valid={combo_a, combo_b},
+            dtensor_rules={combo_a, combo_b},
+            input_shapes=((4, 8),),
+            output_shapes=((4, 8),),
+            sample_idx=0,
+            scalar_args=(),
+            scalar_kwargs={},
+            aten_op=torch.ops.aten.relu.default,
+            variant="",
+            stats=stats,
+        )
+        self.assertEqual(stats.true_positives, 2)
+        self.assertEqual(stats.true_positives_by_op, {"aten.relu.default": 2})
+        self.assertEqual(len(stats.false_positives), 0)
+        self.assertEqual(len(stats.false_negatives), 0)
+
+    def test_per_op_breakdown_multiple_aten_ops(self):
+        """Simulate an opinfo that dispatches to different aten variants per sample."""
+        from torch.distributed.tensor._ops.strategy_validation import (
+            _compare_rules,
+            ComparisonStats,
+        )
+
+        stats = ComparisonStats()
+
+        # Sample 0: aten.max.dim returns (values, indices)
+        combo_2out = (("S(0)",), ("R", "R"))
+        _compare_rules(
+            ground_truth_valid={combo_2out},
+            dtensor_rules={combo_2out},
+            input_shapes=((4, 8),),
+            output_shapes=((4, 8), (4, 8)),
+            sample_idx=0,
+            scalar_args=(1,),
+            scalar_kwargs={},
+            aten_op=torch.ops.aten.max.dim,
+            variant="",
+            stats=stats,
+        )
+        # Sample 1: aten.native_layer_norm returns (output, mean, rstd)
+        combo_3out = (("S(0)",), ("R", "R", "R"))
+        _compare_rules(
+            ground_truth_valid={combo_3out},
+            dtensor_rules={combo_3out},
+            input_shapes=((4, 8),),
+            output_shapes=((4, 8), (4,), (4,)),
+            sample_idx=1,
+            scalar_args=(),
+            scalar_kwargs={},
+            aten_op=torch.ops.aten.native_layer_norm.default,
+            variant="",
+            stats=stats,
+        )
+
+        self.assertEqual(stats.true_positives, 2)
+        self.assertEqual(
+            stats.true_positives_by_op,
+            {"aten.max.dim": 1, "aten.native_layer_norm.default": 1},
+        )
+
+    def test_false_positives_and_negatives_not_in_by_op(self):
+        """true_positives_by_op only tracks true positives, not FP/FN."""
+        from torch.distributed.tensor._ops.strategy_validation import (
+            _compare_rules,
+            ComparisonStats,
+        )
+
+        gt_only = (("S(0)",), ("R",))
+        dt_only = (("S(1)",), ("R",))
+        stats = ComparisonStats()
+        _compare_rules(
+            ground_truth_valid={gt_only},
+            dtensor_rules={dt_only},
+            input_shapes=((4, 8),),
+            output_shapes=((4, 8),),
+            sample_idx=0,
+            scalar_args=(),
+            scalar_kwargs={},
+            aten_op=torch.ops.aten.relu.default,
+            variant="",
+            stats=stats,
+        )
+        self.assertEqual(stats.true_positives, 0)
+        self.assertEqual(stats.true_positives_by_op, {})
+        self.assertEqual(len(stats.false_positives), 1)
+        self.assertEqual(len(stats.false_negatives), 1)
 
 
 class TestCompareOperatorEndToEnd(TestCase):
