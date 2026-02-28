@@ -58,7 +58,7 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
-from torch.testing._internal.common_utils import parametrize, skipIfWindows
+from torch.testing._internal.common_utils import parametrize, skipIfRocm, skipIfWindows
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -991,12 +991,133 @@ class CompiledOptimizerTests(TestCase):
             self.assertEqual(param, param_ref)
 
 
+@skipIfRocm(msg="ROCm may have different numerical behavior")
+@requires_cuda_and_triton
+class CompiledOptimizerBitwiseTests(TestCase):
+    """
+    Tests that compiled optimizers produce bitwise identical results to eager
+    when precision configs are enabled.
+
+    These tests verify that with the following config options:
+    - eager_numerics.division_rounding = True
+    - eager_numerics.use_pytorch_libdevice = True
+    - emulate_precision_casts = True
+
+    The compiled optimizer step produces results that are bitwise identical
+    to the eager optimizer step.
+    """
+
+    @staticmethod
+    def _test_optimizer_bitwise(
+        test_case,
+        optim_cls,
+        num_steps=10,
+        **optim_kwargs,
+    ):
+        """Helper to test optimizer bitwise equality."""
+        torch._dynamo.reset()
+        torch.manual_seed(42)
+
+        params_eager = [
+            torch.randn(64, 64, device=GPU_TYPE, dtype=torch.float32),
+            torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32),
+        ]
+        params_compiled = [p.clone() for p in params_eager]
+
+        opt_eager = optim_cls(
+            params_eager,
+            **optim_kwargs,
+        )
+        opt_compiled = optim_cls(
+            params_compiled,
+            **optim_kwargs,
+        )
+
+        @torch.compile
+        def compiled_step():
+            opt_compiled.step()
+
+        for step in range(num_steps):
+            # Generate gradients with consistent seed
+            torch.manual_seed(1000 + step)
+            grads = [torch.randn_like(p) for p in params_eager]
+
+            for p, g in zip(params_eager, grads):
+                p.grad = g.clone()
+            for p, g in zip(params_compiled, grads):
+                p.grad = g.clone()
+
+            opt_eager.step()
+            compiled_step()
+
+            # Check bitwise equality
+            for i, (p_eager, p_compiled) in enumerate(
+                zip(params_eager, params_compiled)
+            ):
+                test_case.assertEqual(
+                    p_eager,
+                    p_compiled,
+                    atol=0,
+                    rtol=0,
+                    msg=f"Step {step + 1}, param {i}: params differ",
+                )
+
+        # Also check optimizer state
+        for p_eager, p_compiled in zip(params_eager, params_compiled):
+            for key in opt_eager.state[p_eager]:
+                eager_val = opt_eager.state[p_eager][key]
+                compiled_val = opt_compiled.state[p_compiled][key]
+                if isinstance(eager_val, torch.Tensor):
+                    test_case.assertEqual(
+                        eager_val,
+                        compiled_val,
+                        atol=0,
+                        rtol=0,
+                        msg=f"State '{key}' differs",
+                    )
+
+
 for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
     setattr(
         CompiledOptimizerTests,
         name,
         make_test(optim_cls, scheduler_cls=scheduler_cls, **kwargs),
     )
+
+
+def _make_bitwise_test(optim_cls, **optim_kwargs):
+    @config.patch(
+        {
+            "eager_numerics.division_rounding": True,
+            "eager_numerics.use_pytorch_libdevice": True,
+            "emulate_precision_casts": True,
+        }
+    )
+    def test_fn(self):
+        CompiledOptimizerBitwiseTests._test_optimizer_bitwise(
+            self, optim_cls, **optim_kwargs
+        )
+
+    return test_fn
+
+
+for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
+    if (
+        optim_cls in (Adam, AdamW)
+        and kwargs.get("foreach", False)
+        and kwargs.get("capturable", False)
+        and kwargs.get("device") == GPU_TYPE
+        and "tensor_lr" not in name
+    ):
+        optim_kwargs = {
+            k: v for k, v in kwargs.items() if k not in ("device", "kernel_count")
+        }
+        setattr(
+            CompiledOptimizerTests,
+            name.replace("test_", "test_bitwise_"),
+            _make_bitwise_test(optim_cls, **optim_kwargs),
+        )
+
 
 instantiate_device_type_tests(
     CompiledOptimizerParityTests, globals(), allow_xpu=True, except_for="cpu"
