@@ -32,6 +32,7 @@ def start_debug_server(
     dump_interval: float = 60.0,
     enabled_dumps: set[str] | None = None,
     handlers: list["DebugHandler"] | None = None,
+    fetch_timeout: float = 60.0,
 ) -> None:
     """
     Start the debug server stack on all workers. The frontend debug server is
@@ -71,6 +72,9 @@ def start_debug_server(
         handlers (list[DebugHandler] | None): List of debug handlers to use. If None,
             uses the default handlers. See torch.distributed.debug._handlers for
             the default handlers.
+        fetch_timeout (float): Timeout in seconds for fetching data from individual
+            workers. Defaults to 60. Workers that don't respond within this time
+            will be reported as unavailable.
     """
     global _WORKER_SERVER, _DEBUG_SERVER_PROC
 
@@ -104,6 +108,7 @@ def start_debug_server(
             "dump_interval": dump_interval,
             "enabled_dumps": enabled_dumps,
             "handlers": handlers,
+            "fetch_timeout": fetch_timeout,
         }
 
         if start_method is not None:
