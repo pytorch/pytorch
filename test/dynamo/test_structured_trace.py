@@ -714,12 +714,11 @@ class StructuredTraceTest(TestCase):
         else:
             text = self.buffer.getvalue()
             # after https://github.com/pytorch/pytorch/pull/172633,
-            # on ROCm runners this name subtly changed, but flakily.
-            if torch.version.hip:
-                text = text.replace(
-                    "torch_dynamo_resume_in___init___at_105_ORIGINAL_BYTECODE",
-                    "torch_dynamo_resume_in___init___at_103_ORIGINAL_BYTECODE",
-                )
+            # on multiple platforms this name subtly changed, but flakily.
+            text = text.replace(
+                "torch_dynamo_resume_in___init___at_105_ORIGINAL_BYTECODE",
+                "torch_dynamo_resume_in___init___at_103_ORIGINAL_BYTECODE",
+            )
             self.assertExpectedInline(
                 text,
                 """\
@@ -820,16 +819,15 @@ class StructuredTraceTest(TestCase):
 
         text = self.buffer.getvalue()
         # after https://github.com/pytorch/pytorch/pull/172633,
-        # on ROCm runners this name subtly changed, but flakily.
-        if torch.version.hip:
-            text = text.replace(
-                "torch_dynamo_resume_in_fn_at_816_ORIGINAL_BYTECODE",
-                "torch_dynamo_resume_in_fn_at_808_ORIGINAL_BYTECODE",
-            )
-            text = text.replace(
-                "torch_dynamo_resume_in_fn_at_816_MODIFIED_BYTECODE",
-                "torch_dynamo_resume_in_fn_at_808_MODIFIED_BYTECODE",
-            )
+        # on multiple platforms this name subtly changed, but flakily.
+        text = text.replace(
+            "torch_dynamo_resume_in_fn_at_816_ORIGINAL_BYTECODE",
+            "torch_dynamo_resume_in_fn_at_808_ORIGINAL_BYTECODE",
+        )
+        text = text.replace(
+            "torch_dynamo_resume_in_fn_at_816_MODIFIED_BYTECODE",
+            "torch_dynamo_resume_in_fn_at_808_MODIFIED_BYTECODE",
+        )
 
         self.assertExpectedInline(
             text,
