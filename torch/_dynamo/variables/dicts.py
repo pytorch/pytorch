@@ -859,7 +859,7 @@ class ConstDictVariable(VariableTracker):
             # defaultdict.
 
             # TODO(guilhermeleobas): this check should be on builtin.py::call_or_
-            if isinstance(
+            if istype(
                 other,
                 (
                     ConstDictVariable,
@@ -867,6 +867,14 @@ class ConstDictVariable(VariableTracker):
                     variables.DefaultDictVariable,
                 ),
             ):
+                assert isinstance(
+                    other,
+                    (
+                        ConstDictVariable,
+                        variables.UserDefinedDictVariable,
+                        variables.DefaultDictVariable,
+                    ),
+                )
                 # Always return the specialized dictionary, and in the case
                 # both are specialized, take the first to be the type of the
                 # new dictionary
