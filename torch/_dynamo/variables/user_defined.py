@@ -1597,9 +1597,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     dict_source = TypeDictSource(klass_source)
                     install_guard(
                         dict_source.make_guard(
-                            functools.partial(
-                                GuardBuilder.DICT_CONTAINS, key=name, invert=True
-                            )
+                            functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
                         )
                     )
 

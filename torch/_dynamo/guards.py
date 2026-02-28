@@ -1027,14 +1027,14 @@ class GuardCheckSpec(NamedTuple):
     NB - This separate spec table *increases maintenance burden*, but each
     handler is small and the number of guard types is finite, so it's tractable.
 
-    extract: (guard, value) -> saved_info  — captures the minimum information
+    extract_fn: (guard, value) -> saved_info  — captures the minimum information
         from the guarded value at build time.
-    check: (value, saved_info) -> bool  — re-evaluates the guard at lookup
+    eval_fn: (value, saved_info) -> bool  — re-evaluates the guard at lookup
         time using a fresh value and the previously saved info.
     """
 
-    extract: Any
-    check: Any
+    extract_fn: Any
+    eval_fn: Any
 
 
 SKIP_GUARD = object()
@@ -1104,11 +1104,11 @@ def check_closure(value: Any, expected: Any) -> bool:
 
 
 def register_guard_check_spec(
-    extract,
-    check,
+    extract_fn,
+    eval_fn,
 ):
     """Attach a GuardCheckSpec to a guard method for auto-dispatch."""
-    handler = GuardCheckSpec(extract=extract, check=check)
+    handler = GuardCheckSpec(extract_fn=extract_fn, eval_fn=eval_fn)
 
     def decorator(fn):
         fn.guard_check_spec = handler
@@ -1126,18 +1126,18 @@ def skip_guard_check_spec(fn):
 class UnsupportedGuardCheckSpec:
     """Sentinel for guards with no check spec yet.
 
-    Raises NotImplementedError if extract/check are accidentally called.
+    Raises NotImplementedError if extract_fn/eval_fn are accidentally called.
     """
 
     def __init__(self, name: str) -> None:
         self._name = name
 
     @property
-    def extract(self):
+    def extract_fn(self):
         raise NotImplementedError(f"Guard check spec not implemented for {self._name}")
 
     @property
-    def check(self):
+    def eval_fn(self):
         raise NotImplementedError(f"Guard check spec not implemented for {self._name}")
 
 
@@ -2020,11 +2020,11 @@ class GuardBuilder(GuardBuilderBase):
     # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
 
     @register_guard_check_spec(
-        extract=lambda guard, value: (
+        extract_fn=lambda guard, value: (
             guard.create_fn.keywords["attr"],
             hasattr(value, guard.create_fn.keywords["attr"]),
         ),
-        check=lambda value, expected: hasattr(value, expected[0]) == expected[1],
+        eval_fn=lambda value, metadata: hasattr(value, metadata[0]) == metadata[1],
     )
     def HASATTR(self, guard: Guard, attr: str | None = None) -> None:
         assert attr is not None
@@ -2082,8 +2082,8 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        extract=lambda guard, value: guard.create_fn.keywords["attr"],
-        check=lambda value, expected: expected not in value.__dict__,
+        extract_fn=lambda guard, value: guard.create_fn.keywords["attr"],
+        eval_fn=lambda value, expected: expected not in value.__dict__,
     )
     def NOT_PRESENT_IN_GENERIC_DICT(
         self, guard: Guard, attr: Optional[Any] = None
@@ -2114,8 +2114,8 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        extract=lambda guard, value: type(value),
-        check=lambda value, expected: type(value) is expected,
+        extract_fn=lambda guard, value: type(value),
+        eval_fn=lambda value, expected: type(value) is expected,
     )
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
@@ -2143,6 +2143,8 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    # Dict versions change on any mutation, so a version captured during one
+    # trace is meaningless for a later subgraph reuse check.
     @skip_guard_check_spec
     def DICT_VERSION(self, guard: Guard) -> None:
         # ___check_dict_version is same as `dict_version(x) == y`
@@ -2159,29 +2161,19 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: (
-            guard.create_fn.keywords["key"],
-            guard.create_fn.keywords["invert"],
-            (guard.create_fn.keywords["key"] not in value)
-            if guard.create_fn.keywords["invert"]
-            else (guard.create_fn.keywords["key"] in value),
-        ),
-        check=lambda value, expected: (
-            ((expected[0] not in value) if expected[1] else (expected[0] in value))
-            == expected[2]
-        ),
+        extract_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        eval_fn=lambda value, expected: expected in value,
     )
-    def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool) -> None:
+    def DICT_CONTAINS(self, guard: Guard, key: str) -> None:
         dict_ref = self.arg_ref(guard)
 
-        maybe_not = "not " if invert else ""
-        code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
+        code = f"___dict_contains({key!r}, {dict_ref})"
         if code in self.already_added_code_parts:
             return
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_dict_contains_guard(
-            not invert,
+            True,
             key,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
@@ -2189,22 +2181,32 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        extract=lambda guard, value: (
-            guard.create_fn.keywords["key"],
-            guard.create_fn.keywords["invert"],
-            (guard.create_fn.keywords["key"] not in value)
-            if guard.create_fn.keywords["invert"]
-            else (guard.create_fn.keywords["key"] in value),
-        ),
-        check=lambda value, expected: (
-            ((expected[0] not in value) if expected[1] else (expected[0] in value))
-            == expected[2]
-        ),
+        extract_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        eval_fn=lambda value, expected: expected not in value,
     )
-    def SET_CONTAINS(self, guard: Guard, key: Any, invert: bool) -> None:
+    def DICT_NOT_CONTAINS(self, guard: Guard, key: str) -> None:
+        dict_ref = self.arg_ref(guard)
+
+        code = f"not ___dict_contains({key!r}, {dict_ref})"
+        if code in self.already_added_code_parts:
+            return
+        self._set_guard_export_info(guard, [code])
+
+        self.get_guard_manager(guard).add_dict_contains_guard(
+            False,
+            key,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+        self.already_added_code_parts.add(code)
+
+    @register_guard_check_spec(
+        extract_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        eval_fn=lambda value, expected: expected in value,
+    )
+    def SET_CONTAINS(self, guard: Guard, key: Any) -> None:
         set_ref = self.arg_ref(guard)
         item = key
-        contains = not invert  # install_dict_contains_guard inverts "contains"
 
         code = f"set.__contains__({set_ref}, {item!r})"
         if code in self.already_added_code_parts:
@@ -2213,7 +2215,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_set_contains_guard(
-            contains,
+            True,
             item,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
@@ -2221,8 +2223,30 @@ class GuardBuilder(GuardBuilderBase):
         self.already_added_code_parts.add(code)
 
     @register_guard_check_spec(
-        extract=lambda guard, value: value,
-        check=lambda value, expected: value == expected,
+        extract_fn=lambda guard, value: guard.create_fn.keywords["key"],
+        eval_fn=lambda value, expected: expected not in value,
+    )
+    def SET_NOT_CONTAINS(self, guard: Guard, key: Any) -> None:
+        set_ref = self.arg_ref(guard)
+        item = key
+
+        code = f"not set.__contains__({set_ref}, {item!r})"
+        if code in self.already_added_code_parts:
+            return
+
+        self._set_guard_export_info(guard, [code])
+
+        self.get_guard_manager(guard).add_set_contains_guard(
+            False,
+            item,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+        self.already_added_code_parts.add(code)
+
+    @register_guard_check_spec(
+        extract_fn=lambda guard, value: value,
+        eval_fn=lambda value, expected: value == expected,
     )
     def BOOL_MATCH(self, guard: Guard) -> None:
         # checks val == True or val == False
@@ -2242,8 +2266,8 @@ class GuardBuilder(GuardBuilderBase):
             )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: None,
-        check=lambda value, expected: value is None,
+        extract_fn=lambda guard, value: None,
+        eval_fn=lambda value, expected: value is None,
     )
     def NONE_MATCH(self, guard: Guard) -> None:
         # checks `val is None`
@@ -2258,8 +2282,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: value,
-        check=lambda value, expected: value is expected,
+        extract_fn=lambda guard, value: value,
+        eval_fn=lambda value, expected: value is expected,
     )
     def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         # TODO - Run a CI with the following uncommented to find the remaining places
@@ -2310,8 +2334,8 @@ class GuardBuilder(GuardBuilderBase):
                     self.id_matched_objs[local_name] = weak_id
 
     @register_guard_check_spec(
-        extract=lambda guard, value: None,
-        check=lambda value, expected: value is not None,
+        extract_fn=lambda guard, value: None,
+        eval_fn=lambda value, expected: value is not None,
     )
     def NOT_NONE_MATCH(self, guard: Guard, value: Optional[Any] = None) -> None:
         ref = self.arg_ref(guard)
@@ -2325,8 +2349,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: value.raw_repr(),
-        check=lambda value, expected: value.raw_repr() == expected,
+        extract_fn=lambda guard, value: value.raw_repr(),
+        eval_fn=lambda value, expected: value.raw_repr() == expected,
     )
     def DISPATCH_KEY_SET_MATCH(self, guard: Guard) -> None:
         ref = self.arg_ref(guard)
@@ -2404,8 +2428,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=extract_subclass_metadata,
-        check=check_subclass_metadata,
+        extract_fn=extract_subclass_metadata,
+        eval_fn=check_subclass_metadata,
     )
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
         value = self.get(guard)
@@ -2432,16 +2456,16 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=extract_dtensor_spec,
-        check=check_dtensor_spec,
+        extract_fn=extract_dtensor_spec,
+        eval_fn=check_dtensor_spec,
     )
     def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
         # Copied from DTensor __metadata_guard__
         # TODO - Consider moving this to C++ if stable
-        value = deepcopy(self.get(guard))
+        expected = extract_dtensor_spec(guard, self.get(guard))
 
         def guard_fn(x: Any) -> bool:
-            return x._check_equals(value, skip_shapes=True)
+            return check_dtensor_spec(x, expected)
 
         code = f"__dtensor_spec_{id(guard_fn)}"
         self.get_guard_manager(guard).add_lambda_guard(
@@ -2449,25 +2473,20 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=extract_opaque_obj,
-        check=check_opaque_obj,
+        extract_fn=extract_opaque_obj,
+        eval_fn=check_opaque_obj,
     )
     def OPAQUE_OBJ_GUARD_FN_MATCH(self, guard: Guard) -> None:
         """Guard on the values returned by the opaque object's guard_fn."""
 
         value = self.get(guard)
-        opaque_info = get_opaque_obj_info(type(value))
+        original_values = extract_opaque_obj(guard, value)
 
-        if not opaque_info or not opaque_info.guard_fn:
+        if original_values is None:
             return
 
-        original_values = deepcopy(opaque_info.guard_fn(value))
-
         def opaque_guard_checker(x: Any) -> bool:
-            current_values = opaque_info.guard_fn(  # pyrefly: ignore[missing-attribute]
-                x
-            )
-            return current_values == original_values
+            return check_opaque_obj(x, original_values)
 
         global_name = f"___check_opaque_guard_fn_{id(opaque_guard_checker)}_c{CompileContext.current_compile_id()}"
         self.get_guard_manager(guard).add_lambda_guard(
@@ -2477,8 +2496,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: value,
-        check=lambda value, expected: value == expected,
+        extract_fn=lambda guard, value: value,
+        eval_fn=lambda value, expected: value == expected,
     )
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         ref = self.arg_ref(guard)
@@ -2593,8 +2612,8 @@ class GuardBuilder(GuardBuilderBase):
         return
 
     @register_guard_check_spec(
-        extract=lambda guard, value: value,
-        check=lambda value, expected: value == expected,
+        extract_fn=lambda guard, value: value,
+        eval_fn=lambda value, expected: value == expected,
     )
     def CONSTANT_MATCH(self, guard: Guard) -> None:
         val = self.get(guard)
@@ -2608,8 +2627,8 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     @register_guard_check_spec(
-        extract=lambda guard, value: value,
-        check=lambda value, expected: value is expected,
+        extract_fn=lambda guard, value: value,
+        eval_fn=lambda value, expected: value is expected,
     )
     def NN_MODULE(self, guard: Guard) -> None:
         # don't support this in serialization because it uses unsupported ID_MATCH
@@ -2632,8 +2651,8 @@ class GuardBuilder(GuardBuilderBase):
             )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: value,
-        check=lambda value, expected: value is expected,
+        extract_fn=lambda guard, value: value,
+        eval_fn=lambda value, expected: value is expected,
     )
     def FUNCTION_MATCH(self, guard: Guard) -> None:
         """things like torch.add and user defined functions"""
@@ -2641,8 +2660,8 @@ class GuardBuilder(GuardBuilderBase):
         return self.ID_MATCH(guard)
 
     @register_guard_check_spec(
-        extract=lambda guard, value: value,
-        check=lambda value, expected: value is expected,
+        extract_fn=lambda guard, value: value,
+        eval_fn=lambda value, expected: value is expected,
     )
     def CLASS_MATCH(self, guard: Guard) -> None:
         """Equals ID_MATCH on classes - better readability than directly calling ID_MATCH"""
@@ -2664,8 +2683,8 @@ class GuardBuilder(GuardBuilderBase):
         self.id_match_unchecked(guard)
 
     @register_guard_check_spec(
-        extract=extract_closure,
-        check=check_closure,
+        extract_fn=extract_closure,
+        eval_fn=check_closure,
     )
     def CLOSURE_MATCH(self, guard: Guard) -> None:
         """matches a closure by __code__ id."""
@@ -2690,8 +2709,8 @@ class GuardBuilder(GuardBuilderBase):
         return self.id_match_unchecked(guard)
 
     @register_guard_check_spec(
-        extract=lambda guard, value: len(value),
-        check=lambda value, expected: len(value) == expected,
+        extract_fn=lambda guard, value: len(value),
+        eval_fn=lambda value, expected: len(value) == expected,
     )
     def SEQUENCE_LENGTH(self, guard: Guard) -> None:
         # This guard is used to check length of PySequence objects like list,
@@ -2724,8 +2743,8 @@ class GuardBuilder(GuardBuilderBase):
             )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: tuple_iterator_len(value),
-        check=lambda value, expected: tuple_iterator_len(value) == expected,
+        extract_fn=lambda guard, value: tuple_iterator_len(value),
+        eval_fn=lambda value, expected: tuple_iterator_len(value) == expected,
     )
     def TUPLE_ITERATOR_LEN(self, guard: Guard) -> None:
         ref = self.arg_ref(guard)
@@ -2747,8 +2766,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: normalize_range_iter(value),
-        check=lambda value, expected: normalize_range_iter(value) == expected,
+        extract_fn=lambda guard, value: normalize_range_iter(value),
+        eval_fn=lambda value, expected: normalize_range_iter(value) == expected,
     )
     def RANGE_ITERATOR_MATCH(self, guard: Guard) -> None:
         ref = self.arg_ref(guard)
@@ -2822,8 +2841,8 @@ class GuardBuilder(GuardBuilderBase):
             )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: None,
-        check=lambda value, expected: value is not None,
+        extract_fn=lambda guard, value: None,
+        eval_fn=lambda value, expected: value is not None,
     )
     def WEAKREF_ALIVE(self, guard: Guard) -> None:
         code = [f"{self.arg_ref(guard)} is not None"]
@@ -2834,8 +2853,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: list(value.keys()),
-        check=lambda value, expected: list(value.keys()) == expected,
+        extract_fn=lambda guard, value: list(value.keys()),
+        eval_fn=lambda value, expected: list(value.keys()) == expected,
     )
     def MAPPING_KEYS_CHECK(self, guard: Guard) -> None:
         """Guard on the key order of types.MappingProxyType object"""
@@ -2850,8 +2869,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: list(dict.keys(value)),
-        check=lambda value, expected: list(dict.keys(value)) == expected,
+        extract_fn=lambda guard, value: list(dict.keys(value)),
+        eval_fn=lambda value, expected: list(dict.keys(value)) == expected,
     )
     def DICT_KEYS_MATCH(self, guard: Guard) -> None:
         """Insert guard to check that the keys of a dict are same"""
@@ -2879,8 +2898,8 @@ class GuardBuilder(GuardBuilderBase):
             self.guard_on_dict_keys_and_ignore_order(value, guard)
 
     @register_guard_check_spec(
-        extract=lambda guard, value: None,
-        check=lambda value, expected: len(value) == 0,
+        extract_fn=lambda guard, value: None,
+        eval_fn=lambda value, expected: len(value) == 0,
     )
     def EMPTY_NN_MODULE_HOOKS_DICT(self, guard: Guard) -> None:
         """Special guard to skip guards on empty hooks. This is controlled by skip_nnmodule_hook_guards"""
@@ -2945,7 +2964,6 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    @skip_guard_check_spec
     def SHAPE_ENV(self, guard: Guard) -> None:
         from torch._dynamo.output_graph import OutputGraphCommon
 
@@ -3196,8 +3214,8 @@ class GuardBuilder(GuardBuilderBase):
             )
 
     @register_guard_check_spec(
-        extract=lambda guard, value: extract_tensor_metadata(value),
-        check=lambda value, expected: (
+        extract_fn=lambda guard, value: extract_tensor_metadata(value),
+        eval_fn=lambda value, expected: (
             isinstance(value, torch.Tensor)
             and extract_tensor_metadata(value) == expected
         ),

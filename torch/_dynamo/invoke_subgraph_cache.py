@@ -229,7 +229,7 @@ def build_auto_cache_condition(
         if type_str == "CONSTANT_MATCH" and isinstance(value, str):
             continue
 
-        expected = handler.extract(guard, value)
+        expected = handler.extract_fn(guard, value)
         guard_tuples.append((source, handler, expected))
 
     hc_log.debug("Number of guards %s", len(guard_tuples))
@@ -303,7 +303,10 @@ def is_reusable(
 
     # Shared resolution context so source.get_value memoizes intermediate
     # results (e.g. common base sources) across all guards in this check.
-    resolve_globals = {"G": tx.output.root_tx.f_globals, "L": tx.output.root_tx.f_locals}
+    resolve_globals = {
+        "G": tx.output.root_tx.f_globals,
+        "L": tx.output.root_tx.f_locals,
+    }
     resolve_locals: dict = {}
     resolve_cache: dict = {}
 
@@ -322,7 +325,7 @@ def is_reusable(
             )
             return False
 
-        if not handler.check(value, expected):
+        if not handler.eval_fn(value, expected):
             hc_log.debug(
                 "auto_guard_cache: reuse failed -- guard on '%s': expected %s, got mismatch",
                 new_source.name,
