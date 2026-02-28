@@ -275,10 +275,12 @@ class PeriodicDumper:
         handlers: list[DebugHandler],
         output_dir: str,
         interval_seconds: float = 60.0,
+        max_dumps: int | None = None,
     ) -> None:
         self._handlers = handlers
         self._output_dir = output_dir
         self._interval_seconds = interval_seconds
+        self._max_dumps = max_dumps
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -297,6 +299,7 @@ class PeriodicDumper:
             self._thread.join()
 
     def _run(self) -> None:
+        dumps_done = 0
         while not self._stop_event.is_set():
             for handler in self._handlers:
                 try:
@@ -314,6 +317,9 @@ class PeriodicDumper:
                         f.write(content)
                 except Exception:
                     logger.exception("Failed to write dump to %s", path)
+            dumps_done += 1
+            if self._max_dumps is not None and dumps_done >= self._max_dumps:
+                break
             self._stop_event.wait(self._interval_seconds)
 
 
@@ -463,6 +469,7 @@ def main(
     handlers: list[DebugHandler],
     enabled_dumps: set[str],
     fetch_timeout: float = 60.0,
+    max_dumps: int | None = None,
 ) -> None:
     for handler in handlers:
         handler.fetch_timeout = fetch_timeout
@@ -482,13 +489,15 @@ def main(
             ],
             dump_dir,
             dump_interval,
+            max_dumps=max_dumps,
         )
         dumper.start()
-        logger.info(
-            "Periodic dumper started, writing to %s every %.0fs",
-            dump_dir,
-            dump_interval,
+        msg = (
+            f"Periodic dumper started, writing to {dump_dir} every {dump_interval:.0f}s"
         )
+        if max_dumps is not None:
+            msg += f" (max {max_dumps} dumps)"
+        logger.info(msg)
 
     try:
         server.join()

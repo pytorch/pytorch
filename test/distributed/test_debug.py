@@ -178,6 +178,26 @@ class _StubHandler(DebugHandler):
         return self._name
 
 
+class _CountingHandler(DebugHandler):
+    """Handler that counts how many times dump() is called."""
+
+    def __init__(self) -> None:
+        self.dump_count = 0
+
+    def routes(self) -> list[Route]:
+        return []
+
+    def nav_links(self) -> list[NavLink]:
+        return []
+
+    def dump(self) -> str | None:
+        self.dump_count += 1
+        return "data"
+
+    def dump_filename(self) -> str:
+        return "counting"
+
+
 class _ErrorHandler(DebugHandler):
     """Handler whose dump() always raises."""
 
@@ -263,6 +283,34 @@ class TestPeriodicDumper(TestCase):
             self.assertGreater(len(ok_files), 0)
             err_files = [f for f in files if f.startswith("error_handler_")]
             self.assertEqual(len(err_files), 0)
+
+    def test_max_dumps_limits_cycles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            h = _CountingHandler()
+            dumper = PeriodicDumper([h], tmp, interval_seconds=0.05, max_dumps=3)
+            dumper.start()
+            # Wait long enough that without the limit we'd get more than 3
+            time.sleep(0.5)
+            dumper.stop()
+            self.assertEqual(h.dump_count, 3)
+
+    def test_max_dumps_none_is_unlimited(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            h = _CountingHandler()
+            dumper = PeriodicDumper([h], tmp, interval_seconds=0.05, max_dumps=None)
+            dumper.start()
+            time.sleep(0.3)
+            dumper.stop()
+            self.assertGreater(h.dump_count, 3)
+
+    def test_max_dumps_thread_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            h = _CountingHandler()
+            dumper = PeriodicDumper([h], tmp, interval_seconds=0.05, max_dumps=1)
+            dumper.start()
+            # Give the thread time to finish its single dump and exit
+            time.sleep(0.3)
+            self.assertFalse(dumper._thread.is_alive())
 
     def test_stop_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
