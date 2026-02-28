@@ -76,8 +76,9 @@ def start_debug_server(
         fetch_timeout (float): Timeout in seconds for fetching data from individual
             workers. Defaults to 60. Workers that don't respond within this time
             will be reported as unavailable.
-        max_dumps (int | None): Maximum number of dump cycles to perform. If None
-            (default), dumps continue indefinitely until the server is stopped.
+        max_dumps (int | None): Maximum number of dump files to keep per handler.
+            Older dumps are deleted after each cycle. If None (default), dumps
+            are never cleaned up.
     """
     global _WORKER_SERVER, _DEBUG_SERVER_PROC
 
