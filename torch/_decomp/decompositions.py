@@ -2749,8 +2749,8 @@ def _max_pool_nd_with_indices(
 ) -> tuple[Tensor, Tensor]:
     def _expand(val: list[int], default: Optional[list[int]] = None) -> list[int]:
         if not val:
-            assert default is not None
-            return default
+            torch._check(default is not None, lambda: "default must be provided")
+            return default  # type: ignore[return-value]
         return val * n_dim if len(val) == 1 else list(val)
 
     ks = _expand(kernel_size)
@@ -2777,10 +2777,10 @@ def _max_pool_nd_with_indices(
         for d in range(n_dim)
     ]
 
-    # Pad with -inf (or dtype min) so out-of-bounds positions never win the max.
-    # For unsigned integers (min == 0), promote to signed so we can use a
-    # negative sentinel — otherwise padding ties with real 0-valued data and
-    # the argmax can select a padding position, producing wrong indices.
+    # Pad with -inf so out-of-bounds positions never win the max. For integer
+    # types, iinfo.min is a valid data value, so padding with it causes ties
+    # in argmax that produce wrong indices. Promote to a wider type so the
+    # sentinel is strictly below any representable value in the original dtype.
     dtype = self.dtype
     promoted = False
     if dtype is torch.bool:
@@ -2789,12 +2789,12 @@ def _max_pool_nd_with_indices(
         fill_value = float("-inf")
     else:
         info = torch.iinfo(dtype)
-        if info.min == 0:
+        if info.bits < 32:
             self = self.to(torch.int32)
-            fill_value = -1.0
-            promoted = True
-        else:
-            fill_value = float(info.min)
+        elif info.bits < 64:
+            self = self.to(torch.int64)
+        fill_value = float(info.min - 1) if info.bits < 64 else float(info.min)
+        promoted = True
 
     # Compute asymmetric padding: left = pa[d], right may be larger for ceil_mode
     pad_args: list[int] = []
@@ -2812,8 +2812,7 @@ def _max_pool_nd_with_indices(
         idx = (
             torch.arange(output_sizes[d], device=device, dtype=torch.int64).unsqueeze(1)
             * st[d]
-            + torch.arange(ks[d], device=device, dtype=torch.int64).unsqueeze(0)
-            * di[d]
+            + torch.arange(ks[d], device=device, dtype=torch.int64).unsqueeze(0) * di[d]
         )
         shape = [1] * (2 * n_dim)
         shape[2 * d] = output_sizes[d]
