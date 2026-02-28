@@ -730,11 +730,12 @@ else:
                 # we can compile device_mesh `slicing` (no graph break) is not verified
                 # yet and need a follow-up,
                 # TODO: compiler + device_mesh slicing.
-                with torch._subclasses.fake_tensor.unset_fake_temporarily():
-                    with torch._C._DisableTorchDispatch():
-                        submesh = self._create_sub_mesh(
-                            sliced_mesh_layout, mesh_dim_names
-                        )
+                with (
+                    torch._subclasses.fake_tensor.unset_fake_temporarily(),
+                    torch._subclasses.functional_tensor.disable_functional_mode(),
+                    torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing(),
+                ):
+                    submesh = self._create_sub_mesh(sliced_mesh_layout, mesh_dim_names)
                 return submesh
 
         def get_group(self, mesh_dim: int | str | None = None) -> ProcessGroup:
