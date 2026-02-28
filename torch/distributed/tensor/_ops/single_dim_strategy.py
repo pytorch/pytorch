@@ -160,6 +160,9 @@ def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
         elif isinstance(obj, TupleStrategy):
             for child in obj.children:
                 _update_placements(child)
+        elif isinstance(obj, (list, tuple)):
+            for child in obj:
+                _update_placements(child)
 
     for obj in op_schema.args_schema:
         _update_placements(obj)
@@ -172,17 +175,21 @@ def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
 
 def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
     num_inputs = 0
-    for obj in op_schema.args_schema:
+
+    def _count(obj: Any) -> int:
         if isinstance(obj, OpStrategy):
-            num_inputs += 1
+            return 1
         elif isinstance(obj, TupleStrategy):
-            num_inputs += len(obj.children)
+            return len(obj.children)
+        elif isinstance(obj, (list, tuple)):
+            return sum(_count(child) for child in obj)
+        return 0
+
+    for obj in op_schema.args_schema:
+        num_inputs += _count(obj)
     # Also count tensor kwargs (e.g., "out" for out-variant ops)
     for obj in op_schema.kwargs_schema.values():
-        if isinstance(obj, OpStrategy):
-            num_inputs += 1
-        elif isinstance(obj, TupleStrategy):
-            num_inputs += len(obj.children)
+        num_inputs += _count(obj)
     return num_inputs
 
 
