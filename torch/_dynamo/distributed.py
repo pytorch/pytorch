@@ -14,16 +14,18 @@ is properly initialized, making it safe to import and use this module even in
 non-distributed scenarios.
 """
 
+from typing import Optional
+
 import torch.distributed as dist
 
 from . import config
 
 
-_COMPILE_PG: dist.ProcessGroup | None = None
-_GUARD_PG: dist.ProcessGroup | None = None
+_COMPILE_PG: Optional[dist.ProcessGroup] = None
+_GUARD_PG: Optional[dist.ProcessGroup] = None
 
 
-def get_compile_pg() -> dist.ProcessGroup | None:
+def get_compile_pg() -> Optional[dist.ProcessGroup]:
     if (
         config.enable_compiler_collectives
         and dist.is_available()
@@ -42,7 +44,7 @@ def get_compile_pg() -> dist.ProcessGroup | None:
 
 # NB: Unlike get_compile_pg, this is only called when guard collectives were
 # explicitly requested
-def get_guard_pg() -> dist.ProcessGroup | None:
+def get_guard_pg() -> Optional[dist.ProcessGroup]:
     if dist.is_available() and dist.is_initialized():
         global _GUARD_PG
         if _GUARD_PG is None:

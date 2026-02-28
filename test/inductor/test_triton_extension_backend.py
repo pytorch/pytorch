@@ -191,8 +191,10 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
                 partition_signatures: Optional[ir.GraphPartitionSignature] = None,
             ):
                 if is_subgraph:
-                    assert subgraph_name is not None
-                    assert parent_wrapper is not None
+                    if subgraph_name is None:
+                        raise AssertionError
+                    if parent_wrapper is None:
+                        raise AssertionError
                     return PythonWrapperCodegen.create(
                         subgraph_name, parent_wrapper, partition_signatures
                     )

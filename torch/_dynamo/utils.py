@@ -56,10 +56,12 @@ from typing import (
     Generic,
     Literal,
     NoReturn,
+    Optional,
     overload,
     TypeAlias,
     TypeGuard,
     TypeVar,
+    Union,
 )
 from typing_extensions import ParamSpec, TypeIs
 
@@ -235,8 +237,8 @@ class ReinplaceCounters:
 
 
 def tabulate(
-    rows: list[tuple[str, Any]] | list[list[Any]],
-    headers: tuple[str, ...] | list[str],
+    rows: Union[list[tuple[str, Any]], list[list[Any]]],
+    headers: Union[tuple[str, ...], list[str]],
 ) -> str:
     try:
         import tabulate
@@ -265,7 +267,7 @@ def reset_frame_count() -> None:
     curr_frame = 0
 
 
-_recompile_user_contexts: list[Callable[[], str]] | None = None
+_recompile_user_contexts: Optional[list[Callable[[], str]]] = None
 
 
 def register_hook_for_recompile_user_context(hook: Callable[[], str]) -> None:
@@ -282,7 +284,7 @@ def register_hook_for_recompile_user_context(hook: Callable[[], str]) -> None:
     _recompile_user_contexts.append(hook)
 
 
-def get_hook_for_recompile_user_context() -> list[Callable[[], str]] | None:
+def get_hook_for_recompile_user_context() -> Optional[list[Callable[[], str]]]:
     return _recompile_user_contexts
 
 
@@ -411,7 +413,7 @@ class CompileEventLogger:
     def log_instant_event(
         event_name: str,
         metadata: dict[str, Any],
-        time_ns: int | None = None,
+        time_ns: Optional[int] = None,
         log_level: CompileEventLogLevel = CompileEventLogLevel.CHROMIUM,
     ) -> None:
         if time_ns is None:
@@ -644,7 +646,7 @@ class CompileEventLogger:
 
     @staticmethod
     def instant(
-        event_name: str, metadata: dict[str, Any], time_ns: int | None = None
+        event_name: str, metadata: dict[str, Any], time_ns: Optional[int] = None
     ) -> None:
         """
         Log an instant event to chromium logs with name <event_name> at time <time_ns>. The `args` field in
@@ -710,14 +712,14 @@ def compile_time_record_function(name: str) -> Generator[Any, None, None]:
 def dynamo_timed(
     key: str,
     # TODO(masneral): Deprecate this param.
-    phase_name: str | None = None,
+    phase_name: Optional[str] = None,
     log_pt2_compile_event: bool = False,
-    metadata: dict[str, object] | None = None,
-    dynamo_compile_column_us: str | None = None,
-    compile_id: CompileId | None = None,
-    is_backward: bool | None = None,
+    metadata: Optional[dict[str, object]] = None,
+    dynamo_compile_column_us: Optional[str] = None,
+    compile_id: Optional[CompileId] = None,
+    is_backward: Optional[bool] = None,
     log_waitcounter: bool = False,
-    waitcounter_name_override: str | None = None,
+    waitcounter_name_override: Optional[str] = None,
 ) -> Generator[Any, None, None]:
     """
     dynamo_timed is a context manager
@@ -864,7 +866,7 @@ def compile_times(
 
 def compile_times(  # type: ignore[misc]
     repr: str = "str", aggregate: bool = False
-) -> str | None | tuple[list[str], list[str]]:
+) -> Union[str, None, tuple[list[str], list[str]]]:
     """
     Get metrics about torchdynamo frontend/backend compilation times.
 
@@ -928,7 +930,7 @@ class DuplicateWarningChecker:
     def reset(self) -> None:
         self.set: OrderedDict[Any, Any] = OrderedDict()
 
-    def add(self, key: str | tuple[object, object]) -> bool:
+    def add(self, key: Union[str, tuple[object, object]]) -> bool:
         if key in self.set:
             self.set.move_to_end(key, last=True)
             if not config.verbose:
@@ -1122,11 +1124,11 @@ if sys.version_info >= (3, 12):
 def get_inputs_devices(
     inputs: collections.abc.Sequence[object],
     model: torch.fx.GraphModule,
-) -> list[torch.device | None]:
+) -> list[Optional[torch.device]]:
     all_inputs = pytree.tree_flatten(inputs)[0] + [
         node.meta["val"] for node in list(model.graph.nodes) if "val" in node.meta
     ]
-    devices: list[torch.device | None] = list(
+    devices: list[Optional[torch.device]] = list(
         OrderedSet([i.device for i in all_inputs if hasattr(i, "device")])
     )
     return [
@@ -1209,17 +1211,17 @@ def is_lru_cache_wrapped_function(
     )
 
 
-_FuncTypes: TypeAlias = (
-    types.FunctionType
-    | types.BuiltinFunctionType
-    | types.MethodDescriptorType
-    | types.WrapperDescriptorType
-)
+_FuncTypes: TypeAlias = Union[
+    types.FunctionType,
+    types.BuiltinFunctionType,
+    types.MethodDescriptorType,
+    types.WrapperDescriptorType,
+]
 
 
 def is_function_or_wrapper(
     value: Any,
-) -> TypeIs[_FuncTypes | torch._ops.OpOverloadPacket | torch._ops.OpOverload]:
+) -> TypeIs[Union[_FuncTypes, torch._ops.OpOverloadPacket, torch._ops.OpOverload]]:
     return is_function(value) or isinstance(
         value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
@@ -1262,11 +1264,13 @@ cmp_name_to_op_str_mapping = {
 def is_wrapper_or_member_descriptor(
     value: Any,
 ) -> TypeIs[
-    types.GetSetDescriptorType
-    | types.MethodDescriptorType
-    | types.WrapperDescriptorType
-    | types.MemberDescriptorType
-    | types.MethodWrapperType
+    Union[
+        types.GetSetDescriptorType,
+        types.MethodDescriptorType,
+        types.WrapperDescriptorType,
+        types.MemberDescriptorType,
+        types.MethodWrapperType,
+    ]
 ]:
     return isinstance(
         value,
@@ -1289,7 +1293,7 @@ def unwrap_if_wrapper(fn: Any) -> Any:
     return unwrap_with_attr_name_if_wrapper(fn)[0]
 
 
-def unwrap_with_attr_name_if_wrapper(fn: Any) -> tuple[Any, str | None]:
+def unwrap_with_attr_name_if_wrapper(fn: Any) -> tuple[Any, Optional[str]]:
     # TODO(anijain2305) - Investigate if we can get rid of this function
     # unpack @torch._dynamo.optimize()(fn) wrapped function
     if is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
@@ -1356,13 +1360,13 @@ def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str
         )
 
 
-def to_int_ms(v: float | None) -> int | None:
+def to_int_ms(v: Optional[float]) -> Optional[int]:
     return None if v is None else int(v * 1000)
 
 
 # float64 timestamp has a quarter microsecond precision in 2024, so while
 # this is suboptimal we shouldn't meaningfully lose precision
-def to_int_us(v: float | None) -> int | None:
+def to_int_us(v: Optional[float]) -> Optional[int]:
     return None if v is None else int(v * 1_000_000)
 
 
@@ -1373,113 +1377,113 @@ LOG_FORMAT_VERSION = 3
 
 @dataclasses.dataclass
 class CompilationMetrics:
-    compile_id: str | None = None
-    frame_key: str | None = None
-    co_name: str | None = None
-    co_filename: str | None = None
-    co_firstlineno: int | None = None
-    cache_size: int | None = None
-    accumulated_cache_size: int | None = None
-    guard_count: int | None = None
-    shape_env_guard_count: int | None = None
-    graph_op_count: int | None = None
-    graph_node_count: int | None = None
-    graph_input_count: int | None = None
-    start_time: float | None = None
-    entire_frame_compile_time_s: float | None = None
-    backend_compile_time_s: float | None = None
-    inductor_compile_time_s: float | None = None
-    code_gen_time_s: float | None = None
-    fail_type: str | None = None
-    fail_reason: str | None = None
-    fail_user_frame_filename: str | None = None
-    fail_user_frame_lineno: int | None = None
-    non_compliant_ops: set[str] | None = None
-    compliant_custom_ops: set[str] | None = None
-    restart_reasons: set[str] | None = None
-    dynamo_time_before_restart_s: float | None = None
-    stack_trace: list[str] | None = None
-    exception_stack_trace: list[str] | None = None
-    graph_node_shapes: str | None = None
+    compile_id: Optional[str] = None
+    frame_key: Optional[str] = None
+    co_name: Optional[str] = None
+    co_filename: Optional[str] = None
+    co_firstlineno: Optional[int] = None
+    cache_size: Optional[int] = None
+    accumulated_cache_size: Optional[int] = None
+    guard_count: Optional[int] = None
+    shape_env_guard_count: Optional[int] = None
+    graph_op_count: Optional[int] = None
+    graph_node_count: Optional[int] = None
+    graph_input_count: Optional[int] = None
+    start_time: Optional[float] = None
+    entire_frame_compile_time_s: Optional[float] = None
+    backend_compile_time_s: Optional[float] = None
+    inductor_compile_time_s: Optional[float] = None
+    code_gen_time_s: Optional[float] = None
+    fail_type: Optional[str] = None
+    fail_reason: Optional[str] = None
+    fail_user_frame_filename: Optional[str] = None
+    fail_user_frame_lineno: Optional[int] = None
+    non_compliant_ops: Optional[set[str]] = None
+    compliant_custom_ops: Optional[set[str]] = None
+    restart_reasons: Optional[set[str]] = None
+    dynamo_time_before_restart_s: Optional[float] = None
+    stack_trace: Optional[list[str]] = None
+    exception_stack_trace: Optional[list[str]] = None
+    graph_node_shapes: Optional[str] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
-    has_guarded_code: bool | None = None
-    remote_cache_time_saved_s: float | None = None
-    structured_logging_overhead_s: float | None = None
-    config_suppress_errors: bool | None = None
-    config_inline_inbuilt_nn_modules: bool | None = None
-    specialize_float: bool | None = None
-    dynamo_config: str | None = None
-    compiler_config: str | None = None
-    is_forward: bool | None = None
-    num_triton_bundles: int | None = None
-    remote_fx_graph_cache_get_time_ms: int | None = None
-    remote_fx_graph_cache_put_time_ms: int | None = None
-    start_time_us: int | None = None
-    duration_us: int | None = None
-    dynamo_cumulative_compile_time_us: int | None = None
-    aot_autograd_cumulative_compile_time_us: int | None = None
-    inductor_cumulative_compile_time_us: int | None = None
-    inductor_code_gen_cumulative_compile_time_us: int | None = None
-    triton_compile_time_us: int | None = None
-    runtime_cudagraphify_time_us: int | None = None
-    runtime_triton_autotune_time_us: int | None = None
-    dynamo_compile_time_before_restart_us: int | None = None
-    distributed_ephemeral_timeout_us: int | None = None
-    structured_logging_overhead_us: int | None = None
-    remote_fx_graph_cache_get_time_us: int | None = None
-    remote_fx_graph_cache_put_time_us: int | None = None
-    backward_cumulative_compile_time_us: int | None = None
-    end_time_us: int | None = None
-    pre_grad_pass_time_us: int | None = None
-    post_grad_pass_time_us: int | None = None
-    joint_graph_pass_time_us: int | None = None
+    has_guarded_code: Optional[bool] = None
+    remote_cache_time_saved_s: Optional[float] = None
+    structured_logging_overhead_s: Optional[float] = None
+    config_suppress_errors: Optional[bool] = None
+    config_inline_inbuilt_nn_modules: Optional[bool] = None
+    specialize_float: Optional[bool] = None
+    dynamo_config: Optional[str] = None
+    compiler_config: Optional[str] = None
+    is_forward: Optional[bool] = None
+    num_triton_bundles: Optional[int] = None
+    remote_fx_graph_cache_get_time_ms: Optional[int] = None
+    remote_fx_graph_cache_put_time_ms: Optional[int] = None
+    start_time_us: Optional[int] = None
+    duration_us: Optional[int] = None
+    dynamo_cumulative_compile_time_us: Optional[int] = None
+    aot_autograd_cumulative_compile_time_us: Optional[int] = None
+    inductor_cumulative_compile_time_us: Optional[int] = None
+    inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
+    triton_compile_time_us: Optional[int] = None
+    runtime_cudagraphify_time_us: Optional[int] = None
+    runtime_triton_autotune_time_us: Optional[int] = None
+    dynamo_compile_time_before_restart_us: Optional[int] = None
+    distributed_ephemeral_timeout_us: Optional[int] = None
+    structured_logging_overhead_us: Optional[int] = None
+    remote_fx_graph_cache_get_time_us: Optional[int] = None
+    remote_fx_graph_cache_put_time_us: Optional[int] = None
+    backward_cumulative_compile_time_us: Optional[int] = None
+    end_time_us: Optional[int] = None
+    pre_grad_pass_time_us: Optional[int] = None
+    post_grad_pass_time_us: Optional[int] = None
+    joint_graph_pass_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
-    inductor_config: str | None = None
-    remote_cache_version: int | None = None
-    inductor_fx_remote_cache_hit_count: int | None = 0
-    inductor_fx_remote_cache_miss_count: int | None = 0
-    inductor_fx_remote_cache_backend_type: str | None = None
-    inductor_fx_remote_cache_hit_keys: str | None = None
-    inductor_fx_remote_cache_miss_keys: str | None = None
-    inductor_fx_local_cache_hit_count: int | None = 0
-    inductor_fx_local_cache_miss_count: int | None = 0
-    aotautograd_remote_cache_hit_count: int | None = 0
-    aotautograd_remote_cache_miss_count: int | None = 0
-    aotautograd_local_cache_hit_count: int | None = 0
-    aotautograd_local_cache_miss_count: int | None = 0
-    cuda_version: str | None = None
-    triton_version: str | None = None
-    feature_usage: dict[str, bool] | None = None
-    compile_time_autotune_time_us: int | None = None
-    is_runtime: bool | None = False
-    gc_time_us: int | None = None
-    tensorify_float_attempt: bool | None = None
-    tensorify_float_success: bool | None = None
-    tensorify_float_failure: set[str] | None = None
-    guard_latency_us: float | None = None
-    recompile_reason: str | None = None
-    num_graph_breaks: int | None = None
-    triton_kernel_compile_times_us: str | None = None
-    ir_count: int | None = None
-    cudagraph_skip_reason: str | None = None
-    python_version: str | None = None
-    pgo_put_remote_code_state_time_us: int | None = None
-    pgo_get_remote_code_state_time_us: int | None = None
+    inductor_config: Optional[str] = None
+    remote_cache_version: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = 0
+    inductor_fx_remote_cache_miss_count: Optional[int] = 0
+    inductor_fx_remote_cache_backend_type: Optional[str] = None
+    inductor_fx_remote_cache_hit_keys: Optional[str] = None
+    inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    inductor_fx_local_cache_hit_count: Optional[int] = 0
+    inductor_fx_local_cache_miss_count: Optional[int] = 0
+    aotautograd_remote_cache_hit_count: Optional[int] = 0
+    aotautograd_remote_cache_miss_count: Optional[int] = 0
+    aotautograd_local_cache_hit_count: Optional[int] = 0
+    aotautograd_local_cache_miss_count: Optional[int] = 0
+    cuda_version: Optional[str] = None
+    triton_version: Optional[str] = None
+    feature_usage: Optional[dict[str, bool]] = None
+    compile_time_autotune_time_us: Optional[int] = None
+    is_runtime: Optional[bool] = False
+    gc_time_us: Optional[int] = None
+    tensorify_float_attempt: Optional[bool] = None
+    tensorify_float_success: Optional[bool] = None
+    tensorify_float_failure: Optional[set[str]] = None
+    guard_latency_us: Optional[float] = None
+    recompile_reason: Optional[str] = None
+    num_graph_breaks: Optional[int] = None
+    triton_kernel_compile_times_us: Optional[str] = None
+    ir_count: Optional[int] = None
+    cudagraph_skip_reason: Optional[str] = None
+    python_version: Optional[str] = None
+    pgo_put_remote_code_state_time_us: Optional[int] = None
+    pgo_get_remote_code_state_time_us: Optional[int] = None
     # The number of elements within parameters. This is classically what people
     # think of when they think of parameters in a ML model.
-    param_numel: int | None = None
+    param_numel: Optional[int] = None
     # The number of elements counted by bytes - i.e. a float32 is 4 bytes
     # per element.
-    param_bytes: int | None = None
+    param_bytes: Optional[int] = None
     # The number of parameters counted by fields. This is mostly a proxy for
     # the number of distinct type of params.
-    param_count: int | None = None
-    recompile_user_contexts: set[str] | None = None
-    inline_inbuilt_nn_modules_candidate: bool | None = False
-    pytorch_version: str | None = None
-    inductor_provenance: set[str] | None = None
+    param_count: Optional[int] = None
+    recompile_user_contexts: Optional[set[str]] = None
+    inline_inbuilt_nn_modules_candidate: Optional[bool] = False
+    pytorch_version: Optional[str] = None
+    inductor_provenance: Optional[set[str]] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1489,13 +1493,13 @@ class CompilationMetrics:
         we transform some fields to comma-separated strings for scuba logging.
         """
 
-        def us_to_s(metric: int | None) -> float | None:
+        def us_to_s(metric: Optional[int]) -> Optional[float]:
             return metric / 1e6 if metric is not None else None
 
-        def us_to_ms(metric: int | None) -> int | None:
+        def us_to_ms(metric: Optional[int]) -> Optional[int]:
             return metric // 1000 if metric is not None else None
 
-        def collection_to_str(metric: Any | None) -> str | None:
+        def collection_to_str(metric: Optional[Any]) -> Optional[str]:
             def safe_str(item: Any) -> str:
                 try:
                     return str(item)
@@ -1510,7 +1514,7 @@ class CompilationMetrics:
 
             return ",".join(safe_str(item) for item in sorted(metric))
 
-        def collection_to_json_str(metric: Any | None) -> str | None:
+        def collection_to_json_str(metric: Optional[Any]) -> Optional[str]:
             if metric is None:
                 return None
             try:
@@ -1623,7 +1627,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     )
 
 
-def _get_dynamo_config_for_logging() -> str | None:
+def _get_dynamo_config_for_logging() -> Optional[str]:
     def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
         blocklist = {
             "TYPE_CHECKING",
@@ -1658,7 +1662,7 @@ def _get_dynamo_config_for_logging() -> str | None:
     return json.dumps(config_dict, sort_keys=True)
 
 
-def _compiler_config_for_logging() -> str | None:
+def _compiler_config_for_logging() -> Optional[str]:
     def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
         blocklist = {
             "TYPE_CHECKING",
@@ -1682,7 +1686,7 @@ def _compiler_config_for_logging() -> str | None:
     return json.dumps(config_dict, sort_keys=True)
 
 
-def _scrubbed_inductor_config_for_logging() -> str | None:
+def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     """
     Method to parse and scrub uninteresting configs from inductor config
     """
@@ -1734,8 +1738,8 @@ def record_compilation_metrics(
     start_time_ns: int,
     end_time_ns: int,
     metrics: dict[str, Any],
-    exc_type: type[BaseException] | None,
-    exc_value: BaseException | None,
+    exc_type: Optional[type[BaseException]],
+    exc_value: Optional[BaseException],
 ) -> None:
     if torch._inductor.utils.should_use_remote_fx_graph_cache():
         try:
@@ -1849,7 +1853,7 @@ class ChromiumEventLogger:
             self.tls.stack = []
             return self.tls.stack
 
-    def get_outermost_event(self) -> str | None:
+    def get_outermost_event(self) -> Optional[str]:
         """
         Get the outermost event name (i.e. the longest running event)
         or None if the stack is empty.
@@ -1967,7 +1971,7 @@ class ChromiumEventLogger:
         time_ns: int,
         metadata: dict[str, Any],
         log_pt2_compile_event: bool = False,
-        compile_id: CompileId | None = None,
+        compile_id: Optional[CompileId] = None,
     ) -> None:
         """
         Logs the start of a single event.
@@ -2024,7 +2028,7 @@ class ChromiumEventLogger:
         metadata: dict[str, Any],
         start_time_ns: int,
         log_pt2_compile_event: bool,
-        compile_id: CompileId | None = None,
+        compile_id: Optional[CompileId] = None,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -2102,7 +2106,7 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         phase: str,
-        metadata: dict[str, Any] | None = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """
         Logs a timed event in chromium format. See log_event_start, log_event_end, etc.
@@ -2130,7 +2134,7 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: dict[str, Any] | None = None,
+        metadata: Optional[dict[str, Any]] = None,
         # By default, an instant event isn't logged internally, only to structured logging.
         log_pt2_compile_event: bool = False,
     ) -> None:
@@ -2169,7 +2173,7 @@ class ChromiumEventLogger:
             )
 
 
-CHROMIUM_EVENT_LOG: ChromiumEventLogger | None = None
+CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
 
 
 def get_chromium_event_logger() -> ChromiumEventLogger:
@@ -2282,7 +2286,9 @@ def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
     _copy_dynamo_attr(src, dst, "_dynamo_weak_dynamic_indices")
 
 
-def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.Tensor:
+def clone_input(
+    x: torch.Tensor, *, dtype: Optional[torch.dtype] = None
+) -> torch.Tensor:
     """copy while preserving strides"""
     # TODO: this is questionable
     if is_fake(x):
@@ -2360,7 +2366,7 @@ def clone_input(x: torch.Tensor, *, dtype: torch.dtype | None = None) -> torch.T
 
 @overload
 def clone_inputs(
-    example_inputs: dict[str, T | tuple[T, ...]],
+    example_inputs: dict[str, Union[T, tuple[T, ...]]],
 ) -> dict[str, list[T]]: ...
 
 
@@ -2369,7 +2375,7 @@ def clone_inputs(example_inputs: Sequence[T]) -> list[T]: ...
 
 
 def clone_inputs(example_inputs: Any) -> Any:
-    res: dict[str, Any] | list[Any]
+    res: Union[dict[str, Any], list[Any]]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
@@ -2431,10 +2437,12 @@ def preserve_rng_state() -> Generator[None, None, None]:
 def is_jit_model(
     model0: Any,
 ) -> TypeIs[
-    torch.jit._trace.TopLevelTracedModule
-    | torch.jit._script.RecursiveScriptModule
-    | torch.jit.ScriptFunction[Any, Any]
-    | torch.jit.ScriptModule
+    Union[
+        torch.jit._trace.TopLevelTracedModule,
+        torch.jit._script.RecursiveScriptModule,
+        torch.jit.ScriptFunction[Any, Any],
+        torch.jit.ScriptModule,
+    ]
 ]:
     return isinstance(
         model0,
@@ -2465,7 +2473,7 @@ def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
     return None
 
 
-def getfile(obj: Any) -> str | None:
+def getfile(obj: Any) -> Optional[str]:
     try:
         return inspect.getfile(obj)
     except (TypeError, OSError):
@@ -2656,7 +2664,7 @@ def common_constants() -> set[int]:
     }
 
 
-def is_torch_sym(value: Any) -> TypeGuard[torch.SymBool | torch.SymInt]:
+def is_torch_sym(value: Any) -> TypeGuard[Union[torch.SymBool, torch.SymInt]]:
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
@@ -2811,7 +2819,7 @@ def builtin_dict_keys(d: dict[K, V]) -> KeysView[K]:
     return dict.keys(d)
 
 
-def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
+def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, Union[V, Any]]]:
     # Get items without calling the user defined __getitem__ or keys method.
     assert isinstance(obj, dict)
     if istype(obj, (dict, OrderedDict)):
@@ -2975,7 +2983,7 @@ def iter_contains(
         # Match of Tensor means match of FakeTensor
         search = _get_fake_tensor(search)
 
-    found: VariableTracker | None = None
+    found: Optional[VariableTracker] = None
     for x in items:
         if must_check_tensor_id:
             if x.is_tensor():
@@ -3000,7 +3008,7 @@ def iter_contains(
 
 def key_is_id(
     k: Any,
-) -> TypeIs[torch.Tensor | torch.nn.Module | MethodWrapperType]:
+) -> TypeIs[Union[torch.Tensor, torch.nn.Module, MethodWrapperType]]:
     """Returns whether it indexes dictionaries using its id"""
     return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
 
@@ -3562,7 +3570,9 @@ def get_fake_values_from_nodes(
     return torch.fx.node.map_arg(nodes, visit)
 
 
-def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) -> str:
+def get_concrete_sizes_from_symints(
+    msg: str, fake_mode: Optional[FakeTensorMode]
+) -> str:
     """
     Replace symbolic size expressions (like 's0', 's94') in error messages
     with their concrete runtime values for better readability.
@@ -3836,7 +3846,7 @@ def _get_fake_value_impl(
 _current_node = threading.local()
 
 
-def get_current_node() -> torch.fx.Node | None:
+def get_current_node() -> Optional[torch.fx.Node]:
     return getattr(_current_node, "value", None)
 
 
@@ -4051,7 +4061,7 @@ def class_has_getattribute(cls: type) -> bool:
 
 def get_custom_getattr(
     value: Any, ignore_nn_module_getattr: bool = False
-) -> Any | None:
+) -> Optional[Any]:
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")
     except AttributeError:
@@ -4079,10 +4089,10 @@ def tensor_static_reason_to_message(reason: TensorStaticReason) -> str:
 
 
 def tensor_always_has_static_shape(
-    tensor: torch.Tensor | Any,
+    tensor: Union[torch.Tensor, Any],
     is_tensor: bool,
     tensor_source: Source,
-) -> tuple[bool, TensorStaticReason | None]:
+) -> tuple[bool, Optional[TensorStaticReason]]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
 
@@ -4423,7 +4433,7 @@ class _Anchors:
     right_start_offset: int
 
 
-def _extract_anchors_from_expr(segment: str) -> _Anchors | None:
+def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
     """
     Given source code `segment` corresponding to a bytecode
     instruction, determine:
@@ -4634,7 +4644,7 @@ def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
         num_spaces = len(last_line) - len(last_line.lstrip())
         markers.append(" " * num_spaces + "~" * (end_offset - num_spaces))
 
-    anchors: _Anchors | None = None
+    anchors: Optional[_Anchors] = None
     try:
         anchors = _extract_anchors_from_expr(segment)
     except AssertionError:
@@ -5171,7 +5181,7 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
         yield
 
 
-def is_node_meta_valid(node: torch.fx.Node | None) -> bool:
+def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
     return node is None or "example_value" in node.meta or "val" in node.meta
 
 
@@ -5206,7 +5216,7 @@ def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
 
 # Returns a set of code objects present traced in the current TracingContext, or None
 # if there is no current TracingContext.
-def get_traced_code() -> list[CodeType] | None:
+def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()

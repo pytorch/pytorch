@@ -16,7 +16,7 @@ handling of iterator operations during code transformation and optimization.
 import itertools
 import sys
 from collections.abc import Callable, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Union
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
@@ -338,8 +338,8 @@ class RepeatIteratorVariable(IteratorVariable):
 class CountIteratorVariable(IteratorVariable):
     def __init__(
         self,
-        item: int | VariableTracker = 0,
-        step: int | VariableTracker = 1,
+        item: Union[int, VariableTracker] = 0,
+        step: Union[int, VariableTracker] = 1,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -428,7 +428,7 @@ class ZipVariable(IteratorVariable):
         args = []
 
         def get_item(
-            it: list[VariableTracker] | VariableTracker,
+            it: Union[list[VariableTracker], VariableTracker],
         ) -> VariableTracker:
             if isinstance(it, list):
                 if old_index >= len(it):
