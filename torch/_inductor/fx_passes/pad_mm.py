@@ -84,11 +84,13 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
-def realize_symbols(
-    ds: torch.Size | tuple[torch.SymInt, ...],
+def hint_symbols(
+    ds: Sequence[int | torch.SymInt],
 ) -> list[int]:
     """Helper to convert symbolic dimensions to their concrete hint values."""
-    return [d if isinstance(d, int) else d.node.hint for d in ds]
+    from torch.fx.experimental.symbolic_shapes import optimization_hint
+
+    return [optimization_hint(d) for d in ds]
 
 
 def can_pad(
@@ -102,31 +104,15 @@ def can_pad(
     All logic related to whether it's safe to pad should be here.
     """
 
-    # It's fine we have symbolic shapes or strides as long as they
-    # have hints. Later, we will make sure we only pad non-symbolic dimensions.
-    def valid_shape_and_stride(t: Tensor | None) -> bool:
-        if t is None:
-            return True
-
-        symbolic_cnt = 0
+    # Can't pad if there is no static dims, we pad static dims only.
+    def has_one_static_dim(t: Tensor) -> bool:
+        """Return False if all dimensions are symbolic — nothing concrete to pad."""
         for x in t.size():
             if isinstance(x, int):
-                continue
-            elif utils.is_symbolic(x):
-                # pyrefly: ignore [missing-attribute]
-                if not x.node.has_hint():
-                    return False
-                symbolic_cnt += 1
-            else:
-                return False
-        # filter out cases where all dimensions are symbolic
-        if symbolic_cnt == len(t.size()):
-            return False
-        return all(
-            # pyrefly: ignore [missing-attribute]
-            isinstance(x, int) or (utils.is_symbolic(x) and x.node.has_hint())
-            for x in t.stride()
-        )
+                return True
+            elif not isinstance(x, torch.SymInt):
+                raise RuntimeError("not expected size")
+        return False
 
     # Basic safety checks
     if not torch._inductor.config.shape_padding:
@@ -138,15 +124,16 @@ def can_pad(
     if not check_dtype(mat1, mat2):
         return False
 
-    if not all(valid_shape_and_stride(t) for t in (mat1, mat2, input)):
+    # For padding to be vaible each tensor should have at least one static dim.
+    tensors = [t for t in (mat1, mat2, input) if t is not None]
+    if not all(has_one_static_dim(t) for t in tensors):
         return False
 
-    # Check for zero dimensions - not safe to pad
+    # Skip zero-sized dimensions — padding would be wasteful (mm on empty tensors)
+    from torch.fx.experimental.symbolic_shapes import optimization_hint
+
     if any(
-        dim == 0
-        for dim in itertools.chain(
-            realize_symbols(mat1.shape), realize_symbols(mat2.shape)
-        )
+        optimization_hint(dim) == 0 for dim in itertools.chain(mat1.shape, mat2.shape)
     ):
         return False
 
@@ -519,15 +506,19 @@ def _should_pad(
         if torch._inductor.config.force_shape_pad:
             return True
 
+        # Resolve symbolic dims to concrete hints for heuristic checks below.
+        # These are performance decisions, not correctness — optimization_hint is safe.
+        m_concrete, k_concrete, n_concrete = hint_symbols((m, k, n))
+
         # Performance heuristic for bf16 large K scenarios
         if (
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
-            and should_pad_mm_bf16(mat1.dtype, m, n, k)
+            and should_pad_mm_bf16(mat1.dtype, m_concrete, n_concrete, k_concrete)
         ):
             return True
 
         # Check if operation is compute bound (performance check)
-        if not is_mm_compute_bound(m, k, n, mat1.dtype):
+        if not is_mm_compute_bound(m_concrete, k_concrete, n_concrete, mat1.dtype):
             return False
 
         # We don't want to look up the cache for cases that are trivially false
@@ -540,9 +531,9 @@ def _should_pad(
 
         def realize_tensor(t):
             if isinstance(t, FakeTensor):
-                size_hints = realize_symbols(t.size())
+                size_hints = hint_symbols(t.size())
                 # pyrefly: ignore [bad-argument-type]
-                stride_hint = realize_symbols(t.stride())
+                stride_hint = hint_symbols(t.stride())
                 real_size = (
                     sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
                 )
