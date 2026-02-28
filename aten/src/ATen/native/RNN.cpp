@@ -1546,6 +1546,14 @@ std::tuple<Tensor, Tensor> lstm_cell(
   const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
+  TORCH_CHECK(input.dim() == hx[0].dim() && input.dim() == hx[1].dim(),
+              "LSTMCell: Expected input and hidden states to have the same number of dimensions, but got input dim: ",
+              input.dim(), ", hx dim: ", hx[0].dim(), ", and cx dim: ", hx[1].dim());
+  if (input.dim() == 2) {
+    TORCH_CHECK(input.size(0) == hx[0].size(0) && input.size(0) == hx[1].size(0),
+                "LSTMCell: Expected input and hidden states to have the same batch size, but got input batch: ",
+                input.size(0), ", hx batch: ", hx[0].size(0), ", and cx batch: ", hx[1].size(0));
+  }
   auto hidden_size = w_hh.sym_size(1);
   check_rnn_cell_forward_input(input, w_ih.sym_size(1));
   check_rnn_cell_forward_weights<4>(w_ih, w_hh, hidden_size);
