@@ -671,9 +671,11 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
 
   TORCH_CHECK(output.is_mps());
 
+  // Edge case behaviors must match _int_mm_out_cpu CPU implementation
   // Transpose inputs if needed
-  if (output.numel() == 0) {
-    return output;
+  // Outer or inner dimension is 0
+  if (output.numel() == 0 || self.size(1) == 0) {
+    return output.zero_();
   }
 
   // MPS matmul returns silently incorrect results if one of the matrix dimensions is greater than 2**15
@@ -862,6 +864,17 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     output.resize_(bias_sizes);
   }
   if (output.numel() == 0) {
+    return output;
+  }
+  // Inner dimension is 0
+  // Early out as some paths in the code below do not handle this case correctly
+  if (self.size(1) == 0) {
+    if (beta.toDouble() == 0.0) {
+      output.zero_();
+    } else {
+      output.copy_(*bias_);
+      output.mul_(beta);
+    }
     return output;
   }
 

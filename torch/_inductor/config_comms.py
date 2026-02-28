@@ -1,6 +1,5 @@
 import os
 import sys
-from typing import Optional
 
 from torch.utils._config_module import install_config_module
 
@@ -14,12 +13,12 @@ runtime_estimations_use_nccl_lib_estimations: bool = False
 runtime_estimations_align_across_all_distributed_ranks: bool = False
 
 reorder_iterative_debug_memory_recompute: bool = False
-reorder_iterative_debug_limit_to_reorder: Optional[int] = (
+reorder_iterative_debug_limit_to_reorder: int | None = (
     None
     if (env_str := os.getenv("PYTORCH_REORDER_COLLECTIVES_LIMIT")) is None
     else int(env_str)
 )
-sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+sink_waits_iterative_debug_limit_to_sink: int | None = (
     # pyrefly: ignore[unbound-name]
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
