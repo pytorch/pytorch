@@ -7640,6 +7640,28 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ]:
             test_rnn_cell(cell_fn, gate_count)
 
+    def test_conv3d_initialization_consistency(self):
+        # Verify Conv3d initialization parity across different memory formats
+        # to address inconsistency in non-contiguous layouts (e.g., channels_last_3d)
+        m = torch.nn.Conv3d(3, 6, kernel_size=3)
+        
+        # Scenario 1: Default contiguous initialization
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_default = m.weight.clone().detach()
+        
+        # Scenario 2: Non-contiguous (channels_last_3d) initialization
+        m.to(memory_format=torch.channels_last_3d)
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_channels_last = m.weight.clone().detach()
+        
+        # Assert bit-wise parity between the two layouts
+        self.assertTrue(
+            torch.allclose(weights_default, weights_channels_last),
+            "Conv3d initialization is inconsistent between contiguous and non-contiguous layouts"
+        )
+
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
