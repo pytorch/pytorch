@@ -1043,6 +1043,50 @@ def extract_tensor_metadata(t: torch.Tensor) -> tuple:
     return (t.shape, t.stride(), t.dtype, t.device, t.requires_grad)
 
 
+# Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
+def extract_subclass_metadata(guard: Any, value: Any) -> tuple:
+    metadata = deepcopy(value.__tensor_flatten__()[1])
+    cls = type(value)
+    has_custom_guard = hasattr(value, "__metadata_guard__")
+    return (metadata, cls, has_custom_guard)
+
+
+# Used by TENSOR_SUBCLASS_METADATA_MATCH guard check spec
+def check_subclass_metadata(value: Any, expected: tuple) -> bool:
+    metadata, cls, has_custom_guard = expected
+    if has_custom_guard:
+        return cls.__metadata_guard__(metadata, value.__tensor_flatten__()[1])
+    return value.__tensor_flatten__()[1] == metadata
+
+
+# Used by DTENSOR_SPEC_MATCH guard check spec
+def extract_dtensor_spec(guard: Any, value: Any) -> Any:
+    return deepcopy(value)
+
+
+# Used by DTENSOR_SPEC_MATCH guard check spec
+def check_dtensor_spec(value: Any, expected: Any) -> bool:
+    return value._check_equals(expected, skip_shapes=True)
+
+
+# Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
+def extract_opaque_obj(guard: Any, value: Any) -> Any:
+    opaque_info = get_opaque_obj_info(type(value))
+    if not opaque_info or not opaque_info.guard_fn:
+        return None
+    return deepcopy(opaque_info.guard_fn(value))
+
+
+# Used by OPAQUE_OBJ_GUARD_FN_MATCH guard check spec
+def check_opaque_obj(value: Any, expected: Any) -> bool:
+    if expected is None:
+        return True
+    opaque_info = get_opaque_obj_info(type(value))
+    if not opaque_info or not opaque_info.guard_fn:
+        return expected is None
+    return opaque_info.guard_fn(value) == expected
+
+
 # Used by CLOSURE_MATCH guard check spec
 def extract_closure(guard: Any, value: Any) -> Any:
     if type(value) is types.FunctionType and hasattr(value, "__code__"):
@@ -2105,7 +2149,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def DICT_VERSION(self, guard: Guard) -> None:
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
@@ -2150,7 +2194,19 @@ class GuardBuilder(GuardBuilderBase):
         )
         self.already_added_code_parts.add(code)
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: (
+            guard.create_fn.keywords["key"],
+            guard.create_fn.keywords["invert"],
+            (guard.create_fn.keywords["key"] not in value)
+            if guard.create_fn.keywords["invert"]
+            else (guard.create_fn.keywords["key"] in value),
+        ),
+        check=lambda value, expected: (
+            ((expected[0] not in value) if expected[1] else (expected[0] in value))
+            == expected[2]
+        ),
+    )
     def SET_CONTAINS(self, guard: Guard, key: Any, invert: bool) -> None:
         set_ref = self.arg_ref(guard)
         item = key
@@ -2170,7 +2226,10 @@ class GuardBuilder(GuardBuilderBase):
         )
         self.already_added_code_parts.add(code)
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: value,
+        check=lambda value, expected: value == expected,
+    )
     def BOOL_MATCH(self, guard: Guard) -> None:
         # checks val == True or val == False
         ref = self.arg_ref(guard)
@@ -2188,7 +2247,10 @@ class GuardBuilder(GuardBuilderBase):
                 get_verbose_code_parts(code, guard), guard.user_stack
             )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: None,
+        check=lambda value, expected: value is None,
+    )
     def NONE_MATCH(self, guard: Guard) -> None:
         # checks `val is None`
         ref = self.arg_ref(guard)
@@ -2253,7 +2315,10 @@ class GuardBuilder(GuardBuilderBase):
                 if weak_id is not None:
                     self.id_matched_objs[local_name] = weak_id
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: None,
+        check=lambda value, expected: value is not None,
+    )
     def NOT_NONE_MATCH(self, guard: Guard, value: Any | None = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
@@ -2265,7 +2330,10 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: value.raw_repr(),
+        check=lambda value, expected: value.raw_repr() == expected,
+    )
     def DISPATCH_KEY_SET_MATCH(self, guard: Guard) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
@@ -2278,7 +2346,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def DUAL_LEVEL(self, guard: Guard) -> None:
         # Invalidate dual level if current dual level is different than the one
         # in the fx graph
@@ -2292,7 +2360,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def FUNCTORCH_STACK_MATCH(self, guard: Guard) -> None:
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
@@ -2312,7 +2380,7 @@ class GuardBuilder(GuardBuilderBase):
             fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard) -> None:
         get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
         are_inline_hooks = (
@@ -2341,7 +2409,10 @@ class GuardBuilder(GuardBuilderBase):
             fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=extract_subclass_metadata,
+        check=check_subclass_metadata,
+    )
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
         value = self.get(guard)
         original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
@@ -2366,7 +2437,10 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=extract_dtensor_spec,
+        check=check_dtensor_spec,
+    )
     def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
         # Copied from DTensor __metadata_guard__
         # TODO - Consider moving this to C++ if stable
@@ -2380,7 +2454,10 @@ class GuardBuilder(GuardBuilderBase):
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=extract_opaque_obj,
+        check=check_opaque_obj,
+    )
     def OPAQUE_OBJ_GUARD_FN_MATCH(self, guard: Guard) -> None:
         """Guard on the values returned by the opaque object's guard_fn."""
 
@@ -2536,7 +2613,10 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self.EQUALS_MATCH(guard)
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: value,
+        check=lambda value, expected: value is expected,
+    )
     def NN_MODULE(self, guard: Guard) -> None:
         # don't support this in serialization because it uses unsupported ID_MATCH
         self.ID_MATCH(guard, "[inline-inbuilt-nn-modules-candidate]")
@@ -2557,7 +2637,10 @@ class GuardBuilder(GuardBuilderBase):
                 ],
             )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: value,
+        check=lambda value, expected: value is expected,
+    )
     def FUNCTION_MATCH(self, guard: Guard) -> None:
         """things like torch.add and user defined functions"""
         # don't support this in serialization because it uses unsupported ID_MATCH
@@ -2646,7 +2729,10 @@ class GuardBuilder(GuardBuilderBase):
                 guard.user_stack,
             )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: tuple_iterator_len(value),
+        check=lambda value, expected: tuple_iterator_len(value) == expected,
+    )
     def TUPLE_ITERATOR_LEN(self, guard: Guard) -> None:
         ref = self.arg_ref(guard)
         value = self.get(guard)
@@ -2666,7 +2752,10 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: normalize_range_iter(value),
+        check=lambda value, expected: normalize_range_iter(value) == expected,
+    )
     def RANGE_ITERATOR_MATCH(self, guard: Guard) -> None:
         ref = self.arg_ref(guard)
         value = self.get(guard)
@@ -2738,7 +2827,10 @@ class GuardBuilder(GuardBuilderBase):
                 guard.user_stack,
             )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: None,
+        check=lambda value, expected: value is not None,
+    )
     def WEAKREF_ALIVE(self, guard: Guard) -> None:
         code = [f"{self.arg_ref(guard)} is not None"]
 
@@ -2747,7 +2839,10 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: list(value.keys()),
+        check=lambda value, expected: list(value.keys()) == expected,
+    )
     def MAPPING_KEYS_CHECK(self, guard: Guard) -> None:
         """Guard on the key order of types.MappingProxyType object"""
         ref = self.arg_ref(guard)
@@ -2760,7 +2855,10 @@ class GuardBuilder(GuardBuilderBase):
             value, code, guard.user_stack
         )
 
-    @unsupported_guard_check_spec
+    @register_guard_check_spec(
+        extract=lambda guard, value: list(dict.keys(value)),
+        check=lambda value, expected: list(dict.keys(value)) == expected,
+    )
     def DICT_KEYS_MATCH(self, guard: Guard) -> None:
         """Insert guard to check that the keys of a dict are same"""
         ref = self.arg_ref(guard)
@@ -2797,19 +2895,19 @@ class GuardBuilder(GuardBuilderBase):
             return
         self.SEQUENCE_LENGTH(guard)
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def GRAD_MODE(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def DETERMINISTIC_ALGORITHMS(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def FSDP_TRAINING_STATE(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def GLOBAL_STATE(self, guard: Guard) -> None:
         output_graph = self.check_fn_manager.output_graph
         assert output_graph is not None
@@ -2824,7 +2922,7 @@ class GuardBuilder(GuardBuilderBase):
             global_state, code, guard.user_stack
         )
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
         assert self.check_fn_manager.torch_function_mode_stack is not None
         self.check_fn_manager.torch_function_mode_stack_check_fn = (
@@ -2838,7 +2936,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def DEFAULT_DEVICE(self, guard: Guard) -> None:
         """Guard on CURRENT_DEVICE per torch.utils._device"""
         assert guard.source is GuardSource.GLOBAL
@@ -2853,7 +2951,7 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    @unsupported_guard_check_spec
+    @skip_guard_check_spec
     def SHAPE_ENV(self, guard: Guard) -> None:
         from torch._dynamo.output_graph import OutputGraphCommon
 
@@ -5081,28 +5179,11 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Guard check spec dispatch table
-#
-def build_guard_check_spec_dispatch() -> dict[str, GuardCheckSpec | object]:
-    dispatch: dict[str, GuardCheckSpec | object] = {}
-    for name in dir(GuardBuilder):
-        method = getattr(GuardBuilder, name)
-        handler = getattr(method, "guard_check_spec", None)
-        if handler is not None:
-            dispatch[name] = handler
-    return dispatch
-
-
-guard_check_spec_dispatch_cache: dict[str, GuardCheckSpec | object] | None = None
-
-
-def get_guard_check_spec_dispatch() -> dict[str, GuardCheckSpec | object]:
-    global guard_check_spec_dispatch_cache
-    if guard_check_spec_dispatch_cache is None:
-        guard_check_spec_dispatch_cache = build_guard_check_spec_dispatch()
-    return guard_check_spec_dispatch_cache
-
-
-# Backwards-compatible alias — will be replaced with get_guard_check_spec_dispatch()
-# in invoke_subgraph_cache in a follow-up commit.
-GUARD_VALUE_DISPATCH = get_guard_check_spec_dispatch()
+# Guard check spec dispatch table — built by scanning GuardBuilder methods
+# for the guard_check_spec attribute set by the decorators above.
+GUARD_VALUE_DISPATCH: dict[str, GuardCheckSpec | object] = {
+    name: handler
+    for name in dir(GuardBuilder)
+    if (handler := getattr(getattr(GuardBuilder, name), "guard_check_spec", None))
+    is not None
+}
