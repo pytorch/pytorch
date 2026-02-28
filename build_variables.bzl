@@ -1474,6 +1474,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/RowwisePrune.cpp",
     "aten/src/ATen/native/SegmentReduce.cpp",
     "aten/src/ATen/native/Scalar.cpp",
+    "aten/src/ATen/native/ScaledBlasUtils.cpp",
     "aten/src/ATen/native/SobolEngineOps.cpp",
     "aten/src/ATen/native/SobolEngineOpsUtils.cpp",
     "aten/src/ATen/native/SoftMax.cpp",

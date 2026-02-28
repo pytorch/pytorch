@@ -45,7 +45,16 @@ import traceback
 import types
 import weakref
 from collections import deque
-from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
+from typing import (
+    Any,
+    cast,
+    NoReturn,
+    Optional,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 from typing_extensions import TypeIs
 
 import torch
@@ -219,11 +228,11 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
 
-ExceptionVals: TypeAlias = (
-    variables.ExceptionVariable
-    | UserDefinedExceptionClassVariable
-    | UserDefinedExceptionObjectVariable
-)
+ExceptionVals: TypeAlias = Union[
+    variables.ExceptionVariable,
+    UserDefinedExceptionClassVariable,
+    UserDefinedExceptionObjectVariable,
+]
 
 
 @functools.cache
@@ -244,8 +253,8 @@ class SpeculationEntry:
     inst: Instruction  # for debugging only
     _failed: bool = False
     # TX error_on_graph_break setting at the time of failure
-    error_on_graph_break: bool | None = None
-    reason: GraphCompileReason | None = None
+    error_on_graph_break: Optional[bool] = None
+    reason: Optional[GraphCompileReason] = None
 
     def fail_and_restart_analysis(self, error_on_graph_break: bool) -> None:
         """
@@ -355,7 +364,7 @@ class LocalState:
 class DistributedState:
     compile_pg: Any
     local_state: LocalState
-    all_states: list[LocalState] | None = None
+    all_states: Optional[list[LocalState]] = None
 
 
 class TensorifyState:
@@ -424,7 +433,9 @@ class BlockStackEntry:
     inst: Instruction
     target: Instruction | None
     stack_index: int
-    with_context: ContextWrappingVariable | GenericContextWrappingVariable | None = None
+    with_context: Optional[
+        Union[ContextWrappingVariable, GenericContextWrappingVariable]
+    ] = None
 
     def can_restore(self) -> bool:
         return self.with_context is not None
@@ -549,7 +560,7 @@ def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
     def fn_consumed() -> int:
         return sum([i for i in range(1)])  # noqa: C416
 
-    def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], str | None]:
+    def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], Optional[str]]:
         """Extract (pre_store_ops, post_store_op) from comprehension bytecode."""
         target_line = list(dis.findlinestarts(fn.__code__))[1][1]
         insts: list[str] = []
@@ -602,7 +613,7 @@ class ComprehensionAnalysis:
     """
 
     end_ip: int
-    result_var: str | None
+    result_var: Optional[str]
     result_on_stack: bool
     iterator_vars: list[str]
     walrus_vars: list[str]
@@ -952,7 +963,7 @@ def _reconstruct_block_stack(
     in the compiled bytecode."""
     # Reconstruct the context variable CLASS in the block stack
     all_txes: list[InstructionTranslatorBase] = []
-    cur_tx: InstructionTranslatorBase | None = tx
+    cur_tx: Optional[InstructionTranslatorBase] = tx
     while cur_tx is not None:
         all_txes.append(cur_tx)
         cur_tx = cur_tx.parent
@@ -1149,7 +1160,7 @@ class ExceptionStack:
     #  + POP_EXCEPT := pops TOS from the *exception stack*
 
     _exc_stack: list[ExceptionVals] = dataclasses.field(default_factory=list)
-    _current_exception: ExceptionVals | None = dataclasses.field(default=None)
+    _current_exception: Optional[ExceptionVals] = dataclasses.field(default=None)
 
     def clear_current_exception(self) -> None:
         self._current_exception = None
@@ -1238,32 +1249,32 @@ class InstructionTranslatorBase(
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
     symbolic_stream_state: SymbolicStreamState
-    post_prune_cell_and_freevars: dict[str, VariableTracker] | None
+    post_prune_cell_and_freevars: Optional[dict[str, VariableTracker]]
     stack: list[VariableTracker]
-    instruction_pointer: int | None
+    instruction_pointer: Optional[int]
     current_instruction: Instruction
     current_instruction_push: bool
     block_stack: list[BlockStackEntry]
     lineno: int
-    kw_names: ConstantVariable | None
+    kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
     prefix_insts: list[Instruction]
     inline_depth: int
     inconsistent_side_effects: bool
-    current_speculation: SpeculationEntry | None
+    current_speculation: Optional[SpeculationEntry]
     dispatch_table: list[Any]
     exn_vt_stack: ExceptionStack
-    exec_recorder: ExecutionRecorder | None
-    strict_checks_fn: Callable[[VariableTracker], bool] | None
-    start_point: int | None
+    exec_recorder: Optional[ExecutionRecorder]
+    strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
+    start_point: Optional[int]
     # Does this function make no inlined function calls?
     has_no_inlined_calls: bool
-    parent: InstructionTranslatorBase | None
+    parent: Optional[InstructionTranslatorBase]
     # Does this tx currently have a child tx tracing?
     # Used to correctly implement should_compile_partial_graph
     is_child_tracer_active: bool
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
-    package: CompilePackage | None
+    package: Optional[CompilePackage]
     latest_bytecode_queue: deque[str]
     # Store the latest bytecode before graph_break() call by user
 
@@ -1296,7 +1307,7 @@ class InstructionTranslatorBase(
         # negatives so that Dynamo does not skip the whole frame.
 
         # If any parent tx has a backedge, then return True
-        cur_tx: InstructionTranslatorBase | None = self
+        cur_tx: Optional[InstructionTranslatorBase] = self
         while cur_tx is not None:
             cur_offset = cur_tx.current_instruction.offset
             assert cur_tx.instruction_pointer is not None
@@ -1383,7 +1394,7 @@ class InstructionTranslatorBase(
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
 
-    def get_line_of_code_header(self, lineno: int | None = None) -> str:
+    def get_line_of_code_header(self, lineno: Optional[int] = None) -> str:
         if lineno is None:
             lineno = self.lineno
         inline_depth_str = (
@@ -1855,7 +1866,7 @@ class InstructionTranslatorBase(
                     # twice is not an issue (second stop is a no op).
                     self.output.mark_bytecode_tracing_stop()
 
-    def push(self, val: VariableTracker | None) -> None:
+    def push(self, val: Optional[VariableTracker]) -> None:
         assert val is None or isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
         )
@@ -3146,7 +3157,7 @@ class InstructionTranslatorBase(
         txes: list[InstructionTranslatorBase] = []
         idxes: list[int] = []
         resume_insts: list[Instruction] = []
-        cur_tx: InstructionTranslatorBase | None = self
+        cur_tx: Optional[InstructionTranslatorBase] = self
         idx = 0
         while cur_tx is not None:
             if cur_tx is self:
@@ -3620,17 +3631,27 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        self.push(
-            NestedUserFunctionVariable(
-                fn_name,
-                code,
-                self.f_globals,
-                defaults,
-                kwdefaults,
-                annotations,
-                closure,
-            )
+        fn = NestedUserFunctionVariable(
+            fn_name,
+            code,
+            self.f_globals,
+            defaults,
+            kwdefaults,
+            closure,
         )
+        if annotations:
+            assert isinstance(annotations, TupleVariable)
+            # Convert the attribute to a dictionary before assigning it
+            # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
+            items = annotations.items
+            ann = ConstDictVariable(
+                dict(zip(items[::2], items[1::2], strict=True)),
+                mutation_type=ValueMutationNew(),
+            )
+            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
+                "__annotations__", ann
+            )
+        self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
@@ -4117,7 +4138,7 @@ class InstructionTranslatorBase(
 
     def enter_ctx(
         self,
-        ctx: ContextWrappingVariable | GenericContextWrappingVariable,
+        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
         inst: Instruction,
     ) -> VariableTracker:
         if (
@@ -4278,7 +4299,7 @@ class InstructionTranslatorBase(
             # same as => arg1.__type_params__ = arg2
             assert isinstance(arg1, BaseUserFunctionVariable)
             arg1.call_method(
-                self,
+                self,  # pyrefly: ignore[bad-argument-type]
                 "__setattr__",
                 [ConstantVariable.create("__type_params__"), arg2],
                 {},
@@ -4331,7 +4352,12 @@ class InstructionTranslatorBase(
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
             attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.annotations = attr
+            fn.call_method(
+                self,  # pyrefly: ignore[bad-argument-type]
+                "__setattr__",
+                [ConstantVariable.create("__annotations__"), attr],
+                {},
+            )
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -4343,7 +4369,9 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.annotations = ann
+            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
+                "__annotations__", ann
+            )
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:
@@ -4432,7 +4460,7 @@ class InstructionTranslatorBase(
         return False
 
     def format_frame_summary(
-        self, additional_stack_frames: list[Any] | None = None
+        self, additional_stack_frames: Optional[list[Any]] = None
     ) -> str:
         if additional_stack_frames is None:
             additional_stack_frames = []
@@ -4463,7 +4491,7 @@ class InstructionTranslatorBase(
         return global_name
 
     @property
-    def fake_mode(self) -> FakeTensorMode | None:
+    def fake_mode(self) -> Optional[FakeTensorMode]:
         return self.output.tracing_context.fake_mode
 
     @contextlib.contextmanager
@@ -4621,7 +4649,7 @@ class InstructionTranslatorBase(
                 post_store_op == pat["post_store_op"] or not pat["post_store_op"]
             )
 
-        result_var: str | None = None
+        result_var: Optional[str] = None
         if matches("stored"):
             result_var = self.instructions[store_fast_ip].argval
             result_on_stack = False
@@ -5018,7 +5046,7 @@ class InstructionTranslatorBase(
         return copied_insts
 
     def _make_frame_loc(
-        self, filename: str, lineno: int | None, fallback_lineno: int
+        self, filename: str, lineno: Optional[int], fallback_lineno: int
     ) -> tuple[str, int]:
         if lineno is None or lineno < 0:
             return (filename, fallback_lineno)
@@ -5030,7 +5058,7 @@ class InstructionTranslatorBase(
         frame_loc_chain_list: list[tuple[str, int]] = []
 
         if config.nested_graph_breaks:
-            current_tx: InstructionTranslatorBase | None = self.parent
+            current_tx: Optional[InstructionTranslatorBase] = self.parent
             while current_tx is not None:
                 parent_frame_loc = self._make_frame_loc(
                     current_tx.f_code.co_filename,
@@ -5183,12 +5211,12 @@ class InstructionTranslatorBase(
         inline_depth: int,
         speculation_log: SpeculationLog,
         exn_vt_stack: ExceptionStack,
-        distributed_state: DistributedState | None,
+        distributed_state: Optional[DistributedState],
         # This determines whether to use the execution recorder.
-        closure: tuple[types.CellType] | None = None,
-        package: CompilePackage | None = None,
+        closure: Optional[tuple[types.CellType]] = None,
+        package: Optional[CompilePackage] = None,
         # Pre-computed indexof for cache reuse
-        indexof: dict[Instruction, int] | None = None,
+        indexof: Optional[dict[Instruction, int]] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -5284,15 +5312,15 @@ class InstructionTranslatorBase(
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
-        self._constants_cache: list[ConstantVariable | SliceVariable | None] = [
-            None
-        ] * len(f_code.co_consts)
+        self._constants_cache: list[
+            Optional[Union[ConstantVariable, SliceVariable]]
+        ] = [None] * len(f_code.co_consts)
 
-        self.is_trace_bytecode_log_enabled: bool | None = (
+        self.is_trace_bytecode_log_enabled: Optional[bool] = (
             trace_bytecode_log.isEnabledFor(logging.DEBUG)
         )
-        self.is_trace_source_log_enabled: bool | None = trace_source_log.isEnabledFor(
-            logging.DEBUG
+        self.is_trace_source_log_enabled: Optional[bool] = (
+            trace_source_log.isEnabledFor(logging.DEBUG)
         )
         linecache.lazycache(f_code.co_filename, f_globals)
 
@@ -5318,7 +5346,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         f_locals: dict[str, Any],
         f_globals: dict[str, Any],
         f_builtins: dict[str, Any],
-        closure: tuple[Any, ...] | None,
+        closure: Optional[tuple[Any, ...]],
         torch_function_mode_stack: Any,
         code_options: dict[str, Any],
         compiler_fn: Any,
@@ -5328,8 +5356,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         frame_state: Any,
         speculation_log: SpeculationLog,
         exn_vt_stack: ExceptionStack,
-        distributed_state: DistributedState | None,
-        package: CompilePackage | None,
+        distributed_state: Optional[DistributedState],
+        package: Optional[CompilePackage],
     ) -> None:
         _step_logger()(
             logging.INFO,
@@ -5662,7 +5690,7 @@ def profile_inline_call(
 class InliningInstructionTranslator(InstructionTranslatorBase):
     """Trace and inline a called method"""
 
-    symbolic_result: VariableTracker | None
+    symbolic_result: Optional[VariableTracker]
     # pyrefly: ignore [bad-override]
     parent: InstructionTranslatorBase
 
@@ -6022,7 +6050,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.one_graph = parent.one_graph
 
     @property
-    def fake_mode(self) -> FakeTensorMode | None:
+    def fake_mode(self) -> Optional[FakeTensorMode]:
         return self.parent.fake_mode
 
     def run_ctx_mgr(self) -> Any:

@@ -16,7 +16,7 @@ import numpy as np
 import numpy.typing as npt
 from torch import inf, nan
 
-from typing import Any, Union
+from typing import Any
 from collections.abc import Sequence
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -5138,7 +5138,7 @@ def sample_inputs_avgpool1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Order: input_shape, kernel_size, kwargs
-    cases: list[tuple[tuple[int, ...], Union[int, tuple[int, ...]], dict]] = [
+    cases: list[tuple[tuple[int, ...], int | tuple[int, ...], dict]] = [
         ((2, 3, 9), (3,), {}),
         ((1, 3, 9), 3, dict(stride=1, padding=1, ceil_mode=True, count_include_pad=False)),
         ((1, 3, 9), (6,), dict(stride=(3,), padding=(2,), ceil_mode=True, count_include_pad=True)),
@@ -5157,7 +5157,7 @@ def sample_inputs_avgpool3d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
-    cases: list[tuple[tuple[int, ...], Union[int, tuple[int, ...]], dict]] = [
+    cases: list[tuple[tuple[int, ...], int | tuple[int, ...], dict]] = [
         ((2, 3, 3, 4, 4), (2, 2, 2), {}),
         ((1, 2, 4, 4, 4), 2, dict(stride=1, padding=1, ceil_mode=True,
                                   count_include_pad=False, divisor_override=2)),
@@ -6929,14 +6929,12 @@ def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.d
                            *, variant: str, **kwargs) -> list[SampleInput]:
     if variant == 'variadic':
         def make_inputs(
-                tensors: list[torch.Tensor]) -> tuple[Union[torch.Tensor,
-                                                            list[torch.Tensor]],
+                tensors: list[torch.Tensor]) -> tuple[torch.Tensor | list[torch.Tensor],
                                                       tuple[torch.Tensor, ...]]:
             return tensors
     elif variant == 'list':
         def make_inputs(
-                tensors: list[torch.Tensor]) -> tuple[Union[torch.Tensor,
-                                                            list[torch.Tensor]],
+                tensors: list[torch.Tensor]) -> tuple[torch.Tensor | list[torch.Tensor],
                                                       tuple[torch.Tensor, ...]]:
             return [tensors]
     else:
@@ -19666,11 +19664,13 @@ op_db: list[OpInfo] = [
     *(OpInfo('index_reduce',
              variant_test_name=reduction_type,
              dtypes=all_types_and(torch.float16, torch.bfloat16),
+             dtypesIfMPS=custom_types(
+                 torch.float32, torch.bfloat16, torch.float16, torch.int32,
+                 torch.int16, torch.int8, torch.uint8,
+             ),
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
-                 # Error: The operator 'aten::index_reduce.out' is not currently implemented for the MPS device
-                 DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
              ),
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
@@ -27107,7 +27107,6 @@ python_ref_db += opinfo.definitions.python_ref_db
 ops_and_refs = op_db + python_ref_db
 unary_ufuncs = [op for op in ops_and_refs if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo)]
-binary_ufuncs_and_refs = tuple(op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo))
 spectral_funcs = [op for op in ops_and_refs if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]

@@ -22,7 +22,7 @@ import collections
 import functools
 import operator
 import types
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
@@ -47,7 +47,7 @@ from ..utils import (
     raise_args_mismatch,
     specialize_symnode,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import ValueMutationExisting, ValueMutationNew, VariableTracker
 from .constant import (
     CONSTANT_VARIABLE_FALSE,
     CONSTANT_VARIABLE_NONE,
@@ -58,6 +58,7 @@ from .constant import (
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
+    from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.builtin import BuiltinVariable
 
@@ -382,7 +383,7 @@ class ConstDictVariable(VariableTracker):
         )
 
     def is_new_item(
-        self, value: VariableTracker | None, other: VariableTracker
+        self, value: Optional[VariableTracker], other: VariableTracker
     ) -> bool:
         # compare the id of the realized values if both values are not lazy VTs
         if value and value.is_realized() and other.is_realized():
@@ -482,7 +483,7 @@ class ConstDictVariable(VariableTracker):
             )
         return self.items[key]
 
-    def maybe_getitem_const(self, arg: VariableTracker) -> VariableTracker | None:
+    def maybe_getitem_const(self, arg: VariableTracker) -> Optional[VariableTracker]:
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
             return None
@@ -632,7 +633,9 @@ class ConstDictVariable(VariableTracker):
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
-            self.install_dict_keys_match_guard()
+            # No dict guard needed here - we already guard on args[0], and
+            # lazy dict guarding will insert len/dict_keys_match guards
+            # elsewhere if needed.
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
                     tx,
@@ -1041,7 +1044,7 @@ class DefaultDictVariable(ConstDictVariable):
         self,
         items: dict[VariableTracker, VariableTracker],
         user_cls: type,
-        default_factory: VariableTracker | None = None,
+        default_factory: Optional[VariableTracker] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(items, user_cls, **kwargs)
@@ -1716,7 +1719,7 @@ class DictViewVariable(VariableTracker):
     This is an "abstract" class. Subclasses will override kv and the items method
     """
 
-    kv: str | None = None
+    kv: Optional[str] = None
 
     def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -1906,3 +1909,97 @@ class DictItemsVariable(DictViewVariable):
         Dictionary item views are not hashable in Python.
         """
         return False
+
+
+kV = Union[ConstDictVariable._HashableTracker, str]
+
+
+class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
+    """
+    A proxy dict that allows us to track mutations to the dict using side
+    effects table as storage.
+    """
+
+    def __init__(self, item: VariableTracker, side_effects: "SideEffects") -> None:
+        self.item = item
+        self.side_effects = side_effects
+
+    def _maybe_unwrap_key(self, key: kV) -> str:
+        Hasher = ConstDictVariable._HashableTracker
+        return key.vt.as_python_constant() if istype(key, Hasher) else key
+
+    def __getitem__(self, key: kV) -> VariableTracker:
+        name = self._maybe_unwrap_key(key)
+        return self.side_effects.load_attr(self.item, name)
+
+    def __setitem__(self, key: kV, value: VariableTracker) -> None:
+        # Find a way to not hash the key using _HashableTracker
+        name = self._maybe_unwrap_key(key)
+        assert istype(name, str)
+        self.side_effects.store_attr(self.item, name, value)
+
+    def __delitem__(self, key: kV) -> None:
+        name = self._maybe_unwrap_key(key)
+        self.side_effects.store_attr(self.item, name, variables.DeletedVariable())
+
+    def __contains__(self, key: kV) -> bool:  # type: ignore[bad-override]
+        name = self._maybe_unwrap_key(key)
+        return name in self.side_effects.store_attr_mutations.get(self.item, {})
+
+    def __len__(self) -> int:
+        return len(self.side_effects.store_attr_mutations.get(self.item, {}))
+
+    def __iter__(self) -> Iterator[ConstDictVariable._HashableTracker]:
+        Hasher = ConstDictVariable._HashableTracker
+        d = self.side_effects.store_attr_mutations.get(self.item, {})
+        for k, v in d.items():
+            if isinstance(v, variables.DeletedVariable):
+                continue
+            yield Hasher(ConstantVariable.create(k))
+
+
+class DunderDictVariable(ConstDictVariable):
+    """represents object.__dict__"""
+
+    @classmethod
+    def create(
+        cls, tx: "InstructionTranslator", vt: VariableTracker
+    ) -> "DunderDictVariable":
+        mutation = ValueMutationExisting() if vt.source else ValueMutationNew()
+        source = vt.source and AttrSource(vt.source, "__dict__")
+        return cls(
+            vt,
+            side_effects=tx.output.side_effects,
+            mutation_type=mutation,
+            source=source,
+        )
+
+    def __init__(
+        self,
+        vt: VariableTracker,
+        side_effects: "SideEffects",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__({}, **kwargs)
+        self.items = SideEffectsProxyDict(vt, side_effects)
+
+    def setitem(self, name: str, value: VariableTracker) -> None:
+        self.items[name] = value
+
+    def getitem(self, name: str) -> VariableTracker:
+        return self.items[name]
+
+    def contains(self, name: str) -> bool:
+        return name in self.items
+
+    def getitem_or_default(
+        self,
+        name: str,
+        default: Callable[[], VariableTracker],
+    ) -> VariableTracker:
+        if name in self.items:
+            return self.items[name]
+        else:
+            value = default()
+            self.items[name] = value
+            return value

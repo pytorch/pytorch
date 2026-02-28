@@ -1167,12 +1167,10 @@ class TestQuerySingleDimStrategyKwargs(TestCase):
         original = propagator.op_single_dim_strategy_funcs.get(aten_add)
         propagator.op_single_dim_strategy_funcs[aten_add] = alpha_aware_add_strategy
         try:
-            tensors = [("a", torch.randn(4, 3)), ("b", torch.randn(4, 3))]
+            a, b = torch.randn(4, 3), torch.randn(4, 3)
 
             # Query with alpha=-1 kwargs
-            result = query_single_dim_strategy(
-                aten_add, tensors, None, kwargs={"alpha": -1}
-            )
+            result = query_single_dim_strategy(aten_add, (a, b), {"alpha": -1})
             self.assertIsNotNone(result)
 
             # The third rule's output should be P(min) for alpha=-1
@@ -1269,6 +1267,71 @@ class TestCompareOperatorEndToEnd(TestCase):
             self.assertEqual(len(stats.false_positives), 0)
 
         self._with_even_sizes(run)
+
+    def test_compare_operator_runtime_schema_ops(self):
+        """Ops with RuntimeSchemaInfo (non-tensor positional args) should find DTensor rules."""
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+
+        runtime_schema_ops = ["flip", "roll"]
+        for op_name in runtime_schema_ops:
+            with self.subTest(op=op_name):
+
+                def run(name=op_name):
+                    stats = compare_operator(
+                        name,
+                        device="cpu",
+                        dtype=torch.float32,
+                        world_size=self.world_size,
+                        incorrect_only=True,
+                    )
+                    self.assertGreater(
+                        stats.true_positives,
+                        0,
+                        f"{name} should have DTensor rules (true_positives > 0), "
+                        f"got skip_reasons={stats.skip_reasons}",
+                    )
+
+                self._with_even_sizes(run)
+
+
+class TestMainModule(TestCase):
+    """Test that strategy_validation can be run as a main module."""
+
+    def _run_module(self, *extra_args):
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "torch.distributed.tensor._ops.strategy_validation",
+                "--device",
+                "cpu",
+                *extra_args,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Module exited with code {result.returncode}.\n"
+            f"stderr: {result.stderr[-2000:]}",
+        )
+        return result.stdout
+
+    def test_run_as_module_default(self):
+        """Running with no args should validate 'add' and exit cleanly."""
+        stdout = self._run_module()
+        self.assertIn("add", stdout)
+        self.assertIn("Correct", stdout)
+
+    def test_run_with_op_flag(self):
+        """Running with --op mul --incorrect-only should work."""
+        stdout = self._run_module("--op", "mul", "--incorrect-only")
+        self.assertIn("mul", stdout)
 
 
 class TestOpInfoLookup(TestCase):

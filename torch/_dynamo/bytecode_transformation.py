@@ -22,7 +22,7 @@ import sys
 import types
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from typing import Any, cast, Optional, TYPE_CHECKING
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 from . import config
 from .bytecode_analysis import (
@@ -72,17 +72,17 @@ class Instruction:
 
     opcode: int
     opname: str
-    arg: int | None
+    arg: Optional[int]
     argval: Any
-    offset: int | None = None
-    starts_line: int | None = None
+    offset: Optional[int] = None
+    starts_line: Optional[int] = None
     is_jump_target: bool = False
 
     positions: Optional["dis.Positions"] = None
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
-    exn_tab_entry: InstructionExnTabEntry | None = None
-    argrepr: str | None = None
+    exn_tab_entry: Optional[InstructionExnTabEntry] = None
+    argrepr: Optional[str] = None
 
     def __hash__(self) -> int:
         return id(self)
@@ -165,9 +165,9 @@ else:
 def create_instruction(
     name: str,
     *,
-    arg: int | None = None,
-    argval: Any | None = _NotProvided,
-    target: Instruction | None = None,
+    arg: Optional[int] = None,
+    argval: Optional[Any] = _NotProvided,
+    target: Optional[Instruction] = None,
 ) -> Instruction:
     """
     At most one of `arg`, `argval`, and `target` can be not None/_NotProvided.
@@ -225,6 +225,24 @@ def create_load_const(val: Any, checked: bool = True) -> Instruction:
     return create_instruction("LOAD_CONST", argval=val)
 
 
+def create_breakpoint() -> list[Instruction]:
+    """
+    Create instructions that trigger the bytecode debugger to stop.
+
+    Usage:
+        codegen.extend_output(create_breakpoint())
+
+    When the bytecode debugger is active, execution will pause at this point.
+    At runtime, these instructions have no effect on program state.
+    """
+    from .bytecode_debugger import BREAKPOINT_MARKER
+
+    return [
+        create_instruction("LOAD_CONST", argval=BREAKPOINT_MARKER),
+        create_instruction("POP_TOP"),
+    ]
+
+
 def create_dup_top() -> Instruction:
     if sys.version_info >= (3, 11):
         return create_instruction("COPY", arg=1)
@@ -255,7 +273,7 @@ def create_rot_n(n: int) -> list[Instruction]:
 
 
 def add_push_null(
-    inst_or_insts: Instruction | list[Instruction],
+    inst_or_insts: Union[Instruction, list[Instruction]],
 ) -> list[Instruction]:
     """
     Appends or prepends a PUSH_NULL instruction to `inst_or_insts`,
@@ -314,7 +332,7 @@ def add_push_null(
 
 
 def add_push_null_call_function_ex(
-    inst_or_insts: Instruction | list[Instruction],
+    inst_or_insts: Union[Instruction, list[Instruction]],
 ) -> list[Instruction]:
     """Like add_push_null, but the low bit of LOAD_ATTR/LOAD_SUPER_ATTR
     is not set, due to an expected CALL_FUNCTION_EX instruction.
@@ -502,7 +520,7 @@ def create_swap(n: int) -> list[Instruction]:
 
 
 def create_binary_slice(
-    start: int | None, end: int | None, store: bool = False
+    start: Optional[int], end: Optional[int], store: bool = False
 ) -> list[Instruction]:
     """
     BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
@@ -830,7 +848,7 @@ def assemble(instructions: list[Instruction], firstlineno: int) -> tuple[bytes, 
 
 def _get_instruction_by_offset(
     offset_to_inst: dict[int, Instruction], offset: int
-) -> Instruction | None:
+) -> Optional[Instruction]:
     """
     Get the instruction located at a given offset, accounting for EXTENDED_ARGs
     """
@@ -1428,7 +1446,7 @@ def get_const_index(code_options: dict[str, Any], val: Any) -> int:
 def fix_vars(
     instructions: list[Instruction],
     code_options: dict[str, Any],
-    varname_from_oparg: Callable[..., Any] | None = None,
+    varname_from_oparg: Optional[Callable[..., Any]] = None,
 ) -> None:
     # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
@@ -1751,7 +1769,7 @@ def is_generator(code: types.CodeType) -> bool:
 
 def bytecode_from_template(
     fn: Callable[..., Any],
-    varname_map: Mapping[Any, Any] | None = None,
+    varname_map: Optional[Mapping[Any, Any]] = None,
     noreturn: bool = True,
     noprefix: bool = True,
 ) -> list[Instruction]:

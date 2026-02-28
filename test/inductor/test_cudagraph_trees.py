@@ -77,7 +77,8 @@ def get_num_partitions(code):
     """Get the number of cudagraph partitions from generated code."""
     code = "".join(code)
     found = re.search(r"partitions=\[(.*)\]", code)
-    assert found is not None, "Could not find partitions in generated code"
+    if found is None:
+        raise AssertionError("Could not find partitions in generated code")
     partitions = found.group(1)
     return len([p for p in partitions.split(",") if p])
 
@@ -893,7 +894,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
             # we should not have cudagraph'd anything
-            assert self.get_manager() is None
+            if self.get_manager() is not None:
+                raise AssertionError
 
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
@@ -981,7 +983,8 @@ if HAS_CUDA_AND_TRITON:
             out.backward(back_inp)
 
             # we should not have cudagraph'd anything
-            assert self.get_manager() is None
+            if self.get_manager() is not None:
+                raise AssertionError
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         @torch._functorch.config.patch("enable_autograd_cache", True)
@@ -1081,8 +1084,6 @@ if HAS_CUDA_AND_TRITON:
             def get_unaligned_inputs():
                 return [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
 
-            from torch._higher_order_ops.wrap import inductor_compiled_code
-
             class CloneCounterMode(TorchDispatchMode):
                 def __init__(self) -> None:
                     self.count = 0
@@ -1091,11 +1092,6 @@ if HAS_CUDA_AND_TRITON:
                     kwargs = {} if kwargs is None else kwargs
                     self.count += func is torch.ops.aten.clone.default
                     return func(*args, **kwargs)
-
-            @inductor_compiled_code.py_impl(CloneCounterMode)
-            def _(mode, func, inputs):
-                with mode:
-                    return func(inputs)
 
             for _ in range(3):
                 with CloneCounterMode() as m:
@@ -4495,7 +4491,8 @@ if HAS_CUDA_AND_TRITON:
                 eager_out = f(padded_tensor, original_tensor, weight)
                 for _ in range(3):
                     compiled_out = compiled_f(padded_tensor, original_tensor, weight)
-                    assert torch.allclose(eager_out, compiled_out)
+                    if not torch.allclose(eager_out, compiled_out):
+                        raise AssertionError
 
             # although custom op `create_mask` happens at the middle of function, reorder
             # moves it to the front so we only have 1 partition. This leads to 1 cudagraph
@@ -5185,7 +5182,7 @@ if HAS_CUDA_AND_TRITON:
                             if isinstance(inp, torch._ops.OpOverload):
                                 op = inp
                                 break
-                        assert op is not None
+                        assert op is not None  # noqa: S101
                         if hop is run_and_save_rng_state:
                             mode.op_outputs[op].append(out[1])
                         else:
