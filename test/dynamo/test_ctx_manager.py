@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import sys
+import threading
 import unittest
 from contextlib import contextmanager
 
@@ -2860,6 +2861,29 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin())
+
+    def test_ignore_locks(self):
+        l = threading.Lock()
+        r = threading.RLock()
+
+        def f(x):
+            y = 0
+            with l:
+                y += 1
+
+            with r:
+                y += 2
+
+            return x + y
+
+        x = torch.randn(3, 3)
+        y = f(x)
+        with torch._dynamo.config.patch(ignore_locks=True):
+            opt_y = torch.compile(f, backend="eager", fullgraph=True)(x)
+        self.assertEqual(y, opt_y)
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            opt_y = torch.compile(f, backend="eager", fullgraph=True)(x)
 
 
 instantiate_parametrized_tests(CtxManagerTests)
