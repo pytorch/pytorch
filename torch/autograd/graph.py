@@ -70,6 +70,46 @@ class Node(abc.ABC):
     @property
     @abc.abstractmethod
     def next_functions(self) -> tuple[tuple[Optional["Node"], int], ...]:
+        r"""Return the next functions in the autograd graph.
+
+        This property provides access to the edges connecting this node to its
+        input nodes in the autograd computation graph. Each edge represents a
+        gradient flow path during backpropagation.
+
+        Returns:
+            A tuple of ``(Node, int)`` pairs. Each pair contains:
+                - ``Node``: The next function (gradient function) in the backward
+                  graph. For leaf tensors with ``requires_grad=True``, this is an
+                  ``AccumulateGrad`` node. For inputs that do not require gradients,
+                  this is ``None``.
+                - ``int``: The output index of the corresponding node, indicating
+                  which output of the next function this edge connects to.
+
+        Example::
+
+            >>> # xdoctest: +SKIP
+            >>> import torch
+            >>> a = torch.tensor([1., 2., 3.], requires_grad=True)
+            >>> b = torch.tensor([4., 5., 6.], requires_grad=True)
+            >>> c = a * b
+            >>> # c.grad_fn is MulBackward0, which has two inputs (a and b)
+            >>> print(c.grad_fn.name())
+            MulBackward0
+            >>> # next_functions shows the gradient functions for a and b
+            >>> # Leaf tensors have AccumulateGrad nodes
+            >>> for next_fn, idx in c.grad_fn.next_functions:
+            ...     print(f"Node: {next_fn.name()}, output index: {idx}")
+            Node: AccumulateGrad, output index: 0
+            Node: AccumulateGrad, output index: 0
+            >>> # When an input doesn't require gradients, next_fn is None
+            >>> x = torch.tensor([1., 2.], requires_grad=True)
+            >>> y = torch.tensor([3., 4.], requires_grad=False)  # No gradients
+            >>> z = x * y
+            >>> for next_fn, idx in z.grad_fn.next_functions:
+            ...     print(f"Node: {type(next_fn).__name__ if next_fn else None}")
+            Node: AccumulateGrad
+            Node: None
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
