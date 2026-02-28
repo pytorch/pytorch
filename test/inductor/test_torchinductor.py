@@ -17161,6 +17161,18 @@ if RUN_GPU:
             expected = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
             torch.testing.assert_close(result, fn(expected, indices, values))
 
+        @parametrize("dtype", (torch.float32, torch.float64))
+        def test_copysign(self, dtype):
+            def fn(x):
+                out = torch.copysign(x, -0.0)
+                return out
+
+            inp = torch.randn([6], dtype=dtype, device=GPU_TYPE)
+
+            result, code = run_and_get_code(torch.compile(fn), inp)
+            self.assertIn("0x80000000", code[0])
+            torch.testing.assert_close(result, fn(inp))
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
