@@ -6208,6 +6208,42 @@ class NCCLTraceTest(NCCLTraceTestBase):
             t["entries"][self.world_size]["profiling_name"], "nccl:ALLGATHER_coalesced"
         )
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_noncontiguous(self):
+        """
+        all_gather works with non-contiguous tensors (e.g., from permute).
+        Regression test for issue #173164.
+        """
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+
+        tensor_contig = torch.arange(
+            24, dtype=torch.float32, device=f"cuda:{self.rank}"
+        ).view(2, 3, 4)
+        tensor_contig = tensor_contig + self.rank * 100
+
+        tensor_noncontig = tensor_contig.permute(2, 0, 1)
+
+        self.assertFalse(tensor_noncontig.is_contiguous())
+
+        output_list = [
+            torch.empty_like(tensor_noncontig) for _ in range(self.world_size)
+        ]
+
+        dist.all_gather(output_list, tensor_noncontig, group=pg)
+
+        torch.cuda.synchronize(device=self.rank)
+
+        for i, output in enumerate(output_list):
+            expected = torch.arange(
+                24, dtype=torch.float32, device=f"cuda:{self.rank}"
+            ).view(2, 3, 4)
+            expected = expected + i * 100
+            expected = expected.permute(2, 0, 1)
+            self.assertEqual(output, expected)
+
     # TODO(whc) test out other ops (And combinations of ops, if that's valid?)
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
