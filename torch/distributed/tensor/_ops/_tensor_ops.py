@@ -950,9 +950,7 @@ def index_select_single_dim_strategy(
         )
 
     # Shard index → output sharded on the indexed dim
-    strategies.append(
-        [_ShardingPlaceholder(dim), Replicate(), _ShardingPlaceholder(0)]
-    )
+    strategies.append([_ShardingPlaceholder(dim), Replicate(), _ShardingPlaceholder(0)])
 
     # Partial passthrough from values
     for reduce_op in Partial.LINEAR_REDUCE_OPS:
@@ -983,17 +981,14 @@ def index_single_dim_strategy(
 
     # Determine where index output dims are inserted in the result
     all_consecutive = all(
-        indexed_dims[i + 1] - indexed_dims[i] == 1
-        for i in range(len(indexed_dims) - 1)
+        indexed_dims[i + 1] - indexed_dims[i] == 1 for i in range(len(indexed_dims) - 1)
     )
     insert_dim = indexed_dims[0] if all_consecutive else 0
 
     def values_dim_to_output_dim(d: int) -> int:
         if d < insert_dim:
             return d
-        return d + broadcast_ndim - sum(
-            1 for idx_dim in indexed_dims if d > idx_dim
-        )
+        return d + broadcast_ndim - sum(1 for idx_dim in indexed_dims if d > idx_dim)
 
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
 
