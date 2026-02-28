@@ -85,6 +85,30 @@ Tensor& addmm_out(
       " but got:",
       self.sizes());
 
+  // Bypass OneDNN optimization path for float64 due to lack of full double
+  // precision support.
+  if (mat1.scalar_type() == at::kDouble) {
+    bool is_inplace = self.is_same(result);
+    bool is_beta_ne_zero = beta.to<double>() != 0.0;
+
+    Tensor self_copy;
+    if (is_inplace && is_beta_ne_zero) {
+      self_copy = self.clone();
+    }
+
+    onednn::matmul(result, mat1, mat2, Tensor(), true, onednn::Attr());
+
+    if (alpha.to<double>() != 1.0) {
+      result.mul_(alpha);
+    }
+
+    if (is_beta_ne_zero) {
+      result.add_(is_inplace ? self_copy : self, beta);
+    }
+
+    return result;
+  }
+
   // general case
   Tensor bias = Tensor();
   onednn::Attr attr;
@@ -223,6 +247,31 @@ Tensor& baddbmm_out(
     return result;
   }
 
+  // Bypass OneDNN optimization path for float64 due to lack of full double
+  // precision support.
+  if (batch1.scalar_type() == at::kDouble ||
+      batch2.scalar_type() == at::kDouble) {
+    bool is_inplace = input.is_same(result);
+    bool is_beta_ne_zero = beta.to<double>() != 0.0;
+
+    Tensor input_copy;
+    if (is_inplace && is_beta_ne_zero) {
+      input_copy = input.clone();
+    }
+
+    onednn::matmul(result, batch1, batch2, Tensor(), true, onednn::Attr());
+
+    if (alpha.to<double>() != 1.0) {
+      result.mul_(alpha);
+    }
+
+    if (is_beta_ne_zero) {
+      result.add_(is_inplace ? input_copy : input, beta);
+    }
+
+    return result;
+  }
+
   // general case
   onednn::Attr attr;
   float beta_ = beta.to<float>();
@@ -326,6 +375,17 @@ Tensor& addmv_out(
   }
 
   Tensor vec_v = vec.view({vec.size(0), 1});
+
+  bool is_float64 =
+      mat.scalar_type() == at::kDouble || vec.scalar_type() == at::kDouble;
+  bool is_inplace = self.is_same(out);
+  if (is_float64 && is_inplace) {
+    Tensor self_v_copy = self_v.clone();
+    at::native::xpu::addmm_out(self_v_copy, mat, vec_v, beta, alpha, out);
+    out.resize_({mat.size(0)});
+    return out;
+  }
+
   at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
   out.resize_({mat.size(0)});
   return out;

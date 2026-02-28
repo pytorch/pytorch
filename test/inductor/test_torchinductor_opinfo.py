@@ -296,7 +296,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     },  # align with cuda.
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
-    "addmv": {f64},
     "fft.fft": {f16},
     "fft.fft2": {f16},
     "fft.fftn": {f16},
