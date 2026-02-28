@@ -28,7 +28,7 @@ struct HashValue {
     uint64_t first_elem_uint64 = 0;
 
     if (t.numel() > 0 && t.has_storage()) {
-      auto scalar = t.view(-1)[0].item();
+      auto scalar = t.reshape(-1)[0].item();
 
       if (scalar.isFloatingPoint()) {
         first_elem_double = scalar.to<double>();
