@@ -226,17 +226,10 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
 }
 
 #else // USE_ROCM
-template <int vec_size, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(num_threads())
-__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+template <int vec_size, int tws, typename func_t, typename array_t>
+__forceinline__ __device__ void vectorized_elementwise_kernel_impl(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
   constexpr auto io_size = calc_io_size<func_t>();
-#if defined(USE_ROCM) && defined(__gfx942__)
-  // Similar check in launch_vectorized_kernel() as well. Both should be in sync.
-  constexpr int tws = 16;
-#else
-  constexpr int tws = elems_per_thread<io_size>();
-#endif
   constexpr int bws = tws * num_threads();
   int remaining = N - bws * blockIdx.x;
 
@@ -261,6 +254,18 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     elementwise_kernel_helper(
         f, memory::policies::vectorized<optimal_vec_size, array_t, tws>(data));
   }
+}
+
+template <int vec_size, typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads())
+__global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
+  constexpr auto io_size = calc_io_size<func_t>();
+  constexpr auto tws_942 = 16;
+  constexpr auto tws = elems_per_thread<io_size>();
+  if (__builtin_amdgcn_processor_is("gfx942"))
+    return vectorized_elementwise_kernel_impl<vec_size, tws_942>(N, f, data);
+
+  vectorized_elementwise_kernel_impl<vec_size, tws>(N, f, data);
 }
 #endif // USE_ROCM
 

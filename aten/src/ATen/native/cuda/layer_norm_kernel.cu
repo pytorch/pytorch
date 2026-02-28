@@ -139,11 +139,15 @@ WelfordDataLN cuWelfordOnlineSum(
   if constexpr (!rms_norm){
     U delta = val - curr_sum.mean;
     U new_count = curr_sum.count + 1.f;
-//Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
-#if defined(USE_ROCM) && !defined(__gfx90a__) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
-    U new_mean = curr_sum.mean + delta * __builtin_amdgcn_rcpf(new_count);
+    // TODO: should this use __fdividef?
+    auto fn_rcp_mul = [](auto a, auto b) {return a * (1.0f / b);};
+#if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
+    //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
+    U new_mean =  curr_sum.mean +  (__builtin_amdgcn_processor_is("gfx90a") ? fn_rcp_mul(delta, new_count)
+                           : delta * __builtin_amdgcn_rcpf(new_count));
 #else
-    U new_mean = curr_sum.mean + delta * (1.f/new_count); //proper division is slow, this is less accurate but noticeably faster
+    //proper division is slow, this is less accurate but noticeably faster:
+    U new_mean = curr_sum.mean + fn_rcp_mul(delta, new_count);
 #endif
     return {new_mean, curr_sum.sigma2 + delta * (val - new_mean), new_count};
   } else{
@@ -162,11 +166,13 @@ WelfordDataLN cuWelfordCombine(
     U count = dataA.count + dataB.count;
     U mean, sigma2;
     if (count > decltype(dataB.count){0}) {
+      // TODO: should this use __fdividef?
+      auto fn_rcp = [](auto a) {return 1.0f / a;};
+#if defined(USE_ROCM) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
 //Due to low CU count, we run into accuracy issues on gfx90a with `__builtin_amdgcn_rcpf`
-#if defined(USE_ROCM) && !defined(__gfx90a__) && defined(USE_LAYERNORM_FAST_RECIPROCAL)
-      auto coef = __builtin_amdgcn_rcpf(count);
+      auto coef = __builtin_amdgcn_processor_is("gfx90a") ? fn_rcp(count): __builtin_amdgcn_rcpf(count);
 #else
-      auto coef = 1.f/count; //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
+      auto coef = fn_rcp(count); //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
 #endif
       auto nA = dataA.count * coef;
       auto nB = dataB.count * coef;
