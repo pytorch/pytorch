@@ -130,6 +130,32 @@ void clearCublasWorkspaces() {
   }
 }
 
+void clearCublasWorkspacesForStream(cudaStream_t stream) {
+  void* stream_ptr = static_cast<void*>(stream);
+  {
+    auto& workspace = cublas_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    for (auto it = workspace.map.begin(); it != workspace.map.end(); ) {
+      if (std::get<1>(it->first) == stream_ptr) {
+        it = workspace.map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  {
+    auto& workspace = cublaslt_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    for (auto it = workspace.map.begin(); it != workspace.map.end(); ) {
+      if (std::get<1>(it->first) == stream_ptr) {
+        it = workspace.map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+}
+
 size_t parseChosenWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLAS_WORKSPACE_CONFIG");
 #ifdef USE_ROCM

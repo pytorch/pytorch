@@ -111,6 +111,8 @@ FALLBACK_ALLOW_LIST = OrderedSet(
 
 log = logging.getLogger(__name__)
 lowerings: dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
+# User-registered lowerings that take priority over built-in lowerings.
+user_lowerings: dict[torch._ops.OpOverload, Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
 _maybe_layout_constraints: dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
@@ -1756,6 +1758,8 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     scale_loader = scale.make_loader()
     zero_point_loader = zero_point.make_loader()
 
+    device = input.get_device()
+
     def inner_fn(idx):
         input = input_loader(idx)
         _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
@@ -1764,6 +1768,9 @@ def quantized_decomposed_quantize_per_tensor_tensor(
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
             _zero_point = ops.to_dtype(_zero_point, torch.float32)
+        if device and device.type == "cpu":
+            val = ops.fma(input, ops.reciprocal(_scale), _zero_point)
+            return ops.round_to_int(val, dtype)
         val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
         clamped = ops.minimum(ops.maximum(val, qmin), qmax)
@@ -3107,7 +3114,6 @@ make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
-make_fallback(torch._prims.rng_prims.run_dtensor_rng_op)
 
 
 # Implemented / Half implemented
@@ -6994,13 +7000,7 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     to force rounding of the product before the FMA. This prevents Triton's
     compiler from fusing the multiplication with the FMA, matching eager's
     rounding behavior.
-
-    When emulate_precision_casts is False, we return NotImplemented to use the
-    decomposition instead.
     """
-    if not config.emulate_precision_casts:
-        return NotImplemented
-
     dtype = get_promoted_dtype(
         self,
         tensor1,
@@ -7012,8 +7012,14 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA is only available for floating-point types on non-AMD GPUs
-    use_fma = dtype.is_floating_point and not torch.version.hip
+    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
+    device = self.get_device()
+    use_fma = (
+        dtype.is_floating_point
+        and not torch.version.hip
+        and device is not None
+        and device.type == "cuda"
+    )
 
     def inner_fn(idx):
         self_val = self_loader(idx)
@@ -7053,17 +7059,85 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     )
 
 
+@register_lowering(aten.addcdiv, broadcast=True)
+def addcdiv(self, tensor1, tensor2, *, value=1):
+    """
+    Computes self + value * (tensor1 / tensor2) using FMA for better precision.
+
+    Matches eager CUDA kernel order: self + value * (tensor1 / tensor2)
+    This is computed as: fma(value, tensor1 / tensor2, self)
+
+    For value=1: self + tensor1 / tensor2 (no FMA needed, just add the division)
+    For value!=1: fma(value, div_rn(tensor1, tensor2), self)
+
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
+    we fall back to regular arithmetic since FMA doesn't support integers.
+
+    We use div_rn (round-to-nearest division) to force proper rounding, preventing
+    Triton from fusing operations in ways that change the rounding behavior.
+    """
+    dtype = get_promoted_dtype(
+        self,
+        tensor1,
+        tensor2,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+
+    self_loader = self.make_loader()
+    t1_loader = tensor1.make_loader()
+    t2_loader = tensor2.make_loader()
+
+    # FMA/mul_rn/div_rn are only available for floating-point types on CUDA (non-AMD)
+    device = self.get_device()
+    use_fma = (
+        dtype.is_floating_point
+        and not torch.version.hip
+        and device is not None
+        and device.type == "cuda"
+    )
+
+    def inner_fn(idx):
+        self_val = self_loader(idx)
+        t1_val = t1_loader(idx)
+        t2_val = t2_loader(idx)
+
+        # Compute tensor1 / tensor2 first
+        # Use div_rn for round-to-nearest division on CUDA to match eager behavior
+        if use_fma:
+            t1_div_t2 = ops.div_rn(t1_val, t2_val)
+        else:
+            t1_div_t2 = ops.truediv(t1_val, t2_val)
+
+        if value == 1:
+            # For value=1, just add the division result (no FMA needed)
+            return ops.add(self_val, t1_div_t2)
+
+        # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
+        if isinstance(value, sympy.Basic):
+            value_expr = ops.index_expr(value, dtype)
+        else:
+            value_expr = ops.constant(value, dtype)
+
+        if use_fma:
+            # Use FMA for floating-point types for better precision
+            return ops.fma(value_expr, t1_div_t2, self_val)
+        else:
+            # Fall back to regular arithmetic for integer types
+            return ops.add(self_val, ops.mul(value_expr, t1_div_t2))
+
+    return Pointwise.create(
+        device=self.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=self.get_size(),
+    )
+
+
 def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
     """
     Foreach version of addcmul with scalar value parameter.
     Uses foreach_group_loop for consistent grouping behavior.
-
-    When emulate_precision_casts is False, we return NotImplemented to use the
-    decomposition instead.
     """
-    if not config.emulate_precision_casts:
-        return NotImplemented
-
     realize_outputs = (
         len(V.graph.current_node.users) == 0
         or V.graph.current_node.target in inplace_foreach_ops

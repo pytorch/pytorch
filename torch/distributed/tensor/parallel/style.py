@@ -105,7 +105,10 @@ class ColwiseParallel(ParallelStyle):
         input_tensor = inputs[0]
         if not isinstance(input_tensor, DTensor):
             input_tensor = DTensor.from_local(
-                input_tensor, device_mesh, input_layouts, run_check=False
+                input_tensor,
+                device_mesh,
+                input_layouts,
+                run_check=False,
             )
 
         # transform the input layouts to the desired layouts of ColwiseParallel
@@ -162,7 +165,9 @@ class ColwiseParallel(ParallelStyle):
             device_mesh,
             partition_fn,
             partial(
-                self._prepare_input_fn, self.input_layouts, self.desired_input_layouts
+                self._prepare_input_fn,
+                self.input_layouts,
+                self.desired_input_layouts,
             ),
             partial(
                 self._prepare_output_fn, self.output_layouts, self.use_local_output
@@ -230,7 +235,10 @@ class RowwiseParallel(ParallelStyle):
         input_tensor = inputs[0]
         if not isinstance(input_tensor, DTensor):
             input_tensor = DTensor.from_local(
-                input_tensor, device_mesh, input_layouts, run_check=False
+                input_tensor,
+                device_mesh,
+                input_layouts,
+                run_check=False,
             )
 
         if input_layouts != desired_input_layouts:
@@ -310,7 +318,9 @@ class RowwiseParallel(ParallelStyle):
             device_mesh,
             partition_fn,
             partial(
-                self._prepare_input_fn, self.input_layouts, self.desired_input_layouts
+                self._prepare_input_fn,
+                self.input_layouts,
+                self.desired_input_layouts,
             ),
             partial(
                 self._prepare_output_fn, self.output_layouts, self.use_local_output
