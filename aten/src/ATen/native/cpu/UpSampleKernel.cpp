@@ -175,13 +175,11 @@ inline scalar_t interpolate_aa_single_dim_zero_strides(
   scalar_t t = *(scalar_t*)&src_min[0];
   index_t wts_idx = *(index_t*)&data[4][0];
   scalar_t* wts_ptr = (scalar_t*)&data[3][wts_idx];
-  scalar_t wts = wts_ptr[0];
 
-  scalar_t output = t * wts;
+  scalar_t output = t * wts_ptr[0];
   for (const auto j : c10::irange(1, ids_size)) {
-    wts = wts_ptr[j];
     t = *(scalar_t*)&src_min[j * ids_stride];
-    output += t * wts;
+    output += t * wts_ptr[j];
   }
   return output;
 }
@@ -201,13 +199,11 @@ inline scalar_t interpolate_aa_single_dim(
   scalar_t t = *(scalar_t*)&src_min[0];
   index_t wts_idx = *(index_t*)&data[4][i * strides[4]];
   scalar_t* wts_ptr = (scalar_t*)&data[3][wts_idx];
-  scalar_t wts = wts_ptr[0];
 
-  scalar_t output = t * wts;
+  scalar_t output = t * wts_ptr[0];
   for (const auto j : c10::irange(1, ids_size)) {
-    wts = wts_ptr[j];
     t = *(scalar_t*)&src_min[j * ids_stride];
-    output += t * wts;
+    output += t * wts_ptr[j];
   }
   return output;
 }
@@ -854,23 +850,32 @@ struct HelperInterpBase {
   // optimally optimized: the code assumes an arbitrary number of weights and
   // indices, but this can be optimized further when aa=False since we know
   // their actual dimensions.
-  template <typename scalar_t, typename aa_filter_fn_t, int weight_index_stride=sizeof(scalar_t)>
-  static inline std::tuple<std::vector<Tensor>, int, scalar_t> _compute_index_ranges_weights(
-    int64_t input_size, int64_t output_size, int64_t stride, int64_t ndims,
-    int64_t reshape_dim, scalar_t scale,
-    int interp_size, aa_filter_fn_t aa_filter_fn, bool antialias, bool align_corners
-  ) {
+  template <typename scalar_t, typename aa_filter_fn_t,
+            int weight_index_stride = sizeof(scalar_t)>
+  static inline std::tuple<std::vector<Tensor>, int, scalar_t>
+  _compute_index_ranges_weights(
+      int64_t input_size,
+      int64_t output_size,
+      int64_t stride,
+      int64_t ndims,
+      int64_t reshape_dim,
+      scalar_t scale,
+      int interp_size,
+      aa_filter_fn_t aa_filter_fn,
+      bool antialias,
+      bool align_corners) {
 
     std::vector<Tensor> output;
 
     scalar_t support;
     int max_interp_size = 0;
     if (antialias) {
-        support = (scale >= 1.0) ? (interp_size * 0.5) * scale : interp_size * 0.5;
-        max_interp_size = (int) std::ceil(support) * 2 + 1;
+      support = (scale >= scalar_t(1.0)) ? (scalar_t(interp_size) * scalar_t(0.5)) * scale
+                                         : scalar_t(interp_size) * scalar_t(0.5);
+      max_interp_size = (int)std::ceil(support) * 2 + 1;
     } else {
-        support = interp_size * 0.5;
-        max_interp_size = interp_size;
+      support = scalar_t(interp_size) * scalar_t(0.5);
+      max_interp_size = interp_size;
     }
 
     auto new_shape = std::vector<int64_t>(ndims, 1);
@@ -904,12 +909,12 @@ struct HelperInterpBase {
     scalar_t* wt_ptr = output[3].data_ptr<scalar_t>();
     int64_t* wt_idx_ptr = output[4].data_ptr<int64_t>();
 
-    scalar_t wt_max = 0.0;
+    scalar_t wt_max = scalar_t(0.0);
     for (const auto i : c10::irange(output_size)) {
       int64_t xmin = 0, xsize = 0;
       scalar_t wt_max_i;
       if (antialias) {
-        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights_aa(
+        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights_aa<scalar_t>(
             i,
             input_size,
             scale,
@@ -920,7 +925,7 @@ struct HelperInterpBase {
             xmin,
             xsize);
       } else {
-        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights(
+        wt_max_i = HelperInterpBase::_compute_indices_min_size_weights<scalar_t>(
             i,
             input_size,
             scale,
@@ -1229,7 +1234,8 @@ struct HelperInterpLinear : public HelperInterpBase {
   ) {
 
     std::vector<Tensor> indices_weights;
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf,
       scalar_type, "compute_index_ranges_weights", [&] {
 
         scalar_t scale = area_pixel_compute_scale<scalar_t>(
@@ -1337,7 +1343,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     // a = -0.5 was proposed by R. Keys in "Cubic convolution interpolation for digital image processing"
     // We are using -0.5 for bicubic, antialiasing=true (compatibility with PIL)
     // and using -0.75 for bicubic, antialiasing=false (compatibility with Opencv)
-    constexpr scalar_t a = use_keys_cubic ? -0.5 : -0.75;
+    const scalar_t a = use_keys_cubic ? scalar_t(-0.5) : scalar_t(-0.75);
 
     x = std::abs(x);
     if (x < 1.0) {
@@ -1362,7 +1368,8 @@ struct HelperInterpCubic : public HelperInterpBase {
   ) {
 
     std::vector<Tensor> indices_weights;
-    AT_DISPATCH_FLOATING_TYPES(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf,
       scalar_type, "compute_index_ranges_weights", [&] {
 
         scalar_t scale = area_pixel_compute_scale<scalar_t>(
@@ -1574,8 +1581,9 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
 
   auto iter = config.build();
 
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::Byte, iter.dtype(), "upsample_generic_Nd_aa", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND3(
+      kByte, kBFloat16, kHalf,
+      iter.dtype(), "upsample_generic_Nd_aa", [&] {
         cpu_upsample_generic_aa<scalar_t, is_horizontal>(iter, weights_precision);
       });
 }
@@ -1934,6 +1942,7 @@ void cpu_upsample_genNd_backward_aa(
   auto grad_input = grad_input_.contiguous();
 
   auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  grad_input.zero_();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
@@ -1961,48 +1970,34 @@ void cpu_upsample_genNd_backward_aa(
           h * input_width + w;
     };
 
-    const scalar_t support_h = (height_scale >= 1.0)
-        ? (interp_size * 0.5) * height_scale
-        : interp_size * 0.5;
-    const scalar_t support_w = (width_scale >= 1.0)
-        ? (interp_size * 0.5) * width_scale
-        : interp_size * 0.5;
+    const scalar_t support_h = (height_scale >= scalar_t(1.0))
+        ? (scalar_t(interp_size) * scalar_t(0.5)) * height_scale
+        : scalar_t(interp_size) * scalar_t(0.5);
+    const scalar_t support_w = (width_scale >= scalar_t(1.0))
+        ? (scalar_t(interp_size) * scalar_t(0.5)) * width_scale
+        : scalar_t(interp_size) * scalar_t(0.5);
 
-    const int interp_height = (int)ceilf(support_h) * 2 + 1;
-    const int interp_width = (int)ceilf(support_w) * 2 + 1;
+    const int interp_height = static_cast<int>(std::ceil(support_h)) * 2 + 1;
+    const int interp_width  = static_cast<int>(std::ceil(support_w)) * 2 + 1;
 
-    std::vector<scalar_t> wx(interp_width, 0.0);
-    std::vector<scalar_t> wy(interp_height, 0.0);
+    std::vector<scalar_t> wx(interp_width, scalar_t(0));
+    std::vector<scalar_t> wy(interp_height, scalar_t(0));
 
     int64_t xmin = 0, ymin = 0;
     int64_t xsize = 0, ysize = 0;
 
-    typedef scalar_t (*aa_filter_fn_t)(scalar_t);
-    aa_filter_fn_t filter_fn = &F::aa_filter;
+    using aa_filter_fn_t = scalar_t (*)(scalar_t);
+    aa_filter_fn_t filter_fn = &F::template aa_filter<scalar_t>;
 
     for (const auto oh : c10::irange(output_height)) {
-      F::_compute_indices_min_size_weights_aa(
-          oh,
-          input_height,
-          height_scale,
-          support_h,
-          wy.data(),
-          interp_height,
-          filter_fn,
-          ymin,
-          ysize);
+      F::template _compute_indices_min_size_weights_aa<scalar_t>(
+          oh, input_height, height_scale, support_h,
+          wy.data(), interp_height, filter_fn, ymin, ysize);
 
       for (const auto ow : c10::irange(output_width)) {
-        F::_compute_indices_min_size_weights_aa(
-            ow,
-            input_width,
-            width_scale,
-            support_w,
-            wx.data(),
-            interp_width,
-            filter_fn,
-            xmin,
-            xsize);
+        F::template _compute_indices_min_size_weights_aa<scalar_t>(
+            ow, input_width, width_scale, support_w,
+            wx.data(), interp_width, filter_fn, xmin, xsize);
 
         for (const auto c : c10::irange(begin, end)) {
           scalar_t grad_output_value =
@@ -2010,8 +2005,7 @@ void cpu_upsample_genNd_backward_aa(
 
           for (const auto y : c10::irange(ysize)) {
             for (const auto x : c10::irange(xsize)) {
-              *input_indexr(c, ymin + y, xmin + x) +=
-                  wx[x] * wy[y] * grad_output_value;
+              *input_indexr(c, ymin + y, xmin + x) += wx[x] * wy[y] * grad_output_value;
             }
           }
         }
@@ -2038,7 +2032,7 @@ void upsample_bilinear2d_aa_backward_kernel_impl(
     bool align_corners,
     std::optional<double> scales_h,
     std::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
       grad_output.scalar_type(), "upsample_bilinear2d_aa_backward_cpu", [&] {
         cpu_upsample_genNd_backward_aa<scalar_t, scale_t, HelperInterpLinear>(
             grad_input, grad_output, align_corners, {scales_h, scales_w});
@@ -2051,7 +2045,7 @@ void upsample_bicubic2d_aa_backward_kernel_impl(
     bool align_corners,
     std::optional<double> scales_h,
     std::optional<double> scales_w) {
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf,
       grad_output.scalar_type(), "upsample_bicubic2d_aa_backward_cpu", [&] {
         cpu_upsample_genNd_backward_aa<scalar_t, scale_t, HelperInterpCubic>(
             grad_input, grad_output, align_corners, {scales_h, scales_w});
