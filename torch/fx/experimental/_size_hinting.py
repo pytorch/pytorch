@@ -4,7 +4,7 @@ Size hinting utilities for symbolic shape expressions.
 This module contains the core logic for resolving symbolic expressions to
 concrete integer hints. Two strategies are provided:
 
-- _guarding_hint_or_throw: strict, only uses backed symbol hints, throws on
+- _guarding_hint_or_throw_base: strict, only uses backed symbol hints, throws on
   unbacked symbols. Use for correctness-critical guarding decisions.
 - _optimization_hint_base: permissive, uses heuristics and fallbacks for unbacked
   symbols. Use for performance optimization decisions.
