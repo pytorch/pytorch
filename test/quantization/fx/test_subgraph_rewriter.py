@@ -454,8 +454,10 @@ class TestSubgraphRewriter(JitTestCase):
         symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
         for n, m in zip(symbolic_traced.graph.nodes, graph.nodes):
             if n.op == 'placeholder':
-                assert n.type is int
-                assert m.type is int
+                if n.type is not int:
+                    raise AssertionError(f"Expected n.type to be int, got {n.type}")
+                if m.type is not int:
+                    raise AssertionError(f"Expected m.type to be int, got {m.type}")
 
     def test_subgraph_writer_replace_consecutive_submodules(self):
 

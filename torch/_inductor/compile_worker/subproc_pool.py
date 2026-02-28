@@ -15,7 +15,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum, IntEnum
-from typing import Any, IO, Optional, TypeVar
+from typing import Any, IO, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
@@ -131,7 +131,7 @@ class SubprocPool:
     def __init__(
         self,
         nprocs: int,
-        pickler: Optional[SubprocPickler] = None,
+        pickler: SubprocPickler | None = None,
         kind: SubprocKind = SubprocKind.FORK,
         quiesce: bool = False,
     ) -> None:
@@ -209,17 +209,17 @@ class SubprocPool:
         self.running_waitcounter.__enter__()
 
         # The quiesce waitcounter indicates when the job is in a quiesced state.
-        self.quiesce_waitcounter: Optional[_WaitCounterTracker] = None
+        self.quiesce_waitcounter: _WaitCounterTracker | None = None
 
         # Firstjob is used to capture the time from when the firstjob is queued, to when the first job is done.
         self.firstjob = True
-        self.firstjob_id: Optional[int] = None
+        self.firstjob_id: int | None = None
         self.firstjob_waitcounter = _WaitCounter(
             "pytorch.wait_counter.subproc_pool.first_job"
         ).guard()
 
         if quiesce:
-            self.timer: Optional[Timer] = Timer(
+            self.timer: Timer | None = Timer(
                 config.quiesce_async_compile_time, self.quiesce
             )
         else:
@@ -369,7 +369,7 @@ class SubprocMain:
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
         self.nprocs = nprocs
-        self.pool: Optional[ProcessPoolExecutor] = None
+        self.pool: ProcessPoolExecutor | None = None
         self.running = True
 
     def main(self) -> None:
@@ -460,7 +460,7 @@ class SubprocMain:
         return pickler.dumps(result)
 
 
-AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
+AnyPool = ProcessPoolExecutor | SubprocPool
 
 
 def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:

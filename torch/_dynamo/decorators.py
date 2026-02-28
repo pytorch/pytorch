@@ -320,8 +320,8 @@ def _invoke_leaf_function_python(
     This enables @leaf_function to work with make_fx
     without relying on Dynamo to intercept the call.
     """
-    from torch._higher_order_ops.flat_apply import func_to_graphable
     from torch._higher_order_ops.invoke_leaf_function import (
+        _LeafCallable,
         convert_modules_to_states,
         invoke_leaf_function,
         make_leaf_function_wrappers,
@@ -352,8 +352,8 @@ def _invoke_leaf_function_python(
         real_impl, fake_impl, captured_out_spec
     )
 
-    _, real_fn_spec = func_to_graphable(wrapped_real)
-    _, fake_fn_spec = func_to_graphable(wrapped_fake)
+    real_fn_callable = _LeafCallable(wrapped_real)
+    fake_fn_callable = _LeafCallable(wrapped_fake)
 
     mutated_flat_indices = ""
     if mutates_args:
@@ -366,7 +366,7 @@ def _invoke_leaf_function_python(
         )
 
     flat_out = invoke_leaf_function(
-        real_fn_spec, fake_fn_spec, input_spec, mutated_flat_indices, *flat_args
+        real_fn_callable, fake_fn_callable, input_spec, mutated_flat_indices, *flat_args
     )
 
     assert captured_out_spec[0] is not None
@@ -1555,6 +1555,48 @@ def error_on_graph_break(
     The default value of torch.compile's `error_on_graph_break` setting is False.
     """
     return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
+
+
+class CudagraphOverrideContextManager:
+    """Context manager that overrides cudagraph recording during tracing."""
+
+    def __init__(self, fwd: Optional[bool] = None, bwd: Optional[bool] = None) -> None:
+        self.fwd = fwd
+        self.bwd = bwd
+
+    __call__ = wrap_dunder_call_ctx_manager
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        pass
+
+
+def override_cudagraphs(
+    fwd: Optional[bool] = None, bwd: Optional[bool] = None
+) -> CudagraphOverrideContextManager:
+    """
+    Context manager/decorator to override cudagraph recording for compiled graphs.
+
+    When used as a context manager, overrides cudagraphs for all graph segments
+    within the block (including across graph breaks).
+
+    When used as a decorator, marks a function so that any compiled graph
+    inlining it will have cudagraphs overridden.
+
+    Args:
+        fwd: If False, disable cudagraphs for forward. If True, force enable.
+             If None, don't override.
+        bwd: If False, disable cudagraphs for backward. If True, force enable.
+             If None, don't override.
+    """
+    return CudagraphOverrideContextManager(fwd=fwd, bwd=bwd)
 
 
 def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:

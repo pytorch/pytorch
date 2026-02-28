@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Callable, Iterable
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -56,9 +56,9 @@ class CppTemplateKernel(CppKernel):
         self,
         inputs: dict[str, ir.Buffer],
         outputs: dict[str, ir.Buffer],
-        aliases: Optional[dict[str, str]] = None,
+        aliases: dict[str, str] | None = None,
         function_name: str = "",
-        extra_sizevars: Optional[list[sympy.Expr]] = None,
+        extra_sizevars: list[sympy.Expr] | None = None,
         placeholder: str = "<DEF_KERNEL>",
     ) -> str:
         if len(function_name) == 0:
@@ -245,8 +245,8 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: ir.Buffer,
         nodes: list[ir.IRNode],
-        offsets: Optional[list[sympy.Expr]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        offsets: list[sympy.Expr] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
     ) -> str:
         var_sizes = (tuple(dst.get_size()), ())
         var_ranges = {
@@ -309,7 +309,7 @@ class CppTemplateKernel(CppKernel):
         dst: tuple[ir.Buffer],
         nodes: list[ir.IRNode],
         offsets: list[sympy.Expr],
-        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
+        reindexers: list[Callable[[list[Any]], list[Any]] | None],
         output_names: list[str],
     ) -> str:
         ref_dst = dst[0]
@@ -370,10 +370,10 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: ir.Buffer,
         src: ir.Buffer,
-        orig_src: Optional[ir.Buffer] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
-        offsets: Optional[list[Any]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        orig_src: ir.Buffer | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
+        offsets: list[Any] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
     ):
         """
         Store the `src` buffer to the `dst` buffer. The size of `src` and `dst` should match.
@@ -432,11 +432,11 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: tuple[ir.Buffer],
         src: tuple[ir.IRNode],
-        orig_src: Optional[tuple[ir.IRNode]] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
-        offsets: Optional[list[Any]] = None,
-        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
-        multi_output_buffers: Optional[tuple[ir.MultiOutput, ...]] = None,
+        orig_src: tuple[ir.IRNode] | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
+        offsets: list[Any] | None = None,
+        reindexers: list[Callable[[list[Any]], list[Any]] | None] | None = None,
+        multi_output_buffers: tuple[ir.MultiOutput, ...] | None = None,
     ):
         assert isinstance(dst, Iterable)
         assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
@@ -567,15 +567,14 @@ class CppTemplateCaller(ir.ChoiceCaller):
             [
                 ir.CppTemplateBuffer,
                 bool,
-                Optional[list[ir.IRNode]],
+                list[ir.IRNode] | None,
             ],
             str,
         ],
         bmreq: CppBenchmarkRequest,
         template: "CppTemplate",  # type: ignore[name-defined]  # noqa: F821
-        info_kwargs: Optional[
-            dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]
-        ] = None,
+        info_kwargs: dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]
+        | None = None,
     ):
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -605,7 +604,7 @@ class CppTemplateCaller(ir.ChoiceCaller):
 
     def info_dict(
         self,
-    ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
+    ) -> dict[str, ir.PrimitiveInfoType | list[ir.PrimitiveInfoType]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
     def output_node(self) -> ir.TensorBox:
