@@ -7,12 +7,12 @@ import logging
 import math
 from typing import Any, cast, TYPE_CHECKING
 
+import torch
+from torch.utils._ordered_set import OrderedSet
+
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
-
-import torch
-from torch.utils._ordered_set import OrderedSet
 
 from ...utils import prefix_is_reduction
 from ..hints import (
@@ -47,19 +47,6 @@ class InductorConfig(Config):
     def __init__(self, *args, dynamic_scale_rblock=True, **kwargs):
         super().__init__(*args, **kwargs)
         self.dynamic_scale_rblock = dynamic_scale_rblock
-
-
-def unique_configs(configs: list[Config]):
-    """Remove duplicate configurations"""
-    seen: OrderedSet[Hashable] = OrderedSet()
-    pruned_configs = []
-
-    for cfg in configs:
-        key = triton_config_to_hashable(cfg)
-        if key not in seen:
-            seen.add(key)
-            pruned_configs.append(cfg)
-    return pruned_configs
 
 
 def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
@@ -262,12 +249,6 @@ def cached_autotune(*args, **kwargs):
     return _cached_autotune(*args, **kwargs)
 
 
-def get_total_reduction_numel(numels: dict[str, int]) -> int:
-    return conditional_product(
-        *[numel for prefix, numel in numels.items() if prefix_is_reduction(prefix)]
-    )
-
-
 def autotune_hints_to_configs(
     hints: OrderedSet[AutotuneHint],
     size_hints,
@@ -309,6 +290,25 @@ def autotune_hints_to_configs(
             )
 
     return configs
+
+
+def get_total_reduction_numel(numels: dict[str, int]) -> int:
+    return conditional_product(
+        *[numel for prefix, numel in numels.items() if prefix_is_reduction(prefix)]
+    )
+
+
+def unique_configs(configs: list[Config]):
+    """Remove duplicate configurations"""
+    seen: OrderedSet[Hashable] = OrderedSet()
+    pruned_configs = []
+
+    for cfg in configs:
+        key = triton_config_to_hashable(cfg)
+        if key not in seen:
+            seen.add(key)
+            pruned_configs.append(cfg)
+    return pruned_configs
 
 
 def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, int]:
@@ -437,107 +437,6 @@ def _get_config(numels: dict[str, int]) -> dict[str, int]:
     return {prefix.upper() + "BLOCK": numel for prefix, numel in numels.items()}
 
 
-def _handle_combo_kernel_per_subkernel_blocks(
-    size_hints: dict[str, int],
-    inductor_meta: dict[str, Any] | None,
-    triton_meta: dict[str, Any] | None,
-    filename: str | None = None,
-    reduction_hint: bool = False,
-    tile_hint: Any = None,
-    min_elem_per_thread: int = 0,
-) -> list[Config] | None:
-    """
-    Handle per-subkernel config generation for combo kernels.
-
-    Each sub-kernel gets its own block sizes (XBLOCK_0, XBLOCK_1, etc.) generated
-    using the same heuristics as standalone Triton kernels. The final config uses
-    the maximum num_warps and num_stages across all sub-kernels.
-
-    Returns:
-        List of configs if combo kernel with combo_grid_meta and per-subkernel
-        blocks enabled, None otherwise.
-    """
-    if triton_meta is None:
-        raise NotImplementedError("Missing triton_meta for combo kernel heuristics")
-
-    inductor_meta = {} if inductor_meta is None else inductor_meta
-    combo_meta = inductor_meta.get("combo_grid_meta")
-    if combo_meta is None or "heuristic_0" not in combo_meta:
-        return None
-
-    num_kernels = combo_meta["num_kernels"]
-    inductor_meta_clean = {
-        k: v for k, v in inductor_meta.items() if k != "combo_grid_meta"
-    }
-
-    combined_kwargs: dict[str, int] = {}
-    all_num_warps: list[int] = []
-    all_num_stages: list[int] = []
-    unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
-
-    from ..triton_heuristics import persistent_reduction, pointwise, reduction
-
-    for i in range(num_kernels):
-        subkernel_heuristic = combo_meta[f"heuristic_{i}"]
-        size_hints_i = combo_meta[f"size_hints_{i}"]
-
-        if subkernel_heuristic == "pointwise":
-            cfg = pointwise(
-                size_hints_i,
-                triton_meta=triton_meta,
-                tile_hint=TileHint.SQUARE
-                if combo_meta[f"tile_hint_{i}"] == "TileHint.SQUARE"
-                else TileHint.DEFAULT,
-                filename=filename,
-                min_elem_per_thread=min_elem_per_thread,
-                inductor_meta=inductor_meta_clean,
-                return_configs=True,
-            )[0]
-            skip_rblock = False
-        elif subkernel_heuristic == "reduction":
-            cfg = reduction(
-                size_hints_i,
-                reduction_hint=reduction_hint,
-                triton_meta=triton_meta,
-                filename=filename,
-                inductor_meta=inductor_meta_clean,
-                return_configs=True,
-            )[0]
-            skip_rblock = False
-        elif subkernel_heuristic == "persistent_reduction":
-            cfg = persistent_reduction(
-                size_hints_i,
-                reduction_hint=reduction_hint,
-                triton_meta=triton_meta,
-                filename=filename,
-                inductor_meta=inductor_meta_clean,
-                return_configs=True,
-            )[0]
-            skip_rblock = True  # persistent reduction embeds RBLOCK in kernel body
-        else:
-            raise ValueError(f"Unknown heuristic: {subkernel_heuristic}")
-
-        for key, value in cfg.kwargs.items():
-            if skip_rblock and key.startswith("R") and "BLOCK" in key:
-                continue
-            combined_kwargs[f"{key}_{i}"] = value
-
-        all_num_warps.append(cfg.num_warps)
-        all_num_stages.append(cfg.num_stages)
-        unique_warp_stage_pairs.add((cfg.num_warps, cfg.num_stages))
-
-    unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
-
-    return [
-        Config(
-            combined_kwargs,
-            num_warps=num_warps,
-            num_stages=num_stages,
-        )
-        for num_warps, num_stages in unique_warp_stage_pairs
-    ]
-
-
 def triton_config_tiled_reduction(
     size_hints, x, y, r, num_stages=1, register_intensive=False, waves_per_eu=None
 ):
@@ -584,57 +483,29 @@ def triton_config_tiled_reduction(
 
 
 def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages: int):
-    cfg = _get_config(sizes)
-    check_max_block(cfg)
-    return Config(cfg, num_warps=num_warps, num_stages=num_stages)
+    config = {
+        "XBLOCK": sizes.get("x"),
+        "YBLOCK": sizes.get("y"),
+        "ZBLOCK": sizes.get("z"),
+        "R0_BLOCK": sizes.get("r"),
+    }
+    # Remove keys with None values (i.e., missing in sizes)
+    config = {k: v for k, v in config.items() if v is not None}
+    return Config(config, num_warps=num_warps, num_stages=num_stages)
 
 
-def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Config]):
-    tma_min_block_sizes: dict[str, int]
-    if (tma_min_block_sizes := inductor_meta.get("tma_min_block_sizes")) and configs:
-        # Rn blocks are not provided to the kernel for persistent reductions
-        if inductor_meta.get("persistent_reduction"):
-            tma_min_block_sizes = {
-                block_type: block_size
-                for block_type, block_size in tma_min_block_sizes.items()
-                if not prefix_is_reduction(block_type.lower())
-            }
-
-        assert all(
-            block_type in configs[0].kwargs for block_type in tma_min_block_sizes
-        )
-
-        # Add a config that is guaranteed to compile
-        example_config = configs[0]
-        config_block_sizes = {**example_config.kwargs}
-        config_block_sizes.update(tma_min_block_sizes)
-        new_configs = [
-            Config(
-                config_block_sizes,
-                num_warps=example_config.num_warps,
-                num_stages=example_config.num_stages,
-                maxnreg=example_config.maxnreg,
-                pre_hook=example_config.pre_hook,
-            )
-        ]
-        # Remove configs that will not compile
-        for c in configs:
-            if all(
-                c.kwargs.get(block_type) >= min_block_value
-                for block_type, min_block_value in tma_min_block_sizes.items()
-            ):
-                new_configs.append(c)
-
-        log.debug(
-            "Filtering configs for TMA API restrictions. Input configs size: %d. Output configs size: %d",
-            len(configs),
-            len(new_configs),
-        )
-        return new_configs
-    return configs
+def _get_tiling_scores(
+    inductor_meta: dict[str, Any],
+    size_hints: dict[str, int],
+) -> dict[str, float]:
+    """
+    Retrieve the tiling scores, providing suitable defaults if they are missing.
+    """
+    return inductor_meta.get("tiling_scores") or dict.fromkeys(size_hints, 1)
 
 
-def _config_helper(bmm: bool, persistent: bool):
+def _config_helper(bmm=False, persistent=False):
+    # Each entry is: (sizes_dict, num_warps, num_stages)
     _base_mm_configs = [
         ({"x": 32, "y": 32, "r": 16}, 2, 1),
         ({"x": 32, "y": 32, "r": 128}, 4, 2),
@@ -677,27 +548,13 @@ triton_native_bmm_configs = _config_helper(bmm=True, persistent=False)
 triton_native_persistent_bmm_configs = _config_helper(bmm=True, persistent=True)
 
 
-def _get_tiling_scores(
-    inductor_meta: dict[str, Any],
-    size_hints: dict[str, int],
-) -> dict[str, float]:
-    """
-    Retrieve the tiling scores, providing suitable defaults if they are missing.
-    """
-    return inductor_meta.get("tiling_scores") or dict.fromkeys(size_hints, 1)
-
-
 def _reduction_configs(
     *,
     size_hints: dict[str, int],
-    inductor_meta: dict[str, Any] | None,
-    triton_meta: dict[str, Any] | None,
+    inductor_meta: dict[str, Any],
+    triton_meta: dict[str, Any],
     num_dynamic=0,
 ) -> list[Config]:
-    if triton_meta is None:
-        raise NotImplementedError("Missing triton_meta for reduction configs")
-
-    inductor_meta = {} if inductor_meta is None else inductor_meta
     reduction_hint = inductor_meta.get("reduction_hint")
 
     # Convert reductions to 1D, to simplify heuristics.
@@ -896,68 +753,6 @@ def _reduction_configs(
     return result_configs
 
 
-@register_triton_heuristic("reduction", None)
-def reduction_common(
-    size_hints,
-    reduction_hint=False,
-    triton_meta=None,
-    filename=None,
-    inductor_meta=None,
-    return_configs=False,
-):
-    """args to @triton.heuristics()"""
-    inductor_meta = {} if inductor_meta is None else inductor_meta
-    inductor_meta["reduction_hint"] = reduction_hint
-    if inductor_meta.get("no_x_dim"):
-        size_hints["x"] = 1
-
-    configs = _handle_combo_kernel_per_subkernel_blocks(
-        size_hints,
-        inductor_meta,
-        triton_meta,
-        filename=filename,
-        reduction_hint=reduction_hint,
-    )
-    if configs is not None:
-        return cached_autotune(
-            None,
-            configs,
-            triton_meta=triton_meta,
-            inductor_meta=inductor_meta,
-            heuristic_type=HeuristicType.REDUCTION,
-            filename=filename,
-        )
-
-    assert triton_meta is not None
-
-    num_dynamic = 0
-    for k in triton_meta["signature"]:
-        if "ks" in k:
-            num_dynamic += 1
-
-    configs = _reduction_configs(
-        size_hints=size_hints,
-        inductor_meta=inductor_meta,
-        triton_meta=triton_meta,
-        num_dynamic=num_dynamic,
-    )
-
-    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
-    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
-
-    if return_configs:
-        return configs
-
-    return cached_autotune(
-        size_hints,
-        configs=configs,
-        triton_meta=triton_meta,
-        inductor_meta=inductor_meta,
-        heuristic_type=HeuristicType.REDUCTION,
-        filename=filename,
-    )
-
-
 def match_target_block_product(
     size_hints,
     tiling_scores,
@@ -1151,6 +946,152 @@ def filter_reduction_configs_for_determinism(
     return configs
 
 
+def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Config]):
+    tma_min_block_sizes: dict[str, int]
+    if (tma_min_block_sizes := inductor_meta.get("tma_min_block_sizes")) and configs:
+        # Rn blocks are not provided to the kernel for persistent reductions
+        if inductor_meta.get("persistent_reduction"):
+            tma_min_block_sizes = {
+                block_type: block_size
+                for block_type, block_size in tma_min_block_sizes.items()
+                if not prefix_is_reduction(block_type.lower())
+            }
+
+        assert all(
+            block_type in configs[0].kwargs for block_type in tma_min_block_sizes
+        )
+
+        # Add a config that is guaranteed to compile
+        example_config = configs[0]
+        config_block_sizes = {**example_config.kwargs}
+        config_block_sizes.update(tma_min_block_sizes)
+        new_configs = [
+            Config(
+                config_block_sizes,
+                num_warps=example_config.num_warps,
+                num_stages=example_config.num_stages,
+                maxnreg=example_config.maxnreg,
+                pre_hook=example_config.pre_hook,
+            )
+        ]
+        # Remove configs that will not compile
+        for c in configs:
+            if all(
+                c.kwargs.get(block_type) >= min_block_value
+                for block_type, min_block_value in tma_min_block_sizes.items()
+            ):
+                new_configs.append(c)
+
+        log.debug(
+            "Filtering configs for TMA API restrictions. Input configs size: %d. Output configs size: %d",
+            len(configs),
+            len(new_configs),
+        )
+        return new_configs
+    return configs
+
+
+def _handle_combo_kernel_per_subkernel_blocks(
+    size_hints: dict[str, int],
+    inductor_meta: dict[str, Any] | None,
+    triton_meta: dict[str, Any] | None,
+    filename: str | None = None,
+    reduction_hint: bool = False,
+    tile_hint: Any = None,
+    min_elem_per_thread: int = 0,
+) -> list[Config] | None:
+    """
+    Handle per-subkernel config generation for combo kernels.
+
+    Each sub-kernel gets its own block sizes (XBLOCK_0, XBLOCK_1, etc.) generated
+    using the same heuristics as standalone Triton kernels. The final config uses
+    the maximum num_warps and num_stages across all sub-kernels.
+
+    Returns:
+        List of configs if combo kernel with combo_grid_meta and per-subkernel
+        blocks enabled, None otherwise.
+    """
+    if triton_meta is None:
+        raise NotImplementedError("Missing triton_meta for combo kernel heuristics")
+
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    combo_meta = inductor_meta.get("combo_grid_meta")
+    if combo_meta is None or "heuristic_0" not in combo_meta:
+        return None
+
+    num_kernels = combo_meta["num_kernels"]
+    inductor_meta_clean = {
+        k: v for k, v in inductor_meta.items() if k != "combo_grid_meta"
+    }
+
+    combined_kwargs: dict[str, int] = {}
+    all_num_warps: list[int] = []
+    all_num_stages: list[int] = []
+    unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
+
+    from ..triton_heuristics import persistent_reduction, pointwise, reduction
+
+    for i in range(num_kernels):
+        subkernel_heuristic = combo_meta[f"heuristic_{i}"]
+        size_hints_i = combo_meta[f"size_hints_{i}"]
+
+        if subkernel_heuristic == "pointwise":
+            cfg = pointwise(
+                size_hints_i,
+                triton_meta=triton_meta,
+                tile_hint=TileHint.SQUARE
+                if combo_meta[f"tile_hint_{i}"] == "TileHint.SQUARE"
+                else TileHint.DEFAULT,
+                filename=filename,
+                min_elem_per_thread=min_elem_per_thread,
+                inductor_meta=inductor_meta_clean,
+                return_configs=True,
+            )[0]
+            skip_rblock = False
+        elif subkernel_heuristic == "reduction":
+            cfg = reduction(
+                size_hints_i,
+                reduction_hint=reduction_hint,
+                triton_meta=triton_meta,
+                filename=filename,
+                inductor_meta=inductor_meta_clean,
+                return_configs=True,
+            )[0]
+            skip_rblock = False
+        elif subkernel_heuristic == "persistent_reduction":
+            cfg = persistent_reduction(
+                size_hints_i,
+                reduction_hint=reduction_hint,
+                triton_meta=triton_meta,
+                filename=filename,
+                inductor_meta=inductor_meta_clean,
+                return_configs=True,
+            )[0]
+            skip_rblock = True  # persistent reduction embeds RBLOCK in kernel body
+        else:
+            raise ValueError(f"Unknown heuristic: {subkernel_heuristic}")
+
+        for key, value in cfg.kwargs.items():
+            if skip_rblock and key.startswith("R") and "BLOCK" in key:
+                continue
+            combined_kwargs[f"{key}_{i}"] = value
+
+        all_num_warps.append(cfg.num_warps)
+        all_num_stages.append(cfg.num_stages)
+        unique_warp_stage_pairs.add((cfg.num_warps, cfg.num_stages))
+
+    unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
+
+    return [
+        Config(
+            combined_kwargs,
+            num_warps=num_warps,
+            num_stages=num_stages,
+        )
+        for num_warps, num_stages in unique_warp_stage_pairs
+    ]
+
+
 def _persistent_reduction_configs(
     size_hints,
     reduction_hint=False,
@@ -1280,6 +1221,68 @@ def _persistent_reduction_configs(
                 c.kwargs.pop(f"{prefix.upper()}BLOCK")
 
     return configs
+
+
+@register_triton_heuristic("reduction", None)
+def reduction_common(
+    size_hints,
+    reduction_hint=False,
+    triton_meta=None,
+    filename=None,
+    inductor_meta=None,
+    return_configs=False,
+):
+    """args to @triton.heuristics()"""
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    inductor_meta["reduction_hint"] = reduction_hint
+    if inductor_meta.get("no_x_dim"):
+        size_hints["x"] = 1
+
+    configs = _handle_combo_kernel_per_subkernel_blocks(
+        size_hints,
+        inductor_meta,
+        triton_meta,
+        filename=filename,
+        reduction_hint=reduction_hint,
+    )
+    if configs is not None:
+        return cached_autotune(
+            None,
+            configs,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
+            heuristic_type=HeuristicType.REDUCTION,
+            filename=filename,
+        )
+
+    assert triton_meta is not None
+
+    num_dynamic = 0
+    for k in triton_meta["signature"]:
+        if "ks" in k:
+            num_dynamic += 1
+
+    configs = _reduction_configs(
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
+        num_dynamic=num_dynamic,
+    )
+
+    configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+
+    if return_configs:
+        return configs
+
+    return cached_autotune(
+        size_hints,
+        configs=configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.REDUCTION,
+        filename=filename,
+    )
 
 
 @register_triton_heuristic("cooperative_reduction", None)
