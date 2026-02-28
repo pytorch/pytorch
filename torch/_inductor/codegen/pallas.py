@@ -872,8 +872,7 @@ class PallasKernel(SIMDKernel):
         self.load_index_exprs: dict[str, sympy.Expr] = {}
         # Track outputs that need to be readable (for scatter operations)
         self.outputs_need_read: OrderedSet[str] = OrderedSet()
-        # Track if any load in this kernel used transpose
-        # Used to avoid double transpose (load + store)
+        # Map input buffer names to their detected permutation tuples.
         self.permuted_input_buffers: dict[str, tuple[int, ...]] = {}
         self.collapsed_reshape_inputs: dict[str, tuple[int, ...]] = {}
         self.collapsed_output_shape: Optional[tuple[int, ...]] = None
@@ -887,8 +886,6 @@ class PallasKernel(SIMDKernel):
         self.used_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
         # Track if any load/store uses flatten-based indexing (buf[...].flatten()[idx])
         self.has_flatten_indexing = False
-        # Track input buffers that are accessed with transposed last-2 dims
-
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -1125,10 +1122,12 @@ class PallasKernel(SIMDKernel):
         stride_raw = getattr(layout, "stride", None)
         if stride_raw is None or len(stride_raw) != n:
             return None
-        from torch._inductor.codegen.pallas import PallasKernel
-        strides = [PallasKernel._safe_int(s) for s in stride_raw]
-        if any(s is None for s in strides):
-            return None
+        strides: list[int] = []
+        for s in stride_raw:
+            v = int(s) if isinstance(s, (int, sympy.Integer)) else None
+            if v is None:
+                return None
+            strides.append(v)
         return strides
 
     def _compute_store_coeffs(
@@ -1315,8 +1314,7 @@ class PallasKernel(SIMDKernel):
                   for v in ordered]
         if None in ranges:
             return None
-        import math as _math
-        if _math.prod(ranges) != _math.prod(in_shape):
+        if math.prod(ranges) != math.prod(in_shape):
             return None
 
         # Group consecutive input dims (right-to-left) to match ranges
@@ -1360,7 +1358,7 @@ class PallasKernel(SIMDKernel):
             out_shape = [self._safe_int(s) for s in out_buf.get_size()]
             if any(s is None for s in out_shape) or len(out_shape) < 2:
                 continue
-            if _math.prod(out_shape) != _math.prod(in_shape):
+            if math.prod(out_shape) != math.prod(in_shape):
                 continue
             out_groups = self._group_dims_to_ranges(out_shape, list(in_groups))
             if out_groups is None:
@@ -2985,16 +2983,13 @@ class PallasKernel(SIMDKernel):
                     break
 
                 if mismatch and buf_name in self.permuted_input_buffers:
-                    # Permuted input: verify shape matches under permutation
                     perm = self.permuted_input_buffers[buf_name]
-                    if len(perm) == ref_nd and all(
+                    if not (len(perm) == ref_nd and all(
                         int_size[perm[i]] == ref_shape[i]
                         or int_size[perm[i]] == 1
                         or ref_shape[i] == 1
                         for i in range(ref_nd)
-                    ):
-                        pass  # shape is compatible under permutation
-                    else:
+                    )):
                         return False
                 elif mismatch:
                     return False
@@ -3253,14 +3248,11 @@ class PallasKernel(SIMDKernel):
             if self.tile_cpu_tpu:
                 self._codegen_tiled_specs(ctx)
             else:
-                # Reshape collapsed inputs before building specs
+                # Reshape collapsed inputs before building specs.
                 for param in ctx.kernel_input_params:
-                    buf_name = None
-                    for graph_name, inner_name in self.args.input_buffers.items():
-                        if inner_name == param:
-                            buf_name = graph_name
-                            break
-                    cshape = self.collapsed_reshape_inputs.get(buf_name) if buf_name else None
+                    cshape = self.collapsed_reshape_inputs.get(
+                        self._param_to_buf_name(param)
+                    )
                     if cshape is not None:
                         code.writeline(f"{param} = {param}.reshape({cshape})")
 
@@ -3662,6 +3654,13 @@ from torch._inductor.runtime.runtime_utils import (
             "        return pallas_gpu_unpad_results(_result, out_shapes, _is_scalar)"
         )
 
+    def _param_to_buf_name(self, param: str) -> Optional[str]:
+        """Map a kernel parameter name back to its graph buffer name."""
+        for graph_name, inner_name in self.args.input_buffers.items():
+            if inner_name == param:
+                return graph_name
+        return None
+
     def _codegen_tiled_specs(self, ctx: _CodegenContext) -> None:
         """Generate tiled BlockSpec and grid variables for CPU/TPU.
 
@@ -3674,38 +3673,22 @@ from torch._inductor.runtime.runtime_utils import (
         skip_n = self.tile_skip_last_n
         has_transpose = "True" if self.tile_has_transpose else "False"
 
-        # Collect permutations from all input buffers so tiling alignment
-        # accounts for how dims map into input layouts.
-        all_perms = []
-        for param in ctx.kernel_input_params:
-            buf_name = None
-            for graph_name, inner_name in self.args.input_buffers.items():
-                if inner_name == param:
-                    buf_name = graph_name
-                    break
-            perm = self.permuted_input_buffers.get(buf_name) if buf_name else None
-            all_perms.append(perm)
+        # Collect per-input permutations for tiling alignment.
+        all_perms = [
+            self.permuted_input_buffers.get(self._param_to_buf_name(p))
+            for p in ctx.kernel_input_params
+        ]
 
-        if any(p is not None for p in all_perms):
-            perms_literal = repr(all_perms)
-            mgp = getattr(self, "_cpu_max_grid_product", None)
-            mgp_arg = f", max_grid_product={mgp}" if mgp else ""
-            code.writeline(
-                f"_tile, _grid, _ax2g = pallas_compute_tiling("
-                f"_pallas_out_shapes[0], "
-                f"transpose={has_transpose}, "
-                f"skip_last_n={skip_n}, exact_only=len(_pallas_out_shapes[0]) < 2, "
-                f"permutations={perms_literal}{mgp_arg})"
-            )
-        else:
-            mgp = getattr(self, "_cpu_max_grid_product", None)
-            mgp_arg = f", max_grid_product={mgp}" if mgp else ""
-            code.writeline(
-                f"_tile, _grid, _ax2g = pallas_compute_tiling("
-                f"_pallas_out_shapes[0], "
-                f"transpose={has_transpose}, "
-                f"skip_last_n={skip_n}, exact_only=len(_pallas_out_shapes[0]) < 2{mgp_arg})"
-            )
+        mgp = self._cpu_max_grid_product
+        mgp_arg = f", max_grid_product={mgp}" if mgp else ""
+        perms_arg = f", permutations={repr(all_perms)}" if any(p is not None for p in all_perms) else ""
+        code.writeline(
+            f"_tile, _grid, _ax2g = pallas_compute_tiling("
+            f"_pallas_out_shapes[0], "
+            f"transpose={has_transpose}, "
+            f"skip_last_n={skip_n}, exact_only=len(_pallas_out_shapes[0]) < 2"
+            f"{perms_arg}{mgp_arg})"
+        )
         code.writeline("_ng = len(_grid)")
         code.writeline("_ref = _pallas_out_shapes[0]")
 
@@ -3716,33 +3699,19 @@ from torch._inductor.runtime.runtime_utils import (
         code.writeline("    for s in _pallas_out_shapes")
         code.writeline(")")
 
-        # Reshape collapsed inputs before building specs
+        # Reshape collapsed inputs before building specs.
         for param in ctx.kernel_input_params:
-            buf_name = None
-            for graph_name, inner_name in self.args.input_buffers.items():
-                if inner_name == param:
-                    buf_name = graph_name
-                    break
-            cshape = self.collapsed_reshape_inputs.get(buf_name) if buf_name else None
+            cshape = self.collapsed_reshape_inputs.get(
+                self._param_to_buf_name(param)
+            )
             if cshape is not None:
                 code.writeline(f"{param} = {param}.reshape({cshape})")
 
-        # Build per-input permutation flags
-        perm_flags = []
-        for param in ctx.kernel_input_params:
-            # Map kernel param back to graph buffer name
-            buf_name = None
-            for graph_name, inner_name in self.args.input_buffers.items():
-                if inner_name == param:
-                    buf_name = graph_name
-                    break
-            perm = self.permuted_input_buffers.get(buf_name) if buf_name else None
-            perm_flags.append(perm)
-
-        if any(p is not None for p in perm_flags):
-            perm_list = ", ".join(repr(p) for p in perm_flags)
+        # Build input BlockSpecs (with per-input permutation when needed).
+        input_list = ", ".join(ctx.kernel_input_params)
+        if any(p is not None for p in all_perms):
+            perm_list = ", ".join(repr(p) for p in all_perms)
             code.writeline(f"_perm_flags = [{perm_list}]")
-            input_list = ", ".join(ctx.kernel_input_params)
             code.writeline("in_specs_pallas = tuple(")
             code.writeline(
                 f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng, permutation=p)"
@@ -3750,7 +3719,6 @@ from torch._inductor.runtime.runtime_utils import (
             )
             code.writeline(")")
         else:
-            input_list = ", ".join(ctx.kernel_input_params)
             code.writeline("in_specs_pallas = tuple(")
             code.writeline(
                 f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng) for i in [{input_list}]"

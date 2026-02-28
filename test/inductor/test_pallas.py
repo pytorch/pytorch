@@ -1785,23 +1785,20 @@ class PallasTestsMixin:
     def test_permute_contiguous_3d_all_perms(self):
         """Test all non-identity 3D permutations with distinct dim sizes.
 
-        Using distinct sizes (4, 8, 16) ensures reshape vs permute bugs
-        are caught — if dimensions were equal, a wrong reshape could
-        accidentally produce correct results.
+        Uses (2, 1152, 2048) so every permutation generates a multi-tile
+        grid (all collapsed shapes have at least one dim > 1024).
 
         (1, 0, 2), (0, 2, 1), and (2, 1, 0) work via full-rank
         permutation detection.  (2, 0, 1) and (1, 2, 0) work via
         collapsed-dimension permutation detection.
         """
-        working = [
+        all_perms = [
             (1, 0, 2), (0, 2, 1), (2, 1, 0),  # full-rank detection
             (2, 0, 1), (1, 2, 0),               # collapsed-dim detection
         ]
-        broken = []
+        x = torch.randn(2, 1152, 2048, device=self.DEVICE)
 
-        x = torch.randn(4, 8, 16, device=self.DEVICE)
-
-        for perm in working:
+        for perm in all_perms:
             with self.subTest(perm=perm):
                 def fn(x, p=perm):
                     return x.permute(*p).contiguous()
@@ -1810,27 +1807,67 @@ class PallasTestsMixin:
                 expected = fn(x)
                 self.assertEqual(result, expected)
 
-        for perm in broken:
+    def test_permute_contiguous_3d_large_notile(self):
+        """Test 3D perms with large shape but no tiling (dim=1024 exact fit)."""
+        perms = [(1, 0, 2), (0, 2, 1), (2, 1, 0)]
+
+        # (2, 1152, 1024) -> last dim 1024 = tile_size, so no tiling: grid=(1,)
+        x = torch.randn(2, 1152, 1024, device=self.DEVICE)
+
+        for perm in perms:
             with self.subTest(perm=perm):
                 def fn(x, p=perm):
                     return x.permute(*p).contiguous()
                 compiled = self._compile(fn)
-                try:
-                    result = compiled(x)
-                    expected = fn(x)
-                    if torch.allclose(result, expected):
-                        pass  # Unexpectedly passed
-                    else:
-                        self.skipTest(f"Known issue: 3D perm {perm} (scatter store on TPU)")
-                except Exception:
-                    self.skipTest(f"Known issue: 3D perm {perm} (scatter store on TPU)")
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    def test_permute_contiguous_3d_medium(self):
+        """Test 3D perms with medium shape that triggers tiling on last dim."""
+        perms = [(1, 0, 2), (0, 2, 1), (2, 1, 0)]
+
+        # (2, 8, 2048) -> last dim 2048 tiles to 1024, grid=(2,)
+        x = torch.randn(2, 8, 2048, device=self.DEVICE)
+
+        for perm in perms:
+            with self.subTest(perm=perm):
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    def test_permute_contiguous_3d_small(self):
+        """Test 3D perms with small shapes that produce grid=(1,)."""
+        all_perms = [
+            (1, 0, 2), (0, 2, 1), (2, 1, 0),
+            (2, 0, 1), (1, 2, 0),
+        ]
+        # Small shape: all dims <= alignment, no tiling
+        x = torch.randn(2, 8, 16, device=self.DEVICE)
+
+        for perm in all_perms:
+            with self.subTest(perm=perm):
+                def fn(x, p=perm):
+                    return x.permute(*p).contiguous()
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
 
     def test_permute_contiguous_4d(self):
-        """Test 4D permutations with distinct dim sizes (2, 4, 8, 16).
+        """Test all 23 non-identity 4D permutations with multi-tile grids.
 
-        All 23 non-identity permutations work on both CPU and TPU.
+        Uses two complementary shapes so every permutation is tested at a
+        size that generates grid > (1,):
+        - (2, 4, 128, 2048): large last dims, tiles 14/23 perms
+        - (1152, 1152, 2, 4): large first dims, tiles the remaining 9
+
+        The union covers all 23 permutations with multi-tile grids.
         """
-        working = [
+        all_perms = [
             (0, 1, 3, 2), (0, 2, 1, 3), (0, 2, 3, 1), (0, 3, 1, 2),
             (0, 3, 2, 1),
             (1, 0, 2, 3), (1, 0, 3, 2), (1, 2, 0, 3), (1, 2, 3, 0),
@@ -1840,33 +1877,29 @@ class PallasTestsMixin:
             (3, 0, 1, 2), (3, 0, 2, 1), (3, 1, 0, 2), (3, 1, 2, 0),
             (3, 2, 0, 1), (3, 2, 1, 0),
         ]
-        broken = []
+        # Perms that don't tile with large_last shape: their collapsed
+        # shapes place small dims at the end.  Use large_first instead.
+        needs_large_first = {
+            (0, 3, 2, 1), (1, 3, 0, 2), (1, 3, 2, 0),
+            (2, 3, 1, 0), (3, 0, 2, 1), (3, 1, 0, 2),
+            (3, 1, 2, 0), (3, 2, 0, 1), (3, 2, 1, 0),
+        }
+        shapes = {
+            "large_last": (2, 4, 128, 2048),
+            "large_first": (1152, 1152, 2, 4),
+        }
 
-        x = torch.randn(2, 4, 8, 16, device=self.DEVICE)
-
-        for perm in working:
-            with self.subTest(perm=perm):
+        for perm in all_perms:
+            key = "large_first" if perm in needs_large_first else "large_last"
+            shape = shapes[key]
+            with self.subTest(perm=perm, shape=shape):
+                x = torch.randn(*shape, device=self.DEVICE)
                 def fn(x, p=perm):
                     return x.permute(*p).contiguous()
                 compiled = self._compile(fn)
                 result = compiled(x)
                 expected = fn(x)
                 self.assertEqual(result, expected)
-
-        for perm in broken:
-            with self.subTest(perm=perm):
-                def fn(x, p=perm):
-                    return x.permute(*p).contiguous()
-                compiled = self._compile(fn)
-                try:
-                    result = compiled(x)
-                    expected = fn(x)
-                    if torch.allclose(result, expected):
-                        pass  # Unexpectedly passed
-                    else:
-                        self.skipTest(f"Known issue: 4D perm {perm}")
-                except Exception:
-                    self.skipTest(f"Known issue: 4D perm {perm}")
 
     def test_warpgroup_size_2d_aligned_32x8(self):
         """Test 2D tensor with 32x8 = 256 elements (2 warpgroups)."""
