@@ -284,33 +284,42 @@ class TestPeriodicDumper(TestCase):
             err_files = [f for f in files if f.startswith("error_handler_")]
             self.assertEqual(len(err_files), 0)
 
-    def test_max_dumps_limits_cycles(self) -> None:
+    def test_max_dumps_cleans_old_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             h = _CountingHandler()
-            dumper = PeriodicDumper([h], tmp, interval_seconds=0.05, max_dumps=3)
+            dumper = PeriodicDumper([h], tmp, interval_seconds=0.05, max_dumps=2)
             dumper.start()
-            # Wait long enough that without the limit we'd get more than 3
             time.sleep(0.5)
             dumper.stop()
-            self.assertEqual(h.dump_count, 3)
+            # Dumper should have run many cycles but only kept the last 2 files
+            files = [f for f in os.listdir(tmp) if f.startswith("counting_")]
+            self.assertEqual(len(files), 2)
+            # Should have dumped more than 2 times total
+            self.assertGreater(h.dump_count, 2)
 
-    def test_max_dumps_none_is_unlimited(self) -> None:
+    def test_max_dumps_none_keeps_all(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             h = _CountingHandler()
             dumper = PeriodicDumper([h], tmp, interval_seconds=0.05, max_dumps=None)
             dumper.start()
             time.sleep(0.3)
             dumper.stop()
-            self.assertGreater(h.dump_count, 3)
+            files = [f for f in os.listdir(tmp) if f.startswith("counting_")]
+            # All dump files are kept
+            self.assertEqual(len(files), h.dump_count)
 
-    def test_max_dumps_thread_exits(self) -> None:
+    def test_max_dumps_per_handler(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            h = _CountingHandler()
-            dumper = PeriodicDumper([h], tmp, interval_seconds=0.05, max_dumps=1)
+            h1 = _StubHandler("aaa", "data1")
+            h2 = _StubHandler("bbb", "data2")
+            dumper = PeriodicDumper([h1, h2], tmp, interval_seconds=0.05, max_dumps=2)
             dumper.start()
-            # Give the thread time to finish its single dump and exit
-            time.sleep(0.3)
-            self.assertFalse(dumper._thread.is_alive())
+            time.sleep(0.4)
+            dumper.stop()
+            aaa_files = [f for f in os.listdir(tmp) if f.startswith("aaa_")]
+            bbb_files = [f for f in os.listdir(tmp) if f.startswith("bbb_")]
+            self.assertEqual(len(aaa_files), 2)
+            self.assertEqual(len(bbb_files), 2)
 
     def test_stop_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

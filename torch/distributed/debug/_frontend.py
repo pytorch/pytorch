@@ -299,7 +299,6 @@ class PeriodicDumper:
             self._thread.join()
 
     def _run(self) -> None:
-        dumps_done = 0
         while not self._stop_event.is_set():
             for handler in self._handlers:
                 try:
@@ -309,7 +308,11 @@ class PeriodicDumper:
                     continue
                 if content is None:
                     continue
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                now = time.time()
+                timestamp = (
+                    time.strftime("%Y%m%d_%H%M%S", time.localtime(now))
+                    + f"_{int(now * 1e6) % 1_000_000:06d}"
+                )
                 filename = f"{handler.dump_filename()}_{timestamp}.txt"
                 path = os.path.join(self._output_dir, filename)
                 try:
@@ -317,10 +320,27 @@ class PeriodicDumper:
                         f.write(content)
                 except Exception:
                     logger.exception("Failed to write dump to %s", path)
-            dumps_done += 1
-            if self._max_dumps is not None and dumps_done >= self._max_dumps:
-                break
+                    continue
+                if self._max_dumps is not None:
+                    self._cleanup_old_dumps(handler.dump_filename())
             self._stop_event.wait(self._interval_seconds)
+
+    def _cleanup_old_dumps(self, prefix: str) -> None:
+        try:
+            files = sorted(
+                f
+                for f in os.listdir(self._output_dir)
+                if f.startswith(prefix + "_") and f.endswith(".txt")
+            )
+        except OSError:
+            return
+        assert self._max_dumps is not None
+        to_delete = files[: -self._max_dumps]
+        for f in to_delete:
+            try:
+                os.remove(os.path.join(self._output_dir, f))
+            except OSError:
+                logger.exception("Failed to remove old dump %s", f)
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +516,7 @@ def main(
             f"Periodic dumper started, writing to {dump_dir} every {dump_interval:.0f}s"
         )
         if max_dumps is not None:
-            msg += f" (max {max_dumps} dumps)"
+            msg += f" (keeping last {max_dumps} per handler)"
         logger.info(msg)
 
     try:
