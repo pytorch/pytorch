@@ -355,6 +355,7 @@
     SparseCPU, SparseCUDA, SparseMPS: abs_sparse_
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMPS, SparseCsrMeta: abs_sparse_csr_
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_abs_
+  tags: pointwise
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -469,6 +470,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: _conj
+  tags: pointwise
 
 - func: conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
@@ -1258,6 +1260,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   structured_delegate: copysign.out
+  tags: pointwise
 
 - func: copysign.Scalar(Tensor self, Scalar other) -> Tensor
   variants: function, method
@@ -1269,6 +1272,7 @@
   variants: method
   dispatch:
     CompositeExplicitAutograd: copysign_
+  tags: pointwise
 
 - func: copysign.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -3683,6 +3687,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: xlogy_
+  tags: pointwise
 
 # xlogy: out variant
 - func: xlogy.OutTensor(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -6741,6 +6746,7 @@
   dispatch:
     CPU, CUDA, MPS, MTIA: where_self_out
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_where_out
+  tags: pointwise
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
   variants: function
@@ -8890,6 +8896,7 @@
   dispatch:
     CPU, CUDA, MPS: __irshift__
   autogen: __rshift__.Scalar_out
+  tags: pointwise
 
 - func: __irshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -8897,6 +8904,7 @@
   dispatch:
     CPU, CUDA, MPS: __irshift__
   autogen: __rshift__.Tensor_out
+  tags: pointwise
 
 - func: bitwise_right_shift.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
