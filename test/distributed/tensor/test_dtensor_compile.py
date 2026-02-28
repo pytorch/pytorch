@@ -1760,6 +1760,52 @@ class outer_fn(torch.nn.Module):
         # Test backward pass
         result.sum().backward()
 
+    def test_device_mesh_getitem_export(self):
+        """
+        Repro for the issue where DeviceMesh.__getitem__ (registered as
+        MemberType.INLINED on the opaque type) produces a call_method node
+        in the dynamo graph. When aot_export_joint_with_descriptors later
+        re-traces this graph with make_fx, the FX interpreter executes the
+        real __getitem__ inside proxy-tensor tracing, which fails because
+        _create_sub_mesh -> DeviceMesh.__init__ -> self.mesh does
+        data-dependent tensor operations (nonzero + scalar indexing).
+        """
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+
+        mesh_2d = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
+
+        param = torch.randn(4, 4)
+        param_dt = DTensor.from_local(
+            param, mesh_2d, [Shard(0), Replicate()], run_check=False
+        )
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(param_dt)
+
+            def forward(self, x):
+                tp_mesh = self.weight._spec.mesh["tp"]
+                local_w = self.weight.to_local()
+                y = DTensor.from_local(local_w, tp_mesh, [Shard(0)], run_check=False)
+                return x + y.to_local()
+
+        m = Model()
+        inp = (torch.randn(4, 4),)
+
+        gm = dynamo_graph_capture_for_export(m)(*inp)
+        tracing_context = gm.meta.get("tracing_context", None)
+
+        with tracing(tracing_context):
+            with ExitStack() as stack:
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    inp,
+                )
+                self.assertIsNotNone(joint_with_descriptors.graph_module)
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
