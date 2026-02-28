@@ -3827,6 +3827,50 @@ def lstm_data_impl(
 ):
     if len(hx) != 2:
         raise AssertionError(f"lstm expects two hidden states, got {len(hx)}")
+
+    h_0, c_0 = hx[0], hx[1]
+    num_directions = 2 if bidirectional else 1
+    expected_first_dim = num_layers * num_directions
+
+    # Validate tensor dimensions
+    if h_0.dim() != 3:
+        raise RuntimeError(f"hx[0] must be 3D tensor, got {h_0.dim()}D tensor")
+    if c_0.dim() != 3:
+        raise RuntimeError(f"hx[1] must be 3D tensor, got {c_0.dim()}D tensor")
+
+    # Validate first dimension matches num_layers * num_directions
+    if h_0.size(0) != expected_first_dim:
+        raise RuntimeError(
+            f"hx[0] first dimension must be {expected_first_dim} (num_layers * num_directions), "
+            f"got {h_0.size(0)}"
+        )
+    if c_0.size(0) != expected_first_dim:
+        raise RuntimeError(
+            f"hx[1] first dimension must be {expected_first_dim} (num_layers * num_directions), "
+            f"got {c_0.size(0)}"
+        )
+
+    # Validate batch sizes match for each layer
+    if h_0.size(1) != c_0.size(1):
+        raise RuntimeError(
+            f"hx[0] and hx[1] must have the same batch size (dim 1), "
+            f"got {h_0.size(1)} and {c_0.size(1)}"
+        )
+
+    # Validate batch size compatibility with batch_sizes
+    if len(batch_sizes) > 0:
+        first_batch_size = int(batch_sizes[0])
+        if h_0.size(1) < first_batch_size:
+            raise RuntimeError(
+                f"hx[0] batch size ({h_0.size(1)}) must be >= first batch_size "
+                f"({first_batch_size})"
+            )
+        if c_0.size(1) < first_batch_size:
+            raise RuntimeError(
+                f"hx[1] batch size ({c_0.size(1)}) must be >= first batch_size "
+                f"({first_batch_size})"
+            )
+
     params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
     hidden = list(zip(hx[0], hx[1]))
     out, final_hiddens = _rnn_helper(

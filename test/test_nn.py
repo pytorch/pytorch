@@ -3965,6 +3965,146 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         hidden_c_shape = update_shape(correct_hidden_c_shape, 0, bad_size)
         test(input_shape, hidden_h_shape, hidden_c_shape)
 
+    def test_lstm_data_invalid_shapes(self):
+        """Test that lstm.data raises RuntimeError for invalid hidden state shapes
+        instead of segfaulting. This tests the validation added to prevent
+        issue #173946. Tests both C++ native path and Python decomposition path.
+        """
+        from torch._dispatch.python import enable_python_dispatcher
+
+        input_size = 8
+        hidden_size = 8
+        num_layers = 3
+        bidirectional = False
+        num_directions = 2 if bidirectional else 1
+        expected_first_dim = num_layers * num_directions
+
+        def create_params(device):
+            w_ih = torch.randn(4 * hidden_size, input_size, dtype=torch.float32, device=device)
+            w_hh = torch.randn(4 * hidden_size, hidden_size, dtype=torch.float32, device=device)
+            return [w_ih, w_hh] * num_layers
+
+        def test_invalid_shape(h_0_shape, c_0_shape, expected_error_msg, device, use_python_dispatcher=False):
+            """Test invalid shape on either C++ path or Python decomposition path."""
+            data = torch.randn(10, input_size, dtype=torch.float32, device=device)
+            batch_sizes = torch.tensor([10], dtype=torch.int64, device="cpu")
+            h_0 = torch.randn(*h_0_shape, dtype=torch.float32, device=device)
+            c_0 = torch.randn(*c_0_shape, dtype=torch.float32, device=device)
+            hx = [h_0, c_0]
+            params = create_params(device)
+
+            context = enable_python_dispatcher() if use_python_dispatcher else contextlib.nullcontext()
+            with context:
+                with self.assertRaisesRegex(RuntimeError, expected_error_msg):
+                    torch.ops.aten.lstm.data(
+                        data,
+                        batch_sizes,
+                        hx,
+                        params,
+                        False,  # has_biases
+                        num_layers,
+                        0.0,  # dropout
+                        False,  # train
+                        bidirectional,
+                    )
+
+        # Test on both CPU and CUDA if available
+        devices = ["cpu"]
+        if TEST_CUDA:
+            devices.append("cuda:0")
+
+        # Test both C++ native path and Python decomposition path
+        for use_python_path in [False, True]:
+            for device in devices:
+                # Test 1: h_0 has wrong first dimension (4 instead of 3)
+                test_invalid_shape(
+                    (4, 1, 1),
+                    (3, 1, 8),
+                    f"hx\\[0\\] first dimension must be {expected_first_dim}",
+                    device,
+                    use_python_dispatcher=use_python_path,
+                )
+
+                # Test 2: c_0 has wrong first dimension (2 instead of 3)
+                test_invalid_shape(
+                    (3, 1, 8),
+                    (2, 1, 8),
+                    f"hx\\[1\\] first dimension must be {expected_first_dim}",
+                    device,
+                    use_python_dispatcher=use_python_path,
+                )
+
+                # Test 3: h_0 and c_0 have mismatched batch sizes
+                test_invalid_shape(
+                    (3, 1, 8),
+                    (3, 2, 8),
+                    "hx\\[0\\] and hx\\[1\\] must have the same batch size",
+                    device,
+                    use_python_dispatcher=use_python_path,
+                )
+
+                # Test 4: h_0 batch size too small for batch_sizes
+                test_invalid_shape(
+                    (3, 5, 8),  # batch size 5
+                    (3, 5, 8),
+                    "hx\\[0\\] batch size \\(5\\) must be >= first batch_size \\(10\\)",
+                    device,
+                    use_python_dispatcher=use_python_path,
+                )
+
+                # Test 5: Batch size too small for batch_sizes
+                # Note: Both h_0 and c_0 must have same batch size to pass the mismatch check,
+                # then we can test that the batch size is too small. h_0 is checked first.
+                test_invalid_shape(
+                    (3, 5, 8),  # batch size 5
+                    (3, 5, 8),  # batch size 5, but need 10
+                    "hx\\[0\\] batch size \\(5\\) must be >= first batch_size \\(10\\)",
+                    device,
+                    use_python_dispatcher=use_python_path,
+                )
+
+                # Test 6: h_0 is not 3D
+                h_0_2d = torch.randn(3, 8, dtype=torch.float32, device=device)
+                c_0_3d = torch.randn(3, 1, 8, dtype=torch.float32, device=device)
+                data = torch.randn(10, input_size, dtype=torch.float32, device=device)
+                batch_sizes = torch.tensor([10], dtype=torch.int64, device="cpu")
+                params = create_params(device)
+                context = enable_python_dispatcher() if use_python_path else contextlib.nullcontext()
+                with context:
+                    with self.assertRaisesRegex(RuntimeError, "hx\\[0\\] must be 3D tensor"):
+                        torch.ops.aten.lstm.data(
+                            data, batch_sizes, [h_0_2d, c_0_3d], params,
+                            False, num_layers, 0.0, False, bidirectional
+                        )
+
+                # Test 7: c_0 is not 3D
+                h_0_3d = torch.randn(3, 1, 8, dtype=torch.float32, device=device)
+                c_0_2d = torch.randn(3, 8, dtype=torch.float32, device=device)
+                context = enable_python_dispatcher() if use_python_path else contextlib.nullcontext()
+                with context:
+                    with self.assertRaisesRegex(RuntimeError, "hx\\[1\\] must be 3D tensor"):
+                        torch.ops.aten.lstm.data(
+                            data, batch_sizes, [h_0_3d, c_0_2d], params,
+                            False, num_layers, 0.0, False, bidirectional
+                        )
+
+                # Test 8: Bidirectional case - wrong first dimension
+                bidirectional_bidir = True
+                expected_first_dim_bidir = num_layers * 2
+                data_bidir = torch.randn(10, input_size, dtype=torch.float32, device=device)
+                batch_sizes_bidir = torch.tensor([10], dtype=torch.int64, device="cpu")
+                h_0_bidir = torch.randn(5, 1, 8, dtype=torch.float32, device=device)  # Should be 6 (3 * 2)
+                c_0_bidir = torch.randn(6, 1, 8, dtype=torch.float32, device=device)
+                hx_bidir = [h_0_bidir, c_0_bidir]
+                params_bidir = create_params(device)
+                context = enable_python_dispatcher() if use_python_path else contextlib.nullcontext()
+                with context:
+                    with self.assertRaisesRegex(RuntimeError, f"hx\\[0\\] first dimension must be {expected_first_dim_bidir}"):
+                        torch.ops.aten.lstm.data(
+                            data_bidir, batch_sizes_bidir, hx_bidir, params_bidir,
+                            False, num_layers, 0.0, False, bidirectional_bidir
+                        )
+
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_rnn_check_device(self):
         import copy
