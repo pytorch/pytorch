@@ -93,15 +93,9 @@ runs:
         echo "AWS_REGION=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
         echo "AWS_DEFAULT_REGION=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
 
-    # Ensure region is set for ECR login (amazon-ecr-login reads from env, not inputs)
-    - name: Set AWS region for ECR login
-      shell: bash
-      run: |
-        echo "AWS_REGION=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
-        echo "AWS_DEFAULT_REGION=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
-
-    # Primary ECR login - works with both OIDC and instance profile credentials.
-    # Region is passed via AWS_REGION/AWS_DEFAULT_REGION (set above from inputs.aws-region).
+    # Log in to ECR. Region comes from env: set by configure-aws-credentials (OIDC)
+    # or by the step above (instance profile). aws-actions/amazon-ecr-login does
+    # not accept aws-region as an input; it uses AWS_REGION from the environment.
     - name: Log in to ECR
       id: ecr-login
       uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
