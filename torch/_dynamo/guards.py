@@ -1911,9 +1911,7 @@ class GuardBuilder(GuardBuilderBase):
             attr_source = AttrSource(source, attr)
             example_value = self.get(attr_source)
             base_example_value = self.get(guard)
-            guard_manager_enum = self.get_guard_manager_type(
-                attr_source, example_value
-            )
+            guard_manager_enum = self.get_guard_manager_type(attr_source, example_value)
 
             # if the base value is nn.Module, check if we can speedup the
             # guard by going through __dict__ attrs.
