@@ -874,6 +874,9 @@ always_keep_tensor_constants = False
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
 
+# skip emitting runtime assertions for unbacked symbols in generated code
+do_not_emit_runtime_assertions = False
+
 # compute CSE bounds on variables that do not appear in the FX graph
 compute_all_bounds = False
 
