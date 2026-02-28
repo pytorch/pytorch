@@ -1102,6 +1102,33 @@ Stack (TOS at end):
 
         InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
 
+    def test_quit_suppresses_return_messages(self):
+        """Test that 'q' exits without printing return messages for each frame."""
+        from torch._dynamo.resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            y = x + 1
+            torch._dynamo.graph_break()
+            return y + 2
+
+        def test_logic(sess, initial):
+            self.assertIn("Entering Dynamo-generated code: fn", initial)
+            # Step into the resume function so multiple frames are active
+            output = initial
+            while (
+                "Entering Dynamo-generated code: " + TORCH_DYNAMO_RESUME_IN_PREFIX
+                not in output
+            ):
+                output = yield "s"
+
+            # Quit from inside the resume function
+            final = yield "q"
+            self.assertNotIn("returned:", final)
+            self.assertNotIn("Exception raised", final)
+
+        InteractiveDebugSession(fn, (torch.randn(3),), test_logic)
+
     def test_step_from_upper_frame(self):
         """Test that 's' from an upper frame steps the inner (execution) frame."""
         from torch._dynamo.resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX

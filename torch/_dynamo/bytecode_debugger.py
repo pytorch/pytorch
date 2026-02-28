@@ -151,6 +151,7 @@ class _DebugContext:
         self._next_count: int = 0
         self._verbose: bool = False
         self._stop_at_new_code: bool = True
+        self._quitting: bool = False
         if _HAS_SYS_MONITORING:
             self._tool_id = sys.monitoring.DEBUGGER_ID
 
@@ -442,6 +443,7 @@ class _DebugContext:
                 cmd = input("(bdb) ").strip()
             except (EOFError, KeyboardInterrupt):
                 print("\nExiting debugger.")
+                self._quitting = True
                 raise KeyboardInterrupt from None
 
             if not cmd:
@@ -690,6 +692,7 @@ class _DebugContext:
 
             elif action in ("q", "quit", "exit"):
                 print("Exiting debugger.")
+                self._quitting = True
                 raise KeyboardInterrupt
 
             else:
@@ -843,6 +846,8 @@ class _DebugContext:
         self, code: types.CodeType, retval: object, frame: types.FrameType | None = None
     ) -> None:
         """Common return handling logic."""
+        if self._quitting:
+            return
         print(f"\n=== {code.co_name} returned: {retval!r} ===")
 
         # For sys.monitoring, we don't get the frame directly, but since
@@ -879,6 +884,8 @@ class _DebugContext:
         self, code: types.CodeType, offset: int, exception: BaseException
     ) -> None:
         """Common exception handling logic."""
+        if self._quitting:
+            return
         frame = self._find_frame_for_code(code)
         if frame is None:
             return
