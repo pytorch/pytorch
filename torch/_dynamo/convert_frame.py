@@ -50,7 +50,7 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, NoReturn, TypeVar
+from typing import Any, NoReturn, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -173,7 +173,7 @@ from .utils import (
 from .variables.torch_function import torch_function_mode_stack_state_mgr
 
 
-np: ModuleType | None
+np: Optional[ModuleType]
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -208,7 +208,7 @@ class TODO_UNKNOWN:
 
 
 def _clear_fake_mode_weakrefs(
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode | None,
+    fake_mode: Optional[torch._subclasses.fake_tensor.FakeTensorMode],
 ) -> None:
     """Clear WeakIdRef entries from a FakeTensorMode's describer."""
     if fake_mode is None:
@@ -241,12 +241,12 @@ class Tracker:
 input_codes = Tracker()
 output_codes = Tracker()
 
-initial_global_state: GlobalStateGuard | None = None
+initial_global_state: Optional[GlobalStateGuard] = None
 
 
 @functools.wraps(original_forward_from_src)
 def fx_forward_from_src_skip_result(
-    src: str, globals: dict[str, Any], co_fields: dict[str, str] | None = None
+    src: str, globals: dict[str, Any], co_fields: Optional[dict[str, str]] = None
 ) -> FunctionType:
     # we monkey patch FX to prevent infinite loop of trying to convert
     # our generated code
@@ -455,7 +455,7 @@ def has_tensor_in_frame(frame: DynamoFrameType) -> bool:
 def exception_handler(
     e: Exception,
     code: CodeType,
-    frame: DynamoFrameType | None = None,
+    frame: Optional[DynamoFrameType] = None,
     export: bool = False,
 ) -> None:
     record_filename = None
@@ -468,7 +468,9 @@ def exception_handler(
 
 
 FRAME_COUNTER = 0
-FRAME_COMPILE_COUNTER: typing.Counter[int | FrameStateSizeEntry] = collections.Counter()
+FRAME_COMPILE_COUNTER: typing.Counter[Union[int, FrameStateSizeEntry]] = (
+    collections.Counter()
+)
 
 
 def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -554,11 +556,11 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
 
 @dataclass
 class ConvertFrameBox:
-    error_on_graph_break: bool | None = None
+    error_on_graph_break: Optional[bool] = None
 
 
 def get_compile_id(
-    frame_state: dict[str, int | FrameStateSizeEntry],
+    frame_state: dict[str, Union[int, FrameStateSizeEntry]],
 ) -> CompileId:
     global FRAME_COUNTER
     if "_id" not in frame_state:
@@ -610,9 +612,9 @@ class ConvertFrameAssert:
     def __call__(
         self,
         frame: DynamoFrameType,
-        cache_entry: CacheEntry | None,
+        cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: dict[str, int | FrameStateSizeEntry],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
     ) -> ConvertFrameReturn:
@@ -761,7 +763,7 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints: Any | None = None,
-    package: CompilePackage | None = None,
+    package: Optional[CompilePackage] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph, raising an exception if we fail."""
     return ConvertFrameAssert(
@@ -807,9 +809,9 @@ def trace_frame(
     *,
     export: bool = False,
     export_constraints: Any | None = None,
-    frame_state: dict[str, int | FrameStateSizeEntry] | None = None,
-    distributed_state: DistributedState | None = None,
-    package: CompilePackage | None = None,
+    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    distributed_state: Optional[DistributedState] = None,
+    package: Optional[CompilePackage] = None,
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
@@ -887,14 +889,14 @@ class DynamoOutput:
 
     tracer_output: DynamoTracerOutput
     bytecode: types.CodeType
-    last_attempt_start_time: float | None
+    last_attempt_start_time: Optional[float]
 
     def build_guards(
         self,
         code: types.CodeType,
-        hooks: Hooks | None = None,
+        hooks: Optional[Hooks] = None,
         save: bool = False,
-        cache_entry: CacheEntry | None = None,
+        cache_entry: Optional[CacheEntry] = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
         output_graph = self.tracer_output.output_graph
@@ -911,8 +913,8 @@ class DynamoOutput:
 
     def graph_capture_output(
         self,
-        argdefs: tuple[Any, ...] | None = None,
-        kwdefaults: dict[str, Any] | None = None,
+        argdefs: Optional[tuple[Any, ...]] = None,
+        kwdefaults: Optional[dict[str, Any]] = None,
     ) -> GraphCaptureOutput:
         output_graph = self.tracer_output.output_graph
         assert output_graph is not None
@@ -957,9 +959,9 @@ class GraphRuntimeEnv:
     bytecode: types.CodeType
     import_sources: dict[str, str]
     used_globals: dict[str, Any]
-    closure: tuple[Any, ...] | None
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None = None
+    closure: Optional[tuple[Any, ...]]
+    argdefs: Optional[tuple[Any, ...]]
+    kwdefaults: Optional[dict[str, Any]] = None
     external_refs: set[str] = dataclasses.field(default_factory=set)
 
     def forward_callable(
@@ -967,7 +969,7 @@ class GraphRuntimeEnv:
         backend_id: str,
         compiled_fn: Callable[..., Any],
         *,
-        extra_globals: dict[str, Any] | None = None,
+        extra_globals: Optional[dict[str, Any]] = None,
     ) -> Callable[..., Any]:
         import_sources = {
             alias: importlib.import_module(module_name)
@@ -1017,17 +1019,17 @@ class GraphCaptureOutput:
     import_sources: dict[str, str]
     traced_code: list[CodeType]
     bytecode: CodeType
-    closure: tuple[Any, ...] | None
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None
+    closure: Optional[tuple[Any, ...]]
+    argdefs: Optional[tuple[Any, ...]]
+    kwdefaults: Optional[dict[str, Any]]
     f_globals: dict[str, Any]
 
     def build_guards(
         self,
         code: types.CodeType,
-        hooks: Hooks | None = None,
+        hooks: Optional[Hooks] = None,
         save: bool = False,
-        cache_entry: CacheEntry | None = None,
+        cache_entry: Optional[CacheEntry] = None,
         strict_error: bool = False,
     ) -> CheckFunctionManager:
         return CheckFunctionManager(
@@ -1100,13 +1102,13 @@ class CaptureOutput:
 
     graph_capture_output: GraphCaptureOutput
     # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
-    backend_input: BackendInput | None
+    backend_input: Optional[BackendInput]
 
     def forward_callable(
         self,
         *,
-        compiled_fn: Callable[..., Any] | None = None,
-        extra_globals: dict[str, Any] | None = None,
+        compiled_fn: Optional[Callable[..., Any]] = None,
+        extra_globals: Optional[dict[str, Any]] = None,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
@@ -1119,7 +1121,7 @@ class CaptureOutput:
         )
 
 
-def get_traced_fn(mod: Any) -> tuple[FunctionType, object | None]:
+def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     """
     Utility function to get the function to trace, and optionally a bound self
     object, from a callable (nn.Module, function, or method).
@@ -1175,7 +1177,7 @@ def _get_signature(fn: Any) -> inspect.Signature:
 def _get_frame(
     mod: Any,
     args: tuple[Any, ...],
-    kwargs: dict[str, Any] | None = None,
+    kwargs: Optional[dict[str, Any]] = None,
 ) -> FrameInfo:
     """
     Create a frame to trace, given a model, args, and optional kwargs.
@@ -1215,9 +1217,9 @@ def _get_frame(
 def fullgraph_capture(
     mod: Any,
     args: tuple[Any, ...],
-    kwargs: dict[str, Any] | None = None,
+    kwargs: Optional[dict[str, Any]] = None,
     *,
-    constraints: list[Constraint] | None = None,
+    constraints: Optional[list[Constraint]] = None,
     _is_export_deprecated_do_not_use: bool = False,
 ) -> CaptureOutput:
     """
@@ -1258,19 +1260,19 @@ class FrameInfo:
     locals: dict[str, object]
     builtins: dict[str, object]
     closure: tuple[CellType]
-    argdefs: tuple[Any, ...] | None
-    kwdefaults: dict[str, Any] | None
+    argdefs: Optional[tuple[Any, ...]]
+    kwdefaults: Optional[dict[str, Any]]
 
 
 def _fullgraph_capture_frame(
     frame: FrameInfo,
     *,
-    constraints: list[Constraint] | None = None,
+    constraints: Optional[list[Constraint]] = None,
     _is_export_deprecated_do_not_use: bool = False,
 ) -> CaptureOutput:
     from torch._guards import TracingContext
 
-    backend_input: BackendInput | None = None
+    backend_input: Optional[BackendInput] = None
 
     def fullgraph_compiler(
         gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -1352,9 +1354,9 @@ def compile_frame(  # type: ignore[return]
     *,
     export: bool = False,
     export_constraints: Any | None = None,
-    frame_state: dict[str, int | FrameStateSizeEntry] | None = None,
-    distributed_state: DistributedState | None = None,
-    package: CompilePackage | None = None,
+    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    distributed_state: Optional[DistributedState] = None,
+    package: Optional[CompilePackage] = None,
     # pyrefly: ignore [bad-return]
 ) -> DynamoOutput:
     """
@@ -1460,17 +1462,17 @@ def _compile(
     export: bool,
     export_constraints: Any | None,
     hooks: Hooks,
-    cache_entry: CacheEntry | None,
+    cache_entry: Optional[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
-    frame: DynamoFrameType | None = None,
-    frame_state: dict[str, int | FrameStateSizeEntry] | None = None,
+    frame: Optional[DynamoFrameType] = None,
+    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     *,
     compile_id: CompileId,
     skip: int = 0,
-    package: CompilePackage | None = None,
+    package: Optional[CompilePackage] = None,
     # Can be used to record things for the caller, both
     # in the case of normal and exception code paths
-    convert_frame_box: ConvertFrameBox | None = None,
+    convert_frame_box: Optional[ConvertFrameBox] = None,
 ) -> ConvertFrameReturn:
     from torch.fx.experimental.validator import (
         BisectValidationException,
@@ -1484,7 +1486,7 @@ def _compile(
     @compile_time_strobelight_meta(phase_name="compile_inner")
     def compile_inner(
         code: CodeType, one_graph: bool, hooks: Hooks
-    ) -> tuple[ConvertFrameReturn, DynamoTracerOutput | None]:
+    ) -> tuple[ConvertFrameReturn, Optional[DynamoTracerOutput]]:
         with contextlib.ExitStack() as stack:
             stack.enter_context(
                 torch._dynamo.callback_handler.install_callbacks(
@@ -1706,7 +1708,7 @@ def _compile(
             distributed_state = None
 
         # Check recompilations
-        recompile_reason: str | None = None
+        recompile_reason: Optional[str] = None
         if is_recompilation(cache_size) and frame:
             reasons = get_and_maybe_log_recompilation_reasons(
                 cache_entry, frame, innermost_fn(compiler_fn)
@@ -1832,11 +1834,11 @@ def _compile(
         # torch/_dynamo/convert_frame.py:780 in <lambda>
         stack_trace = log_dynamo_start(code, skip)
         start_time_ns = time.time_ns()
-        fail_type: str | None = None
-        fail_reason: str | None = None
-        exception_stack_trace: list[str] | None = None
-        fail_user_frame_filename: str | None = None
-        fail_user_frame_lineno: int | None = None
+        fail_type: Optional[str] = None
+        fail_reason: Optional[str] = None
+        exception_stack_trace: Optional[list[str]] = None
+        fail_user_frame_filename: Optional[str] = None
+        fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
         tracer_output = None
@@ -2039,7 +2041,7 @@ class ConvertFrame:
         self,
         compiler_fn: CompilerFn,
         hooks: Hooks,
-        package: CompilePackage | None = None,
+        package: Optional[CompilePackage] = None,
     ) -> None:
         self._torchdynamo_orig_backend = compiler_fn
         self._inner_convert = convert_frame_assert(
@@ -2057,9 +2059,9 @@ class ConvertFrame:
     def __call__(
         self,
         frame: DynamoFrameType,
-        cache_entry: CacheEntry | None,
+        cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: dict[str, int | FrameStateSizeEntry],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         skip: int = 0,
     ) -> ConvertFrameReturn:
         input_codes.add(frame.f_code)
@@ -2175,7 +2177,7 @@ class ConvertFrame:
 def convert_frame(
     compiler_fn: CompilerFn,
     hooks: Hooks,
-    package: CompilePackage | None = None,
+    package: Optional[CompilePackage] = None,
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     return ConvertFrame(compiler_fn, hooks, package=package)
@@ -2227,9 +2229,9 @@ class ConvertFrameProtocol(typing.Protocol):
     def __call__(
         self,
         frame: DynamoFrameType,
-        cache_entry: CacheEntry | None,
+        cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: dict[str, int | FrameStateSizeEntry],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
     ) -> ConvertFrameReturn: ...
@@ -2244,8 +2246,8 @@ class CatchErrorsWrapper:
     def __call__(
         self,
         frame: DynamoFrameType,
-        cache_entry: CacheEntry | None,
-        frame_state: dict[str, int | FrameStateSizeEntry],
+        cache_entry: Optional[CacheEntry],
+        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
         input_codes.add(frame.f_code)

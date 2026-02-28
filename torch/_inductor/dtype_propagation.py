@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, Protocol, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -22,7 +22,7 @@ class DTypeVar(Protocol):
     def dtype(self) -> torch.dtype: ...
 
 
-DTypeArg = DTypeVar | torch.types.Number | str | OpsValue
+DTypeArg = Union[DTypeVar, torch.types.Number, str, OpsValue]
 
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
@@ -32,7 +32,7 @@ DTypeArg = DTypeVar | torch.types.Number | str | OpsValue
 @functools.cache
 def get_promoted_dtype(
     *args: Sequence[tuple[torch.dtype, bool]],
-    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
 ):
     def construct_input(inp):
         if inp[1]:
@@ -54,7 +54,7 @@ def get_promoted_dtype(
 
 def promote_types(
     args: Sequence[DTypeArg],
-    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND | None = None,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
 ):
     dtype_prop_candidates = []
 
@@ -188,7 +188,7 @@ class DtypePropagationOpsHandler:
     def to_dtype(
         x: DTypeArg,
         dtype: torch.dtype,
-        src_dtype: torch.dtype | None = None,
+        src_dtype: Optional[torch.dtype] = None,
         use_compute_types=True,
     ) -> torch.dtype:
         return upcast_compute_type(dtype) if use_compute_types else dtype
@@ -248,7 +248,7 @@ class DtypePropagationOpsHandler:
         return dtype
 
     @staticmethod
-    def store(name: str, index, value: DTypeArg, mode: str | None = None) -> None:
+    def store(name: str, index, value: DTypeArg, mode: Optional[str] = None) -> None:
         return None
 
     @staticmethod
@@ -325,8 +325,8 @@ class DtypePropagationOpsHandler:
         boundary_indices: DTypeArg,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: tuple[str, sympy.Expr] | None = None,
-        sorter_indices: T | None = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
     ) -> torch.dtype:
         return indexing_dtype
 

@@ -382,7 +382,7 @@ class ConstDictVariable(VariableTracker):
         )
 
     def is_new_item(
-        self, value: VariableTracker | None, other: VariableTracker
+        self, value: Optional[VariableTracker], other: VariableTracker
     ) -> bool:
         # compare the id of the realized values if both values are not lazy VTs
         if value and value.is_realized() and other.is_realized():
@@ -482,7 +482,7 @@ class ConstDictVariable(VariableTracker):
             )
         return self.items[key]
 
-    def maybe_getitem_const(self, arg: VariableTracker) -> VariableTracker | None:
+    def maybe_getitem_const(self, arg: VariableTracker) -> Optional[VariableTracker]:
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
             return None
@@ -632,7 +632,9 @@ class ConstDictVariable(VariableTracker):
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
-            self.install_dict_keys_match_guard()
+            # No dict guard needed here - we already guard on args[0], and
+            # lazy dict guarding will insert len/dict_keys_match guards
+            # elsewhere if needed.
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
                     tx,
@@ -1041,7 +1043,7 @@ class DefaultDictVariable(ConstDictVariable):
         self,
         items: dict[VariableTracker, VariableTracker],
         user_cls: type,
-        default_factory: VariableTracker | None = None,
+        default_factory: Optional[VariableTracker] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(items, user_cls, **kwargs)
@@ -1716,7 +1718,7 @@ class DictViewVariable(VariableTracker):
     This is an "abstract" class. Subclasses will override kv and the items method
     """
 
-    kv: str | None = None
+    kv: Optional[str] = None
 
     def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
         super().__init__(**kwargs)

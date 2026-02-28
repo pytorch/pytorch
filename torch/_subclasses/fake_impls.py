@@ -6,7 +6,7 @@ import math
 import operator
 import sys
 from functools import reduce
-from typing import Any, cast as typing_cast, TYPE_CHECKING, TypeVar
+from typing import Any, cast as typing_cast, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from torch.types import IntLikeType
 
 
-FakeTensorLike = FakeTensor | torch.Tensor
+FakeTensorLike = Union[FakeTensor, torch.Tensor]
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 _T = TypeVar("_T")
