@@ -1310,10 +1310,12 @@ class _ContextParallel(ParallelStyle):
         self,
         seq_dim: int,
         attention_type: AttentionType,
+        tp_mesh: DeviceMesh | None = None,
     ) -> None:
         super().__init__()
         self.seq_dim = seq_dim
         self.attention_type = attention_type
+        self.tp_mesh = tp_mesh
 
     def _apply(self, module: nn.Module, mesh: DeviceMesh) -> nn.Module:
         if self.attention_type == self.AttentionType.FLEX:
@@ -1374,7 +1376,26 @@ class _ContextParallel(ParallelStyle):
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, torch.Tensor):
                 if isinstance(arg, DTensor):
-                    assert arg._spec.placements == placement
+                    if arg.device_mesh == mesh:
+                        # CP DTensor — existing check
+                        assert arg._spec.placements == tuple(placement), (
+                            placement,
+                            arg._spec.placements,
+                        )
+                    else:
+                        # TP DTensor — strip TP wrapper, wrap as CP DTensor
+                        assert (
+                            self.tp_mesh is not None and arg.device_mesh == self.tp_mesh
+                        ), (
+                            f"Expected DTensor on tp_mesh {self.tp_mesh}, "
+                            f"got mesh {arg.device_mesh}"
+                        )
+                        assert arg._spec.placements == (Shard(1),), (
+                            f"Expected TP DTensor with Shard(1), got {arg._spec.placements}"
+                        )
+                        arg = DTensor.from_local(
+                            arg.to_local(), mesh, placement, run_check=False
+                        )
                 else:
                     arg = DTensor.from_local(arg, mesh, placement, run_check=False)
 
@@ -1389,7 +1410,12 @@ class _ContextParallel(ParallelStyle):
     ) -> Any:
         new_outputs = []
         for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
-            output = output.to_local() if isinstance(output, DTensor) else output
+            if isinstance(output, DTensor):
+                output = output.to_local()
+            if self.tp_mesh is not None and isinstance(output, torch.Tensor):
+                output = DTensor.from_local(
+                    output, self.tp_mesh, [Shard(1)], run_check=False
+                )
             new_outputs.append(output)
 
         if isinstance(outputs, torch.Tensor):
