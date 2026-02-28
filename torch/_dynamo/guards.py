@@ -1057,7 +1057,7 @@ def check_closure(value: Any, expected: Any) -> bool:
     return id(value) == expected
 
 
-def guard_check_spec(
+def register_guard_check_spec(
     extract,
     check,
 ):
@@ -1979,7 +1979,7 @@ class GuardBuilder(GuardBuilderBase):
 
     # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: (
             guard.create_fn.keywords["attr"],
             hasattr(value, guard.create_fn.keywords["attr"]),
@@ -2043,7 +2043,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         self.already_added_code_parts.add(code)
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: guard.create_fn.keywords["attr"],
         check=lambda value, expected: expected not in value.__dict__,
     )
@@ -2075,7 +2075,7 @@ class GuardBuilder(GuardBuilderBase):
         )
         self.already_added_code_parts.add(code)
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: type(value),
         check=lambda value, expected: type(value) is expected,
     )
@@ -2120,7 +2120,7 @@ class GuardBuilder(GuardBuilderBase):
             val, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: (
             guard.create_fn.keywords["key"],
             guard.create_fn.keywords["invert"],
@@ -2201,7 +2201,7 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard), guard.user_stack
         )
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: value,
         check=lambda value, expected: value is expected,
     )
@@ -2405,7 +2405,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: value,
         check=lambda value, expected: value == expected,
     )
@@ -2521,7 +2521,7 @@ class GuardBuilder(GuardBuilderBase):
         self._set_guard_export_info(guard, code)
         return
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: value,
         check=lambda value, expected: value == expected,
     )
@@ -2563,7 +2563,7 @@ class GuardBuilder(GuardBuilderBase):
         # don't support this in serialization because it uses unsupported ID_MATCH
         return self.ID_MATCH(guard)
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: value,
         check=lambda value, expected: value is expected,
     )
@@ -2586,7 +2586,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         self.id_match_unchecked(guard)
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=extract_closure,
         check=check_closure,
     )
@@ -2612,7 +2612,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
         return self.id_match_unchecked(guard)
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: len(value),
         check=lambda value, expected: len(value) == expected,
     )
@@ -2786,7 +2786,7 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self.guard_on_dict_keys_and_ignore_order(value, guard)
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: None,
         check=lambda value, expected: len(value) == 0,
     )
@@ -3103,7 +3103,7 @@ class GuardBuilder(GuardBuilderBase):
                 closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
             )
 
-    @guard_check_spec(
+    @register_guard_check_spec(
         extract=lambda guard, value: extract_tensor_metadata(value),
         check=lambda value, expected: (
             isinstance(value, torch.Tensor)
