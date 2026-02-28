@@ -1,8 +1,7 @@
 import torch
 from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
 from torch.fx.experimental.symbolic_shapes import (
-    has_hint,
-    size_hint,
+    optimization_hint,
     statically_known_true,
 )
 from torch.utils._ordered_set import OrderedSet
@@ -121,12 +120,9 @@ def get_num_bytes(t: torch.Tensor) -> int:
     """
     real_numel = 1
     for size, stride in zip(t.shape, t.stride()):
-        if not has_hint(size) or not has_hint(stride):
-            return 0
-
         # For dims with stride=0 (expanded/broadcast), only 1 element accessed
         if not statically_known_true(stride == 0):
-            real_numel *= size_hint(size)
+            real_numel *= optimization_hint(size, fallback=0)
 
     return real_numel * t.element_size()
 

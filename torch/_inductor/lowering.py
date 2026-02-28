@@ -4123,7 +4123,6 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         None,
         check=check,
     )
-
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
 

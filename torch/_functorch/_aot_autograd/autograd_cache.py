@@ -52,7 +52,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.fx.experimental.symbolic_shapes import size_hint
+from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 from torch.fx.node import Node
 from torch.utils._triton import has_triton_package
 
@@ -986,7 +986,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             remote_cache = AOTAutogradCache.get_remote_cache()
 
         symints = AOTAutogradCache._filter_backed_symints(args)
-        hints = [size_hint(s) for s in symints]
+        hints = [guarding_hint_or_throw(s) for s in symints]
         entry = None
         pickled_content = None
         try:

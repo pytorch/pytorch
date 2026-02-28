@@ -70,6 +70,7 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
+from torch.fx.experimental._size_hinting import _sympy_subs
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
@@ -1175,24 +1176,7 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
     When the passed replacement symbol v is a string, it is converted to a symbol with name v that
     have the same replaced expression integer and nonnegative properties.
     """
-
-    def to_symbol(
-        replaced: sympy.Expr, replacement: Union[sympy.Expr, str]
-    ) -> sympy.Symbol:
-        assert isinstance(replaced, sympy.Expr)
-        if isinstance(replacement, str):
-            return sympy.Symbol(
-                replacement,
-                integer=replaced.is_integer,  # type: ignore[attr-defined]
-                nonnegative=replaced.is_nonnegative,  # type: ignore[attr-defined]
-            )
-        else:
-            return replacement
-
-    # xreplace is faster than subs, but is way more picky
-    return sympy.sympify(expr).xreplace(
-        {k: to_symbol(k, v) for k, v in replacements.items()}
-    )
+    return _sympy_subs(expr, replacements)
 
 
 def is_symbolic(a: Any) -> TypeGuard[Union[torch.SymInt, torch.Tensor]]:
@@ -3484,7 +3468,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
 
     int_max = torch.iinfo(torch.int32).max
     guarding_hint_or_throw = V.graph.sizevars.guarding_hint_or_throw
-    has_hint = V.graph.sizevars.shape_env.has_hint
+    has_guarding_hint = V.graph.sizevars.shape_env.has_guarding_hint
 
     if config.assume_32bit_indexing:
         V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
@@ -3515,7 +3499,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
             return False
 
     # Otherwise, the hint MUST exist and be in range
-    return has_hint(e) and guarding_hint_or_throw(e) <= int_max
+    return has_guarding_hint(e) and guarding_hint_or_throw(e) <= int_max
 
 
 def set_tracing_context_output_strides(

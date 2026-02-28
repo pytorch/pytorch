@@ -95,7 +95,7 @@ class SymNode:
         expr,
         shape_env,
         pytype,
-        hint: Optional[Union[int, float, bool]],
+        hint: HintType | object,
         constant=None,
         fx_node=None,
         optimized_summation=False,
@@ -216,32 +216,6 @@ class SymNode:
 
     def has_hint(self):
         return self._hint is not None
-
-    def require_hint(self, fallback=None):
-        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-
-        if self._hint is None:
-            if fallback is not None:
-                # Say we have some expr like 2*u0 + s0
-                # The hint will be None, since the expr contains at least 1 unbacked.
-                # We will:
-                # - replace every backed free symbol with its corresponding hint
-                # - replace every unbacked free symbol with the fallback
-                # - regenerate the expression with those symbol replacements
-                # Note: this is not really complete either, since right now
-                # this logic does not take into account any value ranges
-                # for the unbacked symints, we may need to beef it up at some point.
-                unbacked_symbols = free_unbacked_symbols(self.expr)
-                replacements = {
-                    s: fallback
-                    if s in unbacked_symbols
-                    else self.shape_env.backed_var_to_val[s]
-                    for s in self.expr.free_symbols
-                }
-                return int(self.expr.xreplace(replacements))
-            # NB: we expect this to raise
-            return self.shape_env.size_hint(self.expr)
-        return self._hint
 
     def maybe_as_int(self):
         if self.expr.is_number:
@@ -523,7 +497,7 @@ class SymNode:
         out = sympy.Add(*exprs)
 
         size_hints = []
-        out_hint = None
+        out_hint: object = _NO_HINT
         for a in args:
             if a.hint is None:
                 break
