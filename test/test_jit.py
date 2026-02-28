@@ -165,7 +165,8 @@ def doAutodiffCheck(testname):
     if "test_t_" in testname or testname == "test_t":
         return False
 
-    assert GRAPH_EXECUTOR
+    if not GRAPH_EXECUTOR:
+        raise AssertionError("GRAPH_EXECUTOR is not set")
     if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
         return False
 
@@ -209,7 +210,8 @@ def doAutodiffCheck(testname):
     return testname not in test_exceptions
 
 
-assert GRAPH_EXECUTOR
+if not GRAPH_EXECUTOR:
+    raise AssertionError("GRAPH_EXECUTOR is not set")
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
@@ -976,7 +978,8 @@ class TestJit(JitTestCase):
                 return x
 
         m = torch.jit.script(Seq())
-        assert m.graph  # ensure jit was able to compile
+        if not m.graph:
+            raise AssertionError("jit was unable to compile")  # ensure jit was able to compile
 
     def test_ModuleList(self):
         class Mod(nn.Module):
@@ -993,7 +996,8 @@ class TestJit(JitTestCase):
                 return v
 
         m = torch.jit.script(Mod())
-        assert m.graph  # ensure jit was able to compile
+        if not m.graph:
+            raise AssertionError("jit was unable to compile")  # ensure jit was able to compile
 
     def test_disabled(self):
         torch.jit._state.disable()
@@ -1827,8 +1831,10 @@ graph(%Ra, %Rb):
                         o_ref = t(x_ref, p, train)
                         o.sum().backward()
                         o_ref.sum().backward()
-                        assert o.equal(o_ref)
-                        assert x.grad.equal(x_ref.grad)
+                        if not o.equal(o_ref):
+                            raise AssertionError(f"Output mismatch: {o} vs {o_ref}")
+                        if not x.grad.equal(x_ref.grad):
+                            raise AssertionError(f"Grad mismatch: {x.grad} vs {x_ref.grad}")
 
     @slowTest
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, 'Testing differentiable graph')
@@ -3420,7 +3426,7 @@ class TestScript(JitTestCase):
                 super().__init__()
                 self.foo = torch.jit.Attribute(0.1, float)
                 # we should be able to use self.foo as a float here
-                assert 0.0 < self.foo
+                assert 0.0 < self.foo  # noqa: S101
         M()
 
     def test_scriptable_fn_as_attr(self):
@@ -4314,20 +4320,20 @@ def foo(x):
             a = SomeClass()
             a_copy = a
             a += 20
-            assert a is a_copy
+            assert a is a_copy  # noqa: S101
             b = SomeOutOfPlaceClass()
             b_copy = b
             b += 99
-            assert b is b_copy
+            assert b is b_copy  # noqa: S101
             c = [1, 2, 3]
             c_copy = c
             c *= 2
-            assert c is c_copy
+            assert c is c_copy  # noqa: S101
             c += [4, 5, 6]
             d = torch.ones(2, 2)
             d_copy = d
             d += torch.ones(2, 2)
-            assert d is d_copy
+            assert d is d_copy  # noqa: S101
             return a, b, c, d
 
         self.checkScript(fn2, [])
@@ -5872,7 +5878,7 @@ a")
                 m = x if not z else y
             while x < y > z:
                 q = x
-            assert 1 == 1, "hello"
+            assert 1 == 1, "hello"  # noqa: S101
             return x
 
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
@@ -6265,7 +6271,7 @@ a")
         @torch.jit.script
         def test(x, y):
             # type: (Optional[int], Optional[int]) -> int
-            assert x is not None and y is not None
+            assert x is not None and y is not None  # noqa: S101
             return x + y
 
         self.assertEqual(test(2, 2), 4)
@@ -7654,7 +7660,7 @@ dedent """
 
         @torch.jit.script
         def foo(x: Any):
-            assert isinstance(x, Dict[str, torch.Tensor])
+            assert isinstance(x, Dict[str, torch.Tensor])  # noqa: S101
 
         foo({"1": torch.tensor(3)})
         with self.assertRaises(Exception):
@@ -7899,13 +7905,13 @@ dedent """
                 if y == 1:
                     x = 5
                     break
-                    assert 1 == 2
+                    assert 1 == 2  # noqa: S101
                 else:
                     x = x + 1
                     break
-                    assert 1 == 2
+                    assert 1 == 2  # noqa: S101
                 x = -30
-                assert 1 == 2
+                assert 1 == 2  # noqa: S101
             return x
 
         self.checkScript(assign_after_break_nested, (1,))
@@ -7976,7 +7982,7 @@ dedent """
                     break
                 a -= 1
                 break
-                assert 1 == 2
+                assert 1 == 2  # noqa: S101
                 a -= -100
             return a
 
@@ -8274,9 +8280,11 @@ dedent """
                 for n in jit_graph.nodes()
                 if isinstance(n.output().type(), torch.TensorType)
             )
-            assert isinstance(node.output().type(), torch.TensorType)
+            if not isinstance(node.output().type(), torch.TensorType):
+                raise AssertionError(f"Expected TensorType, got {type(node.output().type())}")
             t = node.t("value")
-            assert isinstance(t, torch.Tensor)
+            if not isinstance(t, torch.Tensor):
+                raise AssertionError(f"Expected torch.Tensor, got {type(t)}")
             self.assertEqual(t.dtype, dtype)
             self.assertEqual(t.item(), value)
 
@@ -11521,7 +11529,8 @@ dedent """
         empty_tuple_type = torch._C.TupleType([])
         g = {'Tuple' : typing.Tuple}
         python_type = eval(empty_tuple_type.annotation_str, g)
-        assert python_type is typing.Tuple[()]
+        if python_type is not typing.Tuple[()]:
+            raise AssertionError(f"Expected Tuple[()], got {python_type}")
 
     def test_tuple_str(self):
         tuple1_type = torch._C.TupleType([torch._C.StringType.get()])
@@ -11537,7 +11546,8 @@ dedent """
         none_type = torch._C.NoneType.get()
         g = {'NoneType' : type(None)}
         python_type = eval(none_type.annotation_str, g)
-        assert python_type is type(None)
+        if python_type is not type(None):
+            raise AssertionError(f"Expected NoneType, got {python_type}")
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_zip_enumerate_modulelist(self):
@@ -12831,7 +12841,8 @@ dedent """
 
         for i, offset in enumerate(parsed_serialized_offsets):
             data = reader.get_record(str(offset))
-            assert data == buffers[i]
+            if data != buffers[i]:
+                raise AssertionError(f"Record mismatch at offset {offset}: {data} != {buffers[i]}")
 
     def test_file_reader_no_memory_leak(self):
         num_iters = 10000
@@ -13453,9 +13464,9 @@ dedent """
         def test_id_class_types():
             obj1 = FooTest(torch.tensor(3))
             obj2 = FooTest(torch.tensor(2))
-            assert obj1 is not obj2
-            assert id(obj1) != id(obj2)
-            assert id(obj1) != id(None)
+            assert obj1 is not obj2  # noqa: S101
+            assert id(obj1) != id(obj2)  # noqa: S101
+            assert id(obj1) != id(None)  # noqa: S101
             return True
 
         self.assertTrue(test_id_class_types())
@@ -14037,11 +14048,11 @@ dedent """
             if x:
                 if x == 2:
                     return 1
-                    assert 1 == 2
+                    assert 1 == 2  # noqa: S101
                 else:
                     if x == 3:
                         return 2
-                        assert 1 == 2
+                        assert 1 == 2  # noqa: S101
                     else:
                         a = 2
                         b = 3
@@ -14049,7 +14060,7 @@ dedent """
                 a = 4
                 b = 1
             return a + b
-            assert 1 == 2
+            assert 1 == 2  # noqa: S101
 
         for i in range(4):
             self.checkScript(complicated, (i,))
@@ -14222,9 +14233,11 @@ dedent """
                 for n in jit_graph.nodes()
                 if isinstance(n.output().type(), torch._C._GeneratorType)
             )
-            assert isinstance(node.output().type(), torch._C._GeneratorType)
+            if not isinstance(node.output().type(), torch._C._GeneratorType):
+                raise AssertionError(f"Expected _GeneratorType, got {type(node.output().type())}")
             g = node.ival("value")
-            assert isinstance(g, torch.Generator)
+            if not isinstance(g, torch.Generator):
+                raise AssertionError(f"Expected torch.Generator, got {type(g)}")
             self.assertEqual(g.initial_seed(), seed)
 
         _test_parse_generator(2024)
@@ -14312,7 +14325,7 @@ dedent """
 
     def test_assert_is_scripting_metacompile(self):
         def foo():
-            assert not torch.jit.is_scripting(), "TestErrorMsg"
+            assert not torch.jit.is_scripting(), "TestErrorMsg"  # noqa: S101
             print("hello") + 2  # will not be compiled
 
         f = torch.jit.script(foo)
@@ -16230,7 +16243,8 @@ def add_nn_module_test(*args, **kwargs):
 
 
 def post_add_test(test_name, skipTestIf, do_test, test_class):
-    assert not hasattr(test_class, test_name), 'Two tests have the same name: ' + test_name
+    if hasattr(test_class, test_name):
+        raise AssertionError('Two tests have the same name: ' + test_name)
 
     for skip in skipTestIf:
         do_test = skip(do_test)

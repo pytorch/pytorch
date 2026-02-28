@@ -942,6 +942,11 @@ class OpDecompositions:
         return ops.mul(x, y)
 
     @staticmethod
+    def div_rn(x: OpVarT, y: OpVarT) -> OpVarT:
+        # for backends that don't override this, just use regular div
+        return ops.truediv(x, y)
+
+    @staticmethod
     def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.floor(a), dtype)
 

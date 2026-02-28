@@ -33,7 +33,7 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, IO, TYPE_CHECKING
+from typing import Any, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
 import sympy
@@ -213,7 +213,7 @@ def generate_standalone_repro(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
     *,
-    save_path: str | None = None,
+    save_path: Optional[str] = None,
 ) -> str:
     """
     Generate a self-contained repro script from an FX graph.
@@ -472,7 +472,7 @@ def generate_compiler_repro_string(
     args: Sequence[Any],
     *,
     stable_output: bool = False,
-    save_dir: str | None = None,
+    save_dir: Optional[str] = None,
     stable_hash: bool = False,
     has_distributed_ops: bool = False,
 ) -> str:
@@ -714,11 +714,11 @@ def save_graph_repro(
     compiler_name: str,
     *,
     stable_output: bool = False,
-    save_dir: str | None = None,
+    save_dir: Optional[str] = None,
     command: str = "run",
-    accuracy: str | bool | None = None,
-    tracing_mode: str | None = None,
-    check_str: str | None = None,
+    accuracy: Optional[Union[str, bool]] = None,
+    tracing_mode: Optional[str] = None,
+    check_str: Optional[str] = None,
     stable_hash: bool = False,
 ) -> None:
     if any(
@@ -785,7 +785,7 @@ def dump_compiler_graph_state(
     args: Sequence[Any],
     compiler_name: str,
     *,
-    accuracy: str | bool | None = None,
+    accuracy: Optional[Union[str, bool]] = None,
 ) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -830,11 +830,11 @@ def isolate_fails(
     fx_g: torch.fx.GraphModule,
     args: Sequence[Any],
     compiler_name: str,
-    env: dict[str, Any] | None = None,
-    save_dir: str | None = None,
-    accuracy: bool | str | None = None,
-    tracing_mode: str | None = None,
-    check_str: str | None = None,
+    env: Optional[dict[str, Any]] = None,
+    save_dir: Optional[str] = None,
+    accuracy: Optional[Union[bool, str]] = None,
+    tracing_mode: Optional[str] = None,
+    check_str: Optional[str] = None,
 ) -> bool:
     if env is None:
         env = {}
@@ -895,7 +895,7 @@ def isolate_fails(
 
 
 def inductor_fails(
-    fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: str | None = None
+    fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: Optional[str] = None
 ) -> bool:
     has_cuda = False
     for arg in args:
@@ -935,7 +935,7 @@ def inductor_fails(
 def inductor_accuracy_fails(
     fx_g: torch.fx.GraphModule,
     args: Sequence[Any],
-    check_str: str | None = None,
+    check_str: Optional[str] = None,
     *,
     require_fp64: bool = False,
     ignore_non_fp: bool = False,
@@ -1105,7 +1105,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         compiled(new_args)  # type: ignore[arg-type]
         assert not new_args
 
-    def compare_tuples(tuple1: tuple[Any], tuple2: tuple[Any]) -> str | None:
+    def compare_tuples(tuple1: tuple[Any], tuple2: tuple[Any]) -> Optional[str]:
         diff_indices = [i for i in range(len(tuple1)) if tuple1[i] != tuple2[i]]
         diff_values = [(tuple1[i], tuple2[i]) for i in diff_indices]
 
@@ -1254,11 +1254,11 @@ def run_repro(
     load_args: Any,
     *,
     command: str = "run",
-    accuracy: bool | str = "",
-    save_dir: str | None = None,
-    tracing_mode: str | None = None,
-    patch_code: str | None = None,
-    check_str: str | None = None,
+    accuracy: Union[bool, str] = "",
+    save_dir: Optional[str] = None,
+    tracing_mode: Optional[str] = None,
+    patch_code: Optional[str] = None,
+    check_str: Optional[str] = None,
     **kwargs: Any,
 ) -> Any:
     for k in kwargs:

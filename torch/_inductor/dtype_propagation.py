@@ -212,6 +212,10 @@ class DtypePropagationOpsHandler:
         return promote_types([a, b])
 
     @staticmethod
+    def div_rn(a: DTypeArg, b: DTypeArg) -> torch.dtype:
+        return promote_types([a, b])
+
+    @staticmethod
     def pow(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
 
