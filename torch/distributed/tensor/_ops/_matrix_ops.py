@@ -41,6 +41,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.symbolic_shapes import guard_or_false
 
 
 aten = torch.ops.aten
@@ -655,23 +656,48 @@ def scaled_dot_product_flash_attention_backward_strategy(
     )
 
 
-@register_op_strategy(aten.constant_pad_nd.default)
-def constant_pad_nd_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args(validate=False)
+@register_single_dim_strategy(aten.constant_pad_nd.default)
+def constant_pad_nd_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # Allow sharding on non-padded dimensions; ban sharding on dims
+    # that have non-zero padding (where the pad value must be inserted).
+    input_meta = args_schema[0]
+    assert isinstance(input_meta, TensorMeta)
+    pad = args_schema[1]
+    assert isinstance(pad, (list, tuple))
+    ndim = len(input_meta.shape)
 
-    # TODO(d4l3k); implement a more correct strategy for constant_pad_nd
-    return OpStrategy(
-        [
-            OpSpec(
-                output_specs=DTensorSpec(mesh, (Replicate(),)),
-                input_specs=(
-                    DTensorSpec(mesh, (Replicate(),)),
-                    DTensorSpec(mesh, (Replicate(),)),
-                ),
-                redistribute_cost=[[1]],
-            )
-        ]
-    )
+    # pad is [dim_{n-1}_left, dim_{n-1}_right, dim_{n-2}_left, ...] from
+    # the last dim backwards. Determine which dims have non-zero padding.
+    padded_dims = set()
+    for i in range(len(pad) // 2):
+        if not (
+            guard_or_false(pad[i * 2] == 0) and guard_or_false(pad[i * 2 + 1] == 0)
+        ):
+            padded_dims.add(ndim - 1 - i)
+
+    # Shard on any non-padded dim: output and input share the same placement.
+    # All-Replicate is added automatically by the framework.
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(ndim):
+        if dim not in padded_dims:
+            strategies.append([_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)])
+
+    # Partial rules: at padded positions every rank writes the same constant v,
+    # so reduce(v, v, ..., v) = v for avg/max/min (idempotent). P(sum) only
+    # works when v=0 since sum(v, ..., v) = N*v != v otherwise.
+    # When all pad amounts are zero the op is a no-op, so all reduce ops hold.
+    value = args_schema[2] if len(args_schema) > 2 else 0
+    no_padding = all(guard_or_false(pad[i] == 0) for i in range(len(pad)))
+    if no_padding or guard_or_false(value == 0):
+        reduce_ops = ("sum", "avg", "max", "min")
+    else:
+        reduce_ops = ("avg", "max", "min")
+    for reduce_op in reduce_ops:
+        strategies.append([Partial(reduce_op), Partial(reduce_op)])
+
+    return strategies
 
 
 def _scaled_dot_product_efficient_attention_base_strategies(

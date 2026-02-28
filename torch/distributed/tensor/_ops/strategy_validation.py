@@ -770,6 +770,7 @@ def query_single_dim_strategy(
     tensors: list[tuple[str, torch.Tensor]],
     mesh: DeviceMesh | None,
     kwargs: dict[str, Any] | None = None,
+    non_tensor_args: tuple[Any, ...] = (),
 ) -> list[list[Placement]] | None:
     """
     Query DTensor's single-dim strategy for given input tensors.
@@ -782,9 +783,10 @@ def query_single_dim_strategy(
 
     strategy_func = propagator.op_single_dim_strategy_funcs[op_overload]
 
-    args_meta = tuple(
+    tensor_metas = tuple(
         TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype) for _, t in tensors
     )
+    args_meta = tensor_metas + non_tensor_args
 
     try:
         result = strategy_func(op_overload, args_meta, kwargs or {})
@@ -988,7 +990,11 @@ def _query_dtensor_rules(
 
     if aten_op in propagator.op_single_dim_strategy_funcs:
         strategy_result = query_single_dim_strategy(
-            aten_op, tensors, None, kwargs=non_tensor_kwargs
+            aten_op,
+            tensors,
+            None,
+            kwargs=non_tensor_kwargs,
+            non_tensor_args=non_tensor_args,
         )
         if strategy_result:
             for combo in strategy_result:
