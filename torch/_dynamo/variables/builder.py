@@ -17,6 +17,7 @@ The builders in this module handle converting Python values into appropriate
 VariableTracker instances based on their type and usage context.
 """
 
+import _thread
 import abc
 import collections
 import contextlib
@@ -32,6 +33,7 @@ import operator
 import random
 import re
 import sys
+import threading
 import time
 import types
 import weakref
@@ -188,6 +190,7 @@ from .ctx_manager import (
     AutocastModeVariable,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
+    NoOpLockVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
 )
@@ -1140,6 +1143,8 @@ class VariableBuilder:
             return DynamoConfigPatchVariable(value.changes)
         elif isinstance(value, ErrorOnGraphBreakDecoratorContextManager):
             return ErrorOnGraphBreakVariable(value.error_on_graph_break)
+        elif config.ignore_locks and isinstance(value, (threading.Lock, _thread.RLock)):
+            return NoOpLockVariable()
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True

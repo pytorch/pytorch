@@ -670,6 +670,11 @@ ignore_logger_methods: set[Callable[..., Any]] = Config(
     alias="torch._dynamo.config.ignore_logging_functions"
 )
 
+# Ignore threading.Lock and threading.RLock when tracing.  This is mostly useful if you're using locks indirectly
+# (i.e. functools.lru_cache) and want to avoid graph breaks, AND call the compiled function in a
+# single-threaded/thread-safe way.
+ignore_locks: bool = False
+
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
