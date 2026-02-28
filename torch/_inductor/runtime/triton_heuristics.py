@@ -930,6 +930,32 @@ class CachingAutotuner(KernelInterface):
 
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
 
+    def _validate_launcher_args(self, launcher, args, kwargs):
+        """Validate that the number of arguments matches what the launcher expects."""
+        if launcher is None:
+            return
+
+        expected_arg_names = getattr(launcher, 'def_arg_names', None)
+        if expected_arg_names is not None:
+            expected_count = len(expected_arg_names)
+            arg_names_str = ', '.join(expected_arg_names)
+        else:
+            # Fallback for manually mocked launchers that only have __code__
+            expected_params = getattr(launcher, "__code__", None)
+            if expected_params is None:
+                return
+            expected_count = expected_params.co_argcount - 1  # Excluding stream
+            arg_names_str = f"{expected_count} unnamed args"
+
+        actual_count = len(args)
+
+        if actual_count != expected_count:
+            raise TypeError(
+                f"Kernel '{self.fn.__name__}' expected {expected_count} arguments "
+                f"({arg_names_str}) but got {actual_count}. "
+                f"Please check the number of arguments passed to the kernel."
+            )
+
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher"""
         # we don't skip configs with spilled registers when auto-tuning custom
@@ -970,6 +996,7 @@ class CachingAutotuner(KernelInterface):
                     profiler_kwargs,
                 ):
                     try:
+                        self._validate_launcher_args(launcher, cloned_args, cloned_kwargs)
                         launcher(
                             *cloned_args,
                             **cloned_kwargs,
@@ -981,6 +1008,7 @@ class CachingAutotuner(KernelInterface):
 
             else:
                 try:
+                    self._validate_launcher_args(launcher, cloned_args, cloned_kwargs)
                     launcher(
                         *cloned_args,
                         **cloned_kwargs,
@@ -1492,12 +1520,14 @@ class CachingAutotuner(KernelInterface):
                 args_without_constexprs,
                 profiler_kwargs,
             ):
+                self._validate_launcher_args(launcher, args, kwargs)
                 result = launcher(
                     *args,
                     **kwargs,
                     stream=stream,
                 )
         else:
+            self._validate_launcher_args(launcher, args, kwargs)
             result = launcher(
                 *args,
                 **kwargs,
@@ -1845,6 +1875,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         launcher.cache_hash = triton_hash_to_path_key(self.kernel.hash)  # type: ignore[attr-defined]
         launcher.store_cubin = False  # type: ignore[attr-defined]
         launcher._is_static = True  # type: ignore[attr-defined]
+        launcher.def_arg_names = def_args
         return launcher
 
 
@@ -2038,6 +2069,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
         launcher = self._gen_launcher_code(scope, def_args, runner_args)
 
         launcher = scope["launcher"]
+        launcher.def_arg_names = def_args
         launcher.config = cfg
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
