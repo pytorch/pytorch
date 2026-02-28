@@ -13,6 +13,7 @@ Additional TODO:
 
 import logging
 import operator
+from collections import deque
 from dataclasses import dataclass
 
 import torch
@@ -677,7 +678,7 @@ def reorder_for_prefetch(
         reload_group_nodes_set.update(pattern.reload_group_nodes)
 
     # Queue to hold reload group nodes waiting to be placed (FIFO)
-    reload_queue: list[ReloadQueueEntry] = []
+    reload_queue: deque[ReloadQueueEntry] = deque()
 
     # Loop through nodes in reverse
     for node in reversed(nodes_list):
@@ -686,7 +687,7 @@ def reorder_for_prefetch(
         elif node.op == "placeholder":
             # Flush queue - place all remaining reloads after the last placeholder
             while reload_queue:
-                entry: ReloadQueueEntry = reload_queue.pop(0)
+                entry: ReloadQueueEntry = reload_queue.popleft()
                 for reload_group_node in reversed(entry.pattern.reload_group_nodes):
                     node.append(reload_group_node)
             break
@@ -709,7 +710,7 @@ def reorder_for_prefetch(
 
             # Pop and place reload if its remaining time is satisfied (<= 0)
             if reload_queue[0].remaining_time_ms <= 0:
-                entry: ReloadQueueEntry = reload_queue.pop(0)
+                entry: ReloadQueueEntry = reload_queue.popleft()
                 for reload_group_node in entry.pattern.reload_group_nodes:
                     node.prepend(reload_group_node)
 
