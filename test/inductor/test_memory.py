@@ -37,10 +37,10 @@ class Foo(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.w1 = torch.nn.Parameter(torch.ones(1, 10))
-        self.w2 = torch.nn.Parameter(torch.ones(1, 1))
+        self.w1 = torch.nn.Parameter(torch.ones(2, 10))
+        self.w2 = torch.nn.Parameter(torch.ones(2, 2))
         self.w3 = torch.nn.Parameter(torch.ones(10, 1))
-        self.w4 = torch.nn.Parameter(torch.ones(1, 10))
+        self.w4 = torch.nn.Parameter(torch.ones(2, 10))
 
     def forward(self, x):
         t1 = torch.matmul(x, self.w1)
@@ -61,7 +61,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
 
         self.model = Foo().to(GPU_TYPE)
         M = 4096 if torch.version.hip is not None else 2048
-        self.inputs = torch.ones((M, 1), device=GPU_TYPE)
+        self.inputs = torch.ones((M, 2), device=GPU_TYPE)
         self.orig_reorder_method = memory.reorder_for_peak_memory
 
     @mock.patch.object(config, "reorder_for_peak_memory", True)
