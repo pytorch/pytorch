@@ -2340,7 +2340,10 @@ class DistributedDataParallel(Module, Joinable):
             # Update self.modules_buffers in case any buffers were
             # reassigned.
             self._assign_modules_buffers()
-            self._sync_module_buffers(authoritative_rank)
+            with torch.autograd._unsafe_preserve_version_counter(
+                tuple(self.modules_buffers)
+            ):
+                self._sync_module_buffers(authoritative_rank)
 
     def _sync_module_buffers(self, authoritative_rank):
         if not hasattr(self, "buffer_hook"):
