@@ -3247,6 +3247,8 @@ def _reduction_configs(
     elif max_autotune_enabled:
         pass  # skip all these cases
     elif reduction_hint == ReductionHint.INNER:
+        if torch.xpu.is_available():
+            configs.append(make_config(64, 64, num_warps=16))
         return configs + [contiguous_config]
     elif reduction_hint == ReductionHint.OUTER:
         return configs + [outer_config]
