@@ -240,81 +240,11 @@ ROCM_ENV
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 }
 
-install_centos() {
-
-  yum update -y
-  yum install -y kmod
-  yum install -y wget
-  yum install -y openblas-devel
-
-  yum install -y epel-release
-  yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
-
-  # Add amdgpu repository
-  local amdgpu_baseurl
-  if [[ $OS_VERSION == 9 ]]; then
-      amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/9.0/main/x86_64"
-  else
-      amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/rhel/7.9/main/x86_64"
-  fi
-  echo "[AMDGPU]" > /etc/yum.repos.d/amdgpu.repo
-  echo "name=AMDGPU" >> /etc/yum.repos.d/amdgpu.repo
-  echo "baseurl=${amdgpu_baseurl}" >> /etc/yum.repos.d/amdgpu.repo
-  echo "enabled=1" >> /etc/yum.repos.d/amdgpu.repo
-  echo "gpgcheck=1" >> /etc/yum.repos.d/amdgpu.repo
-  echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/amdgpu.repo
-
-  local rocm_baseurl="http://repo.radeon.com/rocm/yum/${ROCM_VERSION}"
-  echo "[ROCm]" > /etc/yum.repos.d/rocm.repo
-  echo "name=ROCm" >> /etc/yum.repos.d/rocm.repo
-  echo "baseurl=${rocm_baseurl}" >> /etc/yum.repos.d/rocm.repo
-  echo "enabled=1" >> /etc/yum.repos.d/rocm.repo
-  echo "gpgcheck=1" >> /etc/yum.repos.d/rocm.repo
-  echo "gpgkey=http://repo.radeon.com/rocm/rocm.gpg.key" >> /etc/yum.repos.d/rocm.repo
-
-  yum update -y
-
-  yum install -y \
-                   rocm-dev \
-                   rocm-utils \
-                   rocm-libs \
-                   rccl \
-                   rocprofiler-dev \
-                   roctracer-dev \
-                   amd-smi-lib
-
-  # precompiled miopen kernels; search for all unversioned packages
-  # if search fails it will abort this script; use true to avoid case where search fails
-  MIOPENHIPGFX=$(yum -q search miopen-hip-gfx | grep miopen-hip-gfx | awk '{print $1}'| grep -F kdb. || true)
-  if [[ "x${MIOPENHIPGFX}" = x ]]; then
-    echo "miopen-hip-gfx package not available" && exit 1
-  else
-    yum install -y ${MIOPENHIPGFX}
-  fi
-
-  # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
-  for kdb in /opt/rocm/share/miopen/db/*.kdb
-  do
-      sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
-  done
-
-  pip_install "git+https://github.com/rocm/composable_kernel@$ROCM_COMPOSABLE_KERNEL_VERSION"
-
-  # Cleanup
-  yum clean all
-  rm -rf /var/cache/yum
-  rm -rf /var/lib/yum/yumdb
-  rm -rf /var/lib/yum/history
-}
-
-# Install Python packages depending on the base OS
+# Install ROCm packages depending on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
 case "$ID" in
   ubuntu)
     install_ubuntu
-    ;;
-  centos)
-    install_centos
     ;;
   *)
     echo "Unable to determine OS..."
