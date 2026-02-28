@@ -15,7 +15,7 @@ import shutil
 import tempfile
 import traceback
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any, IO
+from typing import Any, IO, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -49,9 +49,9 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 # Graph execution tracking for debugging
-GRAPH_EXECUTION_ORDER: list[dict[str, object]] | None = None
+GRAPH_EXECUTION_ORDER: Optional[list[dict[str, object]]] = None
 RECORD_GRAPH_EXECUTION: bool = False
-GRAPH_COMPILE_IDS: dict[int, str | None] | None = None
+GRAPH_COMPILE_IDS: Optional[dict[int, Optional[str]]] = None
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
@@ -68,7 +68,7 @@ def has_dot() -> bool:
 def draw_buffers(
     nodes: list[BaseSchedulerNode],
     print_graph: bool = False,
-    fname: str | None = None,
+    fname: Optional[str] = None,
 ) -> None:
     """
     Draw a graph in fname.svg.
@@ -174,7 +174,7 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
             kwargs = {"device": snode.get_device()}
         fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
-        def in_output(snode: BaseSchedulerNode | FusedSchedulerNode) -> bool:
+        def in_output(snode: Union[BaseSchedulerNode, FusedSchedulerNode]) -> bool:
             if isinstance(snode, FusedSchedulerNode):
                 return any(in_output(x) for x in snode.snodes)
             return any(
@@ -222,9 +222,9 @@ def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
 
 
 def update_orig_fx_node_name_to_buf_name(
-    nodes: SchedulerNodeList | None,
+    nodes: Optional[SchedulerNodeList],
     node_name_to_buf_name: dict[str, str],
-    parent_buf_name: str | None = None,
+    parent_buf_name: Optional[str] = None,
     n_origins: int = 0,
 ) -> None:
     if nodes is None:
@@ -338,7 +338,7 @@ def enable_aot_logging() -> Iterator[None]:
 # _inductor_triton_kernel_to_post_grad_node_info's Debug Context
 _inductor_post_to_pre_grad_nodes: dict[str, dict[str, list[str]]] = {}
 _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
-_pre_grad_graph_id: int | None = None
+_pre_grad_graph_id: Optional[int] = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
@@ -404,7 +404,7 @@ class DebugContext:
     _counter = itertools.count()
 
     @staticmethod
-    def create_debug_dir(folder_name: str) -> str | None:
+    def create_debug_dir(folder_name: str) -> Optional[str]:
         debug_dir = config.trace.debug_dir or get_debug_dir()
         for n in DebugContext._counter:
             dirname = os.path.join(
@@ -517,9 +517,9 @@ class DebugContext:
 
     def __exit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: Any | None,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[Any],
     ) -> None:
         if self._prof:
             self._prof.disable()
@@ -541,7 +541,7 @@ class DebugContext:
             stats.sort_stats("tottime")
             stats.print_stats(100)
 
-    def __getattr__(self, name: str) -> Callable[..., None] | None:
+    def __getattr__(self, name: str) -> Optional[Callable[..., None]]:
         if config.trace.enabled and getattr(config.trace, name):
             try:
                 return getattr(DebugFormatter(self), name)
@@ -645,7 +645,7 @@ class DebugFormatter:
         timings: dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
         elapse: float,
         precompile_elapse: float,
-        prescreening_elapse: float | None,
+        prescreening_elapse: Optional[float],
     ) -> None:
         from .ir import FixedLayout
 
@@ -739,7 +739,7 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
-def _dump_collective_schedule(schedule: list[str | None]) -> None:
+def _dump_collective_schedule(schedule: list[Union[str, None]]) -> None:
     try:
         trace_structured(
             "artifact",
@@ -774,10 +774,10 @@ def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> N
     try:
         to_optimization_hints = V.graph.sizevars.optimization_hints
 
-        def to_list(x: Sequence[Any] | None) -> list[Any]:
+        def to_list(x: Optional[Sequence[Any]]) -> list[Any]:
             return list(to_optimization_hints(x)) if x is not None else []
 
-        def dtype_to_str(dtype: Any) -> str | None:
+        def dtype_to_str(dtype: Any) -> Optional[str]:
             if dtype is None:
                 return None
             s = str(dtype)
@@ -875,7 +875,7 @@ save_args_cnt = itertools.count()
 
 
 def create_mapping_pre_post_grad_nodes(
-    pre_grad_graph_id: int | None,
+    pre_grad_graph_id: Optional[int],
     post_to_pre_grad_nodes_json: dict[str, Any],
 ) -> dict[str, dict[str, list[str]]]:
     """
@@ -1112,10 +1112,10 @@ def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
 
 
 def set_kernel_post_grad_provenance_tracing(
-    node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
+    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
     kernel_name: str,
     is_extern: bool = False,
-) -> int | None:
+) -> Optional[int]:
     """
     Set the mapping between `kernel_name` and the post_grad nodes in `node_schedule`.
 
@@ -1265,7 +1265,7 @@ def aot_inductor_minifier_wrapper(
     exported_program: torch.export.ExportedProgram,
     *,
     inductor_configs: dict[str, Any],
-    package_path: FileLike | None = None,
+    package_path: Optional[FileLike] = None,
 ) -> str:
     from torch._dynamo.debug_utils import AccuracyError
     from torch._dynamo.repro.aoti import dump_to_minify

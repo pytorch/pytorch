@@ -29,7 +29,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from torch import fx
@@ -47,7 +47,7 @@ def tvm(
     gm: fx.GraphModule,
     example_inputs: list[torch.Tensor],
     *,
-    options: MappingProxyType[str, Any] | None = None,
+    options: Optional[MappingProxyType[str, Any]] = None,
 ) -> Callable[..., Any]:
     if options is None:
         options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})

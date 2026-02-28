@@ -1624,8 +1624,6 @@ def _register_distributed_opaque_types():
             "_sym_get_coordinate": MemberType.USE_REAL,
             "_get_mesh_dim_by_name": MemberType.USE_REAL,
             "_get_root_mesh": MemberType.INLINED,
-            "_get_slice_mesh_layout": MemberType.INLINED,
-            "_create_sub_mesh": MemberType.INLINED,
             "__getitem__": MemberType.INLINED,
         },
     )

@@ -241,7 +241,7 @@ def add_call_function(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     flat_example_value: Any,
-    config: NestedCompileRegionOptions | None = None,
+    config: Optional[NestedCompileRegionOptions] = None,
 ) -> VariableTracker:
     from .builder import wrap_fx_proxy
 
@@ -1454,8 +1454,8 @@ def speculate_subgraph_with_auto_output_flattening(
     *,
     # source_target is the .value of HigherOrderOpVariable and is the
     # target of the proxy that we created for the higherOrderOperator.
-    source_target: HigherOrderOperator | None = None,
-    enable_grad: bool | None = None,
+    source_target: Optional[HigherOrderOperator] = None,
+    enable_grad: Optional[bool] = None,
     # automatic: relies on Dynamo to find the used tensors and lift them as
     # inputs.
     #
@@ -2068,7 +2068,7 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
     # Subclasses should set _HOP_NAME to enable automatic HOP context in error messages
-    _HOP_NAME: str | None = None
+    _HOP_NAME: Optional[str] = None
     # Set to False for HOPs that hard error on graph break (e.g., cond, map, scan); otherwise
     # HOPs will fall back to eager.
     _ALLOW_FALLBACK_TO_EAGER: bool = True
