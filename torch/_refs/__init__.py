@@ -2004,6 +2004,7 @@ def clamp(
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
+
     if min is not None:
         a_isnan = torch.isnan(a)
         condition = torch.bitwise_or(torch.ge(a, min), a_isnan)  # type: ignore[arg-type]

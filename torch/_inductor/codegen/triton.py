@@ -1227,6 +1227,28 @@ class TritonOverrides(OpOverrides):
         return out
 
     @staticmethod
+    def div_rn(x, y):
+        """
+        Division with round-to-nearest rounding mode.
+        Always uses triton.language.div_rn for float32 inputs to match eager CUDA behavior.
+        """
+        x_dtype = getattr(x, "dtype", None)
+        y_dtype = getattr(y, "dtype", None)
+
+        if x_dtype == torch.float32 and y_dtype == torch.float32:
+            out = f"triton.language.div_rn({x}, {y})"
+        else:
+            # Fall back to regular division for non-float32 types
+            out = f"({x} / {y})"
+
+        if low_precision_fp_var(x) or low_precision_fp_var(y):
+            out_dtype = get_dtype_handler().truediv(x, y)
+            if out_dtype in (torch.float16, torch.float32):
+                out = f"{out}.to({triton_type(out_dtype)})"
+
+        return out
+
+    @staticmethod
     def mod(x, y):
         out = f"({x} % {y})"
         if low_precision_fp_var(x) or low_precision_fp_var(y):
@@ -2317,7 +2339,8 @@ class TMACompatibilityChecker:
         """
         if self.force:
             strides = [
-                V.graph.sizevars.symbolic_hint(st) for st in block_params.strides
+                V.graph.sizevars.replace_backed_symbols_with_hints(st)
+                for st in block_params.strides
             ]
         else:
             strides = block_params.strides
@@ -3891,26 +3914,27 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         codegen reduction of value to Triton according the reduction_type
         """
 
+        def should_upcast(d: torch.dtype | None) -> bool:
+            return d is not None and d.is_floating_point and d.itemsize < 4
+
         def maybe_upcast(value: CSEVariable) -> CSEVariable:
-            # Math reductions in FP16/BF16 are less accurate because the Triton compiler does not
-            # automatically promote to FP32 for accumulation. Additionally, max/min reductions
-            # do not support FP16/BF16. We manually promote to FP32 here.
+            # Math reductions in small floats are less accurate because the Triton
+            # compiler does not automatically promote to FP32 for accumulation.
+            # Additionally, max/min reductions do not support FP16/BF16.  Manually
+            # promote to FP32 here.
             return (
                 ops.to_dtype(value, torch.float32)
-                if value.dtype
-                in [
-                    torch.float16,
-                    torch.bfloat16,
-                ]
+                if should_upcast(value.dtype)
                 else value
             )
 
-        original_dtypes = [val.dtype for val in pytree.tree_leaves(value)]
-        value = pytree.tree_map(maybe_upcast, value)
-        if any(x in [torch.float16, torch.bfloat16] for x in original_dtypes):
+        do_upcast = pytree.tree_any(lambda v: should_upcast(v.dtype), value)
+        original_dtype = dtype
+        if do_upcast:
             # Only promote FB16/BF16; do not promote other integer/boolean dtypes
-            src_dtype = torch.promote_types(src_dtype, torch.float32)
-            dtype = torch.promote_types(dtype, torch.float32)
+            value = pytree.tree_map(maybe_upcast, value)
+            src_dtype = torch.float32 if should_upcast(src_dtype) else src_dtype
+            dtype = torch.float32 if should_upcast(dtype) else dtype
 
         assert self.inside_reduction
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
@@ -4342,32 +4366,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self.cse.reduction_cache[cache_key] = result_var
 
-        if isinstance(result_var, tuple):
-            assert all(isinstance(x, TritonCSEVariable) for x in result_var)
-            self.outside_loop_vars.update(result_var)
+        result_tuple = result_var if isinstance(result_var, tuple) else (result_var,)
+        self.outside_loop_vars.update(result_tuple)
+        assert all(isinstance(x, TritonCSEVariable) for x in result_tuple)
 
-            # Match output dtype with input dtype
-            if reduction_type in ("welford_reduce", "online_softmax_reduce"):
-                assert len(original_dtypes) == 1
-                original_dtypes = len(result_var) * original_dtypes
-
-            assert len(result_var) == len(original_dtypes)
-            for var, orig_dtype in zip(result_var, original_dtypes):
-                assert orig_dtype is not None
-                if var.dtype != orig_dtype:
+        # If BF16/F16 upcasting was done, ensure the output is downcast to the
+        # expected dtype.
+        if do_upcast:
+            for result in result_tuple:
+                if result.dtype != original_dtype:
                     self.post_loop_combine.writeline(
-                        f"{var} = {var}.to({triton_compute_type(orig_dtype)})"
+                        f"{result} = {result}.to({triton_compute_type(original_dtype)})"
                     )
-        else:
-            assert isinstance(result_var, TritonCSEVariable)
-            self.outside_loop_vars.add(result_var)
-
-            # Match output dtype with input dtype
-            if result_var.dtype != original_dtypes[0]:
-                assert original_dtypes[0] is not None
-                self.post_loop_combine.writeline(
-                    f"{result_var} = {result_var}.to({triton_compute_type(original_dtypes[0])})"
-                )
 
         return result_var
 
@@ -5029,15 +5039,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         # Subtract any advancements made in the previous loop level.
                         if level < len(loop_trees) - 1:
                             prev_tree = loop_trees[level + 1]
-                            prev_advancement = self.pointer_advancements[
+                            prev_advancements = self.pointer_advancements[
                                 prev_tree.symt
-                            ][block_ptr]
-                            prev_block = TritonSymbols.get_block_size(prev_tree)
-                            prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
-                            advancement = [
-                                cur - prev * prev_num_iter
-                                for cur, prev in zip(advancement, prev_advancement)
                             ]
+                            # block_ptr may not exist in the inner loop's advancements
+                            # if its advancement was identity (zero) and was skipped
+                            if block_ptr in prev_advancements:
+                                prev_advancement = prev_advancements[block_ptr]
+                                prev_block = TritonSymbols.get_block_size(prev_tree)
+                                prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
+                                advancement = [
+                                    cur - prev * prev_num_iter
+                                    for cur, prev in zip(advancement, prev_advancement)
+                                ]
 
                         self.body.writeline(
                             DeferredLine(
@@ -5351,22 +5365,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if prefix_is_reduction(prefix) and not self.inside_reduction:
                 continue
 
-            numel_hint = V.graph.sizevars.symbolic_hint(numel)
-            if not isinstance(numel_hint, (int, sympy.Integer)):
-                # This default heuristic hint was picked carefully: it is
-                # large, to ensure that we don't shrink the block size (since
-                # if you don't have many elements, it'd be wasteful to pick a
-                # large block size).  Since we don't know how many elements we
-                # might have, we should be OK with some inefficiency to make
-                # sure we handle the large case well.  8192 is the largest
-                # block size we support, so we pick that.
-                #
-                # If we have a better hint for unbacked SymInts (e.g., because
-                # a user told us, or we are tracking upper bounds) we could
-                # use that here.
-                size_hint = 8192
-            else:
-                size_hint = next_power_of_2(int(numel_hint))
+            numel_hint = V.graph.sizevars.optimization_hint(numel)
+            size_hint = next_power_of_2(int(numel_hint))
             size_hints[prefix] = size_hint
 
         if name is None:

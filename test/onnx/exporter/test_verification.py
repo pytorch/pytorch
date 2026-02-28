@@ -92,7 +92,8 @@ class VerificationInterpreterTest(common_utils.TestCase):
         model = Model()
         args = (torch.tensor([1.0]), torch.tensor([2.0]))
         onnx_program = torch.onnx.export(model, args, dynamo=True, verbose=False)
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         interpreter = _verification._VerificationInterpreter(onnx_program)
         results = interpreter.run(args)
         torch.testing.assert_close(results, model(*args))
@@ -113,7 +114,8 @@ class VerificationFunctionsTest(common_utils.TestCase):
         model = Model()
         args = (torch.tensor([1.0]), torch.tensor([2.0]))
         onnx_program = torch.onnx.export(model, args, dynamo=True, verbose=False)
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         verification_infos = _verification.verify_onnx_program(
             onnx_program, args, compare_intermediates=False
         )
@@ -128,7 +130,8 @@ class VerificationFunctionsTest(common_utils.TestCase):
         model = Model()
         args = (torch.tensor([1.0]), torch.tensor([2.0]))
         onnx_program = torch.onnx.export(model, args, dynamo=True, verbose=False)
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         verification_infos = _verification.verify_onnx_program(
             onnx_program, args, compare_intermediates=True
         )

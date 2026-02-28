@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-import typing
+import functools
 from dataclasses import dataclass, field
 from typing import cast, TypeVar
 
 import torch
 import torch._C
 import torch.distributed._functional_collectives as funcol
-from torch import sym_min
 from torch._C._distributed import Placement
 from torch.distributed import RankType
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
@@ -31,6 +30,18 @@ _RankTypeT = TypeVar("_RankTypeT", bound=RankType)
 
 # Appease TestPublicBindings.test_correct_module_names
 Placement.__module__ = "torch.distributed.tensor.placement_types"
+
+
+def _raise_error(method_name, _):
+    raise RuntimeError(
+        f"Placement method '{method_name}' should not be called as "
+        "it should be overridden by the subclass"
+    )
+
+
+Placement.__eq__ = functools.partial(_raise_error, method_name="__eq__")
+Placement.__hash__ = functools.partial(_raise_error, method_name="__hash__")
+Placement.__fx_repr__ = functools.partial(_raise_error, method_name="__fx_repr__")
 
 
 class Shard(torch._C._distributed.Shard):
@@ -85,10 +96,7 @@ class Shard(torch._C._distributed.Shard):
         )
 
         # chunk tensor over dimension `dim` into n slices
-        tensor_list = list(torch.chunk(tensor, num_chunks, dim=dim))
-        tensor_list = fill_empty_tensor_to_shards(
-            tensor_list, dim, num_chunks - len(tensor_list)
-        )
+        tensor_list = Shard._custom_chunk(tensor, num_chunks, dim=dim)
 
         # compute the chunk size inline with ``torch.chunk`` to calculate padding
         full_chunk_size = (tensor.size(dim) + num_chunks - 1) // num_chunks
@@ -165,6 +173,38 @@ class Shard(torch._C._distributed.Shard):
         return result
 
     @staticmethod
+    def _custom_chunk(
+        tensor: torch.Tensor, num_chunks: int, dim: int
+    ) -> list[torch.Tensor]:
+        """
+        Returns list of tensor chunks along dim.
+        Uses torch.chunk in eager mode, but torch.narrow under tracing to be unbacked-symint safe.
+        Also handles uneven/zero-sharding cases.
+        """
+        from torch.distributed._functional_collectives import _are_we_tracing
+        from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+        assert tensor.dim() > 0
+        assert num_chunks > 0
+
+        # TODO(pianpwk): remove the unbacked symbols check and fix AsyncTP pattern matching
+        # for test_micro_pipeline_tp.py.
+        if not _are_we_tracing() or not has_free_unbacked_symbols(tensor):
+            tensor_list = list(torch.chunk(tensor, num_chunks, dim=dim))
+            return fill_empty_tensor_to_shards(
+                tensor_list, dim, num_chunks - len(tensor_list)
+            )
+        else:
+            dim_size = tensor.size(dim)
+            split_size = (dim_size + num_chunks - 1) // num_chunks
+            chunks = []
+            for i in range(num_chunks):
+                start = torch.sym_min(split_size * i, dim_size)
+                end = torch.sym_min(split_size * (i + 1), dim_size)
+                chunks.append(tensor.narrow(dim, start, end - start))
+            return chunks
+
+    @staticmethod
     @maybe_run_for_local_tensor
     def local_shard_size_and_offset(
         curr_local_size: int,
@@ -182,8 +222,11 @@ class Shard(torch._C._distributed.Shard):
         Returns (new local shard size, offset)
 
         """
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
         # Compute the chunk size inline with ``torch.chunk``
-        if curr_local_size % num_chunks == 0:
+        # Assume uneven sharding as general case for unbacked sizes.
+        if guard_or_false(curr_local_size % num_chunks == 0):
             full_chunk_size = curr_local_size // num_chunks
             # pyrefly: ignore[bad-assignment] # pyrefly bug?
             shard_starting_idx: _RankTypeT = full_chunk_size * rank
@@ -194,15 +237,11 @@ class Shard(torch._C._distributed.Shard):
         # pyrefly: ignore[bad-assignment] # pyrefly bug?
         shard_starting_idx: _RankTypeT = full_chunk_size * rank
 
-        if curr_local_size < shard_starting_idx:
-            # pyrefly: ignore[bad-return]
-            return 0, typing.cast(_RankTypeT, curr_local_size)
-        else:
-            local_shard_size = (
-                sym_min(curr_local_size, shard_starting_idx + full_chunk_size)
-                - shard_starting_idx
-            )
-            return local_shard_size, shard_starting_idx
+        shard_end_idx = torch.sym_min(
+            curr_local_size, shard_starting_idx + full_chunk_size
+        )
+        local_shard_size = torch.sym_max(0, shard_end_idx - shard_starting_idx)
+        return local_shard_size, torch.sym_min(curr_local_size, shard_starting_idx)
 
     def _local_shard_size_and_offset(
         self,
@@ -218,8 +257,11 @@ class Shard(torch._C._distributed.Shard):
     def _maybe_unpad_tensor_with_sizes(
         dim, local_tensor, pad_sizes, mesh_dim_local_rank, make_contiguous
     ) -> torch.Tensor:
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
         # Only unpad if the local_tensor was padded on the dimension.
-        if pad_sizes[mesh_dim_local_rank] > 0:
+        # Assume padding (uneven sharding) as general case for unbacked sizes.
+        if guard_or_true(pad_sizes[mesh_dim_local_rank] > 0):
             local_tensor = unpad_tensor(
                 local_tensor, dim, pad_sizes[mesh_dim_local_rank]
             )
@@ -308,13 +350,18 @@ class Shard(torch._C._distributed.Shard):
         """
         reduce and scatter a tensor on a mesh dimension
         """
-        if not mesh._is_current_rank_part_of_mesh():
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        my_coordinate = mesh.get_coordinate()
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
+
+        if my_coordinate is None:
             # if rank is not part of mesh, we simply return local_tensor,
             # which should be an empty tensor
             return tensor
 
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-        is_padded = tensor.size(self.dim) % num_chunks != 0
+        # Assume padding (uneven sharding) as general case for unbacked sizes.
+        is_padded = guard_or_true(tensor.size(self.dim) % num_chunks != 0)
         pad_sizes = None
         if is_padded:
             scattered_list, pad_sizes = self._split_tensor(
@@ -342,7 +389,10 @@ class Shard(torch._C._distributed.Shard):
         logical_dim_size: int,
         num_chunks: int,
     ) -> torch.Tensor:
-        is_padded = logical_dim_size % num_chunks != 0
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        # Assume padding (uneven sharding) as general case for unbacked sizes.
+        is_padded = guard_or_true(logical_dim_size % num_chunks != 0)
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
@@ -361,7 +411,10 @@ class Shard(torch._C._distributed.Shard):
         logical_dim_size: int,
         num_chunks: int,
     ) -> torch.Tensor:
-        is_padded = logical_dim_size % num_chunks != 0
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        # Assume padding (uneven sharding) as general case for unbacked sizes.
+        is_padded = guard_or_true(logical_dim_size % num_chunks != 0)
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
@@ -435,10 +488,12 @@ class Shard(torch._C._distributed.Shard):
         old_shard_dim: int,
         new_shard_dim: int,
     ) -> tuple[bool, int, int, bool, int, int]:
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
         results = []
         for shard_dim in [old_shard_dim, new_shard_dim]:
             dim_logical_size = current_logical_shape[shard_dim]
-            dim_padding = dim_logical_size % num_chunks != 0
+            dim_padding = guard_or_true(dim_logical_size % num_chunks != 0)
             dim_full_chunk_size = (dim_logical_size + num_chunks - 1) // num_chunks
             results.append((dim_padding, dim_logical_size, dim_full_chunk_size))
 
@@ -564,6 +619,13 @@ class Shard(torch._C._distributed.Shard):
         """
         return f"Shard(dim={self.dim})"
 
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Shard placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return f"torch.distributed.tensor.placement_types.Shard(dim={self.dim})", {}
+
     def __str__(self) -> str:
         """human readable representation of the Shard placement"""
         return f"S({self.dim})"
@@ -649,6 +711,16 @@ class _StridedShard(torch._C._distributed.StridedShard):
     @maybe_run_for_local_tensor
     def _select_shard(shards: list[torch.Tensor], shard_index) -> torch.Tensor:
         return shards[shard_index].clone()
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Shard placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",  # noqa: B950
+            {},
+        )
 
     @classmethod
     def _make_shard_tensor(
@@ -1092,6 +1164,13 @@ class Replicate(torch._C._distributed.Replicate):
         """
         return "Replicate()"
 
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Replicate placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return "torch.distributed.tensor.placement_types.Replicate()", {}
+
     def __str__(self) -> str:
         """
         human readable representation of the Replicate placement
@@ -1238,6 +1317,16 @@ class Partial(torch._C._distributed.Partial):
         machine readable representation of the Partial placement
         """
         return f"Partial({self.reduce_op})"
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Partial placement.
+        Needed for passing this type as an input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types.Partial({self.reduce_op!r})",
+            {},
+        )
 
     def __str__(self) -> str:
         """
@@ -1390,3 +1479,47 @@ class _MaskPartial(Partial):
         human readable representation of the _MaskPartial placement
         """
         return f"MaskP({self.reduce_op}, {self.offset_shape}, {self.offset_dim})"
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Partial placement.
+        Needed for passing this type as an input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",  # noqa: B950
+            {},
+        )
+
+
+def _register_placements_as_opaque():
+    from torch._library.opaque_object import MemberType, register_opaque_type
+
+    allowed_members = {
+        "is_shard": MemberType.USE_REAL,
+        "is_partial": MemberType.USE_REAL,
+        "is_replicate": MemberType.USE_REAL,
+        "__eq__": MemberType.USE_REAL,
+    }
+    register_opaque_type(Placement, typ="value", members=allowed_members)
+    register_opaque_type(
+        Shard, typ="value", members=allowed_members | {"dim": MemberType.USE_REAL}
+    )
+    register_opaque_type(Replicate, typ="value", members=allowed_members)
+    register_opaque_type(
+        Partial,
+        typ="value",
+        members=allowed_members | {"reduce_op": MemberType.USE_REAL},
+    )
+    register_opaque_type(
+        _StridedShard,
+        typ="value",
+        members=allowed_members | {"dim": MemberType.USE_REAL},
+    )
+    register_opaque_type(
+        _MaskPartial,
+        typ="value",
+        members=allowed_members | {"reduce_op": MemberType.USE_REAL},
+    )
+
+
+_register_placements_as_opaque()

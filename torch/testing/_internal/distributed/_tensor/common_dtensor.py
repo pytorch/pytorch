@@ -7,11 +7,12 @@ import copy
 import functools
 import itertools
 import sys
+import threading
 import types
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Any, cast, Optional, TypeVar, Union
+from typing import Any, cast, TypeVar
 
 import torch
 import torch.distributed as dist
@@ -423,7 +424,7 @@ class DTensorTestBase(MultiProcessTestCase):
     def build_device_mesh(self) -> DeviceMesh:
         return init_device_mesh(self.device_type, (self.world_size,))
 
-    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+    def init_pg(self, eager_init, backend: str | None = None) -> None:
         if backend is None:
             backend = self.backend
 
@@ -471,7 +472,7 @@ class DTensorTestBase(MultiProcessTestCase):
             device_id=device_id,
         )
 
-    def destroy_pg(self, device_id: Optional[int] = None) -> None:
+    def destroy_pg(self, device_id: int | None = None) -> None:
         # Wait for all ranks to reach here before starting shutdown.
         # FIXME dist.barrier deadlocks with multiple threads and NCCL: https://github.com/pytorch/pytorch/issues/95895
         # dist.all_reduce(torch.zeros((1,), device="cuda" if TEST_CUDA else "cpu"))
@@ -544,10 +545,10 @@ TestFunc = Callable[[...], object]
 
 # wrapper to initialize comms (processgroup)
 def with_comms(
-    eager_init: Union[TestFunc, bool] = False,
-    backend: Optional[str] = None,
+    eager_init: TestFunc | bool = False,
+    backend: str | None = None,
 ) -> TestFunc:
-    def decorator(func, eager_init: bool = False, backend: Optional[str] = None):
+    def decorator(func, eager_init: bool = False, backend: str | None = None):
         @wraps(func)  # pyre-ignore[6]
         def wrapper(
             self,
@@ -593,7 +594,20 @@ class DTensorOpTestBase(MultiThreadedTestCase):
 
     def setUp(self) -> None:
         super().setUp()
+        # Enable thread-safe lock for ShardingPropagator since we run
+        # multi-threaded tests.
+        from torch.distributed.tensor._sharding_prop import ShardingPropagator
+
+        self._orig_fake_mode_lock = ShardingPropagator._fake_mode_lock
+        ShardingPropagator._fake_mode_lock = threading.Lock()
         self._spawn_threads()
+
+    def tearDown(self) -> None:
+        # Restore the original (no-op) lock
+        from torch.distributed.tensor._sharding_prop import ShardingPropagator
+
+        ShardingPropagator._fake_mode_lock = self._orig_fake_mode_lock
+        super().tearDown()
 
 
 # This is a class for converting args/kwargs of an op into distributed args/kwargs
@@ -795,11 +809,11 @@ class LocalDTensorOpTestBase(DTensorOpTestBase):
         with maybe_disable_local_tensor_mode():
             return super().build_device_mesh()
 
-    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+    def init_pg(self, eager_init, backend: str | None = None) -> None:
         dist.init_process_group("fake", rank=0, world_size=self.world_size)
         self._pg = dist.distributed_c10d._get_default_group()
 
-    def destroy_pg(self, device_id: Optional[int] = None) -> None:
+    def destroy_pg(self, device_id: int | None = None) -> None:
         dist.destroy_process_group(self._pg)
         self._pg = None
 
@@ -857,11 +871,11 @@ class LocalDTensorTestBase(DTensorTestBase):
         with maybe_disable_local_tensor_mode():
             return super().build_device_mesh()
 
-    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+    def init_pg(self, eager_init, backend: str | None = None) -> None:
         dist.init_process_group("fake", rank=0, world_size=self.world_size)
         self._pg = dist.distributed_c10d._get_default_group()
 
-    def destroy_pg(self, device_id: Optional[int] = None) -> None:
+    def destroy_pg(self, device_id: int | None = None) -> None:
         dist.destroy_process_group(self._pg)
         self._pg = None
 

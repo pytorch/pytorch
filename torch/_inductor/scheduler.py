@@ -62,7 +62,7 @@ from .ir import (
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
-from .runtime.hints import ReductionHint
+from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -2760,16 +2760,75 @@ def _replace_operation_buffer(
 
 
 def _estimate_fused_epilogue_runtime(node1, node2, epilogue_runtime) -> float:
+    template_write_bytes = node1.get_write_buffer_sizes()
+    epilogue_read_bytes = node2.get_read_buffer_sizes()
+    extra_bytes = epilogue_read_bytes - template_write_bytes
     # If no extra memory read by epilogue, assume epilogue is free
     # if extra memory is read by epilogue, add to minimum choice
-    total_read_bytes = node2.get_read_buffer_sizes()
-    template_write_bytes = node1.get_write_buffer_sizes()
-    extra_bytes = total_read_bytes - template_write_bytes
     extra_bytes_ratio = extra_bytes / template_write_bytes
 
     # Smoothly approaches 1 as extra_bytes_ratio increases
     extra_memory_ratio = extra_bytes_ratio / (1 + extra_bytes_ratio)
     return extra_memory_ratio * epilogue_runtime
+
+
+def _occupancy_before_and_after_fusion(
+    unfused_n_regs: int,
+    fused_n_regs: int,
+    fused_n_spills: int,
+    num_warps: int,
+    device_props: DeviceProperties,
+) -> tuple[int, int]:
+    if fused_n_spills >= 8:
+        return 0, -1
+
+    # # Need device info to calculate occupancy
+    regs_per_sm = device_props.regs_per_multiprocessor
+    if regs_per_sm is None:
+        return 1, 1  # Can't calculate, allow fusion
+
+    assert num_warps
+    threads_per_block = num_warps * (device_props.warp_size or 32)
+
+    regs_per_block_unfused = unfused_n_regs * threads_per_block
+    regs_per_block_fused = fused_n_regs * threads_per_block
+
+    blocks_unfused = regs_per_sm // regs_per_block_unfused
+    blocks_fused = regs_per_sm // regs_per_block_fused
+
+    return blocks_unfused, blocks_fused
+
+
+def _fuse_epilogue(
+    ms1: float,
+    ms2: float,
+    unfused_n_regs: int,
+    fused_n_regs: int,
+    fused_n_spills: int,
+    num_warps: int,
+    device_props: DeviceProperties,
+) -> bool:
+    """
+    Determine whether to fuse an epilogue into a GEMM template.
+    """
+    MIN_ACCEPTED_OCCUPANCY = 4
+    REGRESSED_OCCUPANCY_RATIO = 0.5
+
+    # Check occupancy impact
+    blocks_unfused, blocks_fused = _occupancy_before_and_after_fusion(
+        unfused_n_regs, fused_n_regs, fused_n_spills, num_warps, device_props
+    )
+
+    epilogue_dominated_with_sufficient_occupancy = ms2 > 2 * ms1 and blocks_fused > 1
+
+    # fuse if no major register spills
+    # Occupancy can decrease but if memory bound/epilogue dominated
+    # optimistically fuse
+    return blocks_fused != -1 and (
+        blocks_fused >= MIN_ACCEPTED_OCCUPANCY
+        or blocks_fused / blocks_unfused > REGRESSED_OCCUPANCY_RATIO
+        or epilogue_dominated_with_sufficient_occupancy
+    )
 
 
 @dataclasses.dataclass
@@ -3797,7 +3856,12 @@ class Scheduler:
         for inp in multi_node.inputs:
             # pyrefly: ignore [missing-attribute]
             inp_name = inp.get_name()
-            if not getattr(inp, "layout", None) or inp_name not in constraints:
+            # View has its own fixed layout that is not constrained
+            if (
+                not getattr(inp, "layout", None)
+                or inp_name not in constraints
+                or isinstance(inp, ir.ReinterpretView)
+            ):
                 continue
 
             layout = inp.layout
@@ -4027,17 +4091,27 @@ class Scheduler:
             if fusion_log.isEnabledFor(logging.DEBUG):
                 if ms_fused < ms1 + ms2:
                     fusion_log.debug(
-                        "can fuse (benchmark): fusing %s with %s cause %sx speedup",
+                        "can fuse (benchmark): fusing %s with %s cause %sx speedup "
+                        "(ms_fused=%.6f, ms1=%.6f, ms2=%.6f, ms1+ms2=%.6f)",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
+                        ms_fused,
+                        ms1,
+                        ms2,
+                        ms1 + ms2,
                     )
                 else:
                     fusion_log.debug(
-                        "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown",
+                        "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown "
+                        "(ms_fused=%.6f, ms1=%.6f, ms2=%.6f, ms1+ms2=%.6f)",
                         node1.get_buffer_names(),
                         node2.get_buffer_names(),
                         red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
+                        ms_fused,
+                        ms1,
+                        ms2,
+                        ms1 + ms2,
                     )
 
         if is_multi_template and any(
@@ -4106,6 +4180,19 @@ class Scheduler:
             num_triton_callers = sum(
                 isinstance(c, TritonTemplateCallerBase) for c in multi_node.choices
             )
+
+            # Check for fb-specific template fusion override
+            force_fb_fusion = False
+            if config.is_fbcode():
+                try:
+                    from torch._inductor.fb.tlx_templates.fusion import (
+                        should_force_fusion,
+                    )
+
+                    force_fb_fusion = should_force_fusion(multi_node)
+                except ImportError:
+                    pass
+
             # Track if the choice timings can be retrieved async after compilation
             get_choice_timings_async = (
                 use_pipelined_autotuning()
@@ -4173,6 +4260,12 @@ class Scheduler:
                     )
 
             if len(future_choices) == 0:
+                # Check if fb-specific fusion was requested but no choices available
+                if force_fb_fusion:
+                    fusion_log.warning(
+                        "FB template fusion requested but no choices available for benchmarking. "
+                        "Proceeding without fusion. Check if template compilation succeeded."
+                    )
                 return FusionResult.fuse(False)
 
             def benchmark_when_ready() -> bool:
@@ -4185,6 +4278,13 @@ class Scheduler:
                     assert multi_node and isinstance(multi_node, ir.MultiTemplateBuffer)
                     choice_timings = multi_node.choice_timings()
                     min_choice, ms1 = multi_node.get_min_choice()
+
+                    # Some choices can fail to benchmark, inf timing
+                    future_choices = [
+                        fut_choice
+                        for fut_choice in future_choices
+                        if fut_choice[0] in choice_timings
+                    ]
 
                     future_choices = sorted(
                         future_choices,
@@ -4230,22 +4330,45 @@ class Scheduler:
                             or ms2 + ms1 > choice_timings[choice] + ms2_fused
                         )
 
-                        if (
-                            res
+                        if res and fusible_choice:
+                            choice.precompile()
                             # pyrefly: ignore [missing-attribute]
-                            and len(res.launchers) == 1
+                            assert res.launchers and choice.n_regs
                             # pyrefly: ignore [bad-index]
-                            and res.launchers[0].n_spills <= 8
-                            and fusible_choice
-                        ):
-                            ms_fused_choice = choice
-                            break
+                            compiled_kernel = res.launchers[0]
+                            # pyrefly: ignore [missing-attribute]
+                            fused_n_regs = compiled_kernel.n_regs
+                            # pyrefly: ignore [missing-attribute]
+                            fused_n_spills = compiled_kernel.n_spills
+                            should_fuse_epilogue = _fuse_epilogue(
+                                ms1,
+                                ms2,
+                                choice.n_regs,
+                                fused_n_regs,
+                                fused_n_spills,
+                                choice.bmreq.num_warps,
+                                DeviceProperties.create(device),
+                            )
+                            if should_fuse_epilogue:
+                                ms_fused_choice = choice
+                                break
 
                 if bench_epilogue:
                     log_fusion(min_ms_fused, ms1, ms2)
 
+                # Log if fb-specific template fusion is being forced
+                if force_fb_fusion:
+                    try:
+                        from torch._inductor.fb.tlx_templates.fusion import (
+                            log_fusion_forced,
+                        )
+
+                        log_fusion_forced(min_ms_fused, ms1, ms2)
+                    except ImportError:
+                        pass
+
                 if (
-                    not bench_epilogue or min_ms_fused < (ms1 + ms2)
+                    not bench_epilogue or min_ms_fused < (ms1 + ms2) or force_fb_fusion
                 ) and ms_fused_choice is not None:
                     if config.multi_kernel_hints:
                         hint_override_best_fusion_choice[None] = ms_fused_choice
@@ -4334,6 +4457,20 @@ class Scheduler:
                                 "slow_down_ratio": ms_fused / (ms1 + ms2),
                             }
                         )
+
+                    # Check if fb-specific template fusion should be forced regardless of benchmark
+                    if config.is_fbcode():
+                        try:
+                            from torch._inductor.fb.tlx_templates.fusion import (
+                                log_fusion_forced,
+                                should_force_fusion_for_node,
+                            )
+
+                            if should_force_fusion_for_node(node1):
+                                log_fusion_forced(ms_fused, ms1, ms2)
+                                return True
+                        except ImportError:
+                            pass
 
                     return ms_fused < ms1 + ms2
 
@@ -5192,7 +5329,9 @@ class Scheduler:
             ):
                 candidates.append(
                     (
-                        V.graph.sizevars.size_hint(lhs_dep.get_numel(), fallback=0),
+                        V.graph.sizevars.optimization_hint(
+                            lhs_dep.get_numel(), fallback=0
+                        ),
                         lhs_dep,
                         rhs_dep,
                     )
@@ -7021,7 +7160,17 @@ class BaseScheduling:  # noqa: docstring_linter
         In this context, we verify whether node1 represents the Multi-Output Template
         and node2 corresponds to one of its outputs. If so, we further check if
         backend supports this fusion.
+
+        Delegates to ``TemplateBuffer.can_fuse_multi_output_epilogue`` which
+        TemplateBuffer subclasses may override to allow fusion of additional node types.
         """
+        template_buf = node1.get_template_node()
+        if not isinstance(template_buf, ir.TemplateBuffer):
+            return False
+        if not template_buf.is_multi_outputs_template():
+            return False
+        if template_buf.can_fuse_multi_output_epilogue(node2):
+            return True
         return False
 
     def fuse(

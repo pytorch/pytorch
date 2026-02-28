@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import time
+import typing_extensions
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
@@ -96,6 +97,7 @@ from .lowering import (
     require_contiguous,
     tag_to_layout_constraint,
     unsupported_output_tensor,
+    user_lowerings,
 )
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -648,7 +650,10 @@ class GraphLowering(torch.fx.Interpreter):
         if (dep, count_bytes) not in self.dep_size_hint_cache:
             res = 0
             try:
-                if not dep.has_unbacked_symbols():
+                if (
+                    not dep.has_unbacked_symbols()
+                    or self.sizevars.all_unbacked_explicitly_hinted(dep.get_numel())
+                ):
                     if count_bytes:
                         res = dep.numbytes_hint()
                     else:
@@ -1290,7 +1295,8 @@ class GraphLowering(torch.fx.Interpreter):
                 self.unaligned_buffers.add(target)
         return tensor
 
-    def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
+    @typing_extensions.override
+    def call_function(self, target: Callable, args: Any, kwargs: dict[str, Any]) -> Any:  # type: ignore[type-arg]
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
@@ -1396,7 +1402,29 @@ class GraphLowering(torch.fx.Interpreter):
                     *args, **kwargs
                 )
             else:
-                out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+                out = None
+
+                if (
+                    target in user_lowerings
+                    and target not in V.active_user_lowering_ops
+                ):
+                    # User-registered lowering takes priority, with recursion guard
+                    V.active_user_lowering_ops.add(target)
+                    try:
+                        # pyrefly: ignore[bad-index]
+                        out = user_lowerings[target](*args, **kwargs)
+                    finally:
+                        V.active_user_lowering_ops.discard(target)
+
+                # If no user_lowering, or it returned None fall back to normal lowering
+                if out is None:
+                    if target in lowerings:
+                        out = lowerings[target](*args, **kwargs)
+                    else:
+                        # Fallback for ops not in lowerings (e.g., custom ops during recursion)
+                        out = fallback_handler(target, add_to_fallback_set=False)(
+                            *args, **kwargs
+                        )
 
             if layout_constraints:
                 # layout_constraints are allowed to make new copies of the inputs.
@@ -2597,7 +2625,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         if config.benchmark_harness and config.profile_bandwidth_output:
             # run the inputs code gen to get the bandwidth info
-            mod.benchmark_compiled_module(times=1, repeat=1)
+            args = mod.get_args()
+            mod.benchmark_compiled_module(args, times=1, repeat=1)
 
         return mod
 
