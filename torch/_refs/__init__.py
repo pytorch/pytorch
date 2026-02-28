@@ -50,7 +50,6 @@ from torch._prims_common.wrappers import (
     elementwise_unary_scalar_wrapper,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import guarding_hint_or_throw
 
 
 # Experimental module containing prototype Python references for existing
@@ -388,6 +387,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
 def _broadcast_shapes(*_shapes):
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
+        guarding_hint_or_throw,
         has_guarding_hint,
         is_nested_int,
     )
@@ -3121,6 +3121,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
+        guarding_hint_or_throw,
         has_guarding_hint,
         sym_or,
     )
