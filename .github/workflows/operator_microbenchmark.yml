@@ -1,5 +1,5 @@
 name: operator_microbenchmark
-# NOTE: When adding a new test, please update README: ../../benchmarks/operator_benchmark/README.md
+# NOTE: When adding a new test, add a new matrix entry with config: "operator_microbenchmark_test_<testname>"
 
 on:
   push:
@@ -42,8 +42,26 @@ jobs:
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_matmul", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_mm", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_addmm", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_bmm", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_conv", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_optimizer", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_activation", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_norm", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_scaled_mm", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_scaled_grouped_mm", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "operator_microbenchmark_test_matmul", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_mm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_addmm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_bmm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_conv", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_optimizer", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_activation", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_norm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_scaled_mm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
+          { config: "operator_microbenchmark_test_scaled_grouped_mm", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
         ]}
     secrets: inherit
 
@@ -52,7 +70,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: opmicrobenchmark-build
     with:
-      timeout-minutes: 500
+      timeout-minutes: 240
       build-environment: ${{ needs.opmicrobenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
@@ -72,7 +90,16 @@ jobs:
       cuda-arch-list: '10.0'
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_matmul", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_mm", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_addmm", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_bmm", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_conv", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_optimizer", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_activation", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_norm", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_scaled_mm", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_test_scaled_grouped_mm", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
     secrets: inherit
 
@@ -81,7 +108,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: opmicrobenchmark-build-b200
     with:
-      timeout-minutes: 500
+      timeout-minutes: 240
       build-environment: ${{ needs.opmicrobenchmark-build-b200.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-b200.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
@@ -98,7 +125,16 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_matmul", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_mm", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_addmm", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_bmm", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_conv", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_optimizer", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_activation", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_norm", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_scaled_mm", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test_scaled_grouped_mm", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
         ]}
     secrets: inherit
 
@@ -107,8 +143,7 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: opmicrobenchmark-build-rocm
     with:
-      # TODO (huydo): Need to implement sharding for ops micro benchmark
-      timeout-minutes: 900
+      timeout-minutes: 360
       build-environment: ${{ needs.opmicrobenchmark-build-rocm.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}

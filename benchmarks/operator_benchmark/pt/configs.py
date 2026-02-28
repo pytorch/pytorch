@@ -135,8 +135,12 @@ conv_3d_configs_short = op_bench.config_list(
     },
     tags=["short"],
 )
+# MIOpen/CK on ROCm lacks precompiled kernels for Conv3d with small IC values.
+# IC=16 produces non-aligned GEMM K dimension (IC * kernel^3), triggering noisy
+# CK validation messages. Use IC=[32, 64] on ROCm to avoid this.
+_conv3d_ic = [32, 64] if torch.version.hip is not None else [16, 32]
 conv_3d_configs_long = op_bench.cross_product_configs(
-    IC=[16, 32],
+    IC=_conv3d_ic,
     OC=[32, 64],
     kernel=[3, 5],
     stride=[1, 2],
