@@ -442,7 +442,6 @@ def generate_custom_triton_kernel(kernel: Any) -> str:
         config_strs = []
         # pyrefly: ignore [missing-attribute]
         for kernel_config in kernel.configs:
-            # pyrefly: ignore [bad-argument-type]
             config_strs.append(f"""triton.Config(
                     {str(kernel_config.kwargs)},
                     num_warps={kernel_config.num_warps},
@@ -565,7 +564,7 @@ if "__compile_source__" in globals():
             return result
 
         fn_globals = getattr(jit_fn.fn, "__globals__", {})
-        src = jit_fn.src  # pyrefly: ignore [missing-attribute]
+        src = jit_fn.src
         full_src = src if src.strip().startswith("def ") else "def " + src
 
         referenced_names: set[str] = set()
@@ -633,9 +632,7 @@ if "__compile_source__" in globals():
             model_str += "ERROR: Repro will not work as intended, "
             model_str += f"User defined triton kernel exception: {e}\n"
 
-    # pyrefly: ignore [unbound-name]
     if len(kernel_side_table.constant_args) > 0:
-        # pyrefly: ignore [unbound-name]
         model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"
 
     model_str += NNModuleToString.convert(gm)
@@ -647,10 +644,8 @@ if "__compile_source__" in globals():
     # Extract from graph placeholders and their corresponding arguments
     placeholder_targets = fx_placeholder_targets(gm)
     for placeholder, arg in zip(placeholder_targets, args):
-        # pyrefly: ignore [unbound-name]
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
-        # pyrefly: ignore [unbound-name]
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
@@ -662,7 +657,6 @@ if "__compile_source__" in globals():
         # Extract symbolic variables from the same arguments
 
         if (
-            # pyrefly: ignore [unbound-name]
             isinstance(arg, torch.SymInt)
             # By checking sympy.Symbol, we are excluding any symbolic expressions.
             # TODO: we may need to solve expressions to extract symbol definitions.
@@ -670,12 +664,10 @@ if "__compile_source__" in globals():
             and arg.node.hint is not None
         ):
             used_syms[str(arg.node)] = arg.node.hint
-        # pyrefly: ignore [unbound-name]
         elif isinstance(arg, torch.Tensor):
             # Extract symbolic variables from tensor shapes and strides
             for dim in arg.shape:
                 if (
-                    # pyrefly: ignore [unbound-name]
                     isinstance(dim, torch.SymInt)
                     and isinstance(dim.node.expr, sympy.Symbol)
                     and dim.node.hint is not None
@@ -683,7 +675,6 @@ if "__compile_source__" in globals():
                     used_syms[str(dim.node)] = dim.node.hint
             for stride in arg.stride():
                 if (
-                    # pyrefly: ignore [unbound-name]
                     isinstance(stride, torch.SymInt)
                     and isinstance(stride.node.expr, sympy.Symbol)
                     and stride.node.hint is not None
@@ -692,7 +683,6 @@ if "__compile_source__" in globals():
             # Extract symbols from storage nbytes (can be a symbolic expression)
             storage = arg.untyped_storage()
             nbytes = storage.nbytes()
-            # pyrefly: ignore [unbound-name]
             if isinstance(nbytes, torch.SymInt):
                 expr = nbytes.node.expr
                 shape_env = nbytes.node.shape_env
@@ -1007,7 +997,6 @@ def repro_common(
 
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
-    # pyrefly: ignore [bad-argument-type]
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
     # pyrefly: ignore [bad-assignment]

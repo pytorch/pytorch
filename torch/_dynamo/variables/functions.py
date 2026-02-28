@@ -86,7 +86,12 @@ from .base import (
     ValueMutationNew,
     VariableTracker,
 )
-from .constant import CONSTANT_VARIABLE_NONE, ConstantVariable
+from .constant import (
+    CONSTANT_VARIABLE_FALSE,
+    CONSTANT_VARIABLE_NONE,
+    CONSTANT_VARIABLE_TRUE,
+    ConstantVariable,
+)
 
 
 try:
@@ -415,7 +420,7 @@ class BaseUserFunctionVariable(VariableTracker):
         except NotImplementedError:
             if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
                 result = True
-        return variables.ConstantVariable.create(result)
+        return VariableTracker.build(tx, result)
 
     def closure_vars(self, tx: "InstructionTranslator") -> dict[str, VariableTracker]:
         return {}
@@ -584,7 +589,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         result = hasattr(self.fn, name)
-        return variables.ConstantVariable.create(result)
+        return VariableTracker.build(tx, result)
 
     def call_function(
         self,
@@ -622,6 +627,25 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Improper error_on_graph_break() call. Please fix your call to error_on_graph_break(). "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
+        elif self.fn is torch._dynamo.override_cudagraphs:
+            try:
+                bound = inspect.signature(self.fn).bind(*args, **kwargs)
+                bound.apply_defaults()
+                fwd = bound.arguments["fwd"]
+                bwd = bound.arguments["bwd"]
+                if isinstance(fwd, VariableTracker):
+                    fwd = fwd.as_python_constant()
+                if isinstance(bwd, VariableTracker):
+                    bwd = bwd.as_python_constant()
+                return variables.CudagraphOverrideVariable(fwd, bwd)
+            except Exception as e:
+                raise RuntimeError(
+                    "Improper override_cudagraphs() call. Please fix your call to override_cudagraphs(). "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
+        elif self.fn is torch._dynamo.bytecode_debugger.breakpoint:
+            tx.output._emit_debugger_breakpoint = True
+            return variables.CONSTANT_VARIABLE_NONE
         # Handle a `nonstrict_trace(fn)` call
         elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
@@ -798,7 +822,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             map_fn,
             source=getattr(map_fn, "source", None),
         )
-        tree_map_variable = variables.UserFunctionVariable(tree_map_callable)
+        tree_map_variable = VariableTracker.build(tx, tree_map_callable)
         return tree_map_variable, [wrapped_map_fn, tree_arg], dict(kwargs)
 
     def _lookup_tree_map_function(self) -> types.FunctionType | None:
@@ -1071,8 +1095,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+            return CONSTANT_VARIABLE_TRUE
+        return CONSTANT_VARIABLE_FALSE
 
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return False
@@ -1798,9 +1822,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         if name == "__code__":
-            return variables.ConstantVariable.create(hasattr(self, "code"))
+            return VariableTracker.build(tx, hasattr(self, "code"))
         if name == "__defaults__":
-            return variables.ConstantVariable.create(hasattr(self, "defaults"))
+            return VariableTracker.build(tx, hasattr(self, "defaults"))
         return super().call_obj_hasattr(tx, name)
 
     def has_self(self) -> bool:
@@ -2149,7 +2173,7 @@ class SkipFunctionVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
-        return variables.ConstantVariable.create(hasattr(self.value, name))
+        return VariableTracker.build(tx, hasattr(self.value, name))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name in cmp_name_to_op_mapping:
@@ -2262,11 +2286,12 @@ class WrapperUserFunctionVariable(VariableTracker):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
-        return variables.UserFunctionVariable(
-            polyfills.getattr_and_trace  # type: ignore[arg-type]
+        return VariableTracker.build(
+            tx,
+            polyfills.getattr_and_trace,  # type: ignore[arg-type]
         ).call_function(
             tx,
-            [self, variables.ConstantVariable(self.attr_to_trace), *all_args],
+            [self, VariableTracker.build(tx, self.attr_to_trace), *all_args],
             kwargs,
         )
 
@@ -2406,9 +2431,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             )
             if reduce_op not in REDUCE_OP_TO_STR:
                 raise ValueError(f"Unsupported all_reduce op: {reduce_op}")
-            kwargs["op"] = variables.ConstantVariable.create(
-                REDUCE_OP_TO_STR[reduce_op]
-            )
+            kwargs["op"] = VariableTracker.build(tx, REDUCE_OP_TO_STR[reduce_op])
         return self.replacement_var.call_function(tx, args, kwargs)
 
 
@@ -2459,10 +2482,9 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
                 raise_observed_exception(
                     type(exc),
                     tx,
-                    args=list(map(ConstantVariable.create, exc.args)),
+                    args=[VariableTracker.build(tx, a) for a in exc.args],
                 )
             return variables.UserDefinedClassVariable(
-                # pyrefly: ignore[unbound-name]
                 value,
                 mutation_type=ValueMutationNew(),
             )
@@ -2537,9 +2559,7 @@ class FunctoolsPartialVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         # functools.partial uses slots, so attributes are constant
-        return variables.ConstantVariable.create(
-            hasattr(functools.partial(identity), name)
-        )
+        return VariableTracker.build(tx, hasattr(functools.partial(identity), name))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = self.source and AttrSource(self.source, name)
@@ -2549,7 +2569,7 @@ class FunctoolsPartialVariable(VariableTracker):
         if name == "args":
             return variables.ListVariable(self.args, source=source)
         if name == "keywords":
-            items = {ConstantVariable.create(k): v for k, v in self.keywords.items()}
+            items = {VariableTracker.build(tx, k): v for k, v in self.keywords.items()}
             return variables.ConstDictVariable(items, source=source)
         if name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(self, name)
@@ -2731,7 +2751,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         options = {}
         if self.source:
             options["source"] = AttrSource(self.source, name)
-        # pyrefly: ignore[bad-specialization]
         polyfilled_method_variable = PolyfilledFunctionVariable(method, **options)
         return polyfilled_method_variable.call_function(tx, args, kwargs)
 
@@ -2817,7 +2836,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
     def call_grid(
         self, grid: Any, meta: dict[str, Any], tx: "InstructionTranslator"
     ) -> Any:
-        meta_var = {variables.ConstantVariable.create(k): v for k, v in meta.items()}
+        meta_var = {VariableTracker.build(tx, k): v for k, v in meta.items()}
         grid = grid.call_function(tx, [meta_var], {})
         return grid
 
@@ -2915,7 +2934,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
                 combined_args[k] = v.get_tensor()
 
         combined_args_vt = {
-            variables.ConstantVariable.create(k): v for k, v in combined_args.items()
+            VariableTracker.build(tx, k): v for k, v in combined_args.items()
         }
 
         from torch._higher_order_ops.triton_kernel_wrap import (
@@ -2959,7 +2978,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
             },
         )
 
-        return variables.ConstantVariable(
+        return VariableTracker.build(
+            tx,
             None,
         )
 
@@ -3263,7 +3283,7 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
             source=get_pytree_SUPPORTED_NODES_source(),
         )
         out = supported_nodes_var.call_method(tx, "__contains__", [node_type_var], {})
-        return ConstantVariable.create(not out.value)
+        return VariableTracker.build(tx, not out.value)
 
 
 class SparseTensorCreationSkipVariable(SkipFunctionVariable):

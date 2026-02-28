@@ -497,6 +497,9 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
     return;
   }
 
+  // Save original shape before flattening for the LU output
+  auto A_original_sizes = A_t.sizes().vec();
+
   if (A_t.dim() > 3) {
     A_t = A_t.flatten(0, -3);
   }
@@ -508,8 +511,9 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
     status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
   }
 
-  resize_output(LU, A_t.sizes());
-  Tensor LU_ = LU;
+  // LU must keep the original (unflattened) shape for the backward pass
+  resize_output(LU, A_original_sizes);
+  Tensor LU_ = (LU.dim() > 3) ? LU.flatten(0, -3) : LU;
   if (!LU_.is_same(A_t)) {
     A_t = LU_.copy_(A_t);
   } else {
@@ -667,9 +671,11 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
 
   TORCH_CHECK(output.is_mps());
 
+  // Edge case behaviors must match _int_mm_out_cpu CPU implementation
   // Transpose inputs if needed
-  if (output.numel() == 0) {
-    return output;
+  // Outer or inner dimension is 0
+  if (output.numel() == 0 || self.size(1) == 0) {
+    return output.zero_();
   }
 
   // MPS matmul returns silently incorrect results if one of the matrix dimensions is greater than 2**15
@@ -858,6 +864,17 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     output.resize_(bias_sizes);
   }
   if (output.numel() == 0) {
+    return output;
+  }
+  // Inner dimension is 0
+  // Early out as some paths in the code below do not handle this case correctly
+  if (self.size(1) == 0) {
+    if (beta.toDouble() == 0.0) {
+      output.zero_();
+    } else {
+      output.copy_(*bias_);
+      output.mul_(beta);
+    }
     return output;
   }
 

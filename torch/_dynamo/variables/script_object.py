@@ -146,7 +146,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
                 )
 
         if ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
+            return VariableTracker.build(tx, obj)
 
         source = AttrSource(self.source, name) if self.source else None
         return VariableTracker.build(tx, obj, source)
@@ -178,7 +178,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
         var_args = TupleVariable(list(args))
         var_kwargs = ConstDictVariable(
-            {ConstantVariable(k): v for k, v in kwargs.items()}
+            {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
         )
         constant_args = var_args.as_python_constant()
         constant_kwargs = var_kwargs.as_python_constant()
@@ -246,6 +246,16 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 self.proxy = hoisted_vt.as_proxy()
 
         return self.proxy
+
+    def __str__(self) -> str:
+        value = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
+        )
+        return f"{self.__class__.__name__}({value})"
+
+    __repr__ = __str__
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
@@ -392,14 +402,20 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         hints=[],
                     )
 
-                args_const = [x.as_python_constant() for x in args]
-                kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
+                def get_real_value(x: VariableTracker) -> Any:
+                    # For TorchScriptObjectVariable, get the real object directly
+                    if isinstance(x, TorchScriptObjectVariable):
+                        return x.get_real_value()
+                    return x.as_python_constant()
+
+                args_const = [get_real_value(x) for x in args]
+                kwargs_const = {k: get_real_value(v) for k, v in kwargs.items()}
 
                 method = getattr(real_obj, name)
 
                 if name == "__setattr__":
                     method(*args_const, **kwargs_const)
-                    return real_obj  # pyrefly: ignore[bad-return]
+                    return real_obj
 
                 constant_val = method(*args_const, **kwargs_const)
 

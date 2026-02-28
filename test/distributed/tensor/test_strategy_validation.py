@@ -15,6 +15,7 @@ from torch.distributed._local_tensor import LocalTensorMode
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate
 from torch.distributed.tensor._ops.strategy_validation import (
+    _checkerboard_mask,
     _create_partial_input,
     _find_opinfo_candidates,
     extract_tensors_from_sample,
@@ -717,13 +718,77 @@ class TestCreatePartialInput(TestCase):
         self.assertTrue(torch.allclose(stacked0.max(dim=0).values, tensor))
         self.assertTrue(torch.allclose(stacked1.max(dim=0).values, tensor))
 
-        # The offset patterns should be different (shifted by 1 element)
-        # tensor_idx=0: rank0 has [0, -1.3, 0, -1.3, ...], rank1 has [-1.3, 0, ...]
-        # tensor_idx=1: rank0 has [-1.3, 0, -1.3, 0, ...], rank1 has [0, -1.3, ...]
+        # The offset patterns should be different (shifted checkerboard)
         self.assertFalse(
             torch.allclose(local0._local_tensors[0], local1._local_tensors[0]),
             "Different tensor_idx should produce different P(max) patterns",
         )
+
+    def test_checkerboard_mask_alternates_every_dim(self):
+        """
+        The checkerboard mask must alternate along every dimension.
+
+        A flat-index mask (idx % 2) has uniform parity along even-stride
+        dimensions: for a [3,2,1,2] tensor, dim 0 stride is 4, so all
+        elements along dim 0 at a given position share the same flat-index
+        parity. This causes argmin/argmax to produce identical results on
+        all ranks, making P(min)/P(max) inputs falsely appear valid.
+
+        The checkerboard mask (sum-of-coordinates % 2) avoids this by
+        guaranteeing adjacent elements differ along every axis.
+        """
+        # Shape where flat-index mask fails: stride of dim 0 = 4 (even)
+        tensor = torch.randn(3, 2, 1, 2)
+        mask = _checkerboard_mask(tensor)
+
+        # Reshape mask back to tensor shape to check along each dim
+        mask_nd = mask.reshape(tensor.shape)
+
+        # Along dim 0, adjacent elements must alternate
+        for j in range(2):
+            for k in range(1):
+                for l in range(2):
+                    vals = [mask_nd[i, j, k, l].item() for i in range(3)]
+                    # Check alternation: each consecutive pair should differ
+                    for idx in range(len(vals) - 1):
+                        self.assertNotEqual(
+                            vals[idx],
+                            vals[idx + 1],
+                            f"Mask should alternate along dim 0 at [{':,'}{j},{k},{l}], "
+                            f"got {vals}",
+                        )
+
+    def test_pmin_pmax_adaptive_offset_exceeds_range(self):
+        """
+        P(min)/P(max) offsets must exceed the tensor's value range.
+
+        With fixed small offsets (e.g., 0.7 / -1.3), the true minimum
+        dominates across all ranks, making argmin produce the same index
+        everywhere. Adaptive offsets scaled to 2*range+1 ensure the mask
+        pattern determines which rank finds the argmin, so different ranks
+        disagree for index-returning ops.
+        """
+        # Tensor with large value range — fixed offsets would be too small
+        tensor = torch.tensor([-10.0, -1.0, 5.0, 8.0])
+        value_range = (tensor.max() - tensor.min()).item()  # 18.0
+
+        for reduce_op, sign in [("min", 1), ("max", -1)]:
+            local = _create_partial_input(tensor, Partial(reduce_op), world_size=2)
+            r0, r1 = local._local_tensors[0], local._local_tensors[1]
+            # The actual offset applied should exceed value_range
+            max_offset = (r0 - r1).abs().max().item()
+            self.assertGreater(
+                max_offset,
+                value_range,
+                f"P({reduce_op}) offset {max_offset:.1f} should exceed "
+                f"value range {value_range:.1f}",
+            )
+            # Ranks should disagree on argmin/argmax
+            self.assertNotEqual(
+                r0.argmin().item(),
+                r1.argmin().item(),
+                f"P({reduce_op}) ranks should disagree on argmin with adaptive offset",
+            )
 
 
 class TestPartialCombinationValidity(TestCase):
@@ -844,6 +909,93 @@ class TestPartialCombinationValidity(TestCase):
             "why compare_operator must skip such samples",
         )
 
+    def test_argmin_rejects_pmax_input(self):
+        """
+        P(max) -> R must be rejected for argmin.
+
+        argmin returns indices, not values. With P(max) input, different
+        ranks hold the true value at different positions (checkerboard mask),
+        so argmin produces different indices on each rank. The Replicate
+        output check should catch this disagreement.
+
+        This test exercises both fixes:
+        1. Adaptive offset (exceeds value range) — prevents the true min
+           from dominating on all ranks despite the perturbation
+        2. Checkerboard mask — prevents uniform parity along even-stride
+           dimensions, which would make all elements in a reduction group
+           shift identically
+        """
+        # Use a shape where flat-index mask would fail: dim 0 stride = 4 (even)
+        t = torch.randn(3, 2, 1, 2)
+        sample = SampleInput(t, kwargs={"dim": 0, "keepdim": True})
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.argmin(t, dim=0, keepdim=True)
+
+        for reduce_op in ("min", "max"):
+            combo = PlacementCombination(
+                input_placements=(Partial(reduce_op),),
+                output_placement=Replicate(),
+            )
+            with LocalTensorMode(frozenset(range(self.world_size))):
+                mesh = init_device_mesh("cpu", (self.world_size,))
+                is_valid, msg = validate_combination(
+                    torch.argmin,
+                    sample,
+                    tensors,
+                    combo,
+                    ground_truth,
+                    self.world_size,
+                    mesh,
+                )
+            self.assertFalse(
+                is_valid,
+                f"argmin P({reduce_op})->R should be invalid "
+                f"(index op, ranks disagree): {msg}",
+            )
+        """
+        All-zero ground truth makes every placement trivially validate.
+
+        Zeros are a fixed point of all reduce operations (sum, max, min),
+        so validate_combination cannot distinguish valid from invalid rules.
+        This is a known limitation: compare_operator skips all-zero samples
+        to avoid hundreds of false positive rules.
+
+        We use zeros_like as the test op because it always produces zeros
+        regardless of input values, unlike mul(zeros, x) which the offset
+        fix in _create_partial_input now correctly handles.
+        """
+        t = torch.randn(8, 4)
+        sample = SampleInput(t)
+        tensors = extract_tensors_from_sample(sample)
+        ground_truth = torch.zeros_like(t)
+
+        # P(sum)->P(sum) is NOT valid for zeros_like, but with all-zero
+        # output it trivially passes: sum(0,0)=0=ground_truth.
+        combo = PlacementCombination(
+            input_placements=(Partial("sum"),),
+            output_placement=Partial("sum"),
+        )
+
+        with LocalTensorMode(frozenset(range(self.world_size))):
+            mesh = init_device_mesh("cpu", (self.world_size,))
+            is_valid, msg = validate_combination(
+                torch.zeros_like,
+                sample,
+                tensors,
+                combo,
+                ground_truth,
+                self.world_size,
+                mesh,
+            )
+
+        # This demonstrates the false positive: validate_combination says
+        # valid, even though the rule is invalid for non-zero inputs.
+        self.assertTrue(
+            is_valid,
+            "Expected True (false positive) for all-zero output, showing "
+            "why compare_operator must skip such samples",
+        )
+
 
 class TestDecompStrategyPath(TestCase):
     """Test that decomposition-based strategy propagation discovers rules."""
@@ -891,9 +1043,9 @@ class TestDecompStrategyPath(TestCase):
             tensor_meta=TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype),
         )
         op_schema = OpSchema(aten_softplus, (spec,), {})
-        DecompShardingStrategy.ensure_schema_info(aten_softplus, propagator)
-        output_strategy = DecompShardingStrategy.propagate_strategy(
-            op_schema, propagator
+        propagator.decomp_strategy.ensure_schema_info(aten_softplus)
+        output_strategy = propagator.decomp_strategy.propagate_strategy(
+            op_schema,
         )
         self.assertIsNotNone(output_strategy)
 
@@ -1015,12 +1167,10 @@ class TestQuerySingleDimStrategyKwargs(TestCase):
         original = propagator.op_single_dim_strategy_funcs.get(aten_add)
         propagator.op_single_dim_strategy_funcs[aten_add] = alpha_aware_add_strategy
         try:
-            tensors = [("a", torch.randn(4, 3)), ("b", torch.randn(4, 3))]
+            a, b = torch.randn(4, 3), torch.randn(4, 3)
 
             # Query with alpha=-1 kwargs
-            result = query_single_dim_strategy(
-                aten_add, tensors, None, kwargs={"alpha": -1}
-            )
+            result = query_single_dim_strategy(aten_add, (a, b), {"alpha": -1})
             self.assertIsNotNone(result)
 
             # The third rule's output should be P(min) for alpha=-1
@@ -1117,6 +1267,71 @@ class TestCompareOperatorEndToEnd(TestCase):
             self.assertEqual(len(stats.false_positives), 0)
 
         self._with_even_sizes(run)
+
+    def test_compare_operator_runtime_schema_ops(self):
+        """Ops with RuntimeSchemaInfo (non-tensor positional args) should find DTensor rules."""
+        from torch.distributed.tensor._ops.strategy_validation import compare_operator
+
+        runtime_schema_ops = ["flip", "roll"]
+        for op_name in runtime_schema_ops:
+            with self.subTest(op=op_name):
+
+                def run(name=op_name):
+                    stats = compare_operator(
+                        name,
+                        device="cpu",
+                        dtype=torch.float32,
+                        world_size=self.world_size,
+                        incorrect_only=True,
+                    )
+                    self.assertGreater(
+                        stats.true_positives,
+                        0,
+                        f"{name} should have DTensor rules (true_positives > 0), "
+                        f"got skip_reasons={stats.skip_reasons}",
+                    )
+
+                self._with_even_sizes(run)
+
+
+class TestMainModule(TestCase):
+    """Test that strategy_validation can be run as a main module."""
+
+    def _run_module(self, *extra_args):
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "torch.distributed.tensor._ops.strategy_validation",
+                "--device",
+                "cpu",
+                *extra_args,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Module exited with code {result.returncode}.\n"
+            f"stderr: {result.stderr[-2000:]}",
+        )
+        return result.stdout
+
+    def test_run_as_module_default(self):
+        """Running with no args should validate 'add' and exit cleanly."""
+        stdout = self._run_module()
+        self.assertIn("add", stdout)
+        self.assertIn("Correct", stdout)
+
+    def test_run_with_op_flag(self):
+        """Running with --op mul --incorrect-only should work."""
+        stdout = self._run_module("--op", "mul", "--incorrect-only")
+        self.assertIn("mul", stdout)
 
 
 class TestOpInfoLookup(TestCase):

@@ -24,7 +24,6 @@ MATH_TRANSPILATIONS = collections.OrderedDict([
     ("std::frexp", ("::frexp")),
 ])
 
-# pyrefly: ignore  # no-matching-overload
 CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("CUresult", "hipError_t"),
     ("cudaError_t", "hipError_t"),
@@ -350,7 +349,6 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("tensorpipe/tensorpipe_cuda.h", "tensorpipe/tensorpipe_hip.h"),
 ])
 
-# pyrefly: ignore  # no-matching-overload
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("__CUDACC__", "__HIPCC__"),
     ("CUDA_ERROR_INVALID_CONTEXT", "hipErrorInvalidContext"),

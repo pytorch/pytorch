@@ -1113,11 +1113,10 @@ class CaptureOutput:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
-        # pyrefly: ignore [bad-assignment, not-callable]
         compiled_fn = compiled_fn or self.backend_input.graph_module
         return runtime_env.forward_callable(
             backend_id,
-            compiled_fn,  # pyrefly: ignore [bad-argument-type]
+            compiled_fn,
             extra_globals=extra_globals,
         )
 
@@ -1137,7 +1136,6 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
 
         resolved_call = mod.__call__
         if hasattr(resolved_call, "__self__"):
-            # pyrefly: ignore [missing-attribute]
             resolved_call = resolved_call.__func__
 
         # Mirrored from NNModuleVariable.call_function:
@@ -1297,7 +1295,6 @@ def _fullgraph_capture_frame(
             frame.locals,
             frame.builtins,
             frame.closure,
-            # pyrefly: ignore [bad-argument-type]
             compiler_fn=fullgraph_compiler,
             export=_is_export_deprecated_do_not_use,
             export_constraints=constraints,  # type: ignore[arg-type]
@@ -1528,7 +1525,18 @@ def _compile(
             code.co_firstlineno,
             code,
         )
-
+        # Dump the ORIGINAL bytecode of resumption frame into TORCH_TRACE
+        # log file, so that it is parsed by tlparse tool.
+        is_resumption_frame = "torch_dynamo_resume_in" in code.co_name
+        if is_resumption_frame:
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": code.co_name + "_ORIGINAL_BYTECODE",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dis.Bytecode(code).dis(),
+            )
         out_code = None
         try:
             dynamo_output = compile_frame(
@@ -1568,6 +1576,17 @@ def _compile(
             code.co_firstlineno,
             out_code,
         )
+        # Dump the MODIFIED bytecode of resumption frame into TORCH_TRACE
+        # log file, so that it is parsed by tlparse tool.
+        if is_resumption_frame:
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": code.co_name + "_MODIFIED_BYTECODE",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dis.Bytecode(out_code).dis(),
+            )
 
         for idx, hook in enumerate(_bytecode_hooks.values()):
             with dynamo_timed(f"bytecode_hooks_{idx}", log_pt2_compile_event=True):
@@ -1580,6 +1599,13 @@ def _compile(
         dynamo_time_before_restart = last_attempt_start_time - start_time
         assert tracer_output.output_graph is not None
         output = tracer_output.output_graph
+
+        from .bytecode_debugger import BREAKPOINT_MARKER
+
+        if BREAKPOINT_MARKER in out_code.co_consts:
+            from torch._C._dynamo.eval_frame import register_breakpoint_code
+
+            register_breakpoint_code(out_code)
 
         # Tests for new code objects.
         # The rationale for these tests can be found in torch/csrc/dynamo/eval_frame.c
@@ -2033,7 +2059,6 @@ class ConvertFrame:
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         return lambda backend: convert_frame(
-            # pyrefly: ignore [bad-argument-type]
             backend,
             self._hooks,
         )
@@ -2234,7 +2259,7 @@ class CatchErrorsWrapper:
         assert frame_state is not None
         input_codes.add(frame.f_code)
 
-        is_skipfile = trace_rules.check(frame.f_code)
+        is_skipfile = trace_rules.check(frame.f_code, frame=frame)
         if sys.version_info >= (3, 13):
             has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
         else:
@@ -2264,7 +2289,7 @@ class CatchErrorsWrapper:
             if log.isEnabledFor(logging.DEBUG):
                 if has_started_execution:
                     skip_reason = "traced frame already"
-                elif trace_rules.check(frame.f_code):
+                elif trace_rules.check(frame.f_code, frame=frame):
                     skip_reason = "in skipfiles"
                 elif should_skip_for_dispatch_mode:
                     skip_reason = "non-infra torch dispatch mode present, this is not supported today in torch.compile"

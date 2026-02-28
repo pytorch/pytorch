@@ -6,7 +6,7 @@
 
 {%- macro binary_env_as_input(config, is_windows=False, include_skip_tests=False) -%}
 {%- if is_windows %}
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
 {%- else %}
       PYTORCH_ROOT: /pytorch
 {%- endif %}
@@ -64,6 +64,9 @@
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
 {%- endmacro %}
 
@@ -76,7 +79,7 @@
     needs: !{{ lt_config["build_name"] }}-extract
     with:
 {%- if is_windows %}
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
 {%- else %}
       PYTORCH_ROOT: /pytorch
 {%- endif %}
@@ -96,5 +99,8 @@
       {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
 {%- endmacro %}

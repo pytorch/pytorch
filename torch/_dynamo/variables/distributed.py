@@ -31,9 +31,7 @@ from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
-from ..utils import istype
 from .base import VariableTracker
-from .constant import ConstantVariable, EnumVariable
 
 
 if TYPE_CHECKING:
@@ -143,86 +141,8 @@ class WorldMetaClassVariable(DistributedVariable):
             assert self.source
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return EnumVariable(self.value.NON_GROUP_MEMBER)
+            return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER)
         return super().var_getattr(tx, name)
-
-
-class DeviceMeshVariable(DistributedVariable):
-    @staticmethod
-    def is_device_mesh(value: object) -> bool:
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if not DistributedVariable.is_available():
-            return False
-
-        from torch.distributed.device_mesh import DeviceMesh
-
-        return istype(value, DeviceMesh)
-
-    def as_python_constant(self) -> Any:
-        return self.value
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "ndim":
-            return ConstantVariable.create(self.value.ndim)
-        if name == "device_type":
-            return ConstantVariable.create(self.value.device_type)
-        if name == "mesh_dim_names":
-            source = self.source
-            if source:
-                source = AttrSource(base=source, member="mesh_dim_names")
-            return VariableTracker.build(tx, self.value.mesh_dim_names, source)
-        return super().var_getattr(tx, name)
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        if name == "size":
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
-        if name == "get_coordinate":
-            return ConstantVariable.create(self.value.get_coordinate())
-        if name == "get_rank":
-            return ConstantVariable.create(self.value.get_rank())
-        if name == "get_local_rank":
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value.get_local_rank(*const_args, **const_kwargs)
-            )
-        if name == "get_group":
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return SourcelessBuilder.create(
-                tx, self.value.get_group(*const_args, **const_kwargs)
-            )
-        if name == "_is_current_rank_part_of_mesh":
-            return ConstantVariable.create(self.value._is_current_rank_part_of_mesh())
-        if name == "_get_or_create_default_group":
-            return SourcelessBuilder.create(
-                tx, self.value._get_or_create_default_group()
-            )
-        if name == "_flatten":
-            from .builder import SourcelessBuilder
-
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return SourcelessBuilder.create(
-                tx, self.value._flatten(*const_args, **const_kwargs)
-            )
-        if name == "_sym_get_coordinate":
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value._sym_get_coordinate(*const_args, **const_kwargs)
-            )
-        return super().call_method(tx, name, args, kwargs)
 
 
 class BackwardHookVariable(VariableTracker):

@@ -189,10 +189,12 @@ def check_files(
             )
         ]
 
-    # Parse JSON output from pyrefly
+    # Parse JSON output from pyrefly. In GitHub Actions, pyrefly appends
+    # ::error commands to stdout after the JSON, so use raw_decode to parse
+    # only the first JSON object and ignore trailing output.
     try:
         if stdout:
-            result = json.loads(stdout)
+            result, _ = json.JSONDecoder().raw_decode(stdout)
             errors = result.get("errors", [])
         else:
             errors = []
