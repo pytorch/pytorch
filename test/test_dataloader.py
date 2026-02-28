@@ -23,6 +23,7 @@ from torch import multiprocessing as mp
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_CI,
     IS_JETSON,
     IS_LINUX,
@@ -1555,6 +1556,13 @@ except RuntimeError as e:
             self._get_data_loader(
                 self.dataset, num_workers=1, multiprocessing_context=object()
             )
+
+        # stateful with multi-process data loading
+        with self.assertRaisesRegex(
+            ValueError,
+            "stateful option is only supported with single-process data loading",
+        ):
+            self._get_data_loader(self.dataset, num_workers=1, stateful=True)
 
         # map-style
         sampler = torch.utils.data.SequentialSampler(self.dataset)
@@ -3194,7 +3202,8 @@ class IntegrationTestDataLoaderDataPipe(TestCase):
                 self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
 
                 if dl._iterator is not None:
-                    dl._iterator._shutdown_workers()
+                    if num_workers > 0:
+                        dl._iterator._shutdown_workers()
                     dl._iterator = None
                 del dl
 
@@ -3220,11 +3229,20 @@ class TestStringDataLoader(TestCase):
         super().setUp()
         self.dataset = StringDataset()
 
+    @parametrize(
+        "stateful",
+        [False, True],
+    )
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_shuffle_pin_memory(self):
-        loader = DataLoader(
-            self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True
-        )
+    def test_shuffle_pin_memory(self, stateful):
+        if stateful:
+            loader = DataLoader(
+                self.dataset, batch_size=2, shuffle=True, pin_memory=True, stateful=True
+            )
+        else:
+            loader = DataLoader(
+                self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True
+            )
         for s, n in loader:
             self.assertIsInstance(s[0], str)
             self.assertTrue(n.is_pinned())
@@ -3251,9 +3269,13 @@ class TestDictDataLoader(TestCase):
         super().setUp()
         self.dataset = DictDataset()
 
-    def test_sequential_batch(self):
+    @parametrize(
+        "stateful",
+        [False, True],
+    )
+    def test_sequential_batch(self, stateful):
         for persistent_workers in (False, True):
-            if persistent_workers:
+            if persistent_workers or not stateful:
                 loader = DataLoader(
                     self.dataset,
                     batch_size=2,
@@ -3284,33 +3306,59 @@ class TestDictDataLoader(TestCase):
                 self.assertEqual(n[0], idx)
                 self.assertEqual(n[1], idx + 1)
 
+    @parametrize(
+        "stateful",
+        [False, True],
+    )
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_pin_memory(self):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
-        for sample in loader:
-            self.assertTrue(sample["a_tensor"].is_pinned())
-            self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
-
-    @skipIfXpu
-    @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
-    def test_pin_memory_no_cuda(self):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
-        for sample in loader:
-            self.assertFalse(sample["a_tensor"].is_pinned())
-            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_pin_memory_device(self):
+    def test_pin_memory(self, stateful):
         loader = DataLoader(
-            self.dataset, batch_size=2, pin_memory=True, pin_memory_device="cuda"
+            self.dataset, batch_size=2, pin_memory=True, stateful=stateful
         )
         for sample in loader:
             self.assertTrue(sample["a_tensor"].is_pinned())
             self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
 
+    @parametrize(
+        "stateful",
+        [False, True],
+    )
+    @skipIfXpu
+    @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
+    def test_pin_memory_no_cuda(self, stateful):
+        loader = DataLoader(
+            self.dataset, batch_size=2, pin_memory=True, stateful=stateful
+        )
+        for sample in loader:
+            self.assertFalse(sample["a_tensor"].is_pinned())
+            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
+
+    @parametrize(
+        "stateful",
+        [False, True],
+    )
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_pin_memory_with_only_device(self):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory_device="cuda")
+    def test_pin_memory_device(self, stateful):
+        loader = DataLoader(
+            self.dataset,
+            batch_size=2,
+            pin_memory=True,
+            pin_memory_device="cuda",
+            stateful=stateful,
+        )
+        for sample in loader:
+            self.assertTrue(sample["a_tensor"].is_pinned())
+            self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
+
+    @parametrize(
+        "stateful",
+        [False, True],
+    )
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_with_only_device(self, stateful):
+        loader = DataLoader(
+            self.dataset, batch_size=2, pin_memory_device="cuda", stateful=stateful
+        )
         for sample in loader:
             self.assertFalse(sample["a_tensor"].is_pinned())
             self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
@@ -3834,6 +3882,12 @@ class TestOutOfOrderDataLoader(TestCase):
 
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
+parametrized_classes = [
+    TestDictDataLoader,
+    TestStringDataLoader,
+]
+for parametrize_class in parametrized_classes:
+    instantiate_parametrized_tests(parametrize_class)
 
 
 if __name__ == "__main__":

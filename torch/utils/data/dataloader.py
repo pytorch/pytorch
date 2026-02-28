@@ -18,7 +18,7 @@ import queue
 import threading
 import warnings
 from collections.abc import Callable
-from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Self
 
 import torch
@@ -34,11 +34,15 @@ from torch.utils.data.datapipes.datapipe import (
 )
 from torch.utils.data.dataset import Dataset, IterableDataset
 from torch.utils.data.sampler import (
+    _InfiniteConstantSampler,
     BatchSampler,
     RandomSampler,
     Sampler,
     SequentialSampler,
 )
+
+from ._utils.stateful import Stateful
+from ._utils.worker import _try_get_state_dict, _try_load_state_dict
 
 
 if TYPE_CHECKING:
@@ -75,6 +79,19 @@ get_worker_info = _utils.worker.get_worker_info
 logger = logging.getLogger(__name__)
 
 
+# Constants for stateful functionality
+class _StateKeys:
+    INDEX_SAMPLER_STATE = "_index_sampler_state"
+    SAMPLER_ITER_STATE = "_sampler_iter_state"
+    SAMPLER_ITER_YIELDED = "_sampler_iter_yielded"
+    ITERABLEDATASET_LEN_CALLED = "_IterableDataset_len_called"
+    SHARED_SEED = "_shared_seed"
+    ITERATOR_FINISHED = "_iterator_finished"
+    DATASET_STATE = "_dataset_state"
+    FETCHER_STATE = "_fetcher_state"
+    DATASET_ITER_STATE = "_dataset_iter_state"
+
+
 class _DatasetKind:
     Map = 0
     Iterable = 1
@@ -89,17 +106,6 @@ class _DatasetKind:
             return _utils.fetch._IterableDatasetFetcher(
                 dataset, auto_collation, collate_fn, drop_last
             )
-
-
-class _InfiniteConstantSampler(Sampler):
-    r"""Analogous to ``itertools.repeat(None, None)``.
-
-    Used as sampler for :class:`~torch.utils.data.IterableDataset`.
-    """
-
-    def __iter__(self):
-        while True:
-            yield None
 
 
 def _get_distributed_settings():
@@ -265,6 +271,7 @@ class DataLoader(Generic[_T_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
+        stateful: bool = False,
     ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
@@ -290,6 +297,12 @@ class DataLoader(Generic[_T_co]):
         if persistent_workers and num_workers == 0:
             raise ValueError("persistent_workers option needs num_workers > 0")
 
+        if stateful and num_workers > 0:
+            raise ValueError(
+                "stateful option is only supported with single-process data loading (num_workers=0). "
+                "Multi-process stateful data loading is not currently supported."
+            )
+
         self.dataset = dataset
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
@@ -299,6 +312,15 @@ class DataLoader(Generic[_T_co]):
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
         self.in_order = in_order
+
+        # Stateful functionality
+        self.stateful = stateful
+        self.next_iter_state: Optional[dict[str, Any]] = None
+        # When a state_dict is requested before __iter__ is called,
+        # we create the __iter__ so we can get a copy of the initial state from
+        # its workers. In those cases, we can avoid creating a new multiprocessing
+        # iterator on the next __iter__ call, and this flag is used for those cases.
+        self._initial_iter_for_state_dict = False
 
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
@@ -426,11 +448,27 @@ class DataLoader(Generic[_T_co]):
         torch.set_vital("Dataloader", "enabled", "True")  # type: ignore[attr-defined]
 
     def _get_iterator(self) -> _BaseDataLoaderIter:
-        if self.num_workers == 0:
+        if self.stateful:
+            return self._get_stateful_iterator()
+        elif self.num_workers == 0:
             return _SingleProcessDataLoaderIter(self)
         else:
             self.check_worker_number_rationality()
             return _MultiProcessingDataLoaderIter(self)
+
+    def _get_stateful_iterator(
+        self,
+    ) -> _StatefulSingleProcessDataLoaderIter:
+        """Create a stateful iterator that supports state_dict/load_state_dict."""
+
+        iterator: _StatefulSingleProcessDataLoaderIter = (
+            _StatefulSingleProcessDataLoaderIter(self, self.next_iter_state)
+        )
+
+        # Important: Clear the next_iter_state after passing it to the iterator
+        # This matches the behavior of the original StatefulDataLoader
+        self.next_iter_state = None
+        return iterator
 
     @property
     def multiprocessing_context(self):
@@ -490,14 +528,76 @@ class DataLoader(Generic[_T_co]):
         # However, in the case of a multiple workers iterator
         # the iterator is only created once in the lifetime of the
         # DataLoader object so that workers can be reused
-        if self.persistent_workers and self.num_workers > 0:
+        loading_state = self.stateful and self.next_iter_state is not None
+        if self._initial_iter_for_state_dict:
+            self._initial_iter_for_state_dict = False
+            assert self._iterator is not None
+        elif self.persistent_workers and self.num_workers > 0:
             if self._iterator is None:
                 self._iterator = self._get_iterator()
             else:
                 self._iterator._reset(self)
-            return self._iterator
+        elif (
+            loading_state
+            and self.next_iter_state
+            and self.next_iter_state.get(_StateKeys.ITERATOR_FINISHED, False)
+        ):
+            # If the previously saved state was in the finished state, we want to load the start of the next epoch
+            # instead of the end of the previous. See https://github.com/meta-pytorch/data/issues/1437
+            self.next_iter_state = None
+            self._iterator = self._get_stateful_iterator()
         else:
-            return self._get_iterator()
+            self._iterator = self._get_iterator()
+
+        return self._iterator
+
+    def state_dict(self) -> dict[str, Any]:
+        """
+        Return the state of the dataloader for checkpointing purposes.
+
+        Raises:
+            RuntimeError: If the dataloader was not created with stateful=True
+        """
+        if not self.stateful:
+            raise RuntimeError(
+                "DataLoader.state_dict() requires stateful=True. "
+                "Create DataLoader with DataLoader(..., stateful=True)"
+            )
+
+        if self._iterator is None:
+            self._iterator = self._get_iterator()
+            self._initial_iter_for_state_dict = True
+
+        if hasattr(self._iterator, "state_dict"):
+            return self._iterator.state_dict()
+        else:
+            raise RuntimeError(
+                "DataLoader iterator does not support state_dict(). "
+                "This should not happen with stateful=True."
+            )
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """
+        Load the state of the dataloader from a checkpoint.
+
+        Args:
+            state_dict: The state dictionary returned by state_dict()
+
+        Raises:
+            RuntimeError: If the dataloader was not created with stateful=True
+        """
+        if not self.stateful:
+            raise RuntimeError(
+                "DataLoader.load_state_dict() requires stateful=True. "
+                "Create DataLoader with DataLoader(..., stateful=True)"
+            )
+
+        self._iterator = None
+        self._initial_iter_for_state_dict = False
+        if state_dict == {}:
+            self.next_iter_state = None
+            return
+        self.next_iter_state = state_dict
 
     @property
     def _auto_collation(self):
@@ -715,7 +815,29 @@ class _BaseDataLoaderIter:
     def __iter__(self) -> Self:
         return self
 
-    def _reset(self, loader, first_iter=False) -> None:
+    def _apply_dataset_sharding(self):
+        """Apply sharding to DataPipes for distributed data loading.
+
+        Adds forward compatibilities so classic DataLoader can work with DataPipes:
+        Taking care of distributed sharding.
+        """
+        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
+            # For BC, use default SHARDING_PRIORITIES
+            torch.utils.data.graph_settings.apply_sharding(
+                self._dataset, self._world_size, self._rank
+            )
+
+    def _create_fetcher(self):
+        """Create the dataset fetcher based on dataset kind."""
+        return _DatasetKind.create_fetcher(
+            self._dataset_kind,
+            self._dataset,
+            self._auto_collation,
+            self._collate_fn,
+            self._drop_last,
+        )
+
+    def _reset(self, loader, first_iter=False):
         self._sampler_iter = iter(self._index_sampler)
         self._num_yielded = 0
         self._IterableDataset_len_called = loader._IterableDataset_len_called
@@ -773,28 +895,209 @@ class _BaseDataLoaderIter:
 class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
     def __init__(self, loader) -> None:
         super().__init__(loader)
-        if self._timeout != 0:
-            raise AssertionError("_SingleProcessDataLoaderIter requires timeout == 0")
-        if self._num_workers != 0:
-            raise AssertionError(
-                "_SingleProcessDataLoaderIter requires num_workers == 0"
+        assert self._timeout == 0
+        assert self._num_workers == 0
+
+        self._apply_dataset_sharding()
+
+        self._dataset_fetcher = self._create_fetcher()
+
+    def _next_data(self):
+        index = self._next_index()  # may raise StopIteration
+        data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+        if self._pin_memory:
+            data = _utils.pin_memory.pin_memory(data, self._pin_memory_device)
+        return data
+
+
+class _StatefulBaseDataLoaderIter(_BaseDataLoaderIter):
+    """Base class for stateful dataloader iterators."""
+
+    def __init__(
+        self, loader: DataLoader, next_iter_state: Optional[dict[str, Any]] = None
+    ) -> None:
+        super().__init__(loader)
+        self._sampler_iter_yielded = 0
+        self._finished = False
+
+    def _reset(self, loader, first_iter=False):
+        super()._reset(loader, first_iter)
+        self._sampler_iter_yielded = 0
+        self._finished = False
+
+    def _next_index(self):
+        idx = super()._next_index()  # may raise StopIteration
+        self._sampler_iter_yielded += 1
+        return idx
+
+    def state_dict(self):
+        """Return the state dictionary of the iterator."""
+        raise NotImplementedError
+
+    def load_state_dict(self, state_dict):
+        """Load the state dictionary of the iterator."""
+        raise NotImplementedError
+
+    def __next__(self):
+        try:
+            return super().__next__()
+        except StopIteration:
+            self._finished = True
+            raise
+
+
+class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
+    """Single-process stateful dataloader iterator."""
+
+    _NUM_YIELDED = "_num_yielded"
+
+    def __init__(
+        self, loader: DataLoader, next_iter_state: Optional[dict[str, Any]] = None
+    ):
+        super().__init__(loader)
+        assert self._timeout == 0
+        assert self._num_workers == 0
+
+        self._apply_dataset_sharding()
+
+        if next_iter_state is not None:
+            self.load_state_dict(next_iter_state)
+        else:
+            self._dataset_fetcher = _DatasetKind.create_fetcher(
+                self._dataset_kind,
+                self._dataset,
+                self._auto_collation,
+                self._collate_fn,
+                self._drop_last,
             )
 
-        # Adds forward compatibilities so classic DataLoader can work with DataPipes:
-        #   Taking care of distributed sharding
-        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
-            # For BC, use default SHARDING_PRIORITIES
-            torch.utils.data.graph_settings.apply_sharding(
-                self._dataset, self._world_size, self._rank
-            )
+    def state_dict(self):
+        """Return the state dictionary for checkpointing."""
 
-        self._dataset_fetcher = _DatasetKind.create_fetcher(
-            self._dataset_kind,
-            self._dataset,
-            self._auto_collation,
-            self._collate_fn,
-            self._drop_last,
+        if self._dataset_kind == _DatasetKind.Iterable:
+            fetcher_state = {
+                _StateKeys.DATASET_ITER_STATE: _try_get_state_dict(
+                    self._dataset_fetcher.dataset_iter
+                ),
+                _StateKeys.FETCHER_STATE: self._dataset_fetcher.ended,
+            }
+            dataset_state = None
+            if self._dataset_fetcher.dataset_iter is not self._dataset_fetcher.dataset:
+                dataset_state = _try_get_state_dict(self._dataset_fetcher.dataset)
+        else:
+            fetcher_state = None
+            dataset_state = _try_get_state_dict(self._dataset_fetcher.dataset)
+
+        state_dict = {
+            _StateKeys.INDEX_SAMPLER_STATE: _try_get_state_dict(self._index_sampler),
+            _StateKeys.SAMPLER_ITER_STATE: _try_get_state_dict(self._sampler_iter),
+            _StateKeys.SAMPLER_ITER_YIELDED: self._sampler_iter_yielded,
+            self._NUM_YIELDED: self._num_yielded,
+            _StateKeys.ITERABLEDATASET_LEN_CALLED: self._IterableDataset_len_called,
+            _StateKeys.SHARED_SEED: self._shared_seed,
+            _StateKeys.FETCHER_STATE: fetcher_state,
+            _StateKeys.DATASET_STATE: dataset_state,
+            _StateKeys.ITERATOR_FINISHED: self._finished,
+        }
+        return state_dict
+
+    def load_state_dict(self, state_dict):
+        """Load state from a checkpoint."""
+        assert self._NUM_YIELDED in state_dict, (
+            f"State doesn't contain key '{self._NUM_YIELDED}' expected for single process dataloader"
         )
+
+        # Load sampler state
+        self._load_sampler_state(state_dict)
+
+        # Load common state
+        self._load_common_state(state_dict)
+
+        # Load dataset state (if applicable)
+        self._load_dataset_state(state_dict)
+
+        # Create fetcher
+        self._dataset_fetcher = self._create_fetcher()
+
+        # Load dataset-kind-specific state
+        if self._dataset_kind == _DatasetKind.Iterable:
+            self._load_iterable_dataset_state(state_dict)
+        # Map datasets don't need additional loading
+
+        # Load finished state
+        self._finished = state_dict[_StateKeys.ITERATOR_FINISHED]
+
+    def _load_sampler_state(self, state_dict):
+        """Restore sampler/sampler_iter state."""
+        self._sampler_iter_yielded = state_dict[_StateKeys.SAMPLER_ITER_YIELDED]
+
+        if isinstance(self._index_sampler, Stateful):
+            # Restore sampler and create fresh iterator from it
+            _try_load_state_dict(
+                self._index_sampler, state_dict[_StateKeys.INDEX_SAMPLER_STATE]
+            )
+            self._sampler_iter = iter(self._index_sampler)  # type: ignore[call-overload]
+        elif isinstance(self._sampler_iter, Stateful):
+            # Only restore iterator state
+            self._sampler_iter = iter(self._index_sampler)
+            if state_dict[_StateKeys.SAMPLER_ITER_STATE] is not None:
+                _try_load_state_dict(
+                    self._sampler_iter, state_dict[_StateKeys.SAMPLER_ITER_STATE]
+                )
+        elif not isinstance(self._index_sampler, _InfiniteConstantSampler):
+            # Fallback to fastforward
+            self._sampler_iter = itertools.islice(
+                self._index_sampler, self._sampler_iter_yielded, None
+            )
+
+    def _load_common_state(self, state_dict):
+        """Load state common to all dataset kinds."""
+        self._num_yielded = state_dict[self._NUM_YIELDED]
+        self._IterableDataset_len_called = state_dict[
+            _StateKeys.ITERABLEDATASET_LEN_CALLED
+        ]
+        self._shared_seed = state_dict[_StateKeys.SHARED_SEED]
+
+    def _load_dataset_state(self, state_dict):
+        """Load dataset state if it's stateful."""
+        _try_load_state_dict(self._dataset, state_dict[_StateKeys.DATASET_STATE])
+
+    def _load_iterable_dataset_state(self, state_dict):
+        """Load state specific to iterable datasets."""
+        # If either dataset or its iter is stateful, we don't fast-forward
+        if isinstance(self._dataset, Stateful) or isinstance(
+            self._dataset_fetcher.dataset_iter, Stateful
+        ):
+            self._load_stateful_iterable_state(state_dict)
+        else:
+            self._fastforward_iterable_dataset()
+
+    def _load_stateful_iterable_state(self, state_dict):
+        """Load state for stateful iterable datasets."""
+        if state_dict[_StateKeys.FETCHER_STATE] is not None:
+            if (
+                state_dict[_StateKeys.FETCHER_STATE][_StateKeys.DATASET_ITER_STATE]
+                is not None
+            ):
+                _try_load_state_dict(
+                    self._dataset_fetcher.dataset_iter,
+                    state_dict[_StateKeys.FETCHER_STATE][_StateKeys.DATASET_ITER_STATE],
+                )
+            self._dataset_fetcher.ended = state_dict[_StateKeys.FETCHER_STATE][
+                _StateKeys.FETCHER_STATE
+            ]
+
+    def _fastforward_iterable_dataset(self):
+        """Fast-forward non-stateful iterable dataset."""
+        if self._num_yielded > 0:
+            logger.warning(
+                "Neither dataset nor iter(dataset) defines state_dict/load_state_dict so we are "
+                "naively fast-forwarding your dataset by %d steps. For more efficient "
+                "resumes, please implement `state_dict` and `load_state_dict` in your IterableDataset and/or iterator.",
+                self._num_yielded,
+            )
+            for _ in range(self._num_yielded):
+                next(self)
 
     def _next_data(self):
         index = self._next_index()  # may raise StopIteration
