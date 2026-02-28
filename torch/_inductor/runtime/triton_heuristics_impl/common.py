@@ -137,6 +137,10 @@ def _check_max_grid_x(size_hints, x, num_warps):
     return x, num_blocks
 
 
+def _conditional_product_optional(*values: int | None) -> int:
+    return conditional_product(*[value for value in values if value is not None])
+
+
 def triton_config(
     size_hints,
     x,
@@ -168,7 +172,7 @@ def triton_config(
 
     maxGridSize = [2147483647, 65535, 65535]
 
-    target = conditional_product(x, y, z)
+    target = _conditional_product_optional(x, y, z)
     if conditional_product(*size_hints.values()) < target:
         target //= 8
 
@@ -182,7 +186,8 @@ def triton_config(
     # if we are below original block size, scale up where we can;
     # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
     while x < min(size_hints["x"], TRITON_MAX_BLOCK["X"]) and (
-        x * maxGridSize[0] < size_hints["x"] or conditional_product(x, y, z) < target
+        x * maxGridSize[0] < size_hints["x"]
+        or _conditional_product_optional(x, y, z) < target
     ):
         x *= 2
     while (
@@ -190,7 +195,7 @@ def triton_config(
         and y < min(size_hints["y"], TRITON_MAX_BLOCK["Y"])
         and (
             y * maxGridSize[1] < size_hints["y"]
-            or conditional_product(x, y, z) < target
+            or _conditional_product_optional(x, y, z) < target
         )
     ):
         y *= 2
@@ -199,7 +204,7 @@ def triton_config(
         and z < min(size_hints["z"], TRITON_MAX_BLOCK["Z"])
         and (
             z * maxGridSize[2] < size_hints["z"]
-            or conditional_product(x, y, z) < target
+            or _conditional_product_optional(x, y, z) < target
         )
     ):
         z *= 2
@@ -207,7 +212,8 @@ def triton_config(
     # Calculate num_warps if they are not hard passed to config
     if num_warps is None:
         num_warps = _num_warps(
-            conditional_product(x, y, z) // num_elements_per_warp, min_num_warps=1
+            _conditional_product_optional(x, y, z) // num_elements_per_warp,
+            min_num_warps=1,
         )
     # we are going to arrive at 2 warps only if bs was too small due to
     # numel being too small. However to workaround some ptx bugs we still
@@ -215,18 +221,19 @@ def triton_config(
     # given that this is a rare situation, don't expect this to affect perf
     # in general
     # see https://github.com/pytorch/pytorch/pull/97950
-    if conditional_product(x, y, z) >= 128 and not torch.version.hip:
+    if _conditional_product_optional(x, y, z) >= 128 and not torch.version.hip:
         num_warps = max(num_warps, 4)
     xnumel = size_hints["x"]
     ynumel = size_hints.get("y")
     znumel = size_hints.get("z")
 
     # Increase x to satisfy min_elem_per_thread requirements.
+    base_block = _conditional_product_optional(x, y, z)
     block_size = max(
-        conditional_product(x, y, z),
+        base_block,
         min_elem_per_thread * _NUM_THREADS_PER_WARP * num_warps,
     )
-    x *= math.ceil(block_size / conditional_product(x, y, z))
+    x *= math.ceil(block_size / base_block)
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
     x = min(x, size_hints["x"])
@@ -1500,5 +1507,32 @@ def split_scan_common(
         triton_meta=triton_meta,
         inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.SPLIT_SCAN,
+        filename=filename,
+    )
+
+
+@register_triton_heuristic("foreach", None)
+def foreach(triton_meta, filename=None, inductor_meta=None):
+    """
+    Compile a triton foreach kernel
+    """
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+    configs = []
+
+    # Naive autotuning path for num_warps
+    if not (
+        inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise")
+    ):
+        configs.append(Config({}, num_stages=1, num_warps=8))
+    else:
+        for warps in [1, 2, 4, 8]:
+            configs.append(Config({}, num_stages=1, num_warps=warps))
+
+    return cached_autotune(
+        None,
+        configs,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,
     )

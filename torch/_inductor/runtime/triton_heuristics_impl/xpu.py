@@ -4,10 +4,9 @@ from __future__ import annotations
 import functools
 import operator
 
-import torch
 from torch.utils._ordered_set import OrderedSet
 
-from ..hints import HeuristicType, TileHint, TRITON_MAX_BLOCK
+from ..hints import HeuristicType
 from .common import (
     _handle_combo_kernel_per_subkernel_blocks,
     _maybe_filter_configs_for_tma_restrictions,
@@ -114,9 +113,7 @@ def pointwise(
                 ]
             )
     if len(size_hints) == 3:
-        if not (
-            inductor_meta.get("max_autotune_pointwise") or torch.xpu.is_available()
-        ):
+        if not inductor_meta.get("max_autotune_pointwise"):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
