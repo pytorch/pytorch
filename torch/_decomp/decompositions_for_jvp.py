@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import inspect
 from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch._decomp
@@ -135,10 +136,10 @@ def native_layer_norm_backward(
     normalized_shape: list[int],
     mean: Tensor,
     rstd: Tensor,
-    weight: Tensor | None,
-    bias: Tensor | None,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
     output_mask: list[bool],
-) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
+) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_ndim = input.dim()
 
@@ -176,13 +177,13 @@ def native_layer_norm_backward(
     inner = a - b - c3
 
     if output_mask[0]:
-        d_input: Tensor | None = (rstd_ / N) * inner
+        d_input: Optional[Tensor] = (rstd_ / N) * inner
     else:
         d_input = torch.zeros_like(input)  # should be None but doesn't work with vjp
 
     if output_mask[1] and weight is not None:
         if len(outer_dim_indices) > 0:
-            d_weight: Tensor | None = torch.sum(
+            d_weight: Optional[Tensor] = torch.sum(
                 grad_out * x_hat, outer_dim_indices, False
             )
         else:
@@ -194,7 +195,7 @@ def native_layer_norm_backward(
 
     if output_mask[2] and bias is not None:
         if len(outer_dim_indices) > 0:
-            d_bias: Tensor | None = torch.sum(grad_out, outer_dim_indices, False)
+            d_bias: Optional[Tensor] = torch.sum(grad_out, outer_dim_indices, False)
         else:
             d_bias = grad_out.clone()
     elif bias is not None:
@@ -216,15 +217,15 @@ def prod(x: list[int]):
 def native_batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
-    weight: Tensor | None,
-    running_mean: Tensor | None,
-    running_var: Tensor | None,
-    save_mean: Tensor | None,
-    save_invstd: Tensor | None,
+    weight: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_invstd: Optional[Tensor],
     train: bool,
     eps: float,
     output_mask: list[bool],
-) -> tuple[Tensor, Tensor | None, Tensor | None]:
+) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_rank = input.dim()
     if input_rank < 2:
@@ -308,15 +309,15 @@ def batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
     weight: Tensor,
-    running_mean: Tensor | None,
-    running_var: Tensor | None,
-    save_mean: Tensor | None,
-    save_var: Tensor | None,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_var: Optional[Tensor],
     update: bool,
     eps: float,
     output_mask: list[bool],
     reserve: Tensor,
-) -> tuple[Tensor, Tensor | None, Tensor | None]:
+) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     return native_batch_norm_backward(
         grad_out,
         input,

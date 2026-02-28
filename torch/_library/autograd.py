@@ -2,7 +2,7 @@
 import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
 from torch import _C, _ops, autograd, Tensor
 from torch.utils import _pytree
@@ -11,14 +11,14 @@ from . import utils
 
 
 class InfoProtocol(Protocol):
-    _backward_fn: Callable | None
-    _setup_context_fn: Callable | None
+    _backward_fn: Optional[Callable]
+    _setup_context_fn: Optional[Callable]
 
 
 @dataclasses.dataclass
 class Info:
-    _backward_fn: Callable | None
-    _setup_context_fn: Callable | None
+    _backward_fn: Optional[Callable]
+    _setup_context_fn: Optional[Callable]
 
 
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
@@ -129,8 +129,8 @@ def supports_tensorlist(cls: Any) -> Any:
     @dataclass
     class Metadata:
         input_spec: _pytree.TreeSpec
-        output_spec: _pytree.TreeSpec | None = None
-        result_is_tuple: bool | None = None
+        output_spec: Optional[_pytree.TreeSpec] = None
+        result_is_tuple: Optional[bool] = None
 
     def new_forward(ctx, *args):
         metadata = args[-1]

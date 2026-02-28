@@ -11,7 +11,7 @@ import tempfile
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING, TypeGuard
+from typing import Any, Optional, TYPE_CHECKING, TypeGuard, Union
 from typing_extensions import final, override, Self
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -214,12 +214,12 @@ class _WireProtocolInput:
     example_inputs: Sequence[InputType]
     inputs_to_check: Sequence[int]
     graph_kwargs: _CompileFxKwargs
-    tracing_context: torch._guards.TracingContext | None
+    tracing_context: Optional[torch._guards.TracingContext]
     config: dict[str, object]
     virtualized: _VirtualizedSerializer
-    deterministic_guard_for_testing: (  # type: ignore[name-defined]  # mypy bug
-        torch.testing._internal.common_utils.DeterministicGuard | None
-    )
+    deterministic_guard_for_testing: Optional[  # type: ignore[name-defined]  # mypy bug
+        torch.testing._internal.common_utils.DeterministicGuard
+    ]
     logger_state: _LoggerState
     lowering: _LoweringSerializer
     fake_tensor_mode: _FakeTensorModeSerializer
@@ -271,8 +271,8 @@ class _WireProtocolOutput:
     graph: OutputCode
     metrics: CachedMetricsDeltas
     logs: list[logging.LogRecord]
-    warning_replay: list[warnings.WarningMessage] | None
-    shape_env: torch.fx.experimental.symbolic_shapes.ShapeEnv | None
+    warning_replay: Optional[list[warnings.WarningMessage]]
+    shape_env: Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]
 
     def serialize(self) -> _WireProtocolPickledOutput:
         """
@@ -314,14 +314,14 @@ class _LoggerState:
     loggers: dict[str, int]
     # The actual log capturing mechanism - this should be None when we're not
     # actively capturing logs.
-    captured_logs: _CapturedLogs | None = None
+    captured_logs: Optional[_CapturedLogs] = None
 
     def __init__(self) -> None:
         # Mapping from logger name to level.
         self.loggers = {}
 
         def filter(
-            logger: logging.Logger | logging.PlaceHolder,
+            logger: Union[logging.Logger, logging.PlaceHolder],
         ) -> TypeGuard[logging.Logger]:
             if not isinstance(logger, logging.Logger):
                 # Assume that Placeholders propagate
@@ -360,9 +360,9 @@ class _LoggerState:
 
     def __exit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: types.TracebackType | None,
+        exc_type: Optional[type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[types.TracebackType],
     ) -> None:
         assert self.captured_logs is not None
         self.captured_logs.remove()
@@ -376,7 +376,7 @@ class _CapturedLogs:
 
     state: _LoggerState
     queue: queue.Queue[logging.LogRecord]
-    handlers: dict[str, logging.Handler] | None
+    handlers: Optional[dict[str, logging.Handler]]
 
     def __init__(self, state: _LoggerState) -> None:
         self.state = state
@@ -459,7 +459,7 @@ class _SerializedFxCompile(FxCompile):
         example_inputs: Sequence[InputType],
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
-    ) -> tuple[_WireProtocolPickledInput, CompiledFxGraphConstantsWithGm] | None:
+    ) -> Optional[tuple[_WireProtocolPickledInput, CompiledFxGraphConstantsWithGm]]:
         """
         Prepare a _WireProtocolInput to compile. If None is returned then it
         wasn't possible to serialize and we should fallback to in-process.
@@ -487,9 +487,9 @@ class _SerializedFxCompile(FxCompile):
 
         # If we're running tests then grab the DeterministicGuard (don't want to
         # import this if it isn't already imported because it has side-effects)
-        deterministic_guard_for_testing: (  # type: ignore[name-defined]  # mypy bug
-            torch.testing._internal.common_utils.DeterministicGuard | None
-        ) = None
+        deterministic_guard_for_testing: Optional[  # type: ignore[name-defined]  # mypy bug
+            torch.testing._internal.common_utils.DeterministicGuard
+        ] = None
         try:
             deterministic_guard_for_testing = (
                 torch.testing._internal.common_utils.DeterministicGuard._current_state()  # type: ignore[attr-defined]  # mypy bug
@@ -541,7 +541,7 @@ class _SerializedFxCompile(FxCompile):
     def _run_in_child(
         cls,
         pickled_input: _WireProtocolPickledInput,
-        extra_env: Mapping[str, str] | None = None,
+        extra_env: Optional[Mapping[str, str]] = None,
     ) -> _WireProtocolPickledOutput:
         metrics = CachedMetricsHelper()
 

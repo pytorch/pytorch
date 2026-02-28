@@ -33,7 +33,7 @@ import math
 import re
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
-from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
@@ -211,7 +211,7 @@ constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
 @functools.cache
-def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
+def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
     # Defined as a function to avoid circular import like torch.onnx
     return {
         torch.jit.is_scripting: False,
@@ -307,7 +307,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
 def _collect_tensors_with_sources(
     var: VariableTracker,
-) -> list[tuple[torch.Tensor, str | None]]:
+) -> list[tuple[torch.Tensor, Optional[str]]]:
     """Extract (fake_tensor, source_name) pairs from a VariableTracker.
 
     Used by handle_autograd_grad to collect tensors from the outputs and inputs
@@ -317,7 +317,7 @@ def _collect_tensors_with_sources(
     from .lists import BaseListVariable
     from .tensor import TensorVariable
 
-    results: list[tuple[torch.Tensor, str | None]] = []
+    results: list[tuple[torch.Tensor, Optional[str]]] = []
     if isinstance(var, TensorVariable):
         fake_tensor = var.as_proxy().node.meta.get("example_value")
         assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
@@ -1359,7 +1359,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
-            fallback: VariableTracker | None = None,
+            fallback: Optional[VariableTracker] = None,
         ) -> VariableTracker | None:
             fallback_int = fallback.as_python_constant() if fallback else None
             if isinstance(expr, SymNodeVariable):
