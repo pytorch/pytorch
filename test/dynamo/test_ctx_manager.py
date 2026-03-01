@@ -17,6 +17,8 @@ from torch.testing._internal.common_utils import (
 )
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 try:
     from . import test_functions
 except ImportError:
@@ -687,7 +689,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
                 with torch.autocast("cpu"):
-                    with torch.autocast("cuda", dtype=torch.float32):
+                    with torch.autocast(device_type, dtype=torch.float32):
                         out = F.scaled_dot_product_attention(
                             query, key, value, None, 0.0, True
                         )
@@ -698,13 +700,31 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         seq_len_k = 1
         head_dim = 8
         query = torch.ones(
-            1, 8, seq_len_q, head_dim, device="cuda", dtype=dtype, requires_grad=True
+            1,
+            8,
+            seq_len_q,
+            head_dim,
+            device=device_type,
+            dtype=dtype,
+            requires_grad=True,
         )
         key = torch.ones(
-            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+            1,
+            8,
+            seq_len_k,
+            head_dim,
+            device=device_type,
+            dtype=dtype,
+            requires_grad=True,
         )
         value = torch.ones(
-            1, 8, seq_len_k, head_dim, device="cuda", dtype=dtype, requires_grad=True
+            1,
+            8,
+            seq_len_k,
+            head_dim,
+            device=device_type,
+            dtype=dtype,
+            requires_grad=True,
         )
 
         module = MyModule()
@@ -718,7 +738,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(compiled.device, real_device)
         self.assertEqual(compiled.dtype, real_dtype)
 
-        self.assertEqual(compiled.device.type, "cuda")
+        self.assertEqual(compiled.device.type, device_type)
         self.assertEqual(compiled.device.index, 0)
         self.assertEqual(compiled.dtype, torch.float32)
 
