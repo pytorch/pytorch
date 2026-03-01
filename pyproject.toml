@@ -127,6 +127,9 @@ standard_library = ["typing_extensions"]
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
+[tool.ruff.per-file-target-version]
+"**/py312_intrinsics.py" = "py312"
+
 [tool.ruff.format]
 docstring-code-format = true
 quote-style = "double"
@@ -283,7 +286,6 @@ keep-runtime-typing = true
 ]
 "test/export/**" = [
     "PGH004",
-    "S101",
 ]
 "test/typing/**" = [
     "PGH004"
@@ -308,14 +310,12 @@ keep-runtime-typing = true
     "PLR0133", # tests require this for JIT
     "PYI",
     "RUF015",
-    "S101",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
 "test/test_jit.py" = [
     "PLR0133", # tests require this for JIT
     "PYI",
     "RUF015",
-    "S101",
     "UP", # We don't want to modify the jit test as they test specify syntax
 ]
 "test/inductor/s429861_repro.py" = [
@@ -345,14 +345,7 @@ keep-runtime-typing = true
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
-# S101 migration: Remaining test folders/files still needing migration (ignore S101 for now)
-# Note: test/export/**, test/jit/**, test/torch_np/numpy_tests/** have S101 added to existing entries above
-"test/distributed/**" = ["S101"]
-"test/dynamo/**" = ["S101"]
-"test/functorch/**" = ["S101"]
-"test/inductor/**" = ["S101"]
-"test/onnx/**" = ["S101"]
-"test/quantization/**" = ["S101"]
+
 # torch/ folders still needing S101 migration
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]

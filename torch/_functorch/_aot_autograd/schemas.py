@@ -9,7 +9,7 @@ import collections
 import functools
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from typing import Any, NewType, Protocol, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -101,11 +101,17 @@ class OutputAliasInfo:
     # If (6) above, then:
     # - Tells us that the base of this alias is output_user_fwds[base_idx]
     #   here, this refers to the index of the *direct* traced
-    base_idx: Optional[int]
+    base_idx: int | None
     # If it is a Tensor, what the dynamic dims are (otherwise is None)
-    dynamic_dims: Optional[set[int]]
-    # requires_grad
+    dynamic_dims: set[int] | None
+    # Whether the output tensor has requires_grad=True. Use for
+    # preserving output properties (mark_non_differentiable, alias reconstruction).
     requires_grad: bool
+    # Whether this output participates in backward as
+    # a tangent. Normally the same as requires_grad, but False for views created
+    # under no_grad() that inherit requires_grad from their base without having a
+    # grad_fn. Use when constructing tangent lists for torch.autograd.grad().
+    requires_grad_for_backward: bool
     # Sequence of ViewMeta objects.
     #
     # Provides us the means to re-run view functions on other tensors.
@@ -113,7 +119,7 @@ class OutputAliasInfo:
     # We need to wrap the actual list of ViewMeta with this class so that
     # we compare the ViewMeta elements appropriately, i.e. their type and
     # the elements returned by the `as_tuple()` call.
-    view_meta_sequence: Optional[ViewMetaSequence] = None
+    view_meta_sequence: ViewMetaSequence | None = None
 
 
 class MutationType(Enum):
@@ -173,14 +179,14 @@ class InputAliasInfo:
 @dataclass
 class MemoryFormatMeta:
     # For static shapes we assume tangents have the same strideness as outputs
-    size: Optional[Sequence[int]] = None
-    stride: Optional[Sequence[int]] = None
+    size: Sequence[int] | None = None
+    stride: Sequence[int] | None = None
 
     # For dynamic shapes we assume the same memory format: contiguous, channels_last etc.
-    memory_format: Optional[torch.memory_format] = None
+    memory_format: torch.memory_format | None = None
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> Optional[MemoryFormatMeta]:
+    def from_tensor(t: torch.Tensor) -> MemoryFormatMeta | None:
         # We only memorize expected memory format for
         # 1. Traceable wrapper subclasses
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
@@ -208,7 +214,7 @@ class MemoryFormatMeta:
 @dataclass
 class PlainTensorMeta:
     unwrapped_idx: int
-    memory_format: Optional[MemoryFormatMeta] = None
+    memory_format: MemoryFormatMeta | None = None
 
 
 @dataclass
@@ -250,11 +256,11 @@ class SubclassCreationMeta:
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
     #  so holding onto this at runtime shouldn't leak memory)
     # This field is nulled out after calling make_runtime_safe()
-    original_subclass: Optional[torch.Tensor]
+    original_subclass: torch.Tensor | None
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
-    original_subclass_type: Optional[type] = None
-    memory_format: Optional[MemoryFormatMeta] = None
+    original_subclass_type: type | None = None
+    memory_format: MemoryFormatMeta | None = None
 
     def compute_outer_size_and_stride(
         self,
@@ -340,7 +346,7 @@ class SubclassCreationMeta:
         return rebuilt
 
     def make_runtime_safe(self) -> None:
-        def _make_size_runtime_safe(x: Union[None, int, torch.SymInt]) -> Optional[int]:
+        def _make_size_runtime_safe(x: None | int | torch.SymInt) -> int | None:
             dummy = -1
             if isinstance(x, torch.SymInt):
                 # Replace nested ints by a dummy value (-1) as NJT ignores
@@ -425,7 +431,7 @@ class ViewAndMutationMeta:
     #      inputs[3] and inputs[4] of the plain-tensor graph".
 
     # length = # user inputs
-    subclass_inp_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
+    subclass_inp_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # So, the full set of outputs to the forward graph looks something like:
     # (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
     # where the first 3 of those 4 can be subclasses
@@ -433,9 +439,9 @@ class ViewAndMutationMeta:
     # and not user visible, so there's no point in wrapping/unwrapping them at runtime).
     # This list contains subclass information on all of the fw graph outputs
     # except for saved_for_bw_tensors.
-    subclass_fw_graph_out_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
+    subclass_fw_graph_out_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # length = # backward graph inputs
-    subclass_tangent_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
+    subclass_tangent_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
@@ -445,31 +451,31 @@ class ViewAndMutationMeta:
     # At runtime, we don't keep the traced_tangents around since they're not serializable.
     # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
     # This list is generated after calling make_runtime_safe().
-    traced_tangent_metas: Optional[list[Any]] = None
+    traced_tangent_metas: list[Any] | None = None
 
-    num_symints_saved_for_bw: Optional[int] = None
+    num_symints_saved_for_bw: int | None = None
 
     # See Note [Activations with no version counter checks in eager]
     # Number of tensors saved for backward that were stashed on ctx (e.g., ctx.x = x)
     # rather than via save_for_backward in an autograd.Function.
     # These tensors are placed at the end of the saved tensors and should skip
     # version counter checks at runtime.
-    num_tensors_saved_with_no_vc_check: Optional[int] = None
+    num_tensors_saved_with_no_vc_check: int | None = None
 
     # Number of opaque objects saved for backward
-    num_opaque_objects_saved_for_bw: Optional[int] = None
+    num_opaque_objects_saved_for_bw: int | None = None
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
     # equivalence to eager mode. It is the responsibility of upstream graph acquisition
     # to reset the grad mode to its pre-graph value prior to calling aot_autograd.
-    grad_enabled_mutation: Optional[bool] = None
+    grad_enabled_mutation: bool | None = None
 
     # Keeps track of whether `torch.use_deterministic_algorithms` was turned on
     # when the forward was run. If deterministic mode was turned off during the
     # forward, but is turned on during the backward call, then an error is
     # raised
-    deterministic: Optional[bool] = None
+    deterministic: bool | None = None
 
     # Keeps track of which input indices store parameters (which we will treat as static)
     static_input_indices: list[int] = field(default_factory=list)
@@ -492,7 +498,7 @@ class ViewAndMutationMeta:
     # Indexes of saved tensors which are donated buffer.
     # Donated buffer means the tensor is not alias of any forward user input, forward user output,
     # and backward output.
-    bw_donated_idxs: Optional[list[int]] = None
+    bw_donated_idxs: list[int] | None = None
 
     # Number of tokens used in backward, appended at the end of backward outputs.
     # Filled after tracing joint function.
@@ -502,14 +508,20 @@ class ViewAndMutationMeta:
     # cudagraph compatible run_and_save_rng
     num_graphsafe_rng_states: int = 0
 
-    graphsafe_rng_state_index: Optional[int] = None
+    graphsafe_rng_state_index: int | None = None
 
     # Stream indices for mutated inputs in the epilogue
     # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
     # the storage of the tensor that will be copied back into the original input
     # None means use the current/default stream
     # This is populated during graph compilation when stream assignments are made
-    mutated_inp_stream_indices: Optional[list[Optional[int]]] = None
+    mutated_inp_stream_indices: list[int | None] | None = None
+
+    # compile ID string (e.g., "1/0") for error messages
+    compile_id_str: str | None = None
+
+    # help users identify where to add .detach() in their code
+    tangent_source_stack_traces: list[str | None] | None = None
 
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
@@ -837,9 +849,7 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[list[Union[PlainTensorMeta, SubclassCreationMeta]]] = (
-        None
-    )
+    grad_input_metas: list[PlainTensorMeta | SubclassCreationMeta] | None = None
 
     def __init__(self) -> None:
         # The fields in this class get set after its construction.
@@ -920,7 +930,7 @@ class GraphSignature:
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
 
-    backward_signature: Optional[BackwardSignature]
+    backward_signature: BackwardSignature | None
 
     input_tokens: list[GraphInputName]
     output_tokens: list[GraphOutputName]
@@ -939,8 +949,8 @@ class GraphSignature:
         num_user_inputs: int,
         num_user_outputs: int,
         trace_joint: bool,
-        loss_index: Optional[int],
-        backward_signature: Optional[BackwardSignature],
+        loss_index: int | None,
+        backward_signature: BackwardSignature | None,
     ) -> GraphSignature:
         graph_inputs = graph_input_names
         graph_outputs = graph_output_names
@@ -1078,20 +1088,20 @@ class AOTConfig:
     is_export: bool = False
     no_tangents: bool = False
     dynamic_shapes: bool = False
-    aot_autograd_arg_pos_to_source: Optional[list[Source]] = None
-    static_input_indices: Optional[list[int]] = None
+    aot_autograd_arg_pos_to_source: list[Source] | None = None
+    static_input_indices: list[int] | None = None
     inference_compiler: Callable[..., Any] | None = None
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
     # Key to use for AOTAutogradCache
-    cache_info: Optional[AOTAutogradCacheInfo] = None
+    cache_info: AOTAutogradCacheInfo | None = None
     # If we should ignore the shape_env in the ambient tracing_context.
     # The net effect is that if dynamic shapes are on, we end up
     # specializing on example_inputs.
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
-    precompile_backend_id: Optional[str] = None
+    precompile_backend_id: str | None = None
     force_non_lazy_backward_lowering: bool = False
     # This config makes sure to check certain things like
     # mutating input with req_grad in export joint tracing.
@@ -1339,11 +1349,9 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # larger than the original flat_args as all tangents get inputs.  The
     # tuple organizes into primals and tangents.  When not autograd it's just
     # a plain list.
-    updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
+    updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
 
-    updated_flat_args_descs: Union[
-        list[AOTInput], tuple[list[AOTInput], list[AOTInput]]
-    ]
+    updated_flat_args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]]
 
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
@@ -1416,8 +1424,8 @@ class JointTraceFn(Protocol):
     def __call__(
         self, primals: list[FxValue], tangents: list[FxValue]
     ) -> tuple[
-        tuple[list[FxValue], list[Optional[Tensor]]],
-        tuple[list[AOTOutput], list[Optional[AOTOutput]]],
+        tuple[list[FxValue], list[Tensor | None]],
+        tuple[list[AOTOutput], list[AOTOutput | None]],
     ]: ...
 
 

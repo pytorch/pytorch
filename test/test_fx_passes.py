@@ -11,7 +11,7 @@ from torch.fx._symbolic_trace import symbolic_trace
 
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
-from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
+from torch.fx.passes.utils.fuser_utils import fuse_by_partitions, topo_sort
 from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
 from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
@@ -427,6 +427,51 @@ class TestFXGraphPasses(JitTestCase):
                                                  supported_ops,
                                                  allows_single_node_partition=True)
         partitions = partitioner.propose_partitions()
+
+    def test_topo_sort_stability(self):
+        """Test that topo_sort preserves relative order of independent nodes."""
+        m = TestModule()
+        gm = symbolic_trace(m)
+
+        nodes_by_name = {node.name: node for node in gm.graph.nodes}
+
+        # add_2 and linear depend on add_1 but are independent of each other.
+        # add_3 depends on both add_2 and linear (via add_1 -> linear -> add_3
+        # and add_1 -> add_2 -> add_3 paths in TestModule).
+        # Provide them in a specific order and verify it is preserved.
+        node_list = [
+            nodes_by_name["add_1"],
+            nodes_by_name["add_2"],
+            nodes_by_name["linear"],
+            nodes_by_name["add_3"],
+        ]
+        sorted_nodes = topo_sort(node_list)
+        sorted_names = [n.name for n in sorted_nodes]
+
+        # add_1 must come first (dependency of add_2, linear, add_3)
+        self.assertEqual(sorted_names[0], "add_1")
+        # add_2 and linear are independent; stable sort preserves input order
+        self.assertEqual(sorted_names[1], "add_2")
+        self.assertEqual(sorted_names[2], "linear")
+        # add_3 depends on both, so it comes last
+        self.assertEqual(sorted_names[3], "add_3")
+
+        # Now reverse the order of the independent nodes and verify stability
+        # is with respect to the new input order.
+        node_list_reversed = [
+            nodes_by_name["add_1"],
+            nodes_by_name["linear"],
+            nodes_by_name["add_2"],
+            nodes_by_name["add_3"],
+        ]
+        sorted_nodes_reversed = topo_sort(node_list_reversed)
+        sorted_names_reversed = [n.name for n in sorted_nodes_reversed]
+
+        self.assertEqual(sorted_names_reversed[0], "add_1")
+        # Now linear should come before add_2 since that's the input order
+        self.assertEqual(sorted_names_reversed[1], "linear")
+        self.assertEqual(sorted_names_reversed[2], "add_2")
+        self.assertEqual(sorted_names_reversed[3], "add_3")
 
     def test_partitioner_nested_getitem_chains(self):
         """Test that nested getitem chains are properly reassigned to producer's partition.

@@ -185,7 +185,7 @@ _FAILURE_FORMAT_TEMPLATE = """[${idx}]:
   time      : ${time}
   host      : ${hostname}
   rank      : ${rank} (local_rank: ${local_rank})
-  exitcode  : ${exitcode} (pid: ${pid})
+  exitcode  : ${exitcode} (pid: ${pid}) ${signal_name}
   error_file: ${error_file}
   traceback : ${message}"""
 
@@ -294,6 +294,9 @@ class ChildFailedError(Exception):
                 .replace("\n", "\n  ")  # to properly indent the traceback
             )
 
+        signal_name = failure.signal_name()
+        signal_name_str = f" ({signal_name})" if signal_name != _NOT_AVAILABLE else ""
+
         fmt = Template(_FAILURE_FORMAT_TEMPLATE).substitute(
             idx=idx,
             time=failure.timestamp_isoformat(),
@@ -302,6 +305,7 @@ class ChildFailedError(Exception):
             local_rank=failure.local_rank,
             exitcode=failure.exitcode,
             pid=failure.pid,
+            signal_name=signal_name_str,
             error_file=failure.error_file,
             message=msg,
         )
