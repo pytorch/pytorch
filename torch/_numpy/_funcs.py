@@ -43,7 +43,7 @@ for name, func in itertools.chain(
     decorated.__qualname__ = name
     decorated.__name__ = name
     vars()[name] = decorated
-    __all__.append(name)
+    __all__[len(__all__) :] = [name]
 
 
 """

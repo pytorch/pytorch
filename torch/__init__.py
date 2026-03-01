@@ -1020,7 +1020,7 @@ del __fn, __name, __sym_name, _get_sym_math_fn
 
 # Adding temporary shortcut
 sym_sqrt = globals()["_sym_sqrt"]
-__all__.append("sym_sqrt")
+__all__[len(__all__) :] = ["sym_sqrt"]
 
 
 def sym_ite(b, t, f):
@@ -1076,7 +1076,7 @@ from torch import _C as _C
 __name, __obj = "", None
 for __name in dir(_C):
     if __name[0] != "_" and not __name.endswith("Base"):
-        __all__.append(__name)
+        __all__[len(__all__) :] = [__name]
         __obj = getattr(_C, __name)
         if callable(__obj) or inspect.isclass(__obj):
             if __obj.__module__ != __name__:  # "torch"
@@ -1914,7 +1914,7 @@ from math import e, inf, nan, pi
 
 newaxis: None = None
 
-__all__.extend(["e", "pi", "nan", "inf", "newaxis"])
+__all__[len(__all__) :] = ["e", "pi", "nan", "inf", "newaxis"]
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -2213,7 +2213,7 @@ for __name in dir(_C._VariableFunctions):
         __name = "_" + __name
     globals()[__name] = __obj
     if not __name.startswith("_"):
-        __all__.append(__name)
+        __all__[len(__all__) :] = [__name]
 
 del __name, __obj
 
@@ -2224,9 +2224,9 @@ del __name, __obj
 import torch
 
 
-__all__.extend(
+__all__[len(__all__) :] = [
     name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype)
-)
+]
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependencies
