@@ -1432,10 +1432,25 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
-            line = f"assert not {name}.isnan().any().item()"
-            self.prefix.writeline(line)
-            line = f"assert not {name}.isinf().any().item()"
-            self.prefix.writeline(line)
+            # FP8 dtypes don't support isinf(), so we need to upcast them
+            dtype = buf.get_dtype()
+            fp8_dtypes = [
+                torch.float8_e4m3fn,
+                torch.float8_e5m2,
+                torch.float8_e4m3fnuz,
+                torch.float8_e5m2fnuz,
+            ]
+            if dtype in fp8_dtypes:
+                # Upcast FP8 to float32 for nan/inf checks
+                line = f"assert not {name}.to(torch.float32).isnan().any().item()"
+                self.prefix.writeline(line)
+                line = f"assert not {name}.to(torch.float32).isinf().any().item()"
+                self.prefix.writeline(line)
+            else:
+                line = f"assert not {name}.isnan().any().item()"
+                self.prefix.writeline(line)
+                line = f"assert not {name}.isinf().any().item()"
+                self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
         self.prefix.splice(
@@ -1587,9 +1602,25 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.do_indent()
                 self.wrapper_call.writeline("if isinstance(var, torch.Tensor):")
                 self.wrapper_call.do_indent()
+                # Check if the tensor is FP8 dtype and needs upcasting for isinf check
+                self.wrapper_call.writeline(
+                    "fp8_dtypes = [torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz]"
+                )
+                self.wrapper_call.writeline("if var.dtype in fp8_dtypes:")
+                self.wrapper_call.do_indent()
+                # Upcast FP8 to float32 for nan/inf checks
+                self.wrapper_call.writeline(
+                    "assert not var.to(torch.float32).isnan().any().item()"
+                )
+                self.wrapper_call.writeline(
+                    "assert not var.to(torch.float32).isinf().any().item()"
+                )
+                self.wrapper_call.do_unindent()
+                self.wrapper_call.writeline("else:")
+                self.wrapper_call.do_indent()
                 self.wrapper_call.writeline("assert not var.isnan().any().item()")
                 self.wrapper_call.writeline("assert not var.isinf().any().item()")
-                self.wrapper_call.do_unindent(2)
+                self.wrapper_call.do_unindent(3)
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
         else:

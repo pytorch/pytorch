@@ -5801,10 +5801,25 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
                     )
                 else:
-                    line = f"assert not {arg}.isnan().any().item()"
-                    wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
-                    wrapper.writeline(line)
+                    # Check if dtype is FP8 and needs upcasting for isinf check
+                    import torch
+                    fp8_dtypes = [
+                        torch.float8_e4m3fn,
+                        torch.float8_e5m2,
+                        torch.float8_e4m3fnuz,
+                        torch.float8_e5m2fnuz,
+                    ]
+                    if arg_signature.dtype in fp8_dtypes:
+                        # Upcast FP8 to float32 for nan/inf checks
+                        line = f"assert not {arg}.to(torch.float32).isnan().any().item()"
+                        wrapper.writeline(line)
+                        line = f"assert not {arg}.to(torch.float32).isinf().any().item()"
+                        wrapper.writeline(line)
+                    else:
+                        line = f"assert not {arg}.isnan().any().item()"
+                        wrapper.writeline(line)
+                        line = f"assert not {arg}.isinf().any().item()"
+                        wrapper.writeline(line)
 
     def create_cse_var(self, *args, **kwargs) -> TritonCSEVariable:
         return TritonCSEVariable(*args, **kwargs)
