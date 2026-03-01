@@ -1219,9 +1219,11 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 server_port=server_port,  # For non-0 rank, this is a no-op
             )
 
-        assert self._bootstrap_store_info is not None
+        if self._bootstrap_store_info is None:
+            raise AssertionError
         if rank == 0:
-            assert self._shared_tcp_store_server is not None
+            if self._shared_tcp_store_server is None:
+                raise AssertionError
 
         return RendezvousInfo(
             store,
