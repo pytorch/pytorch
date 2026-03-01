@@ -206,7 +206,7 @@ QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
 }
 
 void quantile_checks(const Tensor& self, const Tensor& q) {
-  TORCH_CHECK(self.numel() > 0, "quantile() input tensor must be non-empty");
+  TORCH_SYM_CHECK(self.sym_numel().sym_gt(0), "quantile() input tensor must be non-empty");
   TORCH_CHECK(q.dim() <= 1, "quantile() q must be a scalar or 1D tensor");
   TORCH_CHECK(
       self.scalar_type() == kFloat || self.scalar_type() == kDouble,
@@ -256,7 +256,9 @@ Tensor quantile_compute(
   // Checks that all q values are between 0 and 1, inclusive
   // NOTE: this check is only performed when running on the CPU to avoid
   // synchronizing an accelerator with the CPU
-  if (self.device().is_cpu()) {
+  // The check is also skipped when the actual q values are not available yet
+  // e.g. with symbolic shapes or during export
+  if (self.device().is_cpu() && !isTensorSubclassLike(q)) {
     auto all_q_in_range = q.ge(0).logical_and_(q.le(1)).all();
     TORCH_CHECK(at::is_scalar_tensor_true(all_q_in_range),
                 "quantile() q values must be in the range [0, 1]");
@@ -275,7 +277,7 @@ Tensor quantile_compute(
 
   // Treat q as a 1D tensor for the following computations
   if (q.dim() == 0) {
-    out_shape.insert(out_shape.begin(), q.numel());
+    out_shape.insert(out_shape.begin(), 1);
   }
 
   // View input as reduced_size + size of dim to reduce

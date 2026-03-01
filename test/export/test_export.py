@@ -17507,6 +17507,25 @@ def forward(self, q, k, v):
         expected_mask = torch.ones(3, 5, dtype=torch.bool).triu(diagonal=2)
         self.assertEqual(eager_out, expected_mask)
 
+    def test_quantile_export(self):
+        class QuantilePair(torch.nn.Module):
+            def __init__(self, noise=0.1):
+                super().__init__()
+                self.noise = noise
+
+            def forward(self, x):
+                q = torch.tensor(
+                    [self.noise, 1.0 - self.noise],
+                    device=x.device,
+                    dtype=x.dtype,
+                )
+                return torch.quantile(x, q, dim=-1, keepdim=True)
+
+        model = QuantilePair(noise=0.1)
+        x = torch.randn(1, 3200)
+        ep = export(model, (x,))
+        self.assertEqual(ep.module()(x), model(x))
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
