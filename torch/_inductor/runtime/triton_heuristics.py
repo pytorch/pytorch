@@ -409,6 +409,13 @@ class CachingAutotuner(KernelInterface):
             base_name = os.path.basename(self.filename)
             if ".py" in base_name:
                 self.kernel_hash = os.path.splitext(base_name)[0]
+        else:
+            fn_name = getattr(fn, "__name__", "unknown_kernel")
+            try:
+                code_hash = hashlib.sha256(fn.__code__.co_code).hexdigest()[:16]
+            except AttributeError:
+                code_hash = str(hash(fn))
+            self.kernel_hash = f"{fn_name}_{code_hash}"
 
         self.precompile_time_taken_ns = 0
         self.autotune_time_taken_ns = 0
