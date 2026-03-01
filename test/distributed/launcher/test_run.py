@@ -252,7 +252,7 @@ class ElasticLaunchTest(TestCase):
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    @patch("torch.cuda.is_available", return_value=False)
+    @patch("torch.accelerator.is_available", return_value=False)
     def test_nproc_launch_auto_configurations(self, _mock1):
         self._test_nproc_launch_configuration("auto", os.cpu_count())
 
