@@ -2677,8 +2677,10 @@ class GuardBuilder(GuardBuilderBase):
             )
         self.id_match_unchecked(guard)
 
-    # Delegates to ID_MATCH which already has a spec.
-    @skip_guard_check_spec
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: value,
+        eval_fn=lambda value, metadata: value is metadata,
+    )
     def MODULE_MATCH(self, guard: Guard) -> None:
         """Equals ID_MATCH on modules - better readability than directly calling ID_MATCH"""
         val = self.get(guard)
@@ -2704,8 +2706,10 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self.FUNCTION_MATCH(guard)
 
-    # Delegates to ID_MATCH which already has a spec.
-    @skip_guard_check_spec
+    @register_guard_check_spec(
+        get_metadata_fn=lambda guard, value: value,
+        eval_fn=lambda value, metadata: value is metadata,
+    )
     def BUILTIN_MATCH(self, guard: Guard) -> None:
         if self.save_guards:
             # Record which builtin variables are used for pruning later.
