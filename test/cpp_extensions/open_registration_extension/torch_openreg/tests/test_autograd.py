@@ -75,6 +75,19 @@ class TestAutograd(TestCase):
         self.assertIsNotNone(z.grad_fn)
         self.assertTrue(z.requires_grad)
 
+    def test_autograd_inference_mode(self):
+        """Test inference_mode context manager"""
+        x = torch.randn(2, 3, device="openreg", requires_grad=True)
+
+        with torch.inference_mode():
+            y = x * 2
+            self.assertIsNone(y.grad_fn)
+            self.assertFalse(y.requires_grad)
+
+        z = x * 2
+        self.assertIsNotNone(z.grad_fn)
+        self.assertTrue(z.requires_grad)
+
     def test_autograd_detach(self):
         """Test tensor detach"""
         x = torch.randn(2, 3, device="openreg", requires_grad=True)
@@ -120,6 +133,37 @@ class TestAutograd(TestCase):
 
         self.assertIsNotNone(x.grad)
         self.assertTrue(x.grad.is_cpu)
+
+    def test_backward_hook(self):
+        """Test module and tensor backward hooks are executed on device"""
+        # test module hook
+        a = torch.rand(1, requires_grad=True, device="openreg")
+        b = torch.rand(1, requires_grad=True, device="openreg")
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        m = MyModule()
+        hook_called_on_device = []
+        m.register_full_backward_hook(
+            lambda _module, _grad_in, grad_out: hook_called_on_device.append(
+                grad_out[0].device.type
+            )
+        )
+        result = m(x=a, y=b)
+        result.backward()
+        self.assertEqual(result, a * b)
+        self.assertEqual(result.device.type, "openreg")
+        self.assertEqual(hook_called_on_device, ["openreg"])
+
+        # test tensor hook
+        hook_called_on_device = []
+        x = torch.rand(2, requires_grad=True, device="openreg")
+        z = x * x
+        z.register_hook(lambda grad: hook_called_on_device.append(grad.device.type))
+        z.backward(torch.ones_like(z))
+        self.assertEqual(hook_called_on_device, ["openreg"])
 
 
 if __name__ == "__main__":
