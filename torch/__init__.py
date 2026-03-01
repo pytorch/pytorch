@@ -2311,6 +2311,7 @@ from torch import (
     sparse as sparse,
     special as special,
     testing as testing,
+    tpu as tpu,
     types as types,
     utils as utils,
     version as version,
