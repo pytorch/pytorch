@@ -3390,6 +3390,29 @@ class TestTorchDeviceType(TestCase):
         actual = torch.narrow_copy(inp, 1, 0, 10)
         self.assertEqual(expected, actual)
 
+    def test_narrow_copy_gradient(self, device):
+        # dim=0
+        a = torch.ones(4, 4, device=device, requires_grad=True)
+        b = torch.narrow_copy(a, dim=0, start=1, length=2)
+        b.sum().backward()
+        expected = torch.zeros(4, 4, device=device)
+        expected[1:3] = 1.0
+        self.assertEqual(a.grad, expected)
+
+        # dim=1
+        a = torch.ones(3, 5, device=device, requires_grad=True)
+        b = torch.narrow_copy(a, dim=1, start=2, length=2)
+        b.sum().backward()
+        expected = torch.zeros(3, 5, device=device)
+        expected[:, 2:4] = 1.0
+        self.assertEqual(a.grad, expected)
+
+        # zero-length --> zero grad
+        a = torch.ones(4, 4, device=device, requires_grad=True)
+        b = torch.narrow_copy(a, dim=0, start=1, length=0)
+        b.sum().backward()
+        self.assertEqual(a.grad, torch.zeros(4, 4, device=device))
+
     # FIXME: find a test suite for the take operator
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @slowTestIf(IS_WINDOWS)
