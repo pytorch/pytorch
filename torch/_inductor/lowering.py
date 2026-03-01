@@ -6426,7 +6426,10 @@ def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
         c = get_constant_or_index_expr(correction, dtype)
         N = get_constant_or_index_expr(rnumel, dtype)
         zero = ops.constant(0, dtype)
-        return data / ops.maximum(zero, N - c)
+        denom = ops.maximum(zero, N - c)
+        out = data / denom
+        # Handle potential NaNs from division by zero or non-finite inputs
+        return ops.where(ops.isnan(out), zero, out)
 
     var = make_pointwise(scale_fn)(m2)
 
