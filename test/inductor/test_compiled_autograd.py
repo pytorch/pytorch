@@ -69,7 +69,8 @@ from torch.utils._python_dispatch import TorchDispatchMode
 def make_compiler_fn(
     fullgraph=True, dynamic=True, backend="inductor", gm_hook=lambda gm: None
 ):
-    assert backend in ["inductor", "aot_eager", "eager", "ca_eager"]
+    if backend not in ["inductor", "aot_eager", "eager", "ca_eager"]:
+        raise AssertionError(f"unexpected backend: {backend}")
 
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
@@ -180,14 +181,14 @@ class TestCompiledAutograd(TestCase):
     def test_hipify_not_loaded_with_import_torch(self):
         script = """
 import torch
-assert globals().get("hipify", False) is False
+assert globals().get("hipify", False) is False  # noqa: S101
 """
         self.run_as_subprocess(script)
 
     def test_hipify_not_loaded_with_import_cpp_extension(self):
         script = """
 import torch.utils.cpp_extension
-assert globals().get("hipify", False) is False
+assert globals().get("hipify", False) is False  # noqa: S101
 """
         self.run_as_subprocess(script)
 
@@ -208,7 +209,7 @@ def main():
         loss = out.sum()
         with torch._dynamo.compiled_autograd._enable(compiler_fn):
             loss.backward()
-        assert(w.grad is not None)
+        assert(w.grad is not None)  # noqa: S101
 
     inner()
     torch._dynamo.reset()
@@ -242,17 +243,21 @@ main()
         # state should be clean after reset
         compiled_autograd.reset()
 
-        assert compiled_autograd.compiled_autograd_enabled is False
+        if compiled_autograd.compiled_autograd_enabled is not False:
+            raise AssertionError
         (
             prior_compiler,
             prior_dynamic,
         ) = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
-        assert prior_compiler is None
-        assert prior_dynamic is False
-        assert (
+        if prior_compiler is not None:
+            raise AssertionError
+        if prior_dynamic is not False:
+            raise AssertionError
+        if not (
             compiled_autograd.COMPILE_COUNTER is not None
             and next(compiled_autograd.COMPILE_COUNTER) == 0
-        )
+        ):
+            raise AssertionError
 
     def test_basic(self):
         def fn():
@@ -456,8 +461,10 @@ main()
         y = torch.sigmoid(x)
         z = torch.tanh(y)
 
-        assert isinstance(z.grad_fn, torch.autograd.graph.Node)
-        assert isinstance(y.grad_fn, torch.autograd.graph.Node)
+        if not isinstance(z.grad_fn, torch.autograd.graph.Node):
+            raise AssertionError
+        if not isinstance(y.grad_fn, torch.autograd.graph.Node):
+            raise AssertionError
         handle_z = z.grad_fn.register_hook(lambda gI, gO: (gO[0] * 2,))
         handle_y = y.grad_fn.register_hook(lambda gI, gO: (gI[0] * 2,))
         z.sum().backward(retain_graph=True)
@@ -475,7 +482,8 @@ main()
         x = torch.randn([1, 4, 32, 32])
         y = conv(x)
 
-        assert isinstance(y.grad_fn, torch.autograd.graph.Node)
+        if not isinstance(y.grad_fn, torch.autograd.graph.Node):
+            raise AssertionError
         # this hook will mul 2.0 to the conv weight gradient
         handle_y = y.grad_fn.register_hook(lambda gI, gO: (gI[0], gI[1] * 2, gI[2]))
         y.sum().backward(retain_graph=True)
@@ -1008,10 +1016,12 @@ main()
                 placeholders = get_placeholders(gm_)
                 if is_bwd:
                     # boxed inputs
-                    assert isinstance(placeholders[0].meta["example_value"], list)
+                    if not isinstance(placeholders[0].meta["example_value"], list):
+                        raise AssertionError
                 else:
                     # not boxed inputs
-                    assert not isinstance(placeholders[0].meta["example_value"], list)
+                    if isinstance(placeholders[0].meta["example_value"], list):
+                        raise AssertionError
 
                 return gm_
 
@@ -1208,8 +1218,10 @@ main()
 
                 result = model(x).sum()
                 gy, gz = torch.autograd.grad(result, inputs=[y, z])
-                assert y.grad is None
-                assert z.grad is None
+                if y.grad is not None:
+                    raise AssertionError
+                if z.grad is not None:
+                    raise AssertionError
                 yield gy
                 yield gz
 
@@ -1237,8 +1249,10 @@ main()
 
                 result = model(x).sum()
                 gz = torch.autograd.grad(result, inputs=[z])
-                assert y.grad is None
-                assert z.grad is None
+                if y.grad is not None:
+                    raise AssertionError
+                if z.grad is not None:
+                    raise AssertionError
                 yield gz
 
         self.check_output_and_recompiles(fn)
@@ -1255,9 +1269,12 @@ main()
                 x = torch.randn([1, 4])
                 result = model(x).sum()
                 out = result.backward()
-                assert out is None
-                assert y.grad is not None
-                assert z.grad is not None
+                if out is not None:
+                    raise AssertionError
+                if y.grad is None:
+                    raise AssertionError
+                if z.grad is None:
+                    raise AssertionError
                 yield y.grad
                 yield z.grad
                 y.grad = None
@@ -1287,10 +1304,14 @@ main()
                 x = torch.randn([1, 4])
                 result = model(x).sum()
                 out = result.backward(inputs=[y, z])
-                assert out is None
-                assert y.grad is not None
-                assert z.grad is not None
-                assert a.grad is None
+                if out is not None:
+                    raise AssertionError
+                if y.grad is None:
+                    raise AssertionError
+                if z.grad is None:
+                    raise AssertionError
+                if a.grad is not None:
+                    raise AssertionError
                 yield y.grad
                 yield z.grad
                 y.grad = None
@@ -1496,8 +1517,10 @@ main()
                 x = torch.randn([10, 4])
                 result = opt_model(x).sum()
                 result.backward()
-                assert model[0].weight.grad is w_grad
-                assert model[0].bias.grad is b_grad
+                if model[0].weight.grad is not w_grad:
+                    raise AssertionError
+                if model[0].bias.grad is not b_grad:
+                    raise AssertionError
                 yield w_grad.clone()
                 yield b_grad.clone()
 
@@ -1820,9 +1843,10 @@ main()
         def my_compiler_fn(gm):
             for node in gm.graph.nodes:
                 if isinstance(node.target, torch._ops.OpOverload):
-                    assert node.target._name != "aten::_to_copy", (
-                        "there should be no implicit copies (e.g. dtype casting)"
-                    )
+                    if node.target._name == "aten::_to_copy":
+                        raise AssertionError(
+                            "there should be no implicit copies (e.g. dtype casting)"
+                        )
 
             def inner_compiler(gm_, example_inputs_):
                 counters["compiled_autograd"]["compiles"] += 1
@@ -2888,12 +2912,12 @@ from torch.testing._internal.inductor_utils import GPU_TYPE
 
 def main():
     device_interface = get_interface_for_device(GPU_TYPE)
-    assert(device_interface.memory_allocated() == 0)
+    assert(device_interface.memory_allocated() == 0)  # noqa: S101
 
     # Use an op to check that the memory is freed by the time the op is executed
     def assertion_impl(to_clone):
         mem_allocated = device_interface.memory_allocated()
-        assert mem_allocated < 4000000  # some activations should be freed
+        assert mem_allocated < 4000000  # noqa: S101  # some activations should be freed
         return to_clone.clone()
 
     with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
@@ -2916,10 +2940,10 @@ def main():
 
         # allocate at least 4,000,000 bytes (1,000,000 * 4 bytes)
         activations = [torch.ones(1000000, dtype=torch.float32, device=GPU_TYPE)]
-        assert device_interface.memory_allocated() > 4000000
+        assert device_interface.memory_allocated() > 4000000  # noqa: S101
 
         out = compiled_fn(activations)
-        assert len(activations) == 0
+        assert len(activations) == 0  # noqa: S101
 
 main()
         """
@@ -2936,13 +2960,13 @@ from torch.testing._internal.inductor_utils import GPU_TYPE
 
 def main():
     device_interface = get_interface_for_device(GPU_TYPE)
-    assert device_interface.memory_allocated() == 0
+    assert device_interface.memory_allocated() == 0  # noqa: S101
 
     # Use an op to check that the memory is freed by the time the op is executed
     def assertion_impl(to_clone):
         mem_allocated = device_interface.memory_allocated()
-        assert mem_allocated < 1200000  # some activations should be freed
-        assert mem_allocated > 800000  # currently subclasses don't seem to be freed in inductor
+        assert mem_allocated < 1200000  # noqa: S101  # some activations should be freed
+        assert mem_allocated > 800000  # noqa: S101  # currently subclasses don't seem to be freed in inductor
         return to_clone.clone()
 
     with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
@@ -2978,10 +3002,10 @@ def main():
             torch.ones((1, 100000), device=GPU_TYPE),  # 400,000 bytes
         ]
         # 1,200,000 bytes (3 * 4 * 100,000 bytes)
-        assert device_interface.memory_allocated() > 1200000
+        assert device_interface.memory_allocated() > 1200000  # noqa: S101
 
         out = compiled_fn(activations)
-        assert len(activations) == 0
+        assert len(activations) == 0  # noqa: S101
 
 main()
         """
@@ -3208,11 +3232,13 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
-        assert "torch::autograd::AccumulateGrad (NodeCall" in logs.getvalue()
-        assert (
+        if "torch::autograd::AccumulateGrad (NodeCall" not in logs.getvalue():
+            raise AssertionError
+        if (
             self.gen_cache_miss_log_prefix() + "torch::autograd::GraphRoot"
-            not in logs.getvalue()
-        )
+            in logs.getvalue()
+        ):
+            raise AssertionError
 
     def test_logs_aot_bwd_reuse(self):
         @torch.compile(backend="aot_eager")
@@ -3454,9 +3480,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         pattern1 = r"".join(patterns1)
         matches1 = re.findall(pattern1, all_logs)
         self.assertEqual(len(matches1), 1)
-        assert isinstance(
+        if not isinstance(
             matches1[0], str
-        )  # for a single match: matches1=['match'], for multiple matches: matches1=[('match1', 'match2')]...
+        ):  # for a single match: matches1=['match'], for multiple matches: matches1=[('match1', 'match2')]...
+            raise AssertionError
         self.assertEqual(len(matches1), len(patterns1))
 
     @skipIfWindows(msg="node name demangling inconsistent on windows")
@@ -3545,7 +3572,8 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 "mylib::to_twotensor", TwoTensorMode, lib=lib
             )
             def _(_0, _1, _2, args, kwargs):
-                assert not kwargs
+                if kwargs:
+                    raise AssertionError
                 a, b = args
                 return TwoTensor(a.clone(), b.clone())
 
@@ -3553,7 +3581,8 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 "mylib::from_twotensor", TwoTensor, lib=lib
             )
             def _(_0, _1, _2, args, kwargs):
-                assert not kwargs
+                if kwargs:
+                    raise AssertionError
                 (c,) = args
                 return c.a.clone(), c.b.clone()
 
@@ -4345,7 +4374,10 @@ class CompiledAutograd1(torch.nn.Module):
                     third = torch.autograd.grad(second, x, create_graph=True)[0]
                     fourth = torch.autograd.grad(third, x, create_graph=True)[0]
             except RuntimeError as e:
-                assert "does not currently support higher order gradients" in str(e)
+                if "does not currently support higher order gradients" not in str(e):
+                    raise AssertionError(
+                        f"Expected error about higher order gradients, got: {e}"
+                    ) from e
                 return (first, second, third, fourth)
 
             return (first, second, third, fourth)
@@ -4448,7 +4480,8 @@ class CompiledAutograd1(torch.nn.Module):
 
             def check(grad):
                 nonlocal pre_hook_storage_id
-                assert pre_hook_storage_id is None
+                if pre_hook_storage_id is not None:
+                    raise AssertionError
                 pre_hook_storage_id = id(grad.untyped_storage())
 
             var = torch.randn(2, 2, requires_grad=True)
@@ -4456,16 +4489,14 @@ class CompiledAutograd1(torch.nn.Module):
             output = StealableDenseOp.apply(var)
             output.backward(torch.ones_like(output))
 
-            assert var.grad is not None, "Grad should be defined"
-            assert torch.equal(var.grad, torch.ones_like(var) * 5), (
-                "Grad content should be as returned by backward"
-            )
-            assert var.grad.requires_grad is False, (
-                "Detached grad should not require grad"
-            )
-            assert id(var.grad.untyped_storage()) == pre_hook_storage_id, (
-                "Should be stolen"
-            )
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if not torch.equal(var.grad, torch.ones_like(var) * 5):
+                raise AssertionError("Grad content should be as returned by backward")
+            if var.grad.requires_grad is not False:
+                raise AssertionError("Detached grad should not require grad")
+            if id(var.grad.untyped_storage()) != pre_hook_storage_id:
+                raise AssertionError("Should be stolen")
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4498,7 +4529,8 @@ class CompiledAutograd1(torch.nn.Module):
 
             def check(grad):
                 nonlocal pre_hook_storages_id
-                assert pre_hook_storages_id is None
+                if pre_hook_storages_id is not None:
+                    raise AssertionError
                 pre_hook_storages_id = [
                     id(grad._indices().untyped_storage()),
                     id(grad._values().untyped_storage()),
@@ -4509,21 +4541,19 @@ class CompiledAutograd1(torch.nn.Module):
             output = StealableSparseOp.apply(var)
             output.backward(torch.ones_like(output))
 
-            assert var.grad is not None, "Grad should be defined"
-            assert var.grad.is_sparse, "Grad should be sparse"
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if not var.grad.is_sparse:
+                raise AssertionError("Grad should be sparse")
             expected_dense_grad = torch.tensor([[5.0, 0.0], [0.0, 5.0]])
-            assert torch.equal(var.grad.to_dense(), expected_dense_grad), (
-                "Content should be equal after shallow copy"
-            )
-            assert var.grad.requires_grad is False, (
-                "Detached grad should not require grad"
-            )
-            assert (
-                id(var.grad._indices().untyped_storage()) == pre_hook_storages_id[0]
-            ), "Should be stolen"
-            assert (
-                id(var.grad._values().untyped_storage()) == pre_hook_storages_id[1]
-            ), "Should be stolen"
+            if not torch.equal(var.grad.to_dense(), expected_dense_grad):
+                raise AssertionError("Content should be equal after shallow copy")
+            if var.grad.requires_grad is not False:
+                raise AssertionError("Detached grad should not require grad")
+            if id(var.grad._indices().untyped_storage()) != pre_hook_storages_id[0]:
+                raise AssertionError("Should be stolen")
+            if id(var.grad._values().untyped_storage()) != pre_hook_storages_id[1]:
+                raise AssertionError("Should be stolen")
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4554,7 +4584,8 @@ class CompiledAutograd1(torch.nn.Module):
 
             def check(grad):
                 nonlocal pre_hook_storages_id
-                assert pre_hook_storages_id is None
+                if pre_hook_storages_id is not None:
+                    raise AssertionError
                 pre_hook_storages_id = [
                     id(grad._indices().untyped_storage()),
                     id(grad._values().untyped_storage()),
@@ -4567,21 +4598,19 @@ class CompiledAutograd1(torch.nn.Module):
                 torch.ones_like(output), create_graph=True
             )  # grad mode == create_graph
 
-            assert var.grad is not None, "Grad should be defined"
-            assert var.grad.is_sparse, "Grad should be sparse"
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if not var.grad.is_sparse:
+                raise AssertionError("Grad should be sparse")
             expected_dense_grad = torch.tensor([[5.0, 0.0], [0.0, 5.0]])
-            assert torch.equal(var.grad.to_dense(), expected_dense_grad), (
-                "Content should be equal after clone"
-            )
-            assert var.grad.requires_grad, (
-                "Grad should require grad for double backward"
-            )
-            assert (
-                id(var.grad._indices().untyped_storage()) != pre_hook_storages_id[0]
-            ), "Should be copied"
-            assert (
-                id(var.grad._values().untyped_storage()) != pre_hook_storages_id[1]
-            ), "Should be copied"
+            if not torch.equal(var.grad.to_dense(), expected_dense_grad):
+                raise AssertionError("Content should be equal after clone")
+            if not var.grad.requires_grad:
+                raise AssertionError("Grad should require grad for double backward")
+            if id(var.grad._indices().untyped_storage()) == pre_hook_storages_id[0]:
+                raise AssertionError("Should be copied")
+            if id(var.grad._values().untyped_storage()) == pre_hook_storages_id[1]:
+                raise AssertionError("Should be copied")
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4619,13 +4648,12 @@ class CompiledAutograd1(torch.nn.Module):
             output = NotStealableRefsOp.apply(var)
             output.backward(torch.ones_like(output))
 
-            assert var.grad is not None, "Grad should be defined"
-            assert torch.equal(var.grad, torch.ones_like(var) * 10.0), (
-                "Grad content should be as returned by backward"
-            )
-            assert (
-                grad_ref_holder[0].untyped_storage() is not var.grad.untyped_storage()
-            ), "Should be copied"
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if not torch.equal(var.grad, torch.ones_like(var) * 10.0):
+                raise AssertionError("Grad content should be as returned by backward")
+            if grad_ref_holder[0].untyped_storage() is var.grad.untyped_storage():
+                raise AssertionError("Should be copied")
             yield var.grad
 
         self.check_output_and_recompiles(fn)
@@ -4650,9 +4678,8 @@ class CompiledAutograd1(torch.nn.Module):
             # Create a non-contiguous variable
             base_tensor = torch.randn(4, 4)
             var = base_tensor[::2, ::2]
-            assert not var.is_contiguous(), (
-                "Variable should be non-contiguous for this test"
-            )
+            if var.is_contiguous():
+                raise AssertionError("Variable should be non-contiguous for this test")
             var.requires_grad_(True)
 
             grad_ref_holder = [None]
@@ -4666,18 +4693,18 @@ class CompiledAutograd1(torch.nn.Module):
             output = SimpleDenseGradOp.apply(var)
             output.backward(torch.ones_like(output))
 
-            assert var.grad is not None, "Grad should be defined"
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
             # The `clone_obey_contract` branch 2 (`new_grad.clone(at::MemoryFormat::Contiguous)`)
             # will make the resulting grad contiguous.
-            assert var.grad.is_contiguous(), (
-                "Resulting grad should be contiguous due to branch 2 of clone_obey_contract"
-            )
-            assert torch.equal(var.grad, torch.ones_like(var) * 7.0), (
-                "Grad content should be as returned by backward"
-            )
-            assert (
-                grad_ref_holder[0].untyped_storage() is not var.grad.untyped_storage()
-            ), "Should be copied"
+            if not var.grad.is_contiguous():
+                raise AssertionError(
+                    "Resulting grad should be contiguous due to branch 2 of clone_obey_contract"
+                )
+            if not torch.equal(var.grad, torch.ones_like(var) * 7.0):
+                raise AssertionError("Grad content should be as returned by backward")
+            if grad_ref_holder[0].untyped_storage() is var.grad.untyped_storage():
+                raise AssertionError("Should be copied")
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4707,12 +4734,14 @@ class CompiledAutograd1(torch.nn.Module):
             expected_sum = (torch.ones_like(var) * 3.0) + initial_grad_ref.to_dense()
             output.backward(torch.ones_like(output))
 
-            assert var.grad is not None, "Grad should be defined"
-            assert not var.grad.is_sparse, "Resulting grad should be dense"
-            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert var.grad is not initial_grad_ref, (
-                "Grad object should be replaced (out-of-place)"
-            )
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if var.grad.is_sparse:
+                raise AssertionError("Resulting grad should be dense")
+            if not torch.equal(var.grad, expected_sum):
+                raise AssertionError("Grad content should be the sum")
+            if var.grad is initial_grad_ref:
+                raise AssertionError("Grad object should be replaced (out-of-place)")
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4740,12 +4769,16 @@ class CompiledAutograd1(torch.nn.Module):
             expected_sum = initial_grad_ref + (torch.ones_like(var) * 3.0)
             output.backward(torch.ones_like(output))
 
-            assert var.grad is not None, "Grad should be defined"
-            assert not var.grad.is_sparse, "Resulting grad should be dense"
-            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert var.grad is initial_grad_ref, (
-                "Grad object should be modified in-place (same object)"
-            )
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if var.grad.is_sparse:
+                raise AssertionError("Resulting grad should be dense")
+            if not torch.equal(var.grad, expected_sum):
+                raise AssertionError("Grad content should be the sum")
+            if var.grad is not initial_grad_ref:
+                raise AssertionError(
+                    "Grad object should be modified in-place (same object)"
+                )
             yield var.grad
 
         self.check_output_and_recompiles(fn)
@@ -4788,14 +4821,16 @@ class CompiledAutograd1(torch.nn.Module):
 
             output.backward(torch.ones_like(output))
 
-            assert var.grad is not None, "Grad should be defined"
-            assert var.grad.is_sparse, "Resulting grad should remain sparse"
-            assert torch.equal(var.grad.to_dense(), expected_sum_dense), (
-                "Grad content should be the sum of sparse grads"
-            )
-            assert var.grad is initial_grad_ref, (
-                "Grad object should be modified in-place (same object)"
-            )
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if not var.grad.is_sparse:
+                raise AssertionError("Resulting grad should remain sparse")
+            if not torch.equal(var.grad.to_dense(), expected_sum_dense):
+                raise AssertionError("Grad content should be the sum of sparse grads")
+            if var.grad is not initial_grad_ref:
+                raise AssertionError(
+                    "Grad object should be modified in-place (same object)"
+                )
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4835,12 +4870,16 @@ class CompiledAutograd1(torch.nn.Module):
 
             output.backward(torch.ones_like(output))
 
-            assert var.grad is not None, "Grad should be defined"
-            assert not var.grad.is_sparse, "Resulting grad should be dense"
-            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert var.grad is initial_grad_ref, (
-                "Grad object should be modified in-place (same object)"
-            )
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if var.grad.is_sparse:
+                raise AssertionError("Resulting grad should be dense")
+            if not torch.equal(var.grad, expected_sum):
+                raise AssertionError("Grad content should be the sum")
+            if var.grad is not initial_grad_ref:
+                raise AssertionError(
+                    "Grad object should be modified in-place (same object)"
+                )
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4879,15 +4918,18 @@ class CompiledAutograd1(torch.nn.Module):
 
             output.backward(torch.ones_like(output), create_graph=True)
 
-            assert var.grad is not None, "Grad should be defined"
-            assert not var.grad.is_sparse, "Resulting grad should be dense"
-            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert var.grad is not initial_grad_ref, (
-                "Grad object should be replaced (out-of-place)"
-            )
-            assert var.grad.requires_grad, (
-                "Resulting grad should track history for double backward"
-            )
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if var.grad.is_sparse:
+                raise AssertionError("Resulting grad should be dense")
+            if not torch.equal(var.grad, expected_sum):
+                raise AssertionError("Grad content should be the sum")
+            if var.grad is initial_grad_ref:
+                raise AssertionError("Grad object should be replaced (out-of-place)")
+            if not var.grad.requires_grad:
+                raise AssertionError(
+                    "Resulting grad should track history for double backward"
+                )
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -4923,15 +4965,18 @@ class CompiledAutograd1(torch.nn.Module):
 
             output.backward(torch.ones_like(output), create_graph=True)
 
-            assert var.grad is not None, "Grad should be defined"
-            assert not var.grad.is_sparse, "Resulting grad should be dense"
-            assert torch.equal(var.grad, expected_sum), "Grad content should be the sum"
-            assert var.grad is not initial_grad_ref, (
-                "Grad object should be replaced (out-of-place)"
-            )
-            assert var.grad.requires_grad, (
-                "Resulting grad should track history for double backward"
-            )
+            if var.grad is None:
+                raise AssertionError("Grad should be defined")
+            if var.grad.is_sparse:
+                raise AssertionError("Resulting grad should be dense")
+            if not torch.equal(var.grad, expected_sum):
+                raise AssertionError("Grad content should be the sum")
+            if var.grad is initial_grad_ref:
+                raise AssertionError("Grad object should be replaced (out-of-place)")
+            if not var.grad.requires_grad:
+                raise AssertionError(
+                    "Resulting grad should track history for double backward"
+                )
             yield var.grad
 
         self.check_output_and_recompiles(
@@ -5077,7 +5122,8 @@ def lookup_backend(test_name):
     elif test_name in xfail_by_backend["eager"]:
         return "ca_eager"
     else:
-        assert test_name not in xfail_by_backend["ca_eager"]
+        if test_name in xfail_by_backend["ca_eager"]:
+            raise AssertionError(f"test {test_name} is in ca_eager xfail list")
         return "inductor"
 
 
@@ -5365,6 +5411,7 @@ if IS_S390X:
 # clear_saved_tensors_on_access is incompatible with compiled autograd
 skipped_tests.add("test_clear_saved_tensors_on_access")
 skipped_tests.add("test_clear_saved_tensors_on_access_double_access_error")
+skipped_tests.add("test_forward_traceback_preserves_exception_with_checkpoint")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")

@@ -521,8 +521,13 @@ def meta_copy_(self, src, non_blocking=False):
 
     if isinstance(src, Tensor):
         intermediate = src.to(self, non_blocking)
-        if self.size() != intermediate.size():
-            aten.expand_copy.default(intermediate, self.size())
+        # Validate broadcast compatibility. We call the _refs expand
+        # directly rather than aten.expand_copy.default because the
+        # aten dispatch path hits C++ that cannot handle unbacked
+        # symints. The refs version performs the same checks using
+        # sym_or(x == 1, requested_length == x) which gracefully
+        # handles unbacked symints.
+        torch._refs.expand(intermediate, self.size())
     return self
 
 
@@ -1529,7 +1534,7 @@ def _linalg_svd_meta(
     batch_dims = list(A.shape[:-2])
     m = A.shape[-2]
     n = A.shape[-1]
-    k = min(m, n)
+    k = torch.sym_min(m, n)
 
     if compute_uv:
         U_shape = batch_dims + [m, m if full_matrices else k]
@@ -2420,8 +2425,10 @@ def calc_conv_nd_return_shape(
         out_channels = groups * weight.shape[1]
     else:
         out_channels = weight.shape[0]
-        if weight.shape[1] * groups != input_tensor.shape[1]:
-            raise RuntimeError("Invalid channel dimensions")
+        torch._check(
+            weight.shape[1] * groups == input_tensor.shape[1],
+            lambda: "Invalid channel dimensions",
+        )
 
     ret_shape = [input_tensor.shape[0], out_channels]
     if isinstance(stride, IntLike):
@@ -2566,9 +2573,11 @@ def meta_conv(
         output_padding if is_transposed else None,
     )
 
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     input_channels_dim = 1
     output_channels_dim = 1
-    if input_tensor.size(input_channels_dim) == 0:
+    if guard_or_false(input_tensor.size(input_channels_dim) == 0):
         shape_out[output_channels_dim] = 0
 
     out = input_tensor.new_empty(shape_out)
@@ -4578,12 +4587,14 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
     return output
 
 
-@register_meta(aten.bmm.default)
+@register_meta([aten.bmm.default, aten.bmm.out])
+@out_wrapper(exact_dtype=True)
 def meta_bmm(self, mat2):
     return common_meta_baddbmm_bmm(self, mat2, True)
 
 
-@register_meta(aten.bmm.dtype)
+@register_meta([aten.bmm.dtype, aten.bmm.dtype_out])
+@out_wrapper(exact_dtype=True)
 def meta_bmm_dtype(self, mat2, out_dtype):
     return common_meta_baddbmm_bmm(self, mat2, True, out_dtype=out_dtype)
 
@@ -5699,42 +5710,34 @@ def scatter_shape_check(self, dim, index, src_opt=None):
         lambda: "Index tensor must have the same number of dimensions as self tensor",
     )
 
-    is_wrong_shape = False
     self_dims = ensure_nonempty_dim(self.dim())
 
     # Check: index.size(d) <= self.size(d) for all d != dim
+    # Use torch._check to defer validation to runtime for unbacked symbols.
     for d in range(self_dims):
-        index_d_size = ensure_nonempty_size(index, d)
         if d == dim:
             continue
-        if index_d_size > ensure_nonempty_size(self, d):
-            is_wrong_shape = True
-            break
-
-    # Check: index.size(d) <= src.size(d) for all d if src is Tensor
-    if not is_wrong_shape and src_opt is not None:
-        for d in range(self_dims):
-            index_d_size = ensure_nonempty_size(index, d)
-            if index_d_size > ensure_nonempty_size(src_opt, d):
-                is_wrong_shape = True
-                break
-
-    if src_opt is not None:
+        index_d_size = ensure_nonempty_size(index, d)
+        self_d_size = ensure_nonempty_size(self, d)
         torch._check(
-            ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
-            lambda: "Index tensor must have the same number of dimensions as self tensor",
-        )
-        torch._check(
-            not is_wrong_shape,
-            lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
-            + f" apart from dimension {dim} and to be no larger than src {src_opt.shape}",
-        )
-    else:
-        torch._check(
-            not is_wrong_shape,
+            index_d_size <= self_d_size,
             lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
             + f" apart from dimension {dim}",
         )
+
+    # Check: index.size(d) <= src.size(d) for all d if src is Tensor
+    if src_opt is not None:
+        torch._check(
+            ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(src_opt.dim()),
+            lambda: "Index tensor must have the same number of dimensions as src tensor",
+        )
+        for d in range(self_dims):
+            index_d_size = ensure_nonempty_size(index, d)
+            src_d_size = ensure_nonempty_size(src_opt, d)
+            torch._check(
+                index_d_size <= src_d_size,
+                lambda: f"Expected index {index.shape} to be no larger than src {src_opt.shape}",
+            )
 
 
 # From aten/src/ATen/native/TensorAdvancedIndexing.cpp
@@ -6635,6 +6638,8 @@ def _check_scaled_mm_sizes(
                 _k = _k * 2
             else:
                 block_size_k = 32
+                if self.dtype == torch.float4_e2m1fn_x2:
+                    _k = _k * 2
 
             block_size_mn = 128
 

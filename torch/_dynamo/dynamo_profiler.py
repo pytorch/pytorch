@@ -268,6 +268,20 @@ class DynamoProfilerState:
                 f"Sum tottime: {total_tottime:.2f}ms, Sum cumtime: {total_cumtime:.2f}ms"
             )
 
+        # Ensure caller-only functions have a top-level entry.
+        # gprof2dot expects every function referenced as a caller to also
+        # exist as a top-level entry in the stats dict with timing data.
+        for key in list(caller_edges.keys()):
+            for caller_key in caller_edges[key]:
+                if caller_key not in aggregated:
+                    aggregated[caller_key] = {
+                        "ncalls": 0,
+                        "pcalls": 0,
+                        "tottime": 0.0,
+                        "cumtime": 0.0,
+                    }
+                    caller_edges[caller_key] = {}
+
         # Build the stats dict in pstats format
         stats_dict: dict[
             tuple[str, int, str], tuple[int, int, float, float, dict[Any, Any]]
@@ -325,6 +339,7 @@ class DynamoProfilerState:
         Returns:
             Path to the generated SVG file, or None if generation failed.
         """
+        import os
         import shutil
         import subprocess
 
@@ -362,9 +377,20 @@ class DynamoProfilerState:
             )
             gprof2dot.stdout.close()  # type: ignore[union-attr]
             _, dot_err = dot.communicate()
+            _, gprof2dot_err = gprof2dot.communicate()
+
+            if gprof2dot.returncode != 0:
+                print(
+                    f"gprof2dot failed: {gprof2dot_err.decode()}"  # noqa: B950
+                )
+                return None
 
             if dot.returncode != 0:
                 print(f"graphviz dot failed: {dot_err.decode()}")
+                return None
+
+            if not os.path.isfile(svg_file):
+                print(f"SVG file was not created: {svg_file}")
                 return None
 
             print(f"SVG call graph saved to: {svg_file}")

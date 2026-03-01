@@ -123,6 +123,11 @@ class TORCH_API TCPStore : public Store {
 
   std::vector<std::string> listKeys() override;
 
+  void barrier(
+      const std::string& key,
+      int64_t world_size,
+      const std::chrono::milliseconds& timeout) override;
+
   // Waits for all workers to join.
   void waitForWorkers();
 
