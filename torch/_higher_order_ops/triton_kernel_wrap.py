@@ -1046,6 +1046,36 @@ def identify_mutated_tensors(
 # Triton Kernel Wrappers
 
 
+def _maybe_unwrap_async_collective_tensors(
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Unwrap AsyncCollectiveTensors before passing to the Triton HOP dispatch.
+
+    Under torch.compile with distributed training, AllToAll outputs may be wrapped
+    in AsyncCollectiveTensor. The HOP dispatch mechanism computes the dispatch keyset
+    by flattening all args (including dicts), but the subclass dispatch check doesn't
+    recurse into dicts, causing a mismatch and a TypeError. Unwrapping here avoids
+    the issue entirely.
+
+    Uses wait_tensor() for GPU-side stream synchronization (CUDA event sync) rather
+    than blocking the CPU, preserving the async overlap between computation and
+    communication.
+    """
+    try:
+        from torch.distributed._functional_collectives import (
+            AsyncCollectiveTensor,
+            wait_tensor,
+        )
+    except ImportError:
+        return kwargs
+
+    def unwrap(e: AsyncCollectiveTensor) -> Tensor:
+        wait_tensor(e.elem)
+        return e.elem
+
+    return pytree.tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
+
+
 # Used for wrapping a Triton Kernel
 class TritonKernelWrapperMutation(HigherOrderOperator):
     def __init__(self) -> None:
@@ -1059,6 +1089,7 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
     ) -> Any:
+        kwargs = _maybe_unwrap_async_collective_tensors(kwargs)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(
             kernel_idx=kernel_idx,
@@ -1086,6 +1117,7 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
         kwargs: dict[str, Any],
         tensors_to_clone: list[str],
     ) -> dict[str, Any]:
+        kwargs = _maybe_unwrap_async_collective_tensors(kwargs)
         # pyrefly: ignore [missing-attribute]
         return super().__call__(
             kernel_idx=kernel_idx,
