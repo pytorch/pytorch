@@ -2005,27 +2005,70 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Extract dtype and device_type from kernel_inputs
         dtype = kernel_inputs.dtype()
-
+        device = kernel_inputs.device()
+        strides = kernel_inputs.strides_symbolic()
+        a_stride = strides[kernel_inputs._mat1_idx]
+        b_stride = strides[kernel_inputs._mat2_idx]
+        out_layout = kernel_inputs.output_layout(flexible=False)
+        c_stride = out_layout.stride
         # Get the appropriate config generator
         configs = self._get_config_generator()
-
         # Generate and process configs
-        for c in configs(
-            m,
-            n,
-            k,
-            dtype_size=dtype.itemsize,
-            op_name=op_name,
-            **kwargs,
-        ):
-            template_kwargs = self._convert_config_to_template_kwargs(
-                c,
+        if (torch.version.hip is not None) and config.origami:
+            try:
+                import origami
+            except ImportError:
+                raise ImportError("Origami not imported")
+
+            origami_cfg_gen = self.get_exhaustive_mm_configs()
+            allcfgs = origami_cfg_gen(
+                m, n, k, dtype_size=dtype.itemsize, op_name=op_name
+            )
+            selector = origami.OrigamiMatmulSelector(
+                allcfgs,
                 m,
                 n,
                 k,
-                kernel_inputs.out_dtype(),
+                dtype,
+                dtype,
+                dtype,
+                device,
+                a_stride,
+                b_stride,
+                c_stride,
             )
-            yield template_kwargs
+            origami_config_kwargs = {
+                "EVEN_K": selector.even_k,
+                "USE_FAST_ACCUM": False,
+                "ACC_TYPE": "tl.float32",
+                "num_stages": 2,
+                "num_warps": 8,
+                "BLOCK_M": selector.block_m,
+                "BLOCK_N": selector.block_n,
+                "BLOCK_K": selector.block_k,
+                "GROUP_M": selector.group_m,
+                "matrix_instr_nonkdim": 16,
+                "waves_per_eu": selector.occupancy,
+                "kpack": 2,
+            }
+            yield origami_config_kwargs
+        else:
+            for c in configs(
+                m,
+                n,
+                k,
+                dtype_size=dtype.itemsize,
+                op_name=op_name,
+                **kwargs,
+            ):
+                template_kwargs = self._convert_config_to_template_kwargs(
+                    c,
+                    m,
+                    n,
+                    k,
+                    kernel_inputs.out_dtype(),
+                )
+                yield template_kwargs
 
     def _convert_config_to_template_kwargs(
         self,
