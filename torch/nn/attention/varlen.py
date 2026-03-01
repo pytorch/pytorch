@@ -29,6 +29,9 @@ def _normalize_window_size(window_size: list[int] | None) -> list[int]:
 @lru_cache(maxsize=8)
 def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
+    major_cap = torch.cuda.get_device_capability(device_index)[0]
+    if major_cap == 9 or major_cap == 10:
+        return True
     return False
 
 
@@ -61,29 +64,29 @@ def _varlen_attn(
     This is the internal implementation. Users should use the public varlen_attn function instead.
     """
     window_size = _normalize_window_size(window_size)
-
-    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
+    head_dim_cudnn_ok = query.shape[-1] % 8 == 0 and value.shape[-1] % 8 == 0
+    window_size_cudnn_ok = window_size[0] == -1 and window_size[1] == -1
+    use_cudnn = window_size_cudnn_ok and query.is_cuda and _should_use_cudnn(query.device.index) and head_dim_cudnn_ok
 
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
-
         if window_size[0] != -1 or window_size[1] != -1:
             raise RuntimeError(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
             )
         result = torch.ops.aten._cudnn_attention_forward(
-            query,
-            key,
-            value,
-            None,  # attn_bias
-            cu_seq_q,
-            cu_seq_k,
-            max_q,
-            max_k,
-            True,  # compute_log_sumexp
-            0.0,  # dropout_p hardcoded to 0.0
-            is_causal,
-            False,  # return_debug_mask
+            query=query,
+            key=key,
+            value=value,
+            attn_bias=None,
+            cum_seq_q=cu_seq_q,
+            cum_seq_k=cu_seq_k,
+            max_q=max_q,
+            max_k=max_k,
+            compute_log_sumexp=True,
+            dropout_p=0.0,  # dropout_p hardcoded to 0.0
+            is_causal=is_causal,
+            return_debug_mask=False,  # return_debug_mask
             scale=scale,
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
@@ -298,6 +301,10 @@ def _varlen_attn_backward(
     unused = torch.empty(0, device=query.device)
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
+    head_dim_cudnn_ok = query.shape[-1] % 8 == 0 and value.shape[-1] % 8 == 0
+    window_size_cudnn_ok = window_size[0] == -1 and window_size[1] == -1
+    use_cudnn = window_size_cudnn_ok and query.is_cuda and _should_use_cudnn(query.device.index) and head_dim_cudnn_ok
+
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
         if window_size[0] != -1 or window_size[1] != -1:
@@ -305,20 +312,21 @@ def _varlen_attn_backward(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
             )
         dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
-            grad_out,
-            query,
-            key,
-            value,
-            out,
-            lse,
-            cu_seq_q,
-            cu_seq_k,
-            max_q,
-            max_k,
-            0.0,
-            is_causal,
-            rng_state,
-            unused,
+            grad_out=grad_out,
+            query=query,
+            key=key,
+            value=value,
+            out=out,
+            logsumexp=lse,
+            cum_seq_q=cu_seq_q,
+            cum_seq_k=cu_seq_k,
+            max_q=max_q,
+            max_k=max_k,
+            dropout_p=0.0,
+            philox_seed=rng_state,
+            philox_offset=rng_state, # should be unused
+            attn_bias=None,
+            is_causal=is_causal,
             scale=scale,
         )
     else:

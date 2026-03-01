@@ -216,8 +216,6 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
     }
 
     const bool is_nested = cum_seq_q.defined();
-    const int64_t max_seqlen_batch_q = query.size(2);
-    const int64_t max_seqlen_batch_k = key.size(2);
 
     if (!is_nested) {
       const int64_t batch_size = query.size(0);
@@ -234,12 +232,12 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
       if (attn_bias_.has_value()) {
         const auto bias_dim = attn_bias_.value().dim();
         if (bias_dim == 2) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_q, max_k});
         } else if (bias_dim == 3) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_q, max_k});
         } else {
           TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
-          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_q, max_k});
         }
       }
 
@@ -284,11 +282,11 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
       if (attn_bias_.has_value()) {
         const auto bias_dim = attn_bias_.value().dim();
         if (bias_dim == 2) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_q, max_k});
         } else if (bias_dim == 3) {
-          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_q, max_k});
         } else {
-          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_k});
+          attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_q, max_k});
           TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
         }
       }
@@ -303,8 +301,8 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
         num_heads_q,
         num_heads_k,
         num_heads_v,
-        max_seqlen_batch_q,
-        max_seqlen_batch_k,
+        max_q,
+        max_k,
         head_dim_qk,
         head_dim_v,
         softmax_scale,
