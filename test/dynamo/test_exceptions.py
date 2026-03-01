@@ -563,6 +563,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_tensor_attribute_error_in_try_except(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = torch.nn.Parameter(torch.tensor([2.0]))
+
+            def forward(self, x):
+                try:
+                    return x.this_attribute_does_not_exist
+                except AttributeError:
+                    return x * self.scale
+
+        m = M()
+        opt_m = torch.compile(m, backend="eager")
+        x = torch.randn(4, 4)
+        ref = m(x)
+        res = opt_m(x)
+        self.assertEqual(ref, res)
+
     def test_raise_from_None(self):
         # Inspired from os.environ
         class MyMapping:
