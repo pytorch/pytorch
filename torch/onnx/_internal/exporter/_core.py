@@ -594,6 +594,27 @@ def _handle_call_function_node_with_lowering(
                 f"No ONNX function found for {node.target!r}. Failure message: {message}"
             )
 
+        # torch.ops.torchvision.roi_align.default is traced with 7 positional args
+        # (input, boxes, spatial_scale, output_h, output_w, sampling_ratio, aligned).
+        # onnxscript torchvision_roi_align expects (input, boxes, output_size, spatial_scale, sampling_ratio, aligned).
+        op_name = getattr(node.target, "name", None)
+        if (
+            op_name is not None
+            and op_name() == "torchvision::roi_align.default"
+            and len(onnx_args) == 7
+            and "aligned" not in onnx_kwargs
+        ):
+            # Map FX (input, boxes, spatial_scale, output_h, output_w, sampling_ratio, aligned)
+            # to onnxscript (input, boxes, output_size, spatial_scale, sampling_ratio, aligned).
+            onnx_kwargs = {**onnx_kwargs, "aligned": onnx_args[6]}
+            onnx_args = [
+                onnx_args[0],
+                onnx_args[1],
+                [onnx_args[3], onnx_args[4]],
+                onnx_args[2],
+                onnx_args[5],
+            ]
+
         with onnxscript.evaluator.default_as(
             tracer := _building.OpRecorder(opset, constant_farm)
         ):
