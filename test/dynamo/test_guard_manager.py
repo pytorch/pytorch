@@ -1643,6 +1643,33 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn(dict, expected))
         self.assertFalse(handler.eval_fn(list, expected))
 
+    def test_module_match(self):
+        import types
+
+        from torch._dynamo.guards import GuardBuilder
+
+        guard = self._make_guard(GuardBuilder.MODULE_MATCH)
+        handler = self._get_handler("MODULE_MATCH")
+
+        mod = types.ModuleType("test_mod")
+        expected = handler.get_metadata_fn(guard, mod)
+        self.assertIs(expected, mod)
+        self.assertTrue(handler.eval_fn(mod, expected))
+
+        other = types.ModuleType("other_mod")
+        self.assertFalse(handler.eval_fn(other, expected))
+
+    def test_builtin_match(self):
+        from torch._dynamo.guards import GuardBuilder
+
+        guard = self._make_guard(GuardBuilder.BUILTIN_MATCH)
+        handler = self._get_handler("BUILTIN_MATCH")
+
+        expected = handler.get_metadata_fn(guard, len)
+        self.assertIs(expected, len)
+        self.assertTrue(handler.eval_fn(len, expected))
+        self.assertFalse(handler.eval_fn(print, expected))
+
     def test_hasattr_present(self):
         from torch._dynamo.guards import GuardBuilder
 
