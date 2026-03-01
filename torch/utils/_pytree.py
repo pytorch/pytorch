@@ -323,7 +323,6 @@ def register_dataclass(
         >>> assert torch.allclose(point.y, torch.tensor(2))
 
     """
-    drop_field_names = drop_field_names or []
 
     if not dataclasses.is_dataclass(cls):
         if field_names is None:
@@ -331,16 +330,19 @@ def register_dataclass(
                 "field_names must be specified with a list of all fields used to "
                 f"initialize {cls}, as it is not a dataclass."
             )
-    elif field_names is None:
-        field_names = [f.name for f in dataclasses.fields(cls) if f.init]
     else:
         dataclass_init_fields = {f.name for f in dataclasses.fields(cls) if f.init}
-        dataclass_init_fields.difference_update(drop_field_names)
 
-        if dataclass_init_fields != set(field_names):
+        drop_field_names = set(drop_field_names or [])
+        if field_names is None:
+            field_names = dataclass_init_fields - drop_field_names
+        else:
+            field_names = set(field_names)
+
+        if dataclass_init_fields != field_names | drop_field_names:
             error_msg = "field_names does not include all dataclass fields.\n"
 
-            if missing := dataclass_init_fields - set(field_names):
+            if missing := dataclass_init_fields - field_names:
                 error_msg += (
                     f"Missing fields in `field_names`: {missing}. If you want "
                     "to include these fields in the pytree, please add them "
@@ -348,7 +350,7 @@ def register_dataclass(
                     "`drop_field_names`.\n"
                 )
 
-            if unexpected := set(field_names) - dataclass_init_fields:
+            if unexpected := field_names - dataclass_init_fields:
                 error_msg += (
                     f"Unexpected fields in `field_names`: {unexpected}. "
                     "Please remove these fields, or add them to `drop_field_names`.\n"

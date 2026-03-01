@@ -1288,6 +1288,15 @@ if "optree" in sys.modules:
         self.assertEqual(new_data.c, None)
         python_pytree._deregister_pytree_node(Data)
 
+        # drop_field_names without explicit field_names
+        python_pytree.register_dataclass(Data, drop_field_names=["b", "c"])
+        old_data = Data(torch.tensor(3), "b", "c")
+        new_data = python_pytree.tree_map(lambda x: x, old_data)
+        self.assertEqual(new_data.a, torch.tensor(3))
+        self.assertEqual(new_data.b, "moo")
+        self.assertEqual(new_data.c, None)
+        python_pytree._deregister_pytree_node(Data)
+
     def test_register_dataclass_class(self):
         class CustomClass:
             def __init__(self, x, y):
