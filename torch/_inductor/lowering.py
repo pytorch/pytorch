@@ -3203,6 +3203,9 @@ make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 
 make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
 
+# Layout constraints
+add_layout_constraint(aten.native_dropout, constrain_to_fx_strides)
+
 
 # Register with type_promotion_kind None.
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.

@@ -6500,6 +6500,14 @@ class CommonTemplate:
             (torch.randn([16, 16]),),
         )
 
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_clone_dropout(self):
+        def fn(x):
+            y = x.t().contiguous()
+            return torch.nn.functional.dropout(y)
+
+        self.common(fn, (torch.randn(3, 4),))
+
     def test_masked_fill(self):
         def fn(mask, value):
             return aten.masked_fill(value, mask, -10000.0) + 2, aten.masked_fill(
