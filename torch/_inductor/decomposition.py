@@ -330,6 +330,16 @@ def bmm(
     return NotImplemented
 
 
+def _try_decompose_mm_k1(
+    mat1: torch.Tensor, mat2: torch.Tensor, counter_name: str
+) -> torch.Tensor | None:
+    if mat1.device.type not in ["cpu", "mps"]:
+        if statically_known_true(mat1.size(-1) == 1):
+            counters["inductor"][counter_name] += 1
+            return mat1 * mat2
+    return None
+
+
 @register_decomposition([aten.addmm])
 @pw_cast_for_opmath
 def addmm(
@@ -340,6 +350,10 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    out = _try_decompose_mm_k1(mat1, mat2, "decompose_addmm")
+    if out is not None:
+        return alpha * out + beta * self
+
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(
             mat2.size(-1) == 1
@@ -367,6 +381,10 @@ def mm(
     input2: torch.Tensor,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
+    out = _try_decompose_mm_k1(self, input2, "decompose_mm")
+    if out is not None:
+        return out
+
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
 
