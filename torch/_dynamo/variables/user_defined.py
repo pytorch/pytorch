@@ -154,6 +154,30 @@ def is_cython_function(obj: object) -> bool:
     )
 
 
+# Types whose instances are data descriptors (have __get__ + (__set__ or __delete__)).
+# CPython invokes data descriptors found on the type MRO *before* checking
+# the instance __dict__.  This set is used by is_data_descriptor for a fast
+# O(1) check before falling back to the generic hasattr probe.
+KNOWN_DATA_DESCRIPTOR_TYPES: frozenset[type] = frozenset(
+    {
+        property,
+        _collections._tuplegetter,
+        types.MemberDescriptorType,
+        types.GetSetDescriptorType,
+    }
+)
+
+
+def is_data_descriptor(obj: object) -> bool:
+    """Return True if *obj* is a data descriptor (has __get__ and (__set__ or __delete__))."""
+    tp = type(obj)
+    if tp in KNOWN_DATA_DESCRIPTOR_TYPES:
+        return True
+    return hasattr(tp, "__get__") and (
+        hasattr(tp, "__set__") or hasattr(tp, "__delete__")
+    )
+
+
 class UserDefinedVariable(VariableTracker):
     value: object
 
@@ -1539,6 +1563,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._looked_up_attrs[name] = subobj
         return subobj
 
+    def lookup_class_mro_attr(self, name: str) -> object:
+        """Walk type(obj).__mro__ to find *name* in the class hierarchy.
+
+        This only searches the class chain (type(obj).__mro__), NOT the
+        metaclass chain (type(type(obj)).__mro__).  The distinction matters
+        because inspect.getattr_static conflates both chains — it can return
+        metaclass descriptors (e.g. type.__dict__['__annotations__'], a
+        getset_descriptor) when the attribute doesn't exist on the class MRO.
+        Walking cls.__mro__ directly avoids that leak.
+        """
+        if name in self._subobj_from_class:
+            return self._subobj_from_class[name]
+        result = NO_SUCH_SUBOBJ
+        for base in self.value.__class__.__mro__:
+            if name in base.__dict__:
+                result = base.__dict__[name]
+                break
+        self._subobj_from_class[name] = result
+        return result
+
     def should_skip_descriptor_setter(self, attr_name: str) -> bool:
         # Check if `attr_name` corresponds to a descriptor.
         descriptor = inspect.getattr_static(type(self.value), attr_name, None)
@@ -1697,279 +1741,292 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 cls_source = source
             return VariableTracker.build(tx, type(self.value), cls_source)
 
-        try:
-            subobj = self._getattr_static(name)
-        except AttributeError:
-            subobj = NO_SUCH_SUBOBJ
-            getattr_fn = self._check_for_getattr()
-            if isinstance(getattr_fn, types.FunctionType):
-                # Dynamo is going to trace the __getattr__ function with
-                # args=name. Set the source accordingly.
-                if (
-                    getattr_fn is unpatched_nn_module_getattr
-                    and isinstance(self, variables.UnspecializedNNModuleVariable)
-                    # prevent against overwriting of params/buffers/submodules
-                    and istype(self.value._parameters, dict)  # type: ignore[attr-defined]
-                    and istype(self.value._buffers, dict)  # type: ignore[attr-defined]
-                    and istype(self.value._modules, dict)  # type: ignore[attr-defined]
-                ):
-                    # Manually trace out the nn module __getattr__ to avoid large compilation latency.
-                    out = self.manually_trace_nn_module_getattr(tx, name)
-                else:
-                    new_source = None
-                    if self.source:
-                        new_source = AttrSource(self.source, "__getattr__")
-                    out = variables.UserMethodVariable(
-                        getattr_fn, self, source=new_source
-                    ).call_function(tx, [VariableTracker.build(tx, name)], {})
-
-                if self.source and getattr_fn is torch.nn.Module.__getattr__:
-                    if isinstance(
-                        out,
-                        (
-                            variables.UnspecializedNNModuleVariable,
-                            variables.NNModuleVariable,
-                        ),
-                    ):
-                        # nn_module_stack source is BC surface area. Ensure that
-                        # mod._modules["linear"] is reflected as mod.linear for
-                        # nn_module_stack.
-                        out.set_nn_module_stack_source(  # type: ignore[attr-defined]
-                            AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
-                        )
-                return out
-
-            elif getattr_fn is not None:
-                unimplemented(
-                    gb_type="User-defined object with non-function __getattr__",
-                    context=f"object={self.value}, name={name}, getattr_fn={getattr_fn}",
-                    explanation=f"Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value} "
-                    f" when attempting to getattr `{name}`",
-                    hints=[
-                        "Ensure the object's __getattr__ is a function type.",
-                    ],
-                )
-
         from ..mutation_guard import unpatched_nn_module_init
 
-        if subobj is torch.nn.Module.__init__:
-            subobj = unpatched_nn_module_init
+        # ---- CPython attribute lookup algorithm ----
+        # Mirror object.__getattribute__ (PyObject_GenericGetAttr):
+        #   1. type_attr = lookup name in type(obj).__mro__
+        #   2. if type_attr is a DATA descriptor → invoke it
+        #   3. if name in obj.__dict__ → return as-is (no descriptor invocation)
+        #   4. if type_attr is a non-data descriptor → invoke it
+        #   5. if type_attr is a plain class variable → return it
+        #   6. __getattr__ fallback
+        #   7. raise AttributeError
+        #
+        # Between steps 5 and 6, we also handle objects with custom storage
+        # that aren't visible via the MRO walk or instance __dict__ (step 5b).
+        #
+        # Step 1: Single MRO walk on the type (cached).
+        type_attr = self.lookup_class_mro_attr(name)
 
-        # Check if its already saved, avoids inspect getattr_static call
-        if name in self._subobj_from_class:
-            subobj_from_class = self._subobj_from_class[name]
-        else:
-            subobj_from_class = inspect.getattr_static(
-                self.value.__class__, name, NO_SUCH_SUBOBJ
+        # Dynamo patches nn.Module.__init__ at import time to inject tracing
+        # hooks.  Undo that here so the unpatched original is traced instead.
+        if type_attr is torch.nn.Module.__init__:
+            type_attr = unpatched_nn_module_init
+
+        # Step 2: Data descriptors on the type take priority over instance dict.
+        if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
+            return self.resolve_data_descriptor(tx, name, type_attr, source)
+
+        # Step 3: Instance __dict__ — return as-is, no descriptor invocation.
+        if hasattr(self.value, "__dict__") and name in self.value.__dict__:
+            subobj = self.value.__dict__[name]
+            source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
+            return VariableTracker.build(tx, subobj, source)
+
+        # Step 4-5: Non-data descriptor or plain class attribute.
+        if type_attr is not NO_SUCH_SUBOBJ:
+            return self.resolve_type_attr(tx, name, type_attr, source)
+
+        # Step 5b: Dynamic fallback for attributes that exist on the live
+        # object but aren't visible to the static MRO walk or instance
+        # __dict__ check above.  This covers objects with custom storage
+        # backends (e.g. threading.local uses a per-thread dict not
+        # accessible via obj.__dict__) and C extensions that store data
+        # outside the normal Python object layout.
+        #
+        # This is NOT the same as the C-level data descriptor fallback in
+        # resolve_data_descriptor (step 2): that handles descriptors found
+        # on the type MRO (like member_descriptor for __slots__), while this
+        # handles attributes that aren't on the type MRO at all.
+        #
+        # Only safe when the class doesn't override __getattribute__,
+        # otherwise we'd run arbitrary user code.
+        if not self._object_has_getattribute:
+            try:
+                resolved = type(self.value).__getattribute__(self.value, name)
+                source = self.maybe_wrap_nn_module_source_for_instance(tx, name, source)
+                return VariableTracker.build(tx, resolved, source)
+            except AttributeError:
+                pass
+
+        # Step 6: __getattr__ fallback.
+        getattr_fn = self._check_for_getattr()
+        if isinstance(getattr_fn, types.FunctionType):
+            if (
+                getattr_fn is unpatched_nn_module_getattr
+                and isinstance(self, variables.UnspecializedNNModuleVariable)
+                and istype(self.value._parameters, dict)  # type: ignore[attr-defined]
+                and istype(self.value._buffers, dict)  # type: ignore[attr-defined]
+                and istype(self.value._modules, dict)  # type: ignore[attr-defined]
+            ):
+                out = self.manually_trace_nn_module_getattr(tx, name)
+            else:
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
+                out = variables.UserMethodVariable(
+                    getattr_fn, self, source=new_source
+                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+
+            if self.source and getattr_fn is torch.nn.Module.__getattr__:
+                if isinstance(
+                    out,
+                    (
+                        variables.UnspecializedNNModuleVariable,
+                        variables.NNModuleVariable,
+                    ),
+                ):
+                    out.set_nn_module_stack_source(  # type: ignore[attr-defined]
+                        AttrSource(self.get_nn_module_stack_source(), name)  # type: ignore[attr-defined]
+                    )
+            return out
+
+        elif getattr_fn is not None:
+            unimplemented(
+                gb_type="User-defined object with non-function __getattr__",
+                context=f"object={self.value}, name={name}, getattr_fn={getattr_fn}",
+                explanation=f"Found a non-function __getattr__ {getattr_fn} from a user-defined object {self.value} "
+                f" when attempting to getattr `{name}`",
+                hints=[
+                    "Ensure the object's __getattr__ is a function type.",
+                ],
             )
-            self._subobj_from_class[name] = subobj_from_class
 
-        is_accessible_from_type_mro = (
-            subobj_from_class is subobj
-            and self.cls_source is not None
-            and self.source is not None
-            and hasattr(self.value, "__dict__")
-            and name not in self.value.__dict__
+        # Step 7: AttributeError.
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
         )
 
-        if isinstance(subobj, property):
+    def resolve_data_descriptor(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Handle data descriptors found on the type MRO (property, _tuplegetter, etc.)."""
+        if isinstance(type_attr, property) and not self._is_c_defined_property(
+            type_attr
+        ):
+            # Python property — trace fget directly.
             if self.source:
-                # Read the class attribute to reach the property
                 source = AttrSource(self.get_source_by_walking_mro(tx, name), "fget")
             fget_vt = VariableTracker.build(
-                tx, subobj.fget, source=source, realize=True
+                tx, type_attr.fget, source=source, realize=True
             )
             return fget_vt.call_function(tx, [self], {})
-        elif isinstance(subobj, _collections._tuplegetter):
-            # namedtuple fields are represented by _tuplegetter, and here we
-            # emulate its `__get__`, which is implemented in C.
-            _, (idx, _) = subobj.__reduce__()
-            # Don't go through the `__getitem__` method anymore, see
-            # https://github.com/python/cpython/blob/470941782f74288823b445120f6383914b659f23/Modules/_collectionsmodule.c#L2690
-            assert isinstance(self, UserDefinedTupleVariable)
-            return self._tuple_vt.items[idx]  # type: ignore[union-attr]
-        elif isinstance(subobj, staticmethod):
-            # Safe because `staticmethod.__get__` basically won't trigger user
-            # code and just returns the underlying `__func__`:
-            # https://github.com/python/cpython/blob/3.11/Objects/funcobject.c#L1088-L1100
-            if is_accessible_from_type_mro:
-                # Accessing from __dict__ does not resolve the descriptor, it
-                # returns a staticmethod object, so access the __func__
-                # attribute to get to the actual function.
+
+        get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
+        if isinstance(get_fn, types.FunctionType):
+            # User-defined data descriptor with a Python __get__.
+            return self.invoke_descriptor_get(tx, name, type_attr, source)
+
+        # C-level data descriptor (property with C fget, member/getset
+        # descriptors, Cython attrs, etc.) — resolve via
+        # object.__getattribute__ which is side-effect free.
+        # Uninitialized slots raise AttributeError which must be surfaced
+        # as ObservedAttributeError so dynamo's try/except tracing works.
+        try:
+            resolved = type(self.value).__getattribute__(self.value, name)
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                ],
+            )
+        return VariableTracker.build(tx, resolved, source)
+
+    def resolve_type_attr(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Handle non-data descriptors and plain class attributes from the type MRO."""
+        from ..mutation_guard import unpatched_nn_module_init
+
+        if (
+            type_attr is unpatched_nn_module_init
+            or type_attr is torch.nn.Module.__init__
+        ):
+            type_attr = unpatched_nn_module_init
+
+        can_use_mro_source = self.cls_source is not None and self.source is not None
+
+        if isinstance(type_attr, staticmethod):
+            # type_attr is the raw staticmethod wrapper from cls.__dict__
+            # (not the unwrapped function).  We call __get__ to unwrap it,
+            # but the *source* must go through __func__ on the descriptor
+            # (not the resolved function) because the guard needs to watch
+            # the descriptor object in the class dict, not the result.
+            if can_use_mro_source:
                 source = AttrSource(
                     self.get_source_by_walking_mro(tx, name), "__func__"
                 )
-            func = subobj.__get__(self.value)
+            func = type_attr.__get__(self.value)
             return VariableTracker.build(tx, func, source)
-        elif isinstance(subobj, classmethod):
+        elif isinstance(type_attr, classmethod):
             source_fn = None
-            if is_accessible_from_type_mro:
-                # Accessing from __dict__ does not resolve the descriptor, it
-                # returns a classmethod object, so access the __func__
-                # attribute to get to the actual function.
+            if can_use_mro_source:
                 source_fn = AttrSource(
                     self.get_source_by_walking_mro(tx, name), "__func__"
                 )  # type: ignore[assignment]
             return variables.UserMethodVariable(
-                subobj.__func__,
+                type_attr.__func__,
                 self.var_getattr(tx, "__class__"),
                 source_fn=source_fn,
                 source=source,
             )
-        elif isinstance(subobj, types.ClassMethodDescriptorType):
-            # e.g.: inspect.getattr_static({}, "fromkeys")
-            func = subobj.__get__(self.value, None)
+        elif isinstance(type_attr, types.ClassMethodDescriptorType):
+            func = type_attr.__get__(self.value, None)
             return VariableTracker.build(tx, func, source)
-        elif is_lru_cache_wrapped_function(subobj):
-            # getattr_static returns the lru_wrapped function, and we cannot
-            # extract the underlying method from the wrapped function. To handle
-            # it, manually create a wrapped user method vt.
+        elif is_lru_cache_wrapped_function(type_attr):
             return variables.WrapperUserMethodVariable(
-                subobj, "__wrapped__", self, source=source
+                type_attr, "__wrapped__", self, source=source
             )
-        elif inspect.getattr_static(
-            type(subobj), "__get__", NO_SUCH_SUBOBJ
-        ) is not NO_SUCH_SUBOBJ and not is_wrapper_or_member_descriptor(
-            type(subobj).__get__  # type: ignore[attr-defined]
-        ):
-            # Emulate https://github.com/python/cpython/blob/3.11/Objects/object.c#L1271-L1285
-            #
-            # Attribute has a __get__ method. Create a user defined object vt
-            # for the subobj, and then trace the __get__ method.
-            descriptor_source = None
-            descriptor_get_source = None
-            if self.cls_source:
-                # To access the method descriptor from the udf object w/o using
-                # inspect.getattr_static, we can look into the class mro
-                descriptor_source = self.get_source_by_walking_mro(tx, name)
-                descriptor_get_source = AttrSource(
-                    TypeSource(descriptor_source), "__get__"
-                )
-                descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
-            else:
-                # Sourceless Builder does not support user defined objects
-                descriptor_var = UserDefinedObjectVariable(subobj)
-
-            # The arguments of the __get__ function are (self, instance, owner)
-            # self - descriptor_var
-            # instance - instance of the class, represented by self here
-            # owner - class object
-            owner_var = VariableTracker.build(tx, type(self.value))
-            return variables.UserMethodVariable(
-                subobj.__get__.__func__,  # type: ignore[attr-defined]
-                descriptor_var,
-                source=descriptor_get_source,
-            ).call_function(tx, [self, owner_var], {})
-        elif isinstance(subobj, types.FunctionType) or (
-            isinstance(subobj, types.MethodType)
-            and isinstance(self.value, torch.nn.Module)
-        ):
-            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
-            # Static lookup can't tell us it's a method or function correctly,
-            # so we trigger dynamic lookup here to get the correct type.
-            dynamic_subobj = getattr(self.value, name)
-
-            while dynamic_subobj is subobj and hasattr(subobj, "_torchdynamo_inline"):
-                subobj = subobj._torchdynamo_inline
-                dynamic_subobj = subobj
+        elif isinstance(type_attr, types.FunctionType):
+            while hasattr(type_attr, "_torchdynamo_inline"):
+                type_attr = type_attr._torchdynamo_inline  # type: ignore[union-attr]
                 source = AttrSource(source, "_torchdynamo_inline") if source else None
+            # Function on the type MRO + not in instance dict → bound method.
+            var_source = None
+            if can_use_mro_source:
+                var_source = self.get_source_by_walking_mro(tx, name)
+            return variables.UserMethodVariable(
+                type_attr, self, source_fn=var_source, source=source
+            )
+        # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
+        get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
+        if isinstance(get_fn, types.FunctionType):
+            return self.invoke_descriptor_get(tx, name, type_attr, source)
 
-            if isinstance(subobj, types.MethodType):
-                if dynamic_subobj.__self__ is not self.value:
-                    if not isinstance(dynamic_subobj.__func__, types.FunctionType):
-                        unimplemented(
-                            gb_type="User-defined object method with non-function __func__",
-                            context=f"object={self.value}, name={name}, method={dynamic_subobj}, "
-                            f"method.__self__={dynamic_subobj.__self__}, method.__func__={dynamic_subobj.__func__}",
-                            explanation=f"Method {dynamic_subobj} (name={name}) of user-defined object {self.value} has a "
-                            f"__func__ ({dynamic_subobj.__func__}) that is not a function type.",
-                            hints=[
-                                "Ensure that the method's __func__ is a function type.",
-                            ],
-                        )
-
-                    # Use the __self__ attribute of the method to find the
-                    # source of the new self object.
-                    self_source = None
-                    if source is not None:
-                        self_source = AttrSource(source, "__self__")
-                    object_vt = VariableTracker.build(
-                        tx, dynamic_subobj.__self__, self_source
-                    )
-
-                    return variables.UserMethodVariable(
-                        dynamic_subobj.__func__,
-                        object_vt,
-                    )
-                func = subobj.__func__
-            else:
-                assert isinstance(subobj, types.FunctionType)
-                func = subobj
-
-            if inspect.ismethod(dynamic_subobj):
-                var_source = None
-                if is_accessible_from_type_mro:
-                    var_source = self.get_source_by_walking_mro(tx, name)
-                return variables.UserMethodVariable(
-                    func, self, source_fn=var_source, source=source
-                )
-            elif inspect.isfunction(dynamic_subobj):
-                return VariableTracker.build(tx, func, source)
-
+        # C-level non-data descriptors / opaque callables — defer to runtime.
+        # MethodDescriptorType: e.g. list.append (PyMethodDef)
+        # WrapperDescriptorType: e.g. list.__add__ (slot wrappers)
+        # MethodWrapperType: e.g. [].__add__ (bound slot wrappers)
         if (
-            # wrap the source only if inline_inbuilt_nn_modules is set or fsdp modules. This is a temporary solution to
-            # keep Dynamo behavior compatible with no inlining, as there will be some delay to turn on the flag in
-            # fbcode.
+            isinstance(
+                type_attr,
+                (
+                    types.MethodDescriptorType,
+                    types.WrapperDescriptorType,
+                    types.MethodWrapperType,
+                ),
+            )
+            or torch._C._dynamo.utils.is_instancemethod(type_attr)  # type: ignore[attr-defined]
+            or is_cython_function(type_attr)
+        ):
+            return variables.GetAttrVariable(self, name, None, source=source)
+
+        # Plain class variable (or MethodType, C-level non-data descriptor
+        # without __get__, etc.).
+        if can_use_mro_source:
+            source = self.get_source_by_walking_mro(tx, name)
+        elif not source and self.cls_source is not None:
+            source = AttrSource(self.cls_source, name)
+        return VariableTracker.build(tx, type_attr, source)
+
+    def invoke_descriptor_get(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        descriptor: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Trace a descriptor's __get__(instance, owner) call."""
+        descriptor_source = None
+        descriptor_get_source = None
+        if self.cls_source:
+            descriptor_source = self.get_source_by_walking_mro(tx, name)
+            descriptor_get_source = AttrSource(TypeSource(descriptor_source), "__get__")
+            descriptor_var = VariableTracker.build(tx, descriptor, descriptor_source)
+        else:
+            descriptor_var = UserDefinedObjectVariable(descriptor)
+
+        owner_var = UserDefinedClassVariable(type(self.value))
+        return variables.UserMethodVariable(
+            descriptor.__get__.__func__,  # type: ignore[union-attr]
+            descriptor_var,
+            source=descriptor_get_source,
+        ).call_function(tx, [self, owner_var], {})
+
+    def maybe_wrap_nn_module_source_for_instance(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        source: Source | None,
+    ) -> Source | None:
+        """Wrap source for nn.Module instance dict attribute access if needed."""
+        if (
             (
                 torch._dynamo.config.inline_inbuilt_nn_modules
                 or isinstance(self, variables.FSDPManagedNNModuleVariable)
             )
             and source
             and isinstance(self, variables.UnspecializedNNModuleVariable)
-            # export has some awkwardness around specialized and unspecialized modules. Skip wrapping source for export
-            # usecase for now.
             and (not tx.output.export or torch._dynamo.config.install_free_tensors)
         ):
-            # Recalculate source for params/buffers
             if name in ("_buffers", "_parameters"):
                 assert self.source is not None
                 source = UnspecializedParamBufferSource(self.source, name)
             source = self._wrap_source(source)
-
-        if subobj is not NO_SUCH_SUBOBJ:
-            if (
-                is_wrapper_or_member_descriptor(subobj)
-                or torch._C._dynamo.utils.is_instancemethod(subobj)  # type: ignore[attr-defined]
-                or is_cython_function(subobj)
-            ):
-                options = {"source": source}
-                return variables.GetAttrVariable(self, name, None, **options)
-            if source:
-                if is_accessible_from_type_mro:
-                    source = self.get_source_by_walking_mro(tx, name)
-
-                return variables.LazyVariableTracker.create(subobj, source)
-            else:
-                # Check if the subobj is accessible from the class itself. If the class source is known, we can create a
-                # sourceful variable tracker.
-                if self.cls_source is not None:
-                    subobj_from_class = inspect.getattr_static(
-                        self.value.__class__, name, NO_SUCH_SUBOBJ
-                    )
-                    if subobj_from_class is subobj:
-                        src_from_class = AttrSource(self.cls_source, name)
-                        return variables.LazyVariableTracker.create(
-                            subobj_from_class, src_from_class
-                        )
-
-                return VariableTracker.build(tx, subobj)
-
-        # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.
-        raise_observed_exception(
-            AttributeError,
-            tx,
-            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
-        )
+        return source
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -2822,6 +2879,21 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._tuple_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
             self._tuple_vt = tuple_vt
+
+    def resolve_data_descriptor(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        type_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        if isinstance(type_attr, _collections._tuplegetter):
+            # namedtuple fields are _tuplegetter descriptors implemented in C.
+            # We emulate _tuplegetter.__get__ by indexing into the tracked
+            # tuple items, because self.value may not hold actual runtime values.
+            _, (idx, _) = type_attr.__reduce__()
+            return self._tuple_vt.items[idx]  # type: ignore[union-attr]
+        return super().resolve_data_descriptor(tx, name, type_attr, source)
 
     def call_method(
         self,
