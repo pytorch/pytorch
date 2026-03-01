@@ -113,6 +113,7 @@ from .relaxed_categorical import RelaxedOneHotCategorical
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *  # noqa: F403
+from .tweedie import Tweedie
 from .uniform import Uniform
 from .von_mises import VonMises
 from .weibull import Weibull
@@ -161,6 +162,7 @@ __all__ = [
     "RelaxedOneHotCategorical",
     "StudentT",
     "Poisson",
+    "Tweedie",
     "Uniform",
     "VonMises",
     "Weibull",
