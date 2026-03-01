@@ -425,21 +425,19 @@ class OpDispatcher:
                 if not isinstance(args[0], dtensor.DTensor):
                     raise AssertionError
 
-                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
-                # the inplace argument's tensor meta. Here we choose to special case
-                # this op because as far as I know this is the only inplace op that
-                # has such as behavior. We can extend this special case if necessary.
-                if op_call == aten.squeeze_.dim:
-                    # update the spec to handle tensor meta changes
+                if torch.Tag.inplace_view in op_call.tags:
+                    # Inplace view ops may change tensor meta. Update both
+                    # spec and local tensor -- redistribution may produce a
+                    # new local tensor.
+                    # See https://github.com/pytorch/pytorch/issues/174136
                     args[0]._spec = output_spec
-                    # use return_and_correct_aliasing to match the outer and the inner
-                    # aliasing. See https://github.com/pytorch/pytorch/pull/158954
+                    assert isinstance(local_results, torch.Tensor)
+                    args[0]._local_tensor = local_results
                     return return_and_correct_aliasing(op_call, args, kwargs, args[0])
                 else:
-                    # For all other inplace ops, check if placement changes are required
-                    # Inplace operations that change placement are not supported because
-                    # they would require redistribution, which breaks aliasing semantics.
-                    # If there are views into the tensor, the views would not be updated.
+                    # Non-view inplace ops should not change placements --
+                    # that would require redistribution, breaking aliasing
+                    # semantics.
                     if args[0]._spec.placements != output_spec.placements:
                         raise RuntimeError(
                             f"{op_call}: in-place operations that require placement changes "
@@ -448,7 +446,7 @@ class OpDispatcher:
                             f"which requires redistribution and breaks aliasing semantics. "
                             f"Please use the out-of-place version of this operation instead."
                         )
-                    # Most inplace ops don't change tensor meta, so no spec update needed
+                    # No redistribution occurred, local tensor is unchanged.
                     return args[0]
             else:
                 return None
