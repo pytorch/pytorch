@@ -1149,6 +1149,7 @@ def default_partition(
     num_fwd_outputs: int,
     static_lifetime_input_indices: list[int] | None = None,
     static_lifetime_input_nodes: OrderedSet[fx.Node] | None = None,
+    **kwargs,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -3453,6 +3454,7 @@ def min_cut_rematerialization_partition(
     *,
     num_fwd_outputs: int,
     static_lifetime_input_indices: list[int] | None = None,
+    **kwargs,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.

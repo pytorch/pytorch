@@ -1767,6 +1767,7 @@ def _aot_stage2a_partition(
                 joint_inputs,
                 num_fwd_outputs=num_inner_fwd_outputs,
                 static_lifetime_input_indices=static_lifetime_input_indices,
+                fw_metadata=fw_metadata,
             )
             rng_states = [
                 n
