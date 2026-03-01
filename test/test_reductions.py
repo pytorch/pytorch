@@ -3778,8 +3778,6 @@ as the input tensor excluding its innermost dimension'):
     @onlyOn(["cuda", "xpu"])
     @largeTensorTest("8GB")
     @dtypes(torch.half, torch.chalf, torch.bfloat16)
-    # skip chalf and half when XPU, see issues https://github.com/intel/torch-xpu-ops/issues/1973
-    @dtypesIfXPU(torch.bfloat16)
     def test_reductions_large_half_tensors(self, device, dtype):
         t = torch.ones(2**31, device=device, dtype=dtype)
         t[2**30:] = -1
