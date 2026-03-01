@@ -70,6 +70,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    skipIfRocm,
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -4436,6 +4437,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             }
         ),
     )
+    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
         inplace_failure_list = ()

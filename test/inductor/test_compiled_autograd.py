@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfWindows,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
@@ -5412,6 +5413,10 @@ if IS_S390X:
 skipped_tests.add("test_clear_saved_tensors_on_access")
 skipped_tests.add("test_clear_saved_tensors_on_access_double_access_error")
 skipped_tests.add("test_forward_traceback_preserves_exception_with_checkpoint")
+
+# Fails with triton 3.7
+if TEST_WITH_ROCM:
+    skipped_tests.add("test_concat_unbacked_shape_tensor")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")

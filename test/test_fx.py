@@ -73,6 +73,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
+    skipIfRocm,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -4442,6 +4443,8 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         # recorver mutable checking flag
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
+    # This only fails on navi31
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_stack_trace_augmentation(self):

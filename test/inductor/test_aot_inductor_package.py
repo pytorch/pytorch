@@ -32,7 +32,11 @@ from torch.testing._internal.common_cuda import (
     requires_triton_ptxas_compat,
     TRITON_PTXAS_VERSION,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    TEST_CUDA,
+    skipIfRocm,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -319,6 +323,7 @@ class TestAOTInductorPackage(TestCase):
                 self.assertTrue(torch.allclose(actual, expected))
 
     @requires_triton_ptxas_compat
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     def test_compile_after_package_multi_arch(self):
         if self.device != GPU_TYPE:
