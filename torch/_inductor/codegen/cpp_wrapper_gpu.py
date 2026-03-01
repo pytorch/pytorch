@@ -275,8 +275,9 @@ class DeferredTritonCallWrapper:
         ]
         arg_types = [arg_type_lookup[name] for name in call_args]
         arg_signatures = [triton_meta["signature"][name] for name in call_args]
+        num_ctas = params.get("config", {}).get("num_ctas", 1)
         scratch_spaces = {
-            name: params[name]
+            name: params[name] * num_ctas
             for name in ["global_scratch", "profile_scratch"]
             if params.get(name, None) is not None
         }
