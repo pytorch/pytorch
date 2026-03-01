@@ -81,10 +81,7 @@ def _can_check_vec_metrics():
 
 def check_metrics_vec_kernel_count(num_expected_vec_kernels):
     if _can_check_vec_metrics():
-        if metrics.generated_cpp_vec_kernel_count != num_expected_vec_kernels:
-            raise AssertionError(
-                f"Expected {num_expected_vec_kernels} vec kernels, got {metrics.generated_cpp_vec_kernel_count}"
-            )
+        assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
 
 
 def simd_lengths_to_test():
@@ -875,14 +872,8 @@ class CPUReproTests(TestCase):
             [1, 2, 3, 4, 5, 1, 3, 2, 96, 5, 3, 1, 1, 2, 1, 2, 3, 6, 1, 2, 4, 6, 2, 1]
         )
 
-        if sent_lens.shape[0] != batch_size:
-            raise AssertionError(
-                f"Expected sent_lens.shape[0] == {batch_size}, got {sent_lens.shape[0]}"
-            )
-        if sent_lens.max().item() != max_lens:
-            raise AssertionError(
-                f"Expected sent_lens.max().item() == {max_lens}, got {sent_lens.max().item()}"
-            )
+        assert sent_lens.shape[0] == batch_size
+        assert sent_lens.max().item() == max_lens
 
         hidden_0 = hid_0.clone().requires_grad_(False)
         hidden_1 = hid_1.clone().requires_grad_(False)
@@ -1375,10 +1366,9 @@ class CPUReproTests(TestCase):
         # From HF AllenaiLongformerBase.
         def fn(query, key, window_overlap):
             batch_size, seq_len, num_heads, head_dim = query.size()
-            if seq_len % (window_overlap * 2) != 0:
-                raise AssertionError(
-                    f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
-                )
+            assert seq_len % (window_overlap * 2) == 0, (
+                f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+            )
 
             chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
             diagonal_chunked_attention_scores = key
@@ -1442,8 +1432,7 @@ class CPUReproTests(TestCase):
                 ).to(dtype)
             return x
 
-        if dtype not in [torch.uint8, torch.int8]:
-            raise AssertionError(f"Unexpected dtype: {dtype}")
+        assert dtype in [torch.uint8, torch.int8]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
 
@@ -1522,13 +1511,12 @@ class CPUReproTests(TestCase):
         use_quant_list = [False, True]
         use_tensor_overload_list = [False, True]
 
-        if dtype not in [
+        assert dtype in [
             torch.uint8,
             torch.int8,
             torch.float8_e4m3fn,
             torch.float8_e5m2,
-        ]:
-            raise AssertionError(f"Unexpected dtype: {dtype}")
+        ]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
         if dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
@@ -1616,8 +1604,7 @@ class CPUReproTests(TestCase):
             )
             return max_pool2d_with_indices_default
 
-        if dtype not in [torch.uint8, torch.int8]:
-            raise AssertionError(f"Unexpected dtype: {dtype}")
+        assert dtype in [torch.uint8, torch.int8]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
 
@@ -1685,8 +1672,7 @@ class CPUReproTests(TestCase):
                 )
             return y.contiguous()
 
-        if dtype not in [torch.uint8, torch.int8]:
-            raise AssertionError(f"Unexpected dtype: {dtype}")
+        assert dtype in [torch.uint8, torch.int8]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
 
@@ -1762,8 +1748,7 @@ class CPUReproTests(TestCase):
 
         use_tensor_overload_list = [False, True]
         for use_tensor_overload in use_tensor_overload_list:
-            if dtype not in [torch.uint8, torch.int8]:
-                raise AssertionError(f"Unexpected dtype: {dtype}")
+            assert dtype in [torch.uint8, torch.int8]
             quant_min = 0 if dtype == torch.uint8 else -128
             quant_max = 255 if dtype == torch.uint8 else 127
             x = torch.clamp(
@@ -1780,10 +1765,7 @@ class CPUReproTests(TestCase):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x, scale, zero_point, quant_min, quant_max, dtype))
-                if metrics.generated_cpp_vec_kernel_count != 1:
-                    raise AssertionError(
-                        f"Expected 1 vec kernel, got {metrics.generated_cpp_vec_kernel_count}"
-                    )
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
     @requires_vectorization
     def test_per_tensor_fake_quant_uint8(self):
@@ -1814,8 +1796,7 @@ class CPUReproTests(TestCase):
             )
             return input
 
-        if dtype not in [torch.uint8, torch.int8]:
-            raise AssertionError(f"Unexpected dtype: {dtype}")
+        assert dtype in [torch.uint8, torch.int8]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
         x = torch.clamp(
@@ -1893,10 +1874,7 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(m, (x,))
-            if metrics.generated_cpp_vec_kernel_count != 1:
-                raise AssertionError(
-                    f"Expected 1 vec kernel, got {metrics.generated_cpp_vec_kernel_count}"
-                )
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     @requires_vectorization
     def test_per_channel_fake_quant_int8(self):
@@ -1944,8 +1922,7 @@ class CPUReproTests(TestCase):
             x = x.view(batchsize, num_channels, height, width)
             return x
 
-        if dtype not in [torch.uint8, torch.int8]:
-            raise AssertionError(f"Unexpected dtype: {dtype}")
+        assert dtype in [torch.uint8, torch.int8]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
 
@@ -1994,8 +1971,7 @@ class CPUReproTests(TestCase):
             )
             return x.contiguous(memory_format=torch.channels_last)
 
-        if dtype not in [torch.uint8, torch.int8]:
-            raise AssertionError(f"Unexpected dtype: {dtype}")
+        assert dtype in [torch.uint8, torch.int8]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
 
@@ -2062,8 +2038,7 @@ class CPUReproTests(TestCase):
             )
             return x
 
-        if dtype not in [torch.uint8, torch.int8]:
-            raise AssertionError(f"Unexpected dtype: {dtype}")
+        assert dtype in [torch.uint8, torch.int8]
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
 
@@ -2126,8 +2101,7 @@ class CPUReproTests(TestCase):
         fn_compiled = compile_fx_inner(fn_fx, [x1, y])
         fn(x2, y)
         fn_compiled([x3, y])
-        if not same(x2, x3):
-            raise AssertionError("x2 and x3 are not the same")
+        assert same(x2, x3)
 
     def test_int_div(self):
         def fn(x, y):
@@ -2156,11 +2130,9 @@ class CPUReproTests(TestCase):
         x1 = torch.randn((10, 20))
         x2 = torch.randn((10, 20))
         with set_num_threads(1):
-            if not same(x1 + x2, fn(x1, x2)):
-                raise AssertionError("Results differ with 1 thread")
+            assert same(x1 + x2, fn(x1, x2))
         with set_num_threads(4):
-            if not same(x1 + x2, fn(x1, x2)):
-                raise AssertionError("Results differ with 4 threads")
+            assert same(x1 + x2, fn(x1, x2))
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_timed_cpu_only(self):
@@ -2411,10 +2383,7 @@ class CPUReproTests(TestCase):
                         torch._dynamo.reset()
                         metrics.reset()
                         self.common(fn, (value, mask))
-                        if metrics.generated_cpp_vec_kernel_count < 1:
-                            raise AssertionError(
-                                f"Expected >= 1 vec kernels, got {metrics.generated_cpp_vec_kernel_count}"
-                            )
+                        assert metrics.generated_cpp_vec_kernel_count >= 1
 
     def test_channels_last_view_as_complex(self):
         # https://github.com/pytorch/pytorch/issues/122448#issuecomment-2046169554
@@ -2774,10 +2743,7 @@ class CPUReproTests(TestCase):
         torch._dynamo.reset()
         metrics.reset()
         self.common(fn, inps)
-        if metrics.generated_cpp_vec_kernel_count != 2:
-            raise AssertionError(
-                f"Expected 2 vec kernels, got {metrics.generated_cpp_vec_kernel_count}"
-            )
+        assert metrics.generated_cpp_vec_kernel_count == 2
 
         with (
             set_num_threads(1),
@@ -2786,10 +2752,7 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, inps)
-            if metrics.generated_cpp_vec_kernel_count != 2:
-                raise AssertionError(
-                    f"Expected 2 vec kernels, got {metrics.generated_cpp_vec_kernel_count}"
-                )
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
     def test_large_mean(self):
         size = (30000, 100000)
@@ -3086,13 +3049,10 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(fn, (x,))
                 check_metrics_vec_kernel_count(1)
-                if (
+                assert (
                     metrics.generated_kernel_count
                     - metrics.generated_cpp_vec_kernel_count
-                ) != 0:
-                    raise AssertionError(
-                        f"Expected 0, got {metrics.generated_kernel_count - metrics.generated_cpp_vec_kernel_count}"
-                    )
+                ) == 0
 
     @requires_vectorization
     def test_vec_remainder(self):
@@ -3202,10 +3162,7 @@ class CPUReproTests(TestCase):
         torch._dynamo.reset()
         metrics.reset()
         self.common(fn, (x,))
-        if metrics.cpp_to_dtype_count != 0:
-            raise AssertionError(
-                f"Expected cpp_to_dtype_count == 0, got {metrics.cpp_to_dtype_count}"
-            )
+        assert metrics.cpp_to_dtype_count == 0
         check_metrics_vec_kernel_count(1)
 
     def test_insert_to_dtype_count(self):
@@ -3218,10 +3175,7 @@ class CPUReproTests(TestCase):
         torch._dynamo.reset()
         metrics.reset()
         self.common(fn, (x,))
-        if metrics.cpp_to_dtype_count != 2:
-            raise AssertionError(
-                f"Expected cpp_to_dtype_count == 2, got {metrics.cpp_to_dtype_count}"
-            )
+        assert metrics.cpp_to_dtype_count == 2
         check_metrics_vec_kernel_count(1)
 
     def test_memory_copy_with_fusion(self):
@@ -3235,10 +3189,7 @@ class CPUReproTests(TestCase):
         torch._dynamo.reset()
         metrics.reset()
         self.common(fn, (x,))
-        if metrics.cpp_to_dtype_count != 2:
-            raise AssertionError(
-                f"Expected cpp_to_dtype_count == 2, got {metrics.cpp_to_dtype_count}"
-            )
+        assert metrics.cpp_to_dtype_count == 2
         check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
@@ -3342,10 +3293,7 @@ class CPUReproTests(TestCase):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x,))
-                if metrics.generated_cpp_vec_kernel_count != 1:
-                    raise AssertionError(
-                        f"Expected 1 vec kernel, got {metrics.generated_cpp_vec_kernel_count}"
-                    )
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_outer_loop_fusion(self):
@@ -3564,10 +3512,7 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            if metrics.generated_cpp_vec_kernel_count != 1:
-                raise AssertionError(
-                    f"Expected 1 vec kernel, got {metrics.generated_cpp_vec_kernel_count}"
-                )
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     @requires_vectorization
     def test_argmax_argmin_with_nan_value(self):
@@ -3592,19 +3537,13 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            if metrics.generated_cpp_vec_kernel_count != 1:
-                raise AssertionError(
-                    f"Expected generated_cpp_vec_kernel_count == 1, got {metrics.generated_cpp_vec_kernel_count}"
-                )
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
             # Test argmin
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn2, (x,))
-            if metrics.generated_cpp_vec_kernel_count != 1:
-                raise AssertionError(
-                    f"Expected generated_cpp_vec_kernel_count == 1, got {metrics.generated_cpp_vec_kernel_count}"
-                )
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or
@@ -3655,10 +3594,7 @@ class CPUReproTests(TestCase):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x1, x2))
-                if metrics.generated_cpp_vec_kernel_count != 0:
-                    raise AssertionError(
-                        f"Expected generated_cpp_vec_kernel_count == 0, got {metrics.generated_cpp_vec_kernel_count}"
-                    )
+                assert metrics.generated_cpp_vec_kernel_count == 0
 
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
@@ -3705,10 +3641,7 @@ class CPUReproTests(TestCase):
         for e in prof.profiler.function_events:
             if "cpp_fused_add_0" in e.name:
                 kernel_profile_events.append(e.name)
-        if len(kernel_profile_events) <= 0:
-            raise AssertionError(
-                f"Expected kernel_profile_events to be non-empty, got {len(kernel_profile_events)}"
-            )
+        assert len(kernel_profile_events) > 0
 
     @xfailIfS390X
     @requires_vectorization
@@ -3869,10 +3802,7 @@ class CPUReproTests(TestCase):
             x = torch.randn(100, 100).to(dtype)
             opt_fn = torch.compile(fn, backend="inductor")
             self.assertTrue(same(fn(x), opt_fn(x)))
-            if metrics.cpp_to_dtype_count != 0:
-                raise AssertionError(
-                    f"Expected cpp_to_dtype_count == 0, got {metrics.cpp_to_dtype_count}"
-                )
+            assert metrics.cpp_to_dtype_count == 0
             check_metrics_vec_kernel_count(1)
 
     @config.patch("cpp.enable_tiling_heuristics", False)
@@ -4439,10 +4369,7 @@ class CPUReproTests(TestCase):
                 mod,
                 (v,),
             )
-            if metrics.generated_kernel_count != 0:
-                raise AssertionError(
-                    f"Expected generated_kernel_count == 0, got {metrics.generated_kernel_count}"
-                )
+            assert metrics.generated_kernel_count == 0
 
     @config.patch(implicit_fallbacks=True)
     def test_aten_normal_dtype(self):
@@ -4917,10 +4844,7 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         # TODO(jgong5): change to 1 with vectorized uint32 load
-        if metrics.generated_cpp_vec_kernel_count != 0:
-            raise AssertionError(
-                f"Expected generated_cpp_vec_kernel_count == 0, got {metrics.generated_cpp_vec_kernel_count}"
-            )
+        assert metrics.generated_cpp_vec_kernel_count == 0
 
     def test_uint32_reduction_vec(self):
         def fn(x):
@@ -4930,10 +4854,7 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         # TODO(jgong5): change to 1 with vectorized uint32/uint64 load
-        if metrics.generated_cpp_vec_kernel_count != 0:
-            raise AssertionError(
-                f"Expected generated_cpp_vec_kernel_count == 0, got {metrics.generated_cpp_vec_kernel_count}"
-            )
+        assert metrics.generated_cpp_vec_kernel_count == 0
 
     def test_int64_pointwise_vec(self):
         def fn(x):
@@ -4995,10 +4916,7 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         # TODO(jgong5): change to 1 with vectorized uint64 load
-        if metrics.generated_cpp_vec_kernel_count != 0:
-            raise AssertionError(
-                f"Expected generated_cpp_vec_kernel_count == 0, got {metrics.generated_cpp_vec_kernel_count}"
-            )
+        assert metrics.generated_cpp_vec_kernel_count == 0
 
     def test_uint64_reduction_vec(self):
         def fn(x):
@@ -5008,10 +4926,7 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         # TODO(jgong5): change to 1 with vectorized uint64 load
-        if metrics.generated_cpp_vec_kernel_count != 0:
-            raise AssertionError(
-                f"Expected generated_cpp_vec_kernel_count == 0, got {metrics.generated_cpp_vec_kernel_count}"
-            )
+        assert metrics.generated_cpp_vec_kernel_count == 0
 
     def test_convert_int8_to_half_vec(self):
         src_dtypes = [torch.int8, torch.uint8]

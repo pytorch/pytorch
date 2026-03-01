@@ -359,8 +359,7 @@ class TestCase(InductorTestCase):
         torch._dynamo.reset()
         if os.environ.get("ERROR_ON_SLOW") == "1":
             elapsed = time.perf_counter() - self._start
-            if elapsed >= 120:
-                raise AssertionError(f"Test took too long: {elapsed:.1f}s >= 120s")
+            assert elapsed < 120
 
 
 class ToTuple(torch.nn.Module):
@@ -414,14 +413,10 @@ def compute_grads(args, kwrags, results, grads):
     flat_diff_results = [
         r for r in flat_results if isinstance(r, torch.Tensor) and r.requires_grad
     ]
-    if len(flat_diff_results) <= 0:
-        raise AssertionError(
-            f"Expected len(flat_diff_results) > 0, got {len(flat_diff_results)}"
-        )
+    assert len(flat_diff_results) > 0
 
     leaf_tensors = gather_leaf_tensors(args, kwrags)
-    if len(leaf_tensors) <= 0:
-        raise AssertionError(f"Expected len(leaf_tensors) > 0, got {len(leaf_tensors)}")
+    assert len(leaf_tensors) > 0
     return torch.autograd.grad(
         flat_diff_results,
         leaf_tensors,
@@ -528,21 +523,14 @@ def check_model(
     #     for graph in exp[2]:
     #         print("Graph", graph)
     if check_has_compiled:
-        if not called:
-            raise AssertionError("Ran graph without calling compile_fx")
-    if type(actual) is not type(correct):
-        raise AssertionError(f"Expected type {type(correct)}, got {type(actual)}")
+        assert called, "Ran graph without calling compile_fx"
+    assert type(actual) is type(correct)
     if isinstance(actual, (tuple, list)):
-        if len(actual) != len(correct):
-            raise AssertionError(f"Expected length {len(correct)}, got {len(actual)}")
-        if not all(
+        assert len(actual) == len(correct)
+        assert all(
             type(actual_item) is type(correct_item)
             for actual_item, correct_item in zip(actual, correct)
-        ):
-            raise AssertionError(
-                f"Item type mismatch: expected types {[type(c) for c in correct]}, "
-                f"got {[type(a) for a in actual]}"
-            )
+        )
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat = pytree.tree_leaves(actual)
@@ -570,10 +558,9 @@ def check_model(
     if reference_in_float and exact_dtype:
         for expect_dtype, actual_result in zip(expect_dtypes, actual_flat):
             if expect_dtype is not None:
-                if actual_result.dtype != expect_dtype:
-                    raise AssertionError(
-                        f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
-                    )
+                assert actual_result.dtype == expect_dtype, (
+                    f"dtype mismatch, expected {expect_dtype} but got {actual_result.dtype}"
+                )
 
     if reference_in_float:
         correct_flat = reference_to_expect(actual_flat, correct_flat)
@@ -621,37 +608,18 @@ def check_model(
     else:
         for correct_val, actual_val in zip(correct_flat, actual_flat):
             if isinstance(correct_val, torch.Tensor):
-                if correct_val.device != actual_val.device:
-                    raise AssertionError(
-                        f"Expected device {correct_val.device}, got {actual_val.device}"
-                    )
-                if correct_val.size() != actual_val.size():
-                    raise AssertionError(
-                        f"Expected size {correct_val.size()}, got {actual_val.size()}"
-                    )
+                assert correct_val.device == actual_val.device
+                assert correct_val.size() == actual_val.size()
                 strides_equal, _ = torch._prims_common.check_significant_strides(
                     correct_val, actual_val
                 )
-                if not strides_equal:
-                    raise AssertionError(
-                        f"Significant strides mismatch: expected {correct_val.stride()}, "
-                        f"got {actual_val.stride()}"
-                    )
-                if correct_val.layout != actual_val.layout:
-                    raise AssertionError(
-                        f"Expected layout {correct_val.layout}, got {actual_val.layout}"
-                    )
+                assert strides_equal
+                assert correct_val.layout == actual_val.layout
                 if exact_dtype:
-                    if correct_val.dtype != actual_val.dtype:
-                        raise AssertionError(
-                            f"Expected dtype {correct_val.dtype}, got {actual_val.dtype}"
-                        )
+                    assert correct_val.dtype == actual_val.dtype
                 check_exact_stride = exact_stride and not has_zero_dim(correct_val)
                 if check_exact_stride:
-                    if correct_val.stride() != actual_val.stride():
-                        raise AssertionError(
-                            f"Expected stride {correct_val.stride()}, got {actual_val.stride()}"
-                        )
+                    assert correct_val.stride() == actual_val.stride()
 
     if check_gradient:
         actual = output_process_fn_grad(actual)
@@ -4686,7 +4654,7 @@ class CommonTemplate:
     def test_inductor_assert(self):
         @torch.compile(backend="inductor", dynamic=True)
         def fn(a):
-            assert a.shape[0] >= 2 and a.shape[1] >= 4  # noqa: S101
+            assert a.shape[0] >= 2 and a.shape[1] >= 4
             return a.cos()
 
         inp = torch.randn(2, 4, 6)
@@ -5863,12 +5831,10 @@ class CommonTemplate:
 
         # test dtype separately
         out = fn(a)
-        if out.dtype != torch.bfloat16:
-            raise AssertionError(f"Expected dtype torch.bfloat16, got {out.dtype}")
+        assert out.dtype == torch.bfloat16
 
         out = torch.compile(fn)(a)
-        if out.dtype != torch.bfloat16:
-            raise AssertionError(f"Expected dtype torch.bfloat16, got {out.dtype}")
+        assert out.dtype == torch.bfloat16
 
     def test_repeat_interleave(self):
         def fn(x):
@@ -9692,8 +9658,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             tags=[torch._C.Tag.needs_contiguous_strides],
         )
         def second_op(x: torch.Tensor) -> torch.Tensor:
-            if not x.is_contiguous():
-                raise AssertionError("Expected x to be contiguous")
+            assert x.is_contiguous()
             return torch.ones(2, 2)
 
         @second_op.register_fake
@@ -9882,8 +9847,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         @torch.library.custom_op("mylib::sin_out", mutates_args={"outs"})
         def sin_out(x: torch.Tensor, outs: list[torch.Tensor]) -> None:
             x_np = x.numpy()
-            if len(outs) != 2:
-                raise AssertionError(f"Expected len(outs) == 2, got {len(outs)}")
+            assert len(outs) == 2
             out_np0 = out[0].numpy()
             out_np1 = out[1].numpy()
             np.sin(x_np, out=out_np0)
@@ -10132,8 +10096,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_like_rands2(self):
         # rand_like with kwargs `device` of str type
         d = self.device
-        if not isinstance(d, str):
-            raise AssertionError(f"Expected d to be str, got {type(d)}")
+        assert isinstance(d, str)
 
         @torch.compile
         def fn(x):
@@ -11579,10 +11542,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             Applies `lambda x: x.t().contiguous().t()` to the output.
             """
             output_node = g.find_nodes(op="output")[0]
-            if len(output_node.args) != 1:
-                raise AssertionError(
-                    f"Expected len(output_node.args) == 1, got {len(output_node.args)}"
-                )
+            assert len(output_node.args) == 1
             output = output_node.args[0][0]
 
             with g.inserting_before(output_node):
@@ -11820,12 +11780,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.rand((100,), device=self.device)
         with profile() as prof:
             fn(a, b)
-        if not any(
+        assert any(
             "inductor_wrapper_call" in e.name for e in prof.profiler.function_events
-        ):
-            raise AssertionError(
-                "Expected 'inductor_wrapper_call' in profiler function events"
-            )
+        )
 
     def test_insignificant_strides(self):
         def f(x):
@@ -13185,10 +13142,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 if is_compiling:
                     bar_strides.append(x.stride())
                 result = x.clone()
-                if x.stride() != result.stride():
-                    raise AssertionError(
-                        f"Expected stride {x.stride()}, got {result.stride()}"
-                    )
+                assert x.stride() == result.stride()
                 return result
 
             @torch.library.impl(lib, "bar", "Meta")
@@ -14747,18 +14701,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         gc.collect()
                         if func is aten.mm.out:
                             matmul_seen = True
-                            if len(inps) != 0:
-                                raise AssertionError(
-                                    f"Expected len(inps) == 0, got {len(inps)}"
-                                )
-                            if inp_refs[0]() is not None:
-                                raise AssertionError(
-                                    "Expected inp_refs[0]() to be None"
-                                )
-                            if inp_refs[1]() is not None:
-                                raise AssertionError(
-                                    "Expected inp_refs[1]() to be None"
-                                )
+                            assert len(inps) == 0
+                            assert inp_refs[0]() is None
+                            assert inp_refs[1]() is None
 
                         return func(*args, **kwargs)
 
@@ -14778,8 +14723,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 with TestRefMode():
                     fn_compiled(inps)
 
-                if len(inps) != 0:
-                    raise AssertionError(f"Expected len(inps) == 0, got {len(inps)}")
+                assert len(inps) == 0
 
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_pad_dynamic(self):
@@ -17010,10 +16954,7 @@ if RUN_GPU:
             class CausalSelfAttention(nn.Module):
                 def __init__(self, config):
                     super().__init__()
-                    if config.n_embd % config.n_head != 0:
-                        raise AssertionError(
-                            f"n_embd ({config.n_embd}) must be divisible by n_head ({config.n_head})"
-                        )
+                    assert config.n_embd % config.n_head == 0
                     # key, query, value projections for all heads, but in a batch
                     self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
                     # output projection
@@ -17118,10 +17059,9 @@ if RUN_GPU:
                 def forward(self, idx, targets):
                     device = idx.device
                     b, t = idx.size()
-                    if t > self.config.block_size:
-                        raise AssertionError(
-                            f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-                        )
+                    assert t <= self.config.block_size, (
+                        f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+                    )
                     pos = torch.arange(
                         0, t, dtype=torch.long, device=device
                     )  # shape (t)
@@ -17212,8 +17152,7 @@ if RUN_GPU:
             # Verify column-major layout
             def _is_column_major(x: torch.Tensor) -> bool:
                 """Check if tensor is column-major (stride(-2) == 1 and stride(-1) > 1)"""
-                if not (x.ndim == 2 or x.ndim == 3):
-                    raise AssertionError("input tensor must be 2D or 3D")
+                assert x.ndim == 2 or x.ndim == 3, "input tensor must be 2D or 3D"
                 return x.stride(-2) == 1 and x.stride(-1) > 1
 
             self.assertTrue(_is_column_major(B_t))
