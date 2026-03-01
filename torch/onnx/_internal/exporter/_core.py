@@ -1224,7 +1224,6 @@ def _exported_program_to_onnx_program(
     for name, param_name in itertools.chain(
         exported_program.graph_signature.inputs_to_parameters.items(),
         exported_program.graph_signature.inputs_to_buffers.items(),
-        exported_program.graph_signature.inputs_to_lifted_tensor_constants.items(),
     ):
         initializer = model.graph.initializers.pop(name)
         initializer.name = param_name
@@ -1233,7 +1232,7 @@ def _exported_program_to_onnx_program(
         initializer.metadata_props["pkg.torch.onnx.original_node_name"] = name
         model.graph.initializers[param_name] = initializer
 
-    # 5. Add initializers to the graph
+    # 5a. Add initializers to the graph
     # ExportedProgram stores parameters and buffers in state_dict,
     # but non_persistent_buffers and lifted_tensor_constants are not there
     # so we need to get them from the name_* apis.
@@ -1241,7 +1240,6 @@ def _exported_program_to_onnx_program(
         exported_program.named_parameters(),
         # pyrefly: ignore [bad-argument-type]
         exported_program.named_buffers(),
-        exported_program.constants.items(),
     ):
         initializer = model.graph.initializers.get(name)  # type: ignore[assignment]
         if initializer is None:
@@ -1267,6 +1265,29 @@ def _exported_program_to_onnx_program(
             complex_to_float=complex_to_float,
         )
 
+    # 5b. Add constants as initializers. Constants are not renamed to reduce the chance of name conflicts.
+    reversed_constant_names = {
+        v: k
+        for k, v in exported_program.graph_signature.inputs_to_lifted_tensor_constants.items()
+    }
+    for lookup_name, torch_tensor in exported_program.constants.items():
+        name = reversed_constant_names[lookup_name]
+        initializer = model.graph.initializers.get(name)  # type: ignore[assignment]
+        if initializer is None:
+            logger.warning("Tensor '%s' is not one of the initializers", name)
+            continue
+        if not isinstance(torch_tensor, torch.Tensor):
+            raise NotImplementedError(
+                f"Tensor '{name}' should be a torch.Tensor. Actual type is '{type(torch_tensor)}': {torch_tensor!r}. "
+                "This is unexpected and not yet supported."
+            )
+        ir_tensor = TorchTensor(torch_tensor, name=name)
+        initializer.const_value = ir_tensor
+        _set_shape_type(
+            initializer,
+            torch_tensor,
+            complex_to_float=lower != "none",
+        )
     # TODO: Decide if we should keep mutated buffers as inputs/outputs
 
     # Collect and add opset imports to the model
