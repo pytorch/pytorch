@@ -1181,6 +1181,71 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=True,
         )
 
+    @torch._inductor.config.patch("cache_sdpa_constraint", True)
+    def _test_cache_sdpa_constraint_shared_kv_enabled(self):
+        """When cache_sdpa_constraint is True and the same tensor feeds both key
+        and value in SDPA (PMA pattern), the constraint cache should deduplicate
+        the buffer copy, producing fewer copy operations than when disabled."""
+
+        def pma_attention(query, kv):
+            return torch.nn.functional.scaled_dot_product_attention(query, kv, kv)
+
+        tensor_shape = (4, 2, 16, 32)
+        dtype = torch.float
+        query = torch.randn(tensor_shape, device=self.device, dtype=dtype)
+        kv = torch.randn(tensor_shape, device=self.device, dtype=dtype)
+
+        counters.clear()
+        torch._dynamo.reset()
+        result_eager = pma_attention(query, kv)
+        result_compiled, (source_code,) = run_and_get_code(
+            torch.compile(pma_attention, fullgraph=True),
+            query.clone(),
+            kv.clone(),
+        )
+        self.assertEqual(result_eager, result_compiled, atol=1e-3, rtol=0.2)
+        copy_count_cached = source_code.count("copy_")
+        return copy_count_cached
+
+    @torch._inductor.config.patch("cache_sdpa_constraint", False)
+    def _test_cache_sdpa_constraint_shared_kv_disabled(self):
+        """When cache_sdpa_constraint is False and the same tensor feeds both key
+        and value in SDPA (PMA pattern), the constraint should create separate
+        buffer copies, producing more copy operations than when enabled."""
+
+        def pma_attention(query, kv):
+            return torch.nn.functional.scaled_dot_product_attention(query, kv, kv)
+
+        tensor_shape = (4, 2, 16, 32)
+        dtype = torch.float
+        query = torch.randn(tensor_shape, device=self.device, dtype=dtype)
+        kv = torch.randn(tensor_shape, device=self.device, dtype=dtype)
+
+        counters.clear()
+        torch._dynamo.reset()
+        result_eager = pma_attention(query, kv)
+        result_compiled, (source_code,) = run_and_get_code(
+            torch.compile(pma_attention, fullgraph=True),
+            query.clone(),
+            kv.clone(),
+        )
+        self.assertEqual(result_eager, result_compiled, atol=1e-3, rtol=0.2)
+        copy_count_uncached = source_code.count("copy_")
+        return copy_count_uncached
+
+    def _test_cache_sdpa_constraint_shared_kv(self):
+        """Verify that cache_sdpa_constraint=True produces no more copy_
+        operations than cache_sdpa_constraint=False when the same tensor feeds
+        both key and value in SDPA."""
+        copy_count_cached = self._test_cache_sdpa_constraint_shared_kv_enabled()
+        copy_count_uncached = self._test_cache_sdpa_constraint_shared_kv_disabled()
+        self.assertLessEqual(
+            copy_count_cached,
+            copy_count_uncached,
+            f"Expected caching to produce <= copy_ ops (got {copy_count_cached}) "
+            f"vs no caching ({copy_count_uncached})",
+        )
+
     def _test_sdpa_rewriter_26(self):
         def dot_prod_attention(
             query: torch.Tensor,
@@ -1332,6 +1397,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_24_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
         )
+        test_cache_sdpa_constraint_shared_kv_gpu = (
+            TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
+        )
         if HAS_XPU_AND_TRITON:
             test_sdpa_rewriter_25_gpu = functools.partialmethod(
                 TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_25
@@ -1447,6 +1515,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_24_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
+        )
+        test_cache_sdpa_constraint_shared_kv_cpu = (
+            TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):

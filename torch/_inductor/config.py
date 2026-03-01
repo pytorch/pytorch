@@ -733,6 +733,13 @@ layout_optimization = (
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 
+# Cache SDPA constraint results keyed by (tensor identity, stride_order) to avoid
+# creating duplicate buffers when the same tensor feeds multiple SDPA positions
+# (e.g., key=value in simplified PMA attention).
+cache_sdpa_constraint = (
+    os.environ.get("TORCHINDUCTOR_CACHE_SDPA_CONSTRAINT", "0") == "1"
+)
+
 
 # Whether to keep the output strides the same as eager after layout optimization.
 keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"

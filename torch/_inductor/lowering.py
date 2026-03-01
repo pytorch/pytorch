@@ -2844,7 +2844,7 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
-    # sdpa requires dense last dimension]
+    """Apply stride constraints to SDPA inputs, ensuring dense last dimension."""
 
     def apply_constraint(idx, arg, fx_arg):
         if not isinstance(arg, ir.IRNode):
@@ -2873,6 +2873,27 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             # Check https://github.com/pytorch/pytorch/issues/138772
             stride_order = (3, 1, 2, 0)
 
+        # Cache keyed by (id(arg), stride_order) to avoid duplicate
+        # copy_input when the same tensor feeds multiple SDPA positions
+        # (e.g., key=value).  id(arg) is safe because TensorBox objects
+        # stay alive (referenced by the FX interpreter env) throughout
+        # lowering.  Skip cache for mutated buffers defensively.
+        cache_key = None
+        if config.cache_sdpa_constraint:
+            arg_name = arg.maybe_get_name()
+            if not (arg_name and arg_name in V.graph.mutated_buffers):
+                cache_key = (id(arg), tuple(stride_order) if stride_order else None)
+                if cache_key in V.graph.sdpa_constraint_cache:
+                    return V.graph.sdpa_constraint_cache[cache_key]
+
+        result = _apply_constraint_inner(
+            idx, arg, meta_val, meta_stride_expr, stride_order
+        )
+        if cache_key is not None:
+            V.graph.sdpa_constraint_cache[cache_key] = result
+        return result
+
+    def _apply_constraint_inner(idx, arg, meta_val, meta_stride_expr, stride_order):
         if not meta_val.is_cuda:
             return ir.ExternKernel.require_stride_order(arg, stride_order)
 
