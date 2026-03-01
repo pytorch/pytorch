@@ -127,6 +127,8 @@ except ImportError:
 from torch.export import export
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 torch.library.define("testlib::returns_tensor_symint", "(Tensor x) -> (Tensor, SymInt)")
 torch.library.define(
     "testlib::foo",
@@ -11029,7 +11031,6 @@ graph():
             export_res = decomposed_ep.module()(x)
             self.assertTrue(export_res.size() == exp_res.size())
 
-    @skipIfXpu
     def test_export_with_fake_tensor_inputs_on_cuda_devices(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
 
@@ -11048,9 +11049,9 @@ graph():
             model = Model()
 
         # Manually set the fake_device of fake tensors.
-        x.fake_device = torch.device("cuda:0")
+        x.fake_device = torch.device(f"{device_type}:0")
         for n, p in model.named_parameters():
-            p.fake_device = torch.device("cuda:0")
+            p.fake_device = torch.device(f"{device_type}:0")
 
         # Need to set all the requires_grad of tensors to False, because fake_tensor with CUDA device
         # doesn't quite work well with aot_autograd right now due to some logic fails
@@ -17545,6 +17546,7 @@ class TestOneOffModelExportResult(TestCase):
             ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
             ep.run_decompositions()
 
+    @skipIfXpu(msg="scaled_dot_product_attention issue on xpu")
     @skipIfCrossRef
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -17569,9 +17571,9 @@ class TestOneOffModelExportResult(TestCase):
                 )
                 return attn_output
 
-        q = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
-        k = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
-        v = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device="cuda")
+        q = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device=device_type)
+        k = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device=device_type)
+        v = torch.randn(1, 16, 16, 64, dtype=torch.bfloat16, device=device_type)
 
         ep = torch.export.export(
             ScaledDotProductAttention(), (q, k, v)
