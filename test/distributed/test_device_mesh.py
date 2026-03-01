@@ -338,6 +338,29 @@ class DeviceMeshTest(DTensorTestBase):
         backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
         self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
 
+    def test_abort_root_mesh(self):
+        fake_store = FakeStore()
+        init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
+        mesh = init_device_mesh(
+            "cpu",
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        # abort() on root mesh should not raise
+        mesh.abort()
+
+    def test_abort_submesh_raises(self):
+        fake_store = FakeStore()
+        init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
+        mesh = init_device_mesh(
+            "cpu",
+            (2, self.world_size // 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        submesh = mesh["tp"]
+        with self.assertRaisesRegex(RuntimeError, "only supported on root DeviceMesh"):
+            submesh.abort()
+
     @with_comms
     def test_from_group_with_global_pg(self):
         # Simple test: check `from_group` from a mesh pg vs. directly

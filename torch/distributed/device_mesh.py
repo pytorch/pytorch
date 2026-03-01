@@ -800,6 +800,48 @@ else:
             """
             return [self.get_group(i) for i in range(len(self._layout))]
 
+        def abort(self) -> None:
+            """
+            Abort all ProcessGroups owned by this DeviceMesh, including groups
+            created by flatten/unflatten operations.
+
+            Only supported for root DeviceMeshes created via ``DeviceMesh(...)`` or
+            ``init_device_mesh(...)``. Raises ``RuntimeError`` if called on a submesh.
+
+            This wraps the abort calls with NCCL group semantics
+            (``ncclGroupStart``/``ncclGroupEnd``) to avoid the deadlock that occurs
+            when aborting multiple communicators sequentially.
+
+            .. note:: This API is experimental and currently only works with the NCCL
+                backend.
+            """
+            if self._root_mesh is not None:
+                raise RuntimeError(
+                    "abort() is only supported on root DeviceMesh. "
+                    "Call abort() on the root mesh instead."
+                )
+
+            # Collect all PGs: mesh dimension groups + flatten/unflatten groups.
+            all_groups = self.get_all_groups()
+            for flatten_mesh in self._flatten_mapping.values():
+                all_groups.extend(flatten_mesh.get_all_groups())
+
+            if not all_groups:
+                return
+
+            # Use ncclGroupStart/End semantics for concurrent abort on CUDA
+            # meshes. Without this, aborting multiple communicators sequentially
+            # can deadlock.
+            # See: https://github.com/pytorch/pytorch/issues/119797
+            backend = None
+            if self.device_type == "cuda":
+                backend = all_groups[0]._get_backend(torch.device("cuda"))
+                backend._group_start()  # pyrefly: ignore [missing-attribute]
+            for pg in all_groups:
+                pg.abort()
+            if backend is not None:
+                backend._group_end()  # pyrefly: ignore [missing-attribute]
+
         def _create_sub_mesh(
             self,
             layout: _MeshLayout,
