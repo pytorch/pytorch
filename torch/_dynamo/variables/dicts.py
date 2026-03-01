@@ -1042,6 +1042,36 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         pass
 
 
+class DynamicKeysConstDictVariable(ConstDictVariable):
+    """Dict variable that skips DICT_KEYS_MATCH guards by default.
+
+    Used for dicts marked with ``torch._dynamo.mark_dynamic_dict()``.
+    ``install_dict_keys_match_guard`` is a no-op so that mutations like
+    ``__setitem__`` do not install a full key-set guard.  Operations that
+    genuinely depend on the full key set (``items``, ``keys``, ``values``,
+    ``__len__``, ``copy``) explicitly install the guard before delegating to
+    the parent, so they still recompile when the key set changes.
+    """
+
+    def install_dict_keys_match_guard(self) -> None:
+        pass
+
+    def _install_dict_keys_match_guard_force(self) -> None:
+        if self.source:
+            install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("items", "keys", "values", "__len__", "copy"):
+            self._install_dict_keys_match_guard_force()
+        return super().call_method(tx, name, args, kwargs)
+
+
 class DefaultDictVariable(ConstDictVariable):
     def __init__(
         self,

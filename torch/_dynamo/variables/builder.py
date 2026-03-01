@@ -196,6 +196,7 @@ from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
     DictKeySetVariable,
+    DynamicKeysConstDictVariable,
     FrozensetVariable,
     MappingProxyVariable,
     OrderedSetClassVariable,
@@ -877,7 +878,14 @@ class VariableBuilder:
                     source=self.source,
                 )
             else:
-                result = ConstDictVariable(
+                from ..decorators import is_dynamic_dict
+
+                cls = (
+                    DynamicKeysConstDictVariable
+                    if is_dynamic_dict(value)
+                    else ConstDictVariable
+                )
+                result = cls(
                     result,  # type: ignore[arg-type]
                     user_cls=type(value),
                     source=self.source,

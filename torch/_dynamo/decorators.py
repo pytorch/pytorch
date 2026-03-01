@@ -1134,6 +1134,30 @@ def mark_unbacked(
         mark_unbacked(t, i, shape_id=shape_id)
 
 
+_dynamic_dict_ids: set[int] = set()
+
+
+def is_dynamic_dict(d: dict) -> bool:
+    return id(d) in _dynamic_dict_ids
+
+
+@forbid_in_graph
+def mark_dynamic_dict(d: dict) -> None:
+    """Mark a dict as having a dynamic key set.
+
+    Dynamo will not install ``DICT_KEYS_MATCH`` guards for mutations like
+    ``__setitem__``, so adding keys between ``torch.compile`` calls will
+    not trigger recompilation.
+
+    Operations that depend on the full key set (``items()``, ``keys()``,
+    ``values()``, ``len()``, ``copy()``) still install the guard lazily
+    when used, so they recompile correctly when the key set changes.
+    """
+    if not isinstance(d, dict):
+        raise TypeError(f"expected dict, got {type(d)}")
+    _dynamic_dict_ids.add(id(d))
+
+
 @forbid_in_graph
 def mark_dynamic(
     t: Any,

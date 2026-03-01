@@ -2165,6 +2165,96 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_mark_dynamic_dict_setitem_no_recompile(self):
+        cnts = CompileCounter()
+
+        d = {"obs": torch.randn(3)}
+        torch._dynamo.mark_dynamic_dict(d)
+
+        @torch.compile(backend=cnts)
+        def fn(d):
+            d["loss"] = d["obs"] * 2
+            return d["loss"]
+
+        fn(d)
+        self.assertEqual(cnts.frame_count, 1)
+        # dict now has {"obs", "loss"} — should NOT recompile
+        fn(d)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_mark_dynamic_dict_getitem_setitem(self):
+        cnts = CompileCounter()
+
+        d = {"a": torch.randn(3), "b": torch.randn(3)}
+        torch._dynamo.mark_dynamic_dict(d)
+
+        @torch.compile(backend=cnts)
+        def fn(d):
+            d["c"] = d["a"] + d["b"]
+            return d["c"]
+
+        result = fn(d)
+        self.assertEqual(result, d["a"] + d["b"])
+        self.assertEqual(cnts.frame_count, 1)
+        # second call — dict now has extra key "c"
+        result2 = fn(d)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_mark_dynamic_dict_iteration_installs_guard(self):
+        # items/keys/values/len on a dynamic dict should work but install
+        # a DICT_KEYS_MATCH guard, so key-set changes trigger recompilation.
+        cnts = CompileCounter()
+
+        d = {"a": torch.randn(3), "b": torch.randn(3)}
+        torch._dynamo.mark_dynamic_dict(d)
+
+        @torch.compile(backend=cnts)
+        def fn(d):
+            return sum(d.values())
+
+        fn(d)
+        self.assertEqual(cnts.frame_count, 1)
+        d["c"] = torch.randn(3)
+        fn(d)
+        # keys changed and values() installed a guard → recompile
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_mark_dynamic_dict_setitem_then_len(self):
+        # setitem alone should not guard, but len in the same function should.
+        cnts = CompileCounter()
+
+        d = {"obs": torch.randn(3)}
+        torch._dynamo.mark_dynamic_dict(d)
+
+        @torch.compile(backend=cnts)
+        def fn(d):
+            d["loss"] = d["obs"] * 2
+            return len(d)
+
+        result = fn(d)
+        self.assertEqual(cnts.frame_count, 1)
+        # len() installs guard → second call with extra key recompiles
+        result2 = fn(d)
+        self.assertEqual(cnts.frame_count, 2)
+        # third call stabilizes
+        result3 = fn(d)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_unmarked_dict_still_guards_on_keys(self):
+        cnts = CompileCounter()
+        d = {"obs": torch.randn(3)}
+
+        @torch.compile(backend=cnts)
+        def fn(d):
+            d["loss"] = d["obs"] * 2
+            return d["loss"]
+
+        fn(d)
+        self.assertEqual(cnts.frame_count, 1)
+        # dict now has {"obs", "loss"} — normal dict SHOULD recompile
+        fn(d)
+        self.assertGreaterEqual(cnts.frame_count, 2)
+
     def test_listcomp(self):
         def fn2(inputs):
             return torch.sum(torch.cat([v + 1 for k, v in inputs.items()], 0))
