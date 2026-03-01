@@ -4187,6 +4187,8 @@ class SourcelessBuilder:
                 for name in namedtuple_fields(type(value))
             ]
             return NamedTupleVariable(output, tuple_cls=type(value))
+        elif isinstance(value, property) or hasattr(value, "__get__"):
+            return UserDefinedObjectVariable(value)
         elif (
             isinstance(value, torch.SymInt)
             and value.node.expr in tx.output.bound_symbols
@@ -4257,6 +4259,7 @@ class SourcelessBuilder:
         )
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
+        handlers[property] = lambda tx, value: UserDefinedObjectVariable(value)
 
         handlers[torch.DispatchKeySet] = lambda tx, value: DispatchKeySetVariable(
             value, mutation_type=ValueMutationNew()
