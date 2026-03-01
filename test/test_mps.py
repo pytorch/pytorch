@@ -6194,6 +6194,38 @@ class TestMPS(TestCaseMPS):
                 return F.interpolate(x, 3, mode='linear', align_corners=align_corners)
             self.assertEqual(interp(inp).cpu(), interp(inp.cpu()))
 
+    def test_interpolate_bicubic2d_aa(self):
+        def helper(shape, scale_factors, output_size=None, align_corners=False):
+            input_cpu = torch.randn(shape, device="cpu", dtype=torch.float, requires_grad=True)
+            input_cpu.retain_grad()
+            input_mps = input_cpu.detach().clone().to("mps").requires_grad_()
+
+            out_cpu = F.interpolate(
+                input_cpu,
+                size=output_size,
+                scale_factor=scale_factors,
+                mode="bicubic",
+                align_corners=align_corners,
+                antialias=True,
+            )
+            out_mps = F.interpolate(
+                input_mps,
+                size=output_size,
+                scale_factor=scale_factors,
+                mode="bicubic",
+                align_corners=align_corners,
+                antialias=True,
+            )
+            self.assertEqual(out_cpu, out_mps)
+
+            grad = torch.full_like(out_cpu, 0.3)
+            out_cpu.backward(grad)
+            out_mps.backward(grad.to("mps"))
+            self.assertEqual(input_cpu.grad, input_mps.grad)
+
+        helper([2, 3, 4, 5], [1.4, 1.7])
+        helper([1, 1, 3, 3], [0.6, 0.7])
+
     # Test concat forward
     def test_cat1(self):
         def helper(shape_x, shape_y, shape_z):
@@ -12860,6 +12892,8 @@ class TestConsistency(TestCaseMPS):
             if op.name in ["renorm", "norm", "linalg.norm"] and dtype == torch.float16:
                 atol = 7e-4
                 rtol = 1.5e-3
+            if op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"] and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
+                atol, rtol = 2e-5, 2e-6
 
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
