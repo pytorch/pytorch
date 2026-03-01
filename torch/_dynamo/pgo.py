@@ -124,6 +124,27 @@ def _hash_containing_file(filepath: str) -> str:
         return hash
 
 
+def _get_closure_content(content: types.CellType) -> object:
+    if callable(content) and hasattr(content, "__code__"):
+        return content.__code__
+
+    # Attempt to use the actual value for deterministic cross-process caching (Remote PGO).
+    # Fallback to id() ONLY for unhashable types (like dicts, lists) where memory identity is the only option.
+    try:
+        hash(content)
+        return content
+    except TypeError:
+        return id(content)
+
+
+def _get_cell_hash_content(content: types.CellType) -> object:
+    # Safely extract cell contents without blowing up the entire tuple hash
+    try:
+        return _get_closure_content(content)
+    except ValueError:
+        return None
+
+
 @dataclasses.dataclass(frozen=True)
 class CodeId:
     filename: str
@@ -136,6 +157,7 @@ class CodeId:
     # self.filename is kept in the object to give readable information/pointer to the actual file, in a local
     # code state it will refer to the first seen file path.
     file_hash: str
+    closure_hash: Optional[int] = None
 
     # Exclude file name.
     def __eq__(self, other: object) -> bool:
@@ -145,22 +167,30 @@ class CodeId:
             self.file_hash == other.file_hash
             and self.firstlineno == other.firstlineno
             and self.name == other.name
+            and self.closure_hash == other.closure_hash
         )
 
     # Ensure if two CodeIds are the same, then they have the same hash by excluding filename.
     def __hash__(self) -> int:
-        return hash((self.file_hash, self.name, self.firstlineno))
+        return hash((self.file_hash, self.name, self.firstlineno, self.closure_hash))
 
     def __str__(self) -> str:
         return f"hash({self.file_hash}){self.filename}:{self.firstlineno}:{self.name}"
 
     @staticmethod
-    def make(code: types.CodeType) -> CodeId:
+    def make(
+        code: types.CodeType, closure: Optional[tuple[types.CellType, ...]] = None
+    ) -> CodeId:
+        closure_hash = None
+        if closure:
+            closure_hash = hash(tuple(_get_cell_hash_content(c) for c in closure))
+
         return CodeId(
             code.co_filename,
             code.co_firstlineno,
             code.co_name,
             _hash_containing_file(code.co_filename),
+            closure_hash,
         )
 
 
@@ -374,7 +404,7 @@ def update_automatic_dynamic(
     *,
     is_unspecialized_nn_module: bool = False,
 ) -> FrameStateSizeEntry:
-    code_id = CodeId.make(tx.f_code)
+    code_id = CodeId.make(tx.f_code, tx.closure)
     frame_state = get_code_state()[code_id]
     if torch._dynamo.config.automatic_dynamic_shapes:
         is_update = name in frame_state.automatic_dynamic
@@ -647,7 +677,7 @@ def _collect_missing_sources(all_sources: OrderedSet[str]) -> OrderedSet[str]:
 
 def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
     global _KNOWN_DYNAMIC_SOURCES
-    code_id = CodeId.make(f_code)
+    code_id = CodeId.make(f_code, None)
     frame_state = get_code_state()[code_id]
     all_dynamic_sources = _collect_dynamic_sources(frame_state)
     frame_whitelist = ",".join(all_dynamic_sources)
