@@ -656,11 +656,13 @@ print(t.is_pinned())
             torch.backends.cuda.preferred_blas_library(1.0)
         # check env var override
         custom_envs = [
-            {"TORCH_BLAS_PREFER_CUBLASLT": "1"},
-            {"TORCH_BLAS_PREFER_HIPBLASLT": "1"},
+            ({"TORCH_BLAS_PREFER_CUBLASLT": "1"}, "_BlasBackend.Cublaslt"),
+            ({"TORCH_BLAS_PREFER_HIPBLASLT": "1"}, "_BlasBackend.Cublaslt"),
+            ({"TORCH_BLAS_PREFER_CUBLASLT": "0"}, "_BlasBackend.Cublas"),
+            ({"TORCH_BLAS_PREFER_HIPBLASLT": "0"}, "_BlasBackend.Cublas"),
         ]
         test_script = "import torch;print(torch.backends.cuda.preferred_blas_library())"
-        for env_config in custom_envs:
+        for env_config, expected in custom_envs:
             env = os.environ.copy()
             for key, value in env_config.items():
                 env[key] = value
@@ -669,7 +671,14 @@ print(t.is_pinned())
                 .decode("ascii")
                 .strip()
             )
-            self.assertEqual("_BlasBackend.Cublaslt", r)
+            self.assertEqual(expected, r)
+
+        # explicitly check default when no env vars are set
+        if not any(
+            os.environ.get(v)
+            for v in ("TORCH_BLAS_PREFER_CUBLASLT", "TORCH_BLAS_PREFER_HIPBLASLT")
+        ):
+            _check_default()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @setBlasBackendsToDefaultFinally
