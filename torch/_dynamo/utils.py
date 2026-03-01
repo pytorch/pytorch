@@ -3947,6 +3947,31 @@ def set_current_node(node: torch.fx.Node) -> Generator[None, None, None]:
         _current_node.value = old
 
 
+def _normalize_fx_immutable_collections(arg: Any) -> Any:
+    immutable_collections = fx.immutable_collections
+    if type(arg) is immutable_collections.immutable_list:
+        return [_normalize_fx_immutable_collections(x) for x in arg]
+    if type(arg) is immutable_collections.immutable_dict:
+        return {k: _normalize_fx_immutable_collections(v) for k, v in arg.items()}
+    if isinstance(arg, tuple):
+        elems = tuple(_normalize_fx_immutable_collections(x) for x in arg)
+        if hasattr(arg, "_fields"):
+            # namedtuple: preserve the tuple subclass
+            return type(arg)(*elems)
+        return elems
+    if isinstance(arg, list):
+        return [_normalize_fx_immutable_collections(x) for x in arg]
+    if isinstance(arg, dict):
+        return {k: _normalize_fx_immutable_collections(v) for k, v in arg.items()}
+    if isinstance(arg, slice):
+        return slice(
+            _normalize_fx_immutable_collections(arg.start),
+            _normalize_fx_immutable_collections(arg.stop),
+            _normalize_fx_immutable_collections(arg.step),
+        )
+    return arg
+
+
 def run_node(
     tracer: Any, node: torch.fx.Node, args: Any, kwargs: Any, nnmodule: Any
 ) -> Any:
@@ -3967,6 +3992,8 @@ def run_node(
     op = node.op
 
     with set_current_node(node):
+        args = _normalize_fx_immutable_collections(args)
+        kwargs = _normalize_fx_immutable_collections(kwargs)
 
         def make_error_message(e: Any) -> str:
             return (
