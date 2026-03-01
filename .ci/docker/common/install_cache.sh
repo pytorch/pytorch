@@ -7,8 +7,14 @@ install_ubuntu() {
   apt-get update && apt-get install -y pkg-config libssl-dev curl
   echo "Installing rust"
   curl https://sh.rustup.rs -sSf | sh -s -- -y
-  echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.13.0
+
+  local sccache_branch="v0.13.0"
+  if [ "$ROCM_VERSION" = "nightly" ]; then
+    sccache_branch="main"
+  fi
+
+  echo "Checking out sccache repo (branch: $sccache_branch)"
+  git clone https://github.com/mozilla/sccache -b "$sccache_branch"
   cd sccache
   echo "Patch dist build on aarch64"
   sed -i '/all(target_os = "linux", target_arch = "x86_64"),/{ p; s/x86_64/aarch64/; }' src/bin/sccache-dist/main.rs
@@ -77,15 +83,10 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-# Skip all sccache wrapping for theRock nightly: sccache PATH wrappers
-# intercept assembly (.s) compilation and fail because the assembler does not
-# produce the .d dependency file that sccache expects.
-if [ "$ROCM_VERSION" != "nightly" ]; then
-  write_sccache_stub cc
-  write_sccache_stub c++
-  write_sccache_stub gcc
-  write_sccache_stub g++
-fi
+write_sccache_stub cc
+write_sccache_stub c++
+write_sccache_stub gcc
+write_sccache_stub g++
 
 # NOTE: See specific ROCM_VERSION case below.
 if [ "x$ROCM_VERSION" = x ]; then
