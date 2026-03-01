@@ -2390,6 +2390,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(hasattr(result, "c"))
         self.assertEqual(result.c, torch.tensor(3.0))
 
+    def test_namedtuple___eq__(self):
+        class MyNamedTuple(typing.NamedTuple):
+            a: int
+            b: int
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            t1 = MyNamedTuple(a=1, b=2)
+            t2 = (1, 2)
+            return x.sin(), (t1 == t2)
+
+        x = torch.randn(2)
+        res = f(x)
+        self.assertTrue(res[1])
+
     def test_structseq1(self):
         def fn(x, y):
             return torch.return_types.max((x, y))
