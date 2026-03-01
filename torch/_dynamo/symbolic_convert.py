@@ -2124,7 +2124,7 @@ class InstructionTranslatorBase(
 
         # pyrefly: ignore [unbound-name]
         if istype(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore [unbound-name]
+            # pyrefly: ignore [unbound-name, bad-argument-type]
             self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented(
