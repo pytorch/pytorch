@@ -3991,6 +3991,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
     # Special-cases tensors with no elements
     if a.numel() == 0:
+        if len(shape) == a.ndim and builtins.all(
+            d == s for d, s in zip(shape, a.shape)
+        ):
+            return prims.view_of(a)
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
 
     # Special-cases reshaping zero dim tensors
