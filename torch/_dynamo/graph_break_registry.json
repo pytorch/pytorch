@@ -3739,6 +3739,14 @@
       ]
     }
   ],
+  "GB5458": [
+    {
+      "Gb_type": "Custom metaclass with __getattribute__",
+      "Context": "type({self.value}) = {metacls}",
+      "Explanation": "Dynamo does not trace attribute access on classes whose metaclass overrides __getattribute__",
+      "Hints": []
+    }
+  ],
   "GB0310": [
     {
       "Gb_type": "torch.cond: improper predicate",
