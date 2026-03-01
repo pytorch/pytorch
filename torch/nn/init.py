@@ -116,13 +116,8 @@ def _no_grad_trunc_normal_(
                     break
                 result = torch.where(
                     mask,
-                    torch.normal(
-                        mean,
-                        std,
-                        size=result.shape,
-                        dtype=result.dtype,
-                        device=result.device,
-                        generator=generator,
+                    torch.empty_like(result).normal_(
+                        mean, std, generator=generator
                     ),
                     result,
                 )
