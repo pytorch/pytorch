@@ -62,6 +62,8 @@ self-hosted-runner:
     # gfx942 runners
     - linux.rocm.gpu.gfx942.1
     - linux.rocm.gpu.gfx942.4
+    - linux.rocm.gpu.gfx942.1.stg
+    - linux.rocm.gpu.gfx942.4.stg
     # gfx950 runners
     - linux.rocm.gpu.gfx950.1
     - linux.rocm.gpu.gfx950.4
