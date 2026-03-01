@@ -97,7 +97,6 @@
 #include <c10/util/AlignOf.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/BFloat16.h>
-#include <c10/util/C++17.h>
 #include <c10/util/ConstexprCrc.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/DimVector.h>

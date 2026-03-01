@@ -3,7 +3,6 @@
 #include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/boxing/impl/make_boxed_from_unboxed_functor.h>
 
-#include <c10/util/C++17.h>
 #include <type_traits>
 
 namespace c10 {
