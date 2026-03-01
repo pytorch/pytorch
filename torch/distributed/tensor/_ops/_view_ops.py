@@ -821,7 +821,8 @@ def view_as_complex_single_dim_strategy(op, args_schema, kwargs_schema):
     # Dims 0..ndim-2 map 1:1; last dim (real/imag pair) is consumed.
     # P(max)/P(min) invalid: complex numbers have no total ordering.
     input_meta = args_schema[0]
-    assert isinstance(input_meta, TensorMeta)
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     ndim = len(input_meta.shape)
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
     for d in range(ndim - 1):
