@@ -1172,6 +1172,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_out, compiled_out)
         self.assertEqual(eager_out.stride(), compiled_out.stride())
 
+    # https://github.com/pytorch/pytorch/issues/174963
+    def test_roll_as_strided_channels_last(self):
+        def fn(x):
+            x = torch.roll(x, shifts=-1, dims=0)
+            return torch.as_strided(x, (5, 10), (4, 1), 0)
+
+        x = torch.arange(100).reshape(2, 5, 2, 5).to(memory_format=torch.channels_last)
+        eager_out = fn(x)
+        compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
+        compiled_out = compiled_fn(x)
+        self.assertEqual(eager_out, compiled_out)
+
     # https://github.com/pytorch/pytorch/issues/109053
     def test_view_dtype_overload(self):
         def f(x):

@@ -229,7 +229,7 @@ def build_auto_cache_condition(
         if type_str == "CONSTANT_MATCH" and isinstance(value, str):
             continue
 
-        expected = handler.extract_fn(guard, value)
+        expected = handler.get_metadata_fn(guard, value)
         guard_tuples.append((source, handler, expected))
 
     hc_log.debug("Number of guards %s", len(guard_tuples))

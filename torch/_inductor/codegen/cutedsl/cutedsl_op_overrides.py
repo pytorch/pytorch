@@ -71,7 +71,7 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def _node_tensor_flags() -> tuple[bool, bool] | None:
         node = V.current_node
-        if node is None or len(node.args) < 2:
+        if not isinstance(node, torch.fx.Node) or len(node.args) < 2:
             return None
 
         def _is_tensor(raw_arg: object) -> bool:
@@ -181,7 +181,7 @@ class CuteDSLOpOverrides(OpOverrides):
     def _expected_tensor_val() -> torch.Tensor | None:
         """Return the fake-tensor value from the current FX node's metadata, if any."""
         node = V.current_node
-        if node is None:
+        if not isinstance(node, torch.fx.Node):
             return None
         val = node.meta.get("val")
         return val if isinstance(val, torch.Tensor) else None

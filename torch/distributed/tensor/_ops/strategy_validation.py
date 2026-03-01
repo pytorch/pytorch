@@ -761,19 +761,13 @@ def get_aten_op_for_sample(
     else:
         return None, (), {}
 
-    non_tensor_args = tuple(a for a in captured_args if not isinstance(a, torch.Tensor))
-    non_tensor_kwargs = {
-        k: v for k, v in captured_kwargs.items() if not isinstance(v, torch.Tensor)
-    }
-
-    return captured_op, non_tensor_args, non_tensor_kwargs
+    return captured_op, captured_args, captured_kwargs
 
 
 def query_single_dim_strategy(
     op_overload: OpOverload,
-    tensors: list[tuple[str, torch.Tensor]],
-    mesh: DeviceMesh | None,
-    kwargs: dict[str, Any] | None = None,
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
 ) -> list[list[Placement]] | None:
     """
     Query DTensor's single-dim strategy for given input tensors.
@@ -786,12 +780,23 @@ def query_single_dim_strategy(
 
     strategy_func = propagator.op_single_dim_strategy_funcs[op_overload]
 
+    # Build args_meta preserving positional structure: tensors become TensorMeta,
+    # non-tensor args pass through (mirrors OpSchema.args_meta property).
     args_meta = tuple(
-        TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype) for _, t in tensors
+        TensorMeta(shape=a.shape, stride=a.stride(), dtype=a.dtype)
+        if isinstance(a, torch.Tensor)
+        else a
+        for a in captured_args
     )
+    kwargs_meta = {
+        k: TensorMeta(shape=v.shape, stride=v.stride(), dtype=v.dtype)
+        if isinstance(v, torch.Tensor)
+        else v
+        for k, v in captured_kwargs.items()
+    }
 
     try:
-        result = strategy_func(op_overload, args_meta, kwargs or {})
+        result = strategy_func(op_overload, args_meta, kwargs_meta)
 
         expanded_result: list[list[Placement]] = []
         for combo in result:
@@ -970,8 +975,8 @@ def _prepare_false_positive_mitigations(
 def _query_dtensor_rules(
     aten_op: OpOverload | None,
     tensors: list[tuple[str, torch.Tensor]],
-    non_tensor_args: tuple[Any, ...],
-    non_tensor_kwargs: dict[str, Any],
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
     input_shapes: tuple[tuple[int, ...], ...],
     output_shape: tuple[int, ...],
     world_size: int,
@@ -987,18 +992,22 @@ def _query_dtensor_rules(
     if not aten_op:
         return set()
 
+    num_tensors = len(tensors)
+    non_tensor_kwargs = {
+        k: v for k, v in captured_kwargs.items() if not isinstance(v, torch.Tensor)
+    }
     propagator = DTensor._op_dispatcher.sharding_propagator
     rules: set[ComboKey] = set()
 
     if aten_op in propagator.op_single_dim_strategy_funcs:
         strategy_result = query_single_dim_strategy(
-            aten_op, tensors, None, kwargs=non_tensor_kwargs
+            aten_op, captured_args, captured_kwargs
         )
         if strategy_result:
             for combo in strategy_result:
-                if len(combo) >= len(tensors) + 1:
+                if len(combo) >= num_tensors + 1:
                     output_plc = combo[0]
-                    input_plcs = tuple(combo[1 : len(tensors) + 1])
+                    input_plcs = tuple(combo[1 : num_tensors + 1])
                     rule_key = (
                         tuple(str(p) for p in input_plcs),
                         str(output_plc),
@@ -1017,8 +1026,9 @@ def _query_dtensor_rules(
     elif aten_op in propagator.op_strategy_funcs:
         try:
             mesh = init_device_mesh("cpu", (world_size,))
-            input_strategies = []
-            for name, t in tensors:
+            # Build OpStrategy objects for each tensor, keyed by identity
+            tensor_to_strategy: dict[int, OpStrategy] = {}
+            for _, t in tensors:
                 input_placements = get_1d_input_placements_for_tensor(
                     t, include_partial=True
                 )
@@ -1032,8 +1042,12 @@ def _query_dtensor_rules(
                         ),
                     )
                     specs.append(OpSpec(output_specs=spec, input_specs=tuple()))
-                input_strategies.append(OpStrategy(specs))
-            args_schema = list(input_strategies) + list(non_tensor_args)
+                tensor_to_strategy[id(t)] = OpStrategy(specs)
+            # Interleave strategies and non-tensor args at original positions
+            args_schema = [
+                tensor_to_strategy[id(a)] if isinstance(a, torch.Tensor) else a
+                for a in captured_args
+            ]
             op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
             strategy_func = propagator.op_strategy_funcs[aten_op]
             output_strategy = strategy_func(op_schema)
@@ -1052,20 +1066,25 @@ def _query_dtensor_rules(
         if DecompShardingStrategy.has_decomp(aten_op):
             try:
                 mesh = init_device_mesh("cpu", (world_size,))
-                args_schema = []
-                for i, (_, t) in enumerate(tensors):
-                    # First tensor gets Shard(0) to seed candidate
-                    # placement generation in _get_candidate_placements
-                    plc = Shard(0) if i == 0 else Replicate()
-                    spec = DTensorSpec(
-                        mesh=mesh,
-                        placements=(plc,),
-                        tensor_meta=TensorMeta(
-                            shape=t.shape, stride=t.stride(), dtype=t.dtype
-                        ),
-                    )
-                    args_schema.append(spec)
-                args_schema.extend(non_tensor_args)
+                # Interleave DTensorSpec and non-tensor args at original positions
+                tensor_idx = 0
+                args_schema: list[Any] = []
+                for a in captured_args:
+                    if isinstance(a, torch.Tensor):
+                        # First tensor gets Shard(0) to seed candidate
+                        # placement generation in _get_candidate_placements
+                        plc = Shard(0) if tensor_idx == 0 else Replicate()
+                        spec = DTensorSpec(
+                            mesh=mesh,
+                            placements=(plc,),
+                            tensor_meta=TensorMeta(
+                                shape=a.shape, stride=a.stride(), dtype=a.dtype
+                            ),
+                        )
+                        args_schema.append(spec)
+                        tensor_idx += 1
+                    else:
+                        args_schema.append(a)
                 op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
                 propagator.decomp_strategy.ensure_schema_info(aten_op)
                 output_strategy = propagator.decomp_strategy.propagate_strategy(
@@ -1499,15 +1518,15 @@ def compare_operator(
             ]
             output_placement_options = get_1d_output_placements_for_tensor(first_gt)
 
-            aten_op, non_tensor_args, non_tensor_kwargs = get_aten_op_for_sample(
+            aten_op, captured_args, captured_kwargs = get_aten_op_for_sample(
                 op, sample, opinfo.name
             )
 
             dtensor_rules = _query_dtensor_rules(
                 aten_op,
                 tensors,
-                non_tensor_args,
-                non_tensor_kwargs,
+                captured_args,
+                captured_kwargs,
                 input_shapes,
                 output_shape,
                 world_size,

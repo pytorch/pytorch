@@ -628,6 +628,33 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
     return out
 
 
+def _add_with_alpha_fma(a, b, alpha):
+    """Compute a + alpha * b using FMA for CUDA floating-point precision."""
+    dtype = get_promoted_dtype(
+        a,
+        b,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+    a_loader = a.make_loader()
+    b_loader = b.make_loader()
+
+    def inner_fn(idx):
+        a_val = a_loader(idx)
+        b_val = b_loader(idx)
+        if isinstance(alpha, sympy.Basic):
+            alpha_expr = ops.index_expr(alpha, dtype)
+        else:
+            alpha_expr = ops.constant(alpha, dtype)
+        return ops.fma(b_val, alpha_expr, a_val)
+
+    return Pointwise.create(
+        device=a.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=a.get_size(),
+    )
+
+
 def make_pointwise(
     fn,
     override_return_dtype=None,
@@ -636,6 +663,9 @@ def make_pointwise(
     allow_alpha=False,
     triton_fallback=None,
 ):
+    """Wraps a pointwise fn and returns a function representing the pointwise in
+    the define-by-run IR."""
+
     def inner(*inputs: TensorBox, alpha=None):
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
@@ -646,6 +676,18 @@ def make_pointwise(
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
+                # Use FMA for add-with-alpha on CUDA floating-point.
+                # Eager CUDA computes a + alpha * b as fma(b, alpha, a).
+                if isinstance(inputs[0], IRNode):
+                    inp_device = inputs[0].get_device()
+                    if (
+                        inputs[0].get_dtype().is_floating_point
+                        and not torch.version.hip
+                        and inp_device is not None
+                        and inp_device.type == "cuda"
+                    ):
+                        return _add_with_alpha_fma(inputs[0], inputs[1], alpha)
+
                 # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
                 # pyrefly: ignore [unsupported-operation]
