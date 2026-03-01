@@ -1907,7 +1907,25 @@ def _get_overridable_functions() -> tuple[
                 if func in get_testing_overrides():
                     raise AssertionError(msg.format(namespace, func.__name__))
                 continue
+
+            # Check for dynamically added functions that don't support __torch_function__
+            if namespace is torch.Tensor:
+                # Skip dynamically added functions (they don't support __torch_function__)
+                # Check if function was added dynamically by checking if it has proper __torch_function__ support
+                try:
+                    # Try to get the function's __torch_function__ attribute
+                    if hasattr(func, '__torch_function__') and func.__torch_function__ is torch._C._disabled_torch_function_impl:
+                        continue
+                    # Check if it's a bound method that was added dynamically
+                    if hasattr(func, '__self__') and func.__self__ is torch.Tensor:
+                        continue
+                except (AttributeError, TypeError):
+                    # If we can't determine, skip it to be safe
+                    continue
+
+
             overridable_funcs[namespace].append(func)
+           
     return overridable_funcs, index
 
 

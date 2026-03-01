@@ -1,3 +1,4 @@
+Wclass TestEinsumOverrid
 # Owner(s): ["module: __torch_function__"]
 
 import sys
@@ -1154,6 +1155,34 @@ def wrap(v):
 
     return Wrapper(v) if isinstance(v, torch.Tensor) else v
 
+    def test_dynamic_functions_not_overridable(self):
+        """Test that dynamically added functions are not listed as overridable"""
+        # Store original overridable functions
+        original_funcs = set(get_overridable_functions()[torch.Tensor])
+        
+        # Add a dynamic function to torch.Tensor
+        def custom_func(self):
+            return "custom"
+        
+        torch.Tensor.custom_func = custom_func
+        
+        try:
+            # Get overridable functions after adding dynamic function
+            new_funcs = set(get_overridable_functions()[torch.Tensor])
+            
+            # The dynamic function should NOT be in the overridable list
+            self.assertEqual(original_funcs, new_funcs, 
+                           "Dynamic function should not appear in overridable functions")
+            
+            # Verify the function exists but is not overridable
+            self.assertTrue(hasattr(torch.Tensor, 'custom_func'))
+            self.assertNotIn(custom_func, new_funcs)
+            
+        finally:
+            # Cleanup
+            if hasattr(torch.Tensor, 'custom_func'):
+                delattr(torch.Tensor, 'custom_func')
+
 class TestEinsumOverride(TestCase):
     "Regression test for gh-38479"
     def test_wrapper(self):
@@ -1915,6 +1944,33 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(stack[0].device, torch.device("cpu"))
         finally:
             torch.set_default_device(None)
+    def test_dynamic_functions_not_overridable(self):
+        """Test that dynamically added functions are not listed as overridable"""
+        # Store original overridable functions
+        original_funcs = set(get_overridable_functions()[torch.Tensor])
+        
+        # Add a dynamic function to torch.Tensor
+        def custom_func(self):
+            return "custom"
+        
+        torch.Tensor.custom_func = custom_func
+        
+        try:
+            # Get overridable functions after adding dynamic function
+            new_funcs = set(get_overridable_functions()[torch.Tensor])
+            
+            # The dynamic function should NOT be in the overridable list
+            self.assertEqual(original_funcs, new_funcs, 
+                           "Dynamic function should not appear in overridable functions")
+            
+            # Verify the function exists but is not overridable
+            self.assertTrue(hasattr(torch.Tensor, 'custom_func'))
+            self.assertNotIn(custom_func, new_funcs)
+            
+        finally:
+            # Cleanup
+            if hasattr(torch.Tensor, 'custom_func'):
+                delattr(torch.Tensor, 'custom_func')
 
 
 
