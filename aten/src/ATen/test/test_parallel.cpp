@@ -4,7 +4,9 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/Parallel.h>
 #include <ATen/ParallelFuture.h>
+#include <c10/util/ParallelGuard.h>
 
+#include <atomic>
 #include <iostream>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
@@ -105,6 +107,34 @@ TEST(TestParallel, Exceptions) {
       throw std::runtime_error("exception");
     }),
     std::runtime_error);
+}
+
+TEST(TestParallel, ParallelForNoDuplicateWork) {
+  NumThreadsGuard guard(4);
+  if (at::get_num_threads() < 2) {
+    GTEST_SKIP();
+  }
+
+  constexpr int N = 1000;
+  std::vector<std::atomic<int>> counts(N);
+  for (auto& c : counts) c.store(0, std::memory_order_relaxed);
+  at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
+    for (auto i = begin; i < end; ++i) {
+      counts[i].fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+  for (int i = 0; i < N; ++i) {
+    ASSERT_EQ(counts[i].load(std::memory_order_relaxed), 1);
+  }
+}
+
+TEST(TestParallel, InParallelRegionRespectsGuard) {
+  ASSERT_FALSE(at::in_parallel_region());
+  {
+    c10::ParallelGuard guard(true);
+    ASSERT_TRUE(at::in_parallel_region());
+  }
+  ASSERT_FALSE(at::in_parallel_region());
 }
 
 TEST(TestParallel, IntraOpLaunchFuture) {
