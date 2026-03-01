@@ -264,7 +264,10 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
     return func(*args, **kwargs)
 
 
-def mark_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
+def mark_compile_region(
+    fn=None,
+    options: NestedCompileRegionOptions | None = None,
+):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
