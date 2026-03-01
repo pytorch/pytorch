@@ -658,7 +658,10 @@ def skip_all_guards_unsafe(guard_entries):
     return [False for entry in guard_entries]
 
 
-def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
+def nested_compile_region(
+    fn=None,
+    options: NestedCompileRegionOptions | None = None,
+):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
