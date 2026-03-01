@@ -19,7 +19,12 @@ from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import MI200_ARCH, run_tests, skipIfRocmArch
+from torch.testing._internal.common_utils import (
+    MI200_ARCH,
+    run_tests,
+    skipIfRocmArch,
+    slowTest,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorConverter,
@@ -627,6 +632,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
     @skipIfRocmArch(MI200_ARCH)
     @with_comms
+    @slowTest()
     def test_index(self):
         meshes = [
             self.build_device_mesh(),  # 1D mesh
