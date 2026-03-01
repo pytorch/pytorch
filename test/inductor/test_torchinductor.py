@@ -5141,6 +5141,34 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_conv2d_backward_channels_last_input(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/142344
+        # grad_input should preserve input's channels_last format when grad_output is contiguous
+        def fn(grad_output, inp, weight):
+            return torch.ops.aten.convolution_backward.default(
+                grad_output,
+                inp,
+                weight,
+                [0],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, False],
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 64, 8, 8]),
+                torch.randn([2, 32, 8, 8]).to(memory_format=torch.channels_last),
+                torch.randn([64, 32, 3, 3]),
+            ),
+            check_lowp=False,
+        )
+
     @parametrize(
         "use_block_ptr",
         [subtest(False), subtest(True, decorators=[skip_if_not_triton])],

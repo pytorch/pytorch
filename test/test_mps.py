@@ -9215,6 +9215,37 @@ class TestNNMPS(NNTestCase):
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/142344
+    # grad_input should preserve input's channels_last format even when grad_output is contiguous
+    def test_conv2d_backward_channels_last_input(self):
+        grad_out = torch.randn(2, 64, 8, 8, device='mps')
+        x = torch.randn(2, 32, 8, 8, device='mps').to(memory_format=torch.channels_last)
+        w = torch.randn(64, 32, 3, 3, device='mps')
+        result = torch.ops.aten.convolution_backward.default(
+            grad_out, x, w, [0], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [True, True, False]
+        )
+        self.assertTrue(result[0].is_contiguous(memory_format=torch.channels_last))
+
+    # Contiguous input should produce contiguous grad_input
+    def test_conv2d_backward_contiguous_input_stays_contiguous(self):
+        grad_out = torch.randn(2, 64, 8, 8, device='mps')
+        x = torch.randn(2, 32, 8, 8, device='mps')
+        w = torch.randn(64, 32, 3, 3, device='mps')
+        result = torch.ops.aten.convolution_backward.default(
+            grad_out, x, w, [0], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [True, True, False]
+        )
+        self.assertTrue(result[0].is_contiguous())
+
+    # Both grad_output and input are channels_last
+    def test_conv2d_backward_both_channels_last(self):
+        grad_out = torch.randn(2, 64, 8, 8, device='mps').to(memory_format=torch.channels_last)
+        x = torch.randn(2, 32, 8, 8, device='mps').to(memory_format=torch.channels_last)
+        w = torch.randn(64, 32, 3, 3, device='mps')
+        result = torch.ops.aten.convolution_backward.default(
+            grad_out, x, w, [0], [1, 1], [1, 1], [1, 1], False, [0, 0], 1, [True, True, False]
+        )
+        self.assertTrue(result[0].is_contiguous(memory_format=torch.channels_last))
+
     # Regression test for https://github.com/pytorch/pytorch/issues/141471
     def test_conv3d_channels_last_3d(self):
         m_cpu = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0), device="cpu")
