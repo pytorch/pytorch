@@ -4122,6 +4122,105 @@ print(ret)
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
+class TestResizeStorageHint(TestCase):
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not use the caching allocator hint path",
+    )
+    def test_resize_storage_hint_basic(self):
+        t = torch.randn(1024, device="cuda")
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+
+        t.untyped_storage().resize_(0)
+        self.assertEqual(t.untyped_storage().nbytes(), 0)
+
+        t.untyped_storage().resize_(original_size)
+        self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not use the caching allocator hint path",
+    )
+    def test_resize_storage_hint_consumed(self):
+        t = torch.randn(1024, device="cuda")
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+
+        t.untyped_storage().resize_(0)
+
+        # Allocate another tensor that may consume the freed block
+        blocker = torch.randn(1024, device="cuda")
+
+        t.untyped_storage().resize_(original_size)
+        # The hint may or may not succeed depending on whether blocker
+        # consumed the exact block -- either way, no crash.
+        self.assertEqual(t.untyped_storage().nbytes(), original_size)
+        del blocker
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not use the caching allocator hint path",
+    )
+    def test_resize_storage_hint_different_size(self):
+        t = torch.randn(1024, device="cuda")
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+
+        t.untyped_storage().resize_(0)
+
+        # Resize to a different size -- hint should be discarded
+        new_size = original_size * 2
+        t.untyped_storage().resize_(new_size)
+        self.assertEqual(t.untyped_storage().nbytes(), new_size)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not use the caching allocator hint path",
+    )
+    def test_resize_storage_hint_inductor_path(self):
+        t = torch.randn(1024, device="cuda")
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+
+        torch.ops.inductor.resize_storage_bytes_(t, 0)
+        self.assertEqual(t.untyped_storage().nbytes(), 0)
+
+        torch.ops.inductor.resize_storage_bytes_(t, original_size)
+        self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not use the caching allocator hint path",
+    )
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    def test_resize_storage_hint_expandable_segments(self):
+        torch.cuda.empty_cache()
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+        try:
+            t = torch.randn(1024, device="cuda")
+            original_ptr = t.untyped_storage().data_ptr()
+            original_size = t.untyped_storage().nbytes()
+
+            t.untyped_storage().resize_(0)
+            self.assertEqual(t.untyped_storage().nbytes(), 0)
+
+            t.untyped_storage().resize_(original_size)
+            # With expandable segments the hint is best-effort; the block
+            # may have been merged or unmapped.  Just verify no crash and
+            # correct size.
+            self.assertEqual(t.untyped_storage().nbytes(), original_size)
+        finally:
+            del t
+            torch.cuda.empty_cache()
+            torch.cuda.memory._set_allocator_settings("")
+
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"

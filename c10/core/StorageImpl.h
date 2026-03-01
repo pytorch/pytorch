@@ -236,6 +236,21 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     resizable_ = resizable;
   }
 
+  void* preferred_data_ptr() const {
+    return preferred_data_ptr_;
+  }
+  size_t preferred_data_ptr_size() const {
+    return preferred_data_ptr_size_;
+  }
+  void set_preferred_data_ptr(void* ptr, size_t size) {
+    preferred_data_ptr_ = ptr;
+    preferred_data_ptr_size_ = size;
+  }
+  void clear_preferred_data_ptr() {
+    preferred_data_ptr_ = nullptr;
+    preferred_data_ptr_size_ = 0;
+  }
+
   /**
    * Can only be called when use_count is 1
    */
@@ -352,6 +367,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // If we warn when mutable_data_ptr() or mutable_data() is called.
   bool warn_deprecated_on_mutable_data_ptr_ = false;
   Allocator* allocator_;
+  void* preferred_data_ptr_ = nullptr;
+  size_t preferred_data_ptr_size_ = 0;
   impl::PyObjectSlot pyobj_slot_;
   std::unique_ptr<StorageExtraMeta> extra_meta_ = nullptr;
 };

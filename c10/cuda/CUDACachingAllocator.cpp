@@ -1487,7 +1487,10 @@ class DeviceCachingAllocator {
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
 
-  Block* malloc(size_t orig_size, cudaStream_t stream) {
+  Block* malloc(
+      size_t orig_size,
+      cudaStream_t stream,
+      void* hint = nullptr) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -1530,9 +1533,9 @@ class DeviceCachingAllocator {
     params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
-    bool block_found =
+    bool block_found = (hint && get_free_block_by_hint(hint, params))
         // Search pool
-        get_free_block(params)
+        || get_free_block(params)
         // Trigger callbacks and retry search
         || (trigger_free_memory_callbacks(params) && get_free_block(params));
 
@@ -3287,6 +3290,20 @@ class DeviceCachingAllocator {
     return true;
   }
 
+  bool get_free_block_by_hint(void* hint, AllocParams& params) {
+    BlockPool& pool = *params.pool;
+    Block search_key(params.device(), params.stream(), 0);
+    auto it = pool.blocks.lower_bound(&search_key);
+    for (; it != pool.blocks.end() && (*it)->stream == params.stream(); ++it) {
+      if ((*it)->ptr == hint && (*it)->size >= params.size()) {
+        params.block = *it;
+        pool.blocks.erase(it);
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool trigger_free_memory_callbacks(AllocParams& p) {
     bool freed_memory = false;
     for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
@@ -4066,6 +4083,27 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
   }
 
+  void mallocWithHint(
+      void** devPtr,
+      c10::DeviceIndex device,
+      size_t size,
+      cudaStream_t stream,
+      void* hint) {
+    TORCH_INTERNAL_ASSERT(
+        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
+        "Allocator not initialized for device ",
+        device,
+        ": did you call init?");
+    Block* block = device_allocator[device]->malloc(size, stream, hint);
+    add_allocated_block(block);
+    *devPtr = block->ptr;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_memory_allocation(
+          c10::kCUDA, reinterpret_cast<uintptr_t>(*devPtr));
+    }
+  }
+
   void free(void* ptr) {
     if (!ptr) {
       return;
@@ -4370,6 +4408,31 @@ class NativeCachingAllocator : public CUDAAllocator {
       if (size != 0) {
         this->malloc(&devPtr, device, size, stream);
       }
+    }
+
+    if (size && TORCH_SDT_IS_ENABLED(malloc)) {
+      TORCH_SDT_WITH_SEMAPHORE(malloc, devPtr, device, size, stream.id());
+    }
+
+    return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
+  }
+  DataPtr allocateWithHint(size_t size, void* hint) override {
+    constexpr size_t one_exa_bytes = 1152921504606846976ULL;
+    TORCH_CHECK_WITH(
+        OutOfMemoryError,
+        size < one_exa_bytes,
+        "CUDA out of memory. Tried to allocate more than 1EB memory.");
+    c10::DeviceIndex device = 0;
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    void* devPtr = nullptr;
+    void (*deleteFunc)(void*) = &local_raw_delete;
+    CUDAStream stream = cuda::getCurrentCUDAStream(device);
+
+    if (forceUncachedAllocator() || !isEnabled()) {
+      return allocate(size);
+    }
+    if (size != 0) {
+      this->mallocWithHint(&devPtr, device, size, stream, hint);
     }
 
     if (size && TORCH_SDT_IS_ENABLED(malloc)) {
