@@ -512,6 +512,8 @@ class FSDPParamGroup:
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: list[FSDPParam] = []
             unsharded_grads: list[torch.Tensor] = []
+            fsdp_params_without_grad: list[FSDPParam] = []
+
             for fsdp_param in self.fsdp_params:
                 if not hasattr(fsdp_param, "_unsharded_param"):
                     continue
@@ -525,6 +527,22 @@ class FSDPParamGroup:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
+                else:
+                    fsdp_params_without_grad.append(fsdp_param)
+
+            # For parameters without gradients, add zero gradients
+            # with dtype matching the existing gradients to ensure uniform dtype
+            if fsdp_params_without_grad and unsharded_grads:
+                grad_dtype = unsharded_grads[0].dtype
+                for fsdp_param in fsdp_params_without_grad:
+                    fsdp_params_with_grad.append(fsdp_param)
+                    zero_grad = torch.zeros_like(
+                        fsdp_param.unsharded_param,
+                        dtype=grad_dtype,
+                        device=fsdp_param.unsharded_param.device,
+                    )
+                    unsharded_grads.append(zero_grad)
+
             if self.reshard_after_backward:
                 self.reshard()
         if len(fsdp_params_with_grad) == 0:
