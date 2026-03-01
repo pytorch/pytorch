@@ -21,7 +21,7 @@ from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
 
 import torch.distributed as dist
-from torch.distributed import HashStore, Store
+from torch.distributed import HashStore, PrefixStore, Store
 from torch.distributed.elastic.rendezvous import (
     RendezvousClosedError,
     RendezvousError,
@@ -1829,7 +1829,7 @@ class IntegrationTest(TestCase):
             def set(self, key, value):
                 pass
 
-        prefix_store = CustomPrefixStore(spec=dist.PrefixStore)
+        prefix_store = CustomPrefixStore(spec=PrefixStore)
         prefix_store_class_mock.return_value = prefix_store
         tcp_store = Mock(spec=dist.TCPStore)
         original_addr = "original_addr"
