@@ -805,8 +805,8 @@ def _call_while_loop(
         source_target=self.value,
         set_subgraph_inputs="flatten_manual",
         should_flatten_outputs=True,
-        supports_input_mutation=False,
-        supports_aliasing=False,
+        supports_input_mutation=self.supports_input_mutation,
+        supports_aliasing=self.supports_aliasing,
         remove_consts_from_outputs=False,
     )
     validate_subgraph_output_types(body_r)
@@ -2481,8 +2481,8 @@ def validate_subgraph_output_types(
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.while_loop"
     _ALLOW_FALLBACK_TO_EAGER = False
-    supports_input_mutation = False
-    supports_aliasing = False
+    supports_input_mutation = True
+    supports_aliasing = True
 
     def _call_function(
         self,
