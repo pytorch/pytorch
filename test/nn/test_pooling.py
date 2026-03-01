@@ -1114,6 +1114,80 @@ torch.cuda.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
+    @expectedFailureMPS  # TODO: fixme
+    @onlyNativeDeviceTypes
+    @gcIfJetson
+    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    def test_avg_pool3d_nhwc(self, device, dtype):
+        def helper(
+            n,
+            c,
+            d,
+            h,
+            w,
+            kernel_size,
+            stride=None,
+            count_include_pad=True,
+            divisor_override=None,
+            padding=0,
+        ):
+            if stride is None:
+                stride = kernel_size
+            input = torch.randn(n, c, d, h, w, dtype=dtype, device=device)
+            input = input.contiguous(
+                memory_format=torch.channels_last_3d
+            ).requires_grad_()
+            # Calculate output size considering padding
+            out_d = (d + 2 * padding - kernel_size) // stride + 1
+            out_h = (h + 2 * padding - kernel_size) // stride + 1
+            out_w = (w + 2 * padding - kernel_size) // stride + 1
+            grad = torch.randn(
+                n,
+                c,
+                out_d,
+                out_h,
+                out_w,
+                dtype=dtype,
+                device=device,
+            )
+            pool = torch.nn.AvgPool3d(
+                kernel_size,
+                stride=stride,
+                padding=padding,
+                count_include_pad=count_include_pad,
+                divisor_override=divisor_override,
+            ).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.AvgPool3d(
+                kernel_size,
+                stride=stride,
+                padding=padding,
+                count_include_pad=count_include_pad,
+                divisor_override=divisor_override,
+            ).to(device)
+
+            out = pool(input)
+            out.backward(grad)
+            ref_out = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        helper(4, 8, 8, 8, 8, 3)
+        helper(4, 8, 8, 8, 8, 3, count_include_pad=False, padding=1)
+        helper(4, 8, 8, 8, 8, 3, count_include_pad=False, padding=2, stride=2)
+        helper(4, 8, 8, 8, 8, 3, divisor_override=42)
+        helper(4, 8, 8, 8, 8, 7)
+        helper(4, 8, 7, 7, 7, 3, stride=1)
+        helper(4, 8, 7, 7, 7, 3, padding=2, stride=1)
+        helper(2, 16, 10, 10, 10, 3, stride=2)
+
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_max_pool1d_corner_cases(self, device, dtype):
