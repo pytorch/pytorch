@@ -359,6 +359,7 @@ test_python_smoke_b200() {
       inductor/test_flex_flash \
       inductor/test_torchinductor \
       inductor/test_nv_universal_gemm \
+      inductor/test_fused_attention \
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running
   assert_git_not_dirty

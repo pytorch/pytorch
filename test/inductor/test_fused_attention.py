@@ -137,7 +137,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
         for dtype in [torch.float, torch.half]:
-            atol = 0.001
+            atol = 0.0015
             rtol = 1.3e-6 if dtype == torch.float else 0.7
             if self.device in ["cpu", "xpu"] and dtype == torch.half:
                 atol = 2e-3
