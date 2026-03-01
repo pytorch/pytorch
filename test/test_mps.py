@@ -9204,6 +9204,19 @@ class TestNNMPS(NNTestCase):
         # This used to crash with MPSNDArrayConvolutionA14.mm:4352: failed assertion
         y2.sum().backward()
 
+    def test_conv2d_large_out_channels(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/142836
+        weight_cpu = torch.randn(10, 10, 1, 65536, device="cpu")
+        weight_mps = weight_cpu.detach().clone().to("mps")
+
+        x_cpu = torch.randn(1, 10, 1, 65536, device="cpu")
+        x_mps = x_cpu.detach().clone().to("mps")
+
+        y_cpu = F.conv2d(x_cpu, weight_cpu)
+        y_mps = F.conv2d(x_mps, weight_mps)
+
+        self.assertEqual(y_cpu, y_mps, atol=1e-5, rtol=1e-4)
+
     def test_conv3d_backward_collision(self):
         # Conv3D is only available from MacOS 13.2 onwards
         x = torch.rand(1, 1, 10, 10, 20, device="mps", requires_grad=True)
