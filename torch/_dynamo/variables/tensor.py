@@ -388,9 +388,7 @@ class TensorVariable(VariableTracker):
                 self, name, source=attr_source, py_type=type(real_value)
             )
 
-        install_guard(
-            self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
-        )
+        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -515,9 +513,7 @@ class TensorVariable(VariableTracker):
 
         if self.source:
             install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
 
         return VariableTracker.build(tx, ret_val)

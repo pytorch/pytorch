@@ -1881,14 +1881,20 @@ class GuardBuilder(GuardBuilderBase):
         new_guard.create(self)
 
     # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
-    def HASATTR(self, guard: Guard, attr: str | None = None) -> None:
-        assert attr is not None
+    def HASATTR(self, guard: Guard) -> None:
         source = guard.originating_source
         if isinstance(source, NNModuleSource):
             source = source.base
+        if isinstance(source, CodeSource):
+            # No need to guard that a function has a __code__ attribute
+            return
+        assert isinstance(source, AttrSource), f"invalid source {guard.name}"
+        base_source = source.base
+        base = base_source.name
+        attr = source.member
 
-        ref = self.arg_ref(guard)
-        val = hasattr(self.get(guard), attr)
+        ref = self.arg_ref(base)
+        val = hasattr(self.get(base_source), attr)
         code = None
         if val:
             code = f"hasattr({ref}, {attr!r})"
@@ -1899,28 +1905,27 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         self._set_guard_export_info(
-            guard, [code], provided_guarded_object=self.get(guard)
+            guard, [code], provided_guarded_object=self.get(base_source)
         )
 
-        base_manager = self.get_guard_manager_from_source(source)
+        base_manager = self.get_guard_manager_from_source(base_source)
         if val:
             # Just install a getattr manager. GetAttrGuardAccessor itself
             # acts as hasattr guard.
-            attr_source = AttrSource(source, attr)
-            example_value = self.get(attr_source)
-            base_example_value = self.get(guard)
-            guard_manager_enum = self.get_guard_manager_type(attr_source, example_value)
+            example_value = self.get(source)
+            base_example_value = self.get(base_source)
+            guard_manager_enum = self.get_guard_manager_type(source, example_value)
 
             # if the base value is nn.Module, check if we can speedup the
             # guard by going through __dict__ attrs.
             if should_optimize_getattr_on_nn_module(base_example_value):
                 self.getattr_on_nn_module(
-                    attr_source,
+                    source,
                     base_manager,
                     base_example_value,
                     example_value,
+                    base,
                     source.name,
-                    attr_source.name,
                     guard_manager_enum,
                 )
             else:
@@ -2433,8 +2438,7 @@ class GuardBuilder(GuardBuilderBase):
         val = self.get(guard)
         # Strictly only want user-defined functions
         if type(val) is types.FunctionType and hasattr(val, "__code__"):
-            # No explicit HASATTR guard needed for __code__ — the getattr
-            # accessor installed by CONSTANT_MATCH implicitly guards hasattr.
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)  # type: ignore[arg-type]
             self._guard_on_attribute(guard, "__code__", GuardBuilder.CONSTANT_MATCH)  # type: ignore[arg-type]
         else:
             self.FUNCTION_MATCH(guard)
