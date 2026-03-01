@@ -9679,6 +9679,21 @@ class TestLinalgMPS(TestCaseMPS):
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertLess(mean_err, 0.05)
 
+    def test_solve_triangular_device_check(self):
+        """Test that solve_triangular properly checks for device mismatch.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/142048
+        """
+        a = torch.tensor(
+            [[4, 0, 0], [1, 3, 0], [2, 1, 2]], device="mps", dtype=torch.float32
+        )
+        b = torch.tensor([[2, 3], [4, 5], [6, 7]], device="cpu", dtype=torch.float32)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected all tensors to be on the same device"
+        ):
+            torch.linalg.solve_triangular(a, b, upper=False)
+
 
 class TestSDPA(TestCaseMPS):
     def _compare_tensors(self, y, ref, tol=0.01):
