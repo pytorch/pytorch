@@ -771,14 +771,16 @@ static void _wrap_outputs(
     } else {
       if (is_executable) {
         // If one of the grad outputs is undefined, a correctly-shaped zeros
-        // should be used instead. To construct these for NJT, zeros_like() must
-        // be used until we have factory function support.
+        // should be used instead. For NJT and tensor subclasses that set
+        // python_custom_zeros_like (e.g. DTensor), zeros_like() must be used
+        // to preserve the tensor type.
         bool is_differentiable =
             (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
                  0 &&
              isDifferentiableType(wrapped_output->scalar_type()));
-        bool use_zeros_like =
-            is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
+        bool use_zeros_like = is_differentiable && num_outputs > 1 &&
+            (wrapped_output->is_nested() ||
+             wrapped_output->unsafeGetTensorImpl()->python_custom_zeros_like());
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));

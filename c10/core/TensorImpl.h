@@ -2871,6 +2871,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_layout_policy();
   }
 
+  void set_python_custom_zeros_like(bool custom_zeros_like) {
+    python_custom_zeros_like_ = custom_zeros_like;
+  }
+
+  bool python_custom_zeros_like() const {
+    return python_custom_zeros_like_;
+  }
+
  protected:
   void refresh_sizes_strides_policy() {
     if (has_symbolic_sizes_strides_) {
@@ -2971,6 +2979,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         static_cast<uint8_t>(SizesStridesPolicy::Default);
     python_custom_device_ = false;
     python_custom_layout_ = false;
+    python_custom_zeros_like_ = false;
     custom_device_ = false;
     custom_layout_ = false;
     device_policy_ = false;
@@ -3067,6 +3076,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Call into Python for layout()
   bool python_custom_layout_ : 1;
+
+  // subclasses like DTensor that need zeros_like() to be used
+  // when materializing undefined gradients, to preserve the subclass type.
+  bool python_custom_zeros_like_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but

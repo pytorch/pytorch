@@ -2047,6 +2047,60 @@ class TestDTensorCompileE2E(DTensorTestBase):
             for dt_chunk, tensor_chunk in zip(result, expected):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_compile_dtensor_unused_output_backward(self):
+        # test for https://github.com/pytorch/pytorch/issues/173123
+        mesh = self.build_device_mesh()
+
+        class MultiOutputOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x * 2, y * 3
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 * 2, grad2 * 3
+
+        w = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type),
+            mesh,
+            [Replicate()],
+            run_check=False,
+        )
+
+        def fn(x, y):
+            h1, h2 = x @ w, y @ w
+            out1, out2 = MultiOutputOp.apply(h1, h2)
+            return out1.sum()
+
+        x_local = torch.randn(4, 4, device=self.device_type)
+        y_local = torch.randn(4, 4, device=self.device_type)
+
+        x_ref = DTensor.from_local(
+            x_local.clone().requires_grad_(True), mesh, [Replicate()], run_check=False
+        )
+        y_ref = DTensor.from_local(
+            y_local.clone().requires_grad_(True), mesh, [Replicate()], run_check=False
+        )
+        ref = fn(x_ref, y_ref)
+
+        x = DTensor.from_local(
+            x_local.clone().requires_grad_(True), mesh, [Replicate()], run_check=False
+        )
+        y = DTensor.from_local(
+            y_local.clone().requires_grad_(True), mesh, [Replicate()], run_check=False
+        )
+        res = torch.compile(fn)(x, y)
+
+        self.assertEqual(res, ref)
+
+        ref.backward()
+        res.backward()
+
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(y.grad, y_ref.grad)
+
 
 if __name__ == "__main__":
     run_tests()
