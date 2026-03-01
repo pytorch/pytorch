@@ -22,7 +22,7 @@ from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, CompileId
 from torch._dynamo.package import CompilePackage
-from torch._dynamo.source import LocalSource
+from torch._dynamo.source import DefaultsSource, LocalSource
 from torch._dynamo.symbolic_convert import (
     ExceptionStack,
     InstructionTranslator,
@@ -1887,6 +1887,24 @@ if torch.distributed.is_available() and not IS_MACOS:
             inputs = distribute_tensor(torch.randn(3, 2), mesh, [Replicate()])
             ref, loaded = self._test_serialization("TENSOR_MATCH", m, inputs)
             self._test_check_fn(ref, loaded, {"self": m, "x": inputs}, True)
+
+
+class TestDefaultsSourcePickle(torch._inductor.test_case.TestCase):
+    """Regression tests for DefaultsSource pickle serialization (#174955)."""
+
+    def test_defaults_source_pickle_roundtrip(self):
+        ds = DefaultsSource(LocalSource("y"), True)
+        restored = pickle.loads(pickle.dumps(ds))
+        self.assertEqual(restored, ds)
+        self.assertEqual(restored.field, ds.field)
+        self.assertEqual(restored._name, ds._name)
+
+    def test_defaults_source_pickle_roundtrip_kw(self):
+        ds = DefaultsSource(LocalSource("fn"), "param_name", is_kw=True)
+        restored = pickle.loads(pickle.dumps(ds))
+        self.assertEqual(restored, ds)
+        self.assertTrue(restored.is_kw)
+        self.assertEqual(restored.field, "__kwdefaults__")
 
 
 if __name__ == "__main__":
