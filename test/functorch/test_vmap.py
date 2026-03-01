@@ -43,7 +43,12 @@ from functorch.experimental import chunk_vmap
 from torch import Tensor
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
-from torch._functorch.vmap import restore_vmap
+from torch._functorch.vmap import (
+    _is_vmappable,
+    _vmappable_cls_cache,
+    register_vmappable_cls,
+    restore_vmap,
+)
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_cuda import (
@@ -1423,6 +1428,233 @@ def allowVmapFallbackUsage(fn):
 #
 # NB: TestVmapBase is a nested class. This prevents test runners from picking
 # it up and running it.
+
+
+class _SimpleTensorContainer:
+    """Minimal container holding named tensors; implements the vmappable protocol.
+
+    Registered as a pytree node so that tree_flatten would normally recurse into
+    it, but vmap should treat it as a leaf via _is_vmappable.
+    """
+
+    def __init__(self, tensors: dict[str, Tensor], batch_size: torch.Size):
+        self.tensors = tensors
+        self.batch_size = batch_size
+
+    def dim(self) -> int:
+        return len(self.batch_size)
+
+    def size(self, dim: int) -> int:
+        return self.batch_size[dim]
+
+    def _add_batch_dim(self, in_dim: int, vmap_level: int) -> "_SimpleTensorContainer":
+        from torch._functorch.vmap import _add_batch_dim
+
+        new_tensors = {
+            k: _add_batch_dim(v, in_dim, vmap_level) for k, v in self.tensors.items()
+        }
+        new_batch_size = torch.Size(
+            b for i, b in enumerate(self.batch_size) if i != in_dim
+        )
+        return _SimpleTensorContainer(new_tensors, new_batch_size)
+
+    def _maybe_remove_batch_dim(
+        self,
+        func_name: str,
+        vmap_level: int,
+        batch_size: int,
+        out_dim: int,
+    ) -> "_SimpleTensorContainer":
+        from torch._functorch.vmap import _maybe_remove_batch_dim
+
+        new_tensors = {
+            k: _maybe_remove_batch_dim(func_name, v, vmap_level, batch_size, out_dim)
+            for k, v in self.tensors.items()
+        }
+        new_bs = list(self.batch_size)
+        new_bs.insert(out_dim, batch_size)
+        return _SimpleTensorContainer(new_tensors, torch.Size(new_bs))
+
+    def _unwrap_batched(
+        self, level: int
+    ) -> tuple["_SimpleTensorContainer", int | None]:
+        results = {
+            k: torch._C._functorch._unwrap_batched(v, level)
+            for k, v in self.tensors.items()
+        }
+        new_tensors = {k: v[0] for k, v in results.items()}
+        bdims = [v[1] for v in results.values()]
+        bdim = bdims[0] if bdims else None
+        if bdim is not None:
+            new_bs = list(self.batch_size)
+            new_bs.insert(bdim, new_tensors[next(iter(new_tensors))].size(bdim))
+            new_batch_size = torch.Size(new_bs)
+        else:
+            new_batch_size = self.batch_size
+        return _SimpleTensorContainer(new_tensors, new_batch_size), bdim
+
+
+pytree.register_pytree_node(
+    _SimpleTensorContainer,
+    flatten_fn=lambda x: (
+        list(x.tensors.values()),
+        (list(x.tensors.keys()), x.batch_size),
+    ),
+    unflatten_fn=lambda values, ctx: _SimpleTensorContainer(
+        dict(zip(ctx[0], values)), ctx[1]
+    ),
+)
+
+
+@markDynamoStrictTest
+class TestVmappableProtocol(TestCase):
+    def _make_container(self, B, inner=3):
+        return _SimpleTensorContainer(
+            {"x": torch.randn(B, inner), "y": torch.randn(B, inner + 1)},
+            torch.Size([B, inner]),
+        )
+
+    def test_is_vmappable_detection(self):
+        _vmappable_cls_cache.clear()
+        tc = self._make_container(3)
+        self.assertTrue(_is_vmappable(tc))
+        self.assertFalse(_is_vmappable(torch.randn(3)))
+        self.assertFalse(_is_vmappable(42))
+
+    def test_is_vmappable_caching(self):
+        _vmappable_cls_cache.clear()
+        tc = self._make_container(3)
+        _is_vmappable(tc)
+        self.assertIn(_SimpleTensorContainer, _vmappable_cls_cache)
+        self.assertTrue(_vmappable_cls_cache[_SimpleTensorContainer])
+
+    def test_register_vmappable_cls(self):
+        _vmappable_cls_cache.clear()
+
+        class _Dummy:
+            def _add_batch_dim(self, in_dim, vmap_level):
+                pass
+
+        register_vmappable_cls(_Dummy)
+        self.assertTrue(_vmappable_cls_cache[_Dummy])
+
+    def test_is_vmappable_subclass(self):
+        _vmappable_cls_cache.clear()
+
+        class _SubContainer(_SimpleTensorContainer):
+            pass
+
+        sub = _SubContainer({"a": torch.randn(3)}, torch.Size([3]))
+        self.assertTrue(_is_vmappable(sub))
+
+    def test_vmap_basic(self):
+        B = 5
+        tc = self._make_container(B)
+
+        result = vmap(lambda c: c.tensors["x"] + 1)(tc)
+        self.assertEqual(result, tc.tensors["x"] + 1)
+
+    def test_vmap_mixed_inputs(self):
+        B = 5
+        tc = _SimpleTensorContainer(
+            {"x": torch.randn(B, 3)}, torch.Size([B, 3])
+        )
+        extra = torch.randn(B, 3)
+
+        result = vmap(lambda c, t: c.tensors["x"] + t)(tc, extra)
+        self.assertEqual(result, tc.tensors["x"] + extra)
+
+    def test_vmap_container_output(self):
+        B = 5
+        tc = _SimpleTensorContainer(
+            {"x": torch.randn(B, 3)}, torch.Size([B, 3])
+        )
+
+        def fn(c):
+            new_tensors = {k: v * 2 for k, v in c.tensors.items()}
+            return _SimpleTensorContainer(new_tensors, c.batch_size)
+
+        result = vmap(fn)(tc)
+        self.assertIsInstance(result, _SimpleTensorContainer)
+        self.assertEqual(result.tensors["x"], tc.tensors["x"] * 2)
+
+    def test_vmap_in_dims_none(self):
+        B = 5
+        tc = _SimpleTensorContainer({"x": torch.randn(3)}, torch.Size([3]))
+        batched = torch.randn(B, 3)
+
+        result = vmap(lambda c, t: c.tensors["x"] + t, in_dims=(None, 0))(tc, batched)
+        self.assertEqual(result, tc.tensors["x"].unsqueeze(0) + batched)
+
+    def test_vmap_nested(self):
+        B1, B2 = 3, 4
+        tc = _SimpleTensorContainer(
+            {"x": torch.randn(B1, B2, 5)}, torch.Size([B1, B2, 5])
+        )
+
+        result = vmap(vmap(lambda c: c.tensors["x"].sum()))(tc)
+        expected = tc.tensors["x"].sum(-1)
+        self.assertEqual(result, expected)
+
+
+# Pre-register for compile tests (must be at module level, before tracing)
+register_vmappable_cls(_SimpleTensorContainer)
+
+
+class TestVmappableCompile(TestCase):
+    def setUp(self):
+        import torch._dynamo
+
+        torch._dynamo.reset()
+
+    def tearDown(self):
+        import torch._dynamo
+
+        torch._dynamo.reset()
+
+    def test_vmap_vmappable_no_recompile_registered(self):
+        import torch._dynamo.testing
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def fn(container):
+            return container.tensors["x"] + 1
+
+        compiled_fn = torch.compile(vmap(fn), backend=cnt)
+
+        tc1 = _SimpleTensorContainer(
+            {"x": torch.randn(5, 3)}, torch.Size([5, 3])
+        )
+        compiled_fn(tc1)
+        self.assertEqual(cnt.frame_count, 1)
+
+        tc2 = _SimpleTensorContainer(
+            {"x": torch.randn(5, 3)}, torch.Size([5, 3])
+        )
+        compiled_fn(tc2)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_vmap_vmappable_no_recompile_different_values(self):
+        import torch._dynamo.testing
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def fn(container):
+            return container.tensors["x"].sum()
+
+        compiled_fn = torch.compile(vmap(fn), backend=cnt)
+
+        tc1 = _SimpleTensorContainer(
+            {"x": torch.randn(4, 3)}, torch.Size([4, 3])
+        )
+        compiled_fn(tc1)
+        self.assertEqual(cnt.frame_count, 1)
+
+        tc2 = _SimpleTensorContainer(
+            {"x": torch.randn(4, 3)}, torch.Size([4, 3])
+        )
+        compiled_fn(tc2)
+        self.assertEqual(cnt.frame_count, 1)
 
 
 class Namespace:

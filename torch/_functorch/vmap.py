@@ -43,6 +43,38 @@ _R = TypeVar("_R")
 in_dims_t = int | tuple[Any, ...]
 out_dims_t = int | tuple[int, ...] | None
 
+# Cache mapping type -> bool for whether it supports the vmappable protocol.
+# Pre-populated via register_vmappable_cls, lazily filled via hasattr fallback.
+_vmappable_cls_cache: dict[type, bool] = {}
+
+
+def register_vmappable_cls(cls: type) -> None:
+    """Register a class as vmap-compatible.
+
+    Pre-populating the cache avoids dynamic ``hasattr`` checks at runtime, which
+    is important for ``torch.compile`` (no guard breaks from first-time class
+    encounters).
+
+    The class must implement:
+      - ``_add_batch_dim(self, in_dim: int, vmap_level: int) -> Self``
+      - ``_maybe_remove_batch_dim(self, func_name: str, vmap_level: int, batch_size: int, out_dim: int) -> Self``
+      - ``dim(self) -> int``
+      - ``size(self, dim: int) -> int``
+    """
+    _vmappable_cls_cache[cls] = True
+
+
+def _is_vmappable(obj: Any) -> bool:
+    if isinstance(obj, torch.Tensor):
+        return False
+    cls = type(obj)
+    if cls in _vmappable_cls_cache:
+        return True
+    if hasattr(cls, "_add_batch_dim"):
+        _vmappable_cls_cache[cls] = True
+        return True
+    return False
+
 
 def doesnt_support_saved_tensors_hooks(f: Callable[_P, _R]) -> Callable[_P, _R]:
     message = (
@@ -115,7 +147,7 @@ def _process_batched_inputs(
             f"The latter is unsupported."
         )
 
-    flat_args, args_spec = tree_flatten(args)
+    flat_args, args_spec = tree_flatten(args, is_leaf=_is_vmappable)
     flat_in_dims = _broadcast_to_and_flatten(in_dims, args_spec)
     if flat_in_dims is None:
         raise ValueError(
@@ -132,7 +164,7 @@ def _process_batched_inputs(
                 f"Got in_dim={in_dim} for an input but in_dim must be either "
                 f"an integer dimension or None."
             )
-        if isinstance(in_dim, int) and not isinstance(arg, Tensor):
+        if isinstance(in_dim, int) and not isinstance(arg, Tensor) and not _is_vmappable(arg):
             raise ValueError(
                 f"vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): "
                 f"Got in_dim={in_dim} for an input but the input is of type "
@@ -170,7 +202,13 @@ def _create_batched_inputs(
 ) -> tuple[Any, ...]:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [
-        arg if in_dim is None else _add_batch_dim(arg, in_dim, vmap_level)
+        arg
+        if in_dim is None
+        else (
+            arg._add_batch_dim(in_dim=in_dim, vmap_level=vmap_level)
+            if _is_vmappable(arg)
+            else _add_batch_dim(arg, in_dim, vmap_level)
+        )
         for in_dim, arg in zip(flat_in_dims, flat_args)
     ]
     return tree_unflatten(batched_inputs, args_spec)
@@ -182,7 +220,15 @@ def _maybe_remove_batch_dim(
     vmap_level: int,
     batch_size: int,
     out_dim: int | None,
-) -> torch.Tensor:
+) -> Any:
+    if _is_vmappable(batched_output):
+        return batched_output._maybe_remove_batch_dim(
+            name,
+            vmap_level=vmap_level,
+            batch_size=batch_size,
+            out_dim=out_dim,
+        )
+
     if out_dim is None:
         if isinstance(batched_output, torch.Tensor) and is_batchedtensor(
             batched_output
@@ -212,7 +258,9 @@ def _unwrap_batched(
     batch_size: int,
     func: Callable[..., Any],
 ) -> tuple[Any, ...]:
-    flat_batched_outputs, output_spec = tree_flatten(batched_outputs)
+    flat_batched_outputs, output_spec = tree_flatten(
+        batched_outputs, is_leaf=_is_vmappable
+    )
 
     def incompatible_error() -> NoReturn:
         raise ValueError(
@@ -223,7 +271,7 @@ def _unwrap_batched(
         )
 
     flat_out_dims: list[int | None] = []
-    if isinstance(batched_outputs, torch.Tensor):
+    if isinstance(batched_outputs, torch.Tensor) or _is_vmappable(batched_outputs):
         # Some weird edge case requires us to spell out the following
         # see test_out_dims_edge_case
         if isinstance(out_dims, int):
@@ -372,7 +420,7 @@ def _flatten_chunks_output(
     flat_chunks_output: list[list[Any]] = []
     arg_spec: TreeSpec | None = None
     for output in chunks_output_:
-        flat_output, arg_specs = tree_flatten(output)
+        flat_output, arg_specs = tree_flatten(output, is_leaf=_is_vmappable)
         flat_chunks_output.append(flat_output)
         if arg_spec is None:
             arg_spec = arg_specs
@@ -543,7 +591,7 @@ def restore_vmap(
 def wrap_batched(
     args: tuple[Any, ...], bdims: in_dims_t, level: int
 ) -> tuple[Any, ...]:
-    flat_args, spec = tree_flatten(args)
+    flat_args, spec = tree_flatten(args, is_leaf=_is_vmappable)
     flat_bdims = _broadcast_to_and_flatten(bdims, spec)
     if flat_bdims is None:
         raise AssertionError("flat_bdims must not be None")
@@ -552,14 +600,18 @@ def wrap_batched(
 
 
 def unwrap_batched(args: Any, level: int) -> tuple[Any, Any]:
-    flat_args, spec = tree_flatten(args)
+    flat_args, spec = tree_flatten(args, is_leaf=_is_vmappable)
     if len(flat_args) == 0:
         return args, ()
     result = [
         (
-            torch._C._functorch._unwrap_batched(arg, level)
-            if isinstance(arg, torch.Tensor)
-            else (arg, None)
+            arg._unwrap_batched(level)
+            if _is_vmappable(arg)
+            else (
+                torch._C._functorch._unwrap_batched(arg, level)
+                if isinstance(arg, torch.Tensor)
+                else (arg, None)
+            )
         )
         for arg in flat_args
     ]

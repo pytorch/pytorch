@@ -257,6 +257,7 @@ manual_torch_name_rule_map: dict[
     "torch.resize_as_sparse_": SkipFunctionVariable,
     "torch.get_default_device": TorchInGraphFunctionVariable,
     # functorch/vmap
+    "torch._functorch.vmap._is_vmappable": UserFunctionVariable,
     "torch._functorch.vmap._check_int_or_none": UserFunctionVariable,
     "torch._functorch.vmap._check_out_dims_is_int_or_int_pytree": UserFunctionVariable,
     "torch._functorch.vmap._check_randomness_arg": UserFunctionVariable,
