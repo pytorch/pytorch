@@ -23,7 +23,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
     HAS_GPU_AND_TRITON,
-    requires_cuda_with_enough_memory,
+    requires_gpu_with_enough_memory,
 )
 
 
@@ -129,11 +129,9 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
-    # @skipIfXpu
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
-    # @skipIfXpu
     @config.patch("cpp_wrapper", True)
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()
@@ -179,7 +177,6 @@ class TestTritonHeuristics(TestCase):
             "inductor_meta": inductor_meta,
         }
 
-    # @skipIfXpu
     def test_pre_hook_assert(self):
         # assert if any of the configs passed to the CachingAutotuner have pre-hooks
         args = self._get_cos_kernel_caching_autotuner_args()
@@ -273,7 +270,7 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2331")
+    @skipIfXpu(msg="lack _get_exceeding_shared_memory_checker support - xpu-ops: 2331")
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
@@ -336,7 +333,7 @@ class TestArgumentCloneAndRestore(TestCase):
         old_storage_offset = gpu_tensor.storage_offset()
         gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
 
-        peak_mem_before = torch.cuda.max_memory_allocated()
+        peak_mem_before = torch.get_device_module(GPU_TYPE).max_memory_allocated()
         cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
         self.assertTrue(len(cpu_copies) == 1)
 
@@ -363,21 +360,21 @@ class TestArgumentCloneAndRestore(TestCase):
         # Avoid OOM in CI
         self.assertTrue(peak_mem_after < 1e10)
 
-    @requires_cuda_with_enough_memory(1e10)
+    @requires_gpu_with_enough_memory(1e10)
     def test_clone_contiguous_args(self):
         arg = self._create_tensor(pad=0)
         self.assertTrue(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
         self._do_test(arg)
 
-    @requires_cuda_with_enough_memory(1e10)
+    @requires_gpu_with_enough_memory(1e10)
     def test_clone_non_contiguous_args(self):
         arg = self._create_tensor(pad=1)
         self.assertFalse(arg.is_contiguous())
         self.assertTrue(arg.storage_offset() == 0)
         self._do_test(arg)
 
-    @requires_cuda_with_enough_memory(1e10)
+    @requires_gpu_with_enough_memory(1e10)
     def test_clone_args_with_non_zero_offset(self):
         arg = self._create_tensor(pad=1, with_offset=True)
         self.assertFalse(arg.is_contiguous())
