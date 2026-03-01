@@ -2210,6 +2210,36 @@ def forward(self, primals_1, primals_2):
     return (view, add)""",
         )
 
+    def test_output_aliases_intermediate_no_grad_view(self):
+        # View of a differentiable intermediate created under no_grad().
+        # The view inherits requires_grad from the base but has no grad_fn,
+        # so it should not be treated as a differentiable output.
+        def f(a):
+            out = torch.mul(a, 3)
+            with torch.no_grad():
+                out_view = out.view(-1)
+            return out.sum(), out_view
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        compiled_f = aot_function(f, nop)
+
+        ref_loss, ref_view = f(inp)
+        test_loss, test_view = compiled_f(inp)
+        # The differentiable output (sum) participates in backward.
+        self.assertEqual(ref_loss, test_loss)
+        self.assertTrue(test_loss.requires_grad)
+        # The no_grad view still has requires_grad (matching eager) but
+        # does not participate in backward.
+        self.assertEqual(ref_view, test_view)
+        self.assertTrue(test_view.requires_grad)
+
+        ref_loss.backward()
+        ref_grad = inp.grad.clone()
+        inp.grad = None
+        test_loss.backward()
+        test_grad = inp.grad
+        self.assertEqual(ref_grad, test_grad)
+
     def test_output_aliases_intermediate_returned_multiple_times(self):
         def f(a):
             out = torch.mul(a, 3)
