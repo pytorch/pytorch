@@ -404,8 +404,11 @@ class FSDPParam:
             raise AssertionError(
                 f"Expected contiguous tensor with {self.fsdp_placement=}"
             )
-        self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
-        self.sharded_param.requires_grad_(param.requires_grad)
+        self.sharded_param = nn.Parameter(
+            self.to_sharded_dtensor(sharded_param), requires_grad=param.requires_grad
+        )
+        if param.is_leaf and param.requires_grad:
+            self.sharded_param.grad_dtype = param.grad_dtype
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)

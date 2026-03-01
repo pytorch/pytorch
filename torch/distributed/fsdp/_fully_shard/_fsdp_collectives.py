@@ -614,6 +614,12 @@ def foreach_reduce(
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
             )
+            param_grad_dtype = fsdp_param.sharded_param.grad_dtype
+            if (
+                param_grad_dtype is not None
+                and new_sharded_grad.dtype != param_grad_dtype
+            ):
+                new_sharded_grad = new_sharded_grad.to(param_grad_dtype)
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
             if fsdp_param.offload_to_cpu:
                 # Only overlap the D2H copy (copying to pinned memory) if not

@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
@@ -390,6 +391,123 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 ref_model.parameters(), ref_model_compute.parameters()
             ):
                 ref_param_compute.detach().copy_(ref_param)
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_preserved(self):
+        meshes = [init_device_mesh(device_type.type, (self.world_size,))]
+        if self.world_size == 4:  # test HSDP too if enough GPUs
+            shard_size, replicate_size = 2, self.world_size // 2
+            meshes.append(
+                init_device_mesh(
+                    device_type.type,
+                    (replicate_size, shard_size),
+                    mesh_dim_names=("dp_replicate", "dp_shard"),
+                )
+            )
+        self.run_subtests(
+            {
+                "mesh": meshes,
+                "model_dtype": [torch.bfloat16, torch.float32],
+                "grad_dtype": [torch.bfloat16, torch.float32],
+                "param_dtype": [None, torch.bfloat16],
+                "reduce_dtype": [torch.bfloat16, torch.float32],
+            },
+            self._test_grad_dtype_preserved,
+        )
+
+    def _test_grad_dtype_preserved(
+        self,
+        mesh: DeviceMesh,
+        model_dtype: torch.dtype,
+        grad_dtype: torch.dtype,
+        param_dtype: Optional[torch.dtype],
+        reduce_dtype: torch.dtype,
+    ):
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device=device_type, dtype=model_dtype)
+
+        for param in model.parameters():
+            param.grad_dtype = grad_dtype
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        for mlp in model:
+            fully_shard(mlp, mesh=mesh, mp_policy=mp_policy)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+
+        for param in model.parameters():
+            self.assertEqual(param.grad_dtype, grad_dtype)
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp_dtype = param_dtype or model_dtype
+        inp = torch.randn(2, 16, device=device_type, dtype=inp_dtype)
+        model(inp).sum().backward()
+
+        for param in model.parameters():
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(param.grad.dtype, grad_dtype)
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_preserved_grad_acc(self):
+        meshes = [init_device_mesh(device_type.type, (self.world_size,))]
+        if self.world_size == 4:  # test HSDP too if enough GPUs
+            shard_size, replicate_size = 2, self.world_size // 2
+            meshes.append(
+                init_device_mesh(
+                    device_type.type,
+                    (replicate_size, shard_size),
+                    mesh_dim_names=("dp_replicate", "dp_shard"),
+                )
+            )
+        self.run_subtests(
+            {
+                "mesh": meshes,
+                "model_dtype": [torch.bfloat16, torch.float32],
+                "grad_dtype": [torch.bfloat16, torch.float32],
+                "param_dtype": [None, torch.bfloat16],
+                "reduce_dtype": [torch.bfloat16, torch.float32],
+            },
+            self._test_grad_dtype_preserved_grad_acc,
+        )
+
+    def _test_grad_dtype_preserved_grad_acc(
+        self,
+        mesh: DeviceMesh,
+        model_dtype: torch.dtype,
+        grad_dtype: torch.dtype,
+        param_dtype: Optional[torch.dtype],
+        reduce_dtype: torch.dtype,
+    ):
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device=device_type, dtype=model_dtype)
+
+        for param in model.parameters():
+            param.grad_dtype = grad_dtype
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=param_dtype, reduce_dtype=reduce_dtype
+        )
+        for mlp in model:
+            fully_shard(mlp, mesh=mesh, mp_policy=mp_policy)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp_dtype = param_dtype or model_dtype
+        num_microbatches = 3
+        inp = torch.randn(2 * num_microbatches, 16, device=device_type, dtype=inp_dtype)
+        microbatch_inps = inp.chunk(num_microbatches)
+
+        for microbatch_idx in range(num_microbatches):
+            is_last_microbatch = microbatch_idx == num_microbatches - 1
+            model.set_requires_gradient_sync(is_last_microbatch)
+            model(microbatch_inps[microbatch_idx]).sum().backward()
+
+        for param in model.parameters():
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(param.grad.dtype, grad_dtype)
 
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
