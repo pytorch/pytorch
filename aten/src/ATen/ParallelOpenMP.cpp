@@ -14,6 +14,7 @@
 #include <ATen/native/mkldnn/IDeepRegistration.h>
 #endif
 
+#include <c10/util/ParallelGuard.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
@@ -93,7 +94,11 @@ void set_thread_num(int id) {
 
 bool in_parallel_region() {
 #ifdef _OPENMP
-  return omp_in_parallel();
+  // Also check c10::ParallelGuard, which is set by at::parallel_for on all
+  // platforms. omp_in_parallel() suffices on most configurations, but on some
+  // Windows setups with mixed OpenMP runtimes the OpenMP in_parallel query
+  // returns false inside parallel regions, causing nested parallelism.
+  return omp_in_parallel() || c10::ParallelGuard::is_enabled();
 #else
   return false;
 #endif
