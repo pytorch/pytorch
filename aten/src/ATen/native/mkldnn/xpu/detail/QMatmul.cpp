@@ -1,10 +1,10 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/Tensor.h>
+#include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
-#include <c10/core/ScalarType.h>
-
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <c10/core/ScalarType.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 
@@ -339,14 +339,18 @@ struct ScaleSpec {
   dnnl::memory::data_type dtype;
 
   // Helper to compute expected number of elements for scale tensors
-  // arg_type: "src" for SRC (groups pattern {1, X}),
-  // "wei" for WEIGHTS (groups pattern {X, 1})
   int64_t expected_numel(
       int64_t outer_dim,
       int64_t inner_dim,
       const std::string& arg_type) const {
-    if (groups == dnnl::memory::dims{1, 1})
+    // TensorWise: mask=0, groups={} -> single scale
+    if (groups.empty()) {
+      TORCH_INTERNAL_ASSERT(
+          mask == 0,
+          "Empty groups only valid for TensorWise (mask=0), got mask=",
+          mask);
       return 1; // tensorwise scaling
+    }
 
     TORCH_CHECK(
         arg_type == "src" || arg_type == "wei",
@@ -354,29 +358,74 @@ struct ScaleSpec {
         arg_type,
         "'");
 
-    // For rowwise: SRC groups={1, K}, WEI groups={K, 1}
+    int64_t group_m = groups[0];
+    int64_t group_k = groups[1];
+
+    // For RowWise: groups={1, K} for SRC, {K, 1} for WEI
+    // This gives outer_dim scales (M for SRC, N for WEI)
+    if ((group_m == 1 && group_k == inner_dim) ||
+        (group_m == inner_dim && group_k == 1)) {
+      return outer_dim;
+    }
+
+    // For blockwise 1x128: groups = {1, 128} for SRC, {128, 1} for WEI
+    // scale shape: [outer_dim, ceil_div(inner_dim, 128)]
+    if (group_m == 1 && group_k > 1) {
+      // Blockwise 1xK for SRC: groups = {1, block_size}
+      return outer_dim * at::ceil_div(inner_dim, group_k);
+    } else if (group_m > 1 && group_k == 1) {
+      // Blockwise Kx1 for WEI: groups = {block_size, 1}
+      return outer_dim * at::ceil_div(inner_dim, group_m);
+    }
+
+    // For blockwise 128x128: groups = {128, 128}
+    // scale shape: [ceil_div(inner_dim, 128), ceil_div(outer_dim, 128)]
+    // Note: XPU/oneDNN does not use L4 padding unlike CUDA cuBLAS.
+    // So it won't have something like
+    // `round_up<int64_t>(ceil_div<int64_t>(K, 128), 4)`
+    if (group_m > 1 && group_k > 1) {
+      return at::ceil_div(outer_dim, group_m) *
+          at::ceil_div(inner_dim, group_k);
+    }
+
     TORCH_INTERNAL_ASSERT(
-        (groups == dnnl::memory::dims{1, inner_dim} ||
-         groups == dnnl::memory::dims{inner_dim, 1}),
-        "The groups must be either {1, inner_dim} or {inner_dim, 1}. But got ",
+        false,
+        "Unexpected groups configuration: ",
         groups,
-        ".");
-    return outer_dim;
+        " for arg_type: ",
+        arg_type);
+    return 0;
   }
 
-  // Normalize an incoming scale tensor to contiguous storage and appropriate
-  // dtype/view
+  // Normalize scale tensor to contiguous format for oneDNN.
+  //
+  // XPU uses natural scale shapes that match matrix dimensions:
+  //   - A: [M, K] -> scale_a: [M, K//128] or [M//128, K//128]
+  //   - B: [K, N] -> scale_b: [K//128, N] or [K//128, N//128]
   at::Tensor normalize(const at::Tensor& scale) const {
     TORCH_INTERNAL_ASSERT(
         dtype == dnnl::memory::data_type::f32,
         "tensor scale currently must be f32, but got scale dtype: ",
         scale.scalar_type());
-    return scale.to(at::kFloat).contiguous();
+
+    at::Tensor scale_f32 = scale.to(at::kFloat);
+
+    return scale_f32.contiguous();
   }
 };
 
 // This function defines how to set scales mask and groups according to:
-// https://github.com/uxlfoundation/oneDNN/blob/main/tests/benchdnn/doc/knobs_attr.md#--attr-scales
+// - Official API:
+// https://uxlfoundation.github.io/oneDNN/struct_dnnl_primitive_attr-2.html
+// - Quantization Guide:
+// https://uxlfoundation.github.io/oneDNN/dev_guide_attributes_quantization.html
+//
+// The mask and groups parameters work together:
+// - mask=0: per-tensor (single scale for whole tensor)
+// - mask=(1<<0)|(1<<1): scale varies along both dimensions
+// - groups: block sizes for grouping,
+// e.g., {128, 1} means 128 elements grouped on dim0
+//
 // The returned value will be used in
 // `set_scales(arg, mask, groups, data_type)`.
 inline ScaleSpec make_scale_spec(
@@ -390,26 +439,55 @@ inline ScaleSpec make_scale_spec(
       "Expected arg_type to be 'src' or 'wei', but got '",
       arg_type,
       "'");
-  TORCH_INTERNAL_ASSERT(
-      (scaling_type == at::blas::ScalingType::TensorWise ||
-       scaling_type == at::blas::ScalingType::RowWise),
-      "Currently only support scaling_type for TensorWise or RowWise");
-  int64_t dim = K; // Currently only K is used for grouping
+
   bool is_src = (arg_type == "src");
-  if (scaling_type == at::blas::ScalingType::TensorWise) {
-    // Scale tensorwise. The same as `--attr-scales=common`.
-    // mask=0 : scale whole tensor
-    // groups={1, 1}: indicates that there is only one group for scaling
-    return {0, {1, 1}, dnnl::memory::data_type::f32};
-  } else {
-    // (scaling_type == at::blas::ScalingType::RowWise)
-    // Scale RowWise. The same as `--attr-scales=per_dim_01`.
-    // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
-    // SRC: groups={1, K}, WEIGHTS: groups={K, 1}
-    return {
-        (1 << 0) | (1 << 1),
-        is_src ? dnnl::memory::dims{1, dim} : dnnl::memory::dims{dim, 1},
-        dnnl::memory::data_type::f32};
+
+  switch (scaling_type) {
+    case at::blas::ScalingType::TensorWise: {
+      // Scale tensorwise. The same as `--attr-scales=common`.
+      // mask=0: scale whole tensor, groups={}: no grouping needed
+      return {0, {}, dnnl::memory::data_type::f32};
+    }
+
+    case at::blas::ScalingType::RowWise: {
+      // Scale RowWise using block-wise style groups to achieve
+      // per-column scaling.
+      //   SRC: groups={1, K} -> one scale per row (M scales)
+      //   WEI: groups={K, 1} -> one scale per column (N scales)
+      return {
+          (1 << 0) | (1 << 1),
+          is_src ? dnnl::memory::dims{1, K} : dnnl::memory::dims{K, 1},
+          dnnl::memory::data_type::f32};
+    }
+
+    case at::blas::ScalingType::BlockWise1x128: {
+      // Blockwise 1x128 scaling (DeepSeek style)
+      // For SRC (A): scale shape [M, ceil_div(K, 128)], groups = {1, 128}
+      // For WEI (B): scale shape [ceil_div(K, 128), N], groups = {128, 1}
+      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      return {
+          (1 << 0) | (1 << 1),
+          is_src ? dnnl::memory::dims{1, 128} : dnnl::memory::dims{128, 1},
+          dnnl::memory::data_type::f32};
+    }
+
+    case at::blas::ScalingType::BlockWise128x128: {
+      // Blockwise 128x128 scaling (2D block scaling)
+      // For SRC (A): scale shape [M // 128, K // 128], groups = {128, 128}
+      // For WEI (B): scale shape [K // 128, N // 128], groups = {128, 128}
+      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      return {
+          (1 << 0) | (1 << 1),
+          dnnl::memory::dims{128, 128},
+          dnnl::memory::data_type::f32};
+    }
+
+    default:
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Unsupported scaling_type: ",
+          static_cast<int>(scaling_type),
+          ". Currently only support TensorWise, RowWise, BlockWise1x128, and BlockWise128x128");
   }
 }
 
@@ -436,15 +514,10 @@ sycl::event scaled_matmul(
   const int64_t K = mat1.size(1);
   const int64_t N = mat2.size(1);
 
-  // 1.1 Create memory descriptor
+  // 1.1 Create memory descriptors
   dnnl::memory::desc src_md = get_onednn_md(mat1);
   dnnl::memory::desc weights_md = get_onednn_md(mat2);
   dnnl::memory::desc dst_md = get_onednn_md(result);
-
-  // scale_a and scale_b has already be checked in `is_desired_scaling()` call.
-  // So we could directly get their memory desc and set later.
-  dnnl::memory::desc scale_a_md = get_onednn_md(scale_a);
-  dnnl::memory::desc scale_b_md = get_onednn_md(scale_b);
 
   dnnl::memory::desc bias_md;
   bool with_bias = bias.has_value();
@@ -508,20 +581,21 @@ sycl::event scaled_matmul(
         make_onednn_memory(bias_md, engine, possible_reshaped_bias.data_ptr());
   }
 
-  // Prepare runtime scale memories (flat 1-D views) using the specs
-  auto make_scale_mem_from_spec = [&](const ScaleSpec& spec,
-                                      int64_t expected_numel,
-                                      const at::Tensor& scale_tensor) {
-    at::Tensor prepared = spec.normalize(scale_tensor);
+  // Prepare scale memory for oneDNN.
+  // The normalize() function handles conversion to contiguous format.
+  auto make_scale_mem_from_spec =
+      [&](const ScaleSpec& spec,
+          int64_t expected_numel,
+          const at::Tensor& scale_tensor) -> dnnl::memory {
     TORCH_CHECK(
-        prepared.numel() == expected_numel,
+        scale_tensor.numel() == expected_numel,
         "Scale buffer length mismatch. Expected ",
         expected_numel,
         ", got ",
-        prepared.numel());
+        scale_tensor.numel());
     dnnl::memory::desc scale_md(
-        {prepared.numel()}, spec.dtype, dnnl::memory::format_tag::x);
-    return make_onednn_memory(scale_md, engine, prepared.data_ptr());
+        {scale_tensor.numel()}, spec.dtype, dnnl::memory::format_tag::x);
+    return make_onednn_memory(scale_md, engine, scale_tensor.data_ptr());
   };
 
   auto scratchpad =
@@ -537,20 +611,25 @@ sycl::event scaled_matmul(
     args.insert({DNNL_ARG_BIAS, b_usr_m});
   }
 
-  // Attach runtime scales using specs
+  at::Tensor src_sc_tensor = src_spec.normalize(scale_a);
   auto src_sc_mem = make_scale_mem_from_spec(
-      src_spec, src_spec.expected_numel(M, K, "src"), scale_a);
+      src_spec, src_spec.expected_numel(M, K, "src"), src_sc_tensor);
+
+  at::Tensor wei_sc_tensor = wei_spec.normalize(scale_b);
   auto wei_sc_mem = make_scale_mem_from_spec(
-      wei_spec, wei_spec.expected_numel(N, K, "wei"), scale_b);
+      wei_spec, wei_spec.expected_numel(N, K, "wei"), wei_sc_tensor);
+
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_mem});
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_sc_mem});
+
+  at::Tensor dst_scale_tensor;
   if (with_dst_scale) {
     // Bind single f32 scalar as DST scale
-    at::Tensor dst_scale_f32 = scale_result->to(at::kFloat).contiguous();
+    dst_scale_tensor = scale_result->to(at::kFloat).contiguous();
     dnnl::memory::desc dst_sc_md(
         {1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
     auto dst_sc_mem =
-        make_onednn_memory(dst_sc_md, engine, dst_scale_f32.data_ptr());
+        make_onednn_memory(dst_sc_md, engine, dst_scale_tensor.data_ptr());
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_mem});
   }
 
