@@ -40,6 +40,15 @@ def dynamo_assume_constant_result_global_function():
     return "test"
 
 
+def _graph_break_bad_fn(x):
+    torch._dynamo.graph_break()
+    return x
+
+
+def _abs_fn(x):
+    return torch.abs(x)
+
+
 class ExportTests(torch._dynamo.test_case.TestCase):
     # TODO(voz): Refactor to a shared test function.
     # The tests in this file are a little redundant,
@@ -4225,9 +4234,6 @@ def forward(self, arg0_1, arg1_1):
                 x = torch.relu(x)
                 return x
 
-        def fn(x):
-            return torch.abs(x)
-
         mod = Module2()
         inp = torch.randn(3, 3)
 
@@ -4237,7 +4243,7 @@ def forward(self, arg0_1, arg1_1):
         gm_edit = copy.deepcopy(gm)
         for nd in gm_edit.graph.nodes:
             if nd.target == torch.relu:
-                nd.target = fn
+                nd.target = _abs_fn
                 nd.meta.clear()
                 break
         gm_edit.recompile()
@@ -4349,17 +4355,13 @@ def forward(self, x):
             x = torch.abs(x)
             return torch.cos(x)
 
-        def bad_fn(x):
-            torch._dynamo.graph_break()
-            return x
-
         gm, _ = torch._dynamo.export(fn)(torch.randn(3, 3))
 
         # replace abs with graph break
         gm_edit = copy.deepcopy(gm)
         for nd in gm_edit.graph.nodes:
             if nd.target == torch.abs:
-                nd.target = bad_fn
+                nd.target = _graph_break_bad_fn
                 nd.meta.clear()
                 break
         gm_edit.recompile()
