@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <structmember.h>
+#include <torch/csrc/fx/graph.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <algorithm>
@@ -363,9 +364,9 @@ static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static struct PyMemberDef NodeBase_members[] = {
     {"_erased", T_BOOL, offsetof(NodeBase, _erased), 0, nullptr},
-    {"_prev", T_OBJECT_EX, offsetof(NodeBase, _prev), 0, nullptr},
-    {"_next", T_OBJECT_EX, offsetof(NodeBase, _next), 0, nullptr},
-    {"graph", T_OBJECT_EX, offsetof(NodeBase, graph), 0, nullptr},
+    {"_prev", T_OBJECT, offsetof(NodeBase, _prev), 0, nullptr},
+    {"_next", T_OBJECT, offsetof(NodeBase, _next), 0, nullptr},
+    {"graph", T_OBJECT, offsetof(NodeBase, graph), 0, nullptr},
     {"name", T_OBJECT_EX, offsetof(NodeBase, name), 0, nullptr},
     {"op", T_OBJECT_EX, offsetof(NodeBase, op), 0, nullptr},
     {"target", T_OBJECT_EX, offsetof(NodeBase, target), 0, nullptr},
@@ -834,9 +835,8 @@ static PyObject* NodeBase_replace_input_with(
   // Check for replace hooks on the graph's owning module
   // Note: Only access .name if there are actually hooks to call, matching
   // Python's behavior where `if replace_hooks:` is falsy for empty list.
-  THPObjectPtr owning_module(
-      PyObject_GetAttrString(node->graph, "owning_module"));
-  if (owning_module && owning_module.get() != Py_None) {
+  PyObject* owning_module = GraphBase_borrow_owning_module(node->graph);
+  if (owning_module && owning_module != Py_None) {
     THPObjectPtr replace_hooks(
         PyObject_GetAttrString(owning_module, "_replace_hooks"));
     if (replace_hooks && replace_hooks.get() != Py_None &&
@@ -1012,9 +1012,8 @@ static PyObject* NodeBase_replace_all_uses_with(
 
   // Get replace hooks
   THPObjectPtr replace_hooks;
-  THPObjectPtr owning_module(
-      PyObject_GetAttrString(node->graph, "owning_module"));
-  if (owning_module && owning_module.get() != Py_None) {
+  PyObject* owning_module = GraphBase_borrow_owning_module(node->graph);
+  if (owning_module && owning_module != Py_None) {
     replace_hooks =
         THPObjectPtr(PyObject_GetAttrString(owning_module, "_replace_hooks"));
     if (!replace_hooks || replace_hooks.get() == Py_None) {
@@ -1131,9 +1130,8 @@ static PyObject* NodeBase_is_impure(
 
   // Check if impure module
   if (strcmp(op_str, "call_module") == 0) {
-    THPObjectPtr owning_module(
-        PyObject_GetAttrString(node->graph, "owning_module"));
-    if (!owning_module || owning_module.get() == Py_None) {
+    PyObject* owning_module = GraphBase_borrow_owning_module(node->graph);
+    if (!owning_module || owning_module == Py_None) {
       PyErr_SetString(
           PyExc_AssertionError,
           "self.graph.owning_module not set for purity check");
@@ -1292,9 +1290,9 @@ static PyObject* NodeBase_getstate(
   }
   PyErr_Clear();
 
-  // Add all the required fields
-  if (PyDict_SetItemString(dict.get(), "graph", node->graph) < 0)
-    return nullptr;
+  // graph, _prev, _next are omitted — the owning Graph restores them
+  // in Graph.__setstate__; standalone Node pickle produces a detached
+  // node (with these fields as None via T_OBJECT NULL semantics).
   if (PyDict_SetItemString(dict.get(), "name", node->name) < 0)
     return nullptr;
   if (PyDict_SetItemString(dict.get(), "op", node->op) < 0)
@@ -1318,12 +1316,6 @@ static PyObject* NodeBase_getstate(
 
   THPObjectPtr erased(PyBool_FromLong(node->_erased));
   if (PyDict_SetItemString(dict.get(), "_erased", erased.get()) < 0)
-    return nullptr;
-  if (PyDict_SetItemString(
-          dict.get(), "_prev", reinterpret_cast<PyObject*>(node->_prev)) < 0)
-    return nullptr;
-  if (PyDict_SetItemString(
-          dict.get(), "_next", reinterpret_cast<PyObject*>(node->_next)) < 0)
     return nullptr;
   if (PyDict_SetItemString(dict.get(), "_input_nodes", node->_input_nodes) < 0)
     return nullptr;
@@ -1544,9 +1536,8 @@ static int NodeBase_setattro(
 
   // Handle "name" attribute change - call replace hooks
   if (is_name && node->name) {
-    THPObjectPtr owning_module(
-        PyObject_GetAttrString(node->graph, "owning_module"));
-    if (owning_module && owning_module.get() != Py_None) {
+    PyObject* owning_module = GraphBase_borrow_owning_module(node->graph);
+    if (owning_module && owning_module != Py_None) {
       THPObjectPtr replace_hooks(
           PyObject_GetAttrString(owning_module, "_replace_hooks"));
       if (replace_hooks && replace_hooks.get() != Py_None &&
@@ -1579,27 +1570,15 @@ static int NodeBase_setattro(
   bool needs_lookup_update =
       strcmp(attr_name, "op") == 0 || strcmp(attr_name, "target") == 0;
 
-  THPObjectPtr find_nodes_lookup;
+  PyObject* find_nodes_lookup = nullptr;
   bool update = false;
   if (needs_lookup_update) {
-    find_nodes_lookup = THPObjectPtr(
-        PyObject_GetAttrString(node->graph, "_find_nodes_lookup_table"));
-    if (find_nodes_lookup && find_nodes_lookup.get() != Py_None) {
+    find_nodes_lookup = GraphBase_borrow_find_nodes_lookup_table(node->graph);
+    if (find_nodes_lookup && find_nodes_lookup != Py_None) {
       if (PyObject_HasAttr(self, name_obj)) {
-        int contains = PySequence_Contains(find_nodes_lookup.get(), self);
-        if (contains == 1) {
+        if (FindNodesLookupTable_contains_impl(find_nodes_lookup, self)) {
           update = true;
-          THPObjectPtr remove_method(
-              PyObject_GetAttrString(find_nodes_lookup.get(), "remove"));
-          if (remove_method) {
-            THPObjectPtr remove_result(
-                PyObject_CallOneArg(remove_method.get(), self));
-            if (!remove_result) {
-              PyErr_Clear();
-            }
-          }
-        } else if (contains == -1) {
-          PyErr_Clear();
+          FindNodesLookupTable_remove_impl(find_nodes_lookup, self);
         }
       }
     }
@@ -1608,16 +1587,9 @@ static int NodeBase_setattro(
 
   int result = PyObject_GenericSetAttr(self, name_obj, value);
 
+  // Re-insert into lookup table if needed
   if (update && result == 0) {
-    THPObjectPtr insert_method(
-        PyObject_GetAttrString(find_nodes_lookup.get(), "insert"));
-    if (insert_method) {
-      THPObjectPtr insert_result(
-          PyObject_CallOneArg(insert_method.get(), self));
-      if (!insert_result) {
-        PyErr_Clear();
-      }
-    }
+    FindNodesLookupTable_insert_impl(find_nodes_lookup, self);
     PyErr_Clear();
   }
 
@@ -2103,4 +2075,40 @@ bool NodeBase_init(PyObject* module) {
     return false;
   }
   return true;
+}
+
+////////////////////////////////
+// Fast C++ accessors for Node attributes
+////////////////////////////////
+
+bool NodeBase_Check(PyObject* obj) {
+  return PyObject_TypeCheck(obj, &NodeBaseType);
+}
+
+PyObject* NodeBase_borrow_op(PyObject* node) {
+  if (!NodeBase_Check(node)) {
+    return nullptr;
+  }
+  return reinterpret_cast<NodeBase*>(node)->op;
+}
+
+PyObject* NodeBase_borrow_target(PyObject* node) {
+  if (!NodeBase_Check(node)) {
+    return nullptr;
+  }
+  return reinterpret_cast<NodeBase*>(node)->target;
+}
+
+PyObject* NodeBase_borrow_name(PyObject* node) {
+  if (!NodeBase_Check(node)) {
+    return nullptr;
+  }
+  return reinterpret_cast<NodeBase*>(node)->name;
+}
+
+PyObject* NodeBase_borrow_graph(PyObject* node) {
+  if (!NodeBase_Check(node)) {
+    return nullptr;
+  }
+  return reinterpret_cast<NodeBase*>(node)->graph;
 }
