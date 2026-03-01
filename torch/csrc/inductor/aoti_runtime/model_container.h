@@ -355,12 +355,11 @@ class AOTInductorModelContainer {
   }
 
   bool _is_empty_parameter_type(const size_t idx) const {
-    auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
     auto constant_data_size =
         models_[0]->constant_data_size(static_cast<int64_t>(idx));
     // Empty parameters are skipped and not provided by the upstream services,
     // it is OK to skip.
-    return constant_type == ConstantType::Parameter && constant_data_size == 0;
+    return constant_data_size == 0;
   }
 
   bool _is_tensor_constant_or_buffer_type_or_empty_parameter(
@@ -488,6 +487,15 @@ class AOTInductorModelContainer {
       if (it == constants_map.end() &&
           !(use_inactive &&
             _is_tensor_constant_or_buffer_type_or_empty_parameter(idx))) {
+        continue;
+      }
+      // skip update because aoti_torch_create_tensor_from_blob fails on empty
+      // tensor
+      if (_is_empty_parameter_type(idx)) {
+        auto constant_type =
+            models_[0]->constant_type(static_cast<int64_t>(idx));
+        std::cerr << "[WARNING] Skipping update on empty weight: "
+                  << constant_name << "\n";
         continue;
       }
 

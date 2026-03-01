@@ -6421,6 +6421,77 @@ class AOTInductorTestsTemplate:
         self.assertEqual(expected, output_before_swap)
         self.assertEqual(new_expected, output_after_swap)
 
+    def test_update_inactive_constant_buffer_with_empty_weight(self):
+        """Test update_inactive_constant_buffer handles empty weights correctly.
+
+        This test verifies the fix for empty weight inplace update where
+        aoti_torch_create_tensor_from_blob fails on empty tensors. The fix skips
+        updating empty weights during update_inactive_constant_buffer.
+        """
+
+        class Model(torch.nn.Module):
+            def __init__(self, n, k, device):
+                super().__init__()
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
+                # Empty parameter to test the fix
+                self.empty_weight = torch.nn.Parameter(
+                    torch.empty(0, device=device, dtype=torch.float32)
+                )
+
+            def forward(self, a):
+                # Use the non-empty weights in the forward pass
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M, N, K = 8, 6, 16
+        model = Model(N, K, self.device)
+        a = torch.randn(M, K, device=self.device)
+        example_inputs = (a,)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+
+        def runner_call(*args, **kwargs):
+            import torch.fx._pytree as fx_pytree
+
+            call_spec = runner.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+            flat_inputs = fx_pytree.tree_flatten_spec((args, kwargs), in_spec)
+            flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
+            flat_outputs = runner.run(flat_inputs)
+            return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        test_inputs = torch.randn(M, K, device=self.device)
+        expected = model(test_inputs)
+        output = runner_call(test_inputs)
+        self.assertEqual(expected, output, atol=1e-3, rtol=1e-3)
+
+        # Create new weights including an empty weight - this should not crash
+        new_weights = {
+            "L__self___weight": torch.randn(N, K, device=self.device),
+            "L__self___bias": torch.randn(N, device=self.device),
+            "L__self___empty_weight": torch.empty(
+                0, device=self.device, dtype=torch.float32
+            ),
+        }
+        new_expected = torch.nn.functional.linear(
+            test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
+        )
+
+        # This should not crash even with the empty weight
+        runner.update_constant_buffer(new_weights, True, False)
+        output_before_swap = runner_call(test_inputs)
+        runner.swap_constant_buffer()
+        output_after_swap = runner_call(test_inputs)
+
+        self.assertEqual(expected, output_before_swap)
+        self.assertEqual(new_expected, output_after_swap)
+
     def test_free_inactive_buffer(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
