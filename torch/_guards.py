@@ -640,6 +640,15 @@ class GuardsSet:
             self.inner: OrderedSet[Guard] = OrderedSet()
         else:
             self.inner = inner
+        # Map from source to list of guards with that source. Incrementally
+        # built in `add` method.
+        self.source_to_guards: defaultdict[Source, list[Guard]] = defaultdict(list)
+        for guard in self.inner:
+            self.track_guard_by_source(guard)
+
+    def track_guard_by_source(self, guard: Guard) -> None:
+        source = guard.originating_source
+        self.source_to_guards[source].append(guard)
 
     def __iter__(self) -> Iterator[Guard]:
         return iter(self.inner)
@@ -655,6 +664,10 @@ class GuardsSet:
     def __bool__(self) -> bool:
         return bool(self.inner)
 
+    def clear(self) -> None:
+        self.inner = OrderedSet()
+        self.source_to_guards = defaultdict(list)
+
     def add(
         self, guard: Guard, *, collect_debug_stack: bool = True, skip: int = 0
     ) -> None:
@@ -666,11 +679,16 @@ class GuardsSet:
         if guard.user_stack is None:
             guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
+        self.track_guard_by_source(guard)
 
     def update(self, *others: set[Guard]) -> None:
         for o in others:
             for g in o:
                 self.add(g, skip=1)
+
+    def get_guards_for_source(self, source: Source) -> list[Guard]:
+        """Return all guards with the given originating_source."""
+        return list(self.source_to_guards[source])
 
     def remove_guards_with_source(self, source: Source) -> None:
         """Delete all guards that contains a given source"""
@@ -679,6 +697,11 @@ class GuardsSet:
         self.inner = OrderedSet(
             g for g in self.inner if not is_from_source(g.originating_source, source)
         )
+        # Rebuild the index since is_from_source walks the chain, so
+        # multiple source keys may need removal.
+        self.source_to_guards = defaultdict(list)
+        for guard in self.inner:
+            self.track_guard_by_source(guard)
 
 
 """
