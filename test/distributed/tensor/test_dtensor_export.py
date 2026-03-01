@@ -12,7 +12,6 @@ from torch._guards import tracing, TracingContext
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Partial, Replicate, Shard
 from torch.distributed.tensor._api import DTensor
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -124,8 +123,6 @@ class FlexAttentionModel(torch.nn.Module):
 def strict_export_and_aot_export_joint_with_descriptors(model, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
-    # needed for stric export
-    torch.utils._pytree.register_constant(DTensorSpec)
 
     # install_free_tensors is required for dynamo to work
     with torch._dynamo.config.patch(
