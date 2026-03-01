@@ -538,6 +538,11 @@ BatchNormBackend _select_batch_norm_backend(
       && input.scalar_type() != at::kDouble
       && (is_miopen_3_4 || input.scalar_type() != at::kBFloat16)
       && weight.scalar_type() == at::kFloat // only FP32 weight for FP32 or FP16/BF16(mixed) input
+      // MIOpen mixed-precision batchnorm backward produces significantly different
+      // weight/bias gradients compared to native (up to 0.163 abs diff on MI300X).
+      // Fall back to native for mixed-precision until MIOpen fixes this upstream.
+      // See: https://github.com/pytorch/pytorch/issues/168869
+      && input.scalar_type() == weight.scalar_type()
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))

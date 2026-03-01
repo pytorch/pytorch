@@ -38,8 +38,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    _get_torch_rocm_version
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -5236,15 +5235,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                         "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16"):
                 self.skipTest("Failed on CUDA")
 
-        if torch.version.hip:
-            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16") \
-                    and _get_torch_rocm_version() >= (6, 4):
-                # https://github.com/pytorch/pytorch/issues/156513
-                self.skipTest("bfloat16 NCHW train failed due to native tolerance issue")
-
-            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
-                self.skipTest("3D float16 NCHW train failed on ROCm")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
