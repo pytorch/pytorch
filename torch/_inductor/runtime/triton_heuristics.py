@@ -961,6 +961,7 @@ class CachingAutotuner(KernelInterface):
             cloned_args, cloned_kwargs = self.maybe_clone_args(
                 cpu_copies, *args, **kwargs
             )
+            self._validate_launcher_args(launcher, cloned_args)
             # reset to zero before evaluating any config
             self.reset_to_zero_args(*args, **kwargs)
             kernel_name = self.inductor_meta.get("kernel_name", "triton kernel")
@@ -1009,6 +1010,21 @@ class CachingAutotuner(KernelInterface):
             device=self.device_props.type,
             **benchmark_kwargs,  # type: ignore[arg-type]
         )
+
+    def _validate_launcher_args(self, launcher, args):
+        """Validate that the number of arguments matches what the launcher expects."""
+        expected_arg_names = getattr(launcher, 'def_arg_names', None)
+        
+
+        expected_count = len(expected_arg_names)
+        actual_count = len(args)
+
+        if actual_count != expected_count:
+            raise TypeError(
+                f"Kernel '{self.fn.__name__}' expected {expected_count} arguments "
+                f"({', '.join(expected_arg_names)}) but got {actual_count}. "
+                f"Please check the number of arguments passed to the kernel."
+            )
 
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
         """
@@ -1474,6 +1490,8 @@ class CachingAutotuner(KernelInterface):
         # make a copy here to avoid mutating the original args
         args_without_constexprs = tuple(args)
 
+        self._validate_launcher_args(launcher, args)
+
         if self.dump_launch_params:
             new_args, grid = self._interpret_args_grid(args, launcher.config)
             _dump_launch_params(new_args, kwargs, launcher, self.fn.__name__, grid)
@@ -1850,6 +1868,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
         launcher.cache_hash = triton_hash_to_path_key(self.kernel.hash)  # type: ignore[attr-defined]
         launcher.store_cubin = False  # type: ignore[attr-defined]
         launcher._is_static = True  # type: ignore[attr-defined]
+        launcher.def_arg_names = def_args  # expected argument names
         return launcher
 
 
@@ -2041,7 +2060,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             ]
 
         launcher = self._gen_launcher_code(scope, def_args, runner_args)
-
+        launcher.def_arg_names = def_args  # expected argument names
         launcher = scope["launcher"]
         launcher.config = cfg
         launcher.n_regs = getattr(binary, "n_regs", None)
