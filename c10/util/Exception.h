@@ -252,7 +252,9 @@ class C10_API IndexError : public Error {
 // Used in ATen for invalid values.  These turn into
 // ValueError when they cross to Python.
 class C10_API ValueError : public Error {
+public:
   using Error::Error;
+  ValueError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for invalid types.  These turn into
@@ -264,7 +266,9 @@ class C10_API TypeError : public Error {
 // Used in ATen for functionality that is not implemented.  These turn into
 // NotImplementedError when they cross to Python.
 class C10_API NotImplementedError : public Error {
-  using Error::Error;
+  public:
+    using Error::Error;
+    NotImplementedError(SourceLocation source_location, std::string msg);
 };
 
 // Used in ATen for buffer-related errors, e.g. trying to create a DLPack of

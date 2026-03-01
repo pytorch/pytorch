@@ -113,6 +113,12 @@ Error::Error(SourceLocation source_location, std::string msg)
           std::move(msg),
           std::make_shared<PyTorchStyleBacktrace>(source_location)) {}
 
+ValueError::ValueError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
+NotImplementedError::NotImplementedError(SourceLocation loc, std::string msg)
+    : Error(loc, std::move(msg)) {}
+
 using APIUsageLoggerType = std::function<void(const std::string&)>;
 using APIUsageMetadataLoggerType = std::function<void(
     const std::string&,
