@@ -978,8 +978,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self, tx: "InstructionTranslator", name: str
     ) -> "ConstantVariable":
         if self.source:
-            source = AttrSource(self.source, name)
-            install_guard(source.make_guard(GuardBuilder.HASATTR))
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
             return VariableTracker.build(tx, hasattr(self.value, name))
         return super().call_obj_hasattr(tx, name)
 
@@ -1976,7 +1979,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> "ConstantVariable":
         if self.source:
             install_guard(
-                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
             )
 
         try:
