@@ -25,17 +25,6 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 log = logging.getLogger(__name__)
 
 
-class OutputTensorMeta:
-    """Picklable stand-in for FakeTensors in FX graph cache."""
-
-    def __init__(self, shape, stride, dtype, device, requires_grad):
-        self.shape = shape
-        self.stride = stride
-        self.dtype = dtype
-        self.device = device
-        self.requires_grad = requires_grad
-
-
 uid = itertools.count(1)
 
 
@@ -69,7 +58,7 @@ class InductorCompiledCode(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("inductor_compiled_code", no_overloaded_args=True)
+        super().__init__("inductor_compiled_code")
 
     def __call__(self, func, *args, **kwargs):
         # pyrefly: ignore [missing-attribute]
@@ -79,8 +68,6 @@ class InductorCompiledCode(HigherOrderOperator):
 inductor_compiled_code = InductorCompiledCode()
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCPU)
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
-inductor_compiled_code.fallthrough(DispatchKey.Negative)
-inductor_compiled_code.fallthrough(DispatchKey.Conjugate)
 
 
 _inductor_compiled_callable_id = itertools.count()
@@ -88,14 +75,15 @@ _inductor_compiled_callable_id = itertools.count()
 
 class InductorCompiledCallable:
     """
-    A wrapper class that holds both the Inductor-compiled callable and fake outputs.
+    A wrapper class that holds both the Inductor-compiled callable and the
+    original FX graph for fake tensor propagation.
     Each instance gets a globally unique idx at creation (via atomic itertools.count).
     """
 
-    def __init__(self, compiled_callable, fake_outputs):
+    def __init__(self, compiled_callable, original_gm=None):
         self.idx = next(_inductor_compiled_callable_id)
         self.compiled_callable = compiled_callable
-        self.fake_outputs = fake_outputs
+        self.original_gm = original_gm
         # AOT autograd needs this to know inputs are passed as a list
         self._boxed_call = True
 
@@ -175,34 +163,14 @@ redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
 @register_fake(inductor_compiled_code)
 def inductor_compiled_code_fake(func, inputs):
     resolved = _resolve_inductor_callable(func)
-    if resolved.fake_outputs is None:
+    if resolved.original_gm is None:
         raise RuntimeError(
-            "inductor_compiled_code fake_outputs is None — the compiled graph may "
-            "have been serialized. Recompile to restore fake_outputs."
+            "inductor_compiled_code original_gm is None — the compiled graph may "
+            "have been serialized without it. Recompile to restore."
         )
-    for x in pytree.tree_leaves(resolved.fake_outputs):
-        if isinstance(x, torch.Tensor) and any(
-            isinstance(s, torch.SymInt) for s in x.shape
-        ):
-            raise RuntimeError(
-                "fake prop on inductor compiled code doesn't work with SymInt outputs yet"
-            )
-    fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-    results = []
-    for item in resolved.fake_outputs:
-        if isinstance(item, OutputTensorMeta):
-            # FakeTensorMode intercepts this and produces a FakeTensor
-            t = torch.empty_strided(
-                item.shape, item.stride, dtype=item.dtype, device=item.device
-            )
-            if item.requires_grad:
-                t = t.requires_grad_(True)
-            results.append(t)
-        elif isinstance(item, torch.Tensor):
-            results.append(fake_mode.from_tensor(item))
-        else:
-            results.append(item)
-    return tuple(results)
+    # Run the original FX graph under FakeTensorMode to re-derive output
+    # shapes, dtypes, and aliasing from the input fake tensors.
+    return tuple(resolved.original_gm(*inputs))
 
 
 @inductor_compiled_code.py_functionalize_impl

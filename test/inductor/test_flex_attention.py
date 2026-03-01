@@ -7735,7 +7735,7 @@ class TestLearnableBiases(InductorTestCase):
         loss = torch.nn.functional.mse_loss(attn_output, random_target)
         loss.backward()
 
-        if not bias.grad:
+        if bias.grad is None:
             raise AssertionError("No gradient computed for bias")
         if not torch.any(bias.grad != 0):
             raise AssertionError("Gradient for bias is 0")
