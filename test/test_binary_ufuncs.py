@@ -2155,6 +2155,72 @@ class TestBinaryUfuncs(TestCase):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
+    @onlyCUDA
+    def test_maximum_minimum_mixed_dtype_out_tensor(self, device):
+        # Regression test for GitHub issue where torch.maximum/minimum with
+        # mixed dtypes and an out= tensor of smaller dtype produced incorrect
+        # results on CUDA. The bug was that the CUDA kernel used iter.dtype()
+        # (output dtype) instead of iter.common_dtype() for type promotion,
+        # causing inputs to be cast to the output dtype before comparison.
+        #
+        # Example: maximum(uint8(1), int64(-9), out=uint8_tensor)
+        # Bug: -9 was cast to uint8 (247) before comparison, giving max(1, 247) = 247
+        # Fix: Compare in int64, then cast result to uint8, giving max(1, -9) = 1
+
+        # Test uint8 and int64 (the original bug report)
+        b0 = torch.tensor([1], dtype=torch.uint8, device=device)
+        b1 = torch.zeros(1, dtype=torch.uint8, device=device)
+        l0 = torch.tensor([-9], dtype=torch.int64, device=device)
+
+        # Without out=, result should be correct (promoted dtype)
+        result_no_out = torch.maximum(b0, l0)
+        self.assertEqual(result_no_out.item(), 1)
+
+        # With out=, result should also be correct
+        result_with_out = torch.maximum(b0, l0, out=b1)
+        self.assertEqual(result_with_out.item(), 1)
+        self.assertEqual(b1.item(), 1)
+
+        # Verify CPU and CUDA produce the same results
+        cpu_out = torch.zeros(1, dtype=torch.uint8)
+        cpu_result = torch.maximum(b0.cpu(), l0.cpu(), out=cpu_out)
+        self.assertEqual(result_with_out.cpu(), cpu_result)
+
+        # Test minimum as well
+        b1.zero_()
+        result_min = torch.minimum(b0, l0, out=b1)
+        # expected_min computed in promoted dtype (int64), then cast to uint8
+        expected_min = torch.minimum(b0, l0).to(b1.dtype)
+        self.assertEqual(result_min.item(), expected_min.item())
+        # -9 cast to uint8 after comparison
+        self.assertEqual(result_min.item(), (-9) % 256)
+
+        # Test with different dtype combinations.
+        test_cases = [
+            (
+                torch.tensor([5], dtype=torch.uint8, device=device),
+                torch.tensor([-3], dtype=torch.int32, device=device),
+            ),
+            (
+                torch.tensor([100], dtype=torch.int16, device=device),
+                torch.tensor([200], dtype=torch.int64, device=device),
+            ),
+        ]
+
+        for t1, t2 in test_cases:
+            out_max = torch.empty(1, dtype=t1.dtype, device=device)
+            out_min = torch.empty(1, dtype=t1.dtype, device=device)
+
+            torch.maximum(t1, t2, out=out_max)
+            torch.minimum(t1, t2, out=out_min)
+
+            # Compare with result without out tensor (which is always correct)
+            expected_max_val = torch.maximum(t1, t2).to(t1.dtype)
+            expected_min_val = torch.minimum(t1, t2).to(t1.dtype)
+
+            self.assertEqual(out_max, expected_max_val)
+            self.assertEqual(out_min, expected_min_val)
+
     @dtypes(*integral_types_and(torch.bool))
     def test_maximum_minimum_int_and_bool(self, device, dtype):
         ops = (
