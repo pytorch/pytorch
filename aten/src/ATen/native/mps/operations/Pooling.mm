@@ -209,21 +209,25 @@ static void pool2d_template(const Tensor& input,
 
     MPSStream* mpsStream = getCurrentMPSStream();
     // in case of ChannelsLast we don't perform gather() in placeholder to avoid implicit conversion to NCHW
+    const bool is_channels_last = (memory_format == MemoryFormat::ChannelsLast);
+    const auto& input_cl = is_channels_last ? input.contiguous(memory_format) : input;
+    const auto& grad_output_cl =
+        (is_backward_pass && is_channels_last) ? grad_output.contiguous(memory_format) : grad_output;
 
     // MPS TODO: Using strided API causes invalid indices to be generated if the original format is NHWC
     //           Output is still correct, but indices are not matching. Disable it for now and use the old
     //           gather path to solve the strides.
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor,
-                                               input,
+                                               input_cl,
                                                inputShape,
-                                               memory_format != MemoryFormat::ChannelsLast,
+                                               !is_channels_last,
                                                MPSDataTypeInvalid,
                                                /*useMPSStridedAPI=*/false);
     Placeholder gradOutputPlaceholder = !is_backward_pass ? Placeholder()
                                                           : Placeholder(cachedGraph->gradOutputTensor,
-                                                                        grad_output,
+                                                                        grad_output_cl,
                                                                         gradOutputShape,
-                                                                        memory_format != MemoryFormat::ChannelsLast,
+                                                                        !is_channels_last,
                                                                         MPSDataTypeInvalid,
                                                                         /*useMPSStridedAPI=*/false);
     Placeholder indicesPlaceholder = has_indices

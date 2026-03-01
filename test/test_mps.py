@@ -6658,7 +6658,6 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(x.grad, cpu_x.grad)
 
     # Test adaptive avg pool2d - when the input size is a multiple of output size
-    # Not testing for channels last right now
     def test_adaptive_avg_pool2d_simple(self):
         def helper(input_shape, out_shape, channels_last):
             cpu_x = torch.randn(input_shape, device='cpu', dtype=torch.float, requires_grad=True)
@@ -6696,6 +6695,12 @@ class TestMPS(TestCaseMPS):
         helper((2, 2, 2, 16), (16, 16), False)
 
         helper((2, 4, 4), (16, 16), False)
+
+        # channels_last (4D only)
+        helper((2, 2, 4, 4), (2, 2), True)
+        helper((2, 2, 9, 9), (3, 3), True)
+        helper((2, 2, 16, 16), (2, 2), True)
+        helper((2, 2, 4, 4), (8, 8), True)
 
         try:
             helper((2, 2, 3, 3), (7, 7), False)
