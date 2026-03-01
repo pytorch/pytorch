@@ -20706,6 +20706,8 @@ op_db: list[OpInfo] = [
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.float32,)
                ),
+               # Not implemented on XPU
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_cow_input', device_type='xpu'),
            )),
     OpInfo('histc',
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
