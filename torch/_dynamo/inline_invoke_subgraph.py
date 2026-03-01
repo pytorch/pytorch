@@ -1,7 +1,12 @@
 import operator
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.fx.graph_module import GraphModule
+
+
+if TYPE_CHECKING:
+    from torch.fx.node import Node
 
 
 def inline_invoke_subgraph(gm: GraphModule) -> GraphModule:
@@ -30,7 +35,9 @@ def inline_invoke_subgraph(gm: GraphModule) -> GraphModule:
         subgraph: GraphModule = getattr(gm, get_attr_node.target)
 
         # Build mapping from subgraph placeholder nodes -> parent operands
-        env = dict(zip(subgraph.graph.find_nodes(op="placeholder"), operands))
+        env: dict[Node, Any] = dict(
+            zip(subgraph.graph.find_nodes(op="placeholder"), operands)
+        )
 
         # Copy subgraph nodes into parent graph, inserting before the
         # invoke_subgraph node.
@@ -47,7 +54,7 @@ def inline_invoke_subgraph(gm: GraphModule) -> GraphModule:
         for user in list(node.users):
             if user.op == "call_function" and user.target is operator.getitem:
                 idx = user.args[1]
-                user.replace_all_uses_with(env[output_values[idx]])
+                user.replace_all_uses_with(env[output_values[idx]])  # pyrefly: ignore
                 gm.graph.erase_node(user)
 
         gm.graph.erase_node(node)
