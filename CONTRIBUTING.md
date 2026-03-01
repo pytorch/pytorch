@@ -291,7 +291,7 @@ All the details on how to contribute (with or without AI assistance) are in the 
 A couple reminders here though:
 
 - **You are personally responsible for what you send**: If the comments, issues or PRs you send are low quality or consistently overly verbose compared to what is expected, your contributions will not be accepted anymore. You are responsible for reviewing, ensuring the accuracy and the quality of everything you send.
-- **PRs must have an associated "actionable" Issue**: Generally, as a new contributor, you should never send a PR that doesn't have a corresponding issue with the "actionable" label. If you just opened the issue, you must wait for a maintainer to review it and mark it actionable before preparing and sending a PR for it.
+- **PRs must have an associated "actionable" Issue**: Generally, as a new contributor, you should never send a PR that doesn't have a corresponding issue with the "[actionable](https://github.com/pytorch/pytorch/labels/actionable)" label. If you just opened the issue, you must wait for a maintainer to review it and mark it actionable before preparing and sending a PR for it.
 - **New features, utility functions, or core extensions**: Create a short and to the point issue about the problem you're encountering. You should NEVER include AI-generated explanation of how to solve the problem (this will be discussed later once it's decided the feature should be implemented).
 
 ## Spin
