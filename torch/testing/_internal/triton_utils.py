@@ -13,6 +13,9 @@ from torch.utils._triton import has_triton
 requires_cuda_and_triton = unittest.skipUnless(
     HAS_CUDA_AND_TRITON, "requires cuda and triton"
 )
+requires_xpu_and_triton = unittest.skipUnless(
+    HAS_XPU_AND_TRITON, "requires xpu and triton"
+)
 requires_gpu_and_triton = unittest.skipUnless(
     HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON, "requires gpu and triton"
 )

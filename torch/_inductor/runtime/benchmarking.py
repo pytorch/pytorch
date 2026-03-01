@@ -397,12 +397,11 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             may_ban_benchmarking()
 
         # we don't want any outside errors propagating into benchmarking
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         # warmup `_callable` (and catches any failures in the process)
         _callable()
-        torch.cuda.synchronize()
-
+        torch.accelerator.synchronize()
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
         buffer = torch.empty(self.L2_cache_size // 4, dtype=torch.int, device="cuda")
         buffer.zero_()
@@ -418,7 +417,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             start_event.record()
             _callable()
             end_event.record()
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration
