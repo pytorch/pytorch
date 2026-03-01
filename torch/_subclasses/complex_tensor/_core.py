@@ -98,6 +98,7 @@ class ComplexTensor(Tensor):
         cls,
         func: OpOverload,
         types: tuple[type, ...],
+        # pyrefly: ignore [implicit-any]
         args: tuple = (),
         kwargs: dict[str, Any] | None = None,
     ) -> Any:

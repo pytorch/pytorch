@@ -143,15 +143,17 @@ def _convert_to_global_idxs(
     )
 
     if dim is None:
-        local_coord = torch.unravel_index(local_idx, local_shape)
-        global_coord = torch.stack(local_coord)
+        # Convert flat local index → flat global index using arithmetic ops
+        # instead of torch.unravel_index, which doesn't support SymInt shapes.
+        gathered_idxs = torch.zeros_like(local_idx)
+        remaining = local_idx
+        for i in range(len(local_shape)):
+            local_stride = reduce(operator.mul, local_shape[i + 1 :], 1)
+            global_stride = reduce(operator.mul, global_shape[i + 1 :], 1)
+            coord = remaining // local_stride
+            remaining = remaining % local_stride
+            gathered_idxs = gathered_idxs + (coord + global_offset[i]) * global_stride
         gather_dim = 0
-        for i, offset in enumerate(global_offset):
-            global_coord[i] += offset
-        # compute with proper striding
-        gathered_idxs = torch.tensor(0, device=local_idx.device, dtype=torch.long)
-        for i, coord in enumerate(global_coord):
-            gathered_idxs += coord * reduce(operator.mul, global_shape[i + 1 :], 1)
     else:
         gather_dim = dim
         gathered_idxs = local_idx + global_offset[dim]
@@ -218,8 +220,10 @@ def argminmax_handler(
 
     # Compute local reduction
     if dim is None:
-        local_idx = op_call(local_tensor)
-        local_redux = local_tensor.flatten()[local_idx]
+        val_op = _ARGMINMAX_REDUCTION_OPS[op_call]
+        # unsqueeze scalars to 1-d so they can be allgathered
+        local_redux = val_op(local_tensor).unsqueeze(0)
+        local_idx = op_call(local_tensor).unsqueeze(0)
     else:
         val_op = _ARGMINMAX_REDUCTION_OPS[op_call]
         local_redux, local_idx = val_op(local_tensor, dim=dim, keepdim=True)
@@ -235,8 +239,10 @@ def argminmax_handler(
     gathered_redux, gather_idxs = _gather_tensors(
         gather_dim, gathered_idxs, local_redux, device_mesh, shard_mesh_dims
     )
-    # op_call here is argmin/argmax which returns indices only
-    rank_winner = op_call(gathered_redux, dim, True)
+    # Select the rank with the best value; use dim=0 when dim was None since
+    # the scalars were unsqueezed to 1-d for gathering
+    select_dim = 0 if dim is None else dim
+    rank_winner = op_call(gathered_redux, select_dim, True)
     final_idx = torch.gather(gather_idxs, dim=gather_dim, index=rank_winner)
 
     return dtensor.DTensor._op_dispatcher.wrap(
