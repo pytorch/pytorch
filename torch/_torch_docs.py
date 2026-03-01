@@ -339,7 +339,7 @@ add_docstr(
     r"""
 index_copy(input: Tensor, dim: int, index: Tensor, source: Tensor, *, out: Optional[Tensor]) -> Tensor
 
-See :meth:`~Tensor.index_add_` for function description.
+See :meth:`~Tensor.index_copy_` for function description.
 """,
 )
 
