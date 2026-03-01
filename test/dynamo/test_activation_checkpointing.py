@@ -2164,6 +2164,37 @@ class GraphModule(torch.nn.Module):
         with torch._dynamo.config.patch(capture_profiler_record_function=True):
             self._validate(fn, backend, x, y)
 
+    def test_checkpoint_with_pytree_keys_repr(self):
+        """Test checkpoint with MappingKey/SequenceKey __repr__ in f-strings.
+        
+        This test reproduces the issue where using pytree key objects 
+        (MappingKey, SequenceKey) in f-strings within checkpointed functions
+        caused AttributeError during torch.compile tracing.
+        See: https://github.com/pytorch/pytorch/issues/XXXXX
+        """
+        from torch.utils._pytree import MappingKey, SequenceKey
+        
+        def process_with_path(x, path):
+            # This f-string previously caused:
+            # AttributeError: 'MappingKey' object has no attribute 'key'
+            _ = f"processing at path={path}"
+            return x * 2
+        
+        def inner_fn(x):
+            path = (MappingKey("a"), SequenceKey(0))
+            return process_with_path(x, path)
+        
+        def checkpointed_fn(x):
+            return checkpoint(inner_fn, x, use_reentrant=False)
+        
+        x = torch.randn(4, 4, requires_grad=True)
+        
+        # Should work without graph breaks or AttributeError
+        compiled_fn = torch.compile(checkpointed_fn, fullgraph=True, backend="eager")
+        result = compiled_fn(x)
+        
+        self.assertTrue(torch.allclose(result, x * 2))
+
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""

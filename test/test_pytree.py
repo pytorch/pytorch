@@ -1496,6 +1496,31 @@ if "optree" in sys.modules:
         for kp, val in flat:
             self.assertEqual(python_pytree.key_get(tree, kp), val)
 
+    def test_pytree_keys_repr_in_torch_compile(self):
+        """Test that MappingKey, SequenceKey, and GetAttrKey __repr__ works with torch.compile.
+        
+        This test verifies that pytree key objects can be used in f-strings within
+        torch.compile-decorated functions without causing AttributeError during tracing.
+        See: https://github.com/pytorch/pytorch/issues/XXXXX
+        """
+        from torch.utils._pytree import MappingKey, SequenceKey, GetAttrKey
+        
+        def fn_with_repr(x):
+            # Create pytree keys
+            path = (MappingKey("a"), SequenceKey(0), GetAttrKey("name"))
+            # This f-string triggers __repr__() on the keys
+            # Previously caused AttributeError during torch.compile tracing
+            msg = f"processing at path={path}"
+            return x * 2
+        
+        # Test with torch.compile using eager backend to verify tracing works
+        compiled_fn = torch.compile(fn_with_repr, fullgraph=True, backend="eager")
+        x = torch.randn(4, 4, requires_grad=True)
+        result = compiled_fn(x)
+        
+        self.assertTrue(torch.allclose(result, x * 2))
+
+
 
 class TestCxxPytree(TestCase):
     def setUp(self):
