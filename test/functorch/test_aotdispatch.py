@@ -8970,6 +8970,24 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
 
         self.assertEqual(out, optout)
 
+    def test_inputs_overlapping_with_mutation_guard_base_as_strided(self):
+        def f(x):
+            y = x.as_strided((2, 2), (1, 1), 0)
+            y.add_(1.0)
+            return y
+
+        def run(f):
+            base = torch.randn([2, 2, 10])
+            return f(base)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "torch.compile/functionalization does not support in-place mutation on overlapping as_strided views",
+        ):
+            run(optf)
+
     def test_mutations_in_bw_detached_from_tangent(self):
         class AF(torch.autograd.Function):
             @staticmethod

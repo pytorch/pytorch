@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <utility>
 namespace at::functionalization {
@@ -152,6 +153,8 @@ Tensor FunctionalInverses::as_strided_inverse(const Tensor& base, const Tensor& 
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
     } else {
+      auto overlap = at::has_internal_overlap(base.as_strided_symint(size, stride, storage_offset));
+      TORCH_CHECK(overlap == at::MemOverlap::No, "torch.compile/functionalization does not support in-place mutation on overlapping as_strided views");
       return base.as_strided_scatter_symint(mutated_view, size, stride, std::move(storage_offset));
     }
 }
