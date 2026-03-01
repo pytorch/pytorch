@@ -312,6 +312,14 @@ def current_device() -> int:
     return torch._C._xpu_getDevice()
 
 
+def current_device_index() -> int:
+    return current_device()
+
+
+def device_type() -> str:
+    return "xpu"
+
+
 def _get_device(device: int | str | torch.device) -> torch.device:
     r"""Return the torch.device type object from the passed in device.
 
@@ -590,11 +598,13 @@ __all__ = [
     "can_device_access_peer",
     "change_current_allocator",
     "current_device",
+    "current_device_index",
     "current_stream",
     "default_generators",
     "device",
     "device_of",
     "device_count",
+    "device_type",
     "empty_cache",
     "get_arch_list",
     "get_device_capability",

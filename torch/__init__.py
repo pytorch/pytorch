@@ -28,6 +28,7 @@ from typing import (
     Any as _Any,
     get_origin as _get_origin,
     overload as _overload,
+    Protocol as _Protocol,
     TYPE_CHECKING,
     TypeVar as _TypeVar,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "ByteTensor",
     "CharStorage",
     "CharTensor",
+    "DeviceModule",
     "DoubleStorage",
     "DoubleTensor",
     "FloatStorage",
@@ -99,6 +101,8 @@ __all__ = [
     "get_deterministic_debug_mode",
     "get_device_module",
     "get_float32_matmul_precision",
+    "get_module_for_device",
+    "get_registered_device_modules",
     "get_rng_state",
     "inference_mode",
     "initial_seed",
@@ -113,6 +117,7 @@ __all__ = [
     "no_grad",
     "rand",
     "randn",
+    "register_module_for_device",
     "save",
     "seed",
     "set_default_device",
@@ -2918,6 +2923,75 @@ def get_device_module(device: torch.device | str | None = None):
             f"Device '{device_module_name}' does not have a corresponding module registered as 'torch.{device_module_name}'."
         )
     return device_module
+
+
+class DeviceModule(_Protocol):
+    def get_device_name(self, device: torch.device | None = None) -> str: ...
+
+    def device_type(self) -> str: ...
+
+    def current_device_index(self) -> builtins.int:
+        """Return the index of a currently selected device."""
+        ...
+
+    def device_count(self) -> builtins.int: ...
+
+    def is_available(self) -> builtins.bool:
+        """Return True if the device type is currently available."""
+        ...
+
+    def is_initialized(self) -> builtins.bool:
+        """Return True if the device type is initialized."""
+        ...
+
+    def empty_cache(self) -> None: ...
+
+    def reset_peak_memory_stats(self) -> None: ...
+
+    def synchronize(self, device: torch.device | None = None) -> None: ...
+
+    def get_device_properties(
+        self, device: torch.device | None = None
+    ) -> _Any | None: ...
+
+
+device_modules: dict[str, DeviceModule] = {}
+_device_modules_initialized = False
+
+
+def register_module_for_device(
+    device: str | torch.device, device_module: DeviceModule
+) -> None:
+    if isinstance(device, torch.device):
+        device = device.type
+    device_modules[device] = device_module
+
+
+def get_module_for_device(device: str | torch.device) -> DeviceModule:
+    if isinstance(device, torch.device):
+        device = device.type
+    if not _device_modules_initialized:
+        _init_device_modules_reg()
+    if device in device_modules:
+        return device_modules[device]
+    raise NotImplementedError(f"No module for device {device}")
+
+
+def get_registered_device_modules() -> list[str]:
+    if not _device_modules_initialized:
+        _init_device_modules_reg()
+    return list(device_modules.keys())
+
+
+def _init_device_modules_reg() -> None:
+    global _device_modules_initialized
+    register_module_for_device("cpu", get_device_module("cpu"))
+    register_module_for_device("cuda", get_device_module("cuda"))
+    register_module_for_device("mps", get_device_module("mps"))
+    register_module_for_device("mtia", get_device_module("mtia"))
+    register_module_for_device("xpu", get_device_module("xpu"))
+
+    _device_modules_initialized = True
 
 
 def _constrain_as_size(

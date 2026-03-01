@@ -17,19 +17,49 @@ from . import amp
 
 
 __all__ = [
-    "is_available",
-    "is_initialized",
-    "synchronize",
-    "current_device",
-    "current_stream",
-    "stream",
-    "set_device",
-    "device_count",
+    "Event",
     "Stream",
     "StreamContext",
-    "Event",
+    "current_device",
+    "current_device_index",
+    "current_stream",
+    "device_count",
+    "device_type",
+    "empty_cache",
     "get_capabilities",
+    "get_device_name",
+    "get_device_properties",
+    "is_available",
+    "is_initialized",
+    "reset_peak_memory_stats",
+    "set_device",
+    "stream",
+    "synchronize",
 ]
+
+
+def get_device_name(device: _device | None = None) -> str:
+    return "cpu"
+
+
+def device_type() -> str:
+    return "cpu"
+
+
+def current_device_index() -> int:
+    return 0
+
+
+def empty_cache() -> None:
+    pass
+
+
+def reset_peak_memory_stats() -> None:
+    pass
+
+
+def get_device_properties(device: _device | None = None) -> Any | None:
+    return None
 
 
 @lru_cache(None)
