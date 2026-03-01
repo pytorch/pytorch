@@ -780,21 +780,24 @@ class DistMatrixOpsTest(DTensorTestBase):
     def test_scaled_dot_product_attention(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
+        head_dim = 8
+        if self.device_type == "xpu":
+            head_dim = 64
         # bsz, n_heads, slen, head_dim
         query = torch.rand(
-            (4, 8, 8, 8),
+            (4, 8, 8, head_dim),
             device=self.device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
         )
         key = torch.rand(
-            (4, 8, 8, 8),
+            (4, 8, 8, head_dim),
             device=self.device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
         )
         value = torch.rand(
-            (4, 8, 8, 8),
+            (4, 8, 8, head_dim),
             device=self.device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
