@@ -95,10 +95,49 @@ class FakeTensorProp(torch.fx.Interpreter):
         meta = map_aggregate(result, extract_val)
         if meta is not None:
             n.meta["val"] = meta
-            if (shape_env := self._mode.shape_env) and (
-                symbol_to_path := compute_unbacked_bindings(shape_env, result)
-            ):
+
+        shape_env = self._mode.shape_env
+        if shape_env:
+            symbol_to_path = compute_unbacked_bindings(shape_env, result)
+
+            if symbol_to_path:
                 n.meta["unbacked_bindings"] = symbol_to_path
+            else:
+                # Fallback: If result contains unbacked symbols in its shape/stride/storage_offset
+                # but they're not "fresh" (e.g., inherited from inputs like cat/slice),
+                # we still need to propagate unbacked_bindings to avoid crashes in lowering.
+                # This handles cases like: cat([tensor, unbacked_tensor]) -> slice
+                from torch.fx.experimental.symbolic_shapes import (
+                    _free_unbacked_symbols_with_path,
+                    free_unbacked_symbols,
+                )
+
+                # Check if result has any unbacked symbols in its metadata
+                all_unbacked = set()
+                if isinstance(result, (torch.Tensor, FakeTensor)):
+                    all_unbacked.update(free_unbacked_symbols(result.size()))
+                    if result.layout not in [
+                        torch.sparse_csr,
+                        torch.sparse_csc,
+                        torch.sparse_bsr,
+                        torch.sparse_bsc,
+                    ]:
+                        all_unbacked.update(free_unbacked_symbols(result.stride()))
+                        all_unbacked.update(
+                            free_unbacked_symbols([result.storage_offset()])
+                        )
+
+                # If we found unbacked symbols, create bindings for them
+                if all_unbacked:
+                    symbol_to_path = _free_unbacked_symbols_with_path(
+                        result,
+                        (),
+                        shape_env=shape_env,
+                        pending=all_unbacked,
+                        simplify=False,
+                    )
+                    if symbol_to_path:
+                        n.meta["unbacked_bindings"] = symbol_to_path
 
         return result
 
