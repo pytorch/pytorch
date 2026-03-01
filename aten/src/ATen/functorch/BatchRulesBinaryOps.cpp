@@ -340,6 +340,35 @@ static Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, std::opt
   return at::binomial(count, prob.contiguous(), std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
 
+static void masked_fill__Tensor_batch_rule(
+    Tensor& self, std::optional<int64_t> self_bdim,
+    const Tensor& mask, std::optional<int64_t> mask_bdim,
+    const Tensor& value, std::optional<int64_t> value_bdim) {
+  if (!self_bdim && (mask_bdim || value_bdim)) {
+    vmapIncompatibleInplaceError("masked_fill_");
+  }
+
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto mask_logical_rank = rankWithoutBatchDim(mask, mask_bdim);
+  auto max_logical_rank = std::max(self_logical_rank, mask_logical_rank);
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto mask_ = moveBatchDimToFront(mask, mask_bdim);
+
+  self_ = maybePadToLogicalRank(self_, self_bdim, max_logical_rank);
+  mask_ = maybePadToLogicalRank(mask_, mask_bdim, max_logical_rank);
+
+  if (!value_bdim) {
+    self_.masked_fill_(mask_, value);
+    return;
+  }
+
+  // when value is batched (0-d --> 1-d after batching)
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  value_ = maybePadToLogicalRank(value_, value_bdim, max_logical_rank);
+  self_.copy_(at::where(mask_, value_, self_));
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #define BINARY_RANDOM_POINTWISE(op) \
     m.impl(#op, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN(op)));
@@ -509,6 +538,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(clamp_min_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_min_>));
   VMAP_SUPPORT2(clamp_max_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_max_>));
   VMAP_SUPPORT2(masked_fill_, Scalar, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::masked_fill_, const Scalar&>));
+  VMAP_SUPPORT2(masked_fill_, Tensor, masked_fill__Tensor_batch_rule);
   VMAP_SUPPORT(copy_, SINGLE_ARG(binary_pointwise_inplace_batch_rule<CopyT, &Tensor::copy_, bool>));
 
 #define COMPARISON_POINTWISE(op) \

@@ -1085,6 +1085,32 @@ std::tuple<Tensor, std::optional<int64_t>> masked_fill_scalar_batch_rule(
   return std::make_tuple(result, 0);
 }
 
+std::tuple<Tensor, std::optional<int64_t>> masked_fill_tensor_batch_rule(
+    const Tensor & self,
+    std::optional<int64_t> self_bdim,
+    const Tensor & mask,
+    std::optional<int64_t> mask_bdim,
+    const Tensor & value,
+    std::optional<int64_t> value_bdim) {
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto mask_logical_rank = rankWithoutBatchDim(mask, mask_bdim);
+  auto max_logical_rank = std::max(self_logical_rank, mask_logical_rank);
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto mask_ = moveBatchDimToFront(mask, mask_bdim);
+
+  self_ = maybePadToLogicalRank(self_, self_bdim, max_logical_rank);
+  mask_ = maybePadToLogicalRank(mask_, mask_bdim, max_logical_rank);
+
+  if (!value_bdim) {
+    return std::make_tuple(at::masked_fill(self_, mask_, value), 0);
+  }
+
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  value_ = maybePadToLogicalRank(value_, value_bdim, max_logical_rank);
+  return std::make_tuple(at::where(mask_, value_, self_), 0);
+}
+
 std::tuple<Tensor, std::optional<int64_t>> index_fill_batch_rule_helper(
   int64_t batch_size,
   int64_t self_logical_rank,
@@ -1277,6 +1303,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);
   VMAP_SUPPORT2(masked_fill, Scalar, masked_fill_scalar_batch_rule);
+  VMAP_SUPPORT2(masked_fill, Tensor, masked_fill_tensor_batch_rule);
   VMAP_SUPPORT2(index_fill_, int_Tensor, index_fill__int_tensor_batch_rule);
   VMAP_SUPPORT2(index_fill_, int_Scalar, index_fill__int_scalar_batch_rule);
   VMAP_SUPPORT2(index_fill, int_Tensor, index_fill_int_tensor_batch_rule);
