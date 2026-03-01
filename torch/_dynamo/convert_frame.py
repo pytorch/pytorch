@@ -2019,7 +2019,7 @@ def _compile(
                 and tracer_output.output_graph is not None
                 and not tracer_output.output_graph.export
             ):
-                tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = OrderedSet()
+                tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.clear()
 
             # Clear WeakIdRef entries that can block swap_tensors after compile.
             # Determine whether to clear based on config and backend type.
