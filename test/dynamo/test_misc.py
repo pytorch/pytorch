@@ -177,11 +177,11 @@ class UserDefineSetAttr:
     setup = False
 
     def __setattr__(self, key, value):
-        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup  # noqa: S101
         super().__setattr__(f"pfx_{key}", value)
 
     def __getattr__(self, key, c=1):
-        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup  # noqa: S101
         # c is added to force a guard on __defaults__ and checks the source for __getattr__
         if c:
             return self.__dict__[f"pfx_{key}"]
@@ -806,7 +806,8 @@ graph():
             torch.library.impl(
                 "mylib::bar", "CompositeImplicitAutograd", torch.sin, lib=lib
             )
-            assert torch.Tag.pt2_compliant_tag in torch.ops.mylib.bar.default.tags
+            if torch.Tag.pt2_compliant_tag not in torch.ops.mylib.bar.default.tags:
+                raise AssertionError("Expected pt2_compliant_tag in bar.default.tags")
 
             def f(x):
                 return torch.ops.mylib.bar(x)
@@ -832,7 +833,10 @@ graph():
             torch.library.impl(
                 "mylib::bar2", "CompositeImplicitAutograd", torch.sin, lib=lib
             )
-            assert torch.Tag.pt2_compliant_tag not in torch.ops.mylib.bar2.default.tags
+            if torch.Tag.pt2_compliant_tag in torch.ops.mylib.bar2.default.tags:
+                raise AssertionError(
+                    "Expected pt2_compliant_tag not in bar2.default.tags"
+                )
 
             def f(x):
                 return torch.ops.mylib.bar2(x)
@@ -1435,10 +1439,10 @@ graph():
     def test_sys_modules(self):
         def fn(x, y):
             mod_a = sys.modules.get("aaaaaaaa")
-            assert mod_a is None
-            assert "bbbbbbbb" not in sys.modules
+            assert mod_a is None  # noqa: S101
+            assert "bbbbbbbb" not in sys.modules  # noqa: S101
 
-            assert "operator" in sys.modules
+            assert "operator" in sys.modules  # noqa: S101
             operator = sys.modules["operator"]
             builtins = sys.modules.get("builtins")
             operator2 = sys.modules.get("cccccccc", operator)
@@ -1742,7 +1746,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch._check(y >= 0)
             # Cannot conditional on unbacked SymInt
             if y == 0:
-                assert False
+                assert False  # noqa: B011, S101
             else:
                 return torch.arange(0, y)
 
@@ -1913,16 +1917,16 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             f(x)
 
     def test_assert(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn1(x):
-            assert x.shape != x.shape
+            assert x.shape != x.shape  # noqa: S101
 
         with self.assertRaises(AssertionError):
             a = torch.randn(10)
             fn1(a)
 
         def fn2(x):
-            assert x.shape == x.shape
+            assert x.shape == x.shape  # noqa: S101
             return x.abs()
 
         torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
@@ -2809,6 +2813,55 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(opt_fn(mod, x), fn(mod, x)))
 
+    def test_nn_module_getattribute_simple_delegation(self):
+        # Test that nn.Module with __getattribute__ that overrides a
+        # single attribute name compiles without graph break.
+        class MyMod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scale = 3.0
+
+            def __getattribute__(self, name):
+                if name == "my_scale":
+                    return super().__getattribute__("scale")
+                return super().__getattribute__(name)
+
+            def forward(self, x):
+                return x * self.my_scale
+
+        mod = MyMod()
+        x = torch.randn(2, 4)
+        expected = mod(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(mod, backend=cnts)
+        result = opt_fn(x)
+        self.assertTrue(same(result, expected))
+
+    def test_nn_module_getattribute_graph_break(self):
+        # __getattribute__ that Dynamo cannot trace produces correct results
+        # via eager fallback instead of crashing.
+        class MyMod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def __getattribute__(self, name):
+                if name == "my_attr":
+                    return eval("42")  # eval is untraceable
+                return super().__getattribute__(name)
+
+            def forward(self, x):
+                a = self.my_attr
+                return self.linear(x) + a
+
+        mod = MyMod()
+        x = torch.randn(2, 4)
+        expected = mod(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(mod, backend=cnts)
+        result = opt_fn(x)
+        self.assertTrue(same(result, expected))
+
     def test_constant_getattr(self):
         # https://github.com/pytorch/pytorch/issues/97480
         def fn():
@@ -2858,12 +2911,12 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         def fn(obj):
             class_fields = dataclasses.fields(obj)
-            assert len(class_fields)
-            assert all(field.default is None for field in class_fields[1:])
+            assert len(class_fields)  # noqa: S101
+            assert all(field.default is None for field in class_fields[1:])  # noqa: S101
             other_fields_are_none = all(
                 getattr(obj, field.name) is None for field in class_fields[1:]
             )
-            assert not other_fields_are_none
+            assert not other_fields_are_none  # noqa: S101
 
             if not hasattr(obj, "a"):
                 return -1
@@ -3301,7 +3354,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_numpy_gt(self):
         x = np.arange(10)
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(y):
             return y >= 3
 
@@ -3312,7 +3365,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_numpy_min(self):
         x = np.arange(10)
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(y):
             return min(y, 3), min(y, y - 1)
 
@@ -3418,7 +3471,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         r2 = fn2()
         self.assertEqual(cnts.frame_count, 0)
-        assert r2 in ("L", "U")
+        if r2 not in ("L", "U"):
+            raise AssertionError(f"Expected r2 to be 'L' or 'U', got {r2}")
 
     def test_trace_ndarray_frame(self):
         def fn(x):
@@ -3516,7 +3570,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     # NB this may involve a graph break
     @torch._dynamo.config.patch(use_numpy_random_stream=True)
     def test_numpy_random_config_to_numpy(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn():
             return np.random.uniform(size=13)
 
@@ -4417,8 +4471,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             v1 = torch.randn(10)
 
             def fn2(*args, **kwargs):
-                assert len(args) == 1
-                assert len(kwargs) == 1
+                assert len(args) == 1  # noqa: S101
+                assert len(kwargs) == 1  # noqa: S101
                 v2 = torch.randn(10) + args[0] + kwargs["b"]
 
                 def fn3(v3=torch.randn(10)):
@@ -4698,7 +4752,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             # Calling `inner` so Dynamo won't skip this frame.
             return inner(), inner
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def root():
             return get_inner()
 
@@ -4830,7 +4884,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def fn(x):
             import torch.fx
 
-            assert not isinstance(x, torch.fx.Proxy)
+            assert not isinstance(x, torch.fx.Proxy)  # noqa: S101
             return torch.sin(x)
 
         x = torch.randn(4, 5)
@@ -6088,7 +6142,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     def test_tensor_types(self):
         def fn(dtype, tensor_type):
             x = torch.empty(4, dtype=dtype)
-            assert isinstance(x, tensor_type)
+            assert isinstance(x, tensor_type)  # noqa: S101
 
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(torch.float32, torch.FloatTensor)
@@ -6405,7 +6459,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
             def forward(self, idx, targets=None):
                 b, t = idx.size()
-                assert t <= self.block_size, (
+                assert t <= self.block_size, (  # noqa: S101
                     "Cannot forward, model block size is exhausted."
                 )
 
@@ -9198,14 +9252,20 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                     new_state = [False] * len(initial_state)
                     new_state[i] = True
                     write_state(new_state)
-                    assert read_state() == new_state
+                    if read_state() != new_state:
+                        raise AssertionError(f"Expected read_state() == {new_state}")
                     last_state.clear()
                     fn(y)
-                    assert last_state == new_state
+                    if last_state != new_state:
+                        raise AssertionError(f"Expected last_state == {new_state}")
                     if round == 0:
-                        assert cnt == i + 1
+                        if cnt != i + 1:
+                            raise AssertionError(f"Expected cnt == {i + 1}, got {cnt}")
                     else:
-                        assert cnt == len(initial_state)
+                        if cnt != len(initial_state):
+                            raise AssertionError(
+                                f"Expected cnt == {len(initial_state)}, got {cnt}"
+                            )
         finally:
             write_state(initial_state)
 
@@ -9228,16 +9288,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         try:
             torch.set_grad_enabled(True)
             fn(torch.randn(10))
-            assert value is True
-            assert torch.is_grad_enabled() is False
+            if value is not True:
+                raise AssertionError(f"Expected value is True, got {value}")
+            if torch.is_grad_enabled() is not False:
+                raise AssertionError("Expected grad disabled after fn()")
 
             value = None
             torch.set_grad_enabled(True)
             fn(torch.randn(10))
-            assert value is True
-            assert torch.is_grad_enabled() is False
+            if value is not True:
+                raise AssertionError(f"Expected value is True, got {value}")
+            if torch.is_grad_enabled() is not False:
+                raise AssertionError("Expected grad disabled after fn()")
 
-            assert cnt.frame_count == 1
+            if cnt.frame_count != 1:
+                raise AssertionError(f"Expected frame_count 1, got {cnt.frame_count}")
         finally:
             torch.set_grad_enabled(prior)
 
@@ -9258,23 +9323,30 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             check_state()
-            assert torch.are_deterministic_algorithms_enabled() is True
+            assert torch.are_deterministic_algorithms_enabled() is True  # noqa: S101
             torch.use_deterministic_algorithms(False, warn_only=False)
             return x + 1
 
         def run_fn():
             torch.use_deterministic_algorithms(True, warn_only=True)
             fn(torch.randn(10))
-            assert value is True
-            assert warn_only is True
-            assert torch.are_deterministic_algorithms_enabled() is False
-            assert torch.is_deterministic_algorithms_warn_only_enabled() is False
+            if value is not True:
+                raise AssertionError(f"Expected value is True, got {value}")
+            if warn_only is not True:
+                raise AssertionError(f"Expected warn_only is True, got {warn_only}")
+            if torch.are_deterministic_algorithms_enabled() is not False:
+                raise AssertionError(
+                    "Expected deterministic algorithms disabled after fn()"
+                )
+            if torch.is_deterministic_algorithms_warn_only_enabled() is not False:
+                raise AssertionError("Expected warn_only disabled after fn()")
 
         try:
             run_fn()
             value, warn_only = None, None
             run_fn()
-            assert cnt.frame_count == 1
+            if cnt.frame_count != 1:
+                raise AssertionError(f"Expected frame_count 1, got {cnt.frame_count}")
         finally:
             torch.use_deterministic_algorithms(prior, warn_only=prior_warn_only)
 
@@ -9522,14 +9594,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def _result_type_dict(dtype):
             return {bool: torch.float32}[dtype]
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def f():
             return torch.ones(3, dtype=_result_type_dict(bool))
 
         self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
 
     def test_inline_dict_function_passed_as_arg(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def fn(d, x, y):
             if d[x] is torch.float32:
                 return y.cos()
@@ -10449,7 +10521,8 @@ def ___make_guard_fn():
         # custom strides (all integers)
         x2 = torch.randn(10000)
         x2 = x2.as_strided([4, 4, 4, 4], [1, 2, 4, 8])
-        assert g(x2) == (3, 2, 1, 0)
+        if g(x2) != (3, 2, 1, 0):
+            raise AssertionError(f"Expected g(x2) == (3, 2, 1, 0), got {g(x2)}")
 
         # custom unbacked strides with no ordering: ambiguity check should raise
         xs = torch.tensor([2, 3, 4])
@@ -10634,7 +10707,7 @@ def ___make_guard_fn():
 
             return inner
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def start():
             # Obtain the `inner` function, which holds reference to `x`.
             inner = fn()
@@ -10865,7 +10938,7 @@ def ___make_guard_fn():
             target_dtype = target.dtype
             a = torch.zeros(2, 3, dtype=target_dtype)
             # Constant assert at trace time
-            assert isinstance(target_dtype, torch.dtype)
+            assert isinstance(target_dtype, torch.dtype)  # noqa: S101
             b = torch.zeros(2, 3, dtype=target_dtype)
             c = torch.zeros(2, 3, dtype=target_dtype)
             return a + b + c
@@ -11823,7 +11896,7 @@ ShapeEnv not equal: field values don't match:
         )
 
     def test_default_dtype_change(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def foo():
             def inner(a, b, res_dtype):
                 print(a, b, res_dtype)
@@ -11842,7 +11915,7 @@ ShapeEnv not equal: field values don't match:
             x = np.arange(5)
             out = np.empty((x.shape[0], x.shape[0]))
             res_out = np.sin(x, out=out)
-            assert res_out is out
+            assert res_out is out  # noqa: S101
 
         foo()
 
@@ -11856,13 +11929,13 @@ ShapeEnv not equal: field values don't match:
             out = np.empty((x.shape[0], x.shape[0]))
             res_out = np.sin(x, out=out)
             torch._dynamo.graph_break()
-            assert res_out is out
+            assert res_out is out  # noqa: S101
 
         foo()
 
     @wrapDeterministicFlagAPITest
     def test_backward_deterministic_mode_mismatch_warning(self):
-        @torch.compile
+        @torch.compile(backend="aot_eager")
         def func(a, b):
             return a + b
 
@@ -12146,7 +12219,7 @@ fn
         def fn(x):
             y = torch.zeros(x.item())
             if y.size(0) < 0:
-                assert False
+                assert False  # noqa: B011, S101
             return y
 
         self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
@@ -13387,6 +13460,12 @@ fn
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
 
+    @unittest.skipIf(sys.version_info < (3, 12), "Python 3.12+")
+    def test_CALL_INTRINSIC(self):
+        from torch.testing._internal.py312_intrinsics import Foo
+
+        Foo.test_default_update(self)
+
     @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
     def test_RAISE_VARARGS_0(self):
         def foo():
@@ -14441,9 +14520,9 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
                 target_device = target.device
                 a = torch.zeros(2, 3, device=target_device)
                 # Constant assert at trace time
-                assert isinstance(target_device, torch.device)
-                assert target_device.type == device_type
-                assert target_device.index == index
+                assert isinstance(target_device, torch.device)  # noqa: S101
+                assert target_device.type == device_type  # noqa: S101
+                assert target_device.index == index  # noqa: S101
                 b = torch.zeros(2, 3, device=target_device)
                 c = torch.zeros(2, 3, device=target_device)
                 return a + b + c

@@ -106,6 +106,7 @@ Perform thorough line-by-line analysis using the review checklist. See [review-c
 - Code quality and design
 - Testing adequacy
 - Security considerations
+- Thread safety and concurrency (Python, C++, CPython C API, NoGIL)
 - Performance implications
 - Any behavior change not expected by author
 
@@ -129,6 +130,7 @@ Structure your review with actionable feedback organized by category.
 | Testing | Coverage, patterns, edge cases | [review-checklist.md](review-checklist.md) |
 | Security | Injection, credentials, input handling | [review-checklist.md](review-checklist.md) |
 | Performance | Regressions, device handling, memory | [review-checklist.md](review-checklist.md) |
+| Thread Safety | Data races, GIL assumptions, NoGIL, CPython C API | [review-checklist.md](review-checklist.md) |
 | BC | Breaking changes, deprecation | [bc-guidelines.md](bc-guidelines.md) |
 
 ## Output Format
@@ -157,6 +159,9 @@ Brief overall assessment of the changes (1-2 sentences).
 
 ### Security
 [Issues if any, or "No security concerns identified"]
+
+### Thread Safety
+[Threading concerns if any, or "No thread safety concerns"]
 
 ### Backward Compatibility
 [BC concerns if any, or "No BC-breaking changes"]

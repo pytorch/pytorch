@@ -26,7 +26,7 @@ import sys
 import textwrap
 from collections.abc import Callable, Sequence
 from importlib import import_module
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.fx as fx
@@ -82,7 +82,7 @@ def _accuracy_fails(
 
 class WrapBackendDebug:
     def __init__(
-        self, unconfigured_compiler_fn: CompilerFn, compiler_name: Optional[str]
+        self, unconfigured_compiler_fn: CompilerFn, compiler_name: str | None
     ) -> None:
         functools.wraps(unconfigured_compiler_fn)(self)
         self._torchdynamo_orig_backend = unconfigured_compiler_fn
@@ -159,7 +159,7 @@ class WrapBackendDebug:
 
 
 def wrap_backend_debug(
-    unconfigured_compiler_fn: CompilerFn, compiler_name: Optional[str]
+    unconfigured_compiler_fn: CompilerFn, compiler_name: str | None
 ) -> WrapBackendDebug:
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
@@ -180,11 +180,11 @@ def wrap_backend_debug(
 def generate_dynamo_fx_repro_string(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
-    compiler_name: Optional[str],
+    compiler_name: str | None,
     check_accuracy: bool = False,
     *,
     stable_output: bool = False,
-    save_dir: Optional[str] = None,
+    save_dir: str | None = None,
     command: str = "run",
 ) -> str:
     """
@@ -236,7 +236,7 @@ if __name__ == '__main__':
 def dump_backend_repro_as_file(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
-    compiler_name: Optional[str],
+    compiler_name: str | None,
     check_accuracy: bool = False,
 ) -> None:
     """
@@ -269,7 +269,7 @@ def dump_backend_repro_as_file(
 def dump_backend_state(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
-    compiler_name: Optional[str],
+    compiler_name: str | None,
     check_accuracy: bool = False,
 ) -> None:
     """
@@ -290,7 +290,7 @@ def dump_backend_state(
 
 
 def dump_to_minify_after_dynamo(
-    gm: torch.fx.GraphModule, args: Sequence[Any], compiler_name: Optional[str]
+    gm: torch.fx.GraphModule, args: Sequence[Any], compiler_name: str | None
 ) -> None:
     # TODO: factor this out
     subdir = os.path.join(minifier_dir(), "checkpoints")
@@ -315,7 +315,7 @@ def dump_to_minify_after_dynamo(
 
 @register_debug_backend  # type: ignore[arg-type]
 def dynamo_minifier_backend(
-    gm: fx.GraphModule, example_inputs: Sequence[Any], compiler_name: Optional[str]
+    gm: fx.GraphModule, example_inputs: Sequence[Any], compiler_name: str | None
 ) -> fx.GraphModule:
     from functorch.compile import minifier
 
@@ -357,7 +357,7 @@ def dynamo_minifier_backend(
 
 @register_debug_backend  # type: ignore[arg-type]
 def dynamo_accuracy_minifier_backend(
-    gm: fx.GraphModule, example_inputs: Sequence[Any], compiler_name: Optional[str]
+    gm: fx.GraphModule, example_inputs: Sequence[Any], compiler_name: str | None
 ) -> fx.GraphModule:
     from functorch.compile import minifier
 
@@ -471,7 +471,6 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
         compiler_fn,
         compiler_name=options.backend,  # type: ignore[call-arg]
     )
-    # pyrefly: ignore [bad-argument-type]
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
     with torch.amp.autocast("cuda", enabled=options.autocast):
@@ -479,7 +478,6 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
 
 
 def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
-    # pyrefly: ignore [bad-argument-type]
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
 
     if options.accuracy != "":
@@ -518,8 +516,8 @@ def run_repro(
     load_args: Any,
     *,
     command: str = "run",
-    accuracy: Union[bool, str] = "",
-    save_dir: Optional[str] = None,
+    accuracy: bool | str = "",
+    save_dir: str | None = None,
     autocast: bool = False,
     backend: str = "inductor",
     **kwargs: Any,

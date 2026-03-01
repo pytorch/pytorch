@@ -228,6 +228,37 @@ class TestEmbeddingOp(DTensorTestBase):
         # not equal because of different logical_shape, despite of same logical_dim_size
         self.assertNotEqual(partial_placement1, partial_placement3)
 
+    @with_comms
+    def test_embedding_backward_different_num_embeddings(self):
+        # Regression test: embedding_dense_backward op strategy must include
+        # num_weights in its cache key. Without this, multiple embeddings with
+        # different num_embeddings share a cached strategy, producing gradients
+        # with the wrong shape.
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+
+        emb_small = torch.nn.Embedding(16, 12, device=self.device_type)
+        emb_large = torch.nn.Embedding(32, 12, device=self.device_type)
+        sharded_emb_small = self._apply_sharding(emb_small, 1, mesh)
+        sharded_emb_large = self._apply_sharding(emb_large, 1, mesh)
+
+        inp_small = torch.randint(0, 16, (4, 4), device=self.device_type)
+        inp_large = torch.randint(0, 32, (4, 4), device=self.device_type)
+        dist_inp_small = DTensor.from_local(
+            inp_small, mesh, [Replicate()], run_check=False
+        )
+        dist_inp_large = DTensor.from_local(
+            inp_large, mesh, [Replicate()], run_check=False
+        )
+
+        out_large = sharded_emb_large(dist_inp_large)
+        out_small = sharded_emb_small(dist_inp_small)
+        loss = out_large.sum() + out_small.sum()
+        loss.backward()
+
+        self.assertEqual(sharded_emb_small.weight.grad.full_tensor().shape, (16, 12))
+        self.assertEqual(sharded_emb_large.weight.grad.full_tensor().shape, (32, 12))
+
 
 TestEmbeddingOpWithLocalTensor = create_local_tensor_test_class(
     TestEmbeddingOp,

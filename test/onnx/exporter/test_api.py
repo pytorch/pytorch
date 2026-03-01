@@ -66,7 +66,8 @@ class TestExportAPIDynamo(common_utils.TestCase):
         self, *args, strategy: str | None = "TorchExportNonStrictStrategy", **kwargs
     ):
         onnx_program = torch.onnx.export(*args, **kwargs, dynamo=True, verbose=False)
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         onnx_testing.assert_onnx_program(onnx_program, strategy=strategy)
         return onnx_program
 

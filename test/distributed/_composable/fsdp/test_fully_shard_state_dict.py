@@ -132,7 +132,8 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
 
         # call .state_dict() once and use `sd` directly to reduce cpu overhead
         sd = model.state_dict()
-        assert isinstance(model.weight, DTensor)
+        if not isinstance(model.weight, DTensor):
+            raise AssertionError(f"Expected DTensor, got {type(model.weight)}")
 
         if not mutate_after_state_dict:
             self.assertTrue(
