@@ -66,3 +66,7 @@ sphinx-copybutton==0.5.0
 sphinx-design==0.6.1
 sphinxcontrib-mermaid==1.0.0
 myst-parser==4.0.1
+
+linkchecker==10.5.0
+#Description: This is used to check internal links and anchors in the built docs
+#Pinned versions: 10.5.0
