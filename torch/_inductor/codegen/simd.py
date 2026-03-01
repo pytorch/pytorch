@@ -2981,11 +2981,10 @@ class SIMDScheduling(BaseScheduling):
             # Add uncoalesced memory score to prevent small coalesced benefits
             # from dominating large amounts of uncoalesced memory
             uncoalesced_penalty = total_uncoalesced * 0.05
-
-            return -(t[0].score + uncoalesced_penalty) * score_factor
+            return (t[0].score - uncoalesced_penalty) * score_factor
 
         # apply penalty for longer tilings that dont increase score much
-        for cand, tiling_score in sorted(tilings, key=score_mod):
+        for cand, tiling_score in sorted(tilings, key=score_mod, reverse=True):
             if (
                 cls.tiling_is_compatible(
                     node_schedule, pointwise_numel, reduction_numel, cand.tiling
