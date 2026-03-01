@@ -165,7 +165,7 @@ case "$tag" in
     else
       ANACONDA_PYTHON_VERSION=3.12
     fi
-    GCC_VERSION=13
+    GCC_VERSION=11
     VISION=yes
     ROCM_VERSION=7.2
     NINJA_VERSION=1.9.0
@@ -178,7 +178,7 @@ case "$tag" in
     ;;
   pytorch-linux-noble-rocm-nightly-py3)
     ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=13
+    GCC_VERSION=11
     VISION=yes
     ROCM_VERSION=nightly
     NINJA_VERSION=1.9.0
