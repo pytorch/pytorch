@@ -348,6 +348,25 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(splits)
         self.assertEqual(r, opt_r)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_symbool_guard_does_not_become_graph_input(self, device):
+        def f(x):
+            n = x.sum().item()
+            torch._check(n > 0)
+            return (x * 2).sum()
+
+        compiled_f = torch.compile(f, fullgraph=True, dynamic=True)
+        x = torch.ones(4, device=device, requires_grad=True)
+        x_ref = x.detach().clone().requires_grad_(True)
+
+        y = compiled_f(x)
+        y_ref = f(x_ref)
+        y.backward()
+        y_ref.backward()
+
+        self.assertEqual(y, y_ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):

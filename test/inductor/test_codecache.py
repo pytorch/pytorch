@@ -61,6 +61,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
+    scoped_load_inline,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
@@ -2515,6 +2516,7 @@ class TestFxGraphCacheHashing(TestCase):
                 pickler.dumps(torch.randn(3, 3)),
                 pickler.dumps(torch.randn(3, 4)),
             )
+
             self.assertNotEqual(
                 pickler.dumps(torch.randn(3, 3)),
                 pickler.dumps(torch.randn(4, 3)),
@@ -2587,6 +2589,43 @@ class TestFxGraphCacheHashing(TestCase):
                     pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:0")),
                     pickler.dumps(torch.randn(3, device=f"{GPU_TYPE}:1")),
                 )
+
+    @config.patch({"fx_graph_cache": True, "fx_graph_remote_cache": False})
+    @scoped_load_inline
+    def test_pybind_function_in_graph_cache_key(self, load_inline):
+        reset()
+        cpp_source = """
+#include <torch/extension.h>
+
+torch::Tensor foobar(torch::Tensor x) {
+  return x + 1;
+}
+        """
+
+        module = load_inline(
+            name="test_pybind_cache_key",
+            cpp_sources=cpp_source,
+            functions="foobar",
+            verbose=False,
+        )
+        torch.compiler.allow_in_graph(module.foobar)
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x):
+            return module.foobar(x)
+
+        x = torch.ones(2, 2)
+        try:
+            out = f(x)
+        except Exception as exc:
+            msg = str(exc)
+            self.assertNotIn("pybind11_detail_function_record", msg)
+            self.assertNotIn("pickle", msg)
+            if isinstance(exc, torch._dynamo.exc.Unsupported):
+                return
+            raise
+
+        self.assertEqual(out, x + 1)
 
     def test_hash_kwargs(self):
         """

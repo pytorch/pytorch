@@ -160,6 +160,31 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_backward_unbacked_symbol_dependencies(self, device):
+        def fn(x, w):
+            nz = x.nonzero()
+            y = nz.float() @ w
+            return y.sum()
+
+        x = make_tensor(8, 2, device=device, dtype=torch.float32, exclude_zero=True)
+        w = torch.randn(2, 4, device=device, requires_grad=True)
+        x.requires_grad_(True)
+
+        x_ref = x.detach().clone().requires_grad_(True)
+        w_ref = w.detach().clone().requires_grad_(True)
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        out = compiled_fn(x, w)
+        out_ref = fn(x_ref, w_ref)
+        out.backward()
+        out_ref.backward()
+
+        torch.testing.assert_close(out, out_ref)
+        torch.testing.assert_close(x.grad, x_ref.grad)
+        torch.testing.assert_close(w.grad, w_ref.grad)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @inductor_config.patch({"max_autotune": True})
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_equivalent_backed_unbacked(self, device):

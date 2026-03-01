@@ -177,6 +177,54 @@ from user code:
     it = iter(items)""",
         )
 
+    def test_noncontiguous_out_tensor_graph_break(self):
+        def fn(x):
+            out = torch.empty_like(x).transpose(0, 1)
+            return torch.ops.aten.add.out(x, 1, out=out)
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(2, 2)
+            ),
+            """\
+Attempted to call op with non-contiguous `out=` tensor
+  Explanation: Dynamo does not support this.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: self.value=aten.add.out, args=[TensorVariable(), ConstantVariable(int: 1)], kwargs={'out': TensorVariable()}
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0242.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return torch.ops.aten.add.out(x, 1, out=out)""",
+        )
+
+    def test_noncontiguous_out_list_graph_break(self):
+        def fn(x):
+            out = x.t()
+            return torch.ops.aten._foreach_add.Scalar_out((x,), 1, out=(out,))
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(2, 2)
+            ),
+            """\
+Attempted to call op with non-contiguous `out=` list of tensors
+  Explanation: Dynamo does not support this.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: self.value=aten._foreach_add.Scalar_out, args=[TupleVariable(length=1), ConstantVariable(int: 1)], kwargs={'out': TupleVariable(length=1)}
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0241.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    return torch.ops.aten._foreach_add.Scalar_out((x,), 1, out=(out,))""",
+        )
+
     def test_super_call_function(self):
         def fn(it):
             return [x + 1 for x in it()]
@@ -926,6 +974,32 @@ Data-dependent branching
 from user code:
    File "test_error_messages.py", line N, in fn
     if x.sum() > 0:""",
+        )
+
+    def test_data_dependent_branching_tensor_all(self):
+        def fn(attention_mask):
+            if attention_mask.all():
+                return attention_mask + 1
+            return attention_mask - 1
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.ones(2, 2, dtype=torch.bool)
+            ),
+            """\
+Data-dependent branching
+  Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+  Hint: Use `torch.cond` to express dynamic control flow.
+
+  Developer debug context: attempted to jump with TensorVariable()
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0170.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    if attention_mask.all():""",
         )
 
     # Test that the bytecode source attribution is correct with VariableTracker

@@ -1972,7 +1972,9 @@ class GraphLowering(torch.fx.Interpreter):
                         if user.target in need_fixed_layout:
                             result = ir.ExternKernel.require_stride_order(
                                 result,
-                                ir.get_stride_order(n.meta["val"].stride()),
+                                ir.get_stride_order(
+                                    n.meta["val"].stride(), self._shape_env
+                                ),
                                 allow_padding=True,
                             )
                         if (
@@ -1982,7 +1984,8 @@ class GraphLowering(torch.fx.Interpreter):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(
-                                    make_channels_last_strides_for(n.meta["val"].shape)
+                                    make_channels_last_strides_for(n.meta["val"].shape),
+                                    self._shape_env,
                                 ),
                             )
                     if user.op == "output":
