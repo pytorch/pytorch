@@ -20,6 +20,16 @@ extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, doubl
 extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
 extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
 extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
+// BGEMM provides native BF16 GEMM execution (no FP32 up/down conversion),
+// Older SBGEMM paths required BF16 <-> FP32 conversion, adding extra cost.
+#ifdef BLAS_HAS_BGEMM
+extern "C" void bgemm_(char *transa, char *transb, int *m, int *n, int *k,
+                const at::BFloat16 *alpha,
+                const at::BFloat16 *a, int *lda,
+                const at::BFloat16 *b, int *ldb,
+                const at::BFloat16 *beta,
+                at::BFloat16 *c, int *ldc);
+#endif  // BLAS_HAS_BGEMM
 #ifdef BLAS_HAS_SBGEMM
 extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 float *alpha,
@@ -347,7 +357,7 @@ void gemm(
 #ifdef __aarch64__
    // MKLDNN also supports ARM for bf16, and the bypass is only
    // currently intended for x86/x86_64.
-   const bool use_bf16_gemv_trans = false;
+   const bool use_bf16_gemv_trans = (m == 1 || n == 1);
 #elif defined(__powerpc__)
    const bool use_bf16_gemv_trans = false;
 #else
@@ -365,15 +375,27 @@ void gemm(
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
-      float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * m_;
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
+#if defined(BLAS_HAS_BGEMM)
+      at::BFloat16 alpha_ = c10::convert<at::BFloat16>(alpha);
+      at::BFloat16 beta_ = c10::convert<at::BFloat16>(beta);
+      bgemm_(&transa_, &transb_,
+             &m_, &n_, &k_,
+             &alpha_,
+             a, &lda_,
+             b, &ldb_,
+             &beta_,
+             c, &ldc_);
+#else
+      // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
+      int c_size = n_ * m_;
       std::vector<float> float_v(c_size, 0.0f);
       for (const auto j : c10::irange(n)) {
         for (const auto i : c10::irange(m)) {
           float_v[j * m_ + i] = c10::convert<float>(c[j * ldc_ + i]);
         }
       }
+      float alpha_ = alpha, beta_ = beta;
       sbgemm_(&transa_, &transb_,
               &m_, &n_, &k_,
               &alpha_,
@@ -386,6 +408,7 @@ void gemm(
           c[j * ldc_ + i] = c10::convert<at::BFloat16>(float_v[j * m_ + i]);
         }
       }
+#endif // defined(BLAS_HAS_BGEMM)
       return;
    }
 #endif
