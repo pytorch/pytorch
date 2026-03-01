@@ -87,6 +87,8 @@ static void check_shape_forward(const Tensor& input,
 
   std::vector<int64_t> input_shape;
   std::vector<int64_t> kernel_shape;
+  input_shape.reserve(k - 2);
+  kernel_shape.reserve(k - 2);
   bool kernel_size_correct = true;
 
   for (const auto i : c10::irange(2, k)) {

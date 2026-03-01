@@ -254,6 +254,7 @@ variable_list CopySlices::apply_with_saved(
     update_exec_info();
 
     std::vector<bool> needs_input_grad;
+    needs_input_grad.reserve(num_outputs());
     for (const auto i : c10::irange(num_outputs())) {
       needs_input_grad.emplace_back(task_should_compute_output(i));
     }
