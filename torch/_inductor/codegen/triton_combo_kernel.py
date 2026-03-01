@@ -4,7 +4,7 @@ import textwrap
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import sympy
 from sympy import Integer, Symbol
@@ -440,20 +440,19 @@ class ComboKernel(Kernel):
         self.sub_kernels: list[TritonKernel] = []
         self.iter_vars_count = itertools.count()
         self.grids: list[list[int]] = []
-        self.min_x_blocks_list: list[Union[int, str]] = []
-        self.x_numels_list: list[Union[int, str]] = []
+        self.min_x_blocks_list: list[int | str] = []
+        self.x_numels_list: list[int | str] = []
         self.y_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
-        self.dispatch_class: Optional[
+        self.dispatch_class: (
             type[
-                Union[
-                    ComboKernel.SequentialDispatch,
-                    ComboKernel.SequentialFlattenGridDispatch,
-                    ComboKernel.RoundRobinDispatch,
-                ]
+                ComboKernel.SequentialDispatch
+                | ComboKernel.SequentialFlattenGridDispatch
+                | ComboKernel.RoundRobinDispatch
             ]
-        ] = None
+            | None
+        ) = None
         self.block_args: list[str] = []
         # there following are used when autotuning is disabled
         self.block_size_1d = 1024  # Try tuning this value
@@ -569,8 +568,8 @@ class ComboKernel(Kernel):
         Kernels with no_x_dim being true has no tunable XBLOCK. They have a fixed number of X blocks.
         Grid calculation needs to make sure that they are assigned with enough number of blocks.
         """
-        min_x_blocks: Union[int, str] = 0
-        x_numels: Union[int, str] = 0
+        min_x_blocks: int | str = 0
+        x_numels: int | str = 0
         for tree in sub_kernel.range_trees:
             simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
             if tree.prefix == "x":
@@ -898,7 +897,7 @@ class ComboKernel(Kernel):
                     )
         return extra_args
 
-    def codegen_kernel(self, name: Optional[str] = None) -> str:
+    def codegen_kernel(self, name: str | None = None) -> str:
         """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
         heuristics_list, size_hints_list = [], []
