@@ -1713,7 +1713,6 @@ def get_selected_tests(options) -> list[str]:
         selected_tests = [
             "test_ops",
             "test_mps",
-            "test_metal",
             "test_modules",
             "nn/test_convolution",
             "nn/test_dropout",
@@ -1727,7 +1726,7 @@ def get_selected_tests(options) -> list[str]:
         ]
     else:
         # Exclude mps-only tests otherwise
-        options.exclude.extend(["test_mps", "test_metal"])
+        options.exclude.extend(["test_mps"])
 
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
