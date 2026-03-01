@@ -7545,6 +7545,27 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(64), torch.randn(64)))
 
+    def test_remainder_zero_divisor(self):
+        # Device side error from GPUs can be async and different from CPU
+        if self.device != "cpu":
+            self.skipTest(
+                "CPU-only: rely on CPU runtime error path for remainder by zero"
+            )
+
+        def fn(a, b):
+            return torch.remainder(a, b)
+
+        a = torch.tensor(0, dtype=torch.int64, device=self.device)
+        b = torch.tensor(0, dtype=torch.int64, device=self.device)
+
+        compiled = torch.compile(fn)
+        msg = "remainder by zero"
+        if config.cpp_wrapper:
+            msg = "aoti_torch_.* API call failed at .*"
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            compiled(a, b)
+
     def test_zeros(self):
         def fn(a):
             return (

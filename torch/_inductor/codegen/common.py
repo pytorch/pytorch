@@ -757,6 +757,18 @@ def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
         )
 
 
+def _check_nonzero_integer_divisor(divisor, *, op_name: str) -> None:
+    """
+    Runtime-check zero divisor only for non-floating dtypes.
+    """
+    dtype = getattr(divisor, "dtype", None)
+    if dtype is not None and not dtype.is_floating_point:
+        ops.device_assert_async(
+            ops.ne(divisor, ops.constant(0, dtype)),
+            f"{op_name} by zero",
+        )
+
+
 class DataTypePropagation:
     def __init__(self, body: LoopBody) -> None:
         self.body = body
@@ -962,6 +974,7 @@ class OpDecompositions:
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> OpVarT:
+        _check_nonzero_integer_divisor(b, op_name="remainder")
         r = ops.mod(a, b)
         cond = ops.and_(
             ops.ne(r, ops.constant(0, torch.int32)),

@@ -57,6 +57,7 @@ from torch.utils._sympy.functions import (
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
+from .codegen.common import _check_nonzero_integer_divisor
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     BaseView,
@@ -6712,6 +6713,7 @@ def fmod(a, b):
     if is_integral:
 
         def fn(a, b):
+            _check_nonzero_integer_divisor(b, op_name="fmod")
             return ops.mod(a, b)
 
     else:
