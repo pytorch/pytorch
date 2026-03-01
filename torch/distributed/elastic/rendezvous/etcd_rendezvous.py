@@ -412,9 +412,8 @@ class EtcdRendezvous:
         active_version = self.wait_for_peers(expected_version)
         state = json.loads(active_version.value)
 
-        assert state["version"] == expected_version, (
-            "Logic error: failed to observe version mismatch"
-        )
+        if state["version"] != expected_version:
+            raise AssertionError("Logic error: failed to observe version mismatch")
 
         return self.confirm_phase(expected_version, this_rank)
 
@@ -532,9 +531,10 @@ class EtcdRendezvous:
                     "Rendezvous version changed. Must try join the new one."
                 )
 
-            assert len(state["participants"]) < self._num_max_workers, (
-                "Logic error: joinable rendezvous should always have space left"
-            )
+            if len(state["participants"]) >= self._num_max_workers:
+                raise AssertionError(
+                    "Logic error: joinable rendezvous should always have space left"
+                )
 
             this_rank = len(state["participants"])
             state["participants"].append(this_rank)
@@ -954,7 +954,8 @@ class EtcdRendezvous:
 
             # Find the extra_data node, if it exists
             extra_data = [n for n in root.children if n.key == node]
-            assert len(extra_data) <= 1
+            if len(extra_data) > 1:
+                raise AssertionError
 
             # Node for extra_data exists, check the desired key inside it.
             if len(extra_data) == 1:
