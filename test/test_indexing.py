@@ -2010,6 +2010,76 @@ class TestIndexing(TestCase):
             self.assertEqual(x0, y0, atol=0, rtol=0)
 
     @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_index_add_large_index_vectorized_path(self, device, dtype):
+        # Tests that exercise both the VecSize=4 (vectorized) and VecSize=1
+        # (scalar) paths in the indexFuncLargeIndex CUDA kernel.
+        # VecSize=4 activates when: IndexIsMajor=true, sliceSize % 4 == 0,
+        # and both dst/src have stride-1 on their innermost dimension.
+        # numIndex must be > 16 to hit the LargeIndex kernel at all.
+        #
+        # Strategy: for each shape that hits the vectorized path, also run
+        # the same operation with sliceSize+1 (which forces the scalar path)
+        # and compare both against a CPU float reference.  We use UNIQUE
+        # indices to avoid non-deterministic atomic accumulation ordering.
+        num_idx = 64
+        num_dest = 100
+
+        def _run_and_check(self, dst_shape, dim, num_idx, num_dest_dim, dtype, device, tag):
+            dst = torch.zeros(dst_shape, dtype=dtype, device=device)
+            src_shape = list(dst_shape)
+            src_shape[dim] = num_idx
+            src = torch.randn(src_shape, dtype=dtype, device=device)
+            index = torch.randperm(num_dest_dim, device=device)[:num_idx]
+
+            # Reference: run the same op on CPU in float
+            dst_ref = dst.detach().cpu().float()
+            src_ref = src.detach().cpu().float()
+            idx_cpu = index.cpu()
+            dst_ref.index_add_(dim, idx_cpu, src_ref)
+
+            dst.index_add_(dim, index, src)
+
+            atol, rtol = (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
+            self.assertEqual(
+                dst.cpu().float(), dst_ref, atol=atol, rtol=rtol,
+                msg=f"Failed for {tag}, shape={dst_shape}, dim={dim}",
+            )
+
+        # --- VecSize=4 path: contiguous, dim=0, sliceSize divisible by 4 ---
+        for slice_size in [32, 128, 256]:
+            _run_and_check(self, (num_dest, slice_size), 0, num_idx, num_dest,
+                           dtype, device, f"vec4 sliceSize={slice_size}")
+
+        # --- VecSize=1 path: sliceSize NOT divisible by 4 ---
+        for slice_size in [3, 17, 33]:
+            _run_and_check(self, (num_dest, slice_size), 0, num_idx, num_dest,
+                           dtype, device, f"scalar sliceSize={slice_size}")
+
+        # --- VecSize=1 path: non-contiguous (stride != 1 on inner dim) ---
+        dst_base = torch.zeros(num_dest, 256, dtype=dtype, device=device)
+        src_base = torch.randn(num_idx, 256, dtype=dtype, device=device)
+        dst = dst_base[:, ::2]  # shape [100, 128], stride [256, 2]
+        src = src_base[:, ::2]
+        index = torch.randperm(num_dest, device=device)[:num_idx]
+
+        dst_ref = dst.detach().cpu().float().contiguous()
+        src_ref = src.detach().cpu().float().contiguous()
+        dst_ref.index_add_(0, index.cpu(), src_ref)
+        dst.index_add_(0, index, src)
+        atol, rtol = (1e-2, 1e-2) if dtype in (torch.bfloat16, torch.half) else (1e-5, 1e-5)
+        self.assertEqual(dst.cpu().float(), dst_ref, atol=atol, rtol=rtol,
+                         msg="Failed for non-contiguous (stride-2)")
+
+        # --- VecSize=1 path: IndexIsMajor=false (dim=1 on row-major tensor) ---
+        _run_and_check(self, (32, num_dest), 1, num_idx, num_dest,
+                       dtype, device, "IndexIsMajor=false dim=1")
+
+        # --- VecSize=4 path: 3-D contiguous, dim=0, sliceSize divisible by 4 ---
+        _run_and_check(self, (100, 8, 16), 0, num_idx, 100,
+                       dtype, device, "3D vec4 sliceSize=128")
+
+    @onlyNativeDeviceTypes
     @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
     def test_index_add_deterministic(self, device: torch.device) -> None:
         for dim in range(3):

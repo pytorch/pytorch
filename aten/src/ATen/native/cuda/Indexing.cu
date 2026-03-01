@@ -38,6 +38,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.h>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 #include <ATen/native/quantized/AffineQuantizerBase.h>
@@ -1018,7 +1019,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
+    CUDA_KERNEL_ASSERT(dstIndex < static_cast<IndexType>(dstAddDimSize));
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -1046,8 +1047,18 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexFuncSmallIndex kernel is a better choice to reduce memory
 // accesses.
+//
+// When VecSize > 1, each thread processes VecSize consecutive elements,
+// amortizing the divmod and index lookup cost.  Boundary cases (where
+// VecSize elements would cross a slice boundary) are handled inline so
+// the dispatch site does not need to check sliceSize alignment or stride.
+// When VecSize == 1 (default), this is the original scalar kernel.
+//
+// Uses IntDivider for fast integer divmod (multiply+shift instead of
+// hardware division).  For uint32_t this is a significant win on
+// non-power-of-2 innerSize; for power-of-2 it matches compiler shifts.
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
-          bool IndexIsMajor, typename func_t>
+          bool IndexIsMajor, int VecSize = 1, typename func_t>
 __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     cuda::detail::TensorInfo<const T, IndexType> src,
                                     cuda::detail::TensorInfo<const IndicesType, IndexType> indices,
@@ -1058,37 +1069,86 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
                                     int64_t dstAddDimSize,
                                     int64_t dstNumel,
                                     const func_t& op,
-                                    T alpha) {
-  // We stride over the output including the indexed dimension
-  // (totalSize), and calculate the destination index point based on that
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < totalSize;
-       linearIndex += gridDim.x * blockDim.x) {
+                                    T alpha,
+                                    cuda::detail::IntDivider<IndexType> innerSizeDivider) {
+  // Helper to process a single element at linearIndex.
+  auto processElement = [&](IndexType linearIndex) {
+    auto dm = innerSizeDivider.divmod(linearIndex);
     IndexType srcIndex, elementInSlice;
-    if (IndexIsMajor) {
-      srcIndex = linearIndex / innerSize;
-      elementInSlice = linearIndex % innerSize;
-    }
-    else {
-      elementInSlice = linearIndex / innerSize;
-      srcIndex = linearIndex % innerSize;
+    if constexpr (IndexIsMajor) {
+      srcIndex = dm.div;
+      elementInSlice = dm.mod;
+    } else {
+      elementInSlice = dm.div;
+      srcIndex = dm.mod;
     }
 
-    // Lua indices begin at 1
     IndexType dstIndex =
         indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
-    CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
+    CUDA_KERNEL_ASSERT(dstIndex < static_cast<IndexType>(dstAddDimSize));
 
     IndexType dstOffset =
-      cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+        cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
     dstOffset += dstIndex * dst.strides[dstAddDim];
 
     IndexType srcOffset =
-      cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
+        cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
     T val = src.data[srcOffset] * alpha;
     op(dst.data, dstOffset, dstNumel, &val);
+  };
+
+  if constexpr (VecSize > 1) {
+    // Round up to include tail elements in the vectorized loop.
+    const IndexType totalVecs = (totalSize + VecSize - 1) / VecSize;
+    for (IndexType vecIdx = blockIdx.x * blockDim.x + threadIdx.x;
+         vecIdx < totalVecs;
+         vecIdx += gridDim.x * blockDim.x) {
+      IndexType baseLinear = vecIdx * VecSize;
+      auto dm = innerSizeDivider.divmod(baseLinear);
+      IndexType srcIndex = dm.div;
+      IndexType elementBase = dm.mod;
+
+      if (elementBase + VecSize <= innerSize && baseLinear + VecSize <= totalSize) {
+        // Fast path: all VecSize elements are in the same slice and within bounds.
+        // Hoist index lookup outside the unrolled loop.
+        IndexType dstIndex =
+            indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
+        CUDA_KERNEL_ASSERT(dstIndex < static_cast<IndexType>(dstAddDimSize));
+
+        #pragma unroll
+        for (int v = 0; v < VecSize; ++v) {
+          IndexType elementInSlice = elementBase + v;
+          IndexType dstOffset =
+              cuda::detail::IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+          dstOffset += dstIndex * dst.strides[dstAddDim];
+
+          IndexType srcOffset =
+              cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
+          srcOffset += srcIndex * src.strides[srcAddDim];
+
+          T val = src.data[srcOffset] * alpha;
+          op(dst.data, dstOffset, dstNumel, &val);
+        }
+      } else {
+        // Slow path: elements cross a slice boundary or are in the tail.
+        #pragma unroll
+        for (int v = 0; v < VecSize; ++v) {
+          IndexType li = baseLinear + v;
+          if (li < totalSize) {
+            processElement(li);
+          }
+        }
+      }
+    }
+  } else {
+    // Scalar path: one element per thread.
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < totalSize;
+         linearIndex += gridDim.x * blockDim.x) {
+      processElement(linearIndex);
+    }
   }
 }
 
@@ -1180,13 +1240,19 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                        \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)            \
-  indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                      \
-                      SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>          \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                       \
-      selfInfo, sourceInfo, indexInfo,                                      \
-      selfAddDim, sourceAddDim, sourceTotalSize,                            \
-      (IDX_IS_MAJOR) ? sliceSize : numIndex,                                \
-      selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
+  {                                                                          \
+    const TYPE innerSizeVal =                                                \
+        static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndex);            \
+    cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);           \
+    indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                     \
+                        SELF_DIM, SOURCE_DIM, IDX_DIM,                       \
+                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>               \
+      <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                     \
+        selfInfo, sourceInfo, indexInfo,                                     \
+        selfAddDim, sourceAddDim, sourceTotalSize,                          \
+        innerSizeVal, selfAddDimSize, selfNumel,                            \
+        reduce_add, alpha_value, innerSizeDivider);                         \
+  }                                                                          \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
@@ -1355,13 +1421,19 @@ void index_reduce_func_cuda_impl(
 
 #define LARGE_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE,                                     \
                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR)                         \
-  indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                   \
-                     SELF_DIM, SOURCE_DIM, IDX_DIM, IDX_IS_MAJOR>                        \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                    \
-      selfInfo, sourceInfo, indexInfo,                                                   \
-      selfReduceDim, sourceReduceDim, sourceTotalSize,                                   \
-      (IDX_IS_MAJOR) ? sliceSize : numIndex,                                             \
-      selfReduceDimSize, selfNumel, reduce_func, alpha_value);                           \
+  {                                                                                       \
+    const TYPE innerSizeVal =                                                             \
+        static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndex);                         \
+    cuda::detail::IntDivider<TYPE> innerSizeDivider(innerSizeVal);                        \
+    indexFuncLargeIndex<TENSOR_TYPE, INDICES_TYPE, TYPE,                                  \
+                        SELF_DIM, SOURCE_DIM, IDX_DIM,                                     \
+                        IDX_IS_MAJOR, (IDX_IS_MAJOR) ? 4 : 1>                              \
+      <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(                                   \
+        selfInfo, sourceInfo, indexInfo,                                                   \
+        selfReduceDim, sourceReduceDim, sourceTotalSize,                                  \
+        innerSizeVal, selfReduceDimSize, selfNumel,                                       \
+        reduce_func, alpha_value, innerSizeDivider);                                      \
+  }                                                                                       \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
