@@ -1545,6 +1545,39 @@ def flex_attention(
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     """
+    # Autocast-aware dtype harmonization (matches SDPA semantics under AMP).
+    # When autocast is enabled, inputs should be cast to the current autocast dtype
+    # before validation to avoid false-positive dtype mismatch errors.
+    try:
+        device_type = query.device.type
+        # Skip for FP8 inputs; FP8 path has its own layout and dtype handling.
+        _fp8_types = (torch.float8_e4m3fn, torch.float8_e5m2)
+        if (
+            hasattr(torch, "is_autocast_enabled")
+            and torch.is_autocast_enabled(device_type=device_type)  # type: ignore[call-arg]
+            and query.dtype not in _fp8_types
+            and key.dtype not in _fp8_types
+            and value.dtype not in _fp8_types
+        ):
+            # get per-device autocast dtype (e.g., half on CUDA, bfloat16 on CPU)
+            target_dtype = torch.get_autocast_dtype(device_type)  # type: ignore[arg-type]
+            if (
+                query.dtype != target_dtype
+                or key.dtype != target_dtype
+                or value.dtype != target_dtype
+            ):
+                query = query.to(target_dtype)
+                key = key.to(target_dtype)
+                value = value.to(target_dtype)
+    except Exception as e:
+        # Fail closed: if autocast introspection is not available, continue with original tensors.
+        # Log once to aid debugging without spamming users.
+        _warn_once(
+            "flex_attention_autocast_introspection_failed",
+            f"Autocast dtype harmonization skipped due to {type(e).__name__}: {e}",
+            category=RuntimeWarning,
+        )
+
     # Some basic input validation
     _validate_sdpa_input(query, key, value, allow_lowp_kv=True)
     _validate_embed_dim(query, key, value)

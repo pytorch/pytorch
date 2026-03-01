@@ -456,6 +456,28 @@ class TestFlexAttention(InductorTestCase):
             "skip UT for CPU due to long compilation time found in CI",
         )
 
+    @skipUnless(TEST_ON_CUDA, "Requires CUDA with Triton")
+    def test_amp_mixed_dtype_harmonization(self):
+        # Ensure flex_attention accepts mixed dtypes under autocast like SDPA does
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        q = torch.randn(1, 2, 8, 16, device="cuda", dtype=torch.float16)
+        k = torch.randn(1, 2, 8, 16, device="cuda", dtype=torch.float32)
+        v = torch.randn(1, 2, 8, 16, device="cuda", dtype=torch.float32)
+
+        def noop(score, b, h, q_idx, kv_idx):
+            return score
+
+        # Works under autocast: inputs harmonized to autocast dtype (fp16 on CUDA)
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
+            out = flex_attention(q, k, v, score_mod=noop)
+            self.assertEqual(out.dtype, torch.float16)
+            self.assertEqual(out.device.type, "cuda")
+
+        # Outside autocast: still enforces strict equality (mixed dtypes should raise)
+        with self.assertRaises(ValueError):
+            _ = flex_attention(q, k, v, score_mod=noop)
+
     def _check_equal(
         self,
         golden_out: torch.Tensor,
