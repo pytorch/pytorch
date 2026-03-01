@@ -116,9 +116,7 @@ def _no_grad_trunc_normal_(
                     break
                 result = torch.where(
                     mask,
-                    torch.empty_like(result).normal_(
-                        mean, std, generator=generator
-                    ),
+                    torch.empty_like(result).normal_(mean, std, generator=generator),
                     result,
                 )
             if tensor is not result:
