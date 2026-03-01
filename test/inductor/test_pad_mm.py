@@ -398,10 +398,10 @@ class PadMMTest(TestCase):
         mat2 = torch.ones((batch_size, k, n), device=GPU_TYPE, dtype=torch.float16)
         expected_alignment = get_alignment_size(mat1)
 
-        if expected_alignment != 8:
-            raise AssertionError("Alignment for float16 should be 8")
-        if not can_pad(mat1, mat2, torch.ops.aten.bmm):
-            raise AssertionError("This should pass the common padding criteria")
+        assert expected_alignment == 8, "Alignment for float16 should be 8"
+        assert can_pad(mat1, mat2, torch.ops.aten.bmm), (
+            "This should pass the common padding criteria"
+        )
 
         @torch.compile()
         def bmm(mat1, mat2):
@@ -414,8 +414,9 @@ class PadMMTest(TestCase):
             ".run(", 2, exactly=True
         ).check(f"empty_strided_{GPU_TYPE}((3, 8, 16)").run(code)
 
-        if not torch.allclose(res2, bmm_expected_result):
-            raise AssertionError("BMM results are not identical")
+        assert torch.allclose(res2, bmm_expected_result), (
+            "BMM results are not identical"
+        )
 
     @fresh_cache()
     def test_exclude_padding(self):
@@ -485,14 +486,13 @@ class PadMMTest(TestCase):
         mat2 = torch.ones((k, n), device=GPU_TYPE, dtype=torch.bfloat16)
         expected_alignment = get_alignment_size(mat1)
 
-        if expected_alignment != 8:
-            raise AssertionError("Alignment for bfloat16 should be 8")
-        if not can_pad(mat1, mat2, torch.ops.aten.mm):
-            raise AssertionError("This should pass the common padding criteria")
-        if not should_pad_mm_bf16(mat1.dtype, m, n, k):
-            raise AssertionError(
-                "This should pass the should_pad_mm_bf16 padding criteria"
-            )
+        assert expected_alignment == 8, "Alignment for bfloat16 should be 8"
+        assert can_pad(mat1, mat2, torch.ops.aten.mm), (
+            "This should pass the common padding criteria"
+        )
+        assert should_pad_mm_bf16(mat1.dtype, m, n, k), (
+            "This should pass the should_pad_mm_bf16 padding criteria"
+        )
 
         @torch.compile()
         def mm(mat1, mat2):
@@ -505,8 +505,7 @@ class PadMMTest(TestCase):
             ".run(", 2, exactly=True
         ).check(f"empty_strided_{GPU_TYPE}((8, 16)").run(code)
 
-        if not torch.allclose(res2, mm_expected_result):
-            raise AssertionError("MM results are not identical")
+        assert torch.allclose(res2, mm_expected_result), "MM results are not identical"
 
     @fresh_cache()
     @inductor_config.patch(

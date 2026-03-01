@@ -281,8 +281,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 x = torch.randn(3)
                 expected = x.sin()
                 torch.ops.mylib.foo(x)
-                if not torch.allclose(x, expected):
-                    raise AssertionError
+                assert torch.allclose(x, expected)
 
                 @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
                 def f(x):

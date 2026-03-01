@@ -1279,8 +1279,7 @@ class TestFP8Lowering(TestCase):
                 with config.patch({"loop_index_inversion_in_fusion": False}):
                     torch.compile(forward)(A, B)
 
-                if len(input_values) != 2:
-                    raise AssertionError
+                assert len(input_values) == 2
                 for i in range(4):
                     self.assertEqual(
                         input_values[0][i],

@@ -140,8 +140,7 @@ def make_test_case(
         code_string_count = {}
 
     func = getattr(tests, test_name)
-    if not callable(func):
-        raise AssertionError("not a callable")
+    assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
     @config.patch(cpp_wrapper=True)

@@ -193,8 +193,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             ):
                 auto_functionalized_found = True
                 counter += len(node.meta["only_clone_these_tensors"])
-        if not auto_functionalized_found:
-            raise AssertionError
+        assert auto_functionalized_found
         return counter
 
     def test_view_inplaced_functionalize_v2(self):

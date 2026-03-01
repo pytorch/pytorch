@@ -74,12 +74,15 @@ class MPSBasicTests(TestCase):
             return x.tanh()
 
         result = fn(x)
-        if not torch.allclose(result[0], torch.tensor(-1.0, device="mps")):
-            raise AssertionError("tanh(-100) should be -1")
-        if not torch.allclose(result[-1], torch.tensor(1.0, device="mps")):
-            raise AssertionError("tanh(100) should be +1")
-        if torch.isnan(result).any():
-            raise AssertionError("tanh should not produce NaN for large values")
+        assert torch.allclose(result[0], torch.tensor(-1.0, device="mps")), (
+            "tanh(-100) should be -1"
+        )
+        assert torch.allclose(result[-1], torch.tensor(1.0, device="mps")), (
+            "tanh(100) should be +1"
+        )
+        assert not torch.isnan(result).any(), (
+            "tanh should not produce NaN for large values"
+        )
 
     def test_floor(self):
         self.common(lambda x: x.floor(), (torch.rand(1024),))
@@ -215,8 +218,7 @@ class MPSBasicTestsAOTI(TestCase):
         path = torch._inductor.aoti_compile_and_package(ep)
         m = torch._inductor.aoti_load_package(path)
         res = m(*inp)
-        if not torch.allclose(res, res2):
-            raise AssertionError
+        assert torch.allclose(res, res2)
 
     def test_add_mps(self):
         class M(torch.nn.Module):

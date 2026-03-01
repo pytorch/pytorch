@@ -24,8 +24,7 @@ def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1, device
     result = []
     if len(inputs) != 0:
         device = inputs[0].device
-    if not device:
-        raise AssertionError
+    assert device
     # iterate over the cartesian product of predicate values
     for values in itertools.product(*([possible_values] * num_to_prepend)):
         prepended = [torch.tensor(v, device=device) for v in values]

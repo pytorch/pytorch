@@ -119,8 +119,7 @@ class TestSubgraphChoice(TestCase):
         def _(a, b):
             _, _, _, layout, mat1, mat2 = mm_args(a, b)
             mat1_layout = mat1.layout
-            if not isinstance(mat1_layout, FlexibleLayout):
-                raise AssertionError
+            assert isinstance(mat1_layout, FlexibleLayout)
             mat1_stride = mat1_layout.stride
 
             choices = []
@@ -139,20 +138,17 @@ class TestSubgraphChoice(TestCase):
             )
 
             choice = choices[0]
-            if not isinstance(mat1.layout, FixedLayout):
-                raise AssertionError
+            assert isinstance(mat1.layout, FixedLayout)
 
             # Creating the subgraph choice should have frozen the layout
             # We ensure padding so the stride should differ
-            if mat1.layout.stride == mat1_stride:
-                raise AssertionError
+            assert mat1.layout.stride != mat1_stride
 
             for example_stride, layout_stride in zip(
                 choice.example_inputs[0].stride(), mat1.layout.stride
             ):
                 # Example inputs should have same stride as current layout
-                if example_stride != layout_stride:
-                    raise AssertionError
+                assert example_stride == layout_stride
 
             return autotune_select_algorithm(
                 "test_subgraph_choice", choices, [a, b], layout

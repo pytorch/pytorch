@@ -164,10 +164,8 @@ class TestCustomLowering(InductorTestCase):
         def foo_lowering(x):
             return x
 
-        if torch.ops.helion_test.foo not in custom_lowering_dict:
-            raise AssertionError
-        if torch.ops.helion_test.foo in torch._inductor.lowering.lowerings:
-            raise AssertionError
+        assert torch.ops.helion_test.foo in custom_lowering_dict
+        assert torch.ops.helion_test.foo not in torch._inductor.lowering.lowerings
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")

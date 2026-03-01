@@ -107,14 +107,11 @@ START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
 
 if START is not None or END is not None:
-    if END is None:
-        raise AssertionError("END must be set when START is set")
-    if START is None:
-        raise AssertionError("START must be set when END is set")
+    assert END is not None
+    assert START is not None
     START = int(START)
     END = int(END)
-    if START >= END:
-        raise AssertionError(f"START ({START}) must be less than END ({END})")
+    assert START < END
 else:
     START = 0
     END = len(op_db)
@@ -1039,18 +1036,14 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
         exact_stride=False,
     ):
         if is_argsort:
-            if not isinstance(x, torch.Tensor):
-                raise AssertionError(f"Expected torch.Tensor, got {type(x)}")
-            if not isinstance(y, torch.Tensor):
-                raise AssertionError(f"Expected torch.Tensor, got {type(y)}")
+            assert isinstance(x, torch.Tensor)
+            assert isinstance(y, torch.Tensor)
         else:
             # The first tensor is the sorted values and can be asserted via
             # the usual means
             for t in (x, y):
-                if not isinstance(t, tuple):
-                    raise AssertionError(f"Expected tuple, got {type(t)}")
-                if len(t) != 2:
-                    raise AssertionError(f"Expected tuple of length 2, got {len(t)}")
+                assert isinstance(t, tuple)
+                assert len(t) == 2
 
             test_case_inst.assertEqual(
                 x[0],
@@ -1069,8 +1062,7 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
         if exact_dtype and (x.dtype != y.dtype):
             raise AssertionError(f"The dtypes do not match: {x.dtype} != {y.dtype}.")
 
-        if x.shape != y.shape:
-            raise AssertionError(f"Shape mismatch: {x.shape} != {y.shape}")
+        assert x.shape == y.shape
 
         if exact_stride and (x.stride() != y.stride()):
             raise AssertionError(
@@ -1083,8 +1075,7 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
             for cur_dim in reversed(range(x.dim())):
                 indices[cur_dim] = el % x.shape[cur_dim]
                 el //= x.shape[cur_dim]
-            if None in indices:
-                raise AssertionError("indices contains None")
+            assert None not in indices
             return indices
 
         def get_val_by_ids(t, ids):
@@ -1189,8 +1180,7 @@ class TestInductorOpInfo(TestCase):
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
 
-        if device_type not in (GPU_TYPE, "cpu"):
-            raise AssertionError(f"Unexpected device_type: {device_type}")
+        assert device_type in (GPU_TYPE, "cpu")
 
         torch._dynamo.reset()
         with torch.no_grad():

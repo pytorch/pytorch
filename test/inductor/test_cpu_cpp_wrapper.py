@@ -104,8 +104,7 @@ def make_test_case(
         code_string_count = {}
 
     func = getattr(tests, test_name)
-    if not callable(func):
-        raise AssertionError("not a callable")
+    assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
     new_test_name = f"{test_name}_separate" if test_build_separate else test_name
 

@@ -25,14 +25,12 @@ class TestControlDeps(InductorTestCase):
 
         def add_control_deps(graph):
             nodes = [n for n in graph.nodes if n.op == "call_function"]
-            if len(nodes) != 3:
-                raise AssertionError(f"Expected 3 nodes, got {len(nodes)}")
+            assert len(nodes) == 3
             c_node = nodes[0]
             d_node = nodes[1]
             e_node = nodes[2]
 
-            if d_node.target != torch.ops.aten.mm.default:
-                raise AssertionError(f"Expected mm.default, got {d_node.target}")
+            assert d_node.target == torch.ops.aten.mm.default
 
             from torch.utils._ordered_set import OrderedSet
 
@@ -43,24 +41,14 @@ class TestControlDeps(InductorTestCase):
             sub_g = graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.control_deps
             )
-            if len(sub_g) != 2:
-                raise AssertionError(f"Expected 2 control_deps nodes, got {len(sub_g)}")
+            assert len(sub_g) == 2
 
-            if list(sub_g[0].meta["val"].shape) != [256, 256]:
-                raise AssertionError(
-                    f"Expected shape [256, 256], got {list(sub_g[0].meta['val'].shape)}"
-                )
-            if list(sub_g[1].meta["val"].shape) != [256, 256]:
-                raise AssertionError(
-                    f"Expected shape [256, 256], got {list(sub_g[1].meta['val'].shape)}"
-                )
+            assert list(sub_g[0].meta["val"].shape) == [256, 256]
+            assert list(sub_g[1].meta["val"].shape) == [256, 256]
 
             for attr in graph.find_nodes(op="get_attr"):
                 for n in getattr(graph.owning_module, attr.target).graph.nodes:
-                    if list(n.meta["val"].shape) != [256, 256]:
-                        raise AssertionError(
-                            f"Expected shape [256, 256], got {list(n.meta['val'].shape)}"
-                        )
+                    assert list(n.meta["val"].shape) == [256, 256]
 
             return graph
 
@@ -103,8 +91,7 @@ class TestControlDeps(InductorTestCase):
             mm_nodes = graph.find_nodes(
                 op="call_function", target=torch.ops.aten.mm.default
             )
-            if len(mm_nodes) != 4:
-                raise AssertionError(f"Expected 4 mm nodes, got {len(mm_nodes)}")
+            assert len(mm_nodes) == 4, f"Expected 4 mm nodes, got {len(mm_nodes)}"
 
             # Add control dep: mm3 depends on mm0's output
             # This should NOT extend mm0's buffer lifetime
@@ -148,15 +135,13 @@ class TestControlDeps(InductorTestCase):
             cat_nodes = graph.find_nodes(
                 op="call_function", target=torch.ops.aten.cat.default
             )
-            if len(cat_nodes) != 1:
-                raise AssertionError(f"Expected 1 cat node, got {len(cat_nodes)}")
+            assert len(cat_nodes) == 1, f"Expected 1 cat node, got {len(cat_nodes)}"
             cat_node = cat_nodes[0]
 
             # Verify it has nested args (list of tensors)
-            if not isinstance(cat_node.args[0], (list, tuple)):
-                raise AssertionError(
-                    f"Expected nested args, got {type(cat_node.args[0])}"
-                )
+            assert isinstance(cat_node.args[0], (list, tuple)), (
+                f"Expected nested args, got {type(cat_node.args[0])}"
+            )
 
             # Find a node that comes before cat to use as dependency
             add_nodes = graph.find_nodes(
@@ -174,10 +159,7 @@ class TestControlDeps(InductorTestCase):
             control_deps_nodes = graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.control_deps
             )
-            if len(control_deps_nodes) != 1:
-                raise AssertionError(
-                    f"Expected 1 control_deps node, got {len(control_deps_nodes)}"
-                )
+            assert len(control_deps_nodes) == 1
             return graph
 
         with torch._inductor.config.patch(
@@ -231,14 +213,12 @@ class TestControlDeps(InductorTestCase):
                 op="call_function",
                 target=torch.ops.higher_order.triton_kernel_wrapper_functional,
             )
-            if not triton_nodes:
-                raise AssertionError("Expected triton_kernel_wrapper_functional nodes")
+            assert triton_nodes
             # Find mul node (z = x * 2) to use as dependency
             mul_nodes = graph.find_nodes(
                 op="call_function", target=torch.ops.aten.mul.Tensor
             )
-            if not mul_nodes:
-                raise AssertionError("Expected mul.Tensor nodes")
+            assert mul_nodes
             deps_map = {triton_nodes[0]: OrderedSet([mul_nodes[0]])}
             torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
                 graph, deps_map

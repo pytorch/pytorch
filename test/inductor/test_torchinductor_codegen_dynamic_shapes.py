@@ -87,8 +87,7 @@ def check_codegen(
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
         self.assertTrue("def triton" in code, f"Failed to find triton kernel\n{code}")
 
-    if not called:
-        raise AssertionError("Ran graph without calling compile_fx")
+    assert called, "Ran graph without calling compile_fx"
 
     torch._dynamo.reset()
 

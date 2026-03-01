@@ -230,8 +230,7 @@ class TestProvenanceTracingArtifact(TestCase):
                             filepath, expected_mapping
                         )
                     else:
-                        if device != "cpu":
-                            raise AssertionError
+                        assert device == "cpu"
                         # check the inductor kernel to post grad nodes mapping is expected for cpu
                         if backend == "aot_inductor":
                             expected_data = {

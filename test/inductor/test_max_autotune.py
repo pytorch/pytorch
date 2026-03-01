@@ -1291,8 +1291,7 @@ class TestMaxAutotune(TestCase):
 
             expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
-            if not same(expect, actual, tol=1e-2):
-                raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
+            assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -2554,15 +2553,9 @@ class TestMaxAutotune(TestCase):
             if flexible_layout:
                 flexible_layout_called = True
                 if always_freeze:
-                    if not isinstance(node.data.layout, ir.FixedLayout):
-                        raise AssertionError(
-                            f"Expected FixedLayout, got {type(node.data.layout)}"
-                        )
+                    assert isinstance(node.data.layout, ir.FixedLayout)
                 else:
-                    if not isinstance(node.data.layout, ir.FlexibleLayout):
-                        raise AssertionError(
-                            f"Expected FlexibleLayout, got {type(node.data.layout)}"
-                        )
+                    assert isinstance(node.data.layout, ir.FlexibleLayout)
             return result
 
         def fn(x, y):
@@ -2970,14 +2963,12 @@ class TestMaxAutotunePrecompile(TestCase):
                     ):
                         asc("test_call", fake_choices, [], Mock())
             for fake_choice in fake_choices:
-                if fake_choice.thread_id is None:
-                    raise AssertionError(
-                        "Expected all ChoiceCaller's precompile method to have been called"
-                    )
-                if fake_choice.thread_id == main_thread_id:
-                    raise AssertionError(
-                        "Expected all ChoiceCaller's precompile method to have been called on separate thread"
-                    )
+                assert fake_choice.thread_id is not None, (
+                    "Expected all ChoiceCaller's precompile method to have been called"
+                )
+                assert fake_choice.thread_id != main_thread_id, (
+                    "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+                )
         finally:
             V.set_debug_handler(old_debug_handler)
 

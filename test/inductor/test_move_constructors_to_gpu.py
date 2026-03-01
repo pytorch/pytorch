@@ -30,8 +30,7 @@ class TestMoveConstructorsToGpu(TestCase):
         out_compiled, code = run_and_get_code(torch.compile(func), *args)
         self.assertEqual(out_eager, out_compiled)
 
-        if len(code) != 1:
-            raise AssertionError
+        assert len(code) == 1
         if expect_cpu:
             FileCheck().check("cpp_fused").run(code[0])
         else:

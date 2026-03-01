@@ -56,11 +56,10 @@ class TestCodegenTriton(InductorTestCase):
             }:
                 self.assertEqual(expected_divisible_indices, config.divisibility_16)
             else:
-                if (
+                assert (
                     get_triton_attrs_descriptor_version()
-                    != TritonAttrsDescriptorVersion.V4_DICT
-                ):
-                    raise AssertionError
+                    == TritonAttrsDescriptorVersion.V4_DICT
+                )
                 self.assertIsInstance(config, dict)
 
                 for idx in expected_divisible_indices:
