@@ -760,6 +760,7 @@ def generic_jump(
         value: VariableTracker = self.pop()
         if (
             config.rewrite_assert_with_torch_assert
+            and sys.flags.optimize == 0
             and _detect_and_normalize_assert_statement(self, truth_fn, push)
         ):
             error_msg: VariableTracker = self.pop()
