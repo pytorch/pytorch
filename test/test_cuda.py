@@ -2457,19 +2457,20 @@ exit(2)
         # warmup
         torch.mm(a, b)
 
-        free_bytes_before, total_bytes = torch.cuda.mem_get_info()
-        used_gb_before = (total_bytes - free_bytes_before) / 1e9
-
-        for _ in range(100):
+        for i in range(100):
             torch_graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(torch_graph):
                 torch.mm(a, b)
             torch_graph.replay()
+            if i == 0:
+                free_bytes_before, total_bytes = torch.cuda.mem_get_info()
+                used_gb_before = (total_bytes - free_bytes_before) / 1e9
 
         free_bytes_after, _ = torch.cuda.mem_get_info()
         used_gb_after = (total_bytes - free_bytes_after) / 1e9
 
         self.assertFalse(used_gb_before + 0.1 < used_gb_after)
+        self.assertGreater(0.005 + used_gb_before, used_gb_after)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
