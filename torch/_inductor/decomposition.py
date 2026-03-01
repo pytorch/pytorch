@@ -340,6 +340,13 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    if mat1.device.type not in ["cpu", "mps"]:
+        if statically_known_true(mat1.size(-1) == 1):
+            counters["inductor"]["decompose_addmm"] += 1
+            out = mat1 * mat2
+            out = out.as_strided(out.shape, (out.size(1), 1))
+            return alpha * out + beta * self
+
     if self.device.type == "cpu":
         if statically_known_true(mat1.size(0) == 1) and statically_known_true(
             mat2.size(-1) == 1
@@ -377,16 +384,19 @@ def mm(
             input2.shape[1] == 1
         ):
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
-    if self.device.type == "cpu":
-        if (
-            statically_known_true(self.size(-1) == 1)
+    # Non-CPU/MPS: always decompose. CPU: only for small tensors.
+    if statically_known_true(self.size(-1) == 1):
+        if self.device.type not in ["cpu", "mps"] or (
+            self.device.type == "cpu"
             and statically_known_true(self.size(0) > 0)
             and statically_known_true(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
             and guard_or_false((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             counters["inductor"]["decompose_mm"] += 1
-            return self * input2
+            result = self * input2
+            return result.as_strided(result.shape, (result.size(1), 1))
+    if self.device.type == "cpu":
         if statically_known_true(self.size(0) == 1) and statically_known_true(
             input2.size(-1) == 1
         ):

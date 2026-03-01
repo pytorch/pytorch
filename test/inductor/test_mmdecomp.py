@@ -272,6 +272,54 @@ class TestDecomp(NNTestCase):
                 self.assertTrue(r_expr_types[0] == og_t1_expr_types[0])
                 self.assertTrue(r_expr_types[1] == og_t2_expr_types[1])
 
+    def test_mm_k1_stride(self, device):
+        """Test that K==1 mm decomposition preserves contiguous output strides."""
+
+        def check(a, b, label):
+            mm_out = torch.mm(a, b)
+            compiled_mm = torch.compile(torch.mm)
+            compiled_out = compiled_mm(a, b)
+            self.assertEqual(
+                mm_out.stride(),
+                compiled_out.stride(),
+                msg=f"{label}: eager stride={mm_out.stride()}, compiled stride={compiled_out.stride()}",
+            )
+            torch._dynamo.reset()
+
+        # Contiguous inputs
+        check(
+            torch.randn(2, 1, device=device),
+            torch.randn(1, 3, device=device),
+            "contiguous M>1,N>1",
+        )
+        check(
+            torch.randn(1, 1, device=device),
+            torch.randn(1, 3, device=device),
+            "contiguous M==1,N>1",
+        )
+        check(
+            torch.randn(2, 1, device=device),
+            torch.randn(1, 1, device=device),
+            "contiguous M>1,N==1",
+        )
+        check(
+            torch.randn(1, 1, device=device),
+            torch.randn(1, 1, device=device),
+            "contiguous M==1,N==1",
+        )
+
+        # Transposed inputs (non-standard strides from .T)
+        check(
+            torch.randn(1, 2, device=device).T,
+            torch.randn(1, 3, device=device),
+            "mat1=randn(1,2).T",
+        )
+        check(
+            torch.randn(2, 1, device=device),
+            torch.randn(3, 1, device=device).T,
+            "mat2=randn(3,1).T",
+        )
+
 
 device_types = ("cpu", GPU_TYPE)
 instantiate_device_type_tests(TestDecomp, globals(), only_for=device_types)
