@@ -538,13 +538,16 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_fp16(
       std::move(w_ih_packed), std::move(w_hh_packed));
 }
 
-std::unordered_map<
-    std::string,
-    c10::intrusive_ptr<CellParamsBase> (*)(CellParamsSerializationType)>
-    cell_params_deserializers = {
-        {"quantized", &QuantizedCellParams::__setstate__},
-        {"quantized_dynamic", &QuantizedCellParamsDynamic::__setstate__},
-        {"quantized_fp16", &QuantizedCellParamsFP16::__setstate__}};
+auto& cell_params_deserializers() {
+  static std::unordered_map<
+      std::string,
+      c10::intrusive_ptr<CellParamsBase> (*)(CellParamsSerializationType)>
+      instance = {
+          {"quantized", &QuantizedCellParams::__setstate__},
+          {"quantized_dynamic", &QuantizedCellParamsDynamic::__setstate__},
+          {"quantized_fp16", &QuantizedCellParamsFP16::__setstate__}};
+  return instance;
+}
 
 // Stupid wrapper to convert from -> to .
 struct QRNNCellParamsWrapper {
@@ -1918,8 +1921,8 @@ auto cell_params_base_registry =
             [](CellParamsSerializationType state)
                 -> c10::intrusive_ptr<CellParamsBase> {
               std::string type = std::get<0>(state);
-              TORCH_INTERNAL_ASSERT(cell_params_deserializers.count(type));
-              return cell_params_deserializers[type](std::move(state));
+              TORCH_INTERNAL_ASSERT(cell_params_deserializers().count(type));
+              return cell_params_deserializers()[type](std::move(state));
             });
 
 TORCH_LIBRARY_FRAGMENT(aten, m) {
