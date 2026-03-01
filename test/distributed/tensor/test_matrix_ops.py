@@ -420,6 +420,10 @@ class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "NCCL does not support Float8_e4m3fn on ROCm (Unconvertible NCCL type)",
+    )
+    @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
