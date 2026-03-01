@@ -2602,6 +2602,15 @@ class Module:
                         for k, v in local_state_dict.items()
                         if k.startswith(child_prefix)
                     }
+                    # skip recursion if child_state_dict is empty, and there is no pre/post
+                    # hooks registered in child, and not in strict mode.
+                    if (
+                        len(child_state_dict) == 0
+                        and len(child._load_state_dict_pre_hooks) == 0
+                        and len(child._load_state_dict_post_hooks) == 0
+                        and not strict
+                    ):
+                        continue
                     load(child, child_state_dict, child_prefix)  # noqa: F821
 
             # Note that the hook can modify missing_keys and unexpected_keys.
