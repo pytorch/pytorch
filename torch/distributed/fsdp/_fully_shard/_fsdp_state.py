@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import contextlib
 import functools
 import logging
 from collections.abc import Callable, Sequence
@@ -89,6 +90,7 @@ class FSDPState(_State):
         # ``False`` when user set reshard_after_forward
         # through ``fully_shard`` or ``set_reshard_after_forward``
         self._auto_reshard_after_forward: bool | None = True
+        self._saved_tensors_hook_ctx: contextlib.AbstractContextManager | None = None
 
     def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
         """Get the state for a module. Subclasses can override to use different state getters."""
@@ -265,6 +267,11 @@ class FSDPState(_State):
                 )
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
+        if (
+            self._fsdp_param_group
+            and self._fsdp_param_group._reshard_after_forward
+        ):
+            self._setup_saved_tensors_hooks()
         for fsdp_state in self._states_to_forward_prefetch:
             if (target_param_group := fsdp_state._fsdp_param_group) is not None:
                 FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
@@ -276,6 +283,7 @@ class FSDPState(_State):
         # post-backward hook is responsible for the reshard
         if self._training_state == TrainingState.PRE_BACKWARD:
             return output
+        self._teardown_saved_tensors_hooks()
         if self._fsdp_param_group:
             output = self._fsdp_param_group.post_forward(module, input, output)
         output = self._register_pre_backward_hook(output)
@@ -297,6 +305,29 @@ class FSDPState(_State):
                     output,
                 )
         return output
+
+    def _setup_saved_tensors_hooks(self) -> None:
+        # Use saved_tensors_hooks so that when any tensor saved during forward
+        # is accessed during backward, we trigger _pre_backward to unshard
+        # parameters. This handles cases where the loss depends on a tensor
+        # that is not the module output (e.g. a cached intermediate), since
+        # _register_pre_backward_hook only hooks on the module output.
+        fsdp_state = self
+
+        def unpack_hook(tensor: torch.Tensor) -> torch.Tensor:
+            if fsdp_state._training_state != TrainingState.PRE_BACKWARD:
+                fsdp_state._pre_backward(torch.empty(0))
+            return tensor
+
+        self._saved_tensors_hook_ctx = torch.autograd.graph.saved_tensors_hooks(
+            lambda t: t, unpack_hook
+        )
+        self._saved_tensors_hook_ctx.__enter__()
+
+    def _teardown_saved_tensors_hooks(self) -> None:
+        if self._saved_tensors_hook_ctx is not None:
+            self._saved_tensors_hook_ctx.__exit__(None, None, None)
+            self._saved_tensors_hook_ctx = None
 
     def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
         self._training_state = TrainingState.PRE_BACKWARD

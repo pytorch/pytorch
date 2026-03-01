@@ -702,6 +702,44 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(ref_loss, loss)
 
 
+class TestFullyShard1DTrainingBackward(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, torch.get_device_module(device_type).device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_backward_reshard_with_non_output_loss(self):
+        """
+        Tests that backward works when reshard_after_forward=True and the loss
+        depends on a cached intermediate tensor rather than the module output.
+
+        Regression: https://github.com/pytorch/pytorch/issues/173709
+        """
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(64, 64)
+                self.linear2 = nn.Linear(64, 64)
+
+            def forward(self, x):
+                intermediate = self.linear1(x)
+                self.cached_intermediate = intermediate
+                return self.linear2(intermediate)
+
+        torch.manual_seed(42)
+        model = Model().to(device_type)
+        fully_shard(model, reshard_after_forward=True)
+        x = torch.randn(4, 64, device=device_type.type, requires_grad=True)
+        _output = model(x)
+        loss = model.cached_intermediate.sum()
+        # Should not raise "storage of size 0" error
+        loss.backward()
+        for param in model.parameters():
+            if param.requires_grad:
+                self.assertIsNotNone(param.grad)
+
+
 class TestFullyShard1DTrainingCompose(FSDPTest):
     @property
     def world_size(self) -> int:
