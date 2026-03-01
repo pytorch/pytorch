@@ -640,17 +640,15 @@ class GuardsSet:
             self.inner: OrderedSet[Guard] = OrderedSet()
         else:
             self.inner = inner
-        # Index: originating_source → guards with that exact source.
-        # Rebuilt from inner in __init__ (for checkpoint restore) and
-        # maintained incrementally in add().
-        self._source_to_guards: dict[Source, list[Guard]] = {}
+        # Map from source to list of guards with that source. Incrementally
+        # built in `add` method.
+        self.source_to_guards: defaultdict[Source, list[Guard]] = defaultdict(list)
         for guard in self.inner:
-            self._index_guard(guard)
+            self.track_guard_by_source(guard)
 
-    def _index_guard(self, guard: Guard) -> None:
+    def track_guard_by_source(self, guard: Guard) -> None:
         source = guard.originating_source
-        if source is not None:
-            self._source_to_guards.setdefault(source, []).append(guard)
+        self.source_to_guards[source].append(guard)
 
     def __iter__(self) -> Iterator[Guard]:
         return iter(self.inner)
@@ -677,7 +675,7 @@ class GuardsSet:
         if guard.user_stack is None:
             guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
-        self._index_guard(guard)
+        self.track_guard_by_source(guard)
 
     def update(self, *others: set[Guard]) -> None:
         for o in others:
@@ -686,7 +684,7 @@ class GuardsSet:
 
     def get_guards_for_source(self, source: Source) -> list[Guard]:
         """Return all guards with the given originating_source."""
-        return list(self._source_to_guards.get(source, []))
+        return list(self.source_to_guards[source])
 
     def remove_guards_with_source(self, source: Source) -> None:
         """Delete all guards that contains a given source"""
@@ -697,9 +695,9 @@ class GuardsSet:
         )
         # Rebuild the index since is_from_source walks the chain, so
         # multiple source keys may need removal.
-        self._source_to_guards = {}
+        self.source_to_guards = defaultdict(list)
         for guard in self.inner:
-            self._index_guard(guard)
+            self.track_guard_by_source(guard)
 
 
 """
