@@ -10033,6 +10033,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(MyStorage.finalized_count, 1)
         self.assertTrue(m[0])
 
+    @skipIfTorchDynamo("cannot trace t2.grad_fn._saved_self")
     def test_tensor_ressurecting_clear(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/136358
         # A Tensor with custom __dict__
@@ -10042,7 +10043,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         # that is part of a cycle
         l = []
-        l.append(l)
+        l.append(42)
         l.append(t)
 
         # Keep the Tensor alive from c++

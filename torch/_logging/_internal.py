@@ -18,7 +18,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Generic, Optional, Union
+from typing import Any, Generic, Optional
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
@@ -105,7 +105,7 @@ class LogRegistry:
         return alias in self.log_alias_to_log_qnames
 
     # register a log with an alias
-    def register_log(self, alias, log_qnames: Union[str, list[str]]) -> None:
+    def register_log(self, alias, log_qnames: str | list[str]) -> None:
         if isinstance(log_qnames, str):
             log_qnames = [log_qnames]
         self.log_alias_to_log_qnames[alias] = log_qnames
@@ -209,18 +209,18 @@ DEFAULT_LOGGING = {
 
 def set_logs(
     *,
-    all: Optional[int] = None,
-    dynamo: Optional[int] = None,
-    aot: Optional[int] = None,
-    autograd: Optional[int] = None,
-    dynamic: Optional[int] = None,
-    inductor: Optional[int] = None,
-    distributed: Optional[int] = None,
-    c10d: Optional[int] = None,
-    ddp: Optional[int] = None,
-    fsdp: Optional[int] = None,
-    dtensor: Optional[int] = None,
-    onnx: Optional[int] = None,
+    all: int | None = None,
+    dynamo: int | None = None,
+    aot: int | None = None,
+    autograd: int | None = None,
+    dynamic: int | None = None,
+    inductor: int | None = None,
+    distributed: int | None = None,
+    c10d: int | None = None,
+    ddp: int | None = None,
+    fsdp: int | None = None,
+    dtensor: int | None = None,
+    onnx: int | None = None,
     bytecode: bool = False,
     aot_graphs: bool = False,
     aot_joint_graph: bool = False,
@@ -248,8 +248,8 @@ def set_logs(
     onnx_diagnostics: bool = False,
     fusion: bool = False,
     overlap: bool = False,
-    export: Optional[int] = None,
-    modules: Optional[dict[str, Union[int, bool]]] = None,
+    export: int | None = None,
+    modules: dict[str, int | bool] | None = None,
     cudagraphs: bool = False,
     sym_node: bool = False,
     compiled_autograd: bool = False,
@@ -944,7 +944,7 @@ def make_module_path_relative(abs_path: str) -> str:
 # apply custom formats to artifacts when necessary
 class TorchLogsFormatter(logging.Formatter):
     def __init__(
-        self, *, trace: bool = False, trace_id_filter: Optional[set[str]] = None
+        self, *, trace: bool = False, trace_id_filter: set[str] | None = None
     ) -> None:
         super().__init__()
         self._is_trace = trace
@@ -1162,6 +1162,13 @@ def _init_logs(log_file_name=None) -> None:
     # configuration
     trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
 
+    # If TORCH_COMPILE_DEBUG=1 is set but no TORCH_TRACE, automatically use
+    # the torch_compile_debug directory for trace logs (to simplify tlparse usage)
+    if trace_dir_name is None and os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1":
+        import torch._dynamo.config as dynamo_config
+
+        trace_dir_name = os.path.join(dynamo_config.debug_dir_root, "tlparse")
+
     if dtrace_dir_name := os.environ.get(DTRACE_ENV_VAR, None):
         GET_DTRACE_STRUCTURED = True
         trace_dir_name = dtrace_dir_name
@@ -1186,7 +1193,7 @@ def _init_logs(log_file_name=None) -> None:
 class LazyTraceHandler(logging.StreamHandler):
     """Like FileHandler, but the file is allocated lazily only upon the first log message"""
 
-    def __init__(self, root_dir: Optional[str]) -> None:
+    def __init__(self, root_dir: str | None) -> None:
         # This is implemented in the same way that delay is implemented on
         # FileHandler
         self.root_dir = root_dir
@@ -1260,6 +1267,10 @@ class LazyTraceHandler(logging.StreamHandler):
                     delete=False,
                 )
                 log.info("LazyTraceHandler: logging to %s", self.stream.name)
+                # Log tlparse path via inductor logger so it shows when
+                # TORCH_LOGS="inductor" is enabled
+                inductor_log = logging.getLogger("torch._inductor")
+                inductor_log.info("tlparse raw data: %s", self.stream.name)
             else:
                 # We go poof, remove and no-op
                 trace_log.removeHandler(self)
@@ -1353,7 +1364,7 @@ def add_structured_logging_overhead(time_spent: float) -> None:
         structured_logging_overhead[key] += time_spent
 
 
-def get_structured_logging_overhead() -> Optional[float]:
+def get_structured_logging_overhead() -> float | None:
     key = None
     if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
         frame_id = trace_id.compile_id.frame_id
@@ -1368,8 +1379,8 @@ def get_structured_logging_overhead() -> Optional[float]:
 def trace_structured_artifact(
     name: str,  # this will go in metadata
     encoding: str,
-    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
-    compile_id: Optional[CompileId] = None,
+    payload_fn: Callable[[], str | object | None] = lambda: None,
+    compile_id: CompileId | None = None,
 ) -> None:
     trace_structured(
         "artifact",
@@ -1386,13 +1397,13 @@ def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[dict[str, Any], tuple[str, int]]] = dict,
+    metadata_fn: Callable[[], dict[str, Any] | tuple[str, int]] = dict,
     *,
-    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    payload_fn: Callable[[], str | object | None] = lambda: None,
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
-    compile_id: Optional[CompileId] = None,  # Optional if unavailable in the trace
+    compile_id: CompileId | None = None,  # Optional if unavailable in the trace
 ) -> None:
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
@@ -1490,9 +1501,9 @@ def dtrace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[dict[str, Any], tuple[str, int]]] = dict,
+    metadata_fn: Callable[[], dict[str, Any] | tuple[str, int]] = dict,
     *,
-    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    payload_fn: Callable[[], str | object | None] = lambda: None,
     suppress_context: bool = False,
     expect_trace_id: bool = False,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
