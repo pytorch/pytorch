@@ -1,5 +1,5 @@
 from collections.abc import Iterator, MutableMapping
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 
 K = TypeVar("K")
@@ -39,14 +39,14 @@ class IndexedDict(MutableMapping[K, V], Generic[K, V]):
     def __contains__(self, key: object) -> bool:
         return key in self._dict
 
-    def next_key(self, key: K) -> Optional[K]:
+    def next_key(self, key: K) -> K | None:
         """Get the next key in insertion order. O(1)."""
         idx = self._key_to_index.get(key)
         if idx is not None and idx + 1 < len(self._keys):
             return self._keys[idx + 1]
         return None
 
-    def prev_key(self, key: K) -> Optional[K]:
+    def prev_key(self, key: K) -> K | None:
         """Get the previous key in insertion order. O(1)."""
         idx = self._key_to_index.get(key)
         if idx is not None and idx > 0:

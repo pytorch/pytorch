@@ -461,6 +461,93 @@ def test(self):
         )
         self.assertEqual(messages, [expected_msg])
 
+    def test_case8_forbid_direct_raise_unsupported(self):
+        callsite_content = """from torch._dynamo.exc import Unsupported
+
+def test(self):
+    raise Unsupported("testing")
+"""
+        with open(self.callsite_file, "w") as f:
+            f.write(callsite_content)
+
+        messages = check_registry_sync(self.test_data_dir, self.registry_path)
+        self.assertEqual(len(messages), 1)
+
+        message = messages[0]
+        self.assertEqual(message.path, str(self.callsite_file))
+        self.assertEqual(message.line, 4)
+        self.assertEqual(message.code, LINTER_CODE)
+        self.assertEqual(message.severity, LintSeverity.ERROR)
+        self.assertEqual(message.name, "Direct raise Unsupported")
+        self.assertIn("Use `unimplemented(...)`", message.description)
+
+    def test_case9_forbid_raise_exc_unsupported(self):
+        callsite_content = """from torch._dynamo import exc
+
+def test(self):
+    raise exc.Unsupported("testing")
+"""
+        with open(self.callsite_file, "w") as f:
+            f.write(callsite_content)
+
+        messages = check_registry_sync(self.test_data_dir, self.registry_path)
+        self.assertEqual(len(messages), 1)
+
+        message = messages[0]
+        self.assertEqual(message.path, str(self.callsite_file))
+        self.assertEqual(message.line, 4)
+        self.assertEqual(message.code, LINTER_CODE)
+        self.assertEqual(message.severity, LintSeverity.ERROR)
+        self.assertEqual(message.name, "Direct raise Unsupported")
+
+    def test_case10_allow_noqa_for_direct_raise_unsupported(self):
+        callsite_content = """from torch._dynamo.exc import Unsupported
+
+def test(self):
+    raise Unsupported("testing")  # noqa: GB_REGISTRY
+"""
+        with open(self.callsite_file, "w") as f:
+            f.write(callsite_content)
+
+        messages = check_registry_sync(self.test_data_dir, self.registry_path)
+        self.assertEqual(messages, [])
+
+    def test_case10_allow_previous_line_noqa_for_direct_raise_unsupported(self):
+        callsite_content = """from torch._dynamo.exc import Unsupported
+
+def test(self):
+    # noqa: GB_REGISTRY
+    raise Unsupported("testing")
+"""
+        with open(self.callsite_file, "w") as f:
+            f.write(callsite_content)
+
+        messages = check_registry_sync(self.test_data_dir, self.registry_path)
+        self.assertEqual(messages, [])
+
+    def test_case11_allow_noqa_in_exc_py(self):
+        callsite_content = """def test(self):
+    pass
+"""
+        with open(self.callsite_file, "w") as f:
+            f.write(callsite_content)
+
+        exc_file = self.test_data_dir / "exc.py"
+        exc_content = """class Unsupported(Exception):
+    pass
+
+def unimplemented():
+    raise Unsupported("testing")  # noqa: GB_REGISTRY
+
+def other():
+    raise Unsupported("not allowed")  # noqa: GB_REGISTRY
+"""
+        with open(exc_file, "w") as f:
+            f.write(exc_content)
+
+        messages = check_registry_sync(self.test_data_dir, self.registry_path)
+        self.assertEqual(messages, [])
+
 
 if __name__ == "__main__":
     unittest.main()
