@@ -6449,7 +6449,10 @@ def var_mean_helper_(x, *, axis, correction, keepdim, return_mean):
     )
     output = (
         var_mean_sum_(**kwargs)
-        if use_two_step_variance(x, axis=axis, keepdim=keepdim)
+        if (
+            config.mtia.disable_welford_reduction
+            or use_two_step_variance(x, axis=axis, keepdim=keepdim)
+        )
         else var_mean_welford_(**kwargs)
     )
     output = tuple(to_dtype(x, out_dtype, copy=False) for x in output)
