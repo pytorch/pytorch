@@ -10,7 +10,8 @@ import functools
 from contextlib import redirect_stderr
 from torch.testing import make_tensor, FileCheck
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_BF16, PLATFORM_SUPPORTS_BF16_ATOMICS, PLATFORM_SUPPORTS_HALF_ATOMICS)
+    PLATFORM_SUPPORTS_BF16, PLATFORM_SUPPORTS_BF16_ATOMICS, PLATFORM_SUPPORTS_HALF_ATOMICS,
+)
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
      run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
