@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR,
+    TEST_WITH_TORCHINDUCTOR, DeterministicGuard,
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -156,6 +156,20 @@ if TEST_SCIPY:
     from scipy import stats
     import scipy.spatial
     import scipy.special
+
+
+# Decorator that enables deterministic algorithms on ROCm to avoid
+# non-deterministic atomic-add operations in backward passes (e.g. grid_sampler).
+# This forces ops like grid_sampler_2d_backward to use deterministic scatter-based
+# implementations instead of non-deterministic atomics.
+def _rocm_deterministic_gradcheck(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_ROCM:
+            with DeterministicGuard(True, warn_only=True):
+                return fn(*args, **kwargs)
+        return fn(*args, **kwargs)
+    return wrapper
 
 
 def round_up(x: int, y: int) -> int:
@@ -22298,6 +22312,11 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
         ),
+        # On ROCm, grid_sampler backward uses non-deterministic atomic-add.
+        # Force deterministic scatter-based backward to eliminate flakiness. (#131079)
+        decorators=(
+            DecorateInfo(_rocm_deterministic_gradcheck, 'TestGradients'),
+        ),
         gradcheck_nondet_tol=1e-15),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
@@ -22307,6 +22326,11 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,
         gradcheck_nondet_tol=1e-15,
+        # On ROCm, grid_sampler backward uses non-deterministic atomic-add.
+        # Force deterministic scatter-based backward to eliminate flakiness. (#131079)
+        decorators=(
+            DecorateInfo(_rocm_deterministic_gradcheck, 'TestGradients'),
+        ),
         skips=(
             DecorateInfo(slowTest, 'TestDecomp', 'test_comprehensive', dtypes=(torch.float32, torch.float64),
                          active_if=IS_WINDOWS),
@@ -22324,6 +22348,11 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sampler_3d,
         supports_gradgrad=False,
         gradcheck_nondet_tol=1e-15,
+        # On ROCm, grid_sampler backward uses non-deterministic atomic-add.
+        # Force deterministic scatter-based backward to eliminate flakiness. (#131079)
+        decorators=(
+            DecorateInfo(_rocm_deterministic_gradcheck, 'TestGradients'),
+        ),
         skips=(
             # NOTE: Only run on MPS
             DecorateInfo(unittest.skip('Skipped!'), device_type='cpu'),
