@@ -137,7 +137,7 @@ static Tensor batch_offsets_from_efficient_size(const Tensor& ef_sizes) {
 
 Tensor NestedTensor_to_padded_tensor_cuda(
     const Tensor& t,
-    double padding,
+    const Scalar& padding,
     OptionalIntArrayRef output_size) {
   TORCH_CHECK(t.numel() > 0, "to_padded_tensor: at least one constituent tensor should have non-zero numel")
   int64_t t_dim = t.dim();
@@ -202,7 +202,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
           add_padding_kernelLauncher(
               nt_buffer.data_ptr<scalar_t>(),
               output.data_ptr<scalar_t>(),
-              (scalar_t)(padding),
+              padding.to<scalar_t>(),
               offsets.data_ptr<int>(),
               nt_sizes.data_ptr<int>(),
               input_dim,
