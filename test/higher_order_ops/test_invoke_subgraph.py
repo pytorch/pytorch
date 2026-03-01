@@ -3102,6 +3102,208 @@ class GraphModule(torch.nn.Module):
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphAutoGuardCache(TestCase):
+    @torch._dynamo.config.patch(invoke_subgraph_auto_guard_cache=True)
+    def test_auto_guard_cache_basic(self):
+        @nested_compile_region()
+        def gn(x, y):
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            a = gn(x, y)
+            b = gn(x, y)
+            return a + b
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_clone, y_clone)
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
+    @torch._dynamo.config.patch(invoke_subgraph_auto_guard_cache=True)
+    def test_auto_guard_cache_skips_tracing(self):
+        @nested_compile_region()
+        def gn(x, y):
+            return torch.mul(x, y)
+
+        def fn(x, y):
+            a = gn(x, y)
+            b = gn(x, y)
+            c = gn(x, y)
+            return a + b + c
+
+        x = torch.randn(8)
+        y = torch.randn(8)
+
+        call_count = 0
+        orig_speculate = torch._dynamo.variables.higher_order_ops.speculate_subgraph_with_auto_output_flattening
+
+        def counting_speculate(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return orig_speculate(*args, **kwargs)
+
+        with mock.patch.object(
+            torch._dynamo.variables.higher_order_ops,
+            "speculate_subgraph_with_auto_output_flattening",
+            counting_speculate,
+        ):
+            torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        self.assertEqual(call_count, 1)
+
+    @torch._dynamo.config.patch(invoke_subgraph_auto_guard_cache=True)
+    def test_auto_guard_cache_different_shapes(self):
+        @nested_compile_region()
+        def gn(x):
+            return x.sin()
+
+        def fn(x, y):
+            a = gn(x)
+            b = gn(y)
+            return a.sum() + b.sum()
+
+        x = torch.randn(4)
+        y = torch.randn(8)
+
+        call_count = 0
+        orig_speculate = torch._dynamo.variables.higher_order_ops.speculate_subgraph_with_auto_output_flattening
+
+        def counting_speculate(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return orig_speculate(*args, **kwargs)
+
+        with mock.patch.object(
+            torch._dynamo.variables.higher_order_ops,
+            "speculate_subgraph_with_auto_output_flattening",
+            counting_speculate,
+        ):
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        # Different shapes → two separate traces
+        self.assertEqual(call_count, 2)
+        self.assertEqual(res, fn(x, y))
+
+    @torch._dynamo.config.patch(invoke_subgraph_auto_guard_cache=True)
+    def test_auto_guard_cache_module(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+
+            @nested_compile_region()
+            def forward(self, x, y):
+                return torch.mul(x, y).sin() + self.c
+
+        mod = Mod()
+
+        def fn(x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_clone, y_clone)
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
+    @torch._dynamo.config.patch(invoke_subgraph_auto_guard_cache=True)
+    def test_auto_guard_cache_free_function_with_module_arg(self):
+        class Block(torch.nn.Module):
+            def __init__(self, scale):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8, bias=False)
+                torch.nn.init.constant_(self.linear.weight, scale)
+
+        @nested_compile_region()
+        def apply_block(mod, x):
+            return mod.linear(x).relu()
+
+        block1 = Block(1.0)
+        block2 = Block(2.0)
+
+        def fn(x):
+            a = apply_block(block1, x)
+            b = apply_block(block2, x)
+            return a + b
+
+        x = torch.randn(4, 8, requires_grad=True)
+        ref = fn(x)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        call_count = 0
+        orig_speculate = torch._dynamo.variables.higher_order_ops.speculate_subgraph_with_auto_output_flattening
+
+        def counting_speculate(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return orig_speculate(*args, **kwargs)
+
+        with mock.patch.object(
+            torch._dynamo.variables.higher_order_ops,
+            "speculate_subgraph_with_auto_output_flattening",
+            counting_speculate,
+        ):
+            res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_clone)
+
+        # block1 and block2 have the same subgraph structure (Linear + relu).
+        # Source replacement remaps captured vars, so one cache entry suffices.
+        self.assertEqual(call_count, 1)
+
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+    @torch._dynamo.config.patch(invoke_subgraph_auto_guard_cache=True)
+    def test_auto_guard_cache_tuple_output(self):
+        @nested_compile_region()
+        def gn(x, y):
+            return torch.sin(x), torch.cos(y)
+
+        def fn(x, y):
+            a1, a2 = gn(x, y)
+            b1, b2 = gn(x, y)
+            return a1 + b1, a2 + b2
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(x, y)
+
+        x_clone = x.detach().clone().requires_grad_(True)
+        y_clone = y.detach().clone().requires_grad_(True)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_clone, y_clone)
+
+        sum(r.sum() for r in ref).backward()
+        sum(r.sum() for r in res).backward()
+
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(ref[1], res[1])
+        self.assertEqual(x.grad, x_clone.grad)
+        self.assertEqual(y.grad, y_clone.grad)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
 @parameterized_class(
     [
         {"strict": False},
