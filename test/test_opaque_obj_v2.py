@@ -808,6 +808,37 @@ class TestOpaqueObject(TestCase):
             lib=self.lib,
         )
 
+        counter_type = get_opaque_type_name(Counter)
+        torch.library.define(
+            "_TestOpaqueObject::create_counter",
+            f"(SymInt start, SymInt end) -> {counter_type}",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::create_counter",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def create_counter_impl(start: int, end: int) -> Counter:
+            return Counter(start, end)
+
+        @torch.library.register_fake("_TestOpaqueObject::create_counter", lib=self.lib)
+        def create_counter_fake(start: int, end: int) -> Counter:
+            return Counter(start, end)
+
+        @torch.library.custom_op(
+            "_TestOpaqueObject::create_counter2",
+            mutates_args=[],
+        )
+        def create_counter2_impl(start: int, end: int) -> tuple[Counter, Counter]:
+            return Counter(start, end), Counter(end, start)
+
+        @create_counter2_impl.register_fake
+        def create_counter2_fake(start: int, end: int) -> tuple[Counter, Counter]:
+            return Counter(start, end), Counter(end, start)
+
         super().setUp()
 
     def tearDown(self):
@@ -833,6 +864,51 @@ class TestOpaqueObject(TestCase):
         self.assertEqual(popped, torch.ones(3) + 1)
         size = torch.ops._TestOpaqueObject.queue_size(queue)
         self.assertEqual(size, 0)
+
+    def test_custom_op_reference_return(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            c1 = torch.ops._TestOpaqueObject.create_counter(0, 10)
+            c2, c3 = torch.ops._TestOpaqueObject.create_counter2(0, 10)
+            return (
+                c1,
+                torch.ops._TestOpaqueObject.increment_counter(c1, x),
+                c2,
+                torch.ops._TestOpaqueObject.increment_counter(c2, x),
+                c3,
+                torch.ops._TestOpaqueObject.increment_counter(c3, x),
+            )
+
+        x = torch.scalar_tensor(0, dtype=torch.int64)
+        c1, r1, c2, r2, c3, r3 = f(x)
+        self.assertIsInstance(c1, Counter)
+        self.assertIsInstance(c2, Counter)
+        self.assertIsInstance(c3, Counter)
+        self.assertEqual(c3.start, 11)
+        self.assertEqual(c3.end, 0)
+        self.assertEqual(x, torch.scalar_tensor(10, dtype=torch.int64))
+        self.assertEqual(r1, torch.scalar_tensor(1, dtype=torch.int64))
+        self.assertEqual(r2, torch.scalar_tensor(1, dtype=torch.int64))
+        self.assertEqual(r3, torch.scalar_tensor(11, dtype=torch.int64))
+
+    def test_custom_op_value_return(self):
+        with self.assertRaisesRegex(ValueError, "Return has unsupported type"):
+
+            @torch.library.custom_op(
+                "_TestOpaqueObject::create_value_config",
+                mutates_args=[],
+            )
+            def create_value_config(mode: str) -> ValueConfig:
+                return ValueConfig(mode)
+
+        with self.assertRaisesRegex(ValueError, "Return has unsupported type"):
+
+            @torch.library.custom_op(
+                "_TestOpaqueObject::create_value_config_tuple",
+                mutates_args=[],
+            )
+            def create_value_config_tuple(mode: str) -> tuple[ValueConfig, int]:
+                return ValueConfig(mode), 0
 
     def test_fake_script_object_isinstance_per_type(self):
         queue = OpaqueQueue([], torch.zeros(3))
