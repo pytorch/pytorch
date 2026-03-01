@@ -30,7 +30,6 @@ from .post_grad import register_lowering_pattern
 from .quantization import (
     _register_int8_woq_concat_linear_pattern,
     _register_quantization_lowerings,
-    _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
 )
 
@@ -1587,5 +1586,4 @@ if torch._C._has_mkldnn:
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
             _recover_linear()
-            _register_quantization_weight_pack_pass()
             _register_int8_woq_concat_linear_pattern()
