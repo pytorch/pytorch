@@ -164,7 +164,7 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
       device_(c10::dispatchKeyToDeviceType(dispatch_key_), 0),
       pyinterpreter_(getPyInterpreter()) {
   auto device_name = c10::DeviceTypeName(device_.type());
-  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
+  auto& registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
           device_.type() == c10::DeviceType::XPU ||
@@ -405,7 +405,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
 std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
     load_aoti_model_runner(const std::string& so_path) {
   auto device_name = c10::DeviceTypeName(device_.type());
-  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
+  auto& registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
           device_.type() == c10::DeviceType::XPU ||
@@ -431,6 +431,13 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
   } else if (device_.type() == c10::DeviceType::CPU) {
     return std::make_shared<AOTIModelContainerRunnerCpu>(so_path);
   } else {
+    TORCH_CHECK(
+        registered_aoti_runner.find(device_name) !=
+            registered_aoti_runner.end(),
+        "AOTI eager mode: no runner registered for device ",
+        device_name,
+        ". External device backends must register an AOTI model runner factory "
+        "using RegisterAOTIModelRunner before using AOTI eager mode.");
     auto aoti_model_runer_fn = registered_aoti_runner[device_name];
     return aoti_model_runer_fn(
         so_path, 1, device_name, "", /*run_single_threaded=*/false);
@@ -448,6 +455,15 @@ void AOTIPythonKernelHolder::cache_miss(
       kernel != nullptr,
       "Unsupported device: ",
       c10::DeviceTypeName(device_.type()));
+
+  // Populate the in-memory cache so subsequent calls hit cache_hit.
+  auto inputs_metadata =
+      unpack_input_parameters(op.schema().arguments(), *stack);
+  AOTIKernelMetadata aoti_kernel_metadata;
+  aoti_kernel_metadata.parameter_metadata_list_ = std::move(inputs_metadata);
+  aoti_kernel_metadata.kernel_runner_ = kernel;
+  aoti_kernel_cache_.push_back(std::move(aoti_kernel_metadata));
+
   auto inputs = unpack_tensors(op.schema().arguments(), *stack, device_);
   auto outputs = kernel->run(inputs);
   torch::jit::drop(*stack, op.schema().arguments().size());
