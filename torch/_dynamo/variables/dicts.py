@@ -706,6 +706,9 @@ class ConstDictVariable(VariableTracker):
                 msg = VariableTracker.build(tx, "popitem(): dictionary is empty")
                 raise_observed_exception(KeyError, tx, args=[msg])
 
+            self.should_reconstruct_all = True
+            tx.output.side_effects.mutation(self)
+
             if self.user_cls is collections.OrderedDict and (
                 len(args) == 1 or "last" in kwargs
             ):
@@ -870,19 +873,24 @@ class ConstDictVariable(VariableTracker):
                     variables.DefaultDictVariable,
                 ),
             ):
+                assert isinstance(
+                    other,
+                    (
+                        ConstDictVariable,
+                        variables.UserDefinedDictVariable,
+                        variables.DefaultDictVariable,
+                    ),
+                )
                 # Always return the specialized dictionary, and in the case
                 # both are specialized, take the first to be the type of the
                 # new dictionary
                 if self.user_cls is not dict:
                     user_cls = self.user_cls
-                    to_cpy = self
                 else:
-                    assert isinstance(other, ConstDictVariable)
                     user_cls = other.user_cls
-                    to_cpy = other
 
-                to_cpy.install_dict_keys_match_guard()
-                new_dict_vt = to_cpy.clone(
+                self.install_dict_keys_match_guard()
+                new_dict_vt = self.clone(
                     items=self.items.copy(),
                     mutation_type=ValueMutationNew(),
                     source=None,
@@ -892,7 +900,7 @@ class ConstDictVariable(VariableTracker):
                 # NB - Guard on all the keys of the other dict to ensure
                 # correctness.
                 args[0].install_dict_keys_match_guard()  # type: ignore[attr-defined]
-                new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
+                new_dict_vt.items.update(other.items)  # type: ignore[attr-defined]
                 return new_dict_vt
             else:
                 err_msg = (
