@@ -7485,4 +7485,72 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
   return grad_self;
 }
 
+Tensor gru_cell_jvp(
+    const Tensor& input_gates_t,
+    const Tensor& hidden_gates_t,
+    const Tensor& hx_t,
+    const Tensor& input_gates_p,
+    const Tensor& hidden_gates_p,
+    const Tensor& hx_p,
+    const std::optional<Tensor>& input_bias,
+    const std::optional<Tensor>& hidden_bias) {
+  // Forward AD (JVP) for GRU cell
+  // GRU forward computation:
+  //   rg = sigmoid(ir + hr + b1r + b2r)   (reset gate)
+  //   ig = sigmoid(ii + hi + b1i + b2i)   (input/update gate)
+  //   ng = tanh(in + b1n + rg * (hn + b2n))  (new gate)
+  //   hy = ng + ig * (hx - ng)            (output)
+  //
+  // Forward derivatives (chain rule):
+  //   d_rg = rg * (1 - rg) * (d_ir + d_hr)
+  //   d_ig = ig * (1 - ig) * (d_ii + d_hi)
+  //   d_ng = (1 - ng^2) * (d_in + d_rg * (hn + b2n) + rg * d_hn)
+  //   d_hy = d_ng * (1 - ig) + d_ig * (hx - ng) + ig * d_hx
+
+  Tensor in_g = input_gates_p;
+  Tensor h_g = hidden_gates_p;
+  if (input_bias.has_value() && input_bias->defined()) {
+    in_g = in_g + *input_bias;
+  }
+  if (hidden_bias.has_value() && hidden_bias->defined()) {
+    h_g = h_g + *hidden_bias;
+  }
+
+  auto chunked_input_gates = in_g.unsafe_chunk(3, 1);
+  const Tensor& ir = chunked_input_gates[0];
+  const Tensor& ii = chunked_input_gates[1];
+  const Tensor& in = chunked_input_gates[2];
+  auto chunked_hidden_gates = h_g.unsafe_chunk(3, 1);
+  const Tensor& hr = chunked_hidden_gates[0];
+  const Tensor& hi = chunked_hidden_gates[1];
+  const Tensor& hn = chunked_hidden_gates[2];
+
+  // Compute gate values from forward pass
+  Tensor rg = (ir + hr).sigmoid();
+  Tensor ig = (ii + hi).sigmoid();
+  Tensor ng = (in + rg * hn).tanh();
+
+  // Get tangent chunks
+  auto chunked_input_tangent = input_gates_t.unsafe_chunk(3, 1);
+  const Tensor& d_ir = chunked_input_tangent[0];
+  const Tensor& d_ii = chunked_input_tangent[1];
+  const Tensor& d_in = chunked_input_tangent[2];
+  auto chunked_hidden_tangent = hidden_gates_t.unsafe_chunk(3, 1);
+  const Tensor& d_hr = chunked_hidden_tangent[0];
+  const Tensor& d_hi = chunked_hidden_tangent[1];
+  const Tensor& d_hn = chunked_hidden_tangent[2];
+
+  // Compute tangents of gates using chain rule
+  // d_rg = rg * (1 - rg) * (d_ir + d_hr)
+  Tensor d_rg = rg * (1 - rg) * (d_ir + d_hr);
+  // d_ig = ig * (1 - ig) * (d_ii + d_hi)
+  Tensor d_ig = ig * (1 - ig) * (d_ii + d_hi);
+  // d_ng = (1 - ng^2) * (d_in + d_rg * hn + rg * d_hn)
+  Tensor d_ng = (1 - ng * ng) * (d_in + d_rg * hn + rg * d_hn);
+  // d_hy = d_ng * (1 - ig) + d_ig * (hx - ng) + ig * d_hx
+  Tensor d_hy = d_ng * (1 - ig) + d_ig * (hx_p - ng) + ig * hx_t;
+
+  return d_hy;
+}
+
 } // namespace torch::autograd::generated::details

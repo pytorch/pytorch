@@ -1069,6 +1069,16 @@ Tensor evenly_read_jvp(
     const Tensor& value);
 Tensor warn_backwards(const Tensor& grad_output);
 
+Tensor gru_cell_jvp(
+    const Tensor& input_gates_t,
+    const Tensor& hidden_gates_t,
+    const Tensor& hx_t,
+    const Tensor& input_gates_p,
+    const Tensor& hidden_gates_p,
+    const Tensor& hx_p,
+    const std::optional<Tensor>& input_bias,
+    const std::optional<Tensor>& hidden_bias);
+
 std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const at::Tensor& self,
     const at::Tensor& grad_output,
