@@ -7161,17 +7161,106 @@ class BaseScheduling:  # noqa: docstring_linter
         and node2 corresponds to one of its outputs. If so, we further check if
         backend supports this fusion.
 
-        Delegates to ``TemplateBuffer.can_fuse_multi_output_epilogue`` which
-        TemplateBuffer subclasses may override to allow fusion of additional node types.
+        Generic structural checks are performed here:
+        - MultiOutput nodes (tuple extraction) are always eligible.
+        - Pointwise epilogues: must read the kernel output at exactly one index,
+          with matching epilogue write index, matching rank, no other consumers
+          of the kernel output, and no use of ops.index_expr.
+
+        Template-specific eligibility is gated by ``metadata.fusable_outputs``
+        (pre-computed at lowering time by external template backends).
         """
         template_buf = node1.get_template_node()
         if not isinstance(template_buf, ir.TemplateBuffer):
             return False
         if not template_buf.is_multi_outputs_template():
             return False
-        if template_buf.can_fuse_multi_output_epilogue(node2):
-            return True
-        return False
+
+        n2_node = getattr(node2, "node", None)
+
+        # MultiOutput nodes (tuple extraction from template's multi-output) are
+        # always eligible; they just unpack an element of the output tuple.
+        if isinstance(n2_node, ir.MultiOutput):
+            return (
+                len(n2_node.inputs) == 1
+                and n2_node.inputs[0].get_name() == template_buf.get_name()
+            )
+
+        # Only pointwise ComputedBuffers can be fused as epilogues.
+        # Reductions, scans, and other ops require their own loop nest.
+        if not isinstance(n2_node, ir.ComputedBuffer):
+            return False
+        if not isinstance(n2_node.data, ir.Pointwise):
+            return False
+
+        # The epilogue must read from exactly one kernel output buffer at a
+        # single distinct index. MemoryDep is keyed on (name, index, ...) so
+        # same-index reads deduplicate while different-index reads stay distinct:
+        #   relu(out) + out  -> 1 dep (same index)   -> allowed
+        #   out + out.T      -> 2 deps (different)    -> rejected
+        #   no kernel read   -> 0 deps                -> rejected
+        kernel_output_deps = [
+            dep
+            for dep in node2.read_writes.reads
+            if isinstance(dep, dependencies.MemoryDep)
+            and dep.name in template_buf.all_output_names
+        ]
+        if len(kernel_output_deps) != 1:
+            return False
+        read_dep = kernel_output_deps[0]
+        output_buf = read_dep.name
+
+        # Template-specific check: is this output buffer actually fusable?
+        # E.g. Helion rejects post-loop reduction outputs (not tl.stores) and
+        # kernels with symbolic return values.
+        if output_buf not in template_buf.fusable_outputs:
+            return False
+
+        # Dimension match: epilogue must operate over the same rank as the
+        # kernel output. A different rank means a view that fusion can't handle.
+        buf = V.graph.get_buffer(output_buf)
+        if buf is None:
+            return False
+        if len(n2_node.data.ranges) != len(buf.get_size()):
+            return False
+
+        # Index match: the epilogue's read index must equal one of its write
+        # indices. Rejects out.T.contiguous() (read (j,i) vs write (i,j)) and
+        # gather ops (read at dynamic index vs sequential write).
+        write_indices = {
+            dep.index
+            for dep in node2.read_writes.writes
+            if isinstance(dep, dependencies.MemoryDep)
+        }
+        if read_dep.index not in write_indices:
+            return False
+
+        # Other-user guard: if the epilogue stores to a different buffer, we
+        # redirect the kernel's store. Safe only when no other node needs the
+        # original output buffer.
+        write_names = {
+            dep.name
+            for dep in node2.read_writes.writes
+            if isinstance(dep, dependencies.MemoryDep)
+        }
+        if output_buf not in write_names and self.scheduler is not None:
+            sched_buf = self.scheduler.name_to_buf.get(output_buf)
+            if sched_buf is not None:
+                snode_name = node2.get_name()
+                other_users = [
+                    u
+                    for u in sched_buf.users
+                    if not u.is_weak and u.get_name() != snode_name
+                ]
+                if other_users:
+                    return False
+
+        # Index-expr guard: epilogues using ops.index_expr (e.g. triu, tril)
+        # may not be traceable by the template kernel's fusion codegen path.
+        if ir.pointwise_uses_index_expr(n2_node):
+            return False
+
+        return True
 
     def fuse(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

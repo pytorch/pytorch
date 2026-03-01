@@ -64,6 +64,7 @@ from ..utils import (
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
+
 from .multi_kernel import MultiKernel, SizeHintMultiKernel
 from .simd_kernel_features import (
     DisableReduction,
@@ -462,24 +463,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         self.rsplit_size = 0
         self.saved_partial_accumulate: list[PartialAccumulate] = []
-
-    def codegen_template_override(
-        self,
-        scheduling,
-        template_node,
-        epilogue_nodes,
-        prologue_nodes,
-        buf_name_to_prologue_group,
-        prologue_preserves_zero_mask_fn,
-        render,
-        only_gen_src_code: bool,
-    ) -> str | None:
-        """Override template codegen. Return None to use default flow.
-
-        External template handlers (e.g. Helion) can override this method
-        to implement custom code generation.
-        """
-        return None
 
     def _get_store_output_subgraph_name(self, i: int) -> str:
         return f"<STORE_OUTPUT_{i}>"
@@ -1289,6 +1272,77 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         pass
 
 
+class _ExprTracingStub:
+    """Minimal V.kernel stub for TritonOverrides expression replay.
+
+    Used by ``_trace_fusion_expr`` so that TritonOverrides can be driven
+    without a full SIMDKernel.  Satisfies the ``V.kernel.cse.varname_map``
+    and ``V.kernel.min_elem_per_thread`` contracts.
+    """
+
+    class _CSEStub:
+        def __init__(self) -> None:
+            self.varname_map: dict[str, str] = {}
+
+    def __init__(self) -> None:
+        self.cse = self._CSEStub()
+        self.min_elem_per_thread: int = 0
+
+
+def _trace_fusion_expr(
+    ir_node: "ir.ComputedBuffer",
+    intercept_bufs: "set[str]",
+    intercept_value: str,
+    get_extra_input: "Callable[[str], str]",
+    var_prefix: str,
+) -> "tuple[str | None, dict[str, tuple[str, str]], str | None, list[str]]":
+    """Trace a ComputedBuffer's inner_fn to extract a fused Triton expression.
+
+    Replays the buffer's ops through a custom handler that intercepts loads
+    (replacing ``intercept_bufs`` with ``intercept_value`` and recording extra
+    loads from other buffers) and captures the final store expression.
+
+    Returns ``(fused_expr, fusion_loads, store_target, index_symbol_names)``.  ``fusion_loads``
+    maps generated var names to ``(param_name, sympy_index_str)`` for extra
+    ``tl.load`` calls needed by the fused expression.
+    """
+    from .triton import TritonOverrides  # lazy — avoids circular import
+    from ..ops_handler import AddParenHandler
+
+    fusion_loads: "dict[str, tuple[str, str]]" = {}
+    fused_expr_ref: "list[str | None]" = [None]
+    store_target_ref: "list[str | None]" = [None]
+
+    class _Handler(AddParenHandler):
+        def load(self, name: str, index: object) -> str:
+            if name in intercept_bufs:
+                dtype = V.graph.get_dtype(name)
+                if dtype in (torch.float16, torch.bfloat16):
+                    return f"({intercept_value}).to(tl.float32)"
+                return intercept_value
+            param = get_extra_input(name)
+            var_name = f"{var_prefix}{len(fusion_loads)}"
+            fusion_loads[var_name] = (param, str(index))
+            return var_name
+
+        def store(self, name: str, index: object, value: object, mode: object = None) -> None:
+            fused_expr_ref[0] = str(value)
+            store_target_ref[0] = name
+
+    handler = _Handler(TritonOverrides())
+    pw = ir_node.data
+    index = [sympy.Symbol(f"_fidx_{i}") for i in range(len(pw.ranges))]
+    with V.set_kernel_handler(_ExprTracingStub()):  # type: ignore[arg-type]
+        with V.set_ops_handler(handler):  # type: ignore[arg-type]
+            value = pw.inner_fn(index)
+            handler.store(ir_node.get_name(), index, value)
+
+    index_symbol_names = [str(sym) for sym in index]
+    return fused_expr_ref[0], fusion_loads, store_target_ref[0], index_symbol_names
+
+
+
+
 class SIMDScheduling(BaseScheduling):
     """
     Single Instruction Multiple Data parent class used for fusion across
@@ -2040,6 +2094,24 @@ class SIMDScheduling(BaseScheduling):
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
+    def _codegen_nodes_deferred_frees(self, nodes) -> None:
+        """Codegen nodes as separate kernels while deferring buffer frees.
+
+        Used to codegen prologue nodes that a template kernel cannot inline
+        (e.g. because they remap indices), but which must execute before the
+        template. Buffer frees are deferred so the template kernel still has
+        access to all buffers it needs.
+        """
+        if not self.scheduler:
+            return
+        deferred = set(self.scheduler.buffer_names_to_free)
+        self.scheduler.buffer_names_to_free.clear()
+        try:
+            for node in nodes:
+                self.codegen_node(node)
+        finally:
+            self.scheduler.buffer_names_to_free.update(deferred)
+
     def _codegen_single_template(
         self,
         kernel,
@@ -2063,125 +2135,154 @@ class SIMDScheduling(BaseScheduling):
             if names & template_reads:
                 assert len(names) == 1
                 buf_name_to_prologue_group[next(iter(names))] = prologue_group
-                kernel.prologue_fused_inputs.add(next(iter(names)))
                 prologue_group = []
 
         # all prologue groups should have finalized with use in template
         assert len(prologue_group) == 0
 
-        # External template handlers (e.g. Helion) can override codegen
-        result = kernel.codegen_template_override(
-            self,
-            template_node,
-            epilogue_nodes,
-            prologue_nodes,
-            buf_name_to_prologue_group,
-            prologue_preserves_zero_mask,
-            render,
-            only_gen_src_code,
-        )
-        if result is not None:
-            return result
-
-        with kernel:
-            if not only_gen_src_code:
-                # prologue nodes can only be fused if their only use is in the template,
-                # so they are necessarily not allocated
-                for node in [template_node, *epilogue_nodes]:
-                    node.mark_run()
-
-            partial_code = render()
-
-            num_store_subgraphs = kernel.get_store_output_count()
-            for i in range(num_store_subgraphs):
-                subgraph_name = kernel._get_store_output_subgraph_name(i)
-                with kernel.set_subgraph_body(subgraph_name):
-                    for node in epilogue_nodes:
-                        node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                    kernel.cse.invalidate(OrderedSet())
-
-            for input_name, buffer in kernel.named_input_nodes.items():
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                if prologue_group := buf_name_to_prologue_group.get(
-                    buffer.get_name(), []
+        # Filter prologue candidates: reject multi-read and index-remapping prologues.
+        # (multi-read: source value isn't a single element; index-remap: read≠write index
+        # means the op reorders elements, e.g. flip/transpose/roll.)
+        separate_prologue_nodes = []
+        # (sched_node, input_buf, source_bufs) for candidates that passed the filter.
+        fusable_prologue: "list[tuple[Any, str, frozenset]]" = []
+        for buf_name, pro_nodes in buf_name_to_prologue_group.items():
+            for pro_node in pro_nodes:
+                reads = [d for d in pro_node.read_writes.reads if isinstance(d, MemoryDep)]
+                writes = [d for d in pro_node.read_writes.writes if isinstance(d, MemoryDep)]
+                source_bufs = frozenset(d.name for d in reads)
+                read_index = reads[0].index if len(reads) == 1 else None
+                write_index = writes[0].index if len(writes) == 1 else None
+                if len(source_bufs) > 1 or (
+                    read_index is not None
+                    and write_index is not None
+                    and read_index != write_index
                 ):
-                    can_codegen_without_upcast = all(
-                        p_n.can_codegen_without_upcasts() for p_n in prologue_group
-                    )
+                    separate_prologue_nodes.append(pro_node)
+                else:
+                    fusable_prologue.append((pro_node, buf_name, source_bufs))
 
-                    # TODO - this doesn't work with libdevice calls, potentially other bugs
-                    # upcasting to fp32 and downcasting gives large slowdown
-                    with config.patch(
-                        "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
-                    ):
-                        with kernel.set_subgraph_body(subgraph_name):
-                            for prologue_node in prologue_group:
-                                if (
-                                    len(prologue_node.get_buffer_names()) == 1
-                                    and len(prologue_group) == 1
-                                ):
-                                    if prologue_preserves_zero_mask(prologue_node):
-                                        kernel.prologue_fused_inputs_preserve_zero |= (
-                                            prologue_node.get_buffer_names()
-                                        )
+        if separate_prologue_nodes and not only_gen_src_code:
+            self._codegen_nodes_deferred_frees(separate_prologue_nodes)
 
-                                prologue_node.codegen(
-                                    kernel.split_and_set_ranges(
-                                        prologue_node.get_ranges()
-                                    )
-                                )
-                            kernel.cse.invalidate(OrderedSet())
+        for _, input_buf, _ in fusable_prologue:
+            kernel.prologue_fused_inputs.add(input_buf)
 
-        # Template hooks must be finalised after kernel.remove_kernel_local_buffers
-        # is called (this is called when the kernel context is exited above), and when
-        # the kernel handler is set (as below). This is because the hooks may add
-        # DeferredLine type lines, which preclude lines involving buffers that have
-        # been removed
+        output_param_mapping = template_node.node.fusable_outputs
+        input_param_mapping = template_node.node.all_inputs
 
-        # finalize must be called after adding epilogue above
-        with V.set_kernel_handler(kernel):
-            if not isinstance(partial_code, str):
-                # This is used to calculate flops in TritonTemplateKernels
-                with ir.IRNode.current_origins(template_node.node.origins):
-                    partial_code.finalize_hook("<DEF_KERNEL>")
-                partial_code.finalize_hook("<ARGDEFS>", strict=False)
+        # Auto-populate param mappings for standard single-output templates that
+        # don't pre-populate them. External templates (ExternalTritonTemplateBuffer)
+        # and multi-output templates always populate fusable_outputs/all_inputs
+        # explicitly, so the inner `if not` guards make them no-ops here.
+        if not isinstance(template_node.node.layout, ir.MultiOutputLayout):
+            if not output_param_mapping:
+                out_buf = template_node.node.get_name()
+                output_param_mapping = {out_buf: out_buf}
+            if not input_param_mapping:
+                input_param_mapping = {buf: buf for buf in template_reads}
 
-            # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
-
-            for input_name in kernel.named_input_nodes:
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-
-                partial_code.finalize_hook(subgraph_name, strict=False)
-
-            num_store_subgraphs = kernel.get_store_output_count()
-            for i in range(num_store_subgraphs):
-                subgraph_name = kernel._get_store_output_subgraph_name(i)
-
-                partial_code.finalize_hook(subgraph_name)
-
-            if isinstance(partial_code, str):
-                src_code = partial_code
-            else:
-                # Ensure all hooks are finalized before the kernel is defined.
-                # Note: some of these hooks may have been registered by a kernel subclass
-                src_code = partial_code.finalize_remaining()
-
-            node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
-
-            if config.benchmark_kernel:
-                num_gb = kernel.estimate_kernel_num_bytes() / 1e9
-                src_code = (
-                    f"{kernel.imports_for_benchmark_kernel()}\n"
-                    f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
+        # Separate MultiOutput (tuple extraction) from pointwise epilogues, then
+        # trace each pointwise epilogue into an EpilogueSpec with Triton expressions.
+        multi_output_nodes = []
+        epilogue_sched_nodes: "list[Any]" = []
+        epilogue_specs: "list[ir.EpilogueSpec]" = []
+        extra_inputs: "dict[str, str]" = {}
+        extra_params: "list[tuple[str, str]]" = []
+        for epi_node in epilogue_nodes:
+            n2_node = getattr(epi_node, "node", None)
+            if isinstance(n2_node, ir.MultiOutput):
+                multi_output_nodes.append(epi_node)
+                continue
+            epi_deps = [
+                dep
+                for dep in epi_node.read_writes.reads
+                if isinstance(dep, MemoryDep) and dep.name in output_param_mapping
+            ]
+            if len(epi_deps) != 1:
+                continue
+            output_buf = epi_deps[0].name
+            epi_idx = len(epilogue_specs)
+            fused_expr, fusion_loads, store_target, index_symbols = _trace_fusion_expr(
+                n2_node,
+                intercept_bufs=set(output_param_mapping),
+                intercept_value=f"_kernel_val_{epi_idx}",
+                get_extra_input=lambda name: extra_inputs.setdefault(
+                    name, f"_epi_input_{len(extra_inputs)}"
+                ),
+                var_prefix="_epi_",
+            )
+            redirect_param: "str | None" = None
+            if store_target is not None and store_target != output_buf:
+                redirect_param = f"_epi_out_{len(extra_params)}"
+                extra_params.append((redirect_param, store_target))
+            epilogue_specs.append(
+                ir.EpilogueSpec(
+                    kernel_output_param=output_param_mapping[output_buf],
+                    kernel_output_buf=output_buf,
+                    fused_expr=fused_expr,  # type: ignore[arg-type]
+                    fusion_loads=fusion_loads,
+                    store_target=store_target,
+                    redirect_param=redirect_param,
+                    index_symbols=index_symbols,
                 )
+            )
+            epilogue_sched_nodes.append(epi_node)
+        for buf_name, param_name in extra_inputs.items():
+            extra_params.append((param_name, buf_name))
 
-            if only_gen_src_code:
-                return src_code
+        # Trace fusable prologue candidates into PrologueSpec with Triton expressions.
+        prologue_specs: "list[ir.PrologueSpec]" = []
+        for pro_node, input_buf, source_bufs in fusable_prologue:
+            input_param = input_param_mapping.get(input_buf)
+            if input_param is None:
+                continue
+            fused_expr, _loads, _target, _index_syms = _trace_fusion_expr(
+                pro_node.node,
+                intercept_bufs=source_bufs,
+                intercept_value="_load_val",
+                get_extra_input=lambda name: name,
+                var_prefix="_pro_",
+            )
+            source_buf = next(iter(source_bufs)) if source_bufs else None
+            prologue_specs.append(
+                ir.PrologueSpec(
+                    input_param=input_param,
+                    input_buf=input_buf,
+                    fused_expr=fused_expr,  # type: ignore[arg-type]
+                    source_buf=source_buf,
+                )
+            )
 
-            kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+        # Unified codegen dispatch: codegen_with_fusion is self-contained for both
+        # standard TritonTemplateBuffer and ExternalTritonTemplateBuffer.
+        # For standard templates, it drives spec-based injection via
+        # kernel.setup_fusion_specs() and hook callbacks in store_output/load_input.
+        # For external templates (e.g. Helion), it delegates to their compile() path.
+        fused_src_code = template_node.node.codegen_with_fusion(
+            epilogue_specs, prologue_specs, extra_params, (kernel, render)
+        )
 
-            return kernel
+        if only_gen_src_code:
+            return fused_src_code
+
+        # Unified — kernel is always a TritonKernelHandle regardless of template
+        # type (TritonTemplateKernel for standard, ExternalTritonTemplateKernel for
+        # external). mark_run() → allocate() writes to the Python/C++ wrapper, not
+        # the kernel source, so ordering relative to render() does not matter.
+        template_node.mark_run()
+        for node in epilogue_nodes:
+            node.mark_run()
+        for pro_node, _, _ in fusable_prologue:
+            pro_node.mark_run()
+        node_schedule = [
+            template_node,
+            *multi_output_nodes,
+            *[pro_node for pro_node, _, _ in fusable_prologue],
+            *epilogue_sched_nodes,
+        ]
+        kernel.kernel_name = self.define_kernel(fused_src_code, node_schedule, kernel)
+        return kernel
 
     def _get_multikernel_shapes(
         self, node: MultiTemplateBuffer

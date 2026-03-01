@@ -74,7 +74,7 @@ from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_m
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .fx_utils import count_flops_fx
-from .ir import ChoiceCaller, PrimitiveInfoType
+from .ir import ChoiceCaller, PrimitiveInfoType, TritonKernelHandle
 from .ops_handler import StoreMode
 from .runtime.hints import DeviceProperties
 from .runtime.triton_compat import HAS_WARP_SPEC
@@ -385,7 +385,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
 
-class TritonTemplateKernel(TritonKernel):
+class TritonTemplateKernel(TritonKernel, TritonKernelHandle):  # type: ignore[misc]
     """
     A specialized kernel class for Triton templates that handles code generation
     for templated Triton kernels.
@@ -553,8 +553,106 @@ class TritonTemplateKernel(TritonKernel):
         # Tracking for intermediate variables
         self.tmp_var_ctr = itertools.count()
 
+        # Spec-based fusion hooks — populated by setup_fusion_specs() before render().
+        # When set, store_output() and load_input() hooks emit code directly from
+        # fused_expr without requiring node.codegen() injection from simd.py.
+        self._epilogue_specs: dict[str, "ir.EpilogueSpec"] = {}
+        self._prologue_specs: dict[str, "ir.PrologueSpec"] = {}
+        # kernel_output_param → out-ptr arg name for redirect outputs
+        self._spec_redirect_args: dict[str, str] = {}
+        # extra param name (e.g. "_epi_input_0") → in-ptr arg name
+        self._spec_extra_input_args: dict[str, str] = {}
+        # prologue input_param → source in-ptr arg name
+        self._spec_prologue_source_args: dict[str, str] = {}
+
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
+
+    def setup_fusion_specs(
+        self,
+        epilogue_specs: "list[ir.EpilogueSpec]",
+        prologue_specs: "list[ir.PrologueSpec]",
+        extra_params: "list[tuple[str, str]]",
+    ) -> None:
+        """Configure spec-based injection from pre-traced epilogue/prologue specs.
+
+        Called before render() so that store_output() and load_input() hooks
+        can emit code directly from fused_expr without node.codegen() injection.
+        """
+        redirect_params = {
+            spec.redirect_param
+            for spec in epilogue_specs
+            if spec.redirect_param is not None
+        }
+        for param_name, buf_name in extra_params:
+            if param_name in redirect_params:
+                arg_name = self.args.output(buf_name)
+                for spec in epilogue_specs:
+                    if spec.redirect_param == param_name:
+                        self._spec_redirect_args[spec.kernel_output_param] = arg_name
+            else:
+                arg_name = self.args.input(buf_name)
+                self._spec_extra_input_args[param_name] = arg_name
+
+        for spec in epilogue_specs:
+            self._epilogue_specs[spec.kernel_output_param] = spec
+            if spec.redirect_param is not None:
+                # Mark template output as kernel-local so its deferred store is
+                # suppressed by remove_kernel_local_buffers().
+                self.store_buffer_names.add(spec.kernel_output_buf)
+                # Include the redirect target so the epilogue's defining op enters
+                # fused_node_names, enabling remove_kernel_local_buffers() to
+                # confirm that all consumers of kernel_output_buf are in-kernel.
+                if spec.store_target:
+                    self.store_buffer_names.add(spec.store_target)
+
+        for spec in prologue_specs:
+            self._prologue_specs[spec.input_param] = spec
+            if spec.source_buf:
+                source_arg = self.args.input(spec.source_buf)
+                self._spec_prologue_source_args[spec.input_param] = source_arg
+            if spec.input_buf:
+                # Mark prologue intermediate buffer as kernel-local
+                self.store_buffer_names.add(spec.input_buf)
+
+    def finalize_kernel_source(self, partial_code: Any, origins: Any = None) -> str:
+        """Finalize hook placeholders and return the complete Triton source string.
+
+        Called by TritonTemplateBuffer.codegen_with_fusion() after the ``with
+        kernel:`` block exits (i.e. after remove_kernel_local_buffers() has run),
+        so DeferredLine entries for removed buffers are correctly suppressed.
+        """
+        with V.set_kernel_handler(self):
+            if not isinstance(partial_code, str):
+                # Computes flops for TritonTemplateKernels.
+                with ir.IRNode.current_origins(origins or set()):
+                    partial_code.finalize_hook("<DEF_KERNEL>")
+                partial_code.finalize_hook("<ARGDEFS>", strict=False)
+
+            for input_name in self.named_input_nodes:
+                partial_code.finalize_hook(
+                    f"<LOAD_INPUT_{input_name}>", strict=False
+                )
+
+            num_store_subgraphs = self.get_store_output_count()
+            for i in range(num_store_subgraphs):
+                subgraph_name = self._get_store_output_subgraph_name(i)
+                partial_code.finalize_hook(subgraph_name)
+
+            if isinstance(partial_code, str):
+                src_code = partial_code
+            else:
+                src_code = partial_code.finalize_remaining()
+
+            if config.benchmark_kernel:
+                num_gb = self.estimate_kernel_num_bytes() / 1e9
+                src_code = (
+                    f"{self.imports_for_benchmark_kernel()}\n"
+                    f"{src_code}\n"
+                    f"{self.codegen_kernel_benchmark(num_gb).getvalue()}"
+                )
+
+        return src_code
 
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
@@ -1123,6 +1221,27 @@ class TritonTemplateKernel(TritonKernel):
                 if input_node.get_name() not in self.prologue_fused_inputs:
                     assert load_code is not None
                     self.body.writeline(load_code)
+                else:
+                    # Spec-based prologue injection (replaces prologue_node.codegen()
+                    # when TritonTemplateBuffer.codegen_with_fusion drives codegen).
+                    spec = self._prologue_specs.get(input_node.get_name())
+                    if spec is not None:
+                        source_arg = self._spec_prologue_source_args.get(
+                            spec.input_param
+                        )
+                        if source_arg is not None:
+                            raw_load = f"tl.load({source_arg} + ({output_index_str})"
+                            if mask:
+                                raw_load += f", mask={mask}, other={other})"
+                            else:
+                                raw_load += ")"
+                            result_expr = spec.fused_expr.replace(
+                                "_load_val", raw_load
+                            )
+                            self.body.writeline(
+                                f"{output_name} = ({result_expr})"
+                                f".broadcast_to(xindex.shape)"
+                            )
 
                 return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
@@ -1395,6 +1514,56 @@ class TritonTemplateKernel(TritonKernel):
             with self.set_subgraph_body(subgraph_name):
                 # more stuff might have been added since the codegen_body above
                 self.codegen_body()
+
+                # Spec-based epilogue injection (replaces node.codegen() injection
+                # loop when TritonTemplateBuffer.codegen_with_fusion drives codegen).
+                spec = self._epilogue_specs.get(self.output_node.get_name())
+                if spec is not None:
+                    # Load extra fusion inputs, substituting _fidx_i → actual index
+                    for var, (param_name, idx_str) in spec.fusion_loads.items():
+                        resolved_idx = re.sub(
+                            r'_fidx_(\d+)',
+                            lambda m, _i=indices: _i[int(m.group(1))],
+                            idx_str,
+                        )
+                        epi_input_arg = self._spec_extra_input_args.get(
+                            param_name, param_name
+                        )
+                        if mask:
+                            self.body.writeline(
+                                f"{var} = tl.load({epi_input_arg} + ({resolved_idx}),"
+                                f" mask={mask}, other=0.0)"
+                            )
+                        else:
+                            self.body.writeline(
+                                f"{var} = tl.load({epi_input_arg} + ({resolved_idx}))"
+                            )
+                    # Apply fused expression (substitute _kernel_val_* with acc var)
+                    result_expr = re.sub(r'_kernel_val_\d+', val, spec.fused_expr)
+                    result_var = "_epi_result"
+                    self.body.writeline(f"{result_var} = {result_expr}")
+                    # Store to redirect arg (or main output if no redirect).
+                    # Use if/else NOT dict.get(key, default) — Python evaluates
+                    # the default eagerly, and self.args.output() is a side-effecting
+                    # call that re-registers a buffer that remove_kernel_local_buffers()
+                    # already set to REMOVED, corrupting output_buffers.
+                    _out_name = self.output_node.get_name()
+                    store_arg = (
+                        self._spec_redirect_args[_out_name]
+                        if _out_name in self._spec_redirect_args
+                        else self.args.output(_out_name)
+                    )
+                    if mask:
+                        self.body.writeline(
+                            f"tl.store({store_arg} + ({texpr(output_index)}),"
+                            f" {result_var}, mask={mask})"
+                        )
+                    else:
+                        self.body.writeline(
+                            f"tl.store({store_arg} + ({texpr(output_index)}),"
+                            f" {result_var})"
+                        )
+
                 self.cse.invalidate(OrderedSet())
 
                 return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()

@@ -20,6 +20,8 @@ from typing import (
     Literal,
     Optional,
     overload,
+    Protocol,
+    runtime_checkable,
     SupportsFloat,
     SupportsInt,
     TYPE_CHECKING,
@@ -87,7 +89,7 @@ from .dependencies import (
     var_builder,
 )
 from .loop_body import LoopBody
-from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
+from .ops_handler import MockHandler, OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties, ReductionHint
 from .utils import (
@@ -5269,14 +5271,6 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def can_fuse_multi_output_epilogue(self, snode: object) -> bool:
-        """Whether scheduler node can be fused as an epilogue of this multi-output template.
-
-        Returns ``False`` by default.  Subclasses may override to support
-        additional fusion patterns (e.g. epilogue fusion with multi-output
-        extraction and pointwise operations).
-        """
-        return False
 
 
 class TritonTemplateBuffer(TemplateBuffer):
@@ -5312,8 +5306,22 @@ class TritonTemplateBuffer(TemplateBuffer):
             allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
         )
 
+        # Fusion metadata — read by the scheduler and simd codegen.
+        # Standard templates leave these as empty dicts/set (no custom fusion).
+        # ExternalTritonTemplateBuffer subclasses populate them after create.
+        self.fusable_outputs: "dict[str, str]" = {}   # {output_buf_name: kernel_param_name}
+        self.all_inputs: "dict[str, str]" = {}        # {input_buf_name: kernel_param_name}
+        self.all_output_names: "set[str]" = set()     # all MultiOutput buffer names
+
         self.subgraph_inps: Optional[list[Optional[Union[IRNode, sympy.Expr]]]] = None
         self.subgraph_outs: Optional[list[Optional[IRNode]]] = None
+
+        # Fusion spec storage — initialized empty; populated by codegen_with_fusion().
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
+        self._epilogue_specs: dict[str, "EpilogueSpec"] = {}
+        self._prologue_specs: dict[str, "PrologueSpec"] = {}
+        self._epilogue_extra_params: list[tuple[str, str]] = []
+        self._epilogue_renames: dict[str, str] = {}
 
     @cache_on_self_and_args("TritonTemplateBuffer")
     def get_free_symbol_uses(
@@ -5345,9 +5353,666 @@ class TritonTemplateBuffer(TemplateBuffer):
     def get_allowed_prologue_inps(self) -> OrderedSet[str]:
         return self.allowed_prologue_inps
 
+
+    def codegen_with_fusion(
+        self,
+        epilogue_specs: "list[EpilogueSpec]",
+        prologue_specs: "list[PrologueSpec]",
+        extra_params: "list[tuple[str, str]]",
+        kernel_render: "tuple[Any, Callable[[], Any]]",
+    ) -> str:
+        """Unified codegen entry point for both standard and external templates.
+
+        Configures the kernel with fusion specs, runs the render inside the kernel
+        context, and delegates finalization to the kernel — both TritonTemplateKernel
+        (Jinja + hook finalization) and ExternalTritonTemplateKernel (compile() +
+        no-op finalization) satisfy this protocol.
+        """
+        kernel, render = kernel_render
+        kernel.setup_fusion_specs(epilogue_specs, prologue_specs, extra_params)
+        with kernel:
+            partial_code = render()
+        return kernel.finalize_kernel_source(partial_code, self.origins)
+
+    # -----------------------------------------------------------------------
+    # Factory helpers for external template kernel lowerings
+    # -----------------------------------------------------------------------
+    # These encapsulate the Inductor-internal patterns that external backends
+    # (e.g. Helion) need when writing their @register_lowering functions, so
+    # those backends don't have to import ExternKernel / FallbackKernel / StorageBox
+    # directly or work around Inductor internals.
+
+    @classmethod
+    def realize_template_input(cls, tb: "TensorBox") -> "IRNode":
+        """Realize a TensorBox for use as a multi-output template kernel input.
+
+        Unlike ``ExternKernel.realize_input``, this preserves the layout of
+        ``MultiOutput`` inputs.  ``realize_input`` falls through to
+        ``copy_input`` for MultiOutput nodes, which creates a fresh buffer with
+        ``FlexibleLayout`` (contiguous strides) and silently discards the
+        original — possibly non-contiguous — stride information.  Call this
+        instead when the input may come from another template buffer's output.
+        """
+        if isinstance(tb, TensorBox) and isinstance(tb.data, MultiOutput):
+            return tb.data
+        result = ExternKernel.realize_input(tb)
+        if isinstance(result, StorageBox):
+            result = result.data
+        if isinstance(result.layout, FlexibleLayout):  # type: ignore[union-attr]
+            result.freeze_layout()
+        return result
+
+    def extract_read_writes(self, normalize: bool = False) -> dependencies.ReadWrites:
+        """Read/write dependencies for multi-output template buffers.
+
+        Overrides TemplateBuffer.extract_read_writes for MultiOutputLayout buffers.
+        The base calls self.get_layout().make_indexer() which fails for
+        MultiOutputLayout. For multi-output templates we synthesize a zero-indexed
+        MemoryDep write and build MemoryDep reads from each input's layout, falling
+        back to StarDep for inputs without a concrete Layout (e.g. MultiOutput nodes
+        from a prior template kernel). Non-MultiOutputLayout templates fall through
+        to the base implementation unchanged.
+        """
+        if not isinstance(self.layout, MultiOutputLayout):
+            return super().extract_read_writes(normalize)
+
+        reads: OrderedSet[dependencies.Dep] = OrderedSet()
+        for inp in self.inputs:
+            if isinstance(inp, (ReinterpretView, Buffer)) and isinstance(
+                inp.layout, Layout
+            ):
+                indexer = inp.layout.make_indexer()
+
+                def dummy(
+                    index: Sequence[Any],
+                    rindex: Sequence[Any],
+                    indexer: Callable[..., Any] = indexer,
+                    inp: IRNode = inp,
+                ) -> Any:
+                    assert len(rindex) == 0
+                    return ops.load(inp.get_name(), indexer(index))
+
+                reads |= dependencies.extract_read_writes(
+                    dummy, inp.get_size(), (), normalize=normalize,
+                ).reads
+            else:
+                reads.add(dependencies.StarDep(inp.get_name()))
+
+        writes: OrderedSet[dependencies.Dep] = OrderedSet()
+        writes.add(
+            dependencies.MemoryDep(
+                self.get_name(), sympy.Integer(0), var_names=(), size=(),
+            )
+        )
+        return dependencies.ReadWrites(
+            reads=reads, writes=writes, index_exprs=OrderedSet(),
+            range_vars=None, var_ranges=None,
+        )
+
+    @classmethod
+    def build_multi_outputs(
+        cls,
+        template_buf: "TritonTemplateBuffer",
+        structured: object,
+        *,
+        direct_alias_at_leaf: "dict[int, IRNode] | None" = None,
+        on_tensor_leaf: "Callable[[str, MultiOutput, list[tuple[type, int]], int], None] | None" = None,
+        on_non_tensor_leaf: "Callable[[int], None] | None" = None,
+    ) -> "tuple[TensorBox, ...]":
+        """Walk a structured output tree, creating MultiOutput nodes for tensor leaves.
+
+        Generic helper for external template kernel lowerings. Reduces duplication
+        with FallbackKernel.generate_output. Backends provide callbacks to populate
+        backend-specific mappings (e.g. param names, output sizes).
+
+        Args:
+            template_buf: The TritonTemplateBuffer owning these outputs.
+            structured:   pytree-unflattened output (nested list/tuple of tensors,
+                          ints, SymInts, None, etc.).
+            direct_alias_at_leaf:
+                          Optional {leaf_index → IRNode} for outputs that are
+                          identical to an input buffer (bypass MultiOutput creation).
+            on_tensor_leaf:
+                          Called for each *new* MultiOutput node created.
+                          Signature: (buf_name, multi_output, indices, leaf_idx).
+                          Not called for alias bypasses or duplicate-identity tensors.
+            on_non_tensor_leaf:
+                          Called for each non-tensor leaf.
+                          Signature: (leaf_idx,).
+                          Backends use this to detect symbolic (non-constant) returns.
+
+        Returns:
+            Flat tuple of TensorBox for each unique tensor leaf (including aliases).
+        """
+        seen_outputs: dict[int, TensorBox] = {}
+        leaf_counter = [0]
+        direct_alias = direct_alias_at_leaf or {}
+
+        def walk(output: object, indices: list[tuple[type, int]]) -> list[TensorBox]:
+            if isinstance(output, (list, tuple)):
+                results: list[TensorBox] = []
+                for i, item in enumerate(output):
+                    results.extend(walk(item, [*indices, (type(output), i)]))
+                return results
+            leaf_idx = leaf_counter[0]
+            leaf_counter[0] += 1
+            if isinstance(output, torch.Tensor):
+                if leaf_idx in direct_alias:
+                    return [TensorBox.create(direct_alias[leaf_idx])]
+                tid = id(output)
+                if tid in seen_outputs:
+                    return [seen_outputs[tid]]
+                mo = MultiOutput(FallbackKernel.tensor_to_layout(output), template_buf, indices)
+                if on_tensor_leaf is not None:
+                    on_tensor_leaf(mo.get_name(), mo, indices, leaf_idx)
+                tb = TensorBox(mo)
+                seen_outputs[tid] = tb
+                return [tb]
+            # Non-tensor leaf (int, SymInt, None, etc.)
+            if on_non_tensor_leaf is not None:
+                on_non_tensor_leaf(leaf_idx)
+            return []
+
+        return tuple(walk(structured, []))
+
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout})"
         return out
+
+
+class TritonKernelHandle(Protocol):
+    """Protocol satisfied by TritonTemplateKernel and ExternalTritonTemplateKernel.
+
+    Defines the interface _codegen_single_template returns and the post-codegen
+    block uses to emit and query the kernel. Both implementations satisfy this
+    protocol independently — they share a role, not a base class.
+    """
+
+    kernel_name: str
+    removed_buffers: "OrderedSet[str]"
+    inplaced_to_remove: "OrderedSet[str]"
+    prologue_fused_inputs: "OrderedSet[str]"
+    prologue_fused_inputs_preserve_zero: "OrderedSet[str]"
+
+    def setup_fusion_specs(
+        self,
+        epilogue_specs: "list[EpilogueSpec]",
+        prologue_specs: "list[PrologueSpec]",
+        extra_params: "list[tuple[str, str]]",
+    ) -> None: ...
+    def finalize_kernel_source(self, partial_code: "Any", origins: "Any" = None) -> str: ...
+    def __enter__(self) -> "TritonKernelHandle": ...
+    def __exit__(self, exc_type: "Any", exc_val: "Any", exc_tb: "Any") -> None: ...
+    def call_kernel(self, name: str, template_buffer: "Any" = None) -> None: ...
+    def emit_kernel_override(
+        self,
+        wrapper: "Any",
+        src_code: str,
+        kernel_name: str,
+        node_schedule: "Any",
+        kernel_path: str,
+        get_kernel_metadata: "Any",
+    ) -> bool: ...
+
+
+class ExternalTritonTemplateKernel(TritonKernelHandle):
+    """Codegen kernel handle for external Triton template backends.
+
+    Implements TritonKernelHandle independently of TritonTemplateKernel — no
+    SIMDKernel/TritonKernel machinery is needed since the backend compiles its
+    own source via ExternalTritonTemplateBuffer.generate_kernel_source(). Created exclusively
+    by ExternalTritonTemplateBuffer.make_kernel_render().
+    """
+
+    def __init__(self) -> None:
+        self.kernel_name: str = ""
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
+        self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
+        self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
+        self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
+        # Raw specs stored by setup_fusion_specs(); consumed by _render() in the
+        # render lambda when codegen_with_fusion runs ``with kernel: render()``.
+        self._raw_epilogue_specs: "list[EpilogueSpec]" = []
+        self._raw_prologue_specs: "list[PrologueSpec]" = []
+        self._raw_extra_params: "list[tuple[str, str]]" = []
+        # Populated by ExternalTritonTemplateBuffer._render() (the render lambda)
+        # before call_kernel / emit_kernel_override are ever invoked.
+        self.artifact: "Optional[KernelSource]" = None
+        self.output_name: str = ""
+        self.multi_output_children: "dict[str, Any]" = {}
+
+    def setup_fusion_specs(
+        self,
+        epilogue_specs: "list[EpilogueSpec]",
+        prologue_specs: "list[PrologueSpec]",
+        extra_params: "list[tuple[str, str]]",
+    ) -> None:
+        """Store raw fusion specs for render() to consume.
+
+        Alias expansion happens inside _render() since it requires the buffer's
+        param_alias_map(). We do not modify removed_buffers here — _render()
+        propagates self.removed_buffers from the buffer after compile().
+        """
+        self._raw_epilogue_specs = epilogue_specs
+        self._raw_prologue_specs = prologue_specs
+        self._raw_extra_params = extra_params
+
+    def finalize_kernel_source(self, partial_code: "Any", origins: "Any" = None) -> str:
+        """render() returns a complete string; no hook finalization needed."""
+        assert isinstance(partial_code, str)
+        return partial_code
+
+    def __enter__(self) -> "ExternalTritonTemplateKernel":
+        return self
+
+    def __exit__(self, exc_type: "Any", exc_val: "Any", exc_tb: "Any") -> None:
+        pass  # remove_kernel_local_buffers() not applicable; _render() handles cleanup
+
+    def call_kernel(self, name: str, template_buffer: "Any" = None) -> None:
+        """Emit kernel call using the artifact pushed by codegen_with_fusion."""
+        assert self.artifact is not None
+        wrapper = V.graph.wrapper_code
+        for line in self.artifact.call_preamble:
+            wrapper.writeline(line)
+        wrapper.writeline(
+            f"{self.output_name} = {name}({', '.join(self.artifact.call_args)})"
+        )
+        for mo_name, mo in sorted(self.multi_output_children.items()):
+            if mo_name not in self.removed_buffers:
+                idx_str = self.output_name
+                for _, idx in mo.indices:
+                    idx_str = f"{idx_str}[{idx}]"
+                wrapper.writeline(f"{mo_name} = {idx_str}")
+
+    def emit_kernel_override(
+        self,
+        wrapper: "Any",
+        src_code: str,
+        kernel_name: str,
+        node_schedule: "Sequence[Any]",
+        kernel_path: str,
+        get_kernel_metadata: "Callable[..., tuple[str, str]]",
+    ) -> bool:
+        """Override kernel emission using the artifact pushed by codegen_with_fusion."""
+        assert self.artifact is not None
+        for imp in self.artifact.imports:
+            wrapper.add_import_once(imp)
+        origins, detailed = get_kernel_metadata(node_schedule, wrapper)
+        wrapper.header.writeline(f"# kernel path: {kernel_path}\n{origins}\n{detailed}")
+        for line in src_code.split("\n"):
+            s = line.strip()
+            if s.startswith(("from __future__", "import ", "from ")) or not s:
+                continue
+            wrapper.header.writeline(line)
+        wrapper.header.writeline("")
+        return True
+
+
+class ExternalTritonTemplateBuffer(TritonTemplateBuffer):
+    """Abstract base for external Triton kernel backends plugged into Inductor.
+
+    Subclasses (e.g. ``HelionTemplateBuffer``) implement only ``compile()``;
+    all generic fusion scheduling and codegen orchestration lives here:
+
+    * ``fusable_outputs``, ``all_inputs``, ``all_output_names`` are set by
+      ``create`` (``all_inputs``, ``all_output_names``) and by the caller
+      after ``create`` (``fusable_outputs``).  The scheduler and simd
+      codegen read these fields directly.
+    * ``codegen_with_fusion`` applies fusion specs then calls ``self.generate_kernel_source()``.
+    * ``make_kernel_render`` returns an ``ExternalTritonTemplateKernel`` handle
+      that owns ``call_kernel`` / ``emit_kernel_override`` — the kernel-protocol
+      role is separated from this IR-node role.
+
+    Use ``create`` to construct — it handles ``MultiOutputLayout``,
+    ``build_multi_outputs``, ``never_reuse_buffers``, and
+    ``_multi_output_children``.  It returns ``(buf, outputs)`` so callers
+    can set ``buf.fusable_outputs`` after multi-output setup.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: "Sequence[IRNode]",
+        mutated_inputs: "Optional[Iterable[IRNode]]" = None,
+        allowed_prologue_inps: "Optional[OrderedSet[str]]" = None,
+    ) -> None:
+        self._multi_output_children: "dict[str, Any]" = {}
+        self._artifact: "Optional[KernelSource]" = None
+        # param_name → IRNode mapping, set by create.  Preserves per-param
+        # identity even when multiple params share the same underlying buffer
+        # (aliased inputs such as k_add(x, x) with different strides/offsets).
+        self._named_inputs: "dict[str, IRNode]" = {}
+        def _make_kernel_render(
+            tb: "TritonTemplateBuffer", hint_override: "Any" = None
+        ) -> "tuple[ExternalTritonTemplateKernel, Callable[[], str]]":
+            kernel = ExternalTritonTemplateKernel()
+            return kernel, lambda: self._render(kernel)
+
+        super().__init__(
+            layout=layout,
+            inputs=inputs,
+            make_kernel_render=_make_kernel_render,
+            mutated_inputs=mutated_inputs,
+            allowed_prologue_inps=allowed_prologue_inps,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Abstract methods — subclasses must override                         #
+    # ------------------------------------------------------------------ #
+
+    def generate_kernel_source(
+        self,
+        epilogue_specs: "list[EpilogueSpec]",
+        prologue_specs: "dict[str, PrologueSpec]",
+        extra_params: "list[tuple[str, str]]",
+    ) -> "KernelSource":
+        """Generate and return source, imports, and the full kernel call-site.
+
+        Called once with the complete, alias-expanded fusion context.
+        Returns source strings, import statements, and the ordered call_args
+        / call_preamble so ``call_kernel`` needs no further backend involvement.
+        """
+        raise NotImplementedError
+
+    def param_alias_map(self) -> "dict[str, list[str]]":
+        """Return ``{buf_name: [param_names...]}`` from ``self._named_inputs``.
+
+        When the same underlying buffer is passed under multiple parameter names
+        (e.g. ``k_add(x, x)`` with different strides), both param names appear
+        in the list for that buffer.  Used by ``codegen_with_fusion``
+        to fan out prologue specs to all aliased parameter names.
+        """
+        result: "dict[str, list[str]]" = {}
+        for param, node in self._named_inputs.items():
+            result.setdefault(node.get_name(), []).append(param)  # type: ignore[union-attr]
+        return result
+
+    def _build_call_args(
+        self,
+        call_order: "list[str]",
+        constant_repr: "dict[str, str]",
+        prologue_specs: "dict[str, PrologueSpec]",
+        extra_params: "list[tuple[str, str]]",
+    ) -> "tuple[list[str], list[str]]":
+        """Compute ``(call_preamble, call_args)`` for the kernel invocation.
+
+        Resolves each param in ``call_order`` to a Python expression: a buffer
+        name (possibly after prologue source-buf substitution), a
+        ``reinterpret_tensor(...)`` variable (emitted as a preamble line for
+        ``ReinterpretView`` inputs), or a pre-repr'd constant string.  Epilogue
+        extra params are appended last.
+
+        Protected helper for subclass ``compile()`` implementations.
+        """
+        preamble: "list[str]" = []
+        reinterp_count = 0
+
+        def resolve_param(param_name: str) -> "Optional[str]":
+            nonlocal reinterp_count
+            node = self._named_inputs.get(param_name)
+            if node is None:
+                return constant_repr.get(param_name)
+
+            spec = prologue_specs.get(param_name)
+            source_buf = spec.source_buf if spec is not None else None
+
+            if source_buf is not None:
+                if isinstance(node, ReinterpretView):
+                    sizes = tuple(node.get_size())
+                    strides = tuple(node.get_stride())
+                    preamble.append(
+                        f"reinterp_{reinterp_count} = reinterpret_tensor("
+                        f"{source_buf}, {sizes}, {strides}, {node.layout.offset})"
+                    )
+                    result = f"reinterp_{reinterp_count}"
+                    reinterp_count += 1
+                    return result
+                return source_buf
+
+            if not isinstance(node, ReinterpretView):
+                return node.get_name()  # type: ignore[union-attr]
+
+            # Non-prologue ReinterpretView: emit reinterpret_tensor preamble.
+            # realize_template_input guarantees node.data is a realized buffer.
+            data_name = node.data.get_name()
+            sizes = tuple(node.get_size())
+            strides = tuple(node.get_stride())
+            preamble.append(
+                f"reinterp_{reinterp_count} = reinterpret_tensor("
+                f"{data_name}, {sizes}, {strides}, {node.layout.offset})"
+            )
+            result = f"reinterp_{reinterp_count}"
+            reinterp_count += 1
+            return result
+
+        call_args: "list[str]" = []
+        for param in call_order:
+            resolved = resolve_param(param)
+            if resolved is not None:
+                call_args.append(resolved)
+        call_args.extend(buf_name for _, buf_name in extra_params)
+        return preamble, call_args
+
+    @classmethod
+    def create(
+        cls,
+        realized_inputs: "dict[str, IRNode]",
+        structured_outputs: object,
+        mutated_input_names: "list[str]",
+        direct_aliases: "dict[int, IRNode]",
+        *,
+        on_tensor_leaf: "Optional[Callable[[str, Any, list[tuple[type, int]], int], None]]" = None,
+        on_non_tensor_leaf: "Optional[Callable[[int], None]]" = None,
+        **buffer_kwargs: Any,
+    ) -> "tuple[ExternalTritonTemplateBuffer, tuple[TensorBox, ...]]":
+        """Build an ExternalTritonTemplateBuffer and return ``(buf, outputs)``.
+
+        Handles: input ordering, buffer construction (forwarding
+        ``**buffer_kwargs`` to ``cls.__init__``), MultiOutputLayout,
+        mutated-input ``never_reuse_buffers`` registration,
+        ``build_multi_outputs``, and ``_multi_output_children`` collection.
+
+        The caller receives ``buf`` so it can set subclass-specific state
+        (e.g. ``buf._metadata``) after the multi-output structure is known,
+        without needing a separate backend object.
+        """
+        inputs = list(realized_inputs.values())
+        dev = inputs[0].get_device() if inputs else torch.device("cuda")
+
+        mutated_nodes = (
+            [realized_inputs[n] for n in mutated_input_names if n in realized_inputs]
+            or None
+        )
+        buf = cls(
+            layout=MultiOutputLayout(device=dev),
+            inputs=inputs,
+            mutated_inputs=mutated_nodes,
+            allowed_prologue_inps=OrderedSet(inp.get_name() for inp in inputs),  # type: ignore[union-attr]
+            **buffer_kwargs,
+        )
+        # Store the param_name → IRNode mapping so call_kernel can resolve args
+        # by param name rather than buffer name (critical for aliased inputs where
+        # multiple params share the same underlying buffer).
+        buf._named_inputs = dict(realized_inputs)
+        buf.all_inputs = {
+            n.get_name(): p for p, n in buf._named_inputs.items()  # type: ignore[union-attr]
+        }
+        for inp in mutated_nodes or []:
+            if hasattr(inp, "get_name"):
+                V.graph.never_reuse_buffers.add(inp.get_name())
+
+        flat, _ = (
+            pytree.tree_flatten(structured_outputs)
+            if structured_outputs is not None
+            else ([], None)
+        )
+        if not any(isinstance(leaf, torch.Tensor) for leaf in flat):
+            buf._multi_output_children = {}
+            buf.all_output_names = set()
+            return buf, ()
+
+        multi_output_children: "dict[str, Any]" = {}
+
+        def wrapped_on_tensor_leaf(
+            mo_name: str,
+            mo: "Any",
+            indices: "list[tuple[type, int]]",
+            leaf_idx: int,
+        ) -> None:
+            multi_output_children[mo_name] = mo
+            if on_tensor_leaf is not None:
+                on_tensor_leaf(mo_name, mo, indices, leaf_idx)
+
+        result = cls.build_multi_outputs(
+            buf,
+            structured_outputs,
+            direct_alias_at_leaf=direct_aliases,
+            on_tensor_leaf=wrapped_on_tensor_leaf,
+            on_non_tensor_leaf=on_non_tensor_leaf,
+        )
+        buf._multi_output_children = multi_output_children
+        buf.all_output_names = set(multi_output_children.keys())
+        return buf, result
+
+    @property
+    def dtype(self) -> torch.dtype:
+        # MultiOutputLayout has no dtype; infer from the first input.
+        return self.inputs[0].get_dtype() if self.inputs else torch.float32  # type: ignore[union-attr]
+
+    def should_allocate(self) -> bool:
+        return False
+
+    def get_size(self) -> "Sequence[sympy.Expr]":
+        return []
+
+    def _render(self, kernel: "ExternalTritonTemplateKernel") -> str:
+        """Render callable invoked inside codegen_with_fusion's ``with kernel:`` block.
+
+        Reads raw fusion specs stored by kernel.setup_fusion_specs(), applies
+        alias expansion (which requires the buffer's param_alias_map()), compiles,
+        and pushes all per-call state to the kernel handle so call_kernel /
+        emit_kernel_override are fully self-contained when they run.
+        """
+        epilogue_specs = kernel._raw_epilogue_specs
+        prologue_specs = kernel._raw_prologue_specs
+        extra_params = kernel._raw_extra_params
+        if epilogue_specs or prologue_specs:
+            param_alias_map = self.param_alias_map()
+            self._epilogue_extra_params = list(extra_params)
+            for spec in epilogue_specs:
+                self._epilogue_specs[spec.kernel_output_param] = spec
+                if spec.redirect_param is not None:
+                    self._epilogue_renames[spec.kernel_output_param] = spec.redirect_param
+                    self.removed_buffers.add(spec.kernel_output_buf)
+            for spec in prologue_specs:
+                self._prologue_specs[spec.input_param] = spec
+                for alias_param in param_alias_map.get(spec.input_buf, []):
+                    if alias_param != spec.input_param:
+                        self._prologue_specs[alias_param] = spec
+        self._artifact = self.generate_kernel_source(
+            list(self._epilogue_specs.values()),
+            # Pass the alias-expanded dict directly so subclasses can look up
+            # specs by parameter name without losing aliased entries.
+            dict(self._prologue_specs),
+            self._epilogue_extra_params,
+        )
+        kernel.removed_buffers = OrderedSet(self.removed_buffers)
+        kernel.artifact = self._artifact
+        kernel.output_name = self.get_name()
+        kernel.multi_output_children = dict(self._multi_output_children)
+        return self._artifact.source
+
+    def set_current_node(self, node: Any) -> "AbstractContextManager[None]":
+        return nullcontext()
+
+    def __str__(self) -> str:
+        return f"{type(self).__name__}(layout={self.layout})"
+
+
+def pointwise_uses_index_expr(ir_node: "ComputedBuffer") -> bool:
+    """Return True if the node's inner_fn calls ops.index_expr.
+
+    Nodes that use ``ops.index_expr`` (e.g. ``triu``, ``tril``, causal masking)
+    compute position-dependent values that depend on loop index variables.
+    Template-kernel fusion tracers may not implement this op, so this cheap
+    trial-trace detects such nodes proactively so they can be left as separate
+    pointwise kernels.
+    """
+    if not isinstance(ir_node.data, Pointwise):
+        return False
+
+    class _IndexExprDetected(Exception):
+        pass
+
+    class _DetectHandler(MockHandler):
+        @staticmethod
+        def index_expr(expr: object, dtype: object) -> str:
+            raise _IndexExprDetected()
+
+    pw = ir_node.data
+    index = [sympy.Symbol(f"_chk_{i}") for i in range(len(pw.ranges))]
+    try:
+        with V.set_ops_handler(_DetectHandler()):
+            pw.inner_fn(index)
+        return False
+    except _IndexExprDetected:
+        return True
+    except Exception:
+        # Unknown exception during trial trace; don't gate on it.
+        return False
+
+
+@dataclasses.dataclass
+class EpilogueSpec:
+    """Epilogue spec with pre-traced Triton expression strings.
+
+    Built by Inductor's ``_resolve_epilogue_specs`` in ``_codegen_single_template``
+    and passed to ``codegen_with_fusion``.  Replaces the per-template expression
+    tracing that previously lived in each template backend.
+    """
+
+    kernel_output_param: str  # which kernel param this fuses onto
+    kernel_output_buf: str  # which output buffer it reads
+    fused_expr: str  # e.g. "relu(_kernel_val_0) + _epi_0"
+    fusion_loads: "dict[str, tuple[str, str]]"  # var -> (param_name, index_expr)
+    store_target: "str | None" = None  # non-None when epilogue writes to a different buf
+    redirect_param: "str | None" = None  # new param name when store_target is a redirect
+    index_symbols: "list[str]" = dataclasses.field(default_factory=list)
+    # Names of the sympy placeholder symbols used during expression tracing, one
+    # per dimension of the pointwise op (e.g. ["_fidx_0", "_fidx_1"]).
+    # Template backends use these to substitute actual Triton dim expressions into
+    # fusion_loads offsets without hardcoding simd.py's internal naming convention.
+
+
+@dataclasses.dataclass
+class PrologueSpec:
+    """Prologue spec with pre-traced Triton expression strings.
+
+    Built by Inductor's ``_resolve_prologue_specs`` in ``_codegen_single_template``
+    and passed to ``codegen_with_fusion``.
+    """
+
+    input_param: str  # which kernel input param this fuses onto
+    input_buf: str  # the kernel input buffer name (used to find all params sharing it)
+    fused_expr: str  # e.g. "(_load_val).to(tl.float32)"
+    source_buf: "str | None" = None  # bypass buf for prologue intermediate alloc
+
+
+@dataclasses.dataclass
+class KernelSource:
+    """Source, imports, and call-site args for an external kernel.
+
+    Returned by ``ExternalTritonTemplateBuffer.generate_kernel_source()``.  Inductor caches this on
+    ``ExternalTritonTemplateBuffer._artifact`` and reads its parts at the appropriate
+    emission times: source at define_kernel, imports at emit_kernel_override,
+    call_preamble + call_args at call_kernel.
+    """
+
+    source: str  # complete Triton kernel source
+    imports: "list[str]"  # statements for wrapper.add_import_once()
+    call_args: "list[str]" = dataclasses.field(default_factory=list)  # ordered arg list for the invocation
+    call_preamble: "list[str]" = dataclasses.field(default_factory=list)  # reinterpret_tensor lines before call
+
 
 
 PrimitiveInfoType = Union[int, float, bool, str, list[Union[int, str, float, bool]]]
