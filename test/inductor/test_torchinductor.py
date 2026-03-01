@@ -17359,8 +17359,8 @@ if RUN_GPU:
                 self.assertRegex(code, r"return_vars = (.*)")
                 self.assertIn("for var in return_vars:", code)
                 self.assertIn("if isinstance(var, torch.Tensor):", code)
-                self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
-                self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
+                self.assertRegex(code, r"assert not .*\.float\(\)\.isnan\(\)\.any\(\).item\(\)")
+                self.assertRegex(code, r"assert not .*\.float\(\)\.isinf\(\)\.any\(\).item\(\)")
 
         @config.patch("nan_asserts", True)
         def test_nan_checker_fail(self):
@@ -17373,6 +17373,19 @@ if RUN_GPU:
                 AssertionError if not config.cpp_wrapper else RuntimeError
             ):
                 torch.compile(f)(x)
+
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_fp8(self):
+            """Test that nan_asserts works with FP8 types (issue #149002)."""
+
+            def f(x):
+                return x.half() + 1
+
+            x = torch.randn(10, device=GPU_TYPE).to(torch.float8_e4m3fn)
+            # This should not raise RuntimeError about isinf not implemented for FP8
+            actual = torch.compile(f, fullgraph=True)(x)
+            ref = f(x)
+            self.assertTrue(torch.allclose(ref, actual))
 
 
 if RUN_CPU:

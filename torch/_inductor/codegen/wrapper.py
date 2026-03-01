@@ -1432,9 +1432,10 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
-            line = f"assert not {name}.isnan().any().item()"
+            # Use .float() to handle FP8 types which don't support isnan/isinf
+            line = f"assert not {name}.float().isnan().any().item()"
             self.prefix.writeline(line)
-            line = f"assert not {name}.isinf().any().item()"
+            line = f"assert not {name}.float().isinf().any().item()"
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
@@ -1587,8 +1588,9 @@ class PythonWrapperCodegen(CodeGen):
                 self.wrapper_call.do_indent()
                 self.wrapper_call.writeline("if isinstance(var, torch.Tensor):")
                 self.wrapper_call.do_indent()
-                self.wrapper_call.writeline("assert not var.isnan().any().item()")
-                self.wrapper_call.writeline("assert not var.isinf().any().item()")
+                # Use .float() to handle FP8 types which don't support isnan/isinf
+                self.wrapper_call.writeline("assert not var.float().isnan().any().item()")
+                self.wrapper_call.writeline("assert not var.float().isinf().any().item()")
                 self.wrapper_call.do_unindent(2)
 
             self.wrapper_call.writeline("return (" + ", ".join(output_refs) + ", )")
