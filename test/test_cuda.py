@@ -2825,14 +2825,20 @@ exit(2)
             # But replay() (especially cudaGraphLaunch) can incur significant CPU overhead.
             # The following pattern helps align device-side execution of g0 and g1's kernels.
             torch.cuda.synchronize()
+            # Increase sleep cycles on ROCm to ensure proper kernel overlap alignment.
+            # HIP clock cycles map differently to wall-clock time compared to CUDA.
+            sleep_cycles = 10000000 if TEST_WITH_ROCM else 1000000
             with torch.cuda.stream(s0):
-                torch.cuda._sleep(1000000)
+                torch.cuda._sleep(sleep_cycles)
                 s1.wait_stream(s0)
                 g0.replay()
             with torch.cuda.stream(s1):
                 g1.replay()
             torch.cuda.current_stream().wait_stream(s0)
             torch.cuda.current_stream().wait_stream(s1)
+            if TEST_WITH_ROCM:
+                # Ensure all HIP operations complete before checking results
+                torch.cuda.synchronize()
 
             if (not TEST_CUDAMALLOCASYNC) and (share_mem != "Don't share"):
                 # If we used the native allocator and shared mempools,
