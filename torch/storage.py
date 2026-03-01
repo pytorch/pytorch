@@ -392,8 +392,12 @@ class _StorageBase:
         """See :meth:`torch.UntypedStorage.share_memory_`"""
         from torch.multiprocessing import get_sharing_strategy
 
-        if self.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
-            pass  # CUDA or PrivateUse1 doesn't use POSIX shared memory
+        if self.device.type in [
+            "cuda",
+            "xpu",
+            torch._C._get_privateuse1_backend_name(),
+        ]:
+            pass  # CUDA, XPU, or PrivateUse1 doesn't use POSIX shared memory
         elif get_sharing_strategy() == "file_system":
             self._share_filename_cpu_()
         else:
@@ -406,7 +410,12 @@ class _StorageBase:
         from torch.multiprocessing import get_sharing_strategy
 
         device = torch.device(device)
-        if device.type in ["cuda", torch._C._get_privateuse1_backend_name(), "hpu"]:
+        if device.type in [
+            "cuda",
+            "xpu",
+            torch._C._get_privateuse1_backend_name(),
+            "hpu",
+        ]:
             return cls(size, device=device)
         elif get_sharing_strategy() == "file_system":
             return cls._new_using_filename_cpu(size)
