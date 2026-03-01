@@ -688,6 +688,19 @@ class TestPoolingNNDeviceType(NNTestCase):
             )(samples)
 
     @onlyNativeDeviceTypes
+    def test_MaxPool1d_kernel_size_overflow(self, device):
+        input = torch.randn(1, 2, 3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "integer out of range"):
+            torch.max_pool1d(
+                input,
+                kernel_size=[8608480567731124087],
+                stride=[],
+                padding=[1250999896764],
+                dilation=[1250999896764],
+                ceil_mode=True,
+            )
+
+    @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
         inp = torch.randn(0, 16, 50, device=device)
         mod = torch.nn.MaxPool1d(3, stride=2).to(device)
