@@ -384,6 +384,8 @@ class TensorMeta:
     def from_irnodes(
         cls, irnodes: LayoutOrBuffer | Sequence[LayoutOrBuffer]
     ) -> TensorMeta | list[TensorMeta]:
+        from torch._inductor.select_algorithm import get_strides_with_layout_constraints
+
         if isinstance(irnodes, Sequence):
             result: list[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
@@ -402,7 +404,9 @@ class TensorMeta:
             device=device,
             dtype=dtype,
             sizes=V.graph.sizevars.optimization_hints(node.get_size()),
-            strides=V.graph.sizevars.optimization_hints(node.get_stride()),
+            strides=V.graph.sizevars.optimization_hints(
+                get_strides_with_layout_constraints(node)
+            ),
             offset=V.graph.sizevars.optimization_hint(node.get_layout().offset),
             name=node.get_name(),
         )
@@ -715,7 +719,10 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-        getattr(mod, self.kernel_name).precompile()
+        kernel = getattr(mod, self.kernel_name)
+        kernel.precompile()
+
+        self.n_regs = kernel.launchers[0].n_regs
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"

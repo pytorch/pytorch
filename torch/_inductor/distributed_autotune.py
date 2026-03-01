@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 from unittest.mock import patch
 
 import sympy
@@ -253,7 +253,7 @@ class _SerializedChoice:
         return ktc.choice
 
     @staticmethod
-    def _compute_kwargs(description: str) -> dict[str, Union[int, str, bool]]:
+    def _compute_kwargs(description: str) -> dict[str, int | str | bool]:
         """
         Given a template description turn it into input kwargs.
         """
@@ -262,7 +262,7 @@ class _SerializedChoice:
 
         # TODO: It seems like it would be better if the template could provide
         # this directly instead of having to parse a string.
-        kwargs: dict[str, Union[int, str, bool]] = {}
+        kwargs: dict[str, int | str | bool] = {}
         for cfg in description.split(","):
             key, val = cfg.split("=", 1)
             key, val = key.strip(), val.strip()

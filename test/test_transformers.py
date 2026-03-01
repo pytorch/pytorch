@@ -2975,6 +2975,32 @@ class TestSDPACudaOnly(NNTestCase):
                 test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3], use_compile)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_cudnn_attention_broadcast_stride_zero(self, device, dtype):
+        # Regression test: Q/K/V with zero strides (broadcast via as_strided)
+        # caused alloc_with_matching_layout to produce output with stride[-1] != 1,
+        # which cuDNN Frontend rejects.
+        N, n_head, L, S, E, Ev = 8, 2, 64, 16, 128, 64
+        q = torch.randn(N, n_head, L, E, dtype=dtype, device=device)
+        k = torch.randn(N, n_head, S, E, dtype=dtype, device=device)
+        v = torch.randn(N, n_head, S, Ev, dtype=dtype, device=device)
+
+        q_bc = torch.as_strided(q, size=q.shape, stride=(0, 0, E, 1))
+        k_bc = torch.as_strided(k, size=k.shape, stride=(0, 0, E, 1))
+        v_bc = torch.as_strided(v, size=v.shape, stride=(0, 0, Ev, 1))
+
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            out = F.scaled_dot_product_attention(q_bc, k_bc, v_bc, is_causal=True)
+
+        self.assertEqual(out.shape, (N, n_head, L, Ev))
+        self.assertEqual(out.stride(-1), 1)
+
+        out_ref = F.scaled_dot_product_attention(
+            q_bc.contiguous(), k_bc.contiguous(), v_bc.contiguous(), is_causal=True
+        )
+        torch.testing.assert_close(out, out_ref, atol=3e-3, rtol=3e-3)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     @unittest.skipIf(
         not (isSM90Device and torch.backends.cudnn.version() >= 91000),
         "head_dim > 128 requires SM90 with cuDNN >= 9.1.0"
@@ -3040,6 +3066,15 @@ class TestSDPACudaOnly(NNTestCase):
         with torch.nn.attention.sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION]):
             out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
             out.backward(grad)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_low_dropout(self):
+        q = torch.randn(2, 8, 128, 128, dtype=torch.half, device='cuda')
+        dropout_p = 0.00000000001
+        out1 = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=dropout_p)
+        out2 = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.)
+        with self.assertRaisesRegex(AssertionError, "AssertionError not raised"):
+            self.assertNotEqual(out1, out2)
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")

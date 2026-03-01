@@ -116,7 +116,6 @@ from .resume_execution import (
     ContinueExecutionCache,
     IS_TRACING_RESUME_PROLOGUE_VARNAME,
     ReenterWith,
-    TORCH_DYNAMO_RESUME_IN_PREFIX,
 )
 from .source import (
     AttrSource,
@@ -2125,7 +2124,7 @@ class InstructionTranslatorBase(
 
         # pyrefly: ignore [unbound-name]
         if istype(value, (types.ModuleType, DummyModule)):
-            # pyrefly: ignore [unbound-name]
+            # pyrefly: ignore [unbound-name, bad-argument-type]
             self.push(PythonModuleVariable(value, source=source))
         else:
             unimplemented(
@@ -3621,17 +3620,27 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        self.push(
-            NestedUserFunctionVariable(
-                fn_name,
-                code,
-                self.f_globals,
-                defaults,
-                kwdefaults,
-                annotations,
-                closure,
-            )
+        fn = NestedUserFunctionVariable(
+            fn_name,
+            code,
+            self.f_globals,
+            defaults,
+            kwdefaults,
+            closure,
         )
+        if annotations:
+            assert isinstance(annotations, TupleVariable)
+            # Convert the attribute to a dictionary before assigning it
+            # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
+            items = annotations.items
+            ann = ConstDictVariable(
+                dict(zip(items[::2], items[1::2], strict=True)),
+                mutation_type=ValueMutationNew(),
+            )
+            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
+                "__annotations__", ann
+            )
+        self.push(fn)
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
@@ -4279,7 +4288,7 @@ class InstructionTranslatorBase(
             # same as => arg1.__type_params__ = arg2
             assert isinstance(arg1, BaseUserFunctionVariable)
             arg1.call_method(
-                self,
+                self,  # pyrefly: ignore[bad-argument-type]
                 "__setattr__",
                 [ConstantVariable.create("__type_params__"), arg2],
                 {},
@@ -4332,7 +4341,12 @@ class InstructionTranslatorBase(
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
             attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.annotations = attr
+            fn.call_method(
+                self,  # pyrefly: ignore[bad-argument-type]
+                "__setattr__",
+                [ConstantVariable.create("__annotations__"), attr],
+                {},
+            )
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
@@ -4344,7 +4358,9 @@ class InstructionTranslatorBase(
                 dict(zip(items[::2], items[1::2], strict=True)),
                 mutation_type=ValueMutationNew(),
             )
-            fn.annotations = ann
+            fn.get_dict_vt(self).setitem(  # pyrefly: ignore[bad-argument-type]
+                "__annotations__", ann
+            )
         elif flags & 0x02:
             fn.kwdefaults = attr
         elif flags & 0x01:
@@ -4661,23 +4677,10 @@ class InstructionTranslatorBase(
         function for the post-comprehension code.
         """
         assert sys.version_info >= (3, 12)
-
-        analysis = self._analyze_comprehension()
-
-        # Validate: can't handle captured vars in resume functions due to nested sources
-        if self.f_code.co_name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
-            if analysis.captured_vars:
-                unimplemented(
-                    gb_type="Comprehension graph break in resume function with captured variables",
-                    context=str(analysis.captured_vars),
-                    explanation="Cannot use comprehension optimization inside a resume "
-                    "function when there are captured variables. This can cause issues "
-                    "with deeply nested source chains.",
-                    hints=[],
-                )
-
         assert self.instruction_pointer is not None
+
         start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
+        analysis = self._analyze_comprehension()
         stack_pops = 1 + len(analysis.iterator_vars)
         reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
         log.debug("comprehension triggered compile")
