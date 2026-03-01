@@ -116,6 +116,7 @@ def is_hashable(x: VariableTracker) -> bool:
 
 class ConstDictVariable(VariableTracker):
     CONTAINS_GUARD = GuardBuilder.DICT_CONTAINS
+    NOT_CONTAINS_GUARD = GuardBuilder.DICT_NOT_CONTAINS
 
     _nonvar_fields = {
         "user_cls",
@@ -527,12 +528,14 @@ class ConstDictVariable(VariableTracker):
 
         contains = args[0] in self
         if args[0].source is None and args[0].is_python_constant():
+            guard_fn = (
+                type(self).CONTAINS_GUARD if contains else type(self).NOT_CONTAINS_GUARD
+            )
             install_guard(
                 self.make_guard(
                     functools.partial(
-                        type(self).CONTAINS_GUARD,
+                        guard_fn,
                         key=args[0].as_python_constant(),
-                        invert=not contains,
                     )
                 )
             )
@@ -1169,6 +1172,7 @@ class SetVariable(ConstDictVariable):
     """We model a sets as dictionary with None values"""
 
     CONTAINS_GUARD = GuardBuilder.SET_CONTAINS
+    NOT_CONTAINS_GUARD = GuardBuilder.SET_NOT_CONTAINS
 
     def __init__(
         self,
