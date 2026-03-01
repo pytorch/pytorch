@@ -240,8 +240,7 @@ if __name__ == "__main__":
     test_multi_process(model, input)
     print(torch.xpu.device_count())
 """
-        # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
-        rc = check_output(test_script).splitlines()[-1]
+        rc = check_output(test_script)
         self.assertEqual(rc, str(torch.xpu.device_count()))
 
     def test_streams(self):
