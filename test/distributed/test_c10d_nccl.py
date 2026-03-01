@@ -5161,6 +5161,44 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
+    @parametrize("chunk_size", [0, 2, 10])
+    def test_batch_send_recv_chunked(self, chunk_size):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        device = torch.device(f"cuda:{self.rank}")
+        torch.cuda.set_device(device)
+
+        num_ops = 20
+        ops = []
+        recv_tensors = []
+        for i in range(num_ops):
+            peer = (self.rank + 1) % self.world_size
+            send_t = torch.full(
+                (10,), self.rank * 100 + i, device=device, dtype=torch.float32
+            )
+            ops.append(c10d.P2POp(dist.isend, send_t, peer))
+            recv_t = torch.zeros(10, device=device, dtype=torch.float32)
+            recv_peer = (self.rank - 1 + self.world_size) % self.world_size
+            ops.append(c10d.P2POp(dist.irecv, recv_t, recv_peer))
+            recv_tensors.append((recv_t, recv_peer, i))
+
+        with mock.patch.dict(
+            os.environ,
+            {"TORCH_NCCL_BATCH_P2P_CHUNK_SIZE": str(chunk_size)},
+        ):
+            for work in dist.batch_isend_irecv(ops):
+                work.wait()
+
+        for recv_t, recv_peer, i in recv_tensors:
+            expected = torch.full(
+                (10,), recv_peer * 100 + i, device=device, dtype=torch.float32
+            )
+            self.assertEqual(recv_t, expected)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
     @parametrize("group_rank", [True, False])
     def test_broadcast_subgroup(self, group_rank):
         world_size = 4

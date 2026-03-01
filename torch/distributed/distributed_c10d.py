@@ -2905,6 +2905,13 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
         this API call; otherwise, the behavior is undefined. If this API call is
         not the first collective call in the ``group``, batched P2P operations
         involving only a subset of ranks of the ``group`` are allowed.
+
+    .. note:: When using the NCCL backend with a large number of P2P operations,
+        operations are automatically grouped by peer rank into separate
+        coalescing groups to avoid NCCL internal hangs (default threshold:
+        256 ops).  Set ``TORCH_NCCL_BATCH_P2P_CHUNK_SIZE`` to override the
+        threshold or to ``0`` to disable grouping and revert to the legacy
+        single-group behaviour.
     """
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
@@ -2917,6 +2924,10 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
         return {key: op.group_peer}
 
     if type(group) is ProcessGroup and group._get_backend(device).supports_coalescing:
+        chunk_size = int(os.environ.get("TORCH_NCCL_BATCH_P2P_CHUNK_SIZE", 256))
+        if chunk_size > 0 and len(p2p_op_list) > chunk_size:
+            return _chunked_batch_p2p(p2p_op_list, group, device, peer_kwarg)
+
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
@@ -2941,6 +2952,36 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
             if work:
                 reqs.append(work)
         return reqs
+
+
+def _chunked_batch_p2p(
+    p2p_op_list: list[P2POp],
+    group: ProcessGroup,
+    device: torch.device,
+    peer_kwarg: Callable[[P2POp], dict[str, int]],
+) -> list[Work]:
+    """Split P2P ops into separate coalescing groups per peer rank.
+
+    Groups operations by peer rank (sorted) and issues each group as a
+    separate coalescing call.  This prevents NCCL's internal plan splitting
+    from diverging across ranks when multiple peers are batched together.
+    """
+    ops_by_peer: dict[int, list[P2POp]] = {}
+    for op in p2p_op_list:
+        ops_by_peer.setdefault(op.peer, []).append(op)
+
+    all_works: list[Work] = []
+    for _peer, ops in sorted(ops_by_peer.items()):
+        with _coalescing_manager(group, device, async_ops=True) as cm:
+            for p2p_op in ops:
+                p2p_op.op(
+                    p2p_op.tensor,
+                    group=p2p_op.group,
+                    tag=p2p_op.tag,
+                    **peer_kwarg(p2p_op),
+                )
+        all_works.extend(cm.works)
+    return all_works
 
 
 @_exception_logger
