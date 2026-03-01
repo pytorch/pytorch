@@ -167,6 +167,19 @@ def export(
             "using `TS2EPConverter(mod, args, kwargs).convert()` instead."
         )
 
+
+    # Warn if batch=1 with dynamic_shapes (issue #165259, #133653, #170172)
+    if dynamic_shapes is not None:
+        first_arg = args[0] if args else None
+        if isinstance(first_arg, torch.Tensor) and first_arg.size(0) == 1:
+            import warnings
+            warnings.warn(
+                "Using batch_size=1 with dynamic_shapes may cause dynamic dimensions to be specialized to static. "
+                "Consider using batch_size >= 2. See: https://github.com/pytorch/pytorch/issues/165259",
+                UserWarning,
+                stacklevel=2,
+            )
+
     try:
         return _export(
             mod,

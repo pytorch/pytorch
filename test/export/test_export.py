@@ -18456,5 +18456,44 @@ def forward(self, x, y):
             self.assertEqual(export_result.dtype, expected_dtype)
 
 
+
+    def test_warn_batch_one_dynamic_shapes(self):
+        """Test warning when batch=1 with dynamic_shapes
+
+        Related Issues: #165259, #133653, #170172
+        """
+        import warnings
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = SimpleModel()
+        dummy = torch.randn(1, 16)  # batch=1
+
+        # Define dynamic shape for batch dimension
+        batch = Dim("batch")
+        dynamic_shapes = {"x": {0: batch}}
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            export(model, (dummy,), dynamic_shapes=dynamic_shapes)
+
+            # Should emit warning about batch_size=1
+            self.assertGreater(len(w), 0, "Expected at least one warning to be emitted")
+
+            # Check if any warning contains the expected message
+            found_warning = False
+            for warning in w:
+                warning_message = str(warning.message)
+                if "batch_size=1" in warning_message and "dynamic_shapes" in warning_message:
+                    found_warning = True
+                    break
+
+            self.assertTrue(found_warning,
+                f"Expected warning about batch_size=1, got: {[str(x.message) for x in w]}")
+
+
+
 if __name__ == "__main__":
     run_tests()
