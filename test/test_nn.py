@@ -35,7 +35,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMPS, \
-    IS_PPC, \
+    IS_PPC, IS_FBCODE, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -12706,6 +12706,36 @@ class TestNNDeviceType(NNTestCase):
             result_byte, grad_byte = compute_result_and_gradient(reduction, torch.uint8)
             self.assertEqual(result_long, result_byte)
             self.assertEqual(grad_long, grad_byte)
+
+    @unittest.skipIf(IS_FBCODE, "contiguous call skipped in fbcode, see #175084")
+    def test_nll_loss_noncontiguous_4d(self, device):
+        # Ref: https://github.com/pytorch/pytorch/issues/175084
+        # Non-contiguous 4D input used to crash backward with
+        # "grad_input must be contiguous"
+        for reduction in ["none", "mean", "sum"]:
+            # Create non-contiguous 4D input by moving the class dim
+            nc_input = torch.randn(2, 3, 5, 4, device=device).movedim(-1, 1)
+            nc_input.requires_grad_(True)
+            self.assertFalse(nc_input.is_contiguous())
+            target = torch.randint(0, 4, (2, 3, 5), device=device)
+
+            output = F.nll_loss(nc_input, target, reduction=reduction)
+            if reduction == "none":
+                output.sum().backward()
+            else:
+                output.backward()
+            self.assertEqual(nc_input.grad.shape, nc_input.shape)
+
+            # Compare against contiguous version for correctness
+            c_input = nc_input.detach().contiguous().requires_grad_(True)
+            output_c = F.nll_loss(c_input, target, reduction=reduction)
+            if reduction == "none":
+                output_c.sum().backward()
+            else:
+                output_c.backward()
+
+            self.assertEqual(output, output_c)
+            self.assertEqual(nc_input.grad, c_input.grad)
 
     @onlyCUDA
     @dtypes(torch.float16, torch.float32)

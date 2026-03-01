@@ -702,6 +702,10 @@ Tensor nll_loss_nd_symint(
   if (input_.dim() == 1 || input_.dim() == 2) {
     ret = at::nll_loss_symint(input_, target_, weight, reduction, std::move(ignore_index));
   } else if (input_.dim() == 4) {
+#ifndef FBCODE_CAFFE2
+    input_ = input_.contiguous();
+    target_ = target_.contiguous();
+#endif
     ret = at::nll_loss2d_symint(input_, target_, weight, reduction, std::move(ignore_index));
   } else {
     // dim == 3 or dim > 4
