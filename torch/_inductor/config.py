@@ -600,6 +600,15 @@ max_autotune_conv_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS", "ATEN,TRITON"
 ).upper()
 
+# As above, specify candidate backends for conv backward weight autotune.
+max_autotune_conv_bwd_weight_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_BWD_WEIGHT_CONV_BACKENDS", "ATEN,TRITON"
+).upper()
+
+# As above, specify candidate backends for conv backward input autotune.
+max_autotune_conv_bwd_input_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_BWD_INPUT_CONV_BACKENDS", "ATEN,TRITON"
+).upper()
 
 # Specify the size of the search space for GEMM autotuning.
 # DEFAULT     - balance between compile time overhead and performance
