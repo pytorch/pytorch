@@ -1331,6 +1331,7 @@ class _ModuleFrame:
             x.target
             in (
                 torch.ops.aten.sym_size.int,
+                torch.ops.aten.sym_numel.default,
                 torch.ops.aten.item.default,
                 torch.ops.aten.unbind.int,
                 torch.ops.aten.sum.dim_IntList,
@@ -1702,7 +1703,25 @@ class _IVals:
             # we will apply the original mutation later (see below)
             fqn, _ = next(reversed(node.meta["nn_module_stack"].values()))
             self.node_names_by_fqn[fqn].add(node.name)
-        return mf.remap_input(node.args[0])
+        arg0 = node.args[0]
+        if isinstance(arg0, torch.fx.Node):
+            return mf.remap_input(arg0)
+        else:
+            # For ops whose first argument is not a single Node (e.g., aten.cat
+            # taking a list of tensors), we cannot follow the mutation chain
+            # or recreate a copy_ for it. Remove from tracked mutations and
+            # add as a placeholder input to preserve graph topology.
+            # (copy_sym_call_function would copy the op into the subgraph,
+            # changing topology and breaking downstream tree_unflatten.)
+            if not b:
+                self.node_names_by_fqn[fqn].discard(node.name)
+            mf.add_placeholder(node)
+            if mf.parent_call_module is not None:
+                with mf.parent.graph.inserting_before(mf.parent_call_module):
+                    mf.parent_call_module.insert_arg(
+                        0, mf.parent.remap_input(node)
+                    )
+            return mf.node_to_placeholder[node]
 
     def update(self, partitions):
         """
