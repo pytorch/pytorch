@@ -2394,6 +2394,11 @@ class PythonWrapperCodegen(CodeGen):
         gpu: bool = True,
         cpp_definition: str | None = None,
     ):
+        # Fix for https://github.com/pytorch/pytorch/issues/170398
+        # Escape kernel names that start with double underscores to avoid name mangling
+        if kernel_name.startswith("__"):
+            kernel_name = "triton_" + kernel_name
+
         self.writeline(
             KernelDefinitionLine(
                 self,
@@ -2959,6 +2964,10 @@ class PythonWrapperCodegen(CodeGen):
         triton: Defines whether the backend uses Triton for codegen. Otherwise it uses the CUDA language when gpu=True,
                 and C++ when gpu=False.
         """
+        # Fix for https://github.com/pytorch/pytorch/issues/170398
+        # Escape kernel names that start with double underscores to avoid name mangling
+        if kernel_name.startswith("__"):
+            kernel_name = "triton_" + kernel_name
 
         # Store buffers corresponding to each call arg.
         # This is used to generate example args for autotuning later on.
