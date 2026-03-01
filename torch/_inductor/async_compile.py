@@ -13,7 +13,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -47,6 +47,7 @@ from torch._inductor.compile_worker.tracked_process_pool import (
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
+    _set_triton_libdevice_path,
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
@@ -66,13 +67,13 @@ if TYPE_CHECKING:
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
-_t0: Optional[float] = None
+_t0: float | None = None
 
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 log = logging.getLogger(__name__)
 
-_triton_kernel_metrics: Optional[dict[str, dict[str, Any]]] = None
+_triton_kernel_metrics: dict[str, dict[str, Any]] | None = None
 
 size_hints_regex = re.compile(
     r"size_hints=(\{.*?\})",
@@ -212,7 +213,7 @@ class CompiledTritonKernels:
         CompiledTritonKernels._cache[key] = future
 
     @staticmethod
-    def get(kernel_src: str) -> Optional[CodeCacheFuture]:
+    def get(kernel_src: str) -> CodeCacheFuture | None:
         key = CompiledTritonKernels.key(kernel_src)
         return CompiledTritonKernels._cache.get(key, None)
 
@@ -234,7 +235,7 @@ class AsyncCompile:
     Utilities to compile in thread pools or subprocess pools (in the case of Triton).
     """
 
-    _ready_future: Optional[Future[Any]] = None
+    _ready_future: Future[Any] | None = None
 
     def __init__(self) -> None:
         pass
@@ -401,9 +402,15 @@ class AsyncCompile:
 
         # Cache miss
         if is_parallel:
+            # Ensure libdevice path is set in os.environ before passing to workers
+            _set_triton_libdevice_path()
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
-            env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+            env_vars = [
+                "TORCHINDUCTOR_CACHE_DIR",
+                "TRITON_CACHE_DIR",
+                "TRITON_LIBDEVICE_PATH",
+            ]
             extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
             extra_config = {
                 "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
@@ -478,6 +485,7 @@ class AsyncCompile:
                 try:
                     start_ns = time_ns()
                     _set_triton_ptxas_path()
+                    _set_triton_libdevice_path()
                     kernel = load_kernel()
                     kernel.set_compile_info(compile_id, is_backward)
                     kernel.precompile(

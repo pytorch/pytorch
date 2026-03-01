@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/LossMulti.h>
 #include <ATen/native/Resize.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/cuda/CUDAException.h>
@@ -127,38 +128,6 @@ __global__ void MultiMarginLoss_backward_kernel(
   }
 }
 
-void multi_margin_loss_shape_check(
-    int64_t& nframe,
-    int64_t& dim,
-    const int64_t& ndims,
-    const Tensor& input,
-    const Tensor& target,
-    const std::optional<Tensor>& weight) {
-    TORCH_CHECK(
-        (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
-        "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",
-        input.sizes());
-
-    if (ndims <= 1) {
-      nframe = 1;
-      dim = ndims == 0 ? 1 : input.size(0);
-    } else {
-      nframe = input.size(0);
-      dim = input.size(1);
-    }
-
-    TORCH_CHECK(
-        target.dim() <= 1 && target.numel() == nframe,
-        "inconsistent target size, expected ", nframe, " but got ",
-        target.sizes());
-    if (weight && weight->defined()) {
-      TORCH_CHECK(
-          weight->dim() <= 1 && weight->numel() == dim,
-          "inconsistent weight size, expected ", dim, " but got ",
-          weight->sizes());
-    }
-}
-
 }  // namespace (anonymous)
 
 Tensor& multi_margin_loss_cuda_out(
@@ -196,7 +165,6 @@ Tensor& multi_margin_loss_cuda_out(
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "multi_margin_loss_cuda", [&] {
     const scalar_t margin = margin_.to<scalar_t>();
     if (input.dim() <= 1) {
-      TORCH_CHECK(target.dim() <= 1 && target.numel() == nframe, "inconsistent target size");
       dim3 blocks(1);
       dim3 threads(MULTIMARGIN_THREADS);
       if (p == 1) {
@@ -225,9 +193,6 @@ Tensor& multi_margin_loss_cuda_out(
     } else {
       auto in_sizes = input.sizes();
       TORCH_INTERNAL_ASSERT(in_sizes.size() == 2);
-      // allow zero-dim target for 2D input.
-      TORCH_CHECK(in_sizes[1] != 0 && target.dim() <= 1 && target.numel() == nframe,
-                "inconsistent target size");
       dim3 blocks(nframe);
       dim3 threads(MULTIMARGIN_THREADS);
 
@@ -363,8 +328,6 @@ Tensor& multi_margin_loss_cuda_backward_out(
     } else {
       auto in_sizes = input.sizes();
       TORCH_INTERNAL_ASSERT(in_sizes.size() == 2);
-      TORCH_CHECK((in_sizes[1] != 0) && (target.dim() <= 1) && (target.numel() == nframe),
-                  "inconsistent target size");
       dim3 blocks(in_sizes[0]);
       dim3 threads(MULTIMARGIN_THREADS);
 
