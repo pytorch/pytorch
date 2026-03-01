@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import os
 import sys
+import tempfile
 import unittest
 
 import torch
@@ -22,8 +23,6 @@ except ImportError:
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
-
-from filelock import FileLock, Timeout
 
 import torch._inductor.config as config
 from torch._inductor import cpu_vec_isa, metrics
@@ -55,22 +54,11 @@ TestCase = test_torchinductor.TestCase
 class BaseExtensionBackendTests(TestCase):
     module = None
 
-    # Use a lock file so that only one test can build this extension at a time
-    lock_file = "extension_device.lock"
-    lock = FileLock(lock_file)
-
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
 
-        try:
-            cls.lock.acquire(timeout=600)
-        except Timeout:
-            # This shouldn't happen, still attempt to build the extension anyway
-            pass
-
-        # Build Extension
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
+        cls._build_dir = tempfile.TemporaryDirectory()
         source_file_path = os.path.dirname(os.path.abspath(__file__))
         source_file = os.path.join(
             source_file_path, "extension_backends/cpp/extension_device.cpp"
@@ -82,6 +70,7 @@ class BaseExtensionBackendTests(TestCase):
             ],
             extra_cflags=["-g"],
             verbose=True,
+            build_directory=cls._build_dir.name,
         )
 
     @classmethod
@@ -89,11 +78,7 @@ class BaseExtensionBackendTests(TestCase):
         cls._stack.close()
         super().tearDownClass()
 
-        torch.testing._internal.common_utils.remove_cpp_extensions_build_root()
-
-        cls.lock.release()
-        if os.path.exists(cls.lock_file):
-            os.remove(cls.lock_file)
+        cls._build_dir.cleanup()
 
     def setUp(self):
         torch._dynamo.reset()
@@ -110,7 +95,12 @@ class BaseExtensionBackendTests(TestCase):
         super().tearDown()
         torch._dynamo.reset()
 
-        # return the working directory (see setUp)
+        backend_name = torch._C._get_privateuse1_backend_name()
+        if hasattr(torch, backend_name):
+            delattr(torch, backend_name)
+        if f"torch.{backend_name}" in sys.modules:
+            del sys.modules[f"torch.{backend_name}"]
+
         os.chdir(self.old_working_dir)
 
 
@@ -181,4 +171,4 @@ if __name__ == "__main__":
 
     # cpp_extension doesn't work in fbcode right now
     if HAS_CPU and not IS_MACOS and not IS_FBCODE:
-        run_tests(needs="filelock")
+        run_tests()
