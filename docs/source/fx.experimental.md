@@ -151,6 +151,7 @@ These APIs are experimental and subject to change without notice.
     decompose
     disable_autocast_cache
     disable_proxy_modes_tracing
+    dispatch_trace
     extract_val
     fake_signature
     fetch_object_proxy
@@ -181,6 +182,7 @@ These APIs are experimental and subject to change without notice.
     :nosignatures:
 
     extract_subgraph
+    matches_module_pattern
     modules_to_mkldnn
     optimize_for_inference
     remove_dropout
@@ -243,6 +245,10 @@ These APIs are experimental and subject to change without notice.
     :nosignatures:
 
     typename
+    expand_tuples
+    groupby
+    raises
+    reverse_dict
 ```
 
 ## torch.fx.experimental.unification.unification_tools
@@ -264,6 +270,7 @@ These APIs are experimental and subject to change without notice.
     assoc_in
     dissoc
     first
+    groupby
     keyfilter
     keymap
     merge
@@ -443,4 +450,277 @@ These APIs are experimental and subject to change without notice.
     torch_nn_relu_override
     torch_relu_override
     torch_where_override
+```
+
+## torch.fx.experimental.accelerator_partitioner
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.accelerator_partitioner
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.accelerator_partitioner
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    check_dependency
+    combine_two_partitions
+    reorganize_partitions
+    reset_partition_device
+    set_parents_and_children
+```
+
+## torch.fx.experimental.debug
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.debug
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.debug
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    set_trace
+```
+
+## torch.fx.experimental.merge_matmul
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.merge_matmul
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.merge_matmul
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    are_nodes_independent
+    may_depend_on
+    merge_matmul
+```
+
+## torch.fx.experimental.unification.match
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.match
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.match
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    edge
+    match
+    ordering
+    supercedes
+```
+
+## torch.fx.experimental.unification.more
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.more
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.more
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    reify_object
+    unifiable
+    unify_object
+```
+
+## torch.fx.experimental.unification.multipledispatch.conflict
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.conflict
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.conflict
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    ambiguities
+    ambiguous
+    consistent
+    edge
+    ordering
+    super_signature
+    supercedes
+```
+
+## torch.fx.experimental.unification.multipledispatch.core
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.core
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.core
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    dispatch
+    ismethod
+```
+
+## torch.fx.experimental.unification.multipledispatch.dispatcher
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.dispatcher
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.dispatcher
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    ambiguity_warn
+    halt_ordering
+    restart_ordering
+    source
+    str_signature
+    variadic_signature_matches
+    variadic_signature_matches_iter
+    warning_text
+```
+
+## torch.fx.experimental.unification.multipledispatch.variadic
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.multipledispatch.variadic
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.multipledispatch.variadic
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    isvariadic
+```
+
+## torch.fx.experimental.unification.utils
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.utils
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    freeze
+    hashable
+    raises
+    reverse_dict
+    transitive_get
+    xfail
+```
+
+## torch.fx.experimental.unification.variable
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unification.variable
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unification.variable
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    var
+    variables
+    vars
+```
+
+## torch.fx.experimental.unify_refinements
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.unify_refinements
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.unify_refinements
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    check_for_type_equality
+    infer_symbolic_types
+    infer_symbolic_types_single_pass
+    substitute_all_types
+    substitute_solution_one_type
+    unify_eq
+```
+
+## torch.fx.experimental.validator
+
+```{eval-rst}
+.. automodule:: torch.fx.experimental.validator
+```
+
+```{eval-rst}
+.. currentmodule:: torch.fx.experimental.validator
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    bisect
+    translation_validation_enabled
+    translation_validation_timeout
 ```
