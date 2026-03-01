@@ -1811,6 +1811,20 @@ class TestFX(JitTestCase):
         offsets = torch.LongTensor([0, 4])
         self.assertEqual(loaded(input, offsets), traced(input, offsets))
 
+    def test_pickle_string_type_annotation(self):
+        def f(x: "torch.Tensor") -> "torch.Tensor":
+            return x + 1
+
+        traced = symbolic_trace(f)
+        traced.graph.lint()
+
+        pickled = pickle.dumps(traced)
+        loaded = pickle.loads(pickled)
+        loaded.graph.lint()
+
+        x = torch.tensor([1.0, 2.0, 3.0])
+        self.assertEqual(loaded(x), traced(x))
+
     def test_return_tuple(self):
         class M(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
