@@ -2183,6 +2183,32 @@ class CPUReproTests(TestCase):
         self.assertFalse(complex_memory_overlap(gathered))
         self.assertFalse(complex_memory_overlap(gathered.t()))
 
+    def test_vec_sve_armv9_arch_flags(self):
+        # VecSVE256 should emit Armv9-A specific flags when SVE2 is available.#
+
+        isa = cpu_vec_isa.VecSVE256()
+
+        # Armv9-A + SVE2 path should switch to the Armv9 flag set with bf16/i8mm
+        with patch(
+            "torch.cpu.get_capabilities",
+            return_value={"sve": True, "sve2": True},
+        ):
+            isa._armv9a_supported = None
+            flags = isa.build_arch_flags()
+            self.assertIn("+sve2", flags)
+            self.assertIn("+bf16", flags)
+            self.assertIn("+i8mm", flags)
+            self.assertIn("-msve-vector-bits=256", flags)
+
+        # SVE-only path should stick to the base flags
+        with patch(
+            "torch.cpu.get_capabilities",
+            return_value={"sve": True, "sve2": False},
+        ):
+            isa._armv9a_supported = None
+            flags = isa.build_arch_flags()
+            self.assertEqual(flags, isa._arch_flags)
+
     @requires_vectorization
     def test_vec_dynamic_shapes(self):
         def fn(x):
