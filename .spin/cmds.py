@@ -446,3 +446,29 @@ def regenerate_github_workflows():
     """Regenerate GitHub workflows from templates."""
     cmd = [sys.executable, "scripts/generate_ci_workflows.py"]
     spin.util.run(cmd, cwd="./.github")
+
+
+PYREFLY_BASE_CMD = [
+    "uvx",
+    "--python",
+    "3.12",
+    "pyrefly@0.50.0",
+]
+
+
+def _pyrefly_init():
+    cmd = PYREFLY_BASE_CMD + ["init"]
+    spin.util.run(cmd)
+
+
+@click.group()
+def pyrefly():
+    """Commands for managing PyRefly stubs and checks."""
+    click.echo("Starting Pyrefly...")
+
+
+@pyrefly.command()
+@click.argument("files", metavar="", nargs=-1)
+def infer(files):
+    cmd = PYREFLY_BASE_CMD + ["infer"] + list(files)
+    spin.util.run(cmd)

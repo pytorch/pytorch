@@ -370,3 +370,6 @@ package = 'torch'
   ".spin/cmds.py:regenerate_clangtidy_files",
   ".spin/cmds.py:regenerate_github_workflows",
 ]
+"Type" = [
+    ".spin/cmds.py:pyrefly",
+]
