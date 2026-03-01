@@ -8776,6 +8776,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
+    def test_index_put_duplicate_indices_inplace(self):
+        def fn(a, idx):
+            a = a.clone()
+            a[idx] += a[idx]
+            return a
+
+        self.common(
+            fn,
+            (
+                torch.tensor([[-0.8716, 0.1114]], dtype=torch.float64),
+                torch.tensor([0, 0], dtype=torch.int64),
+            ),
+        )
+
     def test_index_put_as_masked_fill(self):
         def fn(a, b, c, d):
             a = a.clone()

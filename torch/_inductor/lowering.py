@@ -4062,6 +4062,9 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
             # the load of `values` might contain modified value from the store of `self`.
             # To address this, store values in a temporary buffer in such cases.
             values.realize()
+            if (values_name := ir.try_get_name(values)) is not None:
+                # Prevent fusion from inlining the RHS temp back into the scatter.
+                V.graph.no_fuse_buffer_names.add(values_name)
 
     # Dispatch to masked fill for single boolean index with single value
     if (
