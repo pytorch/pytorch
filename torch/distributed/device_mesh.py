@@ -723,14 +723,22 @@ else:
                 sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
                 # When using FakeTensorMode to trace the model, `_create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
-                # `unset_fake_temporarily()` will allow us to materialize the tensors
-                # within `_create_sub_mesh`, which should not affect modling.
+                # `unset_fake_temporarily()` and `disable_proxy_modes_tracing()`
+                # will allow us to materialize the tensors within
+                # `_create_sub_mesh`, which should not affect modling.
                 #
                 # Note that this should be orthogonal to torch.compile(). But whether
                 # we can compile device_mesh `slicing` (no graph break) is not verified
                 # yet and need a follow-up,
                 # TODO: compiler + device_mesh slicing.
-                with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                from torch.fx.experimental.proxy_tensor import (
+                    disable_proxy_modes_tracing,
+                )
+
+                with (
+                    torch._subclasses.fake_tensor.unset_fake_temporarily(),
+                    disable_proxy_modes_tracing(),
+                ):
                     submesh = self._create_sub_mesh(sliced_mesh_layout, mesh_dim_names)
                 return submesh
 
