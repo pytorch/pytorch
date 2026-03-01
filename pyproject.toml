@@ -357,7 +357,6 @@ keep-runtime-typing = true
 # torch/ folders still needing S101 migration
 "torch/_dynamo/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
-"torch/distributed/**" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"

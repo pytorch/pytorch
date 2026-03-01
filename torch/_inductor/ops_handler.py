@@ -699,6 +699,11 @@ class OpsHandler(Generic[T]):
         do Python-style (int, int) -> float division, use int_truediv"""
         raise NotImplementedError
 
+    def div_rn(self, x0: T, x1: T) -> T:
+        """Division with round-to-nearest rounding mode.  Used for matching
+        eager CUDA semantics where division uses IEEE round-to-nearest."""
+        raise NotImplementedError
+
     def int_truediv(self, x0: T, x1: T) -> T:
         """True division between integers.  This is NOT the same as promoting
         to float and doing integer division, there is a bespoke algorithm for

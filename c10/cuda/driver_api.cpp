@@ -52,7 +52,7 @@ void* get_symbol(const char* name, int version) {
   cudaDriverEntryPointQueryResult qres{};
 
   // CUDA 12.5+ supports version-based lookup
-#if defined(CUDA_VERSION)
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12050)
   if (auto st = cudaGetDriverEntryPointByVersion(
           name, &out, version, cudaEnableDefault, &qres);
       st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {

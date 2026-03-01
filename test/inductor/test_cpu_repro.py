@@ -165,8 +165,6 @@ class CPUReproTests(TestCase):
             test_self = self
             conv_seen = False
 
-            from torch._higher_order_ops.wrap import inductor_compiled_code
-
             class RecordFunctions(TorchDispatchMode):
                 def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                     kwargs = kwargs if kwargs else {}
@@ -184,11 +182,6 @@ class CPUReproTests(TestCase):
                         conv_seen = True
 
                     return func(*args, **kwargs)
-
-            @inductor_compiled_code.py_impl(RecordFunctions)
-            def _(mode, func, inputs):
-                with mode:
-                    return func(inputs)
 
             with RecordFunctions():
                 fn_compiled(inps)

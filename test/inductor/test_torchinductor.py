@@ -3591,6 +3591,20 @@ class CommonTemplate:
             fn_int_input, (make_tensor(10, device=self.device, dtype=torch.float32), 33)
         )
 
+    def test_floordiv_negative_int(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/158212
+        # Signed integer floor division must handle negative dividends correctly.
+        # The key case: (-1) // 2 should be -1 (Python floor), not 0 (C truncation).
+        def fn(a, b):
+            return a // b
+
+        for divisor in [2, 3, 7]:
+            a = torch.arange(-32, 32, device=self.device, dtype=torch.int32)
+            b = torch.full_like(a, divisor)
+            self.common(fn, (a, b))
+            b_neg = torch.full_like(a, -divisor)
+            self.common(fn, (a, b_neg))
+
     def test_div_precision(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/101039
 
@@ -3698,8 +3712,6 @@ class CommonTemplate:
         cf(x, 1e-5)
         cf(x, 1e-6)
 
-    # I think Triton CPU doesn't preserve -0.0 sign in tl.full
-    @xfail_if_triton_cpu
     def test_div_by_zero(self):
         def fn(x, runtime_zero, runtime_neg_zero):
             zero = torch.zeros_like(x)
@@ -3711,7 +3723,6 @@ class CommonTemplate:
                 x / -zero,
                 zero / zero,
                 x / runtime_zero,
-                # NOTE: -runtime_zero doesn't work as -(0.0) is broken in triton
                 x / runtime_neg_zero,
                 runtime_zero / runtime_neg_zero,
             )
@@ -11213,8 +11224,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 test_self = self
                 matmul_seen = False
 
-                from torch._higher_order_ops.wrap import inductor_compiled_code
-
                 class TestRefMode(TorchDispatchMode):
                     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                         kwargs = kwargs if kwargs else {}
@@ -11234,11 +11243,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                             test_self.assertIsNone(inp_refs[1]())
 
                         return func(*args, **kwargs)
-
-                @inductor_compiled_code.py_impl(TestRefMode)
-                def _(mode, func, inputs):
-                    with mode:
-                        return func(inputs)
 
                 with TestRefMode():
                     fn_compiled(inps)
@@ -14231,14 +14235,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
 
+        x = torch.randn(2, 3, device=self.device, requires_grad=True)
+        _, codes = run_fw_bw_and_get_code(lambda: f(x, [2, 3]))
+        self.assertEqual(len(codes), 2)
         if config.cpp_wrapper:
-            # arg type List[int] is not yet supported by custom_op_wrapper
-            pass
+            FileCheck().check(
+                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda__fused_rms_norm("
+            ).run(codes[0])
         else:
-            x = torch.randn(2, 3, device=self.device, requires_grad=True)
-            _, codes = run_fw_bw_and_get_code(lambda: f(x, [2, 3]))
-            self.assertEqual(len(codes), 2)
-            FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(code[0])
+            FileCheck().check("torch.ops.aten._fused_rms_norm.default(").run(codes[0])
 
     def test_lite_regional_compile_flex_attention(self):
         if self.device != GPU_TYPE or self.device == "mps":
@@ -14685,8 +14690,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
                 matmul_seen = False
 
-                from torch._higher_order_ops.wrap import inductor_compiled_code
-
                 class TestRefMode(TorchDispatchMode):
                     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                         kwargs = kwargs if kwargs else {}
@@ -14703,11 +14706,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                             assert inp_refs[1]() is None
 
                         return func(*args, **kwargs)
-
-                @inductor_compiled_code.py_impl(TestRefMode)
-                def _(mode, func, inputs):
-                    with mode:
-                        return func(inputs)
 
                 with TestRefMode():
                     fn_compiled(inps)
@@ -17250,6 +17248,18 @@ if RUN_GPU:
                 )
             expected = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
             torch.testing.assert_close(result, fn(expected, indices, values))
+
+        @parametrize("dtype", (torch.float32, torch.float64))
+        def test_copysign(self, dtype):
+            def fn(x):
+                out = torch.copysign(x, -0.0)
+                return out
+
+            inp = torch.randn([6], dtype=dtype, device=GPU_TYPE)
+
+            result, code = run_and_get_code(torch.compile(fn), inp)
+            self.assertIn("0x80000000", code[0])
+            torch.testing.assert_close(result, fn(inp))
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
