@@ -78,6 +78,7 @@ def _extract_members(
     names_map = create_names_map(unique_named_members, all_named_members)
 
     # Remove all the members in the model
+    # pyrefly: ignore [implicit-any]
     memo = {}
     accessor = NamedMemberAccessor(mod)
     for name, p in all_named_members:

@@ -464,6 +464,9 @@ class _MaskModWrapper:
             and _closure_contents(self.fn) == _closure_contents(other.fn)
         ):
             return True
+        # For callable objects (not plain functions), delegate to their __eq__
+        if not inspect.isfunction(self.fn) and not inspect.isfunction(other.fn):
+            return self.fn == other.fn
         return False
 
     def __hash__(self) -> int:
@@ -1003,7 +1006,6 @@ class BlockMask:
             for attr, val in zip(cls._CONTEXT_ATTRS, context)
         }
         kwargs.update(zip(cls._TENSOR_ATTRS, tensors))
-        # pyrefly: ignore [bad-argument-type]
         return cls(**kwargs)
 
     def _flatten_with_keys(self):

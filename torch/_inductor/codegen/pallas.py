@@ -11,7 +11,6 @@ import sympy  # noqa: TC002
 
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pallas import has_tpu_pallas
 from torch.utils._sympy.functions import ModularIndexing
 
 from .. import config
@@ -834,6 +833,7 @@ class _CodegenContext:
     full_kernel_params: list[str]
     non_alias_out_set: OrderedSet[str]
     copy_output_indices: list[int]
+    alias_pairs: list[tuple[int, int]]
 
 
 class PallasKernel(SIMDKernel):
@@ -877,6 +877,10 @@ class PallasKernel(SIMDKernel):
         self.has_transposed_load = False
         # Track which iteration variables are actually used in the kernel
         self.used_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
+        # Track if any load/store uses flatten-based indexing (buf[...].flatten()[idx])
+        self.has_flatten_indexing = False
+        # Track input buffers that are accessed with transposed last-2 dims
+        self.transposed_input_buffers: OrderedSet[str] = OrderedSet()
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -1459,7 +1463,7 @@ class PallasKernel(SIMDKernel):
         )
 
         # Check various conditions for skipping strided indexing
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
         is_known_non_contiguous = not is_contiguous and all(
             s is not None for s in actual_strides
         )
@@ -1605,6 +1609,7 @@ class PallasKernel(SIMDKernel):
         Build the load expression based on indexing mode.
         """
         if needs_flatten:
+            self.has_flatten_indexing = True
             # Flatten then index for non-contiguous access (gather operation)
             has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
             idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
@@ -1911,6 +1916,7 @@ class PallasKernel(SIMDKernel):
             return self._build_full_array_store_expr(out, value, needs_transpose)
 
         if needs_flatten:
+            self.has_flatten_indexing = True
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
             return [
@@ -2591,6 +2597,200 @@ class PallasKernel(SIMDKernel):
         layout = buf.get_layout()
         return layout.is_contiguous()
 
+    def _can_tile_cpu_tpu(self) -> bool:
+        """Check if this kernel can use tiling on CPU/TPU.
+
+        Tiling is compatible with reductions, transpositions, and multi-range-tree
+        kernels as long as no flatten-based indexing is used (buf[...].flatten()[idx]).
+        Flatten indexing requires global flat indices which don't decompose into
+        per-tile local indices.
+
+        Reject:
+        - GPU (has its own TMA / padding path)
+        - Flatten-based indexing
+        - Scatter outputs (indirect indexing complicates tile boundaries)
+        """
+        if self.is_gpu:
+            return False
+        if self.has_flatten_indexing:
+            return False
+        if self.outputs_need_read:
+            return False
+
+        # If iteration variables appear in the compute body (not just in
+        # load/store index resolution that collapses to [...]), tiling is
+        # unsafe because the arange-based vars have full-tensor shapes.
+        if self.used_iter_vars:
+            compute_text = "\n".join(str(line) for line in self.compute._lines)
+            for var_sym in self.used_iter_vars:
+                if str(var_sym) in compute_text:
+                    return False
+
+        # Determine the reference output shape (highest-ndim output).
+        out_bufs = list(self.args.output_buffers.keys())
+
+        # Only check the current kernel's actual output buffers for transpose,
+        # not _has_column_major_output() which scans all graph buffers and can
+        # be triggered by unrelated intermediates (e.g., (N,1) reductions with
+        # degenerate column-major strides).
+        has_col_major_out = False
+        for buf_name in out_bufs:
+            info = self._get_buffer_info(buf_name)
+            if info is None:
+                continue
+            _, buf_size, _, actual_strides, _ = info
+            if len(actual_strides) >= 2 and len(buf_size) >= 2:
+                s0 = actual_strides[0]
+                s1 = actual_strides[1]
+                d0 = self._safe_int(buf_size[0])
+                d1 = self._safe_int(buf_size[1])
+                if (
+                    s0 is not None
+                    and s1 is not None
+                    and s0 < s1
+                    and d0 is not None
+                    and d1 is not None
+                    and d0 > 1
+                    and d1 > 1
+                ):
+                    has_col_major_out = True
+                    break
+        self.tile_has_transpose = self.has_transposed_load or has_col_major_out
+
+        # Count trailing reduction dimensions in the output shape that must
+        # not be tiled (the kernel body needs the full reduction range).
+        # Only count when the kernel actually performs reduction (numel > 1).
+        reduction_numel = self._compute_reduction_numel()
+        has_reduction = reduction_numel is not None and reduction_numel > 1
+        self.tile_skip_last_n = (
+            sum(1 for tree in self.range_trees if tree.is_reduction)
+            if has_reduction
+            else 0
+        )
+
+        ref_shape: list[int] = []
+        for buf_name in out_bufs:
+            info = self._get_buffer_info(buf_name)
+            if info is None:
+                return False
+            _, buf_size, _, _, _ = info
+            int_size = [self._safe_int(s) for s in buf_size]
+            if any(s is None for s in int_size):
+                return False
+            if len(int_size) > len(ref_shape):
+                ref_shape = int_size  # type: ignore[assignment]
+
+        if not ref_shape:
+            return False
+        ref_nd = len(ref_shape)
+
+        all_bufs = list(self.args.input_buffers) + out_bufs
+        has_tileable = False
+        for buf_name in all_bufs:
+            info = self._get_buffer_info(buf_name)
+            if info is None:
+                return False
+            _, buf_size, _, _, _ = info
+            if len(buf_size) == 0:
+                continue  # scalar
+            int_size = [self._safe_int(s) for s in buf_size]
+            if any(s is None for s in int_size):
+                return False
+            buf_nd = len(int_size)
+
+            if buf_nd == ref_nd:
+                # Same ndim: check dimensions match or are broadcast (1).
+                # Allow transposed last-2 dims.
+                mismatch = False
+                for i in range(ref_nd):
+                    if (
+                        int_size[i] == ref_shape[i]
+                        or int_size[i] == 1
+                        or ref_shape[i] == 1
+                    ):
+                        continue
+                    mismatch = True
+                    break
+
+                if mismatch and ref_nd >= 2 and self.tile_has_transpose:
+                    # Check if last-2 dims are swapped (transpose pattern).
+                    # Only allow when the kernel actually transposes
+                    # (has_transposed_load or column-major output).
+                    if (
+                        int_size[-2] == ref_shape[-1]
+                        and int_size[-1] == ref_shape[-2]
+                        and all(
+                            int_size[i] == ref_shape[i]
+                            or int_size[i] == 1
+                            or ref_shape[i] == 1
+                            for i in range(ref_nd - 2)
+                        )
+                    ):
+                        if buf_name in self.args.input_buffers:
+                            self.transposed_input_buffers.add(buf_name)
+                    else:
+                        return False
+                elif mismatch:
+                    return False
+
+                # At least one buffer with a tileable dim
+                if any(
+                    int_size[i] == ref_shape[i] and ref_shape[i] > 1
+                    for i in range(ref_nd)
+                ):
+                    has_tileable = True
+
+            elif buf_nd > ref_nd:
+                # Reduction input with extra dims. Find an alignment offset k
+                # such that buf_shape[k+i] == ref_shape[i] for all i (skipping
+                # broadcast dims where ref_shape[i] == 1).
+                found = False
+                for k in range(buf_nd - ref_nd + 1):
+                    ok = True
+                    for i in range(ref_nd):
+                        if ref_shape[i] == 1:
+                            continue
+                        if int_size[k + i] != ref_shape[i]:
+                            ok = False
+                            break
+                    if ok:
+                        found = True
+                        break
+                if not found:
+                    return False
+                has_tileable = True
+
+            else:
+                # Fewer dims: verify numpy-style broadcastability
+                for a, b in zip(reversed(int_size), reversed(ref_shape)):
+                    if a != b and a != 1 and b != 1:
+                        return False
+
+        if not has_tileable:
+            return False
+
+        # On CPU (interpret mode) each tile iteration has significant
+        # Python/JAX overhead, so cap the grid size to avoid regressions
+        # on large tensors.  On TPU the grid executes natively.
+        is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
+        if not is_tpu:
+            from ..runtime.runtime_utils import pallas_compute_tiling
+
+            _, grid, _ = pallas_compute_tiling(
+                tuple(ref_shape),
+                transpose=self.tile_has_transpose,
+                skip_last_n=self.tile_skip_last_n,
+                exact_only=True,
+            )
+            _MAX_GRID_PRODUCT = 64
+            grid_product = 1
+            for g in grid:
+                grid_product *= g
+            if grid_product > _MAX_GRID_PRODUCT:
+                return False
+
+        return True
+
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
         """
         Generate the complete Pallas kernel code as a Python string.
@@ -2628,20 +2828,8 @@ class PallasKernel(SIMDKernel):
         }
 
         kernel_name = name or "<KERNEL_NAME>"
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
-        interpret_is_cpu = (
-            V.graph.get_current_device_or_throw().type == "cpu" and not is_tpu
-        )
-        if is_tpu:
-            if not torch._inductor.config.pallas_take_first_jax_device_only:
-                raise RuntimeError(
-                    "Pallas backend currently only supports using the first JAX device."
-                )
-            if not has_tpu_pallas():
-                raise RuntimeError(
-                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                    "Please make sure that you have a TPU available and that JAX is configured correctly."
-                )
+        is_tpu = V.graph.get_current_device_or_throw().type == "tpu"
+        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         interpret_literal = "True" if interpret_is_cpu else "False"
 
         aliasable_flags: dict[str, bool] = {}
@@ -2658,12 +2846,15 @@ class PallasKernel(SIMDKernel):
         non_alias_out_set = OrderedSet(
             [name for name, flag in aliasable_flags.items() if not flag]
         )
-        # On CPU (interpret=True) and TPU, pallas_call returns new arrays so
-        # we must copy back every output.  On CUDA, aliased outputs are
-        # mutated in-place by the donated-buffer mechanism so only
-        # non-aliased outputs need an explicit copy.
-        if interpret_is_cpu or is_tpu:
+        # On CPU (interpret=True), pallas_call returns new arrays so we must
+        # copy back every output.  On TPU, call_custom_kernel with
+        # input_output_aliases handles donation (zero-copy), so no copy is
+        # needed.  On CUDA, aliased outputs are mutated in-place by the
+        # donated-buffer mechanism so only non-aliased outputs need a copy.
+        if interpret_is_cpu:
             copy_output_indices = list(range(len(output_params)))
+        elif is_tpu:
+            copy_output_indices = []
         else:
             copy_output_indices = [
                 idx
@@ -2689,6 +2880,7 @@ class PallasKernel(SIMDKernel):
             full_kernel_params=full_kernel_params,
             non_alias_out_set=non_alias_out_set,
             copy_output_indices=copy_output_indices,
+            alias_pairs=[],
         )
         self.aliasable_out_ptrs = aliasable_flags
 
@@ -2717,6 +2909,10 @@ class PallasKernel(SIMDKernel):
         ]
         ctx.kernel_input_params = alias_params + ctx.pointer_tail
         ctx.full_kernel_params = alias_params + kernel_params
+
+        # Decide whether to use tiling for CPU/TPU after kernel body is fully
+        # generated (used_iter_vars is populated during load/store codegen).
+        self.tile_cpu_tpu = self._can_tile_cpu_tpu()
 
         # Emit the kernel function with the correct signature
         kernel_signature = (
@@ -2758,32 +2954,54 @@ class PallasKernel(SIMDKernel):
             ["out_shapes", "out_dtypes"] + ctx.size_var_params + ctx.kernel_input_params
         )
         code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
+
+        alias_pairs: list[tuple[int, int]] = []
+        for out_idx, name in enumerate(ctx.output_params):
+            if name.startswith("out_ptr"):
+                if aliasable_flags.get(name, False):
+                    alias_name = f"{name}_alias"
+                    input_idx = ctx.kernel_input_params.index(alias_name)
+                    alias_pairs.append((input_idx, out_idx))
+            else:
+                input_idx = ctx.kernel_input_params.index(name)
+                alias_pairs.append((input_idx, out_idx))
+        alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
+        ctx.alias_pairs = alias_pairs
+
         with code.indent():
+            # Pallas requires >= 1-d tensors; promote 0-d to (1,)
+            code.writeline(
+                "_pallas_out_shapes = tuple("
+                "s if len(s) > 0 else (1,) for s in out_shapes)"
+            )
+            # Reshape aliased inputs to match promoted output shapes
+            for input_idx, out_idx in alias_pairs:
+                param = ctx.kernel_input_params[input_idx]
+                code.writeline(
+                    f"{param} = {param}.reshape(_pallas_out_shapes[{out_idx}])"
+                )
             code.writeline("out_shapes_pallas = tuple(")
             code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
-            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(
+                "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
+            )
             code.writeline(")")
-            code.writeline("indexer = lambda n: lambda i: [i] * n")
-            code.writeline("out_specs_pallas = tuple(")
-            code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
-            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
-            code.writeline(")")
-            code.writeline("in_specs_pallas = tuple(")
-            code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
-            code.writeline("    for i in [" + ", ".join(ctx.kernel_input_params) + "]")
-            code.writeline(")")
-
-            alias_pairs: list[tuple[int, int]] = []
-            for out_idx, name in enumerate(ctx.output_params):
-                if name.startswith("out_ptr"):
-                    if aliasable_flags.get(name, False):
-                        alias_name = f"{name}_alias"
-                        input_idx = ctx.kernel_input_params.index(alias_name)
-                        alias_pairs.append((input_idx, out_idx))
-                else:
-                    input_idx = ctx.kernel_input_params.index(name)
-                    alias_pairs.append((input_idx, out_idx))
-            alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
+            if self.tile_cpu_tpu:
+                self._codegen_tiled_specs(ctx)
+            else:
+                code.writeline("indexer = lambda n: lambda i: [jnp.int32(i)] * n")
+                code.writeline("out_specs_pallas = tuple(")
+                code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+                code.writeline(
+                    "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
+                )
+                code.writeline(")")
+                code.writeline("in_specs_pallas = tuple(")
+                code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+                code.writeline(
+                    "    for i in [" + ", ".join(ctx.kernel_input_params) + "]"
+                )
+                code.writeline(")")
 
             # Wrap kernel with functools.partial to pass scalar arguments (size variables)
             partial_args = []
@@ -2819,15 +3037,17 @@ import jax
 import jax.numpy as jnp
 from jax.experimental import pallas as pl
 from torch._inductor.runtime.runtime_utils import (
+    pallas_compute_tiling, pallas_make_block_spec,
     pallas_gpu_align_output_specs, pallas_gpu_pad_inputs,
     pallas_gpu_unpad_results, pallas_partial_reduce,
     torch_dtype_to_jax_runtime,
 )
-""" + (
-            "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
-            if not ctx.interpret_is_cpu
-            else ""
-        )
+"""
+        if ctx.is_tpu:
+            imports += "\nimport jax.export"
+            imports += "\nfrom torch_tpu._internal.pallas import tpu_torch_pallas"
+        elif not ctx.interpret_is_cpu:
+            imports += "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
         ctx.code.splice(imports, strip=True)
 
     def _codegen_iteration_vars(
@@ -3167,6 +3387,63 @@ from torch._inductor.runtime.runtime_utils import (
             "        return pallas_gpu_unpad_results(_result, out_shapes, _is_scalar)"
         )
 
+    def _codegen_tiled_specs(self, ctx: _CodegenContext) -> None:
+        """Generate tiled BlockSpec and grid variables for CPU/TPU.
+
+        Tiles the last 1–2 dimensions of each tensor, respecting TPU
+        alignment constraints (last dim multiple of 128, second-to-last
+        multiple of 8).  Lower-ndim inputs are right-aligned with the
+        reference output shape per numpy broadcast rules.
+        """
+        code = ctx.code
+        transpose_literal = "True" if self.tile_has_transpose else "False"
+
+        skip_n = self.tile_skip_last_n
+        code.writeline(
+            f"_tile, _grid, _ax2g = pallas_compute_tiling("
+            f"out_shapes[0], transpose={transpose_literal}, "
+            f"skip_last_n={skip_n}, exact_only=True)"
+        )
+        code.writeline("_ng = len(_grid)")
+        code.writeline("_ref = out_shapes[0]")
+
+        code.writeline("out_specs_pallas = tuple(")
+        code.writeline(
+            "    pallas_make_block_spec(s, _ref, _tile, _ax2g, _ng, is_output=True)"
+        )
+        code.writeline("    for s in out_shapes")
+        code.writeline(")")
+
+        # Build per-input swap_last_two flags for transposed buffers
+        swap_flags = []
+        for param in ctx.kernel_input_params:
+            # Map kernel param back to graph buffer name
+            buf_name = None
+            for graph_name, inner_name in self.args.input_buffers.items():
+                if inner_name == param:
+                    buf_name = graph_name
+                    break
+            is_swap = buf_name is not None and buf_name in self.transposed_input_buffers
+            swap_flags.append(is_swap)
+
+        if any(swap_flags):
+            swap_list = ", ".join(str(f) for f in swap_flags)
+            code.writeline(f"_swap_flags = [{swap_list}]")
+            input_list = ", ".join(ctx.kernel_input_params)
+            code.writeline("in_specs_pallas = tuple(")
+            code.writeline(
+                f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng, swap_last_two=s)"
+                f" for i, s in zip([{input_list}], _swap_flags)"
+            )
+            code.writeline(")")
+        else:
+            input_list = ", ".join(ctx.kernel_input_params)
+            code.writeline("in_specs_pallas = tuple(")
+            code.writeline(
+                f"    pallas_make_block_spec(i.shape, _ref, _tile, _ax2g, _ng) for i in [{input_list}]"
+            )
+            code.writeline(")")
+
     def _codegen_jit_wrapper_cpu_tpu(
         self,
         ctx: _CodegenContext,
@@ -3175,13 +3452,14 @@ from torch._inductor.runtime.runtime_utils import (
         alias_map_literal: str,
     ) -> None:
         code = ctx.code
-        code.writeline("return pl.pallas_call(")
+        grid_expr = "_grid" if self.tile_cpu_tpu else "(1,)"
+        code.writeline("_result = pl.pallas_call(")
         code.writeline("    " + kernel_arg)
         code.writeline("    out_shape=out_shapes_pallas,")
         code.writeline("    out_specs=out_specs_pallas,")
         code.writeline("    in_specs=in_specs_pallas,")
         code.writeline(f"    interpret={ctx.interpret_literal},")
-        code.writeline("    grid=(1,),")
+        code.writeline(f"    grid={grid_expr},")
         code.writeline(
             f"    input_output_aliases={{ {alias_map_literal} }},"
             if alias_pairs
@@ -3191,8 +3469,146 @@ from torch._inductor.runtime.runtime_utils import (
         if ctx.kernel_input_params:
             code.writeline(f"    {', '.join(ctx.kernel_input_params)},")
         code.writeline(")")
+        # Reshape results back to original shapes (restores 0-d from promoted (1,))
+        code.writeline("if isinstance(_result, tuple):")
+        code.writeline(
+            "    _result = tuple(r.reshape(s) for r, s in zip(_result, out_shapes))"
+        )
+        code.writeline("else:")
+        code.writeline("    _result = _result.reshape(out_shapes[0])")
+        code.writeline("return _result")
 
     def _codegen_main_entry(self, ctx: _CodegenContext, jit_wrapper_name: str) -> None:
+        if ctx.is_tpu:
+            self._codegen_main_entry_tpu(ctx, jit_wrapper_name)
+        else:
+            self._codegen_main_entry_default(ctx, jit_wrapper_name)
+
+    def _codegen_main_entry_tpu(
+        self, ctx: _CodegenContext, jit_wrapper_name: str
+    ) -> None:
+        code = ctx.code
+        code.writeline("")
+        main_name = f"{ctx.kernel_name}_main"
+        kernel_name_str = ctx.kernel_name
+        code.writeline(
+            f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
+        )
+        with code.indent():
+            code.writeline("jax.config.update('jax_enable_x64', True)")
+            code.writeline("jax.clear_caches()")
+
+            # Build JAX placeholders for all inputs
+            code.writeline("# Build JAX placeholders for export tracing")
+            all_jax_input_names = []
+            for alias_name in ctx.alias_params:
+                code.writeline(
+                    f"{alias_name}_placeholder = jax.ShapeDtypeStruct("
+                    f"{alias_name}.shape, torch_dtype_to_jax_runtime({alias_name}.dtype))"
+                )
+                all_jax_input_names.append(f"{alias_name}_placeholder")
+            for ptr in ctx.pointer_tail:
+                code.writeline(
+                    f"{ptr}_placeholder = jax.ShapeDtypeStruct("
+                    f"{ptr}.shape, torch_dtype_to_jax_runtime({ptr}.dtype))"
+                )
+                all_jax_input_names.append(f"{ptr}_placeholder")
+
+            # Prepare output metadata
+            code.writeline(
+                "out_shapes = ("
+                + ", ".join([f"tuple({name}.shape)" for name in ctx.output_params])
+                + ",)"
+            )
+            dtype_exprs: list[str] = []
+            for name in ctx.output_params:
+                buf_name = ctx.output_buffer_lookup.get(name)
+                if buf_name is not None:
+                    dtype = V.graph.get_dtype(buf_name)
+                    if dtype is not None:
+                        dtype_exprs.append(torch_dtype_to_jax(dtype))
+                        continue
+                dtype_exprs.append(f"torch_dtype_to_jax_runtime({name}.dtype)")
+            code.writeline("out_dtypes = (" + ", ".join(dtype_exprs) + ",)")
+
+            # Export the jit_wrapper
+            wrapper_placeholder_args = ["out_shapes", "out_dtypes"]
+            wrapper_placeholder_args.extend(ctx.size_var_params)
+            wrapper_placeholder_args.extend(all_jax_input_names)
+            code.writeline(
+                f"exported = jax.export.export("
+                f"{jit_wrapper_name}, platforms=['tpu'])"
+                f"({', '.join(wrapper_placeholder_args)})"
+            )
+
+            # Register and call via tpu_torch_pallas
+            # Include all output and input shapes in the key to avoid stale
+            # cache hits when the same kernel name is compiled with different
+            # input/output ranks (e.g. broadcasting vs non-broadcasting calls).
+            shape_key_parts = []
+            for p in ctx.output_params:
+                shape_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            output_key_expr = (
+                " + 'x' + ".join(shape_key_parts) if shape_key_parts else "''"
+            )
+            input_key_parts = []
+            for p in ctx.kernel_input_params:
+                input_key_parts.append(f"'_'.join(str(s) for s in {p}.shape)")
+            input_key_expr = (
+                " + 'x' + ".join(input_key_parts) if input_key_parts else "''"
+            )
+            code.writeline(
+                f"kernel_key = '{kernel_name_str}_out_' + "
+                f"{output_key_expr}"
+                f" + '_in_' + {input_key_expr}"
+            )
+
+            code.writeline(
+                f"if not tpu_torch_pallas.lookup_custom_kernel('{kernel_name_str}', kernel_key):"
+            )
+            with code.indent():
+                code.writeline(
+                    f"tpu_torch_pallas.register_custom_kernel("
+                    f"'{kernel_name_str}', kernel_key, exported.mlir_module_serialized)"
+                )
+
+            # Build input tensor list (all non-size-var inputs)
+            input_tensor_names = list(ctx.alias_params) + list(ctx.pointer_tail)
+            code.writeline(f"input_tensors = [{', '.join(input_tensor_names)}]")
+
+            # Build output shapes list
+            code.writeline("output_shape_tensors = [")
+            with code.indent():
+                for name in ctx.output_params:
+                    buf_name = ctx.output_buffer_lookup.get(name)
+                    if buf_name is not None:
+                        dtype = V.graph.get_dtype(buf_name)
+                        if dtype is not None:
+                            code.writeline(
+                                f"torch.empty({name}.shape, dtype={dtype!r}, device='tpu'),"
+                            )
+                            continue
+                    code.writeline(
+                        f"torch.empty({name}.shape, dtype={name}.dtype, device='tpu'),"
+                    )
+            code.writeline("]")
+
+            # Build input_output_aliases for zero-copy donation
+            if ctx.alias_pairs:
+                alias_map_str = ", ".join(f"{i}: {o}" for (i, o) in ctx.alias_pairs)
+                code.writeline(f"_input_output_aliases = {{ {alias_map_str} }}")
+            else:
+                code.writeline("_input_output_aliases = {}")
+
+            code.writeline(
+                f"tpu_torch_pallas.call_custom_kernel("
+                f"input_tensors, output_shape_tensors, "
+                f"'{kernel_name_str}', kernel_key, _input_output_aliases)"
+            )
+
+    def _codegen_main_entry_default(
+        self, ctx: _CodegenContext, jit_wrapper_name: str
+    ) -> None:
         code = ctx.code
         code.writeline("")
         main_name = f"{ctx.kernel_name}_main"
@@ -3200,7 +3616,6 @@ from torch._inductor.runtime.runtime_utils import (
             f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
         )
         with code.indent():
-            code.writeline("# Enable JAX x64 mode for float64/int64 support")
             code.writeline("jax.config.update('jax_enable_x64', True)")
             code.writeline("jax.clear_caches()")
             if ctx.alias_params:
@@ -3263,32 +3678,16 @@ from torch._inductor.runtime.runtime_utils import (
                 )
                 for idx in ctx.copy_output_indices:
                     out_name = ctx.output_params[idx]
-                    if ctx.is_tpu:
-                        code.writeline(
-                            f"res_cpu = jax.device_get(result_values[{idx}])"
-                        )
-                        code.writeline(f"{out_name}.copy_(torch.from_dlpack(res_cpu))")
-                    else:
-                        code.writeline(
-                            f"{out_name}.copy_(torch.from_dlpack(result_values[{idx}]))"
-                        )
+                    code.writeline(
+                        f"{out_name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                    )
 
     @staticmethod
     def _emit_torch_to_jax(
         code: IndentedBuffer, var_name: str, is_tpu: bool, *, contiguous: bool
     ) -> None:
-        # TODO: The jax.device_put path is a temporary workaround for a Mosaic
-        # compiler bug with DLPack. Revert to from_dlpack once TorchTPU provides
-        # a direct method for placing a torch.Tensor on a TPU device.
-        if is_tpu:
-            code.writeline(
-                f"{var_name}_jax = jax.device_put({var_name}.cpu().numpy(), device=jax.devices('tpu')[0])"
-            )
-        else:
-            suffix = ".detach().contiguous()" if contiguous else ".detach()"
-            code.writeline(
-                f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})"
-            )
+        suffix = ".detach().contiguous()" if contiguous else ".detach()"
+        code.writeline(f"{var_name}_jax = jax.dlpack.from_dlpack({var_name}{suffix})")
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""

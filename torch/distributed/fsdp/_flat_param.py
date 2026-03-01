@@ -565,7 +565,6 @@ class FlatParamHandle:
         # Only align addresses for `use_orig_params=True` (for now)
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
-        # pyrefly: ignore [read-only]
         self.device = device
         self._device_handle = _FSDPDeviceHandle.from_device(self.device)
         self.process_group = process_group

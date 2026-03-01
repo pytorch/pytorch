@@ -314,6 +314,11 @@ inline T i1e(T _x) {
 template <typename T>
 inline float log_gamma(const T);
 
+/*
+ * The gamma function approximations follow John D Cook's
+ * c++ implementation:  https://www.johndcook.com/Gamma.cpp.
+ * (BSD License)
+ */
 template <typename T>
 inline float gamma(const T x) {
   if (x < 0.001) {
@@ -533,6 +538,12 @@ inline float calc_digamma_positive_domain(float x) {
   return result + ::metal::log(x) - (0.5 / x) - y;
 }
 
+/*
+ * The digamma kernel and helper function is derived from the pytorch cpu
+ * of this function, which is itself derived from the implementation
+ * of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ */
 template <typename T0>
 inline float digamma(T0 x) {
   if (x < 0.0f) {
@@ -570,6 +581,36 @@ inline float polygamma(const int64_t order, const T0 input) {
   float n = order;
   float sgn = ((order % 2) ? 1 : -1);
   return sgn * gamma(n + 1) * zeta(n + 1, x);
+}
+
+template <typename T>
+float trigamma(T x) {
+  float sign = 1.0f;
+  float result = 0.0f;
+
+  if (x < 0.0f) {
+    sign = -1.0f;
+    auto sin_pi_x = sin(M_PI_F * x);
+    result -= (M_PI_F * M_PI_F) / (sin_pi_x * sin_pi_x);
+    x = 1.0f - x;
+  } else if (x == 0.0) {
+    return INFINITY;
+  } else if (x < 1.0) {
+    result += 1.0 / (x * x);
+    x += 1.0f;
+  }
+
+  for (int i = 0; i < 6; ++i) {
+    result += 1.0f / (x * x);
+    x += 1.0f;
+  }
+
+  const float ixx = 1.0f / (x * x);
+  result +=
+      (1.0f + 1.0f / (2.0f * x) +
+       ixx * ((1.0f / 6.0f) - ixx * ((1.0f / 30.0f) - ixx * (1.0f / 42.0f)))) /
+      x;
+  return sign * result;
 }
 
 template <typename T>
