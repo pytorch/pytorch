@@ -883,6 +883,9 @@ void check_arguments(
   checkScalarTypes(
       "embedding_bag", weight_arg, {kHalf, kBFloat16, kFloat, kDouble});
 
+  TORCH_CHECK(
+      indices.numel() == 0 || offsets.size(0) > 0,
+      "embedding_bag: offsets tensor can not be empty if indices tensor is not empty");
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_embedding_bag_cpu_impl", [&]() {
     if (offsets.size(0) > 0) {
       index_t offset_0 = offsets.const_data_ptr<index_t>()[0];
