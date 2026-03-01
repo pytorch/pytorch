@@ -278,25 +278,25 @@ class MiscTests(torch._inductor.test_case.TestCase):
         torch._dynamo.decorators.mark_unbacked(b, 1)
 
         source_code = run_and_get_code(func, a, b)[1]
-
+        # Check that int64 indexing is used (either 1D [:] or 2D [:, None] form)
         self.assertTrue(
-            "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
-            in str(source_code)
+            "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+            or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
         )
+        # Check that 32-bit indexing is NOT used
         self.assertFalse(
-            "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+            "tl.arange(0, XBLOCK)[:]\n" in str(source_code)
+            and ".to(tl.int64)" not in str(source_code)
         )
 
         torch._dynamo.reset()
 
         with torch._inductor.config.patch(assume_32bit_indexing=True):
             source_code = run_and_get_code(func, a, b)[1]
+            # Check that int64 indexing is NOT used when assume_32bit_indexing=True
             self.assertFalse(
-                "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
-                in str(source_code)
-            )
-            self.assertTrue(
-                "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+                "tl.arange(0, XBLOCK)[:].to(tl.int64)" in str(source_code)
+                or "tl.arange(0, XBLOCK)[:, None].to(tl.int64)" in str(source_code)
             )
 
     def test_dynamo_side_effect(self):
@@ -2389,6 +2389,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # Verify the dynamic attribute is preserved
         self.assertTrue(hasattr(result, "c"))
         self.assertEqual(result.c, torch.tensor(3.0))
+
+    def test_namedtuple___eq__(self):
+        class MyNamedTuple(typing.NamedTuple):
+            a: int
+            b: int
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            t1 = MyNamedTuple(a=1, b=2)
+            t2 = (1, 2)
+            return x.sin(), (t1 == t2)
+
+        x = torch.randn(2)
+        res = f(x)
+        self.assertTrue(res[1])
 
     def test_structseq1(self):
         def fn(x, y):

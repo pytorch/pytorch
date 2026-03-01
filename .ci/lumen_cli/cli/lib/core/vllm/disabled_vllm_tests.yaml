@@ -1,0 +1,21 @@
+# Disabled vLLM tests for PyTorch CI.
+# Node IDs are relative to vLLM's tests/ directory.
+# Each entry requires 'test' (node ID) and 'issue' (tracking URL).
+#
+# To disable a test, copy one of the entries below into the disabled_tests list.
+#
+# Disable an entire test file (produces --ignore):
+#   - test: basic_correctness/test_basic_correctness.py
+#     issue: https://github.com/pytorch/pytorch/issues/12345
+#
+# Disable a single test (produces --deselect):
+#   - test: basic_correctness/test_basic_correctness.py::test_something
+#     issue: https://github.com/pytorch/pytorch/issues/12345
+#
+# Disable only in specific test plans via 'configs':
+#   - test: compile/test_fusion.py
+#     issue: https://github.com/pytorch/pytorch/issues/12345
+#     configs:
+#       - vllm_pytorch_compilation_unit_tests
+
+disabled_tests: []
