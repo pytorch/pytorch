@@ -8855,6 +8855,24 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = f(torch.tensor([20, 21]))
         self.assertEqual(torch.tensor(True), res)
 
+    def test_mark_dynamic_preserved_by_to(self):
+        counter = CompileCounter()
+
+        def my_dyn_fn(x):
+            return x.cos()
+
+        y = torch.randn([3, 4])
+        torch._dynamo.mark_dynamic(y, 1)
+        y2 = y.to(torch.float64)
+
+        torch.compile(my_dyn_fn, backend=counter)(y2)
+
+        y3 = torch.randn([3, 5], dtype=torch.float64)
+        torch.compile(my_dyn_fn, backend=counter)(y3)
+
+        # The last dim is dynamic (propagated through .to()), so no recompilation
+        self.assertEqual(counter.frame_count, 1)
+
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
     def test_mark_dynamic_with_ranges(self):
