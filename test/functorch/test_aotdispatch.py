@@ -171,9 +171,12 @@ def _pack_fp8_wrap(x):
         # Check only during compilation
         # Test calls hooks to get reference output
         ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
-        assert ctx["_fw_graph"] is not None
-        assert ctx["_bw_graph"] is not None
-        assert ctx["_node"] is not None
+        if ctx["_fw_graph"] is None:
+            raise AssertionError("Expected _fw_graph to not be None")
+        if ctx["_bw_graph"] is None:
+            raise AssertionError("Expected _bw_graph to not be None")
+        if ctx["_node"] is None:
+            raise AssertionError("Expected _node to not be None")
 
     return (x.dtype, x.to(torch.float8_e5m2))
 
@@ -188,9 +191,12 @@ def _unpack_fp8_wrap(x):
         # Check only during compilation
         # Test calls hooks to get reference output
         ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
-        assert ctx["_fw_graph"] is not None
-        assert ctx["_bw_graph"] is not None
-        assert ctx["_node"] is not None
+        if ctx["_fw_graph"] is None:
+            raise AssertionError("Expected _fw_graph to not be None")
+        if ctx["_bw_graph"] is None:
+            raise AssertionError("Expected _bw_graph to not be None")
+        if ctx["_node"] is None:
+            raise AssertionError("Expected _node to not be None")
     return tensor.to(dtype)
 
 
@@ -1527,7 +1533,8 @@ def forward(self, primals_1):
         class TracableCreateParameter(torch.autograd.Function):
             @staticmethod
             def forward(ctx, tensor, placeholder):
-                assert not tensor.requires_grad
+                if tensor.requires_grad:
+                    raise AssertionError("Expected tensor to not require grad")
                 return placeholder.set_(tensor)
 
             @staticmethod
@@ -2202,6 +2209,36 @@ def forward(self, primals_1, primals_2):
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
     return (view, add)""",
         )
+
+    def test_output_aliases_intermediate_no_grad_view(self):
+        # View of a differentiable intermediate created under no_grad().
+        # The view inherits requires_grad from the base but has no grad_fn,
+        # so it should not be treated as a differentiable output.
+        def f(a):
+            out = torch.mul(a, 3)
+            with torch.no_grad():
+                out_view = out.view(-1)
+            return out.sum(), out_view
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        compiled_f = aot_function(f, nop)
+
+        ref_loss, ref_view = f(inp)
+        test_loss, test_view = compiled_f(inp)
+        # The differentiable output (sum) participates in backward.
+        self.assertEqual(ref_loss, test_loss)
+        self.assertTrue(test_loss.requires_grad)
+        # The no_grad view still has requires_grad (matching eager) but
+        # does not participate in backward.
+        self.assertEqual(ref_view, test_view)
+        self.assertTrue(test_view.requires_grad)
+
+        ref_loss.backward()
+        ref_grad = inp.grad.clone()
+        inp.grad = None
+        test_loss.backward()
+        test_grad = inp.grad
+        self.assertEqual(ref_grad, test_grad)
 
     def test_output_aliases_intermediate_returned_multiple_times(self):
         def f(a):
@@ -3940,7 +3977,8 @@ def forward(self, tangents_1):
         aot_fn = make_fx(bn, decomposition_table=cudnn_batch_norm_decomp)(inp)
         res = aot_fn(inp)
         for a, b in zip(ref, res):
-            assert torch.allclose(a, b)
+            if not torch.allclose(a, b):
+                raise AssertionError(f"Tensors not allclose: {a} vs {b}")
 
     def test_output_op_depending_on_symint(self):
         """
@@ -4309,7 +4347,10 @@ def forward(self, tangents_1):
             def forward(self, x):
                 y = self.buffer.add_(3)
                 y.resize_([20])
-                assert y.shape == self.buffer.shape
+                if y.shape != self.buffer.shape:
+                    raise AssertionError(
+                        f"Expected y.shape {y.shape} == buffer.shape {self.buffer.shape}"
+                    )
                 return x.sum() + self.buffer.sum()
 
         m = M().eval()
@@ -4491,14 +4532,20 @@ def forward(self, tangents_1):
 
         def make_assert_pack(dynamic):
             def pack(activation):
-                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                    raise AssertionError(
+                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                    )
                 return activation
 
             return pack
 
         def make_assert_unpack(dynamic):
             def unpack(activation):
-                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                    raise AssertionError(
+                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                    )
                 return activation
 
             return unpack
@@ -4577,14 +4624,20 @@ def forward(self, tangents_1):
 
         def make_assert_pack(dynamic):
             def pack(activation):
-                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                    raise AssertionError(
+                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                    )
                 return activation
 
             return pack
 
         def make_assert_unpack(dynamic):
             def unpack(activation):
-                assert hasattr(activation, "_dynamo_weak_dynamic_indices") == dynamic
+                if hasattr(activation, "_dynamo_weak_dynamic_indices") != dynamic:
+                    raise AssertionError(
+                        f"Expected hasattr(..., '_dynamo_weak_dynamic_indices') to be {dynamic}"
+                    )
                 return activation
 
             return unpack
@@ -5800,9 +5853,12 @@ class TestPartitioning(AOTTestCase):
         )
         res = compiled_fn(res_a, res_b)
         res.sum().backward()
-        assert torch.allclose(ref, res, atol=1e-3, rtol=1e-3)
-        assert torch.allclose(ref_a.grad, res_a.grad, atol=1e-3, rtol=1e-3)
-        assert torch.allclose(ref_b.grad, res_b.grad, atol=1e-3, rtol=1e-3)
+        if not torch.allclose(ref, res, atol=1e-3, rtol=1e-3):
+            raise AssertionError("ref and res not allclose")
+        if not torch.allclose(ref_a.grad, res_a.grad, atol=1e-3, rtol=1e-3):
+            raise AssertionError("ref_a.grad and res_a.grad not allclose")
+        if not torch.allclose(ref_b.grad, res_b.grad, atol=1e-3, rtol=1e-3):
+            raise AssertionError("ref_b.grad and res_b.grad not allclose")
 
     def test_meta_tensor_inplace_op(self):
         # Following module results in inplace ops while tracing. The test checks
@@ -5825,7 +5881,10 @@ class TestPartitioning(AOTTestCase):
         def check_meta_tensor(fx_g, _):
             for node in fx_g.graph.nodes:
                 if node.op != "output":
-                    assert "tensor_meta" in node.meta
+                    if "tensor_meta" not in node.meta:
+                        raise AssertionError(
+                            f"Expected 'tensor_meta' in node.meta for {node}"
+                        )
             return fx_g
 
         inp0 = torch.randn(16, 128, 768, requires_grad=True)
@@ -6123,7 +6182,8 @@ def forward(self, primals_1, tangents_1):
         aot_fn = aot_function(fn, nop)
         res = aot_fn(x)
 
-        assert torch.allclose(ref, res)
+        if not torch.allclose(ref, res):
+            raise AssertionError("ref and res not allclose")
 
     # https://github.com/pytorch/pytorch/issues/110666
     def test_generate_gives_inference_graph(self):
@@ -7114,7 +7174,8 @@ metadata incorrectly.
                     (ref_out[0] + ref_out[1]).sum().backward()
                     (out[0] + out[1]).sum().backward()
                     self.assertEqual(ref_x.grad, x.grad)
-                    assert torch.allclose(ref_x.grad, x.grad, atol=1e-3, rtol=1e-3)
+                    if not torch.allclose(ref_x.grad, x.grad, atol=1e-3, rtol=1e-3):
+                        raise AssertionError("ref_x.grad and x.grad not allclose")
 
     def test_aot_dispatch_output_requires_grad_in_no_grad_views(self):
         # view-type ops preserve requires_grad even in no_grad.
@@ -7248,9 +7309,16 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = compiled_f(*cloned_inputs)
         res[0].sum().backward()
 
-        assert torch.allclose(ref[0], res[0])
-        assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
-        assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+        if not torch.allclose(ref[0], res[0]):
+            raise AssertionError("ref[0] and res[0] not allclose")
+        if not torch.allclose(inputs[0].grad, cloned_inputs[0].grad):
+            raise AssertionError(
+                "inputs[0].grad and cloned_inputs[0].grad not allclose"
+            )
+        if not torch.allclose(inputs[1].grad, cloned_inputs[1].grad):
+            raise AssertionError(
+                "inputs[1].grad and cloned_inputs[1].grad not allclose"
+            )
 
     def test_aot_module_simplified_dynamic(self):
         class MockModule(torch.nn.Module):
@@ -7287,9 +7355,16 @@ class TestAOTModuleSimplified(AOTTestCase):
  - Eq(s70, 30)""",
         )
 
-        assert torch.allclose(ref[0], res[0])
-        assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
-        assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+        if not torch.allclose(ref[0], res[0]):
+            raise AssertionError("ref[0] and res[0] not allclose")
+        if not torch.allclose(inputs[0].grad, cloned_inputs[0].grad):
+            raise AssertionError(
+                "inputs[0].grad and cloned_inputs[0].grad not allclose"
+            )
+        if not torch.allclose(inputs[1].grad, cloned_inputs[1].grad):
+            raise AssertionError(
+                "inputs[1].grad and cloned_inputs[1].grad not allclose"
+            )
 
     # https://github.com/pytorch/pytorch/issues/105327
     def test_lift_fresh_copy_in_graph(self):
@@ -7355,14 +7430,20 @@ class TestAOTModuleSimplified(AOTTestCase):
             if node.op != "call_function":
                 continue
             self.assertTrue(node.stack_trace is not None)
-            assert "test_aotdispatch.py" in node.stack_trace
+            if "test_aotdispatch.py" not in node.stack_trace:
+                raise AssertionError(
+                    f"Expected 'test_aotdispatch.py' in stack trace, got: {node.stack_trace}"
+                )
 
         def assert_compiler(gm: torch.fx.GraphModule, _):
             for node in gm.graph.nodes:
                 if node.op == "output" or node.op == "placeholder":
                     continue
                 self.assertTrue(node.stack_trace is not None)
-                assert "test_aotdispatch.py" in node.stack_trace
+                if "test_aotdispatch.py" not in node.stack_trace:
+                    raise AssertionError(
+                        f"Expected 'test_aotdispatch.py' in stack trace, got: {node.stack_trace}"
+                    )
             return gm.forward  # return a python callable
 
         x = torch.randn(128, 20, requires_grad=True)
@@ -7394,14 +7475,18 @@ class TestAOTModuleSimplified(AOTTestCase):
             if node.op != "call_function":
                 continue
             self.assertTrue(node.stack_trace is not None)
-            assert "test_aotdispatch.py" in node.stack_trace
+            if "test_aotdispatch.py" not in node.stack_trace:
+                raise AssertionError("Expected 'test_aotdispatch.py' in stack trace")
 
         def assert_compiler(gm: torch.fx.GraphModule, _):
-            assert torch.ops.aten.copy_.default in [x.target for x in gm.graph.nodes]
+            if torch.ops.aten.copy_.default not in [x.target for x in gm.graph.nodes]:
+                raise AssertionError("Expected aten.copy_.default in graph nodes")
             for node in gm.graph.nodes:
                 if node.target == torch.ops.aten.copy_.default:
-                    assert "stack_trace" in node.meta
-                    assert "x_view.mul_(2)" in node.meta["stack_trace"]
+                    if "stack_trace" not in node.meta:
+                        raise AssertionError("Expected 'stack_trace' in node.meta")
+                    if "x_view.mul_(2)" not in node.meta["stack_trace"]:
+                        raise AssertionError("Expected 'x_view.mul_(2)' in stack trace")
             return gm.forward  # return a python callable
 
         x = torch.randn(128, 20)
@@ -7628,10 +7713,10 @@ class TestAOTModuleSimplified(AOTTestCase):
         y2 = fn_comp(x2)
         with self.assertRaisesRegex(
             RuntimeError,
-            """
+            r"""
 During the backward, we encountered a tensor subclass where we guessed its
 metadata incorrectly.
-""",  # noqa: F541
+Expected a .* tangent but got a plain Tensor.""",
         ):
             y2.backward(gradient=torch.randn(2, 3))
 
@@ -8551,7 +8636,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.fractional_max_pool3d", ""
     ),  # rand() received an invalid combination of arguments - g...
-    xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     decorate(
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),

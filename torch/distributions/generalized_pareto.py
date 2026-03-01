@@ -131,7 +131,6 @@ class GeneralizedPareto(Distribution):
         concentration = self.concentration
         valid = concentration < 0.5
         safe_conc = torch.where(valid, concentration, 0.25)
-        # pyrefly: ignore [unsupported-operation]
         result = self.scale**2 / ((1 - safe_conc) ** 2 * (1 - 2 * safe_conc))
         return torch.where(valid, result, nan)
 

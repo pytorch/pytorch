@@ -492,6 +492,7 @@ class TensorReferenceAnalysis:
         # TODO: This is wrong, CPython has a custom implementation of true
         # division that results in higher precision when the floats are
         # sufficiently large.  Short term fix: add a guard here
+        # pyrefly: ignore [unreachable]
         return torch.ops.aten.true_divide.default(
             _to_dtype(a, torch.float64), _to_dtype(b, torch.float64)
         )
