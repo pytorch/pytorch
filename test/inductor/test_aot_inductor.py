@@ -5620,22 +5620,18 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randint(high=1024, size=(1,), device=self.device),)
 
-        expected_scalar_args = [
-            "triton_poi_fused_zeros_like_0_xnumel",
-            "triton_poi_fused_ones_1_xnumel",
-            "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
-        ]
-
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(
                 AOTIRunnerUtil.compile, Model(), example_inputs
             )
             self.assertEqual("aoti_torch_print_tensor_handle" in code, True)
-            for scalar in expected_scalar_args:
-                FileCheck().check_count(
-                    f"{scalar}",
-                    2,
-                ).run(code)
+            # The debug printer should emit xnumel scalar args for the
+            # fill kernels (ones/zeros_like). Kernel names may change due
+            # to fusion, so match the pattern rather than exact names.
+            FileCheck().check_regex(r"triton_poi_fused_\w+_xnumel").check_count(
+                "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
+                2,
+            ).run(code)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
@@ -5779,24 +5775,19 @@ class AOTInductorTestsTemplate:
         example_inputs = (
             torch.randint(high=1024, size=(1,), device=self.device, dtype=torch.int32),
         )
-        # This simple unit test case model generates two triton kernels:
-        # 1. triton_poi_fused_ones_1:
-        # triton_meta={'signature': {'out_ptr0': '*fp32', 'xnumel': 'i64'}
-        # 2. add_kernel:
-        # triton_meta={'signature': {'in_ptr0': '*fp32', 'in_ptr1': '*fp32', 'out_ptr': '*fp32', 'n_elements': 'i64'}
-        # input u0 was defined as int32_t initially, verify for every kernel var args downstream,
-        # it gets explicitly declared using its data types in the cpp wrapper codegen code.
+        # This simple unit test case model generates triton kernels:
+        # 1. triton_poi_fused_ones_zeros_like (fill ops fused)
+        # 2. add_kernel
+        # input u0 was defined as int32_t initially, verify for every kernel
+        # var args downstream, it gets explicitly declared using its data
+        # types in the cpp wrapper codegen code.
         expected_scalar_args = [
-            "buf3, u0",
-            "buf4, u0",
-            "buf4, buf5, buf3, u0",
+            "buf3, buf4, buf5, u0",
         ]
         if full_aoti_runtime_assert():
-            # we'll have one more assertion
+            # OSS has one more assertion
             expected_scalar_args = [
-                "buf4, u0",
-                "buf5, u0",
-                "buf5, buf6, buf4, u0",
+                "buf4, buf5, buf6, u0",
             ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(

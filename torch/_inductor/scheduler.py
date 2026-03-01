@@ -5881,6 +5881,18 @@ class Scheduler:
         """
         The first term in our fusion score that estimates number of saved
         memory operations.
+
+        This function scores fusion candidates based on shared memory access patterns.
+        Higher scores indicate better fusion candidates.
+
+        Scoring strategy:
+        1. If nodes share exact memory deps (same buffer + same indexing), return
+           the sum of shared dep sizes (original behavior).
+        2. If no exact matches (score == 0), check for same-buffer reads with
+           different indexing (e.g., split operations reading different slices).
+           - Give bonus if nodes read from exactly the same set of buffers
+           - Score based on overlap ratio: common_buffer_size / total_read_size
+           - High overlap (>50%) suggests good cache locality benefit from fusion
         """
 
         def _construct_return_value(score, is_mix_order_reduction):
@@ -5919,9 +5931,189 @@ class Scheduler:
         common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
             node2.read_writes.reads | node2.read_writes.writes
         )
-        return _construct_return_value(
-            sum(self.dep_size_hint(dep) for dep in common_memory_deps), False
+
+        score = sum(self.dep_size_hint(dep) for dep in common_memory_deps)
+
+        # If no exact dep matches, check for same-buffer reads with different indexing.
+        # This handles cases like split operations that read different slices of the
+        # same buffer - they should fuse for cache locality benefits.
+        if score == 0 and self._can_use_buffer_overlap_scoring(node1, node2):
+            score = self._score_fusion_memory_by_buffer_overlap(node1, node2)
+
+        return _construct_return_value(score, False)
+
+    def _can_use_buffer_overlap_scoring(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> bool:
+        """
+        Check if buffer overlap scoring should be used for this node pair.
+
+        Buffer overlap scoring handles split/cat patterns where nodes read from
+        the same buffer at different indices. We skip it when:
+        - Either node is a reduction (different memory access patterns)
+        - Either node is a template
+        - Both nodes are prologue/epilogue candidates for the same template,
+          because horizontal fusion would prevent them from being absorbed
+          into the template kernel. For example, in:
+            q = a[:64, :]; k = a[64:, :]
+            return mm(q + 2, k - 2)
+          "q + 2" and "k - 2" both read from `a` and would get a high overlap
+          score, but fusing them horizontally prevents prologue fusion into mm
+          (resulting in 2 kernels instead of 1).
+
+        We allow buffer overlap scoring when:
+        - The node outputs are not actually in the template's allowed_prologue_inps,
+          meaning they can't be prologue-fused anyway, so horizontal fusion doesn't
+          prevent any optimization opportunity.
+        """
+        if node1.is_reduction() or node2.is_reduction():
+            return False
+        if node1.is_template() or node2.is_template():
+            return False
+
+        if config.prologue_fusion or config.epilogue_fusion:
+            node1_outputs = node1.get_outputs()
+            node2_outputs = node2.get_outputs()
+
+            # Early return if either node has no outputs
+            if not node1_outputs or not node2_outputs:
+                return True
+
+            node1_output_names = OrderedSet(buf.get_name() for buf in node1_outputs)
+            node2_output_names = OrderedSet(buf.get_name() for buf in node2_outputs)
+
+            # Find templates that consume node1's outputs via buffer users
+            # and check if the outputs are actually prologue-fusable
+            node1_prologue_eligible_template_users: OrderedSet[BaseSchedulerNode] = (
+                OrderedSet()
+            )
+            for buf in node1_outputs:
+                for user in buf.users:
+                    if (
+                        isinstance(user.node, BaseSchedulerNode)
+                        and user.node.is_template()
+                    ):
+                        # Check if this output is actually in the template's
+                        # allowed_prologue_inps. If not, fusing horizontally
+                        # won't prevent any prologue fusion opportunity.
+                        template_node = user.node.get_template_node()
+                        if template_node is not None and isinstance(
+                            template_node, ir.TritonTemplateBuffer
+                        ):
+                            allowed_inps = template_node.get_allowed_prologue_inps()
+                            if node1_output_names & allowed_inps:
+                                node1_prologue_eligible_template_users.add(user.node)
+                        else:
+                            # Conservative: assume it could be a prologue candidate
+                            node1_prologue_eligible_template_users.add(user.node)
+
+            # Check if any of node1's prologue-eligible template users also consume
+            # node2's outputs in a prologue-eligible way
+            if node1_prologue_eligible_template_users:
+                for buf in node2_outputs:
+                    for user in buf.users:
+                        if (
+                            isinstance(user.node, BaseSchedulerNode)
+                            and user.node.is_template()
+                            and user.node in node1_prologue_eligible_template_users
+                        ):
+                            # Also verify node2's output is prologue-eligible
+                            template_node = user.node.get_template_node()
+                            if template_node is not None and isinstance(
+                                template_node, ir.TritonTemplateBuffer
+                            ):
+                                allowed_inps = template_node.get_allowed_prologue_inps()
+                                if node2_output_names & allowed_inps:
+                                    return False
+                            else:
+                                # Conservative: block fusion
+                                return False
+
+        return True
+
+    def _score_fusion_memory_by_buffer_overlap(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        """
+        Score fusion based on buffer name overlap when exact dep matching fails.
+
+        This handles the split/cat fusion case where nodes read from the same buffer
+        but at different indices (e.g., different slices from a split operation).
+
+        Scoring logic:
+        - If nodes read from exactly the same buffers: high bonus (encourages fusion)
+        - For common buffers: score based on overlap ratio
+          - overlap_ratio = common_buffer_size / max(node1_total_reads, node2_total_reads)
+          - If overlap_ratio > threshold (e.g., 0.5): give proportional score
+          - If overlap_ratio < threshold: minimal/no score (not worth fusing)
+
+        Note on dynamic shapes:
+        - When deps have unbacked symbols (dynamic shapes), dep_size_hint returns 0
+        - In this case, we use count * 10 as a proxy for size
+        - This ensures fusion still works for models with dynamic batch sizes
+
+        Note on multiple deps from same buffer:
+        - A node may have multiple MemoryDep entries for the same buffer name
+          (e.g., 4 split reads from arg0_1 at different indices)
+        - We sum ALL dep sizes for each buffer, not just take max
+        - This ensures overlap ratio is calculated correctly when nodes read
+          multiple slices from the same underlying buffer
+        """
+        # Minimum overlap ratio to consider fusion beneficial
+        MIN_OVERLAP_RATIO = 0.5
+        # Fallback size when dep_size_hint returns 0 (e.g., unbacked symbols)
+        FALLBACK_DEP_SIZE = 10
+
+        def get_dep_size(dep: Dep) -> int:
+            size = self.dep_size_hint(dep)
+            return size if size > 0 else FALLBACK_DEP_SIZE
+
+        node1_read_names = OrderedSet(dep.name for dep in node1.read_writes.reads)
+        node2_read_names = OrderedSet(dep.name for dep in node2.read_writes.reads)
+
+        # Early exit if no common buffer names
+        common_names = node1_read_names & node2_read_names
+
+        if not common_names:
+            return 0
+
+        # Calculate total read sizes for each node (sum of ALL deps)
+        node1_total_read_size = sum(
+            get_dep_size(dep) for dep in node1.read_writes.reads
         )
+        node2_total_read_size = sum(
+            get_dep_size(dep) for dep in node2.read_writes.reads
+        )
+
+        max_total_read_size = max(node1_total_read_size, node2_total_read_size)
+        if max_total_read_size == 0:
+            return 0
+
+        # Calculate total reads from common buffers for each node
+        # Sum ALL deps for each common buffer name (handles multiple reads from same buffer)
+        node1_common_read_size = sum(
+            get_dep_size(dep)
+            for dep in node1.read_writes.reads
+            if dep.name in common_names
+        )
+        node2_common_read_size = sum(
+            get_dep_size(dep)
+            for dep in node2.read_writes.reads
+            if dep.name in common_names
+        )
+
+        # Use max of the two as the common buffer size estimate
+        # This represents how much data is being read from shared buffers
+        common_read_buffer_size = max(node1_common_read_size, node2_common_read_size)
+
+        # Calculate overlap ratio
+        overlap_ratio = common_read_buffer_size / max_total_read_size
+        # Scale score by overlap ratio and common buffer size
+        # Higher overlap = higher score
+        # Larger common buffer = higher score (more cache benefit)
+        return common_read_buffer_size if overlap_ratio >= MIN_OVERLAP_RATIO else 0
 
     def get_possible_fusions_with_highest_priority(
         self, possible_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]]
