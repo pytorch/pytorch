@@ -78,8 +78,9 @@ __global__ void prepare_grouped_gemm_data(
       if (N < 0) {
         int align = 128 / cutlass::sizeof_bits<DtypeOutput>::value;
         CUDA_KERNEL_ASSERT(
-                           delta % align == 0 &&
-                           "expected output tensor dynamic dimension byte size to be non-negative multiple of 16\n");
+            delta % align == 0 &&
+            "expected output tensor dynamic dimension byte size to be non-negative multiple of 16");
+
       }
     }
   }
