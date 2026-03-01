@@ -208,7 +208,14 @@ class TORCH_API class_base {
       const std::type_info& intrusivePtrClassTypeid,
       const std::type_info& taggedCapsuleClass);
 
+  // Copies the argument names and default values to the function schema
+  // taking care to preserve the first argument (self)
   static c10::FunctionSchema withNewArguments(
+      const c10::FunctionSchema& schema,
+      std::initializer_list<arg> default_args);
+
+  // Copies the argument names and default values to the function schema
+  static c10::FunctionSchema withNewArgumentsStatic(
       const c10::FunctionSchema& schema,
       std::initializer_list<arg> default_args);
   std::string qualClassName;
