@@ -288,89 +288,231 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        from . import ConstantVariable
+    def lookup_cls_mro_attr(self, name: str) -> object:
+        """Walk cls.__mro__ only (not the metaclass chain) to find *name*."""
+        for base in self.value.__mro__:
+            if name in base.__dict__:
+                return base.__dict__[name]
+        return NO_SUCH_SUBOBJ
 
+    def lookup_metaclass_attr(self, name: str) -> object:
+        """Walk type(cls).__mro__ (the metaclass chain) to find *name*."""
+        for base in type(self.value).__mro__:
+            if name in base.__dict__:
+                return base.__dict__[name]
+        return NO_SUCH_SUBOBJ
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         source = AttrSource(self.source, name) if self.source is not None else None
 
-        if name == "__name__":
-            return VariableTracker.build(tx, self.value.__name__)
-        elif name == "__qualname__":
-            return VariableTracker.build(tx, self.value.__qualname__)
-        elif name == "__dict__":
-            options = {"source": source}
-            return variables.GetAttrVariable(self, name, None, **options)
-        elif name == "__mro__":
-            attr_source = self.source and TypeMROSource(self.source)
-            return VariableTracker.build(tx, self.value.__mro__, attr_source)
+        # --- Dynamo-specific pre-checks ---
 
-        # Special handling of collections.OrderedDict.fromkeys()
-        # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
-        # collections.defaultdict, and both will be handled at UserDefinedClassVariable.call_method().
-        # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
-        # and we need duplicate code to handle both cases.
+        # Wrap OrderedDict/defaultdict.fromkeys as GetAttrVariable so it's
+        # handled uniformly in call_method().
         if (
             self.value in {collections.OrderedDict, collections.defaultdict}
             and name == "fromkeys"
         ):
             return super().var_getattr(tx, name)
 
-        obj = None
-        try:
-            obj = inspect.getattr_static(self.value, name)
-        except AttributeError:
-            if type(self.value) is type:
-                raise_observed_exception(
-                    AttributeError,
-                    tx,
-                    args=[
-                        f"type object '{self.value.__name__}' has no attribute '{name}'"
-                    ],
-                )
+        # Custom metaclasses that override __getattribute__ replace the entire
+        # lookup algorithm; bail out for those. Standard metaclasses (ABCMeta,
+        # EnumType, etc.) that don't override __getattribute__ use
+        # type.__getattribute__ which is the algorithm we implement below.
+        metacls = type(self.value)
+        if metacls is not type and "__getattribute__" in metacls.__dict__:
+            unimplemented(
+                gb_type="Custom metaclass with __getattribute__",
+                context=f"type({self.value}) = {metacls}",
+                explanation="Dynamo does not trace attribute access on classes whose "
+                "metaclass overrides __getattribute__",
+                hints=graph_break_hints.SUPPORTABLE,
+            )
 
-        if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(obj):
-            return super().var_getattr(tx, name)
+        # ---- CPython type_getattro algorithm ----
+        # 1. meta_attr = lookup name in type(cls).__mro__  (metaclass chain)
+        # 2. if meta_attr is a DATA descriptor → invoke
+        # 3. cls_attr = lookup name in cls.__mro__  (class chain)
+        # 4. if cls_attr has __get__ → invoke cls_attr.__get__(None, cls)
+        # 5. if cls_attr exists (plain) → return as-is
+        # 6. if meta_attr is a non-data descriptor → invoke
+        # 7. if meta_attr exists (plain) → return
+        # 8. raise AttributeError
 
-        if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
+        # Step 1-2: Metaclass data descriptors.
+        # For type(cls) is type, these are C-level getset/member descriptors
+        # for __dict__, __mro__, __name__, __qualname__, __doc__, etc.
+        meta_attr = self.lookup_metaclass_attr(name)
+        if meta_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(meta_attr):
+            return self.resolve_meta_data_descriptor(tx, name, meta_attr, source)
+
+        # Step 3-5: Class MRO lookup.
+        cls_attr = self.lookup_cls_mro_attr(name)
+        if cls_attr is not NO_SUCH_SUBOBJ:
+            if hasattr(type(cls_attr), "__get__"):
+                # Step 4: Descriptor — invoke __get__(None, cls).
+                return self.resolve_cls_descriptor(tx, name, cls_attr, source)
+            # Step 5: Plain attribute.
+            return self.resolve_cls_plain_attr(tx, name, cls_attr, source)
+
+        # Step 6-7: Metaclass non-data descriptor or plain attr.
+        # These are non-data descriptors on the metaclass (e.g. type.__call__,
+        # type.__subclasses__, type.mro).  We use GetAttrVariable to defer to
+        # runtime rather than VariableTracker.build, because build would create
+        # a variable for the raw C-level descriptor which then fails when
+        # called (e.g. type.__subclasses__ is a method_descriptor that dynamo
+        # can't trace).  GetAttrVariable defers the access and lets
+        # call_method handle it.
+        if meta_attr is not NO_SUCH_SUBOBJ:
             return variables.GetAttrVariable(self, name, None, source=source)
 
-        if isinstance(obj, staticmethod):
-            return VariableTracker.build(tx, obj.__get__(self.value), source)
-        elif isinstance(obj, classmethod):
-            if isinstance(obj.__func__, property):
-                fget_vt = VariableTracker.build(tx, obj.__func__.fget)
+        # Step 8: __getattr__ on metaclass.
+        metacls = type(self.value)
+        if metacls is not type:
+            meta_getattr = self.lookup_metaclass_attr("__getattr__")
+            if meta_getattr is not NO_SUCH_SUBOBJ and isinstance(
+                meta_getattr, types.FunctionType
+            ):
+                return variables.UserMethodVariable(meta_getattr, self).call_function(
+                    tx, [variables.ConstantVariable.create(name)], {}
+                )
+
+        # Step 9: AttributeError.
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[f"type object '{self.value.__name__}' has no attribute '{name}'"],
+        )
+
+    def resolve_meta_data_descriptor(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        meta_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Handle data descriptors from the metaclass MRO (type.__dict__ slots)."""
+        if name == "__dict__":
+            return variables.GetAttrVariable(self, name, None, source=source)
+        if name == "__mro__":
+            attr_source = self.source and TypeMROSource(self.source)
+            return VariableTracker.build(tx, self.value.__mro__, attr_source)
+        # __name__, __qualname__, __doc__, __module__, __bases__,
+        # __abstractmethods__, etc. — all C-level getset descriptors on type.
+        resolved = type.__getattribute__(self.value, name)
+        return VariableTracker.build(tx, resolved, source)
+
+    def resolve_cls_descriptor(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        cls_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Handle descriptors found in cls.__mro__."""
+        if isinstance(cls_attr, staticmethod):
+            return VariableTracker.build(tx, cls_attr.__get__(self.value), source)
+
+        if isinstance(cls_attr, classmethod):
+            if isinstance(cls_attr.__func__, property):
+                fget_vt = VariableTracker.build(tx, cls_attr.__func__.fget)
                 return fget_vt.call_function(tx, [self], {})
-            return variables.UserMethodVariable(obj.__func__, self, source=source)
-        elif isinstance(obj, types.ClassMethodDescriptorType):
-            # e.g.: inspect.getattr_static(dict, "fromkeys")
-            #       inspect.getattr_static(itertools.chain, "from_iterable")
-            func = obj.__get__(None, self.value)
+            return variables.UserMethodVariable(cls_attr.__func__, self, source=source)
+
+        if isinstance(cls_attr, types.ClassMethodDescriptorType):
+            func = cls_attr.__get__(None, self.value)
             return VariableTracker.build(tx, func, source)
-        elif source:
-            if inspect.ismemberdescriptor(obj):
-                return VariableTracker.build(tx, obj.__get__(self.value), source)
 
-        if ConstantVariable.is_literal(obj):
-            return VariableTracker.build(tx, obj)
-        elif isinstance(obj, enum.Enum):
-            return VariableTracker.build(tx, obj)
-        elif self.value is collections.OrderedDict:
-            return variables.GetAttrVariable(self, name)
-        elif name in getattr(self.value, "__dict__", {}) or (
-            self.value.__module__.startswith("torch.")
-            or self.value.__module__ == "torch"
-        ):
+        # property and _tuplegetter accessed on the class return the
+        # descriptor itself (descriptor.__get__(None, cls) is descriptor).
+        # Build directly — no need to invoke __get__.
+        if isinstance(cls_attr, (property, _collections._tuplegetter)):
             if source:
-                return VariableTracker.build(tx, obj, source)
+                return VariableTracker.build(tx, cls_attr, source)
+            return UserDefinedObjectVariable(cls_attr)
 
-        if (
-            source
-            and not inspect.ismethoddescriptor(obj)
-            and not is_wrapper_or_member_descriptor(obj)
+        # Comparison dunders inherited from object — defer to runtime.
+        if name in cmp_name_to_op_mapping and not isinstance(
+            cls_attr, types.FunctionType
         ):
-            return VariableTracker.build(tx, obj, source)
+            return variables.GetAttrVariable(self, name, None, source=source)
 
-        return super().var_getattr(tx, name)
+        # User-defined descriptor with Python __get__.
+        # For torch-internal classes or attributes in the class's own __dict__,
+        # defer descriptor invocation to runtime via VariableTracker.build to
+        # avoid compile-time side effects (e.g. deprecation warnings from
+        # _ClassPropertyDescriptor on torch.FloatStorage.dtype).
+        get_fn = inspect.getattr_static(type(cls_attr), "__get__", None)
+        if isinstance(get_fn, types.FunctionType):
+            if source and (
+                name in getattr(self.value, "__dict__", {})
+                or self.value.__module__.startswith("torch.")
+                or self.value.__module__ == "torch"
+            ):
+                return VariableTracker.build(tx, cls_attr, source)
+            return self.invoke_cls_descriptor_get(tx, name, cls_attr, source)
+
+        # C-level descriptors (WrapperDescriptor, MethodDescriptor, etc.)
+        # Build directly when the attribute lives in the class's own __dict__
+        # or the class belongs to torch (needed for e.g. torch.Tensor.dim).
+        # OrderedDict's C-level methods are handled at runtime.
+        if inspect.ismethoddescriptor(cls_attr) or is_wrapper_or_member_descriptor(
+            cls_attr
+        ):
+            if (
+                source
+                and self.value is not collections.OrderedDict
+                and (
+                    name in getattr(self.value, "__dict__", {})
+                    or self.value.__module__.startswith("torch.")
+                    or self.value.__module__ == "torch"
+                )
+            ):
+                return VariableTracker.build(tx, cls_attr, source)
+            return variables.GetAttrVariable(self, name, None, source=source)
+
+        # Everything else: FunctionType, etc.
+        return VariableTracker.build(tx, cls_attr, source)
+
+    def resolve_cls_plain_attr(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        cls_attr: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Handle non-descriptor attributes from cls.__mro__."""
+        if name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
+            cls_attr
+        ):
+            return super().var_getattr(tx, name)
+        if self.value is collections.OrderedDict:
+            return variables.GetAttrVariable(self, name)
+        return VariableTracker.build(tx, cls_attr, source)
+
+    def invoke_cls_descriptor_get(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        descriptor: object,
+        source: Source | None,
+    ) -> VariableTracker:
+        """Trace a class-MRO descriptor's __get__(None, cls) call."""
+        descriptor_source = None
+        descriptor_get_source = None
+        if self.source:
+            descriptor_source = AttrSource(self.source, name)
+            descriptor_get_source = AttrSource(TypeSource(descriptor_source), "__get__")
+            descriptor_var = VariableTracker.build(tx, descriptor, descriptor_source)
+        else:
+            descriptor_var = UserDefinedObjectVariable(descriptor)
+
+        none_var = variables.ConstantVariable.create(None)
+        return variables.UserMethodVariable(
+            descriptor.__get__.__func__,  # type: ignore[union-attr]
+            descriptor_var,
+            source=descriptor_get_source,
+        ).call_function(tx, [none_var, self], {})
 
     def _call_cross_entropy_loss(
         self,
