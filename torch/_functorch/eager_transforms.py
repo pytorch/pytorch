@@ -1068,6 +1068,7 @@ def jvp(
     *,
     strict: bool = False,
     has_aux: bool = False,
+    track_tangent_grad: bool = True,
 ) -> tuple[Any, Any] | tuple[Any, Any, Any]:
     """
     Standing for the Jacobian-vector product, returns a tuple containing
@@ -1088,6 +1089,10 @@ def jvp(
             the function to be differentiated and the second element is
             other auxiliary objects that will not be differentiated.
             Default: False.
+        track_tangent_grad (bool): If True, the tangent output is tracked for
+            backward. If False, the tangent output has
+            ``requires_grad=False``, avoiding activation caching for the tangent.
+            Default: True.
 
     Returns:
         Returns a ``(output, jvp_out)`` tuple containing the output of ``func``
@@ -1120,7 +1125,13 @@ def jvp(
     """
 
     return _jvp_with_argnums(
-        func, primals, tangents, argnums=None, strict=strict, has_aux=has_aux
+        func,
+        primals,
+        tangents,
+        argnums=None,
+        strict=strict,
+        has_aux=has_aux,
+        track_tangent_grad=track_tangent_grad,
     )
 
 
@@ -1132,6 +1143,7 @@ def _jvp_with_argnums(
     *,
     strict: bool = False,
     has_aux: bool,
+    track_tangent_grad: bool = True,
 ) -> tuple[Any, Any] | tuple[Any, Any, Any]:
     # This is the same function as jvp but also accepts an argnums argument
     # Most args are the same as jvp except for the added argument
@@ -1171,14 +1183,22 @@ def _jvp_with_argnums(
         with fwAD._set_fwd_grad_enabled(True):
             ctx = fwAD.dual_level if JVP_NESTING == 1 else contextlib.nullcontext
             with ctx():
-                flat_duals = tuple(
-                    fwAD.make_dual(p, t) for p, t in zip(flat_primals, flat_tangents)
-                )
-                duals = tree_unflatten(flat_duals, primals_spec)
-                if argnums is not None:
-                    primals = _wrap_all_tensors(primals, level)
-                    duals = _replace_args(primals, duals, argnums)
-                result_duals = func(*duals)
+                # track_tangent_grad=False: store tangents detached (excluded from backward graph).
+                if not track_tangent_grad:
+                    torch._C._set_fw_grad_tangent_not_tracked(True)
+                try:
+                    flat_duals = tuple(
+                        fwAD.make_dual(p, t)
+                        for p, t in zip(flat_primals, flat_tangents)
+                    )
+                    duals = tree_unflatten(flat_duals, primals_spec)
+                    if argnums is not None:
+                        primals = _wrap_all_tensors(primals, level)
+                        duals = _replace_args(primals, duals, argnums)
+                    result_duals = func(*duals)
+                finally:
+                    if not track_tangent_grad:
+                        torch._C._set_fw_grad_tangent_not_tracked(False)
                 aux: Any = None
                 if has_aux:
                     if not (isinstance(result_duals, tuple) and len(result_duals) == 2):

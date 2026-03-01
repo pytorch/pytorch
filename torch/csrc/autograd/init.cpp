@@ -1026,6 +1026,33 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_fw_grad_tangent_not_tracked(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
+  c10::AutogradState::get_tls_state().set_fw_grad_tangent_not_tracked(
+      arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_fw_grad_tangent_not_tracked(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state().get_fw_grad_tangent_not_tracked()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 template <bool skip_tensors_in_non_tensorlist>
 static bool visit(
     PyObject* o,
@@ -1568,6 +1595,14 @@ static PyMethodDef methods[] = {
      METH_VARARGS,
      nullptr},
     {"_is_fwd_grad_enabled", is_fwd_grad_enabled, METH_NOARGS, nullptr},
+    {"_set_fw_grad_tangent_not_tracked",
+     set_fw_grad_tangent_not_tracked,
+     METH_O,
+     nullptr},
+    {"_is_fw_grad_tangent_not_tracked",
+     is_fw_grad_tangent_not_tracked,
+     METH_NOARGS,
+     nullptr},
     {"is_inference_mode_enabled",
      is_inference_mode_enabled,
      METH_NOARGS,

@@ -2804,6 +2804,28 @@ class TestJvp(TestCase):
         self.assertEqual(out, x.sin())
         self.assertEqual(jvp_out, t * x.cos())
 
+    def test_jvp_track_tangent_grad(self, device):
+        def func(x):
+            return x.sin()
+
+        x = torch.randn(2, 3, device=device, requires_grad=True)
+        v = torch.randn(2, 3, device=device)
+
+        # check default
+        value_ttg_true, grad_ttg_true = jvp(func, (x,), (v,))
+        self.assertTrue(value_ttg_true.requires_grad)
+        self.assertTrue(grad_ttg_true.requires_grad)
+
+        value_ttg_false, grad_ttg_false = jvp(
+            func, (x,), (v,), track_tangent_grad=False
+        )
+        self.assertTrue(value_ttg_false.requires_grad)
+        self.assertFalse(grad_ttg_false.requires_grad)
+
+        # Values unchanged
+        self.assertEqual(value_ttg_false, value_ttg_true)
+        self.assertEqual(grad_ttg_false, grad_ttg_true)
+
     def test_aux_pytree(self, device):
         def f(x):
             y = x.sin()
