@@ -673,6 +673,7 @@ print(t.is_pinned())
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @setBlasBackendsToDefaultFinally
+    @serialTest()
     def test_cublas_workspace_explicit_allocation(self):
         torch.backends.cuda.preferred_blas_library("cublas")
         a = torch.randn(7, 7, device="cuda", requires_grad=False)
@@ -688,8 +689,8 @@ print(t.is_pinned())
             default_workspace_size = (
                 4096 * 2 * 1024 + 16 * 8 * 1024
             )  # :4096:2:16:8  8MiB
-            # different size (32 MiB) expected on Hopper GPU
-            if torch.cuda.get_device_capability() == (9, 0):
+            # different size (32 MiB) expected on Hopper/Blackwell GPU
+            if torch.cuda.get_device_capability()[0] in (9, 10, 12):
                 default_workspace_size = 4096 * 8 * 1024
 
         def check_workspace_size(inp):
@@ -716,6 +717,26 @@ print(t.is_pinned())
         self.assertLess(abs(check_workspace_size(a) - (3072 * 1024)), 524288)
 
         torch._C._cuda_clearCublasWorkspaces()
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
+    @unittest.skipIf(IS_FBCODE, "not enabled by default on fbcode")
+    @unittest.skipIf(TEST_WITH_ROCM, "not enabled by default on rocm")
+    @setBlasBackendsToDefaultFinally
+    @serialTest()
+    def test_cublas_unified_workspace(self):
+        torch.cuda.reset_peak_memory_stats()
+        # We run a cuBLAS matmul, guaranteeing a workspace present on the current stream
+        torch.backends.cuda.preferred_blas_library("cublas")
+        x = torch.randn(128, 128, device="cuda")
+        torch.matmul(x, x)
+        # Stash the maximum memory allocated after running matmuls
+        warmed_alloc = torch.cuda.max_memory_allocated()
+        torch.backends.cuda.preferred_blas_library("cublaslt")
+        torch.matmul(x, x)
+        lt_alloc = torch.cuda.max_memory_allocated()
+        # With unified workspaces, the peak memory allocation should not increase after
+        # switching to Lt, otherwise the temporary allocation would bump the peak
+        self.assertEqual(warmed_alloc, lt_alloc)
 
     def test_cublas_allow_tf32_get_set(self):
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
