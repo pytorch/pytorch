@@ -905,6 +905,30 @@ class DistributedTest:
             if group_id is not None:
                 self._test_barrier_timeout(group_id, timeout)
 
+        def test_barrier_timeout_arg(self):
+            """Test that the timeout argument to barrier() is respected.
+
+            This verifies the timeout parameter in dist.barrier() actually overrides
+            the default process group timeout. We create a PG with a short timeout,
+            then have rank 0 sleep longer than that timeout before calling barrier
+            with a longer custom timeout. If the custom timeout is respected, the
+            barrier succeeds; if it falls back to the PG timeout, it fails.
+            """
+            # Create a new process group with a short timeout (5 seconds)
+            short_timeout = timedelta(seconds=5)
+            pg = dist.new_group(timeout=short_timeout)
+
+            # Rank 0 sleeps for 10 seconds (longer than the PG timeout of 5s,
+            # but shorter than the barrier timeout of 30s)
+            if dist.get_rank() == 0:
+                time.sleep(10)
+
+            # Barrier with explicit timeout of 30 seconds should succeed
+            # because it overrides the PG's 5 second timeout
+            dist.barrier(group=pg, timeout=timedelta(seconds=30))
+
+            dist.destroy_process_group(pg)
+
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
