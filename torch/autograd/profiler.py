@@ -225,7 +225,7 @@ class profile:
         experimental_config=None,
         acc_events=False,
         custom_trace_id_callback=None,
-        post_processing_timeout_s: Optional[float] = None,
+        post_processing_timeout_s: float | None = None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -238,12 +238,12 @@ class profile:
                 FutureWarning,
                 stacklevel=2,
             )
-            self.use_device: Optional[str] = "cuda"
+            self.use_device: str | None = "cuda"
         else:
             self.use_device = use_device
         # TODO Consider changing _function_events into data structure with size cap
-        self._function_events: Optional[EventList] = None
-        self._old_function_events: Optional[EventList] = None
+        self._function_events: EventList | None = None
+        self._old_function_events: EventList | None = None
         # Function event processing is done lazily
         self._needs_processing = False
         self.entered = False
@@ -258,7 +258,7 @@ class profile:
         if experimental_config is None:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
-        self.kineto_results: Optional[_ProfilerResult] = None
+        self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
         self.profiling_end_time_ns = 0
         self._stats = _ProfilerStats()
@@ -576,7 +576,7 @@ class profile:
         return self._function_events.self_cpu_time_total
 
     def _parse_kineto_results(
-        self, result: _ProfilerResult, timeout_s: Optional[float] = None
+        self, result: _ProfilerResult, timeout_s: float | None = None
     ):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
@@ -838,9 +838,9 @@ class record_function(_ContextDecorator):
 
     """
 
-    def __init__(self, name: str, args: Optional[str] = None):
+    def __init__(self, name: str, args: str | None = None):
         self.name: str = name
-        self.args: Optional[str] = args
+        self.args: str | None = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
         # TODO: TorchScript ignores standard type annotation here

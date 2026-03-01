@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -36,17 +36,17 @@ def get_type_a_related_to_b(
     return type_a_related_to_b
 
 
-NSFusionElType = Union[
-    Callable,  # call_function or call_module type, example: F.linear or nn.Conv2d
-    str,  # call_method name, example: "dequantize"
-    tuple[
+NSFusionElType = (
+    Callable  # call_function or call_module type, example: F.linear or nn.Conv2d
+    | str  # call_method name, example: "dequantize"
+    | tuple[
         str, Any
-    ],  # call_method name and first argument, example: ("to", torch.float16)
-]
-NSFusionType = Union[
-    tuple[NSFusionElType, NSFusionElType],
-    tuple[NSFusionElType, NSFusionElType, NSFusionElType, NSFusionElType],
-]
+    ]  # call_method name and first argument, example: ("to", torch.float16)
+)
+NSFusionType = (
+    tuple[NSFusionElType, NSFusionElType]
+    | tuple[NSFusionElType, NSFusionElType, NSFusionElType, NSFusionElType]
+)
 
 
 def get_reversed_fusions() -> list[tuple[NSFusionType, int]]:
