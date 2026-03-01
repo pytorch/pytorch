@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
-    requires_cuda_with_enough_memory,
+    requires_gpu_with_enough_memory,
 )
 
 
@@ -210,7 +210,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
-    @requires_cuda_with_enough_memory(2e10)
+    @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
     @serialTest()
     def test_linear_and_cel(self):
@@ -255,7 +255,7 @@ class InplacePaddingTest(TestCase):
 
     # Enable Max-Autotune to repro this test failure:
     #   https://github.com/pytorch/pytorch/pull/140249#issuecomment-2556079406
-    @requires_cuda_with_enough_memory(2e10)
+    @requires_gpu_with_enough_memory(2e10)
     @inductor_config.patch(max_autotune=True)
     @serialTest()
     def test_linear_and_cel_max_autotune(self):
