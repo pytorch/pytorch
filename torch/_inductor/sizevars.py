@@ -20,7 +20,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
@@ -417,7 +417,7 @@ class SizeVarAllocator:
         if len(free_symbols(numerator)) > 20:
             return False
 
-        expr = sympy.Eq(numerator % denominator, 0)
+        expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
