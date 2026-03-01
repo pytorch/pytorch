@@ -419,6 +419,266 @@ def _do_bench_using_profiling(
     return res
 
 
+# Cached cost of cache.zero_() for L2 cache clearing (measured once per session)
+_cache_zero_cost_ms: float | None = None
+
+
+def do_bench_using_profiling_multi(
+    fns: list[Callable[[], Any]],
+    warmup: int = 20,
+    rep: int = 100,
+    max_iters: int = 100,
+    is_vetted_benchmarking: bool = False,
+    skip_initial_warmup: bool = False,
+    estimated_timings: list[float] | None = None,
+) -> list[float]:
+    """
+    Benchmark multiple callables in a single profiler session.
+
+    This is more efficient than calling do_bench_using_profiling for each
+    callable individually, as profiler overhead is paid only once.
+
+    Args:
+        fns: List of callables to benchmark
+        warmup: Number of cache.zero_() iterations for GPU warmup. The cache
+            clear operation does significant memory work which effectively
+            warms up the GPU without needing to run each callable.
+        rep: Target repeat time in milliseconds
+        max_iters: Maximum number of repeat iterations to perform. Limits the
+            number of profiler events to avoid expensive event materialization.
+        is_vetted_benchmarking: Skip safety checks
+        skip_initial_warmup: Skip the initial single-call warmup (use when
+            callables are already warmed up from prior execution)
+        estimated_timings: Pre-seeded timing estimates for each callable in
+            milliseconds. When provided, skips the runtime estimation step.
+            These should NOT include cache.zero_() overhead (it will be added).
+
+    Returns:
+        List of benchmark times in milliseconds, same order as input fns
+    """
+    # We didn't use decorator may_distort_benchmarking_result directly since that
+    # requires us to import torch._inductor.runtime.benchmarking into global scope.
+    # Importing torch._inductor.runtime.benchmarking will cause cuda initialization
+    # (because of calling torch.cuda.available in global scope)
+    # which causes failure in vllm when it creates child processes.
+    from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
+
+    return may_distort_benchmarking_result(_do_bench_using_profiling_multi)(
+        fns,
+        warmup,
+        rep,
+        max_iters,
+        is_vetted_benchmarking,
+        skip_initial_warmup,
+        estimated_timings,
+    )
+
+
+def _do_bench_using_profiling_multi(
+    fns: list[Callable[[], Any]],
+    warmup: int = 20,
+    rep: int = 100,
+    max_iters: int = 100,
+    is_vetted_benchmarking: bool = False,
+    skip_initial_warmup: bool = False,
+    estimated_timings: list[float] | None = None,
+) -> list[float]:
+    """
+    Benchmark multiple callables in a single profiler session.
+
+    This is more efficient than calling do_bench_using_profiling for each
+    callable individually, as profiler overhead is paid only once.
+
+    Uses cache.zero_() as a sentinel event to delimit callable boundaries,
+    avoiding the need for per-callable dry runs.
+
+    Args:
+        fns: List of callables to benchmark
+        warmup: Number of cache.zero_() iterations for GPU warmup. The cache
+            clear operation does significant memory work which effectively
+            warms up the GPU without needing to run each callable.
+        rep: Target repeat time in milliseconds
+        max_iters: Maximum number of repeat iterations to perform. Limits the
+            number of profiler events to avoid expensive event materialization.
+        is_vetted_benchmarking: Skip safety checks
+        skip_initial_warmup: Skip the initial single-call warmup (use when
+            callables are already warmed up from prior execution)
+        estimated_timings: Pre-seeded timing estimates for each callable in
+            milliseconds. When provided, skips the runtime estimation step.
+            These should NOT include cache.zero_() overhead (it will be added).
+
+    Returns:
+        List of benchmark times in milliseconds, same order as input fns
+    """
+    if not fns:
+        raise ValueError("At least one callable required")
+
+    if estimated_timings is not None and len(estimated_timings) != len(fns):
+        raise ValueError(
+            f"estimated_timings length ({len(estimated_timings)}) "
+            f"must match fns length ({len(fns)})"
+        )
+
+    if not is_vetted_benchmarking:
+        from torch._inductor.runtime.benchmarking import may_ban_benchmarking
+
+        may_ban_benchmarking()
+
+    device_type = get_gpu_type()
+    device_interface = get_interface_for_device(device_type)
+
+    # Initial warmup: run each callable once
+    if not skip_initial_warmup:
+        for fn in fns:
+            fn()
+        device_interface.synchronize()
+
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
+
+    if estimated_timings is not None:
+        # Use pre-seeded timing estimates, but we need to add cache.zero_() overhead
+        global _cache_zero_cost_ms
+        if _cache_zero_cost_ms is None:
+            # Measure cache.zero_() cost once and cache it
+            start_event = device_interface.Event(enable_timing=True)
+            end_event = device_interface.Event(enable_timing=True)
+            # Warmup
+            for _ in range(5):
+                cache.zero_()
+            device_interface.synchronize()
+            # Measure
+            start_event.record()
+            for _ in range(100):
+                cache.zero_()
+            end_event.record()
+            device_interface.synchronize()
+            _cache_zero_cost_ms = start_event.elapsed_time(end_event) / 100
+
+        # Estimate per-callable time: avg(pre-seeded) + cache overhead
+        avg_estimated = sum(estimated_timings) / len(estimated_timings)
+        estimate_ms_per_callable = avg_estimated + _cache_zero_cost_ms
+    else:
+        # Estimate runtime: run all callables in sequence with L2 clears
+        start_event = device_interface.Event(enable_timing=True)
+        end_event = device_interface.Event(enable_timing=True)
+        start_event.record()
+        for _ in range(5):
+            for fn in fns:
+                cache.zero_()
+                fn()
+        end_event.record()
+        device_interface.synchronize()
+        # Estimate per-callable time (warmup/rep targets are per-callable)
+        estimate_ms_per_callable = start_event.elapsed_time(end_event) / 5 / len(fns)
+
+    # Compute number of repeat iterations (warmup is now a fixed iteration count)
+    # Apply multiple limits:
+    # 1. max_iters: hard cap on iterations
+    # 2. rep-based: target repeat time in ms
+    # 3. execution limit: max 1000 total executions per profiling session
+    #    Each repeat runs len(fns) callables, each preceded by cache.zero_(),
+    #    so executions_per_repeat = 2 * len(fns)
+    max_executions = 1000
+    max_repeats_for_exec_limit = max(1, max_executions // (2 * len(fns)))
+    rep_based_repeats = max(1, int(rep / estimate_ms_per_callable))
+    n_repeat = min(max_iters, max_repeats_for_exec_limit, rep_based_repeats)
+
+    # Warmup phase: just run cache.zero_() to warm up GPU memory subsystem
+    for _ in range(warmup):
+        cache.zero_()
+    device_interface.synchronize()
+
+    # Profiler warmup to reset CUPTI state
+    with torch.profiler.profile(
+        activities=[
+            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
+        ]
+    ):
+        cache.zero_()
+        device_interface.synchronize()
+
+    # Profiling phase
+    with torch.profiler.profile(
+        activities=[
+            getattr(torch.profiler.ProfilerActivity, device_type.upper()),
+        ]
+    ) as p:
+        for _ in range(n_repeat):
+            for fn in fns:
+                cache.zero_()
+                fn()
+        device_interface.synchronize()
+
+    # Filter CUDA events
+    filtered_events = [
+        event
+        for event in p.events()
+        if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+    ]
+
+    if not filtered_events:
+        raise RuntimeError("No CUDA events captured during profiling")
+
+    # Find cache sentinel indices
+    # The first event is guaranteed to be cache.zero_() - use its name as sentinel
+    cache_kernel_name = filtered_events[0].name
+
+    # Split events by cache sentinel: each cache event starts a new callable's events
+    # Pattern: [cache, fn0_events..., cache, fn1_events..., ...] × n_repeat
+    # We expect exactly len(fns) * n_repeat cache events
+    expected_cache_count = len(fns) * n_repeat
+
+    # Find indices of all cache sentinel events
+    cache_indices = [
+        i for i, ev in enumerate(filtered_events) if ev.name == cache_kernel_name
+    ]
+
+    if len(cache_indices) != expected_cache_count:
+        raise RuntimeError(
+            f"Expected {expected_cache_count} cache sentinel events "
+            f"({len(fns)} callables × {n_repeat} repeats), "
+            f"got {len(cache_indices)}. Cache kernel: {cache_kernel_name}"
+        )
+
+    # Extract events between consecutive cache sentinels
+    # Add len(filtered_events) as end boundary for the last segment
+    boundaries = cache_indices + [len(filtered_events)]
+
+    # Collect events per callable per repeat (for min timing calculation)
+    # results[fn_idx][repeat_idx] = list of events for that callable in that repeat
+    results: list[list[list[Any]]] = [[[] for _ in range(n_repeat)] for _ in fns]
+
+    for repeat_idx in range(n_repeat):
+        for fn_idx in range(len(fns)):
+            segment_idx = repeat_idx * len(fns) + fn_idx
+            # Events for this callable are between cache[segment_idx]+1 and cache[segment_idx+1]
+            start = boundaries[segment_idx] + 1  # Skip the cache event itself
+            end = boundaries[segment_idx + 1]
+            fn_events = filtered_events[start:end]
+            results[fn_idx][repeat_idx] = fn_events
+
+    # Aggregate per callable using minimum timing across repeats
+    timings: list[float] = []
+    for fn_idx, fn_repeat_events in enumerate(results):
+        repeat_timings: list[float] = []
+        for repeat_events in fn_repeat_events:
+            if repeat_events:
+                # Sum device time for this repeat
+                time_us = sum(ev.device_time_total for ev in repeat_events)
+                time_ms = time_us / 1000.0
+                repeat_timings.append(time_ms)
+
+        if repeat_timings:
+            # Use minimum timing across repeats
+            time_ms = min(repeat_timings)
+        else:
+            # Callable produced no events (empty kernel)
+            time_ms = 0.0
+        timings.append(time_ms)
+
+    return timings
+
+
 @functools.cache
 def has_torchvision_roi_align() -> bool:
     try:

@@ -222,5 +222,112 @@ class TestBenchmarker(TestCase):
             _bench._BENCHMARK_DISPATCH.update(orig)
 
 
+@unittest.skipIf(not HAS_GPU, "requires GPU")
+class TestDoBenchUsingProfilingMulti(TestCase):
+    """Tests for do_bench_using_profiling_multi function."""
+
+    def setUp(self):
+        super().setUp()
+        torch.manual_seed(12345)
+
+    def test_single_callable_consistency(self):
+        """Single callable should produce results comparable to do_bench_using_profiling."""
+        from torch._inductor.utils import (
+            do_bench_using_profiling,
+            do_bench_using_profiling_multi,
+        )
+
+        def kernel():
+            x = torch.randn(1000, 1000, device=GPU_TYPE)
+            return x @ x
+
+        time_single = do_bench_using_profiling(kernel, is_vetted_benchmarking=True)
+        [time_multi] = do_bench_using_profiling_multi(
+            [kernel], is_vetted_benchmarking=True
+        )
+
+        # Within 5% due to profiler variance (benchmarking is inherently noisy)
+        self.assertGreater(time_single, 0)
+        self.assertGreater(time_multi, 0)
+        ratio = time_multi / time_single
+        self.assertGreater(ratio, 0.95, f"Multi timing {time_multi} too low vs single {time_single}")
+        self.assertLess(ratio, 1.05, f"Multi timing {time_multi} too high vs single {time_single}")
+
+    def test_multiple_callables_ordering(self):
+        """Multiple callables should preserve relative timing order."""
+        from torch._inductor.utils import do_bench_using_profiling_multi
+
+        def small_kernel():
+            x = torch.randn(500, 500, device=GPU_TYPE)
+            return x @ x
+
+        def large_kernel():
+            x = torch.randn(2000, 2000, device=GPU_TYPE)
+            return x @ x
+
+        times = do_bench_using_profiling_multi(
+            [small_kernel, large_kernel], is_vetted_benchmarking=True
+        )
+
+        self.assertEqual(len(times), 2)
+        # Large kernel should be slower
+        self.assertGreater(
+            times[1],
+            times[0],
+            f"Large kernel ({times[1]}) should be slower than small kernel ({times[0]})",
+        )
+
+    def test_multiple_callables_different_sizes(self):
+        """Test with three callables of different sizes."""
+        from torch._inductor.utils import do_bench_using_profiling_multi
+
+        def tiny_kernel():
+            x = torch.randn(100, 100, device=GPU_TYPE)
+            return x @ x
+
+        def medium_kernel():
+            x = torch.randn(1000, 1000, device=GPU_TYPE)
+            return x @ x
+
+        def large_kernel():
+            x = torch.randn(2000, 2000, device=GPU_TYPE)
+            return x @ x
+
+        times = do_bench_using_profiling_multi(
+            [tiny_kernel, medium_kernel, large_kernel], is_vetted_benchmarking=True
+        )
+
+        self.assertEqual(len(times), 3)
+        # All times should be positive
+        for t in times:
+            self.assertGreater(t, 0)
+        # Times should be in increasing order
+        self.assertLess(times[0], times[1])
+        self.assertLess(times[1], times[2])
+
+    def test_empty_list_raises(self):
+        """Empty list should raise ValueError."""
+        from torch._inductor.utils import do_bench_using_profiling_multi
+
+        with self.assertRaises(ValueError):
+            do_bench_using_profiling_multi([], is_vetted_benchmarking=True)
+
+    def test_result_count_matches_input(self):
+        """Number of results should match number of input callables."""
+        from torch._inductor.utils import do_bench_using_profiling_multi
+
+        def kernel():
+            x = torch.randn(500, 500, device=GPU_TYPE)
+            return x @ x
+
+        for n in [1, 2, 3, 5]:
+            times = do_bench_using_profiling_multi(
+                [kernel] * n, is_vetted_benchmarking=True
+            )
+            self.assertEqual(
+                len(times), n, f"Expected {n} results, got {len(times)}"
+            )
+
+
 if __name__ == "__main__":
     run_tests()
