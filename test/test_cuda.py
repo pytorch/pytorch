@@ -4119,6 +4119,39 @@ print(ret)
         )
         self.assertEqual(r, "1.0")
 
+    def test_bessel_y0_negative_cuda(self):
+        device = torch.device("cuda")
+        from torch import special
+
+        neg = torch.tensor(-1.0, device=device, dtype=torch.float64)
+        self.assertTrue(torch.isnan(special.bessel_y0(neg)))
+
+        zero = torch.tensor(0.0, device=device, dtype=torch.float64)
+        self.assertEqual(special.bessel_y0(zero).item(), float("-inf"))
+
+        pos = torch.tensor(2.5, device=device, dtype=torch.float64)
+        self.assertTrue(torch.isfinite(special.bessel_y0(pos)).item())
+
+        x = torch.tensor(
+            [-5.0, -2.5, -0.5, -0.0, 0.0, 0.5, 2.5, 5.0],
+            device=device,
+            dtype=torch.float64,
+        )
+        y = special.bessel_y0(x)
+
+        self.assertTrue(torch.isfinite(y[5:]).all())
+        self.assertEqual(y[3].item(), float("-inf"))
+        self.assertEqual(y[4].item(), float("-inf"))
+        self.assertTrue(torch.isnan(y[0:3]).all())
+
+        for dtype in [torch.float32]:
+            x_dtype = x.to(dtype)
+            y_dtype = special.bessel_y0(x_dtype)
+            self.assertTrue(torch.isnan(y_dtype[0:3]).all())
+            self.assertTrue(torch.isfinite(y_dtype[5:]).all())
+            self.assertEqual(y_dtype[3].item(), float("-inf"))
+            self.assertEqual(y_dtype[4].item(), float("-inf"))
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
