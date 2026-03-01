@@ -1544,10 +1544,17 @@ class SchedulerNode(BaseSchedulerNode):
         extra_indexing_constraints: Optional[tuple[dict[Any, Any], list[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
+        fake_deps: OrderedSet[Dep] = OrderedSet(
+            dep for dep in self.read_writes.reads if isinstance(dep, (WeakDep, StarDep))
+        )
         self._compute_attrs(
             extra_indexing_constraints=extra_indexing_constraints,
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
+        if fake_deps:
+            self.set_read_writes(
+                self.read_writes.with_read(fake_deps).rename(self.mutation_renames)
+            )
 
     def refresh_dependencies(
         self, normalize: bool, need_clear_tiling_cache: bool
