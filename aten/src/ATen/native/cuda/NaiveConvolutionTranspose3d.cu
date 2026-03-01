@@ -102,6 +102,13 @@ static inline void slow_conv_transpose3d_shape_check(
         "x kernel_depth x kernel_height x kernel_width) tensor ",
         "expected for weight, but got: ",
         weight.sizes());
+    TORCH_CHECK(
+        weight.size(2) == kernel_depth && weight.size(3) == kernel_height &&
+            weight.size(4) == kernel_width,
+        "kernel_size must match weight dimensions, but got kernel_size=(",
+        kernel_depth, ", ", kernel_height, ", ", kernel_width,
+        ") and weight=(",
+        weight.size(2), ", ", weight.size(3), ", ", weight.size(4), ")");
     if (bias.defined()) {
       check_dim_size(bias, 1, 0, weight.size(1));
     }
