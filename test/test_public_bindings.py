@@ -408,6 +408,10 @@ class TestPublicBindings(TestCase):
             "torch.utils.tensorboard._proto_graph",
             "torch.utils.tensorboard._pytorch_graph",
             "torch.utils.tensorboard._utils",
+            "torch.nn.norms._cutedsl_norms",
+            "torch.nn.norms._kernels._cute_utils",
+            "torch.nn.norms._kernels._rmsnorm_kernels",
+            "torch.nn.norms._kernels.norms",
         }
 
         errors = []

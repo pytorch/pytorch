@@ -2419,6 +2419,8 @@ class TestImports(TestCase):
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
                            "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass
+                           "torch.nn.norms._cutedsl_norms",  # depends on cutlass
+                           "torch.nn.norms._kernels",  # depends on cutlass
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac
