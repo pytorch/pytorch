@@ -1112,11 +1112,11 @@ class TestMixedDtypesLinearCuda(TestCase):
             input_ref = input.reshape(-1, input.shape[-1])
 
             # First, test plain multiplication.
-            weight_ref = weight.T.to(input.dtype) * scale.view(1, n)
+            weight_ref = weight.T.to(torch.float32) * scale.float().view(1, n)
             weightq = (
                 pack_int4_to_int8(weight.T) if dtypeq == torch.quint4x2 else weight.T
             )
-            output_ref = torch.mm(input_ref, weight_ref).reshape(*input.shape[:-1], n)
+            output_ref = torch.mm(input_ref.float(), weight_ref).to(input.dtype).reshape(*input.shape[:-1], n)
             output = torch.ops.aten._mixed_dtypes_linear(
                 input,
                 quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
@@ -1127,12 +1127,12 @@ class TestMixedDtypesLinearCuda(TestCase):
             torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
 
             # Second, test the linear operator itself.
-            weight_ref = weight.to(input.dtype) * scale.view(n, 1)
+            weight_ref = weight.to(torch.float32) * scale.float().view(n, 1)
             weightq = pack_int4_to_int8(weight) if dtypeq == torch.quint4x2 else weight
-            bias_ref = bias.view(1, n) if add_bias else None
+            bias_ref = bias.float().view(1, n) if add_bias else None
             output_ref = torch.nn.functional.linear(
-                input_ref, weight_ref, bias=bias_ref
-            ).reshape(*input.shape[:-1], n)
+                input_ref.float(), weight_ref, bias=bias_ref
+            ).to(input.dtype).reshape(*input.shape[:-1], n)
             if activation == "relu":
                 relu = torch.nn.ReLU()
                 output_ref = relu(output_ref)
