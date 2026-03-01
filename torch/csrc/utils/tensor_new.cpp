@@ -24,6 +24,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <ATen/dlpack.h>
+#include <ATen/mps/MPSStream.h>
 #include <c10/core/Backend.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/Layout.h>
@@ -444,6 +445,12 @@ Tensor internal_new_from_data(
               inferred_scalar_type,
               tensor.dtype().itemsize(),
               data);
+
+          // APPLE TODO: IS THIS VALID??
+          // MPS tensors reside in unified memory, flush CPU writes to GPU
+          if (device.type() == DeviceType::MPS) {
+            ::at::mps::getDefaultMPSStream()->synchronize(::at::mps::SyncType::COMMIT_AND_WAIT);
+          }
         }
       }
     }

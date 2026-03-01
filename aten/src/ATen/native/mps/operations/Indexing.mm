@@ -185,6 +185,7 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                    ndim_nindiees,
                    mpsStream->getErrorBuffer());
     mtl_dispatch1DJob(computeEncoder, indexSelectPSO, serial ? 1 : iter.numel());
+    mpsStream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
 }
 

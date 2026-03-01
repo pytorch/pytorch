@@ -116,6 +116,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
 
       runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
     }
 
     if (!needs_gather) {
@@ -176,6 +177,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
 
       runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
     }
 
     if (!needs_gather) {
@@ -243,6 +245,7 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
 
       runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+      stream->synchronize(SyncType::COMMIT_AND_WAIT);
     }
 
     if (!result.is_contiguous()) {
