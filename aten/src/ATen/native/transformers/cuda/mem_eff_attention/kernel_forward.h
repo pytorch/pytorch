@@ -196,8 +196,9 @@ struct AttentionKernel {
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do
     CUTLASS_DEVICE bool advance_to_block() {
-      auto batch_id = blockIdx.z;
-      auto head_id = blockIdx.y;
+      auto combined = blockIdx.y;
+      auto batch_id = combined / num_heads;
+      auto head_id = combined % num_heads;
       auto query_start = blockIdx.x * kQueriesPerBlock;
 
       auto lse_dim = ceil_div((int32_t)num_queries, kAlignLSE) * kAlignLSE;
@@ -335,8 +336,8 @@ struct AttentionKernel {
     __host__ dim3 getBlocksGrid() const {
       return dim3(
           ceil_div(num_queries, (int32_t)kQueriesPerBlock),
-          num_heads,
-          num_batches);
+          num_heads * num_batches,
+          1);
     }
 
     __host__ dim3 getThreadsGrid() const {

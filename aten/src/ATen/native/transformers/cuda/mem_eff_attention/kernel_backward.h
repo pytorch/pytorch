@@ -739,8 +739,9 @@ struct AttentionBackwardKernel {
     }
 
     CUTLASS_DEVICE bool advance_to_block() {
-      int64_t batch_id = blockIdx.z;
-      int32_t head_id = blockIdx.y;
+      auto combined = blockIdx.y;
+      int64_t batch_id = combined / num_heads;
+      int32_t head_id = combined % num_heads;
 
       if (kNeedsAccumGradQ || kNeedsAccumGradK || kNeedsAccumGradV) {
         assert(workspace_size() == 0 || workspace != nullptr);
@@ -838,7 +839,7 @@ struct AttentionBackwardKernel {
 
 #if 0
       PRINT_T0("[b:%d h:%d] dp[0]:%f Q:%f K:%f V:%f LSE:%f",
-        int(blockIdx.z), int(blockIdx.y),
+        int(batch_id), int(head_id),
         float(delta_ptr[0]),
         float(query_ptr[0]), float(key_ptr[0]), float(value_ptr[0]),
         float(logsumexp_ptr[0])
@@ -848,7 +849,7 @@ struct AttentionBackwardKernel {
     }
 
     __host__ dim3 getBlocksGrid() const {
-      return dim3(num_splits_key, num_heads, num_batches);
+      return dim3(num_splits_key, num_heads * num_batches, 1);
     }
     __host__ dim3 getThreadsGrid() const {
       return dim3(kWarpSize * kNumWarpsPerBlock, 1, 1);
