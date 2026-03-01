@@ -14,7 +14,7 @@ import textwrap
 from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
-from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, TYPE_CHECKING, TypeVar
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -275,10 +275,10 @@ class TritonSymbols:
 class IndexingOptions:
     index_str: str
     mask_vars: OrderedSet[str]
-    expand_str: Optional[str]
+    expand_str: str | None
     _has_rindex: bool
     index: sympy.Expr
-    expand_shape: Optional[Sequence[Union[int, str]]]
+    expand_shape: Sequence[int | str] | None
 
     def has_mask(self) -> bool:
         return bool(self.mask_vars)
@@ -324,7 +324,7 @@ class BlockDescriptorOptions:
     # transpose load / store blocks at runtime using the information in
     # stride_sorter.
     stride_sorter: BlockParameters.StrideSorter
-    _boundary_check: Optional[list[int]] = None
+    _boundary_check: list[int] | None = None
     # Can we safely lift the constructor
     # to the top of the kernel?
     can_lift: bool = False
@@ -1002,7 +1002,7 @@ def low_precision_fp(dtype: torch.dtype) -> bool:
     return dtype.itemsize <= 2 and dtype.is_floating_point
 
 
-def low_precision_fp_var(var: Union[CSEVariable, Any]) -> bool:
+def low_precision_fp_var(var: CSEVariable | Any) -> bool:
     if not isinstance(var, CSEVariable):
         return False
 
@@ -1102,7 +1102,7 @@ class TritonOverrides(OpOverrides):
     def to_dtype(
         x,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ):
         def _get_min_elements_per_thread(
@@ -1182,6 +1182,14 @@ class TritonOverrides(OpOverrides):
         triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
+        # Triton's scalar_constant() treats -0.0 as 0 (since -0.0 == 0 in Python),
+        # Work around by encoding -0.0 as its IEEE 754 hex in uint and bitcasting.
+        if value == 0 and math.copysign(1.0, value) < 0:
+            if triton_type == "tl.float32":
+                return f"tl.full({shape}, 0x80000000, tl.uint32).to({triton_type}, bitcast=True)"
+            elif triton_type == "tl.float64":
+                return f"tl.full({shape}, 0x8000000000000000, tl.uint64).to({triton_type}, bitcast=True)"
+
         # NOTE: We use tl.full here to get the expected type.
         # Otherwise, subnormal float32 values are treated as fp64
         # causing fp32 * fp64 promotion and different numerical results.
@@ -1217,6 +1225,28 @@ class TritonOverrides(OpOverrides):
             # we want div_rn to adhere with eager
             out = f"triton.language.div_rn({x}, {y})"
         else:
+            out = f"({x} / {y})"
+
+        if low_precision_fp_var(x) or low_precision_fp_var(y):
+            out_dtype = get_dtype_handler().truediv(x, y)
+            if out_dtype in (torch.float16, torch.float32):
+                out = f"{out}.to({triton_type(out_dtype)})"
+
+        return out
+
+    @staticmethod
+    def div_rn(x, y):
+        """
+        Division with round-to-nearest rounding mode.
+        Always uses triton.language.div_rn for float32 inputs to match eager CUDA behavior.
+        """
+        x_dtype = getattr(x, "dtype", None)
+        y_dtype = getattr(y, "dtype", None)
+
+        if x_dtype == torch.float32 and y_dtype == torch.float32:
+            out = f"triton.language.div_rn({x}, {y})"
+        else:
+            # Fall back to regular division for non-float32 types
             out = f"({x} / {y})"
 
         if low_precision_fp_var(x) or low_precision_fp_var(y):
@@ -1758,11 +1788,22 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
-        # Similar to div_floor_kernel_cuda in pytorch core.
-        # Notice that // in triton behaves as truncdiv instead of floordiv
-        quot = f"{a} // {b}"
-        rem = f"{a} % {b}"
-        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+        # Notice that // in triton behaves as truncdiv instead of floordiv.
+        #
+        # We avoid feeding negative values into Triton's // operator because
+        # Triton's AxisInfo analysis incorrectly deduplicates signed division
+        # results for contiguous inputs (triton-lang/triton#XXXX). Instead we
+        # use bitwise complement (~) to make the dividend non-negative:
+        #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
+        # For negative b we negate both operands first.
+        zero = ops.constant(0, torch.int32)
+        b_neg = ops.lt(b, zero)
+        a = ops.where(b_neg, ops.sub(zero, a), a)
+        b = ops.where(b_neg, ops.sub(zero, b), b)
+        a_neg = ops.lt(a, zero)
+        a = ops.where(a_neg, ops.bitwise_not(a), a)
+        quot = ops.truncdiv(a, b)
+        return ops.where(a_neg, ops.bitwise_not(quot), quot)
 
     @staticmethod
     def sign(x):
@@ -2072,7 +2113,7 @@ class BlockParameters:
         @classmethod
         @abstractmethod
         def create(
-            cls, original_strides: list[Union[int, sympy.Expr]], shape_env: ShapeEnv
+            cls, original_strides: list[int | sympy.Expr], shape_env: ShapeEnv
         ) -> BlockParameters.StrideSorter:
             """Create a `StrideSorter` that can be used to sort block parameters."""
 
@@ -2093,7 +2134,7 @@ class BlockParameters:
 
         @classmethod
         def create(
-            cls, original_strides: list[Union[int, sympy.Expr]], shape_env: ShapeEnv
+            cls, original_strides: list[int | sympy.Expr], shape_env: ShapeEnv
         ) -> BlockParameters.StrideSorter:
             return cls(
                 original_strides=original_strides,
@@ -2111,7 +2152,7 @@ class BlockParameters:
 
         @classmethod
         def create(
-            cls, original_strides: list[Union[int, sympy.Expr]], shape_env: ShapeEnv
+            cls, original_strides: list[int | sympy.Expr], shape_env: ShapeEnv
         ) -> BlockParameters.StrideSorter:
             """
             If the strides are not all known constants or if the strides are already
@@ -2227,13 +2268,13 @@ class FixedTritonConfig:
         return item in self.config
 
 
-class TritonCSE(CSE[TritonCSEVariable, Union[str, tuple[str, str]]]):
+class TritonCSE(CSE[TritonCSEVariable, str | tuple[str, str]]):
     """
     Subclasses CSE to apply the current load mask to the cache key to avoid CSEing
     variables across separate masked blocks.
     """
 
-    def augment_key(self, cache_key: str) -> Union[str, tuple[str, str]]:
+    def augment_key(self, cache_key: str) -> str | tuple[str, str]:
         if mask := V.kernel._load_mask:
             return (cache_key, mask.name)
         else:
@@ -2423,7 +2464,7 @@ class TMACompatibilityChecker:
                 def indexing_div_rep(
                     x: sympy.Expr,
                     y: sympy.Expr,
-                    z: Optional[sympy.Expr] = None,
+                    z: sympy.Expr | None = None,
                 ) -> sympy.Expr:
                     div = x / y
                     if z:
@@ -2515,15 +2556,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     tensor_descriptor_options_cls: type[TensorDescriptorOptions] = (
         TensorDescriptorOptions
     )
-    transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None
+    transpose_discontiguous_tensor_descriptors_override: bool | None = None
 
     def __init__(
         self,
         tiling: dict[str, sympy.Expr],
         min_elem_per_thread=0,
         optimize_mask=True,
-        fixed_config: Optional[FixedTritonConfig] = None,
-        hint_override: Optional[int] = None,
+        fixed_config: FixedTritonConfig | None = None,
+        hint_override: int | None = None,
         is_combo_kernel: bool = False,
         **kwargs,
     ) -> None:
@@ -2553,7 +2594,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
-        self.triton_meta: Optional[dict[str, Any]] = None
+        self.triton_meta: dict[str, Any] | None = None
 
         if self.inside_reduction:
             self.codegen_reduction_numels(self.body)
@@ -2725,11 +2766,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self,
         index: sympy.Expr,
         *,
-        copy_shape: Optional[Union[str, tuple[str]]] = None,
+        copy_shape: str | tuple[str] | None = None,
         dense_indexing=False,
         override_mask=None,
         block_ptr=False,
-        tma_compatibility_checker: Optional[TMACompatibilityChecker] = None,
+        tma_compatibility_checker: TMACompatibilityChecker | None = None,
     ):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
@@ -2810,7 +2851,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             def match_affine_block(
                 index: sympy.Expr, range_tree: IterationRangesRoot
-            ) -> Optional[BlockParameters]:
+            ) -> BlockParameters | None:
                 """
                 Matches expressions of the form:
                     idx = s * xindex
@@ -2832,7 +2873,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             def match_mod_div_block(
                 index: sympy.Expr, range_tree: IterationRangesRoot
-            ) -> Optional[BlockParameters]:
+            ) -> BlockParameters | None:
                 """
                 Matches higher-dimensional blocks coming from FloorDiv and ModularIndexing.
 
@@ -2955,7 +2996,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             def match_block_subexpr(
                 expr: sympy.Expr,
                 range_tree: IterationRangesRoot,
-            ) -> Optional[BlockParameters]:
+            ) -> BlockParameters | None:
                 """
                 Match a block indexing subexpression involving a single range tree.
                 """
@@ -2972,7 +3013,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
                 return None
 
-            def match_block_expr() -> Optional[BlockDescriptorOptions]:
+            def match_block_expr() -> BlockDescriptorOptions | None:
                 index_relative_to_xyr_index = sympy_subs(
                     index, {v: t.expr for v, t in self.range_tree_nodes.items()}
                 )
@@ -3209,7 +3250,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self,
         name: str,
         var: str,
-        indexing: Union[BlockPtrOptions, TensorDescriptorOptions],
+        indexing: BlockPtrOptions | TensorDescriptorOptions,
         other="",
     ) -> tuple[str, str]:
         """Generate a block pointer or tensor descriptor for Triton kernel operations.
@@ -3473,7 +3514,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         var = self.args.input(name)
         load_counts = self._load_counts
         load_counts[name] += 1
-        make_line: Callable[[str], Union[str, DelayReplaceLine]] = identity
+        make_line: Callable[[str], str | DelayReplaceLine] = identity
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         dtype = V.graph.get_dtype(name)
@@ -3758,7 +3799,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         buffer.writeline(DeferredLine(name, f"if rsplit_id == ({idx} % RSPLIT):"))
         return buffer.indent()
 
-    def _combine_masks(self, *variables: Optional[CSEVariable]):
+    def _combine_masks(self, *variables: CSEVariable | None):
         masks = None
         for elem in variables:
             if elem is None:
@@ -3777,8 +3818,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
-        sorter_indices: Optional[CSEVariable] = None,
+        sorter: tuple[str, sympy.Expr] | None = None,
+        sorter_indices: CSEVariable | None = None,
     ) -> CSEVariable:
         """
         See [Note: Inductor bucketize op]
@@ -3875,8 +3916,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         """
         codegen reduction of value to Triton according the reduction_type
         """
@@ -3956,8 +3997,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         def final_reduction(
             buffer,
             value: CSEVariable,
-            result_type: Optional[torch.dtype],
-        ) -> tuple[str, Optional[torch.dtype], BlockShapeType]:
+            result_type: torch.dtype | None,
+        ) -> tuple[str, torch.dtype | None, BlockShapeType]:
             """
             Helper to generate a reduction call, e.g. tl.sum.
             """
@@ -3990,7 +4031,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             buffer,
             result_var: CSEVariable,
             value: CSEVariable,
-            result_type: Optional[torch.dtype],
+            result_type: torch.dtype | None,
         ) -> None:
             """
             Generate a reduction and assign it to an existing variable.
@@ -4062,7 +4103,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     shape=value.shape,
                 )
 
-            masked_value: Union[CSEVariable, Sequence[CSEVariable], None]
+            masked_value: CSEVariable | Sequence[CSEVariable] | None
             if reduction_type == "online_softmax_reduce":
                 # Don't generate mask value for online_softmax since we
                 # will fallback below
@@ -5081,7 +5122,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     raise ValueError(f"Unsupported numel argument type: {type(arg)}")
         return args
 
-    def codegen_kernel_benchmark(self, num_gb: Optional[float]) -> IndentedBuffer:
+    def codegen_kernel_benchmark(self, num_gb: float | None) -> IndentedBuffer:
         """
         Generates Python code for benchmarking this Triton kernel.
         - Creates example inputs (random tensors, constants, sizes).
@@ -5728,7 +5769,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 arg_types.append(type(expr))
 
     def call_kernel(
-        self, name: str, node: Optional[IRNode] = None, deallocate_ws: bool = True
+        self, name: str, node: IRNode | None = None, deallocate_ws: bool = True
     ):
         wrapper = V.graph.wrapper_code
         wrapper.write_triton_header_once()
@@ -6027,7 +6068,7 @@ class TritonScheduling(SIMDScheduling):
         ]
     )
 
-    def __init__(self, scheduler: Optional[Scheduler]) -> None:
+    def __init__(self, scheduler: Scheduler | None) -> None:
         super().__init__(scheduler)
         if scheduler is None or not hasattr(scheduler, "nodes"):
             return
@@ -6187,7 +6228,7 @@ class TritonScheduling(SIMDScheduling):
         )
 
     def benchmark_codegened_module(
-        self, mod, n_spills_threshold=8, node_names: Optional[OrderedSet[str]] = None
+        self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
     ) -> tuple[float, str]:
         """Benchmark an already compiled module"""
         device_interface = get_interface_for_device(V.graph.device_type)

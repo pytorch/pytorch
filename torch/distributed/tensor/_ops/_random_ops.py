@@ -23,7 +23,8 @@ aten = torch.ops.aten
 )
 def random_op_strategy(op_schema: OpSchema) -> StrategyType:
     self_strategy = op_schema.args_schema[0]
-    assert isinstance(self_strategy, OpStrategy)
+    if not isinstance(self_strategy, OpStrategy):
+        raise AssertionError
 
     random_strategy = OpStrategy([])
     for arg_strategy in self_strategy.strategies:

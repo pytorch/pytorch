@@ -2,7 +2,7 @@ import itertools
 import unittest.mock
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
-from typing import TypeVar, Union
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -119,7 +119,7 @@ def _fmt(a: object) -> object:
 
 def make_crossref_functionalize(
     op: torch._ops.OpOverload[_P, _T], final_key: DispatchKey
-) -> Union[Callable[_P, _T], DispatchKey]:
+) -> Callable[_P, _T] | DispatchKey:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
     # This case is pretty weird, suppress it for now

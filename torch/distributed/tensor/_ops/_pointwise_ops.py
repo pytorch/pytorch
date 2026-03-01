@@ -54,28 +54,6 @@ prims = torch.ops.prims
 #     "real",  # complex data type only
 # ]
 
-# Linear pointwise ops, split by linearity type.
-unary_linear_ops = [aten.to.dtype]
-
-binary_additive_ops = [
-    aten.add.Tensor,
-    aten.add_.Tensor,
-    aten.sub.Tensor,
-    aten.sub_.Tensor,
-]
-
-# mul: partials propagate through either arg. div: only through numerator.
-binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor]
-binary_div_ops = [aten.div.Tensor, aten.div_.Tensor]
-
-scalar_linear_ops = [
-    aten.div.Scalar,
-    aten.div_.Scalar,
-    aten.mul.Scalar,
-    aten.mul_.Scalar,
-]
-
-neg_ops = [aten.neg.default, aten.neg_.default]
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
@@ -457,15 +435,24 @@ pointwise_ops = [
     prims.zeta.default,
 ]
 
-
-# Reconstruct the original linear_pointwise_ops dict for the existing registration path.
-linear_pointwise_ops: dict[OpOverload, int] = {
-    **dict.fromkeys(unary_linear_ops, 0),
-    **dict.fromkeys(binary_additive_ops, 1),
-    **dict.fromkeys(binary_mul_ops, 2),
-    **dict.fromkeys(binary_div_ops, 2),
-    **dict.fromkeys(scalar_linear_ops, 0),
-    **dict.fromkeys(neg_ops, 0),
+# the linear pointwise ops map, key is op, value is the type of linearity
+linear_pointwise_ops = {
+    aten.to.dtype: 0,
+    aten.add.Tensor: 1,
+    aten.add_.Tensor: 1,
+    aten.sub.Tensor: 1,
+    aten.sub_.Tensor: 1,
+    aten.div.Scalar: 0,
+    aten.div_.Scalar: 0,
+    aten.div.Tensor: 2,
+    aten.div_.Tensor: 2,
+    aten.mul.Scalar: 0,
+    aten.mul_.Scalar: 0,
+    aten.mul.Tensor: 2,
+    aten.mul_.Tensor: 2,
+    # neg is linear: -(A1 + A2) = -A1 + -A2
+    aten.neg.default: 0,
+    aten.neg_.default: 0,
 }
 
 # Ops that preserve specific Partial types through the operation.
@@ -521,9 +508,8 @@ def pointwise_strategy(
 
         followed_strategy = op_schema.args_schema[followed_strategy_index]
 
-    assert isinstance(followed_strategy, OpStrategy), (
-        f"no strategy to follow for {op_schema}!"
-    )
+    if not isinstance(followed_strategy, OpStrategy):
+        raise AssertionError(f"no strategy to follow for {op_schema}!")
     return common_pointwise_strategy(
         op_schema.op,
         op_schema.args_schema,
@@ -609,9 +595,8 @@ def single_mesh_dim_common_pointwise_strategy(
     if linearity == 0:
         # unary op (e.g. to_copy), and also binary ops like mul.scalar
         # input, output can be partial
-        assert len(tensor_arg_strategies) == 1, (
-            "expected single tensor input for linearity==0 op"
-        )
+        if len(tensor_arg_strategies) != 1:
+            raise AssertionError("expected single tensor input for linearity==0 op")
         placements_list.append([Partial("sum"), Partial("sum")])
         # TODO: do i need to check scalar_tensor_index and assign a replicate to that one, or do i omit a placement for it
         # TODO: can mul.scalar work with avg or only sum? i think only sum works. common_pointwise_strategy seems
@@ -622,16 +607,14 @@ def single_mesh_dim_common_pointwise_strategy(
     elif linearity == 1:
         # binary add ops
         # (A1 + B1) + (A2 + B2) == (A1 + A2) + (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, (
-            "expected two tensor inputs for linearity==1 op"
-        )
+        if len(tensor_arg_strategies) != 2:
+            raise AssertionError("expected two tensor inputs for linearity==1 op")
         placements_list.append([Partial("sum"), Partial("sum"), Partial("sum")])
     elif linearity == 2:
         # binary mul ops (2 tensor inputs)
         # (A * B1) + (A * B2) == A * (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, (
-            "expected two tensor inputs for linearity==2 op"
-        )
+        if len(tensor_arg_strategies) != 2:
+            raise AssertionError("expected two tensor inputs for linearity==2 op")
         placements_list.append([Partial("sum"), Partial("sum"), Replicate()])
         placements_list.append([Partial("sum"), Replicate(), Partial("sum")])
 
@@ -755,7 +738,8 @@ def common_pointwise_strategy(
                     # For the scalar tensor arg in fused ops, do not follow followed_strategy;
                     # instead, let the input mesh and the Replicate placements propagate through.
                     if input_idx == scalar_tensor_idx:
-                        assert all(p == Replicate() for p in input_arg_spec.placements)
+                        if not all(p == Replicate() for p in input_arg_spec.placements):
+                            raise AssertionError
                         input_arg_target_spec = DTensorSpec(
                             mesh=input_arg.mesh,
                             placements=input_arg_spec.placements,
@@ -962,13 +946,15 @@ def list_pointwise_strategy(
         args_schema: tuple[object, ...],
     ) -> list[TupleStrategy | None]:
         first_arg = args_schema[0]
-        assert isinstance(first_arg, TupleStrategy)
+        if not isinstance(first_arg, TupleStrategy):
+            raise AssertionError
         strategy_len = len(first_arg.children)
         tuple_strategies: list[TupleStrategy | None] = []
         for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
-                assert len(arg.children) == strategy_len
+                if len(arg.children) != strategy_len:
+                    raise AssertionError
                 tuple_strategies.append(arg)
             elif isinstance(arg, OpStrategy):
                 if arg_idx > 0:  # implicitly broadcast
@@ -989,7 +975,8 @@ def list_pointwise_strategy(
     list_strategy: list[OpStrategy] = []
 
     for child_idx, child_strtgy in enumerate(follow_strategy.children):
-        assert isinstance(child_strtgy, OpStrategy)
+        if not isinstance(child_strtgy, OpStrategy):
+            raise AssertionError
         args_schema: list[OpStrategy | None] = [
             cast(OpStrategy, arg_strategy.children[child_idx]) if arg_strategy else None
             for arg_strategy in args_strategies

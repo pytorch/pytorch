@@ -62,7 +62,7 @@ from .ir import (
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
-from .runtime.hints import ReductionHint
+from .runtime.hints import DeviceProperties, ReductionHint
 from .runtime.runtime_utils import green_text, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -2760,16 +2760,75 @@ def _replace_operation_buffer(
 
 
 def _estimate_fused_epilogue_runtime(node1, node2, epilogue_runtime) -> float:
+    template_write_bytes = node1.get_write_buffer_sizes()
+    epilogue_read_bytes = node2.get_read_buffer_sizes()
+    extra_bytes = epilogue_read_bytes - template_write_bytes
     # If no extra memory read by epilogue, assume epilogue is free
     # if extra memory is read by epilogue, add to minimum choice
-    total_read_bytes = node2.get_read_buffer_sizes()
-    template_write_bytes = node1.get_write_buffer_sizes()
-    extra_bytes = total_read_bytes - template_write_bytes
     extra_bytes_ratio = extra_bytes / template_write_bytes
 
     # Smoothly approaches 1 as extra_bytes_ratio increases
     extra_memory_ratio = extra_bytes_ratio / (1 + extra_bytes_ratio)
     return extra_memory_ratio * epilogue_runtime
+
+
+def _occupancy_before_and_after_fusion(
+    unfused_n_regs: int,
+    fused_n_regs: int,
+    fused_n_spills: int,
+    num_warps: int,
+    device_props: DeviceProperties,
+) -> tuple[int, int]:
+    if fused_n_spills >= 8:
+        return 0, -1
+
+    # # Need device info to calculate occupancy
+    regs_per_sm = device_props.regs_per_multiprocessor
+    if regs_per_sm is None:
+        return 1, 1  # Can't calculate, allow fusion
+
+    assert num_warps
+    threads_per_block = num_warps * (device_props.warp_size or 32)
+
+    regs_per_block_unfused = unfused_n_regs * threads_per_block
+    regs_per_block_fused = fused_n_regs * threads_per_block
+
+    blocks_unfused = regs_per_sm // regs_per_block_unfused
+    blocks_fused = regs_per_sm // regs_per_block_fused
+
+    return blocks_unfused, blocks_fused
+
+
+def _fuse_epilogue(
+    ms1: float,
+    ms2: float,
+    unfused_n_regs: int,
+    fused_n_regs: int,
+    fused_n_spills: int,
+    num_warps: int,
+    device_props: DeviceProperties,
+) -> bool:
+    """
+    Determine whether to fuse an epilogue into a GEMM template.
+    """
+    MIN_ACCEPTED_OCCUPANCY = 4
+    REGRESSED_OCCUPANCY_RATIO = 0.5
+
+    # Check occupancy impact
+    blocks_unfused, blocks_fused = _occupancy_before_and_after_fusion(
+        unfused_n_regs, fused_n_regs, fused_n_spills, num_warps, device_props
+    )
+
+    epilogue_dominated_with_sufficient_occupancy = ms2 > 2 * ms1 and blocks_fused > 1
+
+    # fuse if no major register spills
+    # Occupancy can decrease but if memory bound/epilogue dominated
+    # optimistically fuse
+    return blocks_fused != -1 and (
+        blocks_fused >= MIN_ACCEPTED_OCCUPANCY
+        or blocks_fused / blocks_unfused > REGRESSED_OCCUPANCY_RATIO
+        or epilogue_dominated_with_sufficient_occupancy
+    )
 
 
 @dataclasses.dataclass
@@ -3797,7 +3856,12 @@ class Scheduler:
         for inp in multi_node.inputs:
             # pyrefly: ignore [missing-attribute]
             inp_name = inp.get_name()
-            if not getattr(inp, "layout", None) or inp_name not in constraints:
+            # View has its own fixed layout that is not constrained
+            if (
+                not getattr(inp, "layout", None)
+                or inp_name not in constraints
+                or isinstance(inp, ir.ReinterpretView)
+            ):
                 continue
 
             layout = inp.layout
@@ -4266,16 +4330,28 @@ class Scheduler:
                             or ms2 + ms1 > choice_timings[choice] + ms2_fused
                         )
 
-                        if (
-                            res
+                        if res and fusible_choice:
+                            choice.precompile()
                             # pyrefly: ignore [missing-attribute]
-                            and len(res.launchers) == 1
+                            assert res.launchers and choice.n_regs
                             # pyrefly: ignore [bad-index]
-                            and res.launchers[0].n_spills <= 8
-                            and fusible_choice
-                        ):
-                            ms_fused_choice = choice
-                            break
+                            compiled_kernel = res.launchers[0]
+                            # pyrefly: ignore [missing-attribute]
+                            fused_n_regs = compiled_kernel.n_regs
+                            # pyrefly: ignore [missing-attribute]
+                            fused_n_spills = compiled_kernel.n_spills
+                            should_fuse_epilogue = _fuse_epilogue(
+                                ms1,
+                                ms2,
+                                choice.n_regs,
+                                fused_n_regs,
+                                fused_n_spills,
+                                choice.bmreq.num_warps,
+                                DeviceProperties.create(device),
+                            )
+                            if should_fuse_epilogue:
+                                ms_fused_choice = choice
+                                break
 
                 if bench_epilogue:
                     log_fusion(min_ms_fused, ms1, ms2)

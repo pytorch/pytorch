@@ -797,6 +797,21 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn({}, x), opt_fn({}, x))
         self.assertEqual(fn({"a": 1}, x), opt_fn({"a": 1}, x))
 
+    def test_no_recompile_on_setitem_side_effect(self):
+        d = {"a": 5, "b": 2}
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            d["c"] = 3
+            return x * d["a"]
+
+        x = torch.randn(4)
+        fn(x, d)
+        # Second call should not recompile despite __setitem__ adding a new
+        # key (changing len) on the previous call.
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            self.assertEqual(fn(x, d), x * 5)
+
     def test_udf_dict_reconstruction(self):
         class MyDict(dict):
             pass
