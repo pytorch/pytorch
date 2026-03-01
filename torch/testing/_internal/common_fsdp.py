@@ -1187,6 +1187,9 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
 
     def perThreadSetUp(self):
         torch._dynamo.reset()
+        device_id = self.rank % DEVICE_COUNT
+        if DEVICE_TYPE != "cpu":
+            torch.accelerator.set_device_index(device_id)
 
     def perThreadTearDown(self):
         torch._dynamo.reset()
