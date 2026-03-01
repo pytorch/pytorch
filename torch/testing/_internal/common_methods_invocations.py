@@ -488,11 +488,33 @@ def sample_inputs_softmax_backward_data(op_info, device, dtype, requires_grad, *
         output = torch.nn.functional.softmax(input, dim=dim, dtype=input_dtype)
         yield SampleInput(make_arg(shape), output, dim, input_dtype)
 
+def error_inputs_native_batch_norm(op_info, device, **kwargs):
+    """Error inputs for native_batch_norm: empty running_var/running_mean with non-zero channels."""
+    make_arg = partial(make_tensor, dtype=torch.float32, device=device, requires_grad=False)
+
+    # Empty running_var with non-zero channels should raise error
+    input_data = make_arg((10, 8))
+    weight = make_arg(8)
+    bias = make_arg(8)
+    running_mean = make_arg(8)
+    running_var = make_arg(0)  # empty tensor
+
+    yield ErrorInput(
+        SampleInput(
+            input_data,
+            args=(weight, bias, running_mean, running_var, True, 0.1, 1e-5)
+        ),
+        error_type=RuntimeError,
+        error_regex=r"running_var.*should contain"
+    )
+
+
 def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
     for sample in samples:
         # torch.native_batch_norm does not support 0 numel tensors
         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
+        # Skip all zero-numel tensors from sample_inputs_batch_norm
         if sample.input.numel() == 0:
             continue
         args = sample.args
@@ -15566,6 +15588,7 @@ op_db: list[OpInfo] = [
            allow_cow_input_materialize_forward=[3, 4],
            allow_cow_input_materialize_backward=[3, 4],
            sample_inputs_func=sample_inputs_native_batch_norm,
+           error_inputs_func=error_inputs_native_batch_norm,
            skips=(
                # NotImplementedError: Could not run
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.

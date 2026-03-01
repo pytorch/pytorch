@@ -5400,6 +5400,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     re.escape("input tensor must have at least one element, but got input_sizes = [0, 1]")):
             torch.batch_norm_update_stats(input=input, momentum=0.0, running_mean=running_mean, running_var=running_var)
 
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
