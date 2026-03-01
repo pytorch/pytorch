@@ -2512,6 +2512,16 @@ def is_channels_last(ten):
     return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
 
 
+def _conv_memory_format(t1, t2):
+    fmt1 = suggest_memory_format(t1)
+    fmt2 = suggest_memory_format(t2)
+    if fmt1 == torch.channels_last or fmt2 == torch.channels_last:
+        return torch.channels_last
+    if fmt1 == torch.channels_last_3d or fmt2 == torch.channels_last_3d:
+        return torch.channels_last_3d
+    return torch.contiguous_format
+
+
 @register_meta(aten.miopen_batch_norm.default)
 def meta_miopen_batch_norm(
     input_tensor: torch.Tensor,
@@ -2580,7 +2590,8 @@ def meta_conv(
     if guard_or_false(input_tensor.size(input_channels_dim) == 0):
         shape_out[output_channels_dim] = 0
 
-    out = input_tensor.new_empty(shape_out)
+    memory_format = _conv_memory_format(input_tensor, weight)
+    out = input_tensor.new_empty(shape_out).to(memory_format=memory_format)
     return out
 
 
@@ -3637,26 +3648,6 @@ def meta_convolution_backward(
     backend_grad_input = None
     backend_grad_weight = None
     backend_grad_bias = None
-
-    # Backend layout expectation: GPU backends (CUDA via cudnn_conv_suggest_memory_format,
-    # MPS via mps_conv_use_channels_last) return channels_last outputs when either input
-    # tensor is channels_last. This must be matched here to avoid stride assertion failures
-    # in inductor when the predicted strides don't match actual backend output strides.
-    # See: https://github.com/pytorch/pytorch/issues/171622
-    #
-    # Memory format inference rules (matching backend behavior):
-    #   - grad_input format: derived from grad_output and weight
-    #   - grad_weight format: derived from input and grad_output
-    def _conv_memory_format(t1, t2):
-        # Match the logic in cudnn_conv_suggest_memory_format and mps_conv_use_channels_last:
-        # Use channels_last if either tensor suggests it
-        fmt1 = suggest_memory_format(t1)
-        fmt2 = suggest_memory_format(t2)
-        if fmt1 == torch.channels_last or fmt2 == torch.channels_last:
-            return torch.channels_last
-        if fmt1 == torch.channels_last_3d or fmt2 == torch.channels_last_3d:
-            return torch.channels_last_3d
-        return torch.contiguous_format
 
     if output_mask[0]:
         memory_format = _conv_memory_format(grad_output_, weight_)
