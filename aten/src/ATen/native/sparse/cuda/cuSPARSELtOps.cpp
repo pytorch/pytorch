@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <string_view>
+#include <cstdlib>
 #if AT_CUSPARSELT_ENABLED()
 
 namespace at::native {
@@ -54,6 +55,16 @@ static bool isHipSparseLtSupported() {
     }
     return g_hipSparseLtSupported;
 }
+
+// When CUSPARSELT_FORCE_TN=1, use SparseA + TN + Row-major configuration
+// instead of the default NN. AMD's MI300 kernels are optimized for TN.
+static bool cslt_use_tn_mode() {
+    static const bool use_tn = []() {
+        const char* env = std::getenv("CUSPARSELT_FORCE_TN");
+        return env && std::string(env) == "1";
+    }();
+    return use_tn;
+}
 #endif
 
 at::Tensor _cslt_compress(const Tensor& sparse_input) {
@@ -94,12 +105,23 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       break;
   }
 
+  // TN mode (ROCm only): transpose input so physical storage is (K, M)
+  // row-major. The compress function prunes to 2:4 sparsity during compression.
+  bool use_tn = false;
+#ifdef USE_ROCM
+  use_tn = cslt_use_tn_mode();
+#endif
+  Tensor compress_input = sparse_input;
+  if (use_tn) {
+    compress_input = sparse_input.t().contiguous();
+  }
+
   TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
       &handle,
       &sparse_input_descriptor,
-      sparse_input.size(0),
-      sparse_input.size(1),
-      sparse_input.size(1),
+      compress_input.size(0),
+      compress_input.size(1),
+      compress_input.size(1),
       16,
       type,
       CUSPARSE_ORDER_ROW,
@@ -114,10 +136,8 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       &compressed_size,
       &compressed_buffer_size));
 
-  // create a new compressed tensor with the same dtype as the input,
-  // and with packed data/metadata stored in an array with original
-  // number of rows, and sufficient columns to provide compressed_size
-  // buffer (in bytes)
+  // Store compressed tensor with M as first dim regardless of TN mode,
+  // so _cslt_sparse_mm_impl can recover M from compressed_A.size(0).
   size_t orig_m = sparse_input.size(0);
   size_t div = orig_m * sparse_input.itemsize();
   size_t new_n = (compressed_size + div - 1) / div; // ceil(s,d) = (s+d-1)/d
@@ -131,8 +151,9 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       &handle,
       &sparse_input_descriptor,
       true,
-      CUSPARSE_OPERATION_NON_TRANSPOSE,
-      sparse_input.data_ptr(),
+      use_tn ? CUSPARSE_OPERATION_TRANSPOSE
+             : CUSPARSE_OPERATION_NON_TRANSPOSE,
+      compress_input.data_ptr(),
       compressed_tensor.data_ptr(),
       compressedBufferPtr.get(),
       stream));
@@ -304,18 +325,25 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   int64_t n = dense_B.size(1);
   int64_t m = compressed_A.size(0);
 
+  bool use_tn = false;
+#ifdef USE_ROCM
+  use_tn = cslt_use_tn_mode();
+#endif
+
   // initialize sparse descriptor
   cusparseLtMatDescriptor_t sparse_input_descriptor;
-  TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
-      &handle,
-      &sparse_input_descriptor,
-      m,
-      k,
-      k,
-      16,
-      input_type,
-      CUSPARSE_ORDER_ROW,
-      CUSPARSELT_SPARSITY_50_PERCENT));
+  if (use_tn) {
+    // TN: physical storage is (K, M), opA=TRANSPOSE gives logical (M, K)
+    TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
+        &handle, &sparse_input_descriptor,
+        k, m, m, 16, input_type,
+        CUSPARSE_ORDER_ROW, CUSPARSELT_SPARSITY_50_PERCENT));
+  } else {
+    TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
+        &handle, &sparse_input_descriptor,
+        m, k, k, 16, input_type,
+        CUSPARSE_ORDER_ROW, CUSPARSELT_SPARSITY_50_PERCENT));
+  }
 
   // initialize dense input descriptor
   cusparseLtMatDescriptor_t dense_input_descriptor;
@@ -362,7 +390,8 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
       &handle,
       &matmul,
-      CUSPARSE_OPERATION_NON_TRANSPOSE,
+      use_tn ? CUSPARSE_OPERATION_TRANSPOSE
+             : CUSPARSE_OPERATION_NON_TRANSPOSE,
       (dense_B.is_contiguous()) ? CUSPARSE_OPERATION_NON_TRANSPOSE
                                 : CUSPARSE_OPERATION_TRANSPOSE,
       &sparse_input_descriptor,

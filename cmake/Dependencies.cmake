@@ -1059,8 +1059,8 @@ if(USE_ROCM)
       add_definitions(-DUSE_LAYERNORM_FAST_RECIPROCAL)
     endif()
 
-    # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
-    list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
+    # REMOVED: -fclang-abi-compat=17 causes ABI mismatch between .hip and .cpp files
+    # with Clang 18+ (different NTTP mangling), leading to undefined const_data_ptr symbols
 
     set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
     set(CMAKE_HIP_FLAGS ${HIP_HIPCC_FLAGS})
@@ -1087,6 +1087,13 @@ if(USE_ROCM)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
       )
+      set(CAFFE2_USE_HIPSPARSELT ON)
+      set(USE_CUSPARSELT ON CACHE BOOL "Use cuSPARSELt (or hipSPARSELt)" FORCE)
+      # Create torch::cusparselt alias so torch_python can link it
+      if(NOT TARGET torch::cusparselt)
+        add_library(torch::cusparselt INTERFACE IMPORTED)
+        target_link_libraries(torch::cusparselt INTERFACE roc::hipsparselt)
+      endif()
     endif()
 
     # ROCM-SMI needed to support symmetric memory
