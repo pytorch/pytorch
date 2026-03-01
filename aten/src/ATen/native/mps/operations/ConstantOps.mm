@@ -1,120 +1,112 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/Fill.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/fill_native.h>
-#include <ATen/ops/view_as_real.h>
-#include <ATen/ops/zero_native.h>
+#include <ATen/ops/empty_native.h>
 #endif
 
 namespace at::native {
 
-static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/ConstantKernel_metallib.h>
+#endif
+
+static void fill_mps_kernel(TensorIterator& iter, const Scalar& value) {
   using namespace mps;
-
-  if (self.numel() == 0) {
-    return self;
-  }
-  Tensor output = self;
-  bool needsCopyToOutput = false;
-  if (needsGather(self)) {
-    output = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
-    needsCopyToOutput = true;
+  if (iter.numel() == 0) {
+    return;
   }
 
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
-  @autoreleasepool {
-    std::string key = "fill_scalar_mps_impl" + getTensorsStringKey(self) + ":" + std::to_string(value.toDouble());
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()));
-      MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor name:nil];
-      newCachedGraph->inputTensor_ = inputTensor;
-      newCachedGraph->outputTensor_ = outputTensor;
-    });
-
-    auto mpsScalar = getMPSScalar(value, self.scalar_type());
-    auto mpsScalarData = getMPSGraphTensorFromScalar(getCurrentMPSStream(), mpsScalar);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{cachedGraph->inputTensor_ : mpsScalarData};
-
-    Placeholder outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, needsCopyToOutput ? output : self, nullptr, !needsCopyToOutput);
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
-
-    if (needsCopyToOutput) {
-      self.copy_(output);
-    }
-  }
-
-  return self;
-}
-
-static Tensor& fill_mps_tensor_(Tensor& self, uint8_t value) {
-  TORCH_INTERNAL_ASSERT(self.is_contiguous());
+  const Tensor& self = iter.tensor(0);
+  const auto dtype = self.scalar_type();
   const auto stream = getCurrentMPSStream();
-  auto storage_byte_offset = self.storage_offset() * self.itemsize();
-  stream->fill(mps::getMTLBufferStorage(self), value, self.nbytes(), storage_byte_offset);
-  return self;
-}
 
-Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
-  if (isComplexType(self.scalar_type())) {
-    auto self_as_real = at::view_as_real(self);
-    auto self_as_real_real = self_as_real.select(self.dim(), 0);
-    auto self_as_real_imag = self_as_real.select(self.dim(), 1);
-    if (value.isComplex()) {
-      auto value_cdouble = value.to<c10::complex<double>>();
-      fill_scalar_mps_impl(self_as_real_real, value_cdouble.real());
-      fill_scalar_mps_impl(self_as_real_imag, value_cdouble.imag());
-      return self;
-    }
-    fill_scalar_mps_impl(self_as_real_real, value);
-    fill_scalar_mps_impl(self_as_real_imag, 0.0f);
-    return self;
-  }
-  // check if it's possible to use fillBuffer() to fill the Tensor's storage
-  if (self.is_contiguous()) {
+  // For fill_, every logical element gets the same value, so element order
+  // does not matter. Any tensor that is non-overlapping and dense (all storage
+  // positions covered exactly once) can be filled by writing linearly to its
+  // underlying storage, regardless of its dimensional layout.
+  // This covers contiguous tensors AND "effectively-contiguous" views such as
+  // transposed or permuted tensors.
+  const bool can_fill_linearly = self.is_non_overlapping_and_dense();
+
+  // Use Metal fillBuffer for zero fill and byte-representable fills on
+  // linearly-fillable tensors: these map to a single-byte pattern.
+  if (can_fill_linearly && !isComplexType(dtype)) {
     if (value.toDouble() == 0.0) {
-      return fill_mps_tensor_(self, 0);
+      stream->fill(getMTLBufferStorage(self), 0, self.nbytes(), self.storage_offset() * self.itemsize());
+      return;
     }
-    if (self.scalar_type() == kBool) {
-      return fill_mps_tensor_(self, value.toBool());
+    if (dtype == kBool) {
+      stream->fill(getMTLBufferStorage(self), (uint8_t)value.toBool(), self.nbytes(), self.storage_offset() * self.itemsize());
+      return;
     }
-    if (self.scalar_type() == kByte) {
-      return fill_mps_tensor_(self, value.toByte());
+    if (dtype == kByte) {
+      stream->fill(getMTLBufferStorage(self), (uint8_t)value.toByte(), self.nbytes(), self.storage_offset() * self.itemsize());
+      return;
     }
-    if (self.scalar_type() == kChar) {
-      return fill_mps_tensor_(self, value.toChar());
+    if (dtype == kChar) {
+      stream->fill(getMTLBufferStorage(self), (uint8_t)(int8_t)value.toChar(), self.nbytes(), self.storage_offset() * self.itemsize());
+      return;
     }
   }
 
-  return fill_scalar_mps_impl(self, value);
+  const auto type_str = scalarToMetalTypeString(dtype);
+
+  // For tensors with gaps or overlaps (e.g. stride-2 slices) use a 2D strided
+  // kernel: tid.y indexes dim 0 directly (no division), tid.x is the linear
+  // index for the remaining dims.  Consecutive threads in x write consecutive
+  // addresses in the innermost dimension, giving coalesced writes.
+  if (!can_fill_linearly) {
+    auto fillPSO = lib.getPipelineStateForFunc(fmt::format("fill_scalar_strided_{}", type_str));
+    const int64_t dim0_size = self.dim() > 0 ? self.size(0) : 1;
+    const int64_t inner_numel = self.numel() / dim0_size;
+    const uint32_t ndim = static_cast<uint32_t>(self.dim());
+    int64_t sizes_buf[16], strides_buf[16];
+    for (uint32_t i = 0; i < ndim; i++) {
+      sizes_buf[i] = self.size(i);
+      strides_buf[i] = self.stride(i);
+    }
+    // Blocks can't capture C arrays; use pointer aliases (safe: dispatch_sync blocks until done).
+    const int64_t* sizes_ptr = sizes_buf;
+    const int64_t* strides_ptr = strides_buf;
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+      @autoreleasepool {
+        auto computeEncoder = stream->commandEncoder();
+        auto mpsScalar = getMPSScalar(value, dtype);
+        [computeEncoder setComputePipelineState:fillPSO];
+        mtl_setArgs(computeEncoder, self, mpsScalar);
+        [computeEncoder setBytes:sizes_ptr length:ndim * sizeof(int64_t) atIndex:2];
+        [computeEncoder setBytes:strides_ptr length:ndim * sizeof(int64_t) atIndex:3];
+        [computeEncoder setBytes:&ndim length:sizeof(uint32_t) atIndex:4];
+        const NSUInteger maxTG = fillPSO.maxTotalThreadsPerThreadgroup;
+        const MTLSize tgSize = MTLSizeMake(std::min(maxTG, (NSUInteger)inner_numel), 1, 1);
+        const MTLSize gridSize = MTLSizeMake(inner_numel, dim0_size, 1);
+        [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:tgSize];
+      }
+    });
+    return;
+  }
+
+  auto fillPSO = lib.getPipelineStateForFunc(fmt::format("fill_scalar_dense_{}", type_str));
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto mpsScalar = getMPSScalar(value, dtype);
+      [computeEncoder setComputePipelineState:fillPSO];
+      mtl_setArgs(computeEncoder, self, mpsScalar);
+      mtl_dispatch1DJob(computeEncoder, fillPSO, self.numel());
+    }
+  });
 }
 
-Tensor& fill_tensor_mps_(Tensor& self, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0,
-              "fill_ only supports 0-dimension value tensor but got tensor with ",
-              value.dim(),
-              " dimensions.");
-  Scalar scalar_value = value.item();
-  return fill_scalar_mps(self, scalar_value);
-}
-
-Tensor& zero_mps_(Tensor& self) {
-  return fill_scalar_mps(self, 0.0f);
-}
+REGISTER_DISPATCH(fill_stub, &fill_mps_kernel);
 
 } // namespace at::native
