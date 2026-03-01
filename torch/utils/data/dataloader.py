@@ -1628,7 +1628,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # the logic of this function.
         if (
             _utils is None
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is True
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is None
         ):
             # See (2) of the note. If Python is shutting down, do no-op.

@@ -16,6 +16,7 @@ __all__ = ["extract_tb", "clear_frames"]
 def extract_tb(tb: TracebackType | None, limit: int | None = None) -> StackSummary:
     if tb is None:
         return traceback.StackSummary.from_list([])
+    # pyrefly: ignore [implicit-any]
     frame_summary = []
     while tb is not None:
         if limit:

@@ -6,7 +6,7 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 import contextlib
 import dataclasses
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -54,12 +54,45 @@ from .utils import (
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
+def _extract_tangent_source_stack_traces(
+    fx_g: torch.fx.GraphModule,
+    fw_metadata: ViewAndMutationMeta,
+) -> None:
+    from .descriptors import PlainAOTOutput, TangentAOTInput
+
+    if not fw_metadata.traced_tangents_descs:
+        return
+
+    output_node = list(fx_g.graph.nodes)[-1]
+    all_outputs = output_node.args[0]
+
+    stack_traces: list[str | None] = []
+    got_one = False
+
+    for desc in fw_metadata.traced_tangents_descs:
+        stack_trace = None
+
+        if isinstance(desc, TangentAOTInput):
+            output_desc = desc.output
+            if isinstance(output_desc, PlainAOTOutput) and output_desc.idx < len(
+                all_outputs
+            ):
+                output_arg = all_outputs[output_desc.idx]
+                if isinstance(output_arg, torch.fx.Node):
+                    stack_trace = output_arg.meta.get("stack_trace", None)
+                    got_one = True
+
+        stack_traces.append(stack_trace)
+
+    if got_one:
+        fw_metadata.tangent_source_stack_traces = stack_traces
+
+
 def _create_graph(
     f: Callable[..., Any],
     args: list[torch.Tensor],
-    args_descs: Optional[
-        list[AOTInput]
-    ] = None,  # keep compat with old clients; maybe we should split into two impls
+    args_descs: list[AOTInput]
+    | None = None,  # keep compat with old clients; maybe we should split into two impls
     *,
     aot_config: AOTConfig,
 ) -> torch.fx.GraphModule:
@@ -164,7 +197,7 @@ def aot_dispatch_base_graph(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> tuple[torch.fx.GraphModule, list[FxValue], list[AOTInput], Optional[SubclassMeta]]:
+) -> tuple[torch.fx.GraphModule, list[FxValue], list[AOTInput], SubclassMeta | None]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -391,7 +424,7 @@ def aot_dispatch_autograd_graph(
     torch.fx.GraphModule,
     tuple[list[Any], list[Any]],
     tuple[list[AOTInput], list[AOTInput]],
-    Optional[SubclassMeta],
+    SubclassMeta | None,
 ]:
     # NB: flat_fn here is the original user function (as far as
     # aot_module_simplified is concerned)
@@ -510,6 +543,9 @@ def aot_dispatch_autograd_graph(
     # Populate fw_metadata with stream indices from the compiled graph
     # NB: This needs to be done after the above stream assignments
     populate_fw_metadata_with_stream_indices(fx_g, fw_metadata)
+
+    # this helps users identify which forward output to call .detach() on.
+    _extract_tangent_source_stack_traces(fx_g, fw_metadata)
 
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:
