@@ -959,6 +959,11 @@ _efficient_attention_backward(
         checkBinaryArchMatches(), "Something went wrong in the build process");
 #endif
 
+    TORCH_CHECK(
+        (int64_t)p.num_heads * p.num_batches <= INT32_MAX,
+        "scaled_dot_product_attention backward: num_heads * num_batches (=",
+        (int64_t)p.num_heads * p.num_batches,
+        ") exceeds int32 range");
     kernel_fn<<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
   };
 

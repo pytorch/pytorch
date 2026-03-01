@@ -1786,6 +1786,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
           " kb)");
       AT_CUDA_CHECK(err);
     }
+    TORCH_CHECK(
+        (int64_t)p.num_heads * p.num_batches <= INT32_MAX,
+        "scaled_dot_product_attention: num_heads * num_batches (=",
+        (int64_t)p.num_heads * p.num_batches,
+        ") exceeds int32 range");
     auto blocks = p.getBlocksGrid();
     if (blocks.x * blocks.y * blocks.z == 0 || key.size(1) == 0) {
       res.zero_();
