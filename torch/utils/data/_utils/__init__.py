@@ -16,8 +16,11 @@ from torch._utils import ExceptionWrapper
 IS_WINDOWS = sys.platform == "win32"
 
 
+# TODO: Clean up MP_STATUS_CHECK_INTERVAL, keeping it
+# for backward compatibility with torchdata usage.
 MP_STATUS_CHECK_INTERVAL = 5.0
-r"""Interval (in seconds) to check status of processes to avoid hanging in
+STATUS_CHECK_INTERVAL = 5.0
+r"""Interval (in seconds) to check status of processes/threads to avoid hanging in
     multiprocessing data loading. This is mainly used in getting data from
     another process, in which case we need to periodically check whether the
     sender is alive to prevent hanging."""

@@ -201,6 +201,9 @@ class DataLoader(Generic[_T_co]):
             will be used as the device if ``pin_memory=True``.
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
+        worker_method (str, optional): The worker method to be used. Either ``"multiprocessing"`` for process-based workers
+            or ``"thread"`` for thread-based workers. (default: ``"multiprocessing"``). Note that ``"thread"`` is not
+            supported for MacOS and Windows.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -265,6 +268,7 @@ class DataLoader(Generic[_T_co]):
         persistent_workers: bool = False,
         pin_memory_device: str = "",
         in_order: bool = True,
+        worker_method: str = "multiprocessing",
     ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
@@ -297,6 +301,12 @@ class DataLoader(Generic[_T_co]):
         self.pin_memory_device = pin_memory_device
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
+
+        if worker_method not in ["multiprocessing", "thread"]:
+            raise ValueError(
+                "worker_method should be either 'multiprocessing' or 'thread'"
+            )
+        self.worker_method = worker_method
         self.multiprocessing_context = multiprocessing_context
         self.in_order = in_order
 
@@ -430,7 +440,10 @@ class DataLoader(Generic[_T_co]):
             return _SingleProcessDataLoaderIter(self)
         else:
             self.check_worker_number_rationality()
-            return _MultiProcessingDataLoaderIter(self)
+            if self.worker_method == "thread":
+                return _ThreadingDataLoaderIter(self)
+            else:
+                return _MultiProcessingDataLoaderIter(self)
 
     @property
     def multiprocessing_context(self):
@@ -566,8 +579,8 @@ class DataLoader(Generic[_T_co]):
         #        available (available in most of Linux system, but not OSX and Windows).
         #        When os.sched_getaffinity is not available, os.cpu_count() is called instead, but
         #        it doesn't respect cpuset.
-        #        We don't take threading into account since each worker process is single threaded
-        #        at this time.
+        #        We don't take threading into account since each multi-processing worker process is
+        #        single threaded at this time.
         #
         #        We don't set any threading flags (eg. OMP_NUM_THREADS, MKL_NUM_THREADS, etc)
         #        other than `torch.set_num_threads` to 1 in the worker process, if the passing
@@ -804,7 +817,397 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         return data
 
 
-class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
+class _ParallelDataLoaderIter(_BaseDataLoaderIter):
+    """Base class for both _ThreadingDataLoaderIter and _MultiProcessingDataLoaderIter with common functionality."""
+
+    def __init__(self, loader):
+        super().__init__(loader)
+
+        self._prefetch_factor = loader.prefetch_factor
+        self._in_order = loader.in_order
+        self._worker_method = loader.worker_method
+
+        if self._num_workers <= 0:
+            raise AssertionError(
+                "num_workers must be greater than 0 for _ParallelDataLoaderIter"
+            )
+        if self._prefetch_factor <= 0:
+            raise AssertionError(
+                "prefetch_factor must be greater than 0 for _ParallelDataLoaderIter"
+            )
+
+        self._worker_init_fn = loader.worker_init_fn
+
+        # Adds forward compatibilities so classic DataLoader can work with DataPipes:
+        #   Additional worker init function will take care of sharding in MP and Distributed
+        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
+            self._worker_init_fn = functools.partial(
+                _sharding_worker_init_fn,
+                self._worker_init_fn,
+                self._world_size,
+                self._rank,
+            )
+
+        # Will be set in subclasses
+        self._worker_result_queue = None
+        self._shutdown = False
+        self._workers_done_event: (
+            threading.Event | python_multiprocessing.synchronize.Event | None
+        ) = None
+        self._index_queues: list[Any] = []
+        self._workers: list[Any] = []
+        self._data_queue = None
+
+    def _initialize_pin_memory(self):
+        """Initialize pin memory thread and related queues.
+        Pin memory thread is only used when pin_memory is True and
+        the worker method is multiprocessing. For threading, pinning
+        is done in the worker processes.
+        """
+        if self._pin_memory and self._worker_method == "multiprocessing":
+            self._pin_memory_thread_done_event = threading.Event()
+
+            # Queue is not type-annotated
+            self._data_queue = queue.Queue()  # type: ignore[var-annotated]
+            current_device_id = torch.accelerator.current_device_index()
+            pin_memory_thread = threading.Thread(
+                target=_utils.pin_memory._pin_memory_loop,
+                args=(
+                    self._worker_result_queue,
+                    self._data_queue,
+                    current_device_id,
+                    self._pin_memory_thread_done_event,
+                    self._pin_memory_device,
+                ),
+            )
+            pin_memory_thread.daemon = True
+            pin_memory_thread.start()
+            # Similar to workers (see comment above), we only register
+            # pin_memory_thread once it is started.
+            self._pin_memory_thread = pin_memory_thread
+        else:
+            self._data_queue = self._worker_result_queue
+
+    def _reset(self, loader, first_iter=False):
+        super()._reset(loader, first_iter)
+        self._send_idx = 0  # idx of the next task to be sent to workers
+        self._rcvd_idx = 0  # idx of the next task to be returned in __next__
+        # information about data not yet yielded, i.e., tasks w/ indices in range [rcvd_idx, send_idx).
+        # map: task idx => - (worker_id,)        if data isn't fetched (outstanding)
+        #                  \ (worker_id, data)   if data is already fetched (out-of-order)
+        self._task_info = {}
+        self._tasks_outstanding = (
+            0  # always equal to count(v for v in task_info.values() if len(v) == 1)
+        )
+        # A list of booleans representing whether each worker still has work to
+        # do, i.e., not having exhausted its iterable dataset object. It always
+        # contains all `True`s if not using an iterable-style dataset
+        # (i.e., if kind != Iterable).
+        # Not that this indicates that a worker still has work to do *for this epoch*.
+        # It does not mean that a worker is dead. In case of `_persistent_workers`,
+        # the worker will be reset to available in the next epoch.
+        self._workers_status = [True for _ in range(self._num_workers)]
+        # A list of integers representing how many tasks are outstanding for each worker
+        # Incremented when a task is dispatched to the worker
+        # Decremented when that data has been given to the main thread
+        # Each worker should have at most self._prefetch_factor tasks outstanding
+        self._workers_num_tasks = [0 for _ in range(self._num_workers)]
+        # Reset the worker queue cycle so it resumes next epoch at worker 0
+        self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
+        # We resume the prefetching in case it was enabled
+        if not first_iter:
+            for idx in range(self._num_workers):
+                self._index_queues[idx].put(
+                    _utils.worker._ResumeIteration(self._shared_seed)
+                )
+            resume_iteration_cnt = self._num_workers
+            while resume_iteration_cnt > 0:
+                return_idx, return_data = self._get_data()
+                if isinstance(return_idx, _utils.worker._ResumeIteration):
+                    if return_data is not None:
+                        raise AssertionError(
+                            "Expected return_data to be None when resuming iteration"
+                        )
+                    resume_iteration_cnt -= 1
+        # prime the prefetch loop
+        for _ in range(self._prefetch_factor * self._num_workers):
+            self._try_put_index()
+
+    def _try_get_data(self, timeout=_utils.STATUS_CHECK_INTERVAL):
+        # Tries to fetch data from `self._data_queue` once for a given timeout.
+        # This can also be used as inner loop of fetching without timeout, with
+        # the sender status as the loop condition.
+        if self._data_queue is None:
+            raise AssertionError("Data queue not initialized")
+        try:
+            data = self._data_queue.get(timeout=timeout)
+            return (True, data)
+        except queue.Empty:
+            return (False, None)
+
+    def _get_data(self):
+        # Fetches data from `self._data_queue`.
+        #
+        # We check workers' status every `STATUS_CHECK_INTERVAL` seconds,
+        # which we achieve by running `self._try_get_data(timeout=STATUS_CHECK_INTERVAL)`
+        # in a loop. This is the only mechanism to detect worker failures for
+        # Windows. For other platforms, a SIGCHLD handler is also used for
+        # worker failure detection.
+        #
+        # If `pin_memory=True`, we also need check if `pin_memory_thread` had
+        # died at timeouts.
+        if self._timeout > 0:
+            success, data = self._try_get_data(self._timeout)
+            if success:
+                return data
+            else:
+                raise RuntimeError(
+                    f"DataLoader timed out after {self._timeout} seconds"
+                )
+        elif hasattr(self, "_pin_memory_thread"):
+            while self._pin_memory_thread.is_alive():
+                success, data = self._try_get_data()
+                if success:
+                    return data
+            else:
+                # while condition is false, i.e., pin_memory_thread died.
+                raise RuntimeError("Pin memory thread exited unexpectedly")
+        else:
+            while True:
+                success, data = self._try_get_data()
+                if success:
+                    return data
+
+    def _next_data(self):
+        while True:
+            # If the worker responsible for `self._rcvd_idx` has already ended
+            # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
+            # we try to advance `self._rcvd_idx` to find the next valid index.
+            #
+            # This part needs to run in the loop because both the `self._get_data()`
+            # call and `_IterableDatasetStopIteration` check below can mark
+            # extra worker(s) as dead.
+            while self._rcvd_idx < self._send_idx:
+                info = self._task_info.get(self._rcvd_idx, None)
+                if info:
+                    worker_id = info[0]
+                    if (
+                        len(info) == 2 or self._workers_status[worker_id]
+                    ):  # has data or is still active
+                        break
+                    del self._task_info[self._rcvd_idx]
+                self._rcvd_idx += 1
+            else:
+                # no valid `self._rcvd_idx` is found (i.e., didn't break)
+                if not self._persistent_workers:
+                    self._shutdown_workers()
+                raise StopIteration
+
+            # Now `self._rcvd_idx` is the batch index we want to fetch
+
+            # Check if the next sample has already been generated
+            if len(self._task_info[self._rcvd_idx]) == 2:
+                worker_id, data = self._task_info.pop(self._rcvd_idx)
+                self._rcvd_idx += 1
+                return self._process_data(data, worker_id)
+
+            if self._shutdown or self._tasks_outstanding <= 0:
+                raise AssertionError(
+                    "Invalid iterator state: shutdown or no outstanding tasks when fetching next data"
+                )
+            idx, data = self._get_data()
+            self._tasks_outstanding -= 1
+            if self._dataset_kind == _DatasetKind.Iterable:
+                # Check for _IterableDatasetStopIteration
+                if isinstance(data, _utils.worker._IterableDatasetStopIteration):
+                    if self._persistent_workers:
+                        self._workers_status[data.worker_id] = False
+                    else:
+                        self._mark_worker_as_unavailable(data.worker_id)
+                    self._try_put_index()
+                    continue
+
+            if idx != self._rcvd_idx:
+                if not self._in_order:
+                    # don't store it for later, process now
+                    # delete from self._task_info immediately
+                    # this keeps the object size manageable
+                    worker_id = self._task_info.pop(idx)[0]
+                    return self._process_data(data, worker_id)
+                # store out-of-order samples
+                self._task_info[idx] += (data,)
+            else:
+                worker_id = self._task_info.pop(idx)[0]
+                self._rcvd_idx += 1
+                return self._process_data(data, worker_id)
+
+    def _try_put_index(self):
+        max_tasks = self._prefetch_factor * self._num_workers
+        if self._tasks_outstanding >= max_tasks:
+            raise AssertionError(
+                "Number of outstanding tasks exceeded maximum allowed tasks"
+            )
+
+        try:
+            index = self._next_index()
+        except StopIteration:
+            return
+        for _ in range(self._num_workers):  # find the next active worker, if any
+            worker_queue_idx = next(self._worker_queue_idx_cycle)
+            if self._workers_status[worker_queue_idx]:
+                if self._in_order:
+                    break
+                elif self._workers_num_tasks[worker_queue_idx] < max_tasks // sum(
+                    self._workers_status
+                ):
+                    # when self._in_order is False, distribute work to a worker if it has capacity
+                    # _workers_status is updated only in this thread, so the sum is guaranteed > 0
+                    break
+        else:
+            # not found (i.e., didn't break)
+            return
+        self._index_queues[worker_queue_idx].put((self._send_idx, index))  # type: ignore[possibly-undefined]
+        self._task_info[self._send_idx] = (worker_queue_idx,)
+        self._workers_num_tasks[worker_queue_idx] += 1
+        self._tasks_outstanding += 1
+        self._send_idx += 1
+
+    def _process_data(self, data, worker_idx):
+        self._workers_num_tasks[worker_idx] -= 1
+        self._try_put_index()
+        if isinstance(data, ExceptionWrapper):
+            data.reraise()
+        return data
+
+    def _mark_worker_as_unavailable(self, worker_id, shutdown=False):
+        # Mark a worker as having finished its work e.g., due to
+        # exhausting an `IterableDataset`. This should be used only when this
+        # `_ParallelDataLoaderIter` is going to continue running.
+
+        if (
+            not self._workers_status[worker_id]
+            and not self._persistent_workers
+            and not shutdown
+        ):
+            raise AssertionError(
+                "Worker status inconsistent when marking worker as unavailable"
+            )
+
+        # Indicate that no more data will be put on this worker's queue by the current
+        # process.
+        q = self._index_queues[worker_id]
+        q.put(None)
+
+        # Note that we don't actually join the worker here, nor do we remove the
+        # worker's pid from C side struct because (1) joining may be slow, and
+        # (2) since we don't join, the worker may still raise error, and we
+        # prefer capturing those, rather than ignoring them, even though they
+        # are raised after the worker has finished its job.
+        # Joining is deferred to `_shutdown_workers`, which it is called when
+        # all workers finish their jobs (e.g., `IterableDataset` replicas) or
+        # when this iterator is garbage collected.
+
+        self._workers_status[worker_id] = False
+
+        if self._workers_done_event is None:
+            raise AssertionError("Workers done event not initialized")
+        if self._workers_done_event.is_set() != shutdown:
+            raise AssertionError(
+                "_workers_done_event state does not match shutdown flag"
+            )
+
+    def _shutdown_workers(self) -> None:
+        """Common shutdown logic for both threading and multiprocessing implementations."""
+        if not self._shutdown:
+            self._shutdown = True
+            # Exit `pin_memory_thread` first because exiting workers may leave
+            # corrupted data in `worker_result_queue` which `pin_memory_thread`
+            # reads from.
+            if hasattr(self, "_pin_memory_thread"):
+                # Use hasattr in case error happens before we set the attribute.
+                self._pin_memory_thread_done_event.set()
+                # Send something to pin_memory_thread in case it is waiting
+                # so that it can wake up and check `pin_memory_thread_done_event`
+                if self._worker_result_queue is None:
+                    raise AssertionError("Worker result queue not initialized")
+                self._worker_result_queue.put((None, None))
+                self._pin_memory_thread.join()
+
+            # Exit workers now.
+            if self._workers_done_event is None:
+                raise AssertionError("Workers done event not initialized")
+            self._workers_done_event.set()
+            for worker_id in range(len(self._workers)):
+                # Get number of workers from `len(self._workers)` instead of
+                # `self._num_workers` in case we error before starting all
+                # workers.
+                # If we are using workers_status with persistent_workers
+                # we have to shut it down because the worker is paused
+                if self._persistent_workers or self._workers_status[worker_id]:
+                    self._mark_worker_as_unavailable(worker_id, shutdown=True)
+
+            for w in self._workers:
+                w.join(timeout=_utils.STATUS_CHECK_INTERVAL)
+
+    def __del__(self) -> None:
+        self._shutdown_workers()
+
+
+class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
+    r"""Iterates once over the DataLoader's dataset, as specified by the sampler,
+    using threads instead of processes for parallelism.
+
+    Uses per-worker index queues (like multiprocessing mode) to ensure deterministic
+    task-to-worker assignment, which is important for:
+    - Reproducible results with seeded RNG
+    - Consistent behavior with IterableDataset sharding
+    - Matching multiprocessing mode behavior
+    """
+
+    def __init__(self, loader):
+        super().__init__(loader)
+
+        # Thread-based implementation uses standard Python queues
+        self._worker_result_queue = queue.SimpleQueue()  # type: ignore[assignment]
+        self._shutdown = False
+        self._workers_done_event = threading.Event()
+
+        self._index_queues = []
+        self._workers = []
+        for i in range(self._num_workers):
+            # Each worker gets its own index queue (like multiprocessing)
+            # This ensures deterministic round-robin task assignment
+            index_queue: queue.SimpleQueue[Any] = queue.SimpleQueue()
+            w = threading.Thread(
+                target=_utils.worker._thread_worker_loop,
+                args=(
+                    self._dataset_kind,
+                    self._dataset,
+                    index_queue,  # Each thread has its own queue
+                    self._worker_result_queue,
+                    self._workers_done_event,
+                    self._auto_collation,
+                    self._collate_fn,
+                    self._drop_last,
+                    self._base_seed,
+                    self._worker_init_fn,
+                    i,
+                    self._num_workers,
+                    self._pin_memory,
+                ),
+                daemon=True,
+            )
+            w.start()
+
+            self._index_queues.append(index_queue)
+            self._workers.append(w)
+
+        self._initialize_pin_memory()
+
+        self._reset(loader, first_iter=True)
+
+
+class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler."""
 
     # NOTE [ Data Loader Multiprocessing Shutdown Logic ]
@@ -1117,40 +1520,16 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     def __init__(self, loader) -> None:
         super().__init__(loader)
 
-        self._prefetch_factor = loader.prefetch_factor
-        self._in_order = loader.in_order
-
-        if self._num_workers <= 0:
-            raise AssertionError(
-                "num_workers must be greater than 0 for MultiProcessingDataLoaderIter"
-            )
-        if self._prefetch_factor <= 0:
-            raise AssertionError(
-                "prefetch_factor must be greater than 0 for MultiProcessingDataLoaderIter"
-            )
-
         if loader.multiprocessing_context is None:
             multiprocessing_context = torch.multiprocessing
         else:
             multiprocessing_context = loader.multiprocessing_context
 
-        self._worker_init_fn = loader.worker_init_fn
-
-        # Adds forward compatibilities so classic DataLoader can work with DataPipes:
-        #   Additional worker init function will take care of sharding in MP and Distributed
-        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
-            self._worker_init_fn = functools.partial(
-                _sharding_worker_init_fn,
-                self._worker_init_fn,
-                self._world_size,
-                self._rank,
-            )
-
         # No certainty which module multiprocessing_context is
-        self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
+        self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[assignment]
         self._worker_pids_set = False
         self._shutdown = False
-        self._workers_done_event = multiprocessing_context.Event()
+        self._workers_done_event = multiprocessing_context.Event()  # type: ignore[assignment]
 
         self._index_queues = []
         self._workers = []
@@ -1161,7 +1540,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # See sections (2) and (3b) above.
             index_queue.cancel_join_thread()
             w = multiprocessing_context.Process(
-                target=_utils.worker._worker_loop,
+                target=_utils.worker._process_worker_loop,
                 args=(
                     self._dataset_kind,
                     self._dataset,
@@ -1175,7 +1554,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._worker_init_fn,
                     i,
                     self._num_workers,
-                    self._persistent_workers,
                     self._shared_seed,
                 ),
             )
@@ -1203,29 +1581,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             self._index_queues.append(index_queue)
             self._workers.append(w)
 
-        if self._pin_memory:
-            self._pin_memory_thread_done_event = threading.Event()
-
-            # Queue is not type-annotated
-            self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            current_device_id = torch.accelerator.current_device_index()
-            pin_memory_thread = threading.Thread(
-                target=_utils.pin_memory._pin_memory_loop,
-                args=(
-                    self._worker_result_queue,
-                    self._data_queue,
-                    current_device_id,
-                    self._pin_memory_thread_done_event,
-                    self._pin_memory_device,
-                ),
-            )
-            pin_memory_thread.daemon = True
-            pin_memory_thread.start()
-            # Similar to workers (see comment above), we only register
-            # pin_memory_thread once it is started.
-            self._pin_memory_thread = pin_memory_thread
-        else:
-            self._data_queue = self._worker_result_queue  # type: ignore[assignment]
+        self._initialize_pin_memory()
 
         # In some rare cases, persistent workers (daemonic processes)
         # would be terminated before `__del__` of iterator is invoked
@@ -1249,52 +1605,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._worker_pids_set = True
         self._reset(loader, first_iter=True)
 
-    def _reset(self, loader, first_iter=False) -> None:
-        super()._reset(loader, first_iter)
-        self._send_idx = 0  # idx of the next task to be sent to workers
-        self._rcvd_idx = 0  # idx of the next task to be returned in __next__
-        # information about data not yet yielded, i.e., tasks w/ indices in range [rcvd_idx, send_idx).
-        # map: task idx => - (worker_id,)        if data isn't fetched (outstanding)
-        #                  \ (worker_id, data)   if data is already fetched (out-of-order)
-        self._task_info = {}
-        self._tasks_outstanding = (
-            0  # always equal to count(v for v in task_info.values() if len(v) == 1)
-        )
-        # A list of booleans representing whether each worker still has work to
-        # do, i.e., not having exhausted its iterable dataset object. It always
-        # contains all `True`s if not using an iterable-style dataset
-        # (i.e., if kind != Iterable).
-        # Not that this indicates that a worker still has work to do *for this epoch*.
-        # It does not mean that a worker is dead. In case of `_persistent_workers`,
-        # the worker will be reset to available in the next epoch.
-        self._workers_status = [True for i in range(self._num_workers)]
-        # A list of integers representing how many tasks are outstanding for each worker
-        # Incremented when a task is dispatched to the worker
-        # Decremented when that data has been given to the main thread
-        # Each worker should have at most self._prefetch_factor tasks outstanding
-        self._workers_num_tasks = [0 for i in range(self._num_workers)]
-        # Reset the worker queue cycle so it resumes next epoch at worker 0
-        self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
-        # We resume the prefetching in case it was enabled
-        if not first_iter:
-            for idx in range(self._num_workers):
-                self._index_queues[idx].put(
-                    _utils.worker._ResumeIteration(self._shared_seed)
-                )
-            resume_iteration_cnt = self._num_workers
-            while resume_iteration_cnt > 0:
-                return_idx, return_data = self._get_data()
-                if isinstance(return_idx, _utils.worker._ResumeIteration):
-                    if return_data is not None:
-                        raise AssertionError(
-                            "Expected return_data to be None when resuming iteration"
-                        )
-                    resume_iteration_cnt -= 1
-        # prime the prefetch loop
-        for _ in range(self._prefetch_factor * self._num_workers):
-            self._try_put_index()
-
-    def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
+    def _try_get_data(self, timeout=_utils.STATUS_CHECK_INTERVAL):
         # Tries to fetch data from `self._data_queue` once for a given timeout.
         # This can also be used as inner loop of fetching without timeout, with
         # the sender status as the loop condition.
@@ -1306,6 +1617,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         #
         # Returns a 2-tuple:
         #   (bool: whether successfully get data, any: data if successful else None)
+        if self._data_queue is None:
+            raise AssertionError("Data queue not initialized")
         try:
             data = self._data_queue.get(timeout=timeout)
             return (True, data)
@@ -1449,183 +1762,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     # 3. Run the script with the `send` option in the second shell:
     # (shell2) ./test_socket.py sock_tmp 1017 send
 
-    def _get_data(self):
-        # Fetches data from `self._data_queue`.
-        #
-        # We check workers' status every `MP_STATUS_CHECK_INTERVAL` seconds,
-        # which we achieve by running `self._try_get_data(timeout=MP_STATUS_CHECK_INTERVAL)`
-        # in a loop. This is the only mechanism to detect worker failures for
-        # Windows. For other platforms, a SIGCHLD handler is also used for
-        # worker failure detection.
-        #
-        # If `pin_memory=True`, we also need check if `pin_memory_thread` had
-        # died at timeouts.
-        if self._timeout > 0:
-            success, data = self._try_get_data(self._timeout)
-            if success:
-                return data
-            else:
-                raise RuntimeError(
-                    f"DataLoader timed out after {self._timeout} seconds"
-                )
-        elif self._pin_memory:
-            while self._pin_memory_thread.is_alive():
-                success, data = self._try_get_data()
-                if success:
-                    return data
-            else:
-                # while condition is false, i.e., pin_memory_thread died.
-                raise RuntimeError("Pin memory thread exited unexpectedly")
-            # In this case, `self._data_queue` is a `queue.Queue`,. But we don't
-            # need to call `.task_done()` because we don't use `.join()`.
-        else:
-            while True:
-                success, data = self._try_get_data()
-                if success:
-                    return data
-
-    def _next_data(self):
-        while True:
-            # If the worker responsible for `self._rcvd_idx` has already ended
-            # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
-            # we try to advance `self._rcvd_idx` to find the next valid index.
-            #
-            # This part needs to run in the loop because both the `self._get_data()`
-            # call and `_IterableDatasetStopIteration` check below can mark
-            # extra worker(s) as dead.
-            while self._rcvd_idx < self._send_idx:
-                info = self._task_info.get(self._rcvd_idx, None)
-                if info:
-                    worker_id = info[0]
-                    if (
-                        len(info) == 2 or self._workers_status[worker_id]
-                    ):  # has data or is still active
-                        break
-                    del self._task_info[self._rcvd_idx]
-                self._rcvd_idx += 1
-            else:
-                # no valid `self._rcvd_idx` is found (i.e., didn't break)
-                if not self._persistent_workers:
-                    self._shutdown_workers()
-                raise StopIteration
-
-            # Now `self._rcvd_idx` is the batch index we want to fetch
-
-            # Check if the next sample has already been generated
-            if len(self._task_info[self._rcvd_idx]) == 2:
-                worker_id, data = self._task_info.pop(self._rcvd_idx)
-                self._rcvd_idx += 1
-                return self._process_data(data, worker_id)
-
-            if self._shutdown or self._tasks_outstanding <= 0:
-                raise AssertionError(
-                    "Invalid iterator state: shutdown or no outstanding tasks when fetching next data"
-                )
-            idx, data = self._get_data()
-            self._tasks_outstanding -= 1
-            if self._dataset_kind == _DatasetKind.Iterable:
-                # Check for _IterableDatasetStopIteration
-                if isinstance(data, _utils.worker._IterableDatasetStopIteration):
-                    if self._persistent_workers:
-                        self._workers_status[data.worker_id] = False
-                    else:
-                        self._mark_worker_as_unavailable(data.worker_id)
-                    self._try_put_index()
-                    continue
-
-            if idx != self._rcvd_idx:
-                if not self._in_order:
-                    # don't store it for later, process now
-                    # delete from self._task_info immediately
-                    # this keeps the object size manageable
-                    worker_id = self._task_info.pop(idx)[0]
-                    return self._process_data(data, worker_id)
-                # store out-of-order samples
-                self._task_info[idx] += (data,)
-            else:
-                worker_id = self._task_info.pop(idx)[0]
-                self._rcvd_idx += 1
-                return self._process_data(data, worker_id)
-
-    def _try_put_index(self) -> None:
-        max_tasks = self._prefetch_factor * self._num_workers
-        if self._tasks_outstanding >= max_tasks:
-            raise AssertionError(
-                "Number of outstanding tasks exceeded maximum allowed tasks"
-            )
-
-        try:
-            index = self._next_index()
-        except StopIteration:
-            return
-        for _ in range(self._num_workers):  # find the next active worker, if any
-            worker_queue_idx = next(self._worker_queue_idx_cycle)
-            if self._workers_status[worker_queue_idx]:
-                if self._in_order:
-                    break
-                elif self._workers_num_tasks[worker_queue_idx] < max_tasks // sum(
-                    self._workers_status
-                ):
-                    # when self._in_order is False, distribute work to a worker if it has capacity
-                    # _workers_status is updated only in this thread, so the sum is guaranteed > 0
-                    break
-        else:
-            # not found (i.e., didn't break)
-            return
-
-        self._index_queues[worker_queue_idx].put((self._send_idx, index))  # type: ignore[possibly-undefined]
-        self._task_info[self._send_idx] = (worker_queue_idx,)
-        self._workers_num_tasks[worker_queue_idx] += 1
-        self._tasks_outstanding += 1
-        self._send_idx += 1
-
-    def _process_data(self, data, worker_idx):
-        self._workers_num_tasks[worker_idx] -= 1
-        self._try_put_index()
-        if isinstance(data, ExceptionWrapper):
-            data.reraise()
-        return data
-
-    def _mark_worker_as_unavailable(self, worker_id, shutdown=False) -> None:
-        # Mark a worker as having finished its work e.g., due to
-        # exhausting an `IterableDataset`. This should be used only when this
-        # `_MultiProcessingDataLoaderIter` is going to continue running.
-
-        if (
-            not self._workers_status[worker_id]
-            and not self._persistent_workers
-            and not shutdown
-        ):
-            raise AssertionError(
-                "Worker status inconsistent when marking worker as unavailable"
-            )
-
-        # Signal termination to that specific worker.
-        q = self._index_queues[worker_id]
-        # Indicate that no more data will be put on this queue by the current
-        # process.
-        q.put(None)
-
-        # Note that we don't actually join the worker here, nor do we remove the
-        # worker's pid from C side struct because (1) joining may be slow, and
-        # (2) since we don't join, the worker may still raise error, and we
-        # prefer capturing those, rather than ignoring them, even though they
-        # are raised after the worker has finished its job.
-        # Joining is deferred to `_shutdown_workers`, which it is called when
-        # all workers finish their jobs (e.g., `IterableDataset` replicas) or
-        # when this iterator is garbage collected.
-
-        self._workers_status[worker_id] = False
-
-        if self._workers_done_event.is_set() != shutdown:
-            raise AssertionError(
-                "_workers_done_event state does not match shutdown flag"
-            )
-
     def _shutdown_workers(self) -> None:
-        # Called when shutting down this `_MultiProcessingDataLoaderIter`.
-        # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on
-        # the logic of this function.
+        # Check for early exit conditions
         if (
             _utils is None
             # pyrefly: ignore [unnecessary-comparison]
@@ -1633,77 +1771,50 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is None
         ):
-            # See (2) of the note. If Python is shutting down, do no-op.
+            # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details.
+            # If Python is shutting down, do no-op.
             return
-        # Normal exit when last reference is gone / iterator is depleted.
-        # See (1) and the second half of the note.
-        if not self._shutdown:
-            self._shutdown = True
-            try:
-                # Normal exit when last reference is gone / iterator is depleted.
-                # See (1) and the second half of the note.
 
-                # Exit `pin_memory_thread` first because exiting workers may leave
-                # corrupted data in `worker_result_queue` which `pin_memory_thread`
-                # reads from.
-                if hasattr(self, "_pin_memory_thread"):
-                    # Use hasattr in case error happens before we set the attribute.
-                    self._pin_memory_thread_done_event.set()
-                    # Send something to pin_memory_thread in case it is waiting
-                    # so that it can wake up and check `pin_memory_thread_done_event`
-                    self._worker_result_queue.put((None, None))
-                    self._pin_memory_thread.join()
-                    self._worker_result_queue.cancel_join_thread()
-                    self._worker_result_queue.close()
+        # Call parent class shutdown logic (common to both threading and multiprocessing)
+        super()._shutdown_workers()
 
-                # Exit workers now.
-                self._workers_done_event.set()
-                for worker_id in range(len(self._workers)):
-                    # Get number of workers from `len(self._workers)` instead of
-                    # `self._num_workers` in case we error before starting all
-                    # workers.
-                    # If we are using workers_status with persistent_workers
-                    # we have to shut it down because the worker is paused
-                    if self._persistent_workers or self._workers_status[worker_id]:
-                        self._mark_worker_as_unavailable(worker_id, shutdown=True)
-                for w in self._workers:
-                    # We should be able to join here, but in case anything went
-                    # wrong, we set a timeout and if the workers fail to join,
-                    # they are killed in the `finally` block.
-                    w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-                for q in self._index_queues:
-                    q.cancel_join_thread()
-                    q.close()
-            finally:
-                # Even though all this function does is putting into queues that
-                # we have called `cancel_join_thread` on, weird things can
-                # happen when a worker is killed by a signal, e.g., hanging in
-                # `Event.set()`. So we need to guard this with SIGCHLD handler,
-                # and remove pids from the C side data structure only at the
-                # end.
-                #
-                # FIXME: Unfortunately, for Windows, we are missing a worker
-                #        error detection mechanism here in this function, as it
-                #        doesn't provide a SIGCHLD handler.
-                if self._worker_pids_set:
-                    _utils.signal_handling._remove_worker_pids(id(self))
-                    self._worker_pids_set = False
-                for w in self._workers:
-                    if w.is_alive():
-                        # Existing mechanisms try to make the workers exit
-                        # peacefully, but in case that we unfortunately reach
-                        # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
-                        # we kill the worker.
-                        w.terminate()
+        try:
+            if hasattr(self, "_pin_memory_thread"):
+                if self._worker_result_queue is None:
+                    raise AssertionError("Worker result queue not initialized")
+                # Multiprocessing queues have cancel_join_thread and close methods
+                self._worker_result_queue.cancel_join_thread()  # type: ignore[attr-defined]
+                self._worker_result_queue.close()  # type: ignore[attr-defined]
+
+            for q in self._index_queues:
+                q.cancel_join_thread()
+                q.close()
+        finally:
+            # Even though we call `cancel_join_thread` on multiprocessing queues,
+            # weird things can happen when a worker is killed by a signal,
+            # e.g., hanging in `Event.set()`. So we need to guard this with SIGCHLD handler,
+            # and remove pids from the C side data structure only at the
+            # end.
+            #
+            # FIXME: Unfortunately, for Windows, we are missing a worker
+            #        error detection mechanism here in this function, as it
+            #        doesn't provide a SIGCHLD handler.
+            if self._worker_pids_set:
+                _utils.signal_handling._remove_worker_pids(id(self))
+                self._worker_pids_set = False
+            for w in self._workers:
+                if w.is_alive():
+                    # Existing mechanisms try to make the workers exit
+                    # peacefully, but in case that we unfortunately reach
+                    # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
+                    # we kill the worker.
+                    w.terminate()
 
     # staticmethod is used to remove reference to `_MultiProcessingDataLoaderIter`
     @staticmethod
     def _clean_up_worker(w) -> None:
         try:
-            w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+            w.join(timeout=_utils.STATUS_CHECK_INTERVAL)
         finally:
             if w.is_alive():
                 w.terminate()
-
-    def __del__(self) -> None:
-        self._shutdown_workers()

@@ -10,13 +10,20 @@ from __future__ import annotations
 import os
 import queue
 import random
+import threading
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch._utils import ExceptionWrapper
 
-from . import HAS_NUMPY, IS_WINDOWS, MP_STATUS_CHECK_INTERVAL, signal_handling
+from . import (
+    HAS_NUMPY,
+    IS_WINDOWS,
+    pin_memory as pin_memory_module,
+    signal_handling,
+    STATUS_CHECK_INTERVAL,
+)
 
 
 if TYPE_CHECKING:
@@ -73,6 +80,7 @@ else:
 
 
 _worker_info: Optional[WorkerInfo] = None
+_thread_local_worker_info = threading.local()
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +106,7 @@ class WorkerInfo:
 
 def get_worker_info() -> WorkerInfo | None:
     r"""Returns the information about the current
-    :class:`~torch.utils.data.DataLoader` iterator worker process.
+    :class:`~torch.utils.data.DataLoader` iterator worker process or thread.
 
     When called in a worker, this returns an object guaranteed to have the
     following attributes:
@@ -108,36 +116,42 @@ def get_worker_info() -> WorkerInfo | None:
     * :attr:`seed`: the random seed set for the current worker. This value is
       determined by main process RNG and the worker id. See
       :class:`~torch.utils.data.DataLoader`'s documentation for more details.
-    * :attr:`dataset`: the copy of the dataset object in **this** process. Note
+    * :attr:`dataset`: the copy of the dataset object in **this** process or thread. Note
       that this will be a different object in a different process than the one
-      in the main process.
+      in the main process. For thread, this is the same object as the one in the main process.
+    * :attr:`worker_method`: the worker method being used. Either ``"multiprocessing"``
+      for process-based workers or ``"thread"`` for thread-based workers.
 
     When called in the main process, this returns ``None``.
 
     .. note::
        When used in a :attr:`worker_init_fn` passed over to
        :class:`~torch.utils.data.DataLoader`, this method can be useful to
-       set up each worker process differently, for instance, using ``worker_id``
+       set up each worker process/thread differently, for instance, using ``worker_id``
        to configure the ``dataset`` object to only read a specific fraction of a
        sharded dataset, or use ``seed`` to seed other libraries used in dataset
        code.
     """
+    # There is no global worker_method flag because it is set in worker info,
+    # so try thread-local storage first, fall back to _worker_info.
+    thread_local_worker_info = getattr(_thread_local_worker_info, "worker_info", None)
+    if thread_local_worker_info is not None:
+        return thread_local_worker_info
+
     return _worker_info
-
-
-r"""Dummy class used to signal the end of an IterableDataset"""
 
 
 @dataclass(frozen=True)
 class _IterableDatasetStopIteration:
+    """Dummy class used to signal the end of an IterableDataset"""
+
     worker_id: int
-
-
-r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 
 
 @dataclass(frozen=True)
 class _ResumeIteration:
+    """Dummy class used to resume the fetching when worker reuse is enabled"""
+
     seed: int | None = None
 
 
@@ -241,7 +255,7 @@ def _generate_state(base_seed, worker_id):
     return state
 
 
-def _worker_loop(
+def _base_worker_loop(
     dataset_kind,
     dataset,
     index_queue,
@@ -250,57 +264,30 @@ def _worker_loop(
     auto_collation,
     collate_fn,
     drop_last,
-    base_seed,
     init_fn,
     worker_id,
-    num_workers,
-    persistent_workers,
-    shared_seed,
+    shared_rng=None,
+    worker_method="multiprocessing",
+    watchdog_constructor=None,
+    post_fetch_fn=None,
 ) -> None:
-    # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
-    # logic of this function.
+    """
+    Base worker loop with common functionality for both process and thread workers.
 
+    Args:
+        worker_method: The worker method ("multiprocessing", "thread")
+        post_fetch_fn: Optional callback to process data after fetching (e.g., pin_memory for thread workers)
+    """
     try:
-        # Initialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
-        # module's handlers are executed after Python returns from C low-level
-        # handlers, likely when the same fatal signal had already happened
-        # again.
-        # https://docs.python.org/3/library/signal.html#execution-of-python-signal-handlers
-        signal_handling._set_worker_signal_handlers()
-
-        torch.multiprocessing._set_thread_name("pt_data_worker")
-
         torch.set_num_threads(1)
-        seed = base_seed + worker_id
-        random.seed(seed)
-        torch.manual_seed(seed)
-        if HAS_NUMPY:
-            np_seed = _generate_state(base_seed, worker_id)
-            import numpy as np
-
-            np.random.seed(np_seed)
-
-        from torch.utils.data import IterDataPipe
-        from torch.utils.data.graph_settings import apply_random_seed
-
-        shared_rng = torch.Generator()
-        if isinstance(dataset, IterDataPipe):
-            if shared_seed is None:
-                raise AssertionError(
-                    "shared_seed must be provided for IterDataPipe workers"
-                )
-            shared_rng.manual_seed(shared_seed)
-            dataset = apply_random_seed(dataset, shared_rng)
-
-        global _worker_info
-        _worker_info = WorkerInfo(
-            id=worker_id, num_workers=num_workers, seed=seed, dataset=dataset
-        )
 
         from torch.utils.data import _DatasetKind
 
         init_exception = None
 
+        error_prefix = (
+            "worker process" if worker_method == "multiprocessing" else "worker thread"
+        )
         try:
             if init_fn is not None:
                 init_fn(worker_id)
@@ -310,7 +297,7 @@ def _worker_loop(
             )
         except Exception:
             init_exception = ExceptionWrapper(
-                where=f"in DataLoader worker process {worker_id}"
+                where=f"in DataLoader {error_prefix} {worker_id}"
             )
 
         # When using Iterable mode, some worker can exit earlier than others due
@@ -319,19 +306,15 @@ def _worker_loop(
         # sent over to the main process with the ID of this worker, so that the
         # main process won't send more tasks to this worker, and will send
         # `None` to this worker to properly exit it.
-        #
-        # Note that we cannot set `done_event` from a worker as it is shared
-        # among all processes. Instead, we set the `iteration_end` flag to
-        # signify that the iterator is exhausted. When either `done_event` or
-        # `iteration_end` is set, we skip all processing step and just wait for
-        # `None`.
         iteration_end = False
 
-        watchdog = ManagerWatchdog()
+        # Create watchdog to check if parent is alive
+        watchdog = watchdog_constructor() if watchdog_constructor is not None else None
 
-        while watchdog.is_alive():
+        # Main worker loop
+        while watchdog is None or watchdog.is_alive():
             try:
-                r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+                r = index_queue.get(timeout=STATUS_CHECK_INTERVAL)
             except queue.Empty:
                 continue
             if isinstance(r, _ResumeIteration):
@@ -339,13 +322,23 @@ def _worker_loop(
                 data_queue.put((r, None))
                 iteration_end = False
 
-                if isinstance(dataset, IterDataPipe):
-                    if r.seed is None:
-                        raise AssertionError(
-                            "resume iteration seed is None for IterDataPipe"
-                        )
-                    shared_rng.manual_seed(r.seed)
-                    dataset = apply_random_seed(dataset, shared_rng)
+                # Note: DataPipe is not supported in thread mode
+                if worker_method == "multiprocessing":
+                    from torch.utils.data import IterDataPipe
+
+                    if isinstance(dataset, IterDataPipe):
+                        from torch.utils.data.graph_settings import apply_random_seed
+
+                        if r.seed is None:
+                            raise AssertionError(
+                                "resume iteration seed is None for IterDataPipe"
+                            )
+                        if shared_rng is None:
+                            raise AssertionError(
+                                "shared_rng is None for IterDataPipe in multiprocessing mode"
+                            )
+                        shared_rng.manual_seed(r.seed)
+                        dataset = apply_random_seed(dataset, shared_rng)
 
                 # Recreate the fetcher for worker-reuse policy
                 fetcher = _DatasetKind.create_fetcher(
@@ -364,14 +357,25 @@ def _worker_loop(
                 # (None) yet. I will keep continuing until get it, and skip the
                 # processing steps.
                 continue
-            idx, index = r
+            task_id, data_index = r
             data: _IterableDatasetStopIteration | ExceptionWrapper
             if init_exception is not None:
                 data = init_exception
                 init_exception = None
             else:
                 try:
-                    data = fetcher.fetch(index)  # type: ignore[possibly-undefined]
+                    data = fetcher.fetch(data_index)  # type: ignore[possibly-undefined]
+
+                    # Apply post-fetch processing if provided (e.g., pin_memory for thread workers)
+                    if post_fetch_fn is not None and not isinstance(
+                        data, ExceptionWrapper
+                    ):
+                        try:
+                            data = post_fetch_fn(data)
+                        except Exception:
+                            data = ExceptionWrapper(
+                                where=f"in {post_fetch_fn.__name__} for DataLoader {error_prefix} {worker_id}"
+                            )
                 except Exception as e:
                     if (
                         isinstance(e, StopIteration)
@@ -387,13 +391,169 @@ def _worker_loop(
                         # `ExceptionWrapper` does the correct thing.
                         # See NOTE [ Python Traceback Reference Cycle Problem ]
                         data = ExceptionWrapper(
-                            where=f"in DataLoader worker process {worker_id}"
+                            where=f"in DataLoader {error_prefix} {worker_id}"
                         )
-            data_queue.put((idx, data))
-            del data, idx, index, r  # save memory
+            data_queue.put((task_id, data))
+            del data, task_id, data_index, r  # save memory
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass
+
+
+def _process_worker_loop(
+    dataset_kind,
+    dataset,
+    index_queue,
+    data_queue,
+    done_event,
+    auto_collation,
+    collate_fn,
+    drop_last,
+    base_seed,
+    init_fn,
+    worker_id,
+    num_workers,
+    shared_seed,
+):
+    # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
+    # logic of this function.
+
+    # Initialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
+    # module's handlers are executed after Python returns from C low-level
+    # handlers, likely when the same fatal signal had already happened
+    # again.
+    # https://docs.python.org/3/library/signal.html#execution-of-python-signal-handlers
+    signal_handling._set_worker_signal_handlers()
+    torch.multiprocessing._set_thread_name("pt_multiprocess_data_worker")
+
+    seed = base_seed + worker_id
+    random.seed(seed)
+    torch.manual_seed(seed)
+
+    if HAS_NUMPY:
+        np_seed = _generate_state(base_seed, worker_id)
+        import numpy as np
+
+        np.random.seed(np_seed)
+
+    from torch.utils.data import IterDataPipe
+
+    shared_rng = torch.Generator()
+    if isinstance(dataset, IterDataPipe):
+        from torch.utils.data.graph_settings import apply_random_seed
+
+        if shared_seed is None:
+            raise AssertionError(
+                "shared_seed must be provided for IterDataPipe workers"
+            )
+        shared_rng.manual_seed(shared_seed)
+        dataset = apply_random_seed(dataset, shared_rng)
+
+    global _worker_info
+    _worker_info = WorkerInfo(
+        id=worker_id,
+        num_workers=num_workers,
+        seed=seed,
+        dataset=dataset,
+        worker_method="multiprocessing",
+    )
+
+    _base_worker_loop(
+        dataset_kind=dataset_kind,
+        dataset=dataset,
+        index_queue=index_queue,
+        data_queue=data_queue,
+        done_event=done_event,
+        auto_collation=auto_collation,
+        collate_fn=collate_fn,
+        drop_last=drop_last,
+        init_fn=init_fn,
+        worker_id=worker_id,
+        shared_rng=shared_rng,
+        worker_method="multiprocessing",
+        watchdog_constructor=ManagerWatchdog,
+    )
+
     if done_event.is_set():
         data_queue.cancel_join_thread()
         data_queue.close()
+
+
+def _thread_worker_loop(
+    dataset_kind,
+    dataset,
+    index_queue,
+    data_queue,
+    done_event,
+    auto_collation,
+    collate_fn,
+    drop_last,
+    base_seed,
+    init_fn,
+    worker_id,
+    num_workers,
+    pin_memory=False,
+):
+    """
+    Thread worker loop that uses the common base worker loop for threads.
+    Sets up thread-local RNG state to avoid race conditions and shared state issues.
+    """
+    torch.multiprocessing._set_thread_name("pt_thread_data_worker")
+
+    # Set the thread name for better debugging
+    threading.current_thread().name = f"DataLoader_thread_{worker_id}"
+
+    # Thread-local RNG setup to avoid race conditions with global state
+    seed = base_seed + worker_id
+
+    # Set up thread-local random generators
+    random_generator = random.Random(seed)
+    torch_generator = torch.Generator()
+    torch_generator.manual_seed(seed)
+
+    numpy_generator = None
+    if HAS_NUMPY:
+        np_seed = _generate_state(base_seed, worker_id)
+        import numpy as np
+
+        numpy_generator = np.random.default_rng(np_seed)
+
+    rng = _RNG(
+        random_generator=random_generator,
+        torch_generator=torch_generator,
+        numpy_generator=numpy_generator,
+    )
+
+    worker_info = WorkerInfo(
+        id=worker_id,
+        num_workers=num_workers,
+        seed=seed,
+        dataset=dataset,
+        rng=rng,
+        worker_method="thread",
+    )
+
+    _thread_local_worker_info.worker_info = worker_info
+
+    # Create a post-fetch function for pin_memory if enabled
+    post_fetch_fn = None
+    if pin_memory:
+        post_fetch_fn = pin_memory_module.pin_memory
+
+    # Use the common base worker loop with thread-specific settings
+    _base_worker_loop(
+        dataset_kind=dataset_kind,
+        dataset=dataset,
+        index_queue=index_queue,
+        data_queue=data_queue,
+        done_event=done_event,
+        auto_collation=auto_collation,
+        collate_fn=collate_fn,
+        drop_last=drop_last,
+        init_fn=init_fn,
+        worker_id=worker_id,
+        shared_rng=None,  # Not used for thread workers
+        worker_method="thread",
+        watchdog_constructor=None,  # No watchdog needed for threads
+        post_fetch_fn=post_fetch_fn,
+    )

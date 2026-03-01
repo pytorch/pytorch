@@ -10,6 +10,7 @@ import itertools
 import math
 import operator
 import os
+import random
 import signal
 import sys
 import tempfile
@@ -23,6 +24,7 @@ from torch import multiprocessing as mp
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_CI,
     IS_JETSON,
     IS_LINUX,
@@ -55,7 +57,7 @@ from torch.utils.data import (
     Subset,
     TensorDataset,
 )
-from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
+from torch.utils.data._utils import STATUS_CHECK_INTERVAL
 from torch.utils.data.datapipes.iter import IterableWrapper
 from torch.utils.data.dataset import random_split
 
@@ -1084,7 +1086,7 @@ def _test_worker_info_init_fn(worker_id):
         raise AssertionError("worker_info should have correct dataset copy")
     if hasattr(dataset, "value"):
         raise AssertionError("worker_info should have correct dataset copy")
-    for k in ["id", "num_workers", "seed", "dataset", "rng"]:
+    for k in ["id", "num_workers", "seed", "dataset", "rng", "worker_method"]:
         if f"{k}=" not in repr(worker_info):
             raise AssertionError(f"Expected {k} in worker_info repr")
     dataset.value = [worker_id, os.getpid()]
@@ -2797,7 +2799,7 @@ except RuntimeError as e:
                 tester_setup_event.set()
 
                 try:
-                    loader_p.join(JOIN_TIMEOUT + MP_STATUS_CHECK_INTERVAL)
+                    loader_p.join(JOIN_TIMEOUT + STATUS_CHECK_INTERVAL)
                     if loader_p.is_alive():
                         fail_reason = "loader process did not terminate"
                         if loader_p.exception is not None:
@@ -2809,7 +2811,7 @@ except RuntimeError as e:
                             fail(fail_reason + ", and had no exception")
                     _, alive = psutil.wait_procs(
                         worker_psutil_ps,
-                        timeout=(MP_STATUS_CHECK_INTERVAL + JOIN_TIMEOUT),
+                        timeout=(STATUS_CHECK_INTERVAL + JOIN_TIMEOUT),
                     )
                     if len(alive) > 0:
                         fail(
@@ -3045,7 +3047,13 @@ except RuntimeError as e:
         #        `get_worker_info() != None`), even though it is not.
         old = _utils.worker._worker_info
         try:
-            _utils.worker._worker_info = "x"
+            _utils.worker._worker_info = _utils.worker.WorkerInfo(
+                id=0,
+                num_workers=1,
+                seed=0,
+                dataset=self.dataset,
+                worker_method="multiprocessing",
+            )
             self.assertEqual(dataloader.default_collate([t_in]).is_shared(), True)
             self.assertEqual(dataloader.default_collate([n_in]).is_shared(), True)
         finally:
@@ -3717,15 +3725,14 @@ class TestSlowIndexDataset(Dataset):
     def __init__(self, end: int, slow_index: int):
         self.end = end
         self.slow_index = slow_index
-        self._worker_id = None
 
     def __getitem__(self, idx):
-        if not self._worker_id:
-            worker_info = torch.utils.data.get_worker_info()
-            self._worker_id = worker_info.id
+        # Every idx will have a unique worker id associated with it
+        worker_info = torch.utils.data.get_worker_info()
+        _worker_id = worker_info.id
         if idx == self.slow_index:
             time.sleep(1.0)
-        return (self._worker_id, idx)
+        return (_worker_id, idx)
 
     def __len__(self):
         return self.end
@@ -3754,14 +3761,17 @@ class TestSlowIterableDataset(IterableDataset):
         return self.give_data(worker_id, iter_start, iter_end)
 
 
+@instantiate_parametrized_tests
 class TestOutOfOrderDataLoader(TestCase):
-    def test_in_order_index_ds(self):
+    @parametrize("worker_method", ["multiprocessing", "thread"])
+    def test_in_order_index_ds(self, worker_method):
         dataset = TestSlowIndexDataset(end=10, slow_index=0)
 
         dataloader = torch.utils.data.DataLoader(
             dataset,
             num_workers=2,
             in_order=True,
+            worker_method=worker_method,
         )
 
         expected_worker_ids = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
@@ -3769,10 +3779,14 @@ class TestOutOfOrderDataLoader(TestCase):
         outputs = list(dataloader)
         worker_ids = [o[0] for o in outputs]
         data = [o[1] for o in outputs]
+
+        # Both threading and multiprocessing use per-worker queues,
+        # so worker assignment and data order are deterministic
         self.assertEqual(expected_worker_ids, worker_ids)
         self.assertEqual(expected_data, data)
 
-    def test_out_of_order_index_ds(self):
+    @parametrize("worker_method", ["multiprocessing", "thread"])
+    def test_out_of_order_index_ds(self, worker_method):
         dataset = TestSlowIndexDataset(end=10, slow_index=0)
 
         dataloader = torch.utils.data.DataLoader(
@@ -3780,27 +3794,31 @@ class TestOutOfOrderDataLoader(TestCase):
             num_workers=2,
             prefetch_factor=2,
             in_order=False,
+            worker_method=worker_method,
         )
 
-        # worker_id = 0 gets 'stuck' on 0 and also has 2 in it's queue
+        # worker_id = 0 gets 'stuck' on 0 and also has 2 in its queue
         # due to prefetch_factor being 2
-        # this makes the test more deterministic as [0, 2] will be the last elements
         expected_worker_ids = [1, 1, 1, 1, 1, 1, 1, 1, 0, 0]
         expected_data = [1, 3, 4, 5, 6, 7, 8, 9, 0, 2]
         outputs = list(dataloader)
         worker_ids = [o[0].item() for o in outputs]
         data = [o[1].item() for o in outputs]
+
+        # Both threading and multiprocessing use per-worker queues,
+        # so behavior is deterministic
         self.assertEqual(expected_worker_ids, worker_ids)
-        self.assertNotEqual(data, list(range(10)))
         self.assertEqual(expected_data, data)
 
-    def test_in_order_iterable_ds(self):
+    @parametrize("worker_method", ["multiprocessing", "thread"])
+    def test_in_order_iterable_ds(self, worker_method):
         dataset = TestSlowIterableDataset(start=0, end=10)
 
         dataloader = torch.utils.data.DataLoader(
             dataset,
             num_workers=2,
             in_order=True,
+            worker_method=worker_method,
         )
 
         expected_worker_ids = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
@@ -3808,16 +3826,21 @@ class TestOutOfOrderDataLoader(TestCase):
         outputs = list(dataloader)
         worker_ids = [o[0] for o in outputs]
         data = [o[1] for o in outputs]
+
+        # Both threading and multiprocessing use per-worker queues,
+        # so worker assignment and data order are deterministic
         self.assertEqual(expected_worker_ids, worker_ids)
         self.assertEqual(expected_data, data)
 
-    def test_out_of_order_iterable_ds(self):
+    @parametrize("worker_method", ["multiprocessing", "thread"])
+    def test_out_of_order_iterable_ds(self, worker_method):
         dataset = TestSlowIterableDataset(start=0, end=10)
 
         dataloader = torch.utils.data.DataLoader(
             dataset,
             num_workers=2,
             in_order=False,
+            worker_method=worker_method,
         )
 
         # worker 0 has [0, 1, 2, 3, 4], worker 1 has [5, 6, 7, 8, 9]
@@ -3827,10 +3850,648 @@ class TestOutOfOrderDataLoader(TestCase):
         outputs = list(dataloader)
         worker_ids = [o[0] for o in outputs]
         data = [o[1] for o in outputs]
+
+        # Both threading and multiprocessing use per-worker queues,
+        # so behavior is deterministic
         self.assertEqual(expected_worker_ids, worker_ids)
-        self.assertEqual(sum(worker_ids), 5)
-        self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
         self.assertEqual(expected_data, data)
+
+
+@instantiate_parametrized_tests
+@unittest.skipIf(
+    IS_WINDOWS or IS_MACOS,
+    "Threading based data loading workers not supported on Windows and MacOS",
+)
+class TestThreadingDataLoader(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.data = torch.randn(100, 2, 3, 5)
+        self.labels = torch.randperm(50).repeat(2)
+        self.dataset = TensorDataset(self.data, self.labels)
+
+    def test_threading_vs_multiprocessing(self):
+        # Test that threading and multiprocessing produce the same results
+        reference = list(
+            DataLoader(
+                self.dataset,
+                batch_size=2,
+                num_workers=2,
+                worker_method="multiprocessing",
+                shuffle=False,
+            )
+        )
+
+        threading_loader = DataLoader(
+            self.dataset,
+            batch_size=2,
+            num_workers=2,
+            worker_method="thread",
+            shuffle=False,
+        )
+
+        for i, (thread_sample, thread_target) in enumerate(threading_loader):
+            mp_sample, mp_target = reference[i]
+            self.assertEqual(thread_sample, mp_sample)
+            self.assertEqual(thread_target, mp_target)
+
+    def test_threading_with_pin_memory(self):
+        if not TEST_CUDA:
+            self.skipTest("CUDA unavailable")
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=2,
+            num_workers=2,
+            worker_method="thread",
+            pin_memory=True,
+        )
+
+        for input, target in loader:
+            self.assertTrue(input.is_pinned())
+            self.assertTrue(target.is_pinned())
+
+    def test_threading_thread_rng_deterministic(self):
+        # Test that using thread specific rng provides deterministic results
+        class ThreadRNGTransformDataset(Dataset):
+            def __init__(self, size):
+                self.size = size
+
+            def __len__(self):
+                return self.size
+
+            def __getitem__(self, idx):
+                worker_info = torch.utils.data.get_worker_info()
+
+                generator = worker_info.rng.torch_generator
+
+                # Apply random transform using thread-specific generator
+                random_val = (
+                    torch.empty(1).uniform_(0.0, 1.0, generator=generator).item()
+                )
+                return random_val
+
+        # Run twice with same seed - should get identical results
+        dataset1 = ThreadRNGTransformDataset(100)
+        torch.manual_seed(42)
+        loader1 = DataLoader(
+            dataset1,
+            batch_size=10,
+            num_workers=3,
+            worker_method="thread",
+        )
+        results1 = list(loader1)
+
+        dataset2 = ThreadRNGTransformDataset(100)
+        torch.manual_seed(42)
+        loader2 = DataLoader(
+            dataset2,
+            batch_size=10,
+            num_workers=3,
+            worker_method="thread",
+        )
+        results2 = list(loader2)
+
+        flattened1 = [item for batch in results1 for item in batch]
+        flattened2 = [item for batch in results2 for item in batch]
+
+        self.assertTrue(
+            flattened1 == flattened2,
+            "Results should be deterministic when using thread specific rng",
+        )
+
+    def test_threading_different_batch_sizes(self):
+        # Test with different batch sizes
+        for batch_size in [1, 2, 4, 8]:
+            loader = DataLoader(
+                self.dataset,
+                batch_size=batch_size,
+                num_workers=2,
+                worker_method="thread",
+            )
+
+            # Check that we get the expected number of batches
+            expected_batches = math.ceil(len(self.dataset) / batch_size)
+            self.assertEqual(len(loader), expected_batches)
+
+            # Check that all data is correctly loaded
+            all_samples = []
+            all_targets = []
+            for sample, target in loader:
+                all_samples.append(sample)
+                all_targets.append(target)
+
+            all_samples = torch.cat(all_samples, 0)
+            all_targets = torch.cat(all_targets, 0)
+            self.assertEqual(all_samples.size(), self.data.size())
+            self.assertEqual(all_targets.size(), self.labels.size())
+
+    @parametrize("shuffle", [False, True])
+    def test_threading_different_num_workers(self, shuffle):
+        # Test with different numbers of workers
+        def create_loader(num_workers, shuffle):
+            return DataLoader(
+                self.dataset,
+                shuffle=shuffle,
+                num_workers=num_workers,
+                worker_method="thread",
+            )
+
+        torch.manual_seed(42)
+        loader1 = create_loader(2, shuffle)
+        results1 = list(loader1)
+
+        torch.manual_seed(42)
+        loader2 = create_loader(4, shuffle)
+        results2 = list(loader2)
+
+        self.assertEqual(len(results1), len(results2))
+
+        for (samples1, targets1), (samples2, targets2) in zip(results1, results2):
+            self.assertTrue(torch.equal(samples1, samples2))
+            self.assertTrue(torch.equal(targets1, targets2))
+
+    @parametrize("multiprocessing_workers", [1, 3, 5])
+    @parametrize("threading_workers", [0, 2, 4])
+    def test_threading_shuffle(self, multiprocessing_workers, threading_workers):
+        """Test that threading DataLoader with shuffle produces deterministic results when given the same seed."""
+
+        def create_loader(num_workers, worker_method):
+            return DataLoader(
+                self.dataset,
+                shuffle=True,
+                num_workers=num_workers,
+                worker_method=worker_method,
+            )
+
+        torch.manual_seed(42)
+        loader1 = create_loader(multiprocessing_workers, "multiprocessing")
+        results1 = list(loader1)
+
+        torch.manual_seed(42)
+        loader2 = create_loader(threading_workers, "thread")
+        results2 = list(loader2)
+
+        self.assertEqual(len(results1), len(results2))
+        for (samples1, targets1), (samples2, targets2) in zip(results1, results2):
+            self.assertTrue(torch.equal(samples1, samples2))
+            self.assertTrue(torch.equal(targets1, targets2))
+
+    def test_threading_shuffle_generator(self):
+        """Test that threading DataLoader with shuffle produces deterministic results when given explicit generator."""
+        for num_workers in [1, 2, 4]:
+
+            def create_loader():
+                return DataLoader(
+                    self.dataset,
+                    shuffle=True,
+                    num_workers=num_workers,
+                    worker_method="thread",
+                    generator=torch.Generator().manual_seed(42),
+                )
+
+            loader1 = create_loader()
+            loader2 = create_loader()
+
+            for (samples1, targets1), (samples2, targets2) in zip(loader1, loader2):
+                self.assertTrue(torch.equal(samples1, samples2))
+                self.assertTrue(torch.equal(targets1, targets2))
+
+    def test_threading_with_persistent_workers(self):
+        # Test with persistent_workers=True
+        loader = DataLoader(
+            self.dataset,
+            batch_size=2,
+            num_workers=2,
+            worker_method="thread",
+            persistent_workers=True,
+        )
+
+        # Run multiple epochs and check that data is loaded correctly each time
+        for _ in range(3):
+            all_samples = []
+            all_targets = []
+            for sample, target in loader:
+                all_samples.append(sample)
+                all_targets.append(target)
+
+            all_samples = torch.cat(all_samples, 0)
+            all_targets = torch.cat(all_targets, 0)
+            self.assertEqual(all_samples.size(), self.data.size())
+            self.assertEqual(all_targets.size(), self.labels.size())
+
+    def test_threading_error_handling(self):
+        # Test error handling with thread workers
+        error_dataset = ErrorDataset(10)
+        loader = DataLoader(
+            error_dataset,
+            batch_size=2,
+            num_workers=2,
+            worker_method="thread",
+        )
+
+        with self.assertRaises(NotImplementedError):
+            list(loader)
+
+    def test_threading_iterable_dataset(self):
+        # Test with IterableDataset (no split by workers)
+        dataset = CountingIterableDataset(20)
+        loader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=3,
+            worker_method="thread",
+        )
+
+        # Check that all data is correctly loaded
+        all_data = list(loader)
+
+        all_data = torch.cat(all_data, 0)
+        self.assertEqual(len(all_data), 60)  # len(dataset) * num_workers
+
+    def test_threading_iterable_dataset_with_worker_split(self):
+        # Test with IterableDataset that splits data based on worker_info.id
+        num_workers = 3
+        sizes_for_all_workers = [5, 10, 7]
+        dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
+
+        loader = DataLoader(
+            dataset,
+            batch_size=None,
+            num_workers=num_workers,
+            worker_method="thread",
+        )
+
+        fetched = list(loader)
+
+        # Build expected interleaved order based on round-robin allocation
+        expected = []
+        worker_iterators = [iter(range(s)) for s in sizes_for_all_workers]
+        while worker_iterators:
+            exhausted = []
+            for i, it in enumerate(worker_iterators):
+                try:
+                    expected.append(next(it))
+                except StopIteration:
+                    exhausted.append(i)
+            # Remove exhausted iterators in reverse order to preserve indices
+            # in worker_iterators after deletion
+            for i in reversed(exhausted):
+                worker_iterators.pop(i)
+
+        self.assertEqual(len(fetched), len(expected))
+        for i, (a, b) in enumerate(zip(fetched, expected)):
+            self.assertEqual(a, b, f"Mismatch at index {i}: got {a}, expected {b}")
+
+    def test_threading_with_drop_last(self):
+        # Test with drop_last=True
+        loader = DataLoader(
+            self.dataset,
+            batch_size=3,
+            num_workers=2,
+            worker_method="thread",
+            drop_last=True,
+        )
+
+        # Check that we get the expected number of batches
+        expected_batches = len(self.dataset) // 3
+        self.assertEqual(len(loader), expected_batches)
+
+        # Check that all batches have the same size
+        for sample, _ in loader:
+            self.assertEqual(sample.size(0), 3)
+
+    def test_threading_with_custom_collate_fn(self):
+        # Test with custom collate_fn
+        def custom_collate(batch):
+            data = torch.stack([item[0] for item in batch])
+            target = torch.stack([item[1] for item in batch])
+            return {"data": data, "target": target}
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=2,
+            num_workers=2,
+            worker_method="thread",
+            collate_fn=custom_collate,
+        )
+
+        for batch in loader:
+            self.assertIsInstance(batch, dict)
+            self.assertIn("data", batch)
+            self.assertIn("target", batch)
+            self.assertEqual(batch["data"].size(0), 2)
+            self.assertEqual(batch["target"].size(0), 2)
+
+    def test_threading_with_batch_sampler(self):
+        # Test with custom batch_sampler
+        from torch.utils.data import BatchSampler, SequentialSampler
+
+        batch_sampler = BatchSampler(
+            SequentialSampler(self.dataset), batch_size=4, drop_last=True
+        )
+
+        loader = DataLoader(
+            self.dataset,
+            batch_sampler=batch_sampler,
+            num_workers=2,
+            worker_method="thread",
+        )
+
+        # Check that we get the expected number of batches
+        expected_batches = len(self.dataset) // 4
+        self.assertEqual(len(loader), expected_batches)
+
+        # Check that all batches have the same size
+        for sample, _ in loader:
+            self.assertEqual(sample.size(0), 4)
+
+    def test_threading_with_prefetch_factor(self):
+        # Test with different prefetch_factor values
+        for prefetch_factor in [2, 3, 4]:
+            loader = DataLoader(
+                self.dataset,
+                batch_size=2,
+                num_workers=2,
+                worker_method="thread",
+                prefetch_factor=prefetch_factor,
+            )
+
+            # Check that all data is correctly loaded
+            all_samples = []
+            all_targets = []
+            for sample, target in loader:
+                all_samples.append(sample)
+                all_targets.append(target)
+
+            all_samples = torch.cat(all_samples, 0)
+            all_targets = torch.cat(all_targets, 0)
+            self.assertEqual(all_samples.size(), self.data.size())
+            self.assertEqual(all_targets.size(), self.labels.size())
+
+    def test_threading_worker_init_fn(self):
+        # Test that worker_init_fn is properly called in thread workers
+        dataset = SeedDataset(4)
+        loader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=2,
+            worker_method="thread",
+            worker_init_fn=init_fn,
+        )
+
+        # init_fn sets the seed to 12345, so all workers should return this value
+        for batch in loader:
+            self.assertEqual(12345, batch[0])
+            self.assertEqual(12345, batch[1])
+
+    def test_threading_worker_info_unique_per_thread(self):
+        # Test that each worker thread gets unique worker_id, seed, and rng
+        import threading
+
+        worker_info_captured = []
+
+        def init_fn(worker_id):
+            info = torch.utils.data.get_worker_info()
+            worker_info_captured.append(
+                {
+                    "worker_id": info.id,
+                    "seed": info.seed,
+                    "thread_rng_id": id(info.rng) if hasattr(info, "rng") else None,
+                    "thread_id": threading.get_ident(),
+                }
+            )
+
+        dataset = SeedDataset(8)
+        loader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=3,
+            worker_method="thread",
+            worker_init_fn=init_fn,
+        )
+        list(loader)
+
+        self.assertEqual(len(worker_info_captured), 3)
+
+        # Check unique worker_id
+        worker_ids = [w["worker_id"] for w in worker_info_captured]
+        self.assertEqual(len(set(worker_ids)), 3)
+
+        # Check unique seed
+        seeds = [w["seed"] for w in worker_info_captured]
+        self.assertEqual(len(set(seeds)), 3)
+
+        # Check unique thread_rng (if available)
+        thread_rng_ids = [
+            w["thread_rng_id"] for w in worker_info_captured if w["thread_rng_id"]
+        ]
+        if thread_rng_ids:
+            self.assertEqual(len(set(thread_rng_ids)), len(thread_rng_ids))
+
+        # Check unique thread_id
+        thread_ids = [w["thread_id"] for w in worker_info_captured]
+        self.assertEqual(len(set(thread_ids)), 3)
+
+    def test_threading_worker_info_thread_rng(self):
+        # Test that WorkerInfo includes rng for thread workers
+        worker_info_data = []
+
+        def worker_init_with_rng_check(worker_id):
+            worker_info = torch.utils.data.get_worker_info()
+            self.assertIsNotNone(worker_info)
+
+            self.assertTrue(hasattr(worker_info, "rng"))
+            self.assertIsNotNone(worker_info.rng)
+
+            # Check for updated _RNG attribute names
+            self.assertTrue(hasattr(worker_info.rng, "random_generator"))
+            self.assertTrue(hasattr(worker_info.rng, "torch_generator"))
+            self.assertTrue(hasattr(worker_info.rng, "numpy_generator"))
+
+            self.assertIsInstance(worker_info.rng.random_generator, random.Random)
+            self.assertIsInstance(worker_info.rng.torch_generator, torch.Generator)
+
+            # Store worker info data for verification
+            worker_info_data.append(
+                {
+                    "worker_id": worker_id,
+                    "has_rng": hasattr(worker_info, "rng"),
+                    "rng_is_not_none": worker_info.rng is not None
+                    if hasattr(worker_info, "rng")
+                    else False,
+                    "random_generator_id": id(worker_info.rng.random_generator)
+                    if hasattr(worker_info, "rng")
+                    else None,
+                    "torch_generator_id": id(worker_info.rng.torch_generator)
+                    if hasattr(worker_info, "rng")
+                    else None,
+                }
+            )
+
+        dataset = SeedDataset(4)
+        loader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=2,
+            worker_method="thread",
+            worker_init_fn=worker_init_with_rng_check,
+        )
+
+        list(loader)
+
+        self.assertEqual(len(worker_info_data), 2)
+        for i, worker_data in enumerate(worker_info_data):
+            self.assertTrue(worker_data["worker_id"] == i)
+            self.assertTrue(worker_data["has_rng"])
+            self.assertTrue(worker_data["rng_is_not_none"])
+
+        self.assertNotEqual(
+            worker_info_data[0]["random_generator_id"],
+            worker_info_data[1]["random_generator_id"],
+        )
+        self.assertNotEqual(
+            worker_info_data[0]["torch_generator_id"],
+            worker_info_data[1]["torch_generator_id"],
+        )
+
+    def test_threading_shutdown_iterator_exhausted(self):
+        """Case 1: Iterator completed its work, so shutdown automatically."""
+        import time
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=10,
+            num_workers=2,
+            worker_method="thread",
+        )
+
+        iterator = iter(loader)
+        worker_threads = list(iterator._workers)
+
+        for _ in iterator:
+            pass
+
+        time.sleep(0.5)
+
+        # All workers should be stopped automatically after exhaustion
+        for w in worker_threads:
+            self.assertFalse(w.is_alive())
+
+    def test_threading_shutdown_persistent_workers_exhausted(self):
+        """Case 2: Iterator completed its work with persistent_workers, don't shutdown
+        automatically, shutdown on calling _shutdown_workers."""
+        import time
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=10,
+            num_workers=2,
+            worker_method="thread",
+            persistent_workers=True,
+        )
+
+        for _ in loader:
+            pass
+
+        # Workers should still be alive (persistent)
+        worker_threads = list(loader._iterator._workers)
+        for w in worker_threads:
+            self.assertTrue(w.is_alive())
+
+        # Explicitly shutdown
+        loader._iterator._shutdown_workers()
+
+        time.sleep(0.5)
+
+        # All workers should be stopped after explicit shutdown
+        for w in worker_threads:
+            self.assertFalse(w.is_alive())
+
+    def test_threading_shutdown_partial_iteration(self):
+        """Case 3: Iterator did some work but not completely exhausted, workers aren't
+        shutdown, but they shutdown on calling _shutdown_workers."""
+        import time
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=2,
+            num_workers=3,
+            worker_method="thread",
+        )
+
+        iterator = iter(loader)
+        next(iterator)
+        next(iterator)
+
+        worker_threads = list(iterator._workers)
+
+        for w in worker_threads:
+            self.assertTrue(w.is_alive())
+
+        # Explicitly shutdown workers
+        iterator._shutdown_workers()
+
+        time.sleep(0.5)
+
+        # All workers should be stopped after explicit shutdown
+        for w in worker_threads:
+            self.assertFalse(w.is_alive())
+
+    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    def test_threading_shutdown_on_program_exit(self):
+        """Case 4: Iterator did some work but not completely exhausted, program exits,
+        workers are shutdown and the program can exit without hanging.
+
+        Note: The main goal is to verify the process doesn't hang. Daemon threads may
+        cause C++ cleanup warnings on abrupt exit, but this is expected behavior.
+        """
+        import subprocess
+        import sys
+
+        # Script that creates a threading DataLoader, partially iterates, then exits
+        script = """
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+
+data = torch.randn(100, 2, 3)
+labels = torch.randperm(50).repeat(2)
+dataset = TensorDataset(data, labels)
+
+loader = DataLoader(
+    dataset,
+    batch_size=2,
+    num_workers=3,
+    worker_method="thread",
+)
+
+# Partially iterate (don't exhaust)
+iterator = iter(loader)
+next(iterator)
+next(iterator)
+
+# Exit without explicit shutdown - daemon threads should allow clean exit
+print("SUCCESS")
+"""
+        # Run the script as a subprocess with a timeout
+        # If workers don't shutdown properly, the process will hang and timeout
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            self.fail("Process hung - threading workers prevented clean exit")
+
+        # The key assertion: SUCCESS was printed, meaning the script completed
+        # Return code may be non-zero due to C++ thread cleanup warnings when
+        # daemon threads are abruptly terminated, but that's acceptable
+        self.assertIn(
+            "SUCCESS",
+            result.stdout,
+            f"Script did not complete successfully. stdout: {result.stdout}, stderr: {result.stderr}",
+        )
 
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
