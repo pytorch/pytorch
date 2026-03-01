@@ -9025,7 +9025,7 @@
   tags: nondeterministic_seeded
   variants: method
   dispatch:
-    CPU, CUDA: uniform_
+    CPU, CUDA, MTIA: uniform_
     MPS: uniform_mps_
     Meta: uniform_meta_
   autogen: uniform, uniform.out
