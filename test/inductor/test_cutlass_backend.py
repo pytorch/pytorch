@@ -924,7 +924,6 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cutlass.cutlass_max_profiling_configs": 4,
-                "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
             counters["inductor"]["cutlass_epilogue_fusion_counter"] = 0
