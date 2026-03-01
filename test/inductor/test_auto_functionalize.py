@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -1783,6 +1784,96 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             )
             name_to_users = eval(graph_inductor)
             self.assertNotEqual(name_to_users["buf1"], name_to_users["buf5"])
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_dtype_view_clone_elimination(self):
+        """
+        This test verifies that dtype views (tensors sharing storage but with
+        different dtypes, e.g., int32 -> float32) have their clones eliminated
+        when passed to mutating custom ops. The fix_auto_functionalized_dtype_views
+        pass detects dtype views that alias graph inputs and removes unnecessary
+        clone operations.
+
+        Also tests negative cases where clones SHOULD be retained.
+        """
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::mutate_inplace",
+                "(Tensor(a!) x, Tensor y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::mutate_inplace", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def mutate_inplace_cpu(x, y):
+                x.copy_(y)
+
+            @torch.library.impl("mylib::mutate_inplace", "Meta", lib=lib)
+            def mutate_inplace_meta(x, y):
+                pass
+
+            # Dtype view (int32 -> float32) - clone should be eliminated
+            def f_dtype_view(cache_int32, data_float32):
+                cache_float = cache_int32.view(torch.float32)
+                torch.ops.mylib.mutate_inplace(cache_float, data_float32)
+                return cache_int32
+
+            cache = torch.zeros((10, 10), dtype=torch.int32)
+            data = torch.randn((10, 10), dtype=torch.float32)
+            result_eager = f_dtype_view(cache.clone(), data)
+
+            for mode_name, mode_ctx in [
+                ("inference", torch.inference_mode()),
+                ("no_grad", torch.no_grad()),
+            ]:
+                with mode_ctx:
+                    counters.clear()
+                    torch._dynamo.reset()
+                    compiled_f = torch.compile(
+                        f_dtype_view, fullgraph=True, backend="inductor"
+                    )
+                    result = compiled_f(cache.clone(), data)
+
+                    self.assertEqual(result.dtype, torch.int32)
+                    self.assertTrue(torch.equal(result, result_eager))
+                    self.assertEqual(
+                        counters["inductor"]["fix_auto_functionalized_dtype_views"], 1
+                    )
+
+            # Negative cases (slice view, intermediate tensor) - clone should be retained
+            def f_slice(cache, data):
+                cache_slice = cache[0:10, 0:10]
+                torch.ops.mylib.mutate_inplace(cache_slice, data)
+                return cache
+
+            def f_intermediate(data):
+                temp = torch.zeros((10, 10), dtype=torch.int32)
+                torch.ops.mylib.mutate_inplace(temp.view(torch.float32), data)
+                return temp
+
+            for func, args in [
+                (
+                    f_slice,
+                    [
+                        torch.zeros((20, 20), dtype=torch.float32),
+                        torch.randn((10, 10), dtype=torch.float32),
+                    ],
+                ),
+                (f_intermediate, [torch.randn((10, 10), dtype=torch.float32)]),
+            ]:
+                result_eager_neg = func(*[a.clone() for a in args])
+
+                with torch.no_grad():
+                    counters.clear()
+                    torch._dynamo.reset()
+                    compiled_f = torch.compile(func, fullgraph=True, backend="inductor")
+                    result = compiled_f(*[a.clone() for a in args])
+
+                    self.assertTrue(torch.equal(result, result_eager_neg))
+                    self.assertEqual(
+                        counters["inductor"]["fix_auto_functionalized_dtype_views"], 0
+                    )
 
 
 if __name__ == "__main__":

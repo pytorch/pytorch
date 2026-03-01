@@ -361,6 +361,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
+
+    # Fix aliasing detection for dtype views AFTER reinplace determines cloning needs
+    GraphTransformObserver(gm, "fix_auto_functionalized_dtype_views").apply_graph_pass(
+        fix_auto_functionalized_dtype_views
+    )
+
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
@@ -1272,6 +1278,101 @@ def decompose_triton_kernel_wrapper_functional(graph):
         target=torch.ops.higher_order.triton_kernel_wrapper_functional,
     ):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
+
+
+def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
+    """
+    Fix aliasing detection for dtype views in auto_functionalized_v2.
+
+    When a dtype view shares storage with a graph input, we can skip cloning
+    it during decomposition because the view can be safely regenerated.
+
+    This pass identifies such cases and updates the reinplace metadata to
+    indicate no clone is needed.
+    """
+    # Build a map of storage _cdata to graph inputs
+    storage_to_input: dict[int, torch.fx.Node] = {}
+    for node in graph.nodes:
+        if node.op == "placeholder":
+            try:
+                storage = node.meta.get("val")
+                if storage is not None and isinstance(storage, torch.Tensor):
+                    storage_cdata = storage.untyped_storage()._cdata
+                    storage_to_input[storage_cdata] = node
+            except (AttributeError, RuntimeError):
+                pass
+
+    # Process all auto_functionalized_v2 nodes
+    for node in graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.higher_order.auto_functionalized_v2
+        ):
+            # Get _all_bases from kwargs
+            all_bases = node.kwargs.get("_all_bases")
+            if all_bases is None or not isinstance(all_bases, (list, tuple)):
+                continue
+
+            # Check if reinplace metadata exists (set by reinplace pass)
+            only_clone_these = node.meta.get("only_clone_these_tensors")
+            if only_clone_these is None:
+                continue
+
+            # Check each base in only_clone_these to see if it's a dtype view
+            # that aliases a graph input
+            new_only_clone_these = list(only_clone_these)
+            modified = False
+
+            for idx in list(only_clone_these):
+                if idx >= len(all_bases):
+                    continue
+
+                base = all_bases[idx]
+                if not isinstance(base, torch.fx.Node):
+                    continue
+
+                try:
+                    base_val = base.meta.get("val")
+                    if base_val is None or not isinstance(base_val, torch.Tensor):
+                        continue
+
+                    base_storage_cdata = base_val.untyped_storage()._cdata
+                    base_dtype = base_val.dtype
+
+                    # Check if this base shares storage with a graph input
+                    if base_storage_cdata in storage_to_input:
+                        actual_input = storage_to_input[base_storage_cdata]
+                        actual_input_val = actual_input.meta.get("val")
+
+                        if actual_input_val is not None and isinstance(
+                            actual_input_val, torch.Tensor
+                        ):
+                            # Check if this is a dtype view
+                            is_dtype_view = actual_input_val.dtype != base_dtype
+
+                            if is_dtype_view:
+                                # Dtype view of a graph input - no clone needed!
+                                log.debug(
+                                    "Removing clone requirement for dtype view: "
+                                    "base[%d] %s (dtype=%s) aliases %s (dtype=%s)",
+                                    idx,
+                                    base,
+                                    base_dtype,
+                                    actual_input,
+                                    actual_input_val.dtype,
+                                )
+                                new_only_clone_these.remove(idx)
+                                modified = True
+                                counters["inductor"][
+                                    "fix_auto_functionalized_dtype_views"
+                                ] += 1
+
+                except (AttributeError, RuntimeError, KeyError):
+                    continue
+
+            # Update the metadata if we made changes
+            if modified:
+                node.meta["only_clone_these_tensors"] = new_only_clone_these
 
 
 def decompose_auto_functionalized(graph):
