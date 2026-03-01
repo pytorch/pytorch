@@ -88,6 +88,24 @@ if HAS_GPU:
         def log2(n):
             return len(bin(n)) - 3
 
+    # Kernel with dunder name for name-mangling regression test (issue #170398).
+    @triton.jit
+    def __dunder_add_kernel(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        y = tl.load(in_ptr1 + offsets, mask=mask)
+        output = x + y
+        tl.store(out_ptr + offsets, output, mask=mask)
+
 
 class KernelTests(torch._inductor.test_case.TestCase):
     def _kernel_launched_in_code(self, kernel_name: str, code: str) -> bool:
@@ -110,6 +128,30 @@ class KernelTests(torch._inductor.test_case.TestCase):
         f(t1)
         # No need to assert anything, the goal is to make sure dynamo does
         # not crash
+
+    @requires_gpu
+    def test_triton_kernel_dunder_name_no_name_mangling(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/170398
+        # Triton kernels whose names start with ``__`` must not trigger
+        # Python class-based name mangling in the generated code.
+        # Use globals() to reference the dunder-named kernel without triggering
+        # name mangling inside this class body.
+        kernel = globals()["__dunder_add_kernel"]
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        eager_out = f(x, y)
+        compiled_out, (code,) = run_and_get_code(torch.compile(f), x, y)
+        self.assertEqual(compiled_out, eager_out)
+        # The generated variable name should not start with ``__`` to avoid
+        # name mangling when executed inside a class body.
+        self.assertNotIn("__dunder_add_kernel", code)
 
     @requires_gpu
     def test_triton_kernel_ill_formed(self):
