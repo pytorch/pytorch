@@ -7647,6 +7647,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ]:
             test_rnn_cell(cell_fn, gate_count)
 
+    def test_conv3d_initialization_consistency(self):
+        # Create a Conv3d layer
+        m = torch.nn.Conv3d(3, 6, kernel_size=3)
+        
+        # Test Default initialization
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_default = m.weight.clone().detach()
+        
+        # Test Channels Last 3D initialization
+        m.to(memory_format=torch.channels_last_3d)
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_channels_last = m.weight.clone().detach()
+        
+        # Check if they are identical across memory formats
+        self.assertTrue(torch.allclose(weights_default, weights_channels_last), 
+                        "Conv3d initialization is inconsistent between memory formats")
+
+
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
