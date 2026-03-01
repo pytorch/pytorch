@@ -654,7 +654,10 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           const std::optional<at::Tensor>& scale_result,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum) {
-  const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
+  // Result of MXFP8 matmuls must be at least 16-bit type, otherwise operation fails with
+  // CUBLAS_STATUS_INVALID_VALUE when calling `cublasLtMatmulAlgoGetHeuristic(...
+  auto default_dtype = c10::isFloat8Type(mat_a.scalar_type()) && scale_a.scalar_type() == kFloat8_e8m0fnu ? kBFloat16 : mat_a.scalar_type();
+  const auto out_dtype_ = out_dtype.value_or(default_dtype);
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
 
   return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
