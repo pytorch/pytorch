@@ -2022,6 +2022,35 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(output.full_tensor(), ref_out)
 
     @with_comms
+    def test_compile_rowwise_embedding_mark_dynamic(self):
+        mesh = self.build_device_mesh()
+
+        vocab_size = 256
+        embed_dim = 64
+        seq_len = 128
+
+        embedding = nn.Embedding(vocab_size, embed_dim, device=self.device_type)
+        tokens = torch.randint(0, vocab_size, (1, seq_len), device=self.device_type)
+
+        parallelize_module(
+            embedding,
+            mesh,
+            RowwiseParallel(
+                input_layouts=Replicate(),
+                output_layouts=Shard(1),
+            ),
+        )
+
+        eager_out = embedding(tokens)
+
+        torch._dynamo.mark_dynamic(tokens, 1)
+        compiled_embedding = torch.compile(
+            embedding, backend="aot_eager", fullgraph=True
+        )
+        compiled_out = compiled_embedding(tokens)
+        self.assertEqual(compiled_out, eager_out)
+
+    @with_comms
     def test_split_with_symint_split_size(self):
         """
         Test that split works with symbolic integer split_size when using

@@ -1383,9 +1383,9 @@ class _MaskPartial(Partial):
         mask = (tensor < local_offset_on_dim) | (
             tensor >= local_offset_on_dim + local_shard_size
         )
-        # mask the input tensor
-        masked_tensor = tensor.clone() - local_offset_on_dim
-        masked_tensor[mask] = 0
+        # mask the input tensor, using torch.where to avoid in-place index_put_
+        # which doesn't functionalize correctly under torch.compile + dynamic shapes
+        masked_tensor = torch.where(mask, 0, tensor - local_offset_on_dim)
         return mask, masked_tensor
 
     def _partition_value(
