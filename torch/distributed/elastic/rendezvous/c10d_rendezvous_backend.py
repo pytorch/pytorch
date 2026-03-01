@@ -8,6 +8,7 @@
 import binascii
 import logging
 import os
+import sys
 import tempfile
 from base64 import b64decode, b64encode
 from datetime import timedelta
@@ -149,6 +150,8 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     if read_timeout <= 0:
         raise ValueError("The read timeout must be a positive integer.")
 
+    use_libuv = os.environ.get("USE_LIBUV", "0" if sys.platform == "win32" else "1") == "1"
+
     # In specific cases we attempt to instantiate the store twice. For details
     # see the explanation in the except clause below.
     for is_server in [is_host, False]:
@@ -159,6 +162,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                 is_master=is_server,
                 multi_tenant=True,
                 timeout=timedelta(seconds=read_timeout),
+                use_libuv=use_libuv,
             )
 
             if is_server:

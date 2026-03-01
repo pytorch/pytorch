@@ -187,12 +187,14 @@ def _create_c10d_store(
 
     if _torchelastic_use_agent_store():
         # We create a new TCPStore for every retry so no need to add prefix for each attempt.
+        use_libuv = os.environ.get("USE_LIBUV", "0" if sys.platform == "win32" else "1") == "1"
         return TCPStore(
             host_name=hostname,
             port=port,
             world_size=world_size,
             is_master=False,
             timeout=timeout,
+            use_libuv=use_libuv,
         )
     else:
         start_daemon = rank == 0
