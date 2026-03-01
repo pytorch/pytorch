@@ -354,6 +354,7 @@ def _do_bench_using_profiling(
     # Estimate the runtime of the function
     start_event = device_interface.Event(enable_timing=True)
     end_event = device_interface.Event(enable_timing=True)
+
     start_event.record()
     for _ in range(5):
         cache.zero_()
@@ -2809,9 +2810,12 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = datasheet_tops(
-        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32"
+    is_tf32 = (
+        torch.backends.cuda.matmul.allow_tf32
+        if torch.cuda.is_available()
+        else torch.xpu.is_tf32_supported()
     )
+    ds_tops = datasheet_tops(dtype, is_tf32=is_tf32)
     if ds_tops is not None:
         return ds_tops
 

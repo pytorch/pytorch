@@ -135,7 +135,7 @@ def _disable_dynamo_if_unsupported(
                 and has_state_steps
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
-                and arg[0].is_cuda
+                and (arg[0].is_cuda or arg[0].is_xpu)
                 or (
                     "state_steps" in kwargs
                     and (kwarg := kwargs["state_steps"])
