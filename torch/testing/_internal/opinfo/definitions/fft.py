@@ -94,6 +94,22 @@ def sample_inputs_fft_with_min(
     yield from sample_inputs_spectral_ops(
         op_info, device, dtype, requires_grad, **kwargs
     )
+
+    # Empty tensor (zero batch) shouldn't crash
+    # https://github.com/pytorch/pytorch/issues/174984
+    # Use at least size 2 per signal dim so hfft/irfft don't compute n=0
+    if isinstance(min_size, tuple):
+        padded = tuple(max(s, 2) for s in min_size)
+    else:
+        padded = (max(min_size, 2),)
+    empty_shape = (0,) + padded
+    yield SampleInput(
+        make_tensor(
+            empty_shape, dtype=dtype, device=device, requires_grad=requires_grad
+        ),
+        dim=-1,
+    )
+
     if TEST_WITH_ROCM:
         # FIXME: Causes floating point exception on ROCm
         return
