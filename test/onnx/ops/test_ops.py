@@ -1478,6 +1478,676 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         onnx_testing.assert_onnx_program(onnx_program)
 
+    def test_add_opcheck(self):
+        """Test Add operator with opcheck."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+        torch.library.opcheck(_impl.add_13, (A, B))
+
+    def test_add_export(self):
+        """Test Add operator export."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B):
+                return torch.onnx.ops.add(A, B)
+
+        model = Model()
+        onnx_program = self.export(model, (A, B), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Add")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_add_broadcast(self):
+        """Test Add operator with broadcasting."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(4)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B):
+                return torch.onnx.ops.add(A, B)
+
+        model = Model()
+        onnx_program = self.export(model, (A, B), opset_version=13)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_sub_opcheck(self):
+        """Test Sub operator with opcheck."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+        torch.library.opcheck(_impl.sub_13, (A, B))
+
+    def test_sub_export(self):
+        """Test Sub operator export."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B):
+                return torch.onnx.ops.sub(A, B)
+
+        model = Model()
+        onnx_program = self.export(model, (A, B), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Sub")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_mul_opcheck(self):
+        """Test Mul operator with opcheck."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+        torch.library.opcheck(_impl.mul_13, (A, B))
+
+    def test_mul_export(self):
+        """Test Mul operator export."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B):
+                return torch.onnx.ops.mul(A, B)
+
+        model = Model()
+        onnx_program = self.export(model, (A, B), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Mul")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_div_opcheck(self):
+        """Test Div operator with opcheck."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4) + 0.1  # Avoid division by zero
+        torch.library.opcheck(_impl.div_13, (A, B))
+
+    def test_div_export(self):
+        """Test Div operator export."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4) + 0.1
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B):
+                return torch.onnx.ops.div(A, B)
+
+        model = Model()
+        onnx_program = self.export(model, (A, B), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Div")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_pow_opcheck(self):
+        """Test Pow operator with opcheck."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+        torch.library.opcheck(_impl.pow_13, (A, B))
+
+    def test_pow_export(self):
+        """Test Pow operator export."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B):
+                return torch.onnx.ops.pow(A, B)
+
+        model = Model()
+        onnx_program = self.export(model, (A, B), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Pow")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_matmul_opcheck(self):
+        """Test MatMul operator with opcheck."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 4, 5)
+        torch.library.opcheck(_impl.matmul_13, (A, B))
+
+    def test_matmul_export(self):
+        """Test MatMul operator export."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 4, 5)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B):
+                return torch.onnx.ops.matmul(A, B)
+
+        model = Model()
+        onnx_program = self.export(model, (A, B), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "MatMul")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_matmul_2d(self):
+        """Test MatMul with 2D tensors."""
+        A = torch.rand(3, 4)
+        B = torch.rand(4, 5)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B):
+                return torch.onnx.ops.matmul(A, B)
+
+        model = Model()
+        result = model(A, B)
+        self.assertEqual(result.shape, (3, 5))
+        onnx_program = self.export(model, (A, B), opset_version=13)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_concat_opcheck(self):
+        """Test Concat operator with opcheck."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 5, 4)
+        C = torch.rand(2, 1, 4)
+        torch.library.opcheck(_impl.concat_13, ([A, B, C],), {"axis": 1})
+
+    def test_concat_export(self):
+        """Test Concat operator export."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 5, 4)
+        C = torch.rand(2, 1, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B, C):
+                return torch.onnx.ops.concat([A, B, C], axis=1)
+
+        model = Model()
+        onnx_program = self.export(model, (A, B, C), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Concat")
+        result = model(A, B, C)
+        self.assertEqual(result.shape, (2, 9, 4))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_reshape_opcheck(self):
+        """Test Reshape operator with opcheck."""
+        data = torch.rand(2, 3, 4)
+        shape = torch.tensor([6, 4], dtype=torch.int64)
+        torch.library.opcheck(_impl.reshape_14, (data, shape))
+
+    def test_reshape_export(self):
+        """Test Reshape operator export."""
+        data = torch.rand(2, 3, 4)
+        shape = torch.tensor([6, 4], dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, data, shape):
+                return torch.onnx.ops.reshape(data, shape)
+
+        model = Model()
+        onnx_program = self.export(model, (data, shape), opset_version=14)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Reshape")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_reshape_with_minus_one(self):
+        """Test Reshape with -1 dimension."""
+        data = torch.rand(2, 3, 4)
+        shape = torch.tensor([6, -1], dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, data, shape):
+                return torch.onnx.ops.reshape(data, shape)
+
+        model = Model()
+        result = model(data, shape)
+        self.assertEqual(result.shape, (6, 4))
+        onnx_program = self.export(model, (data, shape), opset_version=14)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_transpose_opcheck(self):
+        """Test Transpose operator with opcheck."""
+        data = torch.rand(2, 3, 4, 5)
+        torch.library.opcheck(_impl.transpose_13, (data,), {"perm": [0, 2, 1, 3]})
+
+    def test_transpose_export(self):
+        """Test Transpose operator export."""
+        data = torch.rand(2, 3, 4, 5)
+
+        class Model(torch.nn.Module):
+            def forward(self, data):
+                return torch.onnx.ops.transpose(data, perm=[0, 2, 1, 3])
+
+        model = Model()
+        result = model(data)
+        self.assertEqual(result.shape, (2, 4, 3, 5))
+        onnx_program = self.export(model, (data,), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Transpose")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_gather_opcheck(self):
+        """Test Gather operator with opcheck."""
+        data = torch.rand(3, 4, 5)
+        indices = torch.tensor([[0, 2], [1, 0]], dtype=torch.int64)
+        torch.library.opcheck(_impl.gather_13, (data, indices), {"axis": 1})
+
+    def test_gather_export(self):
+        """Test Gather operator export."""
+        data = torch.rand(3, 4, 5)
+        indices = torch.tensor([[0, 2], [1, 0]], dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, data, indices):
+                return torch.onnx.ops.gather(data, indices, axis=1)
+
+        model = Model()
+        onnx_program = self.export(model, (data, indices), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Gather")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_slice_opcheck(self):
+        """Test Slice operator with opcheck."""
+        data = torch.rand(3, 4, 5)
+        starts = torch.tensor([0, 1], dtype=torch.int64)
+        ends = torch.tensor([2, 4], dtype=torch.int64)
+        torch.library.opcheck(_impl.slice_13, (data, starts, ends))
+
+    def test_slice_export(self):
+        """Test Slice operator export."""
+        data = torch.rand(3, 4, 5)
+        starts = torch.tensor([0, 1], dtype=torch.int64)
+        ends = torch.tensor([2, 4], dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, data, starts, ends):
+                return torch.onnx.ops.slice(data, starts, ends)
+
+        model = Model()
+        onnx_program = self.export(model, (data, starts, ends), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Slice")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_slice_with_axes_and_steps(self):
+        """Test Slice with axes and steps parameters."""
+        data = torch.rand(3, 4, 5)
+        starts = torch.tensor([1, 0], dtype=torch.int64)
+        ends = torch.tensor([3, 4], dtype=torch.int64)
+        axes = torch.tensor([0, 1], dtype=torch.int64)
+        steps = torch.tensor([1, 2], dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, data, starts, ends, axes, steps):
+                return torch.onnx.ops.slice(data, starts, ends, axes, steps)
+
+        model = Model()
+        onnx_program = self.export(
+            model, (data, starts, ends, axes, steps), opset_version=13
+        )
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_unsqueeze_opcheck(self):
+        """Test Unsqueeze operator with opcheck."""
+        data = torch.rand(2, 3, 4)
+        axes = torch.tensor([1, 3], dtype=torch.int64)
+        torch.library.opcheck(_impl.unsqueeze_13, (data, axes))
+
+    def test_unsqueeze_export(self):
+        """Test Unsqueeze operator export."""
+        data = torch.rand(2, 3, 4)
+        axes = torch.tensor([1, 3], dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, data, axes):
+                return torch.onnx.ops.unsqueeze(data, axes)
+
+        model = Model()
+        result = model(data, axes)
+        self.assertEqual(result.shape, (2, 1, 3, 1, 4))
+        onnx_program = self.export(model, (data, axes), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Unsqueeze")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_squeeze_opcheck(self):
+        """Test Squeeze operator with opcheck."""
+        data = torch.rand(2, 1, 3, 1, 4)
+        axes = torch.tensor([1, 3], dtype=torch.int64)
+        torch.library.opcheck(_impl.squeeze_13, (data,), {"axes": axes})
+
+    def test_squeeze_export(self):
+        """Test Squeeze operator export."""
+        data = torch.rand(2, 1, 3, 1, 4)
+        axes = torch.tensor([1, 3], dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, data, axes):
+                return torch.onnx.ops.squeeze(data, axes=axes)
+
+        model = Model()
+        result = model(data, axes)
+        self.assertEqual(result.shape, (2, 3, 4))
+        onnx_program = self.export(model, (data, axes), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Squeeze")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_split_opcheck(self):
+        """Test Split operator with opcheck."""
+        data = torch.rand(2, 9, 4)
+        split = torch.tensor([3, 5, 1], dtype=torch.int64)
+        torch.library.opcheck(_impl.split_13, (data,), {"split": split, "axis": 1})
+
+    def test_split_export(self):
+        """Test Split operator export."""
+        data = torch.rand(2, 9, 4)
+        split = torch.tensor([3, 5, 1], dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, data, split):
+                return torch.onnx.ops.split(data, split=split, axis=1)
+
+        model = Model()
+        outputs = model(data, split)
+        self.assertEqual(len(outputs), 3)
+        self.assertEqual(outputs[0].shape, (2, 3, 4))
+        self.assertEqual(outputs[1].shape, (2, 5, 4))
+        self.assertEqual(outputs[2].shape, (2, 1, 4))
+        onnx_program = self.export(model, (data, split), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Split")
+
+    def test_relu_opcheck(self):
+        """Test Relu operator with opcheck."""
+        X = torch.randn(2, 3, 4)
+        torch.library.opcheck(_impl.relu_13, (X,))
+
+    def test_relu_export(self):
+        """Test Relu operator export."""
+        X = torch.randn(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, X):
+                return torch.onnx.ops.relu(X)
+
+        model = Model()
+        onnx_program = self.export(model, (X,), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Relu")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_sigmoid_opcheck(self):
+        """Test Sigmoid operator with opcheck."""
+        X = torch.randn(2, 3, 4)
+        torch.library.opcheck(_impl.sigmoid_13, (X,))
+
+    def test_sigmoid_export(self):
+        """Test Sigmoid operator export."""
+        X = torch.randn(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, X):
+                return torch.onnx.ops.sigmoid(X)
+
+        model = Model()
+        onnx_program = self.export(model, (X,), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Sigmoid")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_reduce_max_opcheck(self):
+        """Test ReduceMax operator with opcheck."""
+        data = torch.rand(2, 3, 4, 5)
+        torch.library.opcheck(
+            _impl.reduce_max_13, (data,), {"axes": [1, 3], "keepdims": True}
+        )
+
+    def test_reduce_max_export(self):
+        """Test ReduceMax operator export."""
+        data = torch.rand(2, 3, 4, 5)
+
+        class Model(torch.nn.Module):
+            def forward(self, data):
+                return torch.onnx.ops.reduce_max(data, axes=[1, 3], keepdims=True)
+
+        model = Model()
+        result = model(data)
+        self.assertEqual(result.shape, (2, 1, 4, 1))
+        onnx_program = self.export(model, (data,), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "ReduceMax")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_reduce_mean_opcheck(self):
+        """Test ReduceMean operator with opcheck."""
+        data = torch.rand(2, 3, 4, 5)
+        torch.library.opcheck(
+            _impl.reduce_mean_13, (data,), {"axes": [1, 3], "keepdims": True}
+        )
+
+    def test_reduce_mean_export(self):
+        """Test ReduceMean operator export."""
+        data = torch.rand(2, 3, 4, 5)
+
+        class Model(torch.nn.Module):
+            def forward(self, data):
+                return torch.onnx.ops.reduce_mean(data, axes=[1, 3], keepdims=True)
+
+        model = Model()
+        result = model(data)
+        self.assertEqual(result.shape, (2, 1, 4, 1))
+        onnx_program = self.export(model, (data,), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "ReduceMean")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_reduce_min_opcheck(self):
+        """Test ReduceMin operator with opcheck."""
+        data = torch.rand(2, 3, 4, 5)
+        torch.library.opcheck(
+            _impl.reduce_min_13, (data,), {"axes": [1, 3], "keepdims": False}
+        )
+
+    def test_reduce_min_export(self):
+        """Test ReduceMin operator export."""
+        data = torch.rand(2, 3, 4, 5)
+
+        class Model(torch.nn.Module):
+            def forward(self, data):
+                return torch.onnx.ops.reduce_min(data, axes=[1, 3], keepdims=False)
+
+        model = Model()
+        result = model(data)
+        self.assertEqual(result.shape, (2, 4))
+        onnx_program = self.export(model, (data,), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "ReduceMin")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_conv_opcheck(self):
+        """Test Conv operator with opcheck."""
+        X = torch.rand(1, 3, 5, 5)
+        W = torch.rand(2, 3, 3, 3)
+        torch.library.opcheck(
+            _impl.conv_11,
+            (X, W),
+            {"kernel_shape": [3, 3], "strides": [1, 1], "pads": [1, 1, 1, 1]},
+        )
+
+    def test_conv_export(self):
+        """Test Conv operator export."""
+        X = torch.rand(1, 3, 5, 5)
+        W = torch.rand(2, 3, 3, 3)
+
+        class Model(torch.nn.Module):
+            def forward(self, X, W):
+                return torch.onnx.ops.conv(
+                    X, W, kernel_shape=[3, 3], strides=[1, 1], pads=[1, 1, 1, 1]
+                )
+
+        model = Model()
+        onnx_program = self.export(model, (X, W), opset_version=11)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Conv")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_average_pool_opcheck(self):
+        """Test AveragePool operator with opcheck."""
+        X = torch.rand(1, 3, 5, 5)
+        torch.library.opcheck(
+            _impl.average_pool_11, (X,), {"kernel_shape": [2, 2], "strides": [2, 2]}
+        )
+
+    def test_average_pool_export(self):
+        """Test AveragePool operator export."""
+        X = torch.rand(1, 3, 5, 5)
+
+        class Model(torch.nn.Module):
+            def forward(self, X):
+                return torch.onnx.ops.average_pool(X, kernel_shape=[2, 2])
+
+        model = Model()
+        onnx_program = self.export(model, (X,), opset_version=11)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "AveragePool")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_max_pool_opcheck(self):
+        """Test MaxPool operator with opcheck."""
+        X = torch.rand(1, 3, 5, 5)
+        torch.library.opcheck(
+            _impl.max_pool_12, (X,), {"kernel_shape": [2, 2], "strides": [2, 2]}
+        )
+
+    def test_max_pool_export(self):
+        """Test MaxPool operator export."""
+        X = torch.rand(1, 3, 5, 5)
+
+        class Model(torch.nn.Module):
+            def forward(self, X):
+                return torch.onnx.ops.max_pool(X, kernel_shape=[2, 2])
+
+        model = Model()
+        onnx_program = self.export(model, (X,), opset_version=12)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "MaxPool")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_cast_opcheck(self):
+        """Test Cast operator with opcheck."""
+        input_data = torch.rand(2, 3, 4)
+        torch.library.opcheck(_impl.cast_13, (input_data,), {"to": 1})  # FLOAT
+
+    def test_cast_export(self):
+        """Test Cast operator export."""
+        input_data = torch.tensor([1, 2, 3], dtype=torch.int32)
+
+        class Model(torch.nn.Module):
+            def forward(self, input_data):
+                return torch.onnx.ops.cast(input_data, to=1)  # Cast to FLOAT
+
+        model = Model()
+        result = model(input_data)
+        self.assertEqual(result.dtype, torch.float32)
+        onnx_program = self.export(model, (input_data,), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Cast")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_expand_opcheck(self):
+        """Test Expand operator with opcheck."""
+        input_data = torch.rand(3, 1)
+        shape = torch.tensor([3, 4], dtype=torch.int64)
+        torch.library.opcheck(_impl.expand_13, (input_data, shape))
+
+    def test_expand_export(self):
+        """Test Expand operator export."""
+        input_data = torch.rand(3, 1)
+        shape = torch.tensor([3, 4], dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, input_data, shape):
+                return torch.onnx.ops.expand(input_data, shape)
+
+        model = Model()
+        result = model(input_data, shape)
+        self.assertEqual(result.shape, (3, 4))
+        onnx_program = self.export(model, (input_data, shape), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Expand")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_max_element_wise_opcheck(self):
+        """Test Max (element-wise) operator with opcheck."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+        C = torch.rand(2, 3, 4)
+        torch.library.opcheck(_impl.max_13, ([A, B, C],))
+
+    def test_max_element_wise_export(self):
+        """Test Max (element-wise) operator export."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+        C = torch.rand(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B, C):
+                return torch.onnx.ops.max([A, B, C])
+
+        model = Model()
+        onnx_program = self.export(model, (A, B, C), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Max")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_min_element_wise_opcheck(self):
+        """Test Min (element-wise) operator with opcheck."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+        torch.library.opcheck(_impl.min_13, ([A, B],))
+
+    def test_min_element_wise_export(self):
+        """Test Min (element-wise) operator export."""
+        A = torch.rand(2, 3, 4)
+        B = torch.rand(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, A, B):
+                return torch.onnx.ops.min([A, B])
+
+        model = Model()
+        onnx_program = self.export(model, (A, B), opset_version=13)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Min")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_shape_opcheck(self):
+        """Test Shape operator with opcheck."""
+        data = torch.rand(2, 3, 4)
+        torch.library.opcheck(_impl.shape_15, (data,))
+
+    def test_shape_export(self):
+        """Test Shape operator export."""
+        data = torch.rand(2, 3, 4)
+
+        class Model(torch.nn.Module):
+            def forward(self, data):
+                return torch.onnx.ops.shape(data)
+
+        model = Model()
+        result = model(data)
+        self.assertEqual(result.tolist(), [2, 3, 4])
+        onnx_program = self.export(model, (data,), opset_version=15)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Shape")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_range_opcheck(self):
+        """Test Range operator with opcheck."""
+        start = torch.tensor(1, dtype=torch.int64)
+        limit = torch.tensor(10, dtype=torch.int64)
+        delta = torch.tensor(2, dtype=torch.int64)
+        torch.library.opcheck(_impl.range_11, (start, limit, delta))
+
+    def test_range_export(self):
+        """Test Range operator export."""
+        start = torch.tensor(1, dtype=torch.int64)
+        limit = torch.tensor(10, dtype=torch.int64)
+        delta = torch.tensor(2, dtype=torch.int64)
+
+        class Model(torch.nn.Module):
+            def forward(self, start, limit, delta):
+                return torch.onnx.ops.range(start, limit, delta)
+
+        model = Model()
+        result = model(start, limit, delta)
+        expected = torch.arange(1, 10, 2)
+        torch.testing.assert_close(result, expected)
+        onnx_program = self.export(model, (start, limit, delta), opset_version=11)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "Range")
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_dft_opcheck(self):
+        """Test DFT operator with opcheck."""
+        input_data = torch.rand(2, 8, 2)  # Real and imaginary parts
+        torch.library.opcheck(_impl.dft_20, (input_data,))
+
+    def test_dft_export(self):
+        """Test DFT operator export."""
+        input_data = torch.rand(2, 8, 2)
+
+        class Model(torch.nn.Module):
+            def forward(self, input_data):
+                return torch.onnx.ops.dft(input_data)
+
+        model = Model()
+        onnx_program = self.export(model, (input_data,), opset_version=20)
+        self.assertEqual(onnx_program.model.graph.node(0).op_type, "DFT")
+        onnx_testing.assert_onnx_program(onnx_program)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
