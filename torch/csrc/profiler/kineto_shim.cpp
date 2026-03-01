@@ -185,7 +185,13 @@ class ExperimentalConfigWrapper {
     std::set<libkineto::ActivityType> k_activities =
         std::move(enabled_activities);
 #ifdef USE_KINETO
+#if not defined(USE_CUDA) and defined(USE_XPU)
+    k_activities.insert(libkineto::ActivityType::XPU_SCOPE_PROFILER);
+    constexpr const char PTI[] = "XPUPTI";
+#else
     k_activities.insert(libkineto::ActivityType::CUDA_PROFILER_RANGE);
+    constexpr const char PTI[] = "CUPTI";
+#endif
 
     // Add CPU activities if we are measuring per kernel ranges
     if (config_.profiler_measure_per_kernel) {
@@ -195,10 +201,10 @@ class ExperimentalConfigWrapper {
     const size_t num_metrics = config_.profiler_metrics.size();
     std::stringstream configss;
 
-    LOG(INFO) << "CUPTI profiler metrics size = " << num_metrics;
+    LOG(INFO) << PTI << " profiler metrics size = " << num_metrics;
 
     configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
-             << "CUPTI_PROFILER_METRICS=";
+             << PTI << "_PROFILER_METRICS=";
 
     for (size_t i = 0; i < num_metrics; i++) {
       configss << config_.profiler_metrics[i];
@@ -206,7 +212,8 @@ class ExperimentalConfigWrapper {
         configss << ',';
       }
     }
-    configss << "\nCUPTI_PROFILER_ENABLE_PER_KERNEL="
+    configss << "\n"
+             << PTI << "_PROFILER_ENABLE_PER_KERNEL="
              << (config_.profiler_measure_per_kernel ? "true" : "false")
              << '\n';
     configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << '\n';
@@ -454,6 +461,8 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::PRIVATEUSE1_DRIVER:
     case libkineto::ActivityType::OVERHEAD:
       return c10::DeviceType::CPU;
+    case libkineto::ActivityType::XPU_SCOPE_PROFILER:
+      return c10::DeviceType::XPU;
     default: {
       TORCH_WARN(
           "Unknown activity type (",
