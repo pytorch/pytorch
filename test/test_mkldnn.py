@@ -544,6 +544,58 @@ class TestMkldnn(TestCase):
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
+    def test_conv_transpose_shape_compile(self):
+        """Regression test for shape inference bug in mkldnn._convolution_transpose_pointwise.
+
+        Bug: torch.compile was incorrectly transposing weight dimensions for regular PyTorch
+        tensors, causing wrong output channel prediction (e.g., 3 instead of 8 channels).
+        """
+        torch.set_num_threads(1)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Weight layout: (in_channels, out_channels, kH, kW) - same as nn.ConvTranspose2d
+                self.weight = torch.nn.Parameter(torch.randn(3, 8, 3, 3))  # in=3, out=8
+                self.bias = torch.nn.Parameter(torch.randn(8))
+
+            def forward(self, x):
+                # Schema: mkldnn::_convolution_transpose_pointwise(X, W, B, padding, output_padding, stride, dilation, groups, attr, scalars, algorithm)
+                y = torch.ops.mkldnn._convolution_transpose_pointwise.default(
+                    x,
+                    self.weight,
+                    self.bias,
+                    [1, 1],      # padding
+                    [1, 1],      # output_padding
+                    [2, 2],      # stride
+                    [1, 1],      # dilation
+                    1,           # groups
+                    "none",      # attr
+                    [],          # scalars
+                    ""           # algorithm
+                )
+                # Post-ops to prevent trivial elimination
+                y = torch.add(y, 3)
+                y = torch.clamp_min(y, 0)
+                y = torch.clamp_max(y, 6)
+                return torch.div(y, 6)
+
+        torch.manual_seed(9150)
+        model = Model().eval()
+        x = torch.randn(4, 3, 16, 16)
+
+        with torch.no_grad():
+            torch.manual_seed(9150)
+            eager_out = model(x)
+
+            torch.manual_seed(9150)
+            compiled_model = torch.compile(model, fullgraph=True)
+            compiled_out = compiled_model(x)
+
+            # Bug was shape mismatch eager=(4,8,32,32) compiled=(4,3,32,32)
+            self.assertEqual(eager_out.shape, compiled_out.shape)
+            self.assertEqual(eager_out.shape[1], 8)  # Expected output channels
+
     def test_conv2d_legacy_jit_model(self):
         """
         MKLDNN integration used to serialize models with 5d weight for grouped
