@@ -84,7 +84,8 @@ class ImplDetailTest(MockSchedulerTest):
             prefix = str(var)[0]
             break
 
-        assert prefix
+        if not prefix:
+            raise AssertionError
         return prefix
 
     @staticmethod
@@ -761,7 +762,8 @@ class MemoryCoalescingTest(MockSchedulerTest):
         from torch._inductor import tiling_utils
 
         def fn(nodes):
-            assert len(nodes) == 1
+            if len(nodes) != 1:
+                raise AssertionError(f"Expected 1 node, got {len(nodes)}")
             fused_norm_read_writes = tiling_utils.extract_normalized_read_writes(
                 nodes[0]
             )
@@ -1123,7 +1125,8 @@ class TestTiling(TestCase):
                 .unsqueeze(0)
             )
         else:
-            assert layout == "NHWC"
+            if layout != "NHWC":
+                raise AssertionError(f"Unexpected layout: {layout}")
             return torch.rand([1, SIZE_A, SIZE_B, SIZE_C], device=GPU_TYPE).to(
                 memory_format=torch.channels_last
             )
@@ -1220,7 +1223,8 @@ class TestTiling(TestCase):
             self.assertTrue(len(nodes) == 1)
 
             coalesce_analysis = tiling_utils.analyze_memory_coalescing(nodes[0])
-            assert coalesce_analysis is not None
+            if coalesce_analysis is None:
+                raise AssertionError
 
             reads = coalesce_analysis.norm_read_writes.reads
             writes = coalesce_analysis.norm_read_writes.writes
@@ -1340,7 +1344,10 @@ class TestIndexInversion(TestCase):
         import numpy as np
         from sympy import lambdify
 
-        assert len(expr.free_symbols) == 1
+        if len(expr.free_symbols) != 1:
+            raise AssertionError(
+                f"Expected 1 free symbol, got {len(expr.free_symbols)}"
+            )
         p0 = next(iter(expr.free_symbols))
 
         def floordiv_replacement(a, b):

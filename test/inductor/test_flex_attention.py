@@ -5594,7 +5594,10 @@ class GraphModule(torch.nn.Module):
             result = orig_stride_call(self, node)
             if flexible_layout:
                 flexible_layout_called = True
-                assert isinstance(node.data.layout, ir.FixedLayout)
+                if not isinstance(node.data.layout, ir.FixedLayout):
+                    raise AssertionError(
+                        f"Expected FixedLayout, got {type(node.data.layout)}"
+                    )
             return result
 
         with patch.object(
