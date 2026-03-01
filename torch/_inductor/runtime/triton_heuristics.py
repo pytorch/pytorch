@@ -932,6 +932,38 @@ class CachingAutotuner(KernelInterface):
 
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
 
+    def _validate_launcher_args(self, launcher, args, kernel_name="triton kernel"):
+        """
+        Validate that the number of arguments matches the launcher signature.
+        
+        Prevents confusing error messages when argument count mismatch causes
+        positional arguments to overwrite keyword arguments like 'stream'.
+        
+        See: https://github.com/pytorch/pytorch/issues/146018
+        """
+        try:
+            # launcher signature is typically: def launcher(arg1, arg2, ..., argN, stream)
+            # co_argcount includes all parameters, subtract 1 for 'stream'
+            expected_args = launcher.__code__.co_argcount - 1
+            actual_args = len(args)
+            
+            if actual_args > expected_args:
+                raise TypeError(
+                    f"Too many arguments for Triton kernel launcher '{kernel_name}': "
+                    f"expected {expected_args} but got {actual_args}. "
+                    f"Extra arguments may overwrite keyword parameters like 'stream'. "
+                    f"Check your kernel signature."
+                )
+            elif actual_args < expected_args:
+                raise TypeError(
+                    f"Too few arguments for Triton kernel launcher '{kernel_name}': "
+                    f"expected {expected_args} but got {actual_args}. "
+                    f"Check your kernel signature."
+                )
+        except AttributeError:
+            # launcher doesn't have __code__ attribute, skip validation
+            pass
+
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher"""
         # we don't skip configs with spilled registers when auto-tuning custom
@@ -972,6 +1004,7 @@ class CachingAutotuner(KernelInterface):
                     profiler_kwargs,
                 ):
                     try:
+                        self._validate_launcher_args(launcher, cloned_args, kernel_name)
                         launcher(
                             *cloned_args,
                             **cloned_kwargs,
@@ -983,6 +1016,7 @@ class CachingAutotuner(KernelInterface):
 
             else:
                 try:
+                    self._validate_launcher_args(launcher, cloned_args, kernel_name)
                     launcher(
                         *cloned_args,
                         **cloned_kwargs,
