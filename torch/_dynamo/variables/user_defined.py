@@ -978,11 +978,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         self, tx: "InstructionTranslator", name: str
     ) -> "ConstantVariable":
         if self.source:
-            install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
-            )
+            source = AttrSource(self.source, name)
+            install_guard(source.make_guard(GuardBuilder.HASATTR))
             return VariableTracker.build(tx, hasattr(self.value, name))
         return super().call_obj_hasattr(tx, name)
 
@@ -1979,9 +1976,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> "ConstantVariable":
         if self.source:
             install_guard(
-                self.source.make_guard(
-                    functools.partial(GuardBuilder.HASATTR, attr=name)
-                )
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
 
         try:
@@ -2863,9 +2858,10 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         return self._tuple_vt.get_python_hash()
 
     def is_python_equal(self, other: object) -> bool:
-        return isinstance(
-            other, UserDefinedTupleVariable
-        ) and self._tuple_vt.is_python_equal(other._tuple_vt)
+        other = (
+            other._tuple_vt if isinstance(other, UserDefinedTupleVariable) else other
+        )
+        return self._tuple_vt.is_python_equal(other)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):

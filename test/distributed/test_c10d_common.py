@@ -994,6 +994,29 @@ class CommonDistributedDataParallelTest:
 
         self._test_not_nan(model, x)
 
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_buffer_sync_multi_forward_with_batchnorm(self):
+        pg = self._get_process_group()
+
+        model = nn.Sequential(
+            nn.Linear(10, 10),
+            nn.BatchNorm1d(10),
+        ).to(device=self.rank)
+
+        model = DistributedDataParallel(
+            model,
+            device_ids=[self.rank],
+            process_group=pg,
+            broadcast_buffers=True,
+        )
+
+        x = torch.randn(4, 10, device=self.rank)
+
+        model.zero_grad()
+        out1 = model(x)
+        out2 = model(x)
+        (out1.mean() + out2.mean()).backward()
+
     @dataclass
     class CustomOutput:
         o1: Optional[torch.Tensor]

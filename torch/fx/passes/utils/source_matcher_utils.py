@@ -103,7 +103,7 @@ def get_source_partitions(
             # placeholder, get_attr, or output nodes in partitions.
             if not matched and node.op == "call_function":
                 nn_module_stack = node.meta.get("nn_module_stack", None)
-                if nn_module_stack is not None:
+                if nn_module_stack:
                     # Get the innermost module (last entry in the ordered dict)
                     innermost_fqn, innermost_cls = list(nn_module_stack.values())[-1]
                     for src in wanted_sources:

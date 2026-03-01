@@ -262,7 +262,9 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(
-            self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+            NNModuleSource(AttrSource(self.source, name)).make_guard(
+                GuardBuilder.HASATTR
+            )
         )
         return VariableTracker.build(tx, result)
 
