@@ -3913,6 +3913,28 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     if fx_node is not None and is_cudagraph_unsafe_fx_node(fx_node):
         return True
 
+    # ExternKernelOut nodes created by lowering (e.g., out-variant
+    # lowering in comm_lowering.py) may not have an fx_node. Fall back to
+    # checking op_overload against FORBIDDEN_CUDAGRAPH_OPS directly.
+    if fx_node is None:
+        op_overload = getattr(node, "op_overload", None)
+        if op_overload is not None:
+            op_str = str(op_overload)
+            if op_str in FORBIDDEN_CUDAGRAPH_OPS:
+                log.debug(
+                    "is_cudagraph_unsafe_op: matched op_overload=%s (no fx_node)",
+                    op_str,
+                )
+                return True
+        # Also check python_kernel_name for ops without op_overload
+        pk_name = getattr(node, "python_kernel_name", None)
+        if pk_name is not None and pk_name in FORBIDDEN_CUDAGRAPH_OPS:
+            log.debug(
+                "is_cudagraph_unsafe_op: matched python_kernel_name=%s (no fx_node)",
+                pk_name,
+            )
+            return True
+
     return False
 
 

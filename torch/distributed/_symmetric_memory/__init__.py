@@ -991,7 +991,7 @@ def _should_use_multimem_all_gather_matmul(
         and gather_dim == 0
         # The heuristic is empirical. We could refine it with a more
         # sophisticated perf model.
-        and local_M * group.size() <= 2048
+        and local_M * group.size() <= 8192
     )
 
 

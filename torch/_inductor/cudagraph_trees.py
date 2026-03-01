@@ -1263,6 +1263,10 @@ class CUDAGraphNode:
 
     def run_graph(self) -> None:
         assert self.graph is not None
+        log.debug(
+            "Executing cudagraph replay, cuda_graph_id=%d",
+            self.id.id,
+        )
         self.graph.replay()
 
     def all_outputs_are_dead(self) -> bool:
@@ -1863,7 +1867,17 @@ def check_memory_pool(
 ) -> None:
     """Validate cudagraph pool allocations against tracked live storages and surface leaks."""
     assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
-    unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
+    unique_storages = set()  # noqa: set_linter
+    for stor in live_storages_ptrs:
+        storage_ptr = stor()
+        if storage_ptr is None:
+            continue
+        # Skip non-pool allocations (e.g., P2P symmetric memory buffers allocated
+        # via cuMemCreate/cuMemMap). These are not managed by the CUDA caching
+        # allocator and should not be validated against the cudagraph pool.
+        if not torch._C._has_Standard_Deleter(storage_ptr):
+            continue
+        unique_storages.add(stor.data_ptr())
 
     # check if there is a divergence first, then do the expensive snapshot call after
     # we know it will error
@@ -2370,6 +2384,12 @@ class CUDAGraphTreeManager:
     def execute_node(
         self, node: CUDAGraphNode, new_inputs: list[InputType]
     ) -> OutputType:
+        log.debug(
+            "[%s] Replaying cudagraph function=%s, cuda_graph_id=%d",
+            self.compile_id,
+            self.get_func_name(node.wrapped_function.id),
+            node.id.id,
+        )
         self.current_node = node
         self.path_state = ExecutionState.EXECUTION
         self.update_generation()
@@ -2702,8 +2722,9 @@ class CUDAGraphTreeManager:
             for wrapper in live_storages_wrappers:
                 storage_ptr = wrapper()
                 assert storage_ptr is not None
-                assert torch._C._has_Standard_Deleter(storage_ptr)
-                assert wrapper.data_ptr() not in ptrs_to_deallocate
+                # Skip non-pool allocations (e.g., P2P symmetric memory buffers)
+                if torch._C._has_Standard_Deleter(storage_ptr):
+                    assert wrapper.data_ptr() not in ptrs_to_deallocate
 
     def live_cudagraph_pool_storages_in_curr_execution(
         self,

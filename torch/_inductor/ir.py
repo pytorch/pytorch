@@ -231,6 +231,12 @@ class GraphPartitionSignature:
     # name of constants read/written by the graph partition
     constant_names: list[str]
 
+    # Buffers whose allocation is hoisted into this partition from a later
+    # non-cudagraph partition.  The subgraph codegen emits the allocation
+    # (e.g. empty_strided_cuda) and returns these buffers so that the
+    # later partition can use them without a per-iteration allocation.
+    hoisted_alloc_buffers: tuple["Buffer", ...] = ()
+
 
 def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
     def _check_tensorbox(nodes: Optional[_NodeOrNodes]) -> None:
@@ -4627,6 +4633,11 @@ class Buffer(IRNode, CodegenSymbol):
         return loader
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+        if isinstance(self.layout, MutationLayoutSHOULDREMOVE):
+            # This buffer is never allocated — it writes directly into its
+            # mutation target.  Any reference to it should resolve to the
+            # target buffer's name.
+            return self.layout.get_buffer().codegen_reference(writer)
         return self.get_name()
 
     def decide_layout(self) -> None:
@@ -8455,6 +8466,24 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
+
+        # Try to lower functional custom ops to their out-variant via
+        # ExternKernelOut. This enables Inductor's AllocateLine.plan()
+        # buffer reuse for the output allocation.
+        if config.lower_custom_ops_to_out_variant and isinstance(
+            kernel, torch._ops.OpOverload
+        ):
+            from .custom_op_out_lowering import try_lower_to_out_variant
+
+            result = try_lower_to_out_variant(
+                kernel,
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                kwargs,
+            )
+            if result is not None:
+                return result  # type: ignore[return-value]
 
         # We need this extra check for input alignment since the example
         # inputs we created are always aligned.

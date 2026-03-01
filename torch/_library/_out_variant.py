@@ -4,7 +4,6 @@ import logging
 
 import torch
 
-
 log = logging.getLogger(__name__)
 
 
@@ -62,6 +61,18 @@ def _has_valid_out_variant_returns(
     return True
 
 
+def get_out_arg_count(out_op: torch._ops.OpOverload) -> int:
+    """Get the number of out arguments for an out variant op."""
+    schema = out_op._schema
+    return sum(1 for arg in schema.arguments if _is_mutable_arg(arg))
+
+
+def get_out_arg_names(out_op: torch._ops.OpOverload) -> list[str]:
+    """Get the names of out arguments for an out variant op."""
+    schema = out_op._schema
+    return [arg.name for arg in schema.arguments if _is_mutable_arg(arg)]
+
+
 def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
     """
     Given a functional operator overload, return its corresponding out variant.
@@ -92,7 +103,6 @@ def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
         if not _signatures_match(schema, candidate_schema):
             continue
 
-        # We assume that all mutable args are used for out
         mutable_args = [
             arg for arg in candidate_schema.arguments if _is_mutable_arg(arg)
         ]
