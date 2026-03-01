@@ -22,12 +22,10 @@ from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
-    isRocmArchAnyOf,
     TEST_WITH_ROCM,
     skipIfRocm,
     skipIfRocmArch,
     MI300_ARCH,
-    MI350_ARCH,
     skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
@@ -3887,24 +3885,6 @@ class TestSDPACudaOnly(NNTestCase):
         if TEST_WITH_CK and head_dim > 128:
             self.skipTest("CK does not support head dims over 128")
 
-        base_condition = (
-            TEST_WITH_ROCM and isRocmArchAnyOf(MI350_ARCH)
-            and dtype == torch.float16 and scale is None and batch_size == 8
-            and seq_len_q == 2048 and is_causal is False
-        )
-
-        # (seq_len_k, head_dim, enable_gqa) rows that should be skipped
-        skip_cases = {
-            (2048, 256, False),
-            (2048, 203, False),
-            (127, 256, False),
-            (579, 256, True),
-            (2048, 256, True),
-        }
-
-        if base_condition and (seq_len_k, head_dim, enable_gqa) in skip_cases:
-            self.skipTest("Accuracy issues on gfx950")
-
         scale = scale if scale is None else (1 / head_dim)
         num_heads_q = num_heads_kv = 4
         if enable_gqa:
@@ -3918,7 +3898,7 @@ class TestSDPACudaOnly(NNTestCase):
         value = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
 
-        higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+        higher_precision_dtype = torch.float64
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
         is_dropout = dropout_p > 0.0
