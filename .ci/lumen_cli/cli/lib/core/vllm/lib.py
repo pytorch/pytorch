@@ -1,6 +1,9 @@
+import json
 import logging
 import os
+import re
 import textwrap
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +22,8 @@ VLLM_DEFAULT_RERUN_FAILURES_DELAY = 10
 logger = logging.getLogger(__name__)
 
 _VLLM_TEST_LIBRARY_PATH = Path(__file__).parent / "vllm_test_library.yaml"
+_DISABLED_VLLM_TESTS_PATH = Path(__file__).parent / "disabled_vllm_tests.yaml"
+_DISABLED_VLLM_TESTS_ISSUE = 175899
 
 
 def _load_vllm_test_library_yaml() -> dict[str, Any]:
@@ -87,6 +92,92 @@ def check_parallelism(tests: Any, title: str, shard_id: int = 0, num_shards: int
     return True
 
 
+def _load_disabled_vllm_tests_from_yaml() -> list[dict[str, Any]]:
+    if not _DISABLED_VLLM_TESTS_PATH.exists():
+        return []
+    with open(_DISABLED_VLLM_TESTS_PATH, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if not data or "disabled_tests" not in data:
+        return []
+    entries = data["disabled_tests"]
+    if not entries:
+        return []
+    for entry in entries:
+        if "test" not in entry or "issue" not in entry:
+            raise ValueError(
+                f"disabled_vllm_tests.yaml: each entry must have 'test' and 'issue' keys, got {entry}"
+            )
+    return entries
+
+
+def _parse_disabled_tests_from_issue_body(body: str) -> list[dict[str, Any]]:
+    match = re.search(r"```yaml\s*\n(.*?)```", body, re.DOTALL)
+    if not match:
+        return []
+    block = match.group(1)
+    data = yaml.safe_load(block)
+    if not data or "disabled_tests" not in data:
+        return []
+    return data["disabled_tests"] or []
+
+
+def _load_disabled_vllm_tests_from_github() -> list[dict[str, Any]]:
+    if not _DISABLED_VLLM_TESTS_ISSUE:
+        return []
+    url = f"https://api.github.com/repos/pytorch/pytorch/issues/{_DISABLED_VLLM_TESTS_ISSUE}"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"token {token}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            issue = json.loads(resp.read())
+        body = issue.get("body", "") or ""
+        entries = _parse_disabled_tests_from_issue_body(body)
+        # Filter out malformed entries — the issue body is user-editable
+        entries = [e for e in entries if "test" in e]
+        issue_url = issue.get("html_url", url)
+        for entry in entries:
+            entry.setdefault("issue", issue_url)
+        return entries
+    except Exception:
+        logger.warning(
+            "Failed to fetch disabled vLLM tests from GitHub issue #%d",
+            _DISABLED_VLLM_TESTS_ISSUE,
+            exc_info=True,
+        )
+        return []
+
+
+def _load_disabled_vllm_tests() -> list[dict[str, Any]]:
+    yaml_entries = _load_disabled_vllm_tests_from_yaml()
+    github_entries = _load_disabled_vllm_tests_from_github()
+    seen = {e["test"] for e in yaml_entries}
+    merged = list(yaml_entries)
+    for entry in github_entries:
+        if entry["test"] not in seen:
+            seen.add(entry["test"])
+            merged.append(entry)
+    return merged
+
+
+def _build_disabled_test_flags(
+    disabled_tests: list[dict[str, Any]], test_plan: str
+) -> str:
+    flags = []
+    for entry in disabled_tests:
+        configs = entry.get("configs")
+        if configs and test_plan not in configs:
+            continue
+        node_id = entry["test"]
+        if "::" in node_id:
+            flags.append(f"--deselect={node_id}")
+        else:
+            flags.append(f"--ignore={node_id}")
+    return " ".join(flags)
+
+
 def run_test_plan(
     test_plan: str,
     test_target: str,
@@ -110,6 +201,11 @@ def run_test_plan(
     if is_parallel:
         title = title.replace("%N", f"{shard_id}/{num_shards}")
 
+    disabled_tests = _load_disabled_vllm_tests()
+    disabled_flags = _build_disabled_test_flags(disabled_tests, test_plan)
+    if disabled_flags:
+        logger.info("Disabled test flags for %s: %s", test_plan, disabled_flags)
+
     logger.info("Running tests: %s", title)
     if pkgs:
         logger.info("Installing packages: %s", pkgs)
@@ -124,11 +220,14 @@ def run_test_plan(
             if is_parallel:
                 step = replace_buildkite_placeholders(step, shard_id, num_shards)
                 logger.info("Running parallel step: %s", step)
-            # Support retry with delay for all pytest commands, pytest-rerunfailures
-            # is already a dependency of vLLM. This is needed as a stop gap to reduce
-            # the number of requests to HF until #172300 can be landed to enable
-            # HF offline mode
             if "pytest" in step:
+                # Inject disabled test flags before rerun flags
+                if disabled_flags:
+                    step = step.replace("pytest", f"pytest {disabled_flags}", 1)
+                # Support retry with delay for all pytest commands, pytest-rerunfailures
+                # is already a dependency of vLLM. This is needed as a stop gap to reduce
+                # the number of requests to HF until #172300 can be landed to enable
+                # HF offline mode.
                 # Use a low retry count and a high delay value to lower the risk of
                 # having a retry storm and make thing worse
                 rerun_count = os.getenv(
