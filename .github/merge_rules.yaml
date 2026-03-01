@@ -487,6 +487,7 @@
   patterns:
   - torch/_dynamo/**
   - torch/csrc/dynamo/**
+  - test/cpython/**
   - test/dynamo/**
   - test/dynamo_expected_failures/**
   - test/dynamo_skips/**
