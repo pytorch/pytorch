@@ -80,6 +80,7 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
     CustomGraphPassType,
+    CustomIRPass,
     CustomPartitionerFn,
     CustomPartitionerFnType,
 )
@@ -967,8 +968,7 @@ class FxGraphHashDetails:
     # Their types can be found in `torch/_inductor/config.py`, but:
     # - if they are string names, we can cache them safely (one is by default)
     # - if any of them are set to custom callables, we will need to cache miss
-    # Future work is for someone to find any places where these functions are used
-    # and force them to be of type CustomGraphPass, so we can guarantee serialization.
+    # _pre_fusion_custom_pass must be CustomIRPass for IR-level passes.
     def _get_custom_pass_detail_unsafe(self, custom_pass: Any) -> Any | None:
         if not custom_pass:
             return None
@@ -976,7 +976,7 @@ class FxGraphHashDetails:
             return [self._get_custom_pass_detail_unsafe(x) for x in custom_pass]
         if isinstance(custom_pass, str):
             return custom_pass
-        if isinstance(custom_pass, CustomGraphPass):
+        if isinstance(custom_pass, (CustomGraphPass, CustomIRPass)):
             return custom_pass.uuid()
         if callable(custom_pass):
             # Returning None is safe here because we raise an explicit bypass error
@@ -1571,10 +1571,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         for p in (config.joint_custom_pre_pass, config.joint_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported joint custom pass")
-        # We should find any users of _pre_fusion_custom_pass and _fuse_ddp_communication_passes
-        # and ensure they are not passing us raw callables
+        # _pre_fusion_custom_pass must be CustomIRPass (IR-level passes).
+        # _fuse_ddp_communication_passes operate on FX graphs and must be CustomGraphPass.
         if config._pre_fusion_custom_pass is not None:
-            if not isinstance(config._pre_fusion_custom_pass, CustomGraphPass):
+            if not isinstance(config._pre_fusion_custom_pass, CustomIRPass):
                 raise BypassFxGraphCache("Unsupported _pre_fusion_custom_pass")
         for p in config._fuse_ddp_communication_passes:
             if callable(p) and not isinstance(p, CustomGraphPass):

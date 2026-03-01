@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
@@ -9,6 +11,7 @@ import torch.fx.graph
 
 if TYPE_CHECKING:
     from torch._functorch.partitioners import NodeInfo
+    from torch._inductor.scheduler import BaseSchedulerNode
 
 
 class CustomGraphPass(ABC):
@@ -118,6 +121,62 @@ def get_hash_for_files(paths: tuple[str, ...], extra: str = "") -> bytes:
         with open(path, "rb") as f:
             hasher.update(f.read())
     return hasher.digest()
+
+
+class CustomIRPass(ABC):
+    """
+    Base class for custom Loop-level IR passes in PyTorch Inductor.
+
+    This interface is designed for custom passes that operate on Loop-level IR
+    (scheduler nodes) rather than FX graphs. These passes typically run during
+    the pre-fusion stage (_pre_fusion_custom_pass config).
+
+    Key differences from CustomGraphPass:
+    - Operates on List[BaseSchedulerNode] instead of torch.fx.graph.Graph
+    - Runs at a lower level (loop/kernel level) after FX graph lowering
+    - Suitable for hardware-specific optimizations at the IR level
+
+    EXAMPLE:
+
+    from torch._inductor.custom_graph_pass import get_hash_for_files
+
+    class MyIRPass(CustomIRPass):
+        def __call__(
+            self,
+            nodes: list[BaseSchedulerNode],
+        ) -> list[BaseSchedulerNode]:
+            # Transform IR nodes
+            return transformed_nodes
+
+        def uuid(self) -> Optional[Any]:
+            return get_hash_for_files((__file__,))
+
+    The uuid() method enables Inductor to cache compiled graphs when your custom
+    passes are applied. The returned value should uniquely identify your implementation
+    and must be picklable. Changes to the implementation should result in a different
+    uuid to properly invalidate the cache.
+    """
+
+    @abstractmethod
+    def __call__(
+        self, nodes: list[BaseSchedulerNode]
+    ) -> list[BaseSchedulerNode]:
+        """
+        Implementation of the custom IR pass.
+
+        Args:
+            nodes: List of scheduler nodes representing the loop-level IR
+
+        Returns:
+            Transformed list of scheduler nodes
+        """
+
+    @abstractmethod
+    def uuid(self) -> Optional[Any]:
+        """
+        Return an ID to uniquely identify your custom IR pass implementation.
+        Return None to skip inductor code caching entirely.
+        """
 
 
 class CustomPartitionerFn(ABC):
