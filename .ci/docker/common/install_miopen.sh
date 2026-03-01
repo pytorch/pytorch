@@ -10,21 +10,6 @@ if [[ -z $ROCM_VERSION ]]; then
     exit 1;
 fi
 
-IS_UBUNTU=0
-ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
-case "$ID" in
-  ubuntu)
-    IS_UBUNTU=1
-    ;;
-  centos|almalinux)
-    IS_UBUNTU=0
-    ;;
-  *)
-    echo "Unable to determine OS..."
-    exit 1
-    ;;
-esac
-
 # To make version comparison easier, create an integer representation.
 save_IFS="$IFS"
 IFS=. ROCM_VERSION_ARRAY=(${ROCM_VERSION})
@@ -71,17 +56,7 @@ else
     exit 0
 fi
 
-
-if [[ ${IS_UBUNTU} == 1 ]]; then
-  apt-get remove -y miopen-hip
-else
-  # Workaround since almalinux manylinux image already has this and cget doesn't like that
-  rm -rf /usr/local/lib/pkgconfig/sqlite3.pc
-
-  # Versioned package name needs regex match
-  # Use --noautoremove to prevent other rocm packages from being uninstalled
-  yum remove -y miopen-hip* --noautoremove
-fi
+apt-get remove -y miopen-hip
 
 git clone https://github.com/ROCm/MIOpen -b ${MIOPEN_BRANCH}
 pushd MIOpen
@@ -94,15 +69,8 @@ cmake -P install_deps.cmake --minimum
 
 # clean up since CI runner was running out of disk space
 rm -rf /tmp/*
-if [[ ${IS_UBUNTU} == 1 ]]; then
-  apt-get autoclean && apt-get clean
-  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-else
-  yum clean all
-  rm -rf /var/cache/yum
-  rm -rf /var/lib/yum/yumdb
-  rm -rf /var/lib/yum/history
-fi
+apt-get autoclean && apt-get clean
+rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 ## Build MIOpen
 mkdir -p build
@@ -119,11 +87,7 @@ make -j $(nproc) package
 # clean up since CI runner was running out of disk space
 rm -rf /usr/local/cget
 
-if [[ ${IS_UBUNTU} == 1 ]]; then
-  sudo dpkg -i miopen-hip*.deb
-else
-  yum install -y miopen-*.rpm
-fi
+sudo dpkg -i miopen-hip*.deb
 
 popd
 rm -rf MIOpen
