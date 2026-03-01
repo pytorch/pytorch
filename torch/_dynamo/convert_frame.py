@@ -75,7 +75,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     _disable_current_modes,
     any_torch_dispatch_mode_on_stack,
@@ -2019,7 +2018,7 @@ def _compile(
                 and tracer_output.output_graph is not None
                 and not tracer_output.output_graph.export
             ):
-                tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = OrderedSet()
+                tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.clear()
 
             # Clear WeakIdRef entries that can block swap_tensors after compile.
             # Determine whether to clear based on config and backend type.
