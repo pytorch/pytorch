@@ -758,6 +758,9 @@ realize_acc_reads_size_threshold: int | None = (
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
+# align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
+align_random_eager = True
+
 # fallback embedding_bag_byte_unpack to eager
 fallback_embedding_bag_byte_unpack = False
 

@@ -238,6 +238,10 @@ class DtypePropagationOpsHandler:
         return torch.float
 
     @staticmethod
+    def rand_eager(seed, offset, threads_per_round, tid, vec) -> torch.dtype:
+        return torch.float
+
+    @staticmethod
     def store_reduction(name: str, index, value: DTypeArg) -> None:
         return None
 

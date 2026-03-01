@@ -1108,6 +1108,16 @@ class CppOverrides(OpOverrides):
         return f"normalized_rand_cpu({seed}, {offset})"
 
     @staticmethod
+    def rand_eager(
+        seed: sympy.Expr,
+        base_offset: sympy.Expr,
+        threads_per_round: sympy.Expr,
+        tid: sympy.Expr,
+        vec: sympy.Expr,
+    ):
+        return f"normalized_rand_cpu({seed}, {base_offset})"
+
+    @staticmethod
     def randn(seed: sympy.Expr, offset: sympy.Expr):
         return f"randn_cpu({seed}, {offset})"
 
