@@ -26,7 +26,12 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
+from torch.testing._internal.common_utils import (
+    parametrize,
+    skipIfWindows,
+    skipIfXpu,
+    skipIfRocm
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
@@ -3386,6 +3391,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @make_mutation_test
     def test_for_loop_arg_2():
         @triton.jit
@@ -3447,6 +3453,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
     @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @make_mutation_test
     def test_while_loop():
         @triton.jit

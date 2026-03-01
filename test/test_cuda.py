@@ -4308,7 +4308,7 @@ class TestCudaMallocAsync(TestCase):
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
-    @skipIfRocmArch(MI350_ARCH)
+    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_memory_plots(self):
         for context, stacks in (
             ("all", "all" if IS_LINUX else "python"),
@@ -4472,6 +4472,7 @@ class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @requiresCppContext
     def test_memory_plots_free_segment_stack(self):
         for context in ["alloc", "all", "state"]:

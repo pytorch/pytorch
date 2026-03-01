@@ -48,6 +48,11 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import (
+    MI200_ARCH,
+    skipIfRocmArch,
+    skipIfRocm,
+)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
@@ -2345,6 +2350,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
+    # Flaky with triton 3.7
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @skip_on_cpu
     def test_return_aux_deprecation_warnings(self, device, dtype):
         """Test that deprecation warnings are issued for legacy parameters"""
@@ -7850,6 +7857,8 @@ class TestLearnableBiases(InductorTestCase):
         )
 
     @skip_on_cpu
+    # Fails with triton 3.7
+    @skip_on_rocm
     def test_flex_attention_with_dynamic_max_autotune(self, device):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
@@ -7859,6 +7868,7 @@ class TestLearnableBiases(InductorTestCase):
         self._test_flex_attention_with_dynamic_max_autotune(device)
 
     @skip_on_cpu
+    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_flex_attention_logging(self, device):
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = os.path.join(tmpdir, "flex_attention_configs")

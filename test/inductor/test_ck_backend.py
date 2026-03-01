@@ -16,9 +16,10 @@ from torch._inductor.utils import try_import_ck_lib
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI200_ARCH,
     MI350_ARCH,
     parametrize,
-    skipIfRocmArch,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
@@ -241,8 +242,8 @@ class TestCKBackend(TestCase):
             Y_eager = a @ b
             torch.testing.assert_close(Y_compiled, Y_eager, equal_nan=True)
 
-    # regression in ROCm 7.2, Mismatched elements, significantly
-    @skipIfRocmArch(MI350_ARCH)
+    # No valid choices error
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @unittest.mock.patch.dict(os.environ, _test_env)
     @parametrize("max_autotune_gemm_backends", ("CK", "ATen,Triton,CK"))

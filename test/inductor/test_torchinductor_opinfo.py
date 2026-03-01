@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
+    skipIfRocm,
     TEST_MKL,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -1177,6 +1178,7 @@ class TestInductorOpInfo(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
+    @skipIfRocm(msg="Fails with Triton 3.7 on MI200")
     @_ops(op_db[START:END])
     @skipOps("TestInductorOpInfo", "test_comprehensive", test_skips_or_fails)
     @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)

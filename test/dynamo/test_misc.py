@@ -96,6 +96,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfNNModuleInlined,
     skipIfWindows,
+    skipIfRocm,
     subtest,
     TEST_HPU,
     TEST_XPU,
@@ -244,6 +245,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
+    @skipIfRocm(msg="Flaky with Triton 3.7")
     @unittest.skipIf(not TEST_CUDA, "cuda needed")
     def test_assume_32_bit_indexing(self):
         @torch.compile(backend="inductor")
