@@ -1136,7 +1136,6 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.unification.multipledispatch.conflict
 .. py:module:: torch.fx.experimental.unification.multipledispatch.core
 .. py:module:: torch.fx.experimental.unification.multipledispatch.dispatcher
-.. py:module:: torch.fx.experimental.unification.multipledispatch.utils
 .. py:module:: torch.fx.experimental.unification.multipledispatch.variadic
 .. py:module:: torch.fx.experimental.unification.utils
 .. py:module:: torch.fx.experimental.unification.variable

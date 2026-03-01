@@ -123,14 +123,21 @@ class KnapsackEvaluator:
             range(len(self._graph_info_provider.all_recomputable_banned_nodes))
         )
         # Check that there are no overlaps between saved nodes and recomputable nodes
-        assert (
-            len(recomputable_node_idxs_set.intersection(saved_nodes_idxs_set)) == 0
-        ), "Saved nodes and recomputable nodes cannot have any overlaps"
+        if len(recomputable_node_idxs_set.intersection(saved_nodes_idxs_set)) != 0:
+            raise AssertionError(
+                f"Saved nodes and recomputable nodes cannot have any overlaps, "
+                f"but found overlap: {recomputable_node_idxs_set.intersection(saved_nodes_idxs_set)}"
+            )
         # Check that all candidate nodes are accounted for
-        assert (
+        if (
             recomputable_node_idxs_set.union(saved_nodes_idxs_set)
-            == all_candidate_nodes_idxs
-        ), "All candidate nodes must be accounted for in the provided output"
+            != all_candidate_nodes_idxs
+        ):
+            raise AssertionError(
+                f"All candidate nodes must be accounted for in the provided output, "
+                f"got union={recomputable_node_idxs_set.union(saved_nodes_idxs_set)}, "
+                f"expected={all_candidate_nodes_idxs}"
+            )
 
     def evaluate_knapsack_output(
         self,

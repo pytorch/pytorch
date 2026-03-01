@@ -55,7 +55,7 @@ class TestUtils(TestCase):
 
     def test_larger_multiplier_for_even_smaller_tensor(self):
         """
-        Tesnor numel <=10
+        Tensor numel <=10
         """
         fp64_ref = torch.DoubleTensor([0.0])
         a = torch.Tensor([1.0])
@@ -102,18 +102,18 @@ class TestUtils(TestCase):
             loss = loss_fn(output, target)
             loss.backward()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def add(x, y):
             return x + y
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it(x):
             y = x.sum()
             if y > 0:
                 return x + y.item()
             return x - y.item()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it2(x):
             y = x.sum()
             if y > 0:
@@ -212,6 +212,92 @@ class TestUtils(TestCase):
         fn(x)
         self.assertEqual(traced_code_lists, [])
 
+    def test_add_record_function_data(self):
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", False),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data("test_event")
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_called_once_with("test_event_data: key1=value1, key2=value2")
+
+    def test_reinplace_counters_use_trigger_name_not_enum_value(self):
+        """Test that ReinplaceCounters uses trigger.name in dictionary keys instead of the enum value"""
+        from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
+
+        # Clear any existing state
+        ReinplaceCounters.clear()
+
+        # Test with AUTO_FUNC_V1 trigger
+        trigger = ReInplaceTrigger.AUTO_FUNC_V1
+
+        # Add some values
+        ReinplaceCounters.add_missed_opportunities(trigger, 2)
+        ReinplaceCounters.add_missed_bytes(trigger, 512)
+
+        # Check that the dictionary keys use the trigger name, not the enum value
+        expected_tensor_key = "missed_tensors_AUTO_FUNC_V1"
+        expected_bytes_key = "missed_bytes_AUTO_FUNC_V1"
+
+        # Verify the keys exist with the correct format
+        self.assertIn(
+            expected_tensor_key,
+            ReinplaceCounters._values,
+            f"Expected key {expected_tensor_key} not found",
+        )
+        self.assertIn(
+            expected_bytes_key,
+            ReinplaceCounters._values,
+            f"Expected key {expected_bytes_key} not found",
+        )
+
+        # Verify the values are correct
+        self.assertEqual(ReinplaceCounters._values[expected_tensor_key], 2)
+        self.assertEqual(ReinplaceCounters._values[expected_bytes_key], 512)
+
+        # Clear for next test
+        ReinplaceCounters.clear()
+
+        # Test with a different trigger to ensure it's not hardcoded
+        trigger2 = ReInplaceTrigger.TRITON_OPS
+        ReinplaceCounters.add_missed_opportunities(trigger2, 3)
+
+        expected_key2 = "missed_tensors_TRITON_OPS"
+        self.assertIn(
+            expected_key2,
+            ReinplaceCounters._values,
+            f"Expected key {expected_key2} not found",
+        )
+        self.assertEqual(ReinplaceCounters._values[expected_key2], 3)
+
+        # Verify the old key doesn't exist
+        self.assertNotIn("missed_tensors_AUTO_FUNC_V1", ReinplaceCounters._values)
+
+        # Test edge case: check that we don't use the enum integer value
+        # ReInplaceTrigger.AUTO_FUNC_V1 has value 1, so we verify "missed_tensors_1" doesn't exist
+        self.assertNotIn(
+            f"missed_tensors_{trigger.value}",
+            ReinplaceCounters._values,
+            "Should not use enum value (integer) in key, should use trigger.name instead",
+        )
+
 
 class TestModel(torch.nn.Module):
     def __init__(self):
@@ -244,7 +330,7 @@ class TestDynamoTimed(TestCase):
     def warmup(self):
         # Helper to make sure any process-global lru_caches (e.g., torch_key())
         # have already executed. Just compile something.
-        @torch.compile
+        @torch.compile(backend="inductor")
         def add(x, y):
             return x + y
 
@@ -435,6 +521,7 @@ class TestDynamoTimed(TestCase):
  'create_aot_dispatcher_function': [0.0],
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
+ 'insert_deferred_runtime_asserts': [0.0],
  'min_cut_rematerialization_partition': [0.0],
  'pass.joint_graph_passes.constant_fold_uniform_value': [0.0],
  'pass.joint_graph_passes.pass_pattern_0': [0.0],
@@ -488,6 +575,7 @@ class TestDynamoTimed(TestCase):
  'create_aot_dispatcher_function': [0.0],
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
+ 'insert_deferred_runtime_asserts': [0.0],
  'min_cut_rematerialization_partition': [0.0],
  'pass.joint_graph_passes.constant_fold_uniform_value': [0.0],
  'pass.joint_graph_passes.pass_pattern_0': [0.0],

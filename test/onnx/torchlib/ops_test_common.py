@@ -251,22 +251,6 @@ def duplicate_opinfo_for_prims(
     raise RuntimeError(f"OpInfo '{name}' not found in the database.")
 
 
-TORCH_TYPE_TO_ONNX = {
-    torch.bool: onnx.TensorProto.BOOL,
-    torch.uint8: onnx.TensorProto.UINT8,
-    torch.int8: onnx.TensorProto.INT8,
-    torch.int16: onnx.TensorProto.INT16,
-    torch.int32: onnx.TensorProto.INT32,
-    torch.int64: onnx.TensorProto.INT64,
-    torch.float16: onnx.TensorProto.FLOAT16,
-    torch.float32: onnx.TensorProto.FLOAT,
-    torch.float64: onnx.TensorProto.DOUBLE,
-    torch.complex64: onnx.TensorProto.COMPLEX64,
-    torch.complex128: onnx.TensorProto.COMPLEX128,
-    torch.bfloat16: onnx.TensorProto.BFLOAT16,
-}
-
-
 def convert_tensor_to_numpy(input: Any) -> Any:
     if isinstance(input, torch.Tensor):
         if torch.is_complex(input):
@@ -300,7 +284,7 @@ def convert_kwargs_for_onnx(kwargs: dict[str, Any]) -> dict[str, Any]:
         if key == "device":
             continue
         if key == "dtype":
-            value = TORCH_TYPE_TO_ONNX[value]
+            value = _TORCH_DTYPE_TO_ONNX_TYPE[value]
         if isinstance(value, torch.Tensor):
             value = np.array(value.cpu())
         new_kwargs[key] = value
@@ -373,22 +357,7 @@ def _format_model_and_input_information(onnx_model, inputs):
     )
 
 
-_TORCH_DTYPE_TO_ONNX_STRING = {
-    torch.bool: "tensor(bool)",
-    torch.uint8: "tensor(uint8)",
-    torch.int8: "tensor(int8)",
-    torch.int16: "tensor(int16)",
-    torch.int32: "tensor(int32)",
-    torch.int64: "tensor(int64)",
-    torch.float16: "tensor(float16)",
-    torch.float32: "tensor(float)",
-    torch.float64: "tensor(double)",
-    torch.complex64: "tensor(complex64)",
-    torch.complex128: "tensor(complex128)",
-    torch.bfloat16: "tensor(bfloat16)",
-}
-
-_TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
+_TORCH_DTYPE_TO_ONNX_TYPE = {
     torch.bfloat16: ir.DataType.BFLOAT16,
     torch.bool: ir.DataType.BOOL,
     torch.complex128: ir.DataType.COMPLEX128,
@@ -411,7 +380,7 @@ _TORCH_DTYPE_TO_ONNX: dict[torch.dtype, ir.DataType] = {
 }
 
 
-def dtype_op_schema_compatible(dtype: torch.dtype, schema: onnx.defs.OpSchema) -> bool:
+def dtype_op_schema_compatible(dtype: torch.dtype, schema) -> bool:
     """Checks if the dtype is compatible with the schema.
 
     When a dtype is "compatible" with the schema, it means we can use the dtype
@@ -419,16 +388,17 @@ def dtype_op_schema_compatible(dtype: torch.dtype, schema: onnx.defs.OpSchema) -
 
     Args:
         dtype: The torch dtype used to create sample inputs by OpInfo.
-        schema: The ONNX schema of the function.
+        schema: The OpSignature of the function.
 
     Returns:
         True if the dtype is compatible with the schema.
     """
-    if not schema.inputs:
+    inputs = schema.inputs
+    if not inputs:
         # If there are no inputs, we can't check compatibility. Assume it is compatible.
         # e.g. aten_randn has only attributes.
         return True
-    if schema.inputs[0].name not in {"self", "input"}:
+    if inputs[0].name not in {"self", "input"}:
         # If the name of the first input is not "self" or "input",
         # it is usually an input that is not of the same type as the output.
         # We assume support in this case.
@@ -467,22 +437,12 @@ def dtype_op_schema_compatible(dtype: torch.dtype, schema: onnx.defs.OpSchema) -
     # 'tensor(bfloat16)'].
     # Since torch.float32 (tensor(float)) is in the allowed types, we return True.
 
-    first_input_type_name = schema.inputs[0].type_str
-    # Find the type constraint for the first input by matching the parameter name
-    first_input_type_constraint = next(
-        (
-            x
-            for x in schema.type_constraints
-            if first_input_type_name in x.type_param_str
-        ),
-        None,
-    )
+    first_input_type_constraint = inputs[0].type_constraint
     assert first_input_type_constraint is not None
-    allowed_type_strs = first_input_type_constraint.allowed_type_strs
+    allowed_types = first_input_type_constraint.allowed_types
     # Here we consider seq(tensor(float)) compatible with tensor(float) as well
-    return any(
-        _TORCH_DTYPE_TO_ONNX_STRING[dtype] in type_str for type_str in allowed_type_strs
-    )
+    allowed_dtypes = {type_.dtype for type_ in allowed_types}
+    return _TORCH_DTYPE_TO_ONNX_TYPE[dtype] in allowed_dtypes
 
 
 def graph_executor(
@@ -517,7 +477,9 @@ def graph_executor(
                     opset=opset,
                     name=input_name,
                     shape=ir.Shape(arg.shape),
-                    type=ir.TensorType(_TORCH_DTYPE_TO_ONNX[torch.tensor(arg).dtype]),
+                    type=ir.TensorType(
+                        _TORCH_DTYPE_TO_ONNX_TYPE[torch.tensor(arg).dtype]
+                    ),
                 )
                 graph.inputs.append(input)
                 onnxscript_args.append(input)
@@ -533,7 +495,7 @@ def graph_executor(
                             opset=opset,
                             name=input_name,
                             shape=ir.Shape(tensor.shape),
-                            type=ir.TensorType(_TORCH_DTYPE_TO_ONNX[tensor.dtype]),
+                            type=ir.TensorType(_TORCH_DTYPE_TO_ONNX_TYPE[tensor.dtype]),
                         )
                         graph.inputs.append(input)
                         sequence_input.append(input)
@@ -551,7 +513,9 @@ def graph_executor(
                     opset=opset,
                     name=key,
                     shape=ir.Shape(torch.tensor(value).shape),
-                    type=ir.TensorType(_TORCH_DTYPE_TO_ONNX[torch.tensor(value).dtype]),
+                    type=ir.TensorType(
+                        _TORCH_DTYPE_TO_ONNX_TYPE[torch.tensor(value).dtype]
+                    ),
                 )
                 graph.inputs.append(input)
                 ort_inputs[key] = value
@@ -568,7 +532,7 @@ def graph_executor(
         for output, symbolic_output in zip(outputs, symbolic_outputs):
             if isinstance(output, Sequence):
                 # Output is a sequence
-                elem_dtype = _TORCH_DTYPE_TO_ONNX[output[0].dtype]
+                elem_dtype = _TORCH_DTYPE_TO_ONNX_TYPE[output[0].dtype]
                 symbolic_output.type = ir.SequenceType(ir.TensorType(elem_dtype))
                 continue
             output = (
@@ -577,7 +541,7 @@ def graph_executor(
                 else torch.tensor(output, device="cpu")
             )
             symbolic_output.shape = ir.Shape(output.shape)
-            symbolic_output.dtype = _TORCH_DTYPE_TO_ONNX[output.dtype]
+            symbolic_output.dtype = _TORCH_DTYPE_TO_ONNX_TYPE[output.dtype]
 
         graph.outputs.extend(symbolic_outputs)
         graph.extend(tracer.nodes)

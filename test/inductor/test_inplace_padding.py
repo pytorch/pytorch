@@ -254,7 +254,9 @@ class InplacePaddingTest(TestCase):
 
     # Enable Max-Autotune to repro this test failure:
     #   https://github.com/pytorch/pytorch/pull/140249#issuecomment-2556079406
+    @requires_cuda_with_enough_memory(2e10)
     @inductor_config.patch(max_autotune=True)
+    @serialTest()
     def test_linear_and_cel_max_autotune(self):
         self.test_linear_and_cel()
 

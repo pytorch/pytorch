@@ -1,8 +1,7 @@
-# mypy: ignore-errors
-
+from __future__ import annotations
 
 import operator
-from collections.abc import Callable
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -14,10 +13,16 @@ from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch._ops import OpOverloadPacket
+    from torch.utils._pytree import TreeSpec
+
 aten = torch.ops.aten
 
 
-def get_aten_target(node: fx.Node) -> Callable:
+def get_aten_target(node: fx.Node) -> OpOverloadPacket | Callable[..., Any] | str:
     if hasattr(node.target, "overloadpacket"):
         return node.target.overloadpacket
     return node.target
@@ -43,11 +48,15 @@ rand_ops = [
 
 
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
-def fx_graph_cse(fx_g: torch.fx.graph.Graph):
+def fx_graph_cse(fx_g: torch.fx.graph.Graph) -> fx.Graph:
     new_graph = fx.Graph()
-    env = {}  # map from node in the old graph to node in the new graph
-    hash_env = {}  # map from hash to a node in the new graph
-    token_map = {}  # map from hash to token
+    env: dict[
+        fx.Node, fx.Node
+    ] = {}  # map from node in the old graph to node in the new graph
+    hash_env: dict[
+        tuple[str, int], fx.Node
+    ] = {}  # map from hash to a node in the new graph
+    token_map: dict[tuple[str, int], dict[str, Any]] = {}  # map from hash to token
 
     from torch._inductor.pattern_matcher import (
         compute_mutation_region_ids,
@@ -60,7 +69,10 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     # when pruning.  This prevents us from deduplicating returned tensors which have
     # experienced identical operations, but are separate data structures in eager mode.
     output_node: fx.Node = list(fx_g.nodes)[-1]
-    assert output_node.op == "output"
+    if output_node.op != "output":
+        raise AssertionError(
+            f"expected output_node.op to be 'output', got '{output_node.op}'"
+        )
 
     def checkable_node(node: fx.Node) -> bool:
         """We can evaluate only nodes that represent tensors with defined storage."""
@@ -119,7 +131,9 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
         else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
             # substitute args and kwargs members to their mapping in env if exists
             # specs can be used to reconstruct nested list/dictionaries
-            def substitute(arg_list):
+            def substitute(
+                arg_list: list[Any] | tuple[Any, ...],
+            ) -> tuple[tuple[Any, ...], TreeSpec]:
                 arg_list, spec = tree_flatten(arg_list)
                 for i in range(len(arg_list)):
                     v = arg_list[i]
@@ -181,7 +195,10 @@ def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
     # loop through getitem nodes in the graph and raise them to the parent node
     # in reverse order to preserve their original relative order
     for node in reversed(getitem_nodes):
-        assert len(node.all_input_nodes) == 1
+        if len(node.all_input_nodes) != 1:
+            raise AssertionError(
+                f"expected node {node.name} to have 1 input node, got {len(node.all_input_nodes)}"
+            )
         parent = node.all_input_nodes[0]
         parent.append(node)
 
@@ -189,7 +206,7 @@ def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
     return gm
 
 
-def strip_overloads(gm):
+def strip_overloads(gm: fx.GraphModule) -> None:
     """
     Modifies the target of graph nodes in :attr:`gm` to strip overloads.
 
@@ -202,11 +219,11 @@ def strip_overloads(gm):
     gm.recompile()
 
 
-def get_placeholders(graph):
+def get_placeholders(graph: fx.Graph) -> fx.graph._node_list:
     return graph.find_nodes(op="placeholder")
 
 
-def get_outputs(graph):
+def get_outputs(graph: fx.Graph) -> list[fx.Node]:
     for node in graph.find_nodes(op="output"):
         return pytree.tree_leaves(node.args[0])
     raise AssertionError("No output node found")

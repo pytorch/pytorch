@@ -875,6 +875,15 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
+@dataclass
+class InlinedCodeCache:
+    """Cache for code-object-derived data used during inlining."""
+
+    instructions: list[Any]
+    indexof: dict[Any, int]
+    code_options: dict[str, Any]
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -901,6 +910,8 @@ class TracingContext:
         self.global_context = GlobalContext()
         self.previously_inlined_functions: dict[Any, Any] = dict()
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
+        # Combined cache for inlined code data (instructions, indexof, code_options)
+        self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
         self.fake_mode: FakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -945,6 +956,7 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
+        self.cudagraph_annotation: Any = None
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
@@ -952,6 +964,7 @@ class TracingContext:
         self.global_context.global_state = {}
         self.previously_inlined_functions.clear()
         self.previously_cleaned_instructions.clear()
+        self.inlined_code_cache.clear()
 
     @staticmethod
     @contextmanager
@@ -1214,6 +1227,13 @@ class Source:
         """True if you can guard on attributes of this"""
         return self.guard_source != GuardSource.SYNTHETIC_LOCAL
 
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        # Frozen dataclass, so returning self is effectively a clone.
+        # Subclasses with mutable state should override.
+        if transform_fn is not None:
+            return transform_fn(self)
+        return self
+
 
 # Subclasses can be found in torch/_dynamo/source.py
 @dataclass_with_cached_hash(frozen=True)
@@ -1259,6 +1279,19 @@ class ChainedSource(Source):
         del locals[tmpvar]
         cache[self] = value
         return value
+
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        cloned_fields: dict[str, Any] = {"base": self.base.clone(transform_fn)}
+        for f in dataclasses.fields(self):
+            if f.name == "base":
+                continue
+            val = getattr(self, f.name)
+            if isinstance(val, Source):
+                cloned_fields[f.name] = val.clone(transform_fn)
+        result = dataclasses.replace(self, **cloned_fields)
+        if transform_fn is not None:
+            result = transform_fn(result)
+        return result
 
 
 def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:

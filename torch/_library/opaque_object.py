@@ -38,7 +38,7 @@ through `register_opaque_type(MyClass, typ="value")`.
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, NewType, Optional
+from typing import Any, Literal, NewType
 from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
@@ -86,12 +86,26 @@ class _OpaqueTypeInfo:
         [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
+    hoist: bool
 
 
 # Mapping of type -> (string name, reference/value type)
 _OPAQUE_TYPES: WeakKeyDictionary[Any, _OpaqueTypeInfo] = WeakKeyDictionary()
 # Mapping of class_name -> (type, reference/value type)
 _OPAQUE_TYPES_BY_NAME: dict[str, _OpaqueTypeInfo] = {}
+
+
+def _resolve_opaque_type_info(cls: Any) -> _OpaqueTypeInfo | None:
+    if cls in _OPAQUE_TYPES:
+        return _OPAQUE_TYPES[cls]
+    if not isinstance(cls, type):
+        return None
+
+    # Allow subclasses too
+    for parent in cls.__mro__[1:]:
+        if parent in _OPAQUE_TYPES:
+            return _OPAQUE_TYPES[parent]
+    return None
 
 
 def get_opaque_type_name(cls: Any) -> str:
@@ -107,18 +121,20 @@ def get_opaque_type_name(cls: Any) -> str:
     Raises:
         ValueError: If the class is not registered as an opaque type.
     """
-    if cls not in _OPAQUE_TYPES:
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
         raise ValueError(
             f"Class {cls} is not registered as an opaque type. "
             f"Call register_opaque_type({cls.__name__}) first."
         )
-    return _OPAQUE_TYPES[cls].class_name
+    return info.class_name
 
 
 def register_opaque_type(
     cls: Any,
     *,
     typ: str,
+    hoist=False,
     guard_fn: Any = None,
     members: dict[str, MemberType] | None = None,
 ) -> None:
@@ -133,6 +149,13 @@ def register_opaque_type(
         cls (type): The class to register as an opaque type.
         typ (str): Either "reference" or "value". See Note [Opaque Objects] for
             more details.
+        hoist (bool): Only applies to value types. A hoist=True value type
+            object is lifted as an input to the torch.compile'd graph, instead
+            of being a constant baked into the graph. This is useful to
+            improve compilation times in hierarchical compilation
+            (e.g., change your custom ops to use hoisted strings to avoid
+            baking the string into the Dynamo/AOTAutograd/FX graphs).
+            This flag does nothing for reference types.
         guard_fn (callable | None): A function that takes an instance of the opaque
             object and returns a list of values to guard on. These values will be compared
             for equality on each function call, triggering recompilation if they change.
@@ -212,7 +235,7 @@ def register_opaque_type(
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {})
+    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {}, hoist)
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
@@ -223,17 +246,33 @@ def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
     return is_opaque_type(type(value))
 
 
+def should_hoist(cls: Any) -> bool:
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
+        return False
+    return info.hoist
+
+
+def has_members(cls: Any) -> bool:
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
+        return False
+    return len(info.members) > 0
+
+
 def is_opaque_type(cls: Any) -> bool:
     """
     Checks if the given type is an opaque type.
+    Also returns True for subclasses of registered opaque types.
     """
     if isinstance(cls, str):
         return torch._C._is_opaque_type_registered(cls)
 
-    if cls not in _OPAQUE_TYPES:
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
         return False
 
-    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls].class_name)
+    return torch._C._is_opaque_type_registered(info.class_name)
 
 
 def is_opaque_value_type(cls: Any) -> bool:
@@ -247,7 +286,10 @@ def is_opaque_value_type(cls: Any) -> bool:
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "value"
 
-    return _OPAQUE_TYPES[cls].opaque_typ == "value"
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
+        return False
+    return info.opaque_typ == "value"
 
 
 def is_opaque_reference_type(cls: Any) -> bool:
@@ -261,7 +303,10 @@ def is_opaque_reference_type(cls: Any) -> bool:
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "reference"
 
-    return _OPAQUE_TYPES[cls].opaque_typ == "reference"
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
+        return False
+    return info.opaque_typ == "reference"
 
 
 def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
@@ -303,17 +348,17 @@ def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
     return repr_str, globals_dict
 
 
-def get_opaque_obj_info(cls: Any) -> Optional[_OpaqueTypeInfo]:
+def get_opaque_obj_info(cls: Any) -> _OpaqueTypeInfo | None:
     if not is_opaque_type(cls):
         return None
 
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls]
 
-    return _OPAQUE_TYPES[cls]
+    return _resolve_opaque_type_info(cls)
 
 
-def get_member_type(cls: Any, member_name: str) -> Optional[MemberType]:
+def get_member_type(cls: Any, member_name: str) -> MemberType | None:
     """
     Get the MemberType for a specific member of an opaque object class.
 

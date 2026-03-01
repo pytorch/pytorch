@@ -169,7 +169,8 @@ class TestBasicGEMM(TestCase):
             res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
             res3 = res3_t.to(numpy_dtype).cpu().numpy()
         else:
-            assert activation is None, f"unsupported activation {activation}"
+            if activation is not None:
+                raise AssertionError(f"unsupported activation {activation}")
         res3 = torch.from_numpy(res3).to(dtype)
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
@@ -1197,8 +1198,10 @@ class TestBasicGEMM(TestCase):
         Generates sequences of tuples (x, y) of with size(x) = x_dim and
         size(y) <= y_dim that are compatible wrt. matmul
         """
-        assert x_dim >= 1
-        assert y_dim >= 2
+        if x_dim < 1:
+            raise AssertionError(f"Expected x_dim >= 1, got {x_dim}")
+        if y_dim < 2:
+            raise AssertionError(f"Expected y_dim >= 2, got {y_dim}")
         x = x_dim
         for y in range(1, y_dim + 1):
             for batch, mn in product(
@@ -1276,30 +1279,44 @@ class TestBasicGEMM(TestCase):
 
     def _group_quantize_tensor(self, w, n_bit=4, q_group_size=16):
         # w [k, n] = [32, 48]
-        assert w.dim() == 2
+        if w.dim() != 2:
+            raise AssertionError(f"Expected w.dim() == 2, got {w.dim()}")
         # w [n, k] = [48, 32]
         w = w.transpose(0, 1).contiguous()
-        assert q_group_size > 1
-        assert w.shape[-1] % q_group_size == 0
+        if q_group_size <= 1:
+            raise AssertionError(f"Expected q_group_size > 1, got {q_group_size}")
+        if w.shape[-1] % q_group_size != 0:
+            raise AssertionError(
+                f"Expected w.shape[-1] % q_group_size == 0, "
+                f"got {w.shape[-1]} % {q_group_size} = {w.shape[-1] % q_group_size}"
+            )
 
         # to_quant: [n * k / group_size, group_size]
         to_quant = w.reshape(-1, q_group_size)
-        assert torch.isnan(to_quant).sum() == 0
+        nan_count = torch.isnan(to_quant).sum()
+        if nan_count != 0:
+            raise AssertionError(f"Expected no NaNs in to_quant, got {nan_count}")
 
         max_val = to_quant.amax(dim=1, keepdim=True)
         min_val = to_quant.amin(dim=1, keepdim=True)
         max_int = 2**n_bit - 1
         min_int = 0
         scales = (max_val - min_val).clamp(min=1e-6) / max_int
-        assert torch.isnan(scales).sum() == 0
+        nan_count = torch.isnan(scales).sum()
+        if nan_count != 0:
+            raise AssertionError(f"Expected no NaNs in scales, got {nan_count}")
 
         zeros = min_int - min_val.div(scales).round()
         zeros = torch.clamp(zeros, min_int, max_int)
         zeros = zeros.to(torch.int8)
-        assert torch.isnan(zeros).sum() == 0
+        nan_count = torch.isnan(zeros).sum()
+        if nan_count != 0:
+            raise AssertionError(f"Expected no NaNs in zeros, got {nan_count}")
 
         out = to_quant.div(scales).add(zeros).round().clamp_(min_int, max_int)
-        assert torch.isnan(out).sum() == 0
+        nan_count = torch.isnan(out).sum()
+        if nan_count != 0:
+            raise AssertionError(f"Expected no NaNs in out, got {nan_count}")
 
         # [n, k]
         out = out.to(dtype=torch.int32).reshape(w.shape)

@@ -85,6 +85,82 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
+def impl_IS_MAPPING(a: object) -> bool:
+    return isinstance(a, Mapping)
+
+
+def impl_MATCH_SEQUENCE(a: object) -> bool:
+    return isinstance(a, Sequence) and not isinstance(a, (str, bytes, bytearray))
+
+
+def _match_class_attr(obj: object, name: str, seen: set[str]) -> object:
+    if name in seen:
+        raise TypeError(f"{type(obj)} got multiple sub-patterns for attribute {name}")
+
+    attr = getattr(obj, name)
+    seen.add(name)
+    return attr
+
+
+def impl_MATCH_CLASS(
+    subject: object, cls: type, nargs: int, kwargs: tuple[str, ...]
+) -> tuple[object, ...] | None:
+    if not isinstance(cls, type):
+        raise TypeError("called match pattern must be a class")
+
+    if not isinstance(subject, cls):
+        return None
+
+    typ = type(subject)
+    match_self = False
+    match_args = ()
+
+    attrs = []
+    seen = set()
+
+    if nargs:
+        if hasattr(typ, "__match_args__"):
+            match_args = typ.__match_args__
+
+            if not isinstance(match_args, tuple):
+                raise TypeError(
+                    f"{typ}.__match_args__ must be a tuple, (got {type(match_args)})"
+                )
+
+            for name in match_args[:nargs]:
+                if not isinstance(name, str):
+                    raise TypeError(
+                        f"__match_args__ elements must be strings (got {type(name)})"
+                    )
+                attrs.append(_match_class_attr(subject, name, seen))
+        else:
+            # We should somehow check if the type has TPFLAGS_MATCH_SELF set
+            # match_self is only true if TPFLAGS_MATCH_SELF is set, but there is
+            # no way to check for it directly in Python. So we assume it is set
+            # if there are no __match_args__
+            match_self = True
+            attrs.append(subject)
+
+        allowed = 1 if match_self else len(match_args)
+        if allowed < nargs:
+            raise TypeError(
+                f"accepts {allowed} positional sub-patterns ({nargs} given)"
+            )
+
+    for name in kwargs:
+        attrs.append(_match_class_attr(subject, name, seen))
+
+    return tuple(attrs)
+
+
+def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | None:
+    assert isinstance(obj, Mapping)
+    if all(key in obj for key in keys):
+        return tuple(obj[key] for key in keys)
+    else:
+        return None
+
+
 def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # performs fallback "a in b"
     if hasattr(b, "__iter__"):
@@ -244,6 +320,7 @@ def set_union(
     return cls(union_set)
 
 
+# pyrefly: ignore [bad-return]
 def set_update(set1: set[T], *others: Iterable[T]) -> set[T]:
     if len(others) == 0:
         return set1
@@ -409,14 +486,45 @@ def foreach_map_fn(*args: Any) -> Any:
 
 def foreach_lerp_inplace(
     self,
-    end: list[torch.Tensor] | tuple[torch.Tensor, ...] | None,
-    weight: Sequence[bool | complex | float | int],
+    end: list[torch.Tensor] | tuple[torch.Tensor, ...],
+    weight: float | int | torch.Tensor,
 ) -> None:
-    # decompose foreach lerp into constituent ops, prevents a graph break due to
-    # converting a value to a scalar when arg[2] is a single tensor
-    result = torch._foreach_sub(end, self)
-    result = torch._foreach_mul(result, weight)
-    return torch._foreach_add_(self, result)
+    # Decompose lerp via addcmul_ for FMA.  Uses the same dual-formula
+    # approach as CUDA's native lerp to get bitwise identical results:
+    #   |w| <  0.5  (low):  fma(w, diff, start)
+    #   |w| >= 0.5  (high): fma(-(1-w), diff, end)
+    # For tensor weights (e.g. 0-dim tensor from tensor betas in Adam) the
+    # low formula is always used because the native lerp_scalar lowering
+    # would crash on float(weight) for symbolic expressions.
+    diff = torch._foreach_sub(end, self)
+    if isinstance(weight, torch.Tensor):
+        # Select base and weight for the dual formula before a single addcmul:
+        #   low  (|w| <  0.5): fma(w,      diff, self)
+        #   high (|w| >= 0.5): fma(-(1-w), diff, end)
+        mask = weight.abs() >= 0.5
+        neg_omw = -(1.0 - weight)
+        w = torch.where(mask, neg_omw, weight)
+        bases = [torch.where(mask, e, s) for s, e in zip(self, end)]
+        w_list = [w] * len(diff)
+        torch._foreach_addcmul_(bases, w_list, diff)
+        for s, b in zip(self, bases):
+            s.copy_(b)
+    else:
+        abs_weight = weight if weight >= 0 else -weight
+        if abs_weight >= 0.5:
+            # High formula: end + (-(1-w)) * diff  →  fma(-(1-w), diff, end)
+            # Compute 1-w in target dtype to match CUDA rounding.
+            d0 = self[0]
+            neg_omw = -(1.0 - torch.tensor(weight, dtype=d0.dtype, device=d0.device))
+            neg_omw_list = [neg_omw] * len(diff)
+            for s, e in zip(self, end):
+                s.copy_(e)
+            torch._foreach_addcmul_(self, neg_omw_list, diff)
+        else:
+            # Low formula: start + w * diff  →  fma(w, diff, start)
+            weights = [torch.full_like(d, weight) for d in diff]
+            torch._foreach_addcmul_(self, weights, diff)
+    return self
 
 
 def foreach_pow_scalar(

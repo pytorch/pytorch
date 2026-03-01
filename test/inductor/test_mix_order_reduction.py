@@ -24,6 +24,7 @@ class TestBase(TestCase):
     def setUp(self):
         super().setUp()
         metrics.reset()
+        torch._dynamo.utils.clear_compilation_metrics()
 
     def check_numeric(self, f, args, tol=1e-3):
         ref = f(*args)
@@ -700,6 +701,30 @@ class MixOrderReductionTest(TestBase):
             inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True}),
         ):
             self.assertTrue(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
+
+    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
+    def test_no_recompile(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x0 = torch.randn(2048, 1024, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x0, (0,))
+        opt_f = torch.compile(f)
+
+        ref = f(x0)
+        act = opt_f(x0)
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
+        opt_f(torch.randn(4096, 1024, device=GPU_TYPE))
+        opt_f(torch.randn(512, 1024, device=GPU_TYPE))
+
+        compile_metrics = torch._dynamo.utils._compilation_metrics
+        self.assertEqual(len(compile_metrics), 1, "Don't recompile")
 
 
 @inductor_config.patch(

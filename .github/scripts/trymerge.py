@@ -1063,6 +1063,11 @@ class GitHubPR:
         # this workflow doesn't provide mergability info
         self.conclusions.pop("Apply lint suggestions", None)
 
+        # Same issue for Claude Code: triggered by comment events, uses a
+        # protected environment (bedrock), resulting in ACTION_REQUIRED
+        # check suite conclusions that block merges
+        self.conclusions.pop("Claude Code", None)
+
         return self.conclusions
 
     def get_authors(self) -> dict[str, str]:

@@ -12,7 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.onnx import _constants as onnx_constants
-from torch.onnx._internal._lazy_import import onnx, onnxscript_apis
+from torch.onnx._internal._lazy_import import onnx
 from torch.onnx._internal.exporter import (
     _constants,
     _core,
@@ -54,8 +54,7 @@ def export_compat(
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
     opset_version: int | None = onnx_constants.ONNX_DEFAULT_OPSET,
-    custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
-    | None = None,
+    custom_translation_table: dict[Callable, Callable] | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
     | Mapping[str, Sequence[int]]
     | None = None,
@@ -151,14 +150,13 @@ def export_compat(
         opset_version=registry_opset_version
     )
     if custom_translation_table is not None:
-        for torch_op, onnx_ops in custom_translation_table.items():
+        for torch_op, onnx_op in custom_translation_table.items():
             # TODO(justinchuby): Support complex inputs with annotations
-            if not isinstance(onnx_ops, Sequence):
-                onnx_ops = (onnx_ops,)
-            for op in reversed(onnx_ops):
-                # register_op places the op in the front of all onnx variants,
-                # so we reverse the list to maintain the order of the custom ops provided
-                registry.register_op(torch_op, op, is_complex=False)
+            if isinstance(onnx_op, Sequence):
+                raise TypeError(
+                    "The value in custom_translation_table should be a single callable, not a sequence"
+                )
+            registry.register_op(torch_op, onnx_op, is_complex=False)
 
     onnx_program = _core.export(
         model,
@@ -174,17 +172,12 @@ def export_compat(
         dump_exported_program=dump_exported_program,
         artifacts_dir=artifacts_dir,
         verbose=verbose,
+        optimize=optimize,
+        opset_version=opset_version,
     )
 
     if need_axis_mapping and dynamic_shapes is not None:
         onnx_program._rename_dynamic_axes(dynamic_shapes)
-
-    # Converter opset version and optimize
-    onnx_program.model = onnxscript_apis.convert_version(
-        onnx_program.model, opset_version
-    )
-    if optimize:
-        onnx_program.optimize()
 
     if f is not None:
         if isinstance(f, io.BytesIO):

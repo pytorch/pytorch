@@ -216,9 +216,11 @@ Microbenchmarks for Conv3d and ConvTranspose3d operators.
 
 
 class Conv3dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, IC, OC, kernel, stride, N, D, H, W, device):
-        self.inputs = {"input": torch.rand(N, IC, D, H, W, device=device)}
-        self.conv3d = nn.Conv3d(IC, OC, kernel, stride=stride).to(device=device)
+    def init(self, IC, OC, kernel, stride, N, D, H, W, device, dtype=torch.float32):
+        self.inputs = {"input": torch.rand(N, IC, D, H, W, device=device, dtype=dtype)}
+        self.conv3d = nn.Conv3d(IC, OC, kernel, stride=stride).to(
+            device=device, dtype=dtype
+        )
         self.set_module_name("Conv3d")
 
     def forward(self, input):
@@ -244,10 +246,10 @@ class Conv3dBenchmark(op_bench.TorchBenchmarkBase):
 
 
 class ConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, IC, OC, kernel, stride, N, D, H, W, device):
-        self.inputs = {"input": torch.rand(N, IC, D, H, W, device=device)}
+    def init(self, IC, OC, kernel, stride, N, D, H, W, device, dtype=torch.float32):
+        self.inputs = {"input": torch.rand(N, IC, D, H, W, device=device, dtype=dtype)}
         self.convtranspose3d = nn.ConvTranspose3d(IC, OC, kernel, stride=stride).to(
-            device=device
+            device=device, dtype=dtype
         )
         self.set_module_name("ConvTranspose3d")
 

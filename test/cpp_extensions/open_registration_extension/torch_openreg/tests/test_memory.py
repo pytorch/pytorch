@@ -67,6 +67,23 @@ class TestDeviceAllocator(TestCase):
         self.assertEqual(cloned.device.type, "openreg")
         self.assertTrue(torch.allclose(openreg_tensor.cpu(), cloned.cpu()))
 
+    def test_tensor_shallow_copy(self):
+        # set_data from openreg to cpu
+        self_t = torch.randn(4, 4)
+        from_t = torch.randn(4, 4, device="openreg")
+        self.assertTrue(torch._has_compatible_shallow_copy_type(self_t, from_t))
+        self_t.data = from_t
+        self.assertEqual(self_t, from_t)
+        self.assertEqual(self_t.data_ptr(), from_t.data_ptr())
+
+        # set_data from cpu to openreg
+        self_t = torch.randn(4, 4, device="openreg")
+        from_t = torch.randn(4, 4)
+        self.assertTrue(torch._has_compatible_shallow_copy_type(self_t, from_t))
+        self_t.data = from_t
+        self.assertEqual(self_t, from_t)
+        self.assertEqual(self_t.data_ptr(), from_t.data_ptr())
+
     def test_inplace_operations(self):
         """Test memory stability during inplace operations."""
         x = torch.ones(100, device="openreg")

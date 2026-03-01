@@ -984,7 +984,8 @@ class TestEinsum(TestCase):
 
         # contig -> scalar:
         res = np.einsum("i->", arr)
-        assert res == arr.sum()
+        if res != arr.sum():
+            raise AssertionError(f"Expected res == arr.sum(), got {res} vs {arr.sum()}")
         # contig, contig -> contig:
         res = np.einsum("i,i->i", arr, arr)
         assert_array_equal(res, arr * arr)
@@ -992,7 +993,12 @@ class TestEinsum(TestCase):
         res = np.einsum("i,i->i", arr.repeat(2)[::2], arr.repeat(2)[::2])
         assert_array_equal(res, arr * arr)
         # contig + contig -> scalar
-        assert np.einsum("i,i->", arr, arr) == (arr * arr).sum()
+        einsum_result = np.einsum("i,i->", arr, arr)
+        expected = (arr * arr).sum()
+        if einsum_result != expected:
+            raise AssertionError(
+                f"Expected einsum result == {expected}, got {einsum_result}"
+            )
         # contig + scalar -> contig (with out)
         out = np.ones(7, dtype=dtype)
         res = np.einsum("i,->i", arr, dtype.type(2), out=out)
@@ -1003,11 +1009,15 @@ class TestEinsum(TestCase):
         # scalar + contig -> scalar
         res = np.einsum(",i->", scalar, arr)
         # Use einsum to compare to not have difference due to sum round-offs:
-        assert res == np.einsum("i->", scalar * arr)
+        expected = np.einsum("i->", scalar * arr)
+        if res != expected:
+            raise AssertionError(f"Expected res == {expected}, got {res}")
         # contig + scalar -> scalar
         res = np.einsum("i,->", arr, scalar)
         # Use einsum to compare to not have difference due to sum round-offs:
-        assert res == np.einsum("i->", scalar * arr)
+        expected = np.einsum("i->", scalar * arr)
+        if res != expected:
+            raise AssertionError(f"Expected res == {expected}, got {res}")
         # contig + contig + contig -> scalar
 
         if dtype in ["e", "B", "b"]:
@@ -1034,7 +1044,8 @@ class TestEinsum(TestCase):
     def test_out_is_res(self):
         a = np.arange(9).reshape(3, 3)
         res = np.einsum("...ij,...jk->...ik", a, a, out=a)
-        assert res is a
+        if res is not a:
+            raise AssertionError("Expected res is a")
 
     def optimize_compare(self, subscripts, operands=None):
         # Tests all paths of the optimization function against

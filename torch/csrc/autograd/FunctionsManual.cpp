@@ -4905,31 +4905,31 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask) {
   const auto normalized_ndim = normalized_shape.size();
-  const auto input_shape = input_t.sizes();
+  const auto input_shape = input_t.sym_sizes();
   const auto input_ndim = input_t.dim();
   const auto axis = input_ndim - normalized_ndim;
-  const int64_t M =
+  const c10::SymInt M =
       c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
-  const int64_t N =
+  const c10::SymInt N =
       c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
   // printf("M: %ld, N: %ld", M, N);
 
-  auto input = input_t.reshape({M, N});
-  auto gO = gO_t.reshape({M, N});
-  auto save_mean = save_mean_t.reshape({M, 1});
-  auto save_invstd = save_invstd_t.reshape({M, 1});
+  auto input = input_t.reshape_symint({M, N});
+  auto gO = gO_t.reshape_symint({M, N});
+  auto save_mean = save_mean_t.reshape_symint({M, c10::SymInt(1)});
+  auto save_invstd = save_invstd_t.reshape_symint({M, c10::SymInt(1)});
 
   bool affine = isDefined(gamma);
   Tensor gamma_expanded;
   Tensor ggG_expanded, ggB_expanded;
   if (affine) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    gamma_expanded = gamma->reshape({1, N});
+    gamma_expanded = gamma->reshape_symint({c10::SymInt(1), N});
     if (ggG.defined()) {
-      ggG_expanded = ggG.reshape({1, N});
+      ggG_expanded = ggG.reshape_symint({c10::SymInt(1), N});
     }
     if (ggB.defined()) {
-      ggB_expanded = ggB.reshape({1, N});
+      ggB_expanded = ggB.reshape_symint({c10::SymInt(1), N});
     }
   } else {
     gamma_expanded = at::ones({1}, input.options());
@@ -4937,7 +4937,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
 
   Tensor ggI_expanded;
   if (ggI.defined()) {
-    ggI_expanded = ggI.reshape({M, N});
+    ggI_expanded = ggI.reshape_symint({M, N});
   }
 
   // for half inputs, save_mean, save_invstd are float
@@ -4960,10 +4960,11 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     auto ggI_sum = ggI_expanded.sum(1, true);
     auto ggI_mu_sum = (ggI_expanded * input_sub_mu).sum(1, true);
 
+    auto three_over_n = c10::SymFloat(3.) / c10::SymFloat(N);
     auto all_sub = ((ggI_sum * gxhat_sum).div_(N))
                        .sub_((ggI_expanded * gxhat).sum(1, true))
                        .add_((sigma2_eps_neg_1 * gxhat_mu_sum * ggI_mu_sum)
-                                 .mul_(3. / static_cast<double>(N)));
+                                 .mul_(three_over_n));
     auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(N);
     auto gI_1t =
         (ggI_mu_sum * sigma2_eps_neg_3_2).div_(N) * (gxhat_sum.div(N) - gxhat);
@@ -4993,7 +4994,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   auto first_bwd_fn_grad_input = [&](const Tensor& gO_local,
                                      const Tensor& gamma_local) -> Tensor {
     auto h0 = (gamma_local * sigma2_eps_neg_1_2).div_(N);
-    auto h1 = (N * gO_local)
+    auto h1 = (gO_local.mul(N))
                   .sub_(gO_local.sum(1, true))
                   .sub_(
                       input_sub_mu.mul(sigma2_eps_neg_1) *
@@ -5026,7 +5027,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
   }
   if (ggO.defined()) {
-    ggO = ggO.expand({M, N}).reshape_as(input_t);
+    ggO = ggO.expand_symint({M, N}).reshape_as(input_t);
   }
 
   if (output_mask[1] && !gG.defined()) {

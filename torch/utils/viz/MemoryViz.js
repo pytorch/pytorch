@@ -1,10 +1,25 @@
 'use strict';
 
-import * as d3 from "https://cdn.jsdelivr.net/npm/d3@5/+esm";
-import {axisLeft} from "https://cdn.jsdelivr.net/npm/d3-axis@1/+esm";
-import {scaleLinear} from "https://cdn.jsdelivr.net/npm/d3-scale@1/+esm";
-import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@1/+esm";
-import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@1/+esm";
+import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+import {axisLeft} from "https://cdn.jsdelivr.net/npm/d3-axis@3/+esm";
+import {scaleLinear} from "https://cdn.jsdelivr.net/npm/d3-scale@4/+esm";
+import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@3/+esm";
+import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@3/+esm";
+
+// Global configuration for trace interaction mode
+// 'hover' = show trace on hover (default)
+// 'click' = show trace on click
+let traceInteractionMode = 'hover';
+
+function setTraceInteractionMode(mode) {
+  if (mode === 'click' || mode === 'hover') {
+    traceInteractionMode = mode;
+  }
+}
+
+function getTraceInteractionMode() {
+  return traceInteractionMode;
+}
 
 const schemeTableau10 = [
   '#4e79a7',
@@ -80,13 +95,13 @@ function EventSelector(outer, events, stack_info, memory_view) {
       selected_event_idx = idx;
     },
   };
-  d3.select('body').on('keydown', _e => {
-    const key = d3.event.key;
+  d3.select('body').on('keydown', event => {
+    const key = event.key;
     const actions = {ArrowDown: 1, ArrowUp: -1};
     if (selected_event_idx !== null && key in actions) {
       const new_idx = selected_event_idx + actions[key];
       es.select(Math.max(0, Math.min(new_idx, events.length - 1)));
-      d3.event.preventDefault();
+      event.preventDefault();
     }
   });
 
@@ -100,13 +115,16 @@ function EventSelector(outer, events, stack_info, memory_view) {
   return es;
 }
 
-function formatSize(num) {
+function formatSize(num, showBytes = true) {
   const orig = num;
   // https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
   const units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'];
   for (const unit of units) {
     if (Math.abs(num) < 1024.0) {
-      return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
+      if (showBytes) {
+        return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
+      }
+      return `${num.toFixed(1)}${unit}B`;
     }
     num /= 1024.0;
   }
@@ -142,7 +160,8 @@ function eventStack(e, allocated, reserved) {
   }
   const user_metadata_str = format_user_metadata(e.user_metadata);
   const frames_str = format_frames(e.frames);
-  return event + '\n' + (user_metadata_str ? user_metadata_str + '\n' : '') + frames_str;
+  const forward_frames_str = format_forward_frames(e.forward_frames);
+  return event + '\n' + (user_metadata_str ? user_metadata_str + '\n' : '') + frames_str + forward_frames_str;
 }
 
 function hashCode(num) {
@@ -208,8 +227,8 @@ function MemoryView(outer, stack_info, snapshot, device) {
     .attr('preserveAspectRatio', 'xMinYMin meet');
   const g = svg.append('g');
   const seg_zoom = zoom();
-  seg_zoom.on('zoom', () => {
-    g.attr('transform', d3.event.transform);
+  seg_zoom.on('zoom', (event) => {
+    g.attr('transform', event.transform);
   });
   svg.call(seg_zoom);
 
@@ -470,6 +489,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
           }
           const user_metadata_str = format_user_metadata(t.user_metadata);
           const frames_str = format_frames(t.frames);
+          const forward_frames_str = format_forward_frames(t.forward_frames);
           return (
             `s${t.addr.toString(16)}_${t.version}: segment ${formatSize(
               t.size,
@@ -478,7 +498,8 @@ function MemoryView(outer, stack_info, snapshot, device) {
               t.stream
             })\n` +
             (user_metadata_str ? user_metadata_str + '\n' : '') +
-            frames_str
+            frames_str +
+            forward_frames_str
           );
         },
         d => {
@@ -542,13 +563,15 @@ function MemoryView(outer, stack_info, snapshot, device) {
           }
           const user_metadata_str = format_user_metadata(t.user_metadata);
           const frames_str = format_frames(t.frames);
+          const forward_frames_str = format_forward_frames(t.forward_frames);
           return (
             `b${t.addr.toString(16)}_${t.version} ` +
             `${formatSize(t.requested_size)} allocation${requested} (stream ${
               t.segment.stream
             })\n` +
             (user_metadata_str ? user_metadata_str + '\n' : '') +
-            frames_str
+            frames_str +
+            forward_frames_str
           );
         },
         removeStroke,
@@ -576,13 +599,15 @@ function MemoryView(outer, stack_info, snapshot, device) {
           const t = d.datum();
           const user_metadata_str = format_user_metadata(t.user_metadata);
           const frames_str = format_frames(t.frames);
+          const forward_frames_str = format_forward_frames(t.forward_frames);
           return (
             `Free space lost due to rounding ${formatSize(
               t.size - t.requested_size,
             )}` +
             ` (stream ${t.segment.stream})\n` +
             (user_metadata_str ? user_metadata_str + '\n' : '') +
-            frames_str
+            frames_str +
+            forward_frames_str
           );
         },
         removeStroke,
@@ -607,23 +632,39 @@ function StackInfo(outer) {
   };
   return {
     register(dom, enter, leave = _e => {}, select = _e => {}) {
-      dom
-        .on('mouseover', _e => {
-          selected.leave();
-          stack_trace.text(enter(d3.select(d3.event.target)));
-        })
-        .on('mousedown', _e => {
-          const obj = d3.select(d3.event.target);
-          selected = {
-            enter: () => stack_trace.text(enter(obj)),
-            leave: () => leave(obj),
-          };
-          select(obj);
-        })
-        .on('mouseleave', _e => {
-          leave(d3.select(d3.event.target));
-          selected.enter();
-        });
+      if (getTraceInteractionMode() === 'hover') {
+        // Hover mode: show on mouseover, pin on click
+        dom
+          .on('mouseover', function (event) {
+            selected.leave();
+            stack_trace.text(enter(d3.select(event.target)));
+          })
+          .on('mousedown', function (event) {
+            const obj = d3.select(event.target);
+            selected = {
+              enter: () => stack_trace.text(enter(obj)),
+              leave: () => leave(obj),
+            };
+            select(obj);
+          })
+          .on('mouseleave', function (event) {
+            leave(d3.select(event.target));
+            selected.enter();
+          });
+      } else {
+        // Click mode: show only on click
+        dom
+          .on('click', function (event) {
+            selected.leave();
+            const obj = d3.select(event.target);
+            selected = {
+              enter: () => stack_trace.text(enter(obj)),
+              leave: () => leave(obj),
+            };
+            stack_trace.text(enter(obj));
+            select(obj);
+          });
+      }
     },
     highlight(enter, leave = () => {}) {
       selected = {enter: () => stack_trace.text(enter()), leave};
@@ -832,6 +873,18 @@ function format_user_metadata(user_metadata) {
   const metadata_lines = Object.entries(user_metadata)
     .map(([key, value]) => `  ${key}: ${value}`);
   return 'User Metadata:\n' + metadata_lines.join('\n');
+}
+
+function format_forward_frames(forward_frames) {
+  if (!forward_frames || forward_frames.length === 0) {
+    return '';
+  }
+  // forward_frames is a list of strings (each string is a frame line from the forward pass)
+  // Each frame string already includes newlines, so we just join them directly
+  let frames_str = forward_frames.join('');
+  // Ensure we don't have a trailing newline that could cause display issues
+  frames_str = frames_str.trimEnd();
+  return `\n\n=== Forward Pass Stack Trace (where this tensor was created) ===\n${frames_str}`;
 }
 
 function format_frames(frames) {
@@ -1093,6 +1146,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
         text = `${text}\n${user_metadata_str}`;
       }
       text = `${text}\n${format_frames(elem.frames)}`;
+      text = `${text}${format_forward_frames(elem.forward_frames)}`;
       return text;
     },
   };
@@ -1126,7 +1180,8 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  const yaxis = axisLeft(yscale).tickFormat(d3.format('.3s'));
+  // Use formatSize with showBytes=false for clean axis labels
+  const yaxis = axisLeft(yscale).tickFormat(d => formatSize(d, false));
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')
@@ -1162,10 +1217,10 @@ function MemoryPlot(
 
   const axis = plot_coordinate_space.append('g').call(yaxis);
 
-  function handleZoom() {
-    const t = d3.event.transform;
+  function handleZoom(event) {
+    const t = event.transform;
     zoom_group.attr('transform', t);
-    axis.call(yaxis.scale(d3.event.transform.rescaleY(yscale)));
+    axis.call(yaxis.scale(event.transform.rescaleY(yscale)));
   }
 
   const thezoom = zoom().on('zoom', handleZoom);
@@ -1190,16 +1245,26 @@ function MemoryPlot(
       );
     },
     set_delegate: delegate => {
-      plot
-        .on('mouseover', function (_e, _d) {
-          delegate.set_selected(d3.select(this));
-        })
-        .on('mousedown', function (_e, _d) {
-          delegate.default_selected = d3.select(this);
-        })
-        .on('mouseleave', function (_e, _d) {
-          delegate.set_selected(delegate.default_selected);
-        });
+      if (getTraceInteractionMode() === 'hover') {
+        // Hover mode: show on mouseover, pin on click
+        plot
+          .on('mouseover', function (_e, _d) {
+            delegate.set_selected(d3.select(this));
+          })
+          .on('mousedown', function (_e, _d) {
+            delegate.default_selected = d3.select(this);
+          })
+          .on('mouseleave', function (_e, _d) {
+            delegate.set_selected(delegate.default_selected);
+          });
+      } else {
+        // Click mode: show only on click
+        plot
+          .on('click', function (_e, _d) {
+            delegate.default_selected = d3.select(this);
+            delegate.set_selected(d3.select(this));
+          });
+      }
     },
   };
 }
@@ -1273,8 +1338,8 @@ function MiniMap(mini_svg, plot, data, left_pad, width, height = 70) {
     [left_pad, 0],
     [width, height],
   ]);
-  brush.on('brush', function () {
-    const [begin, end] = d3.event.selection.map(x => x - left_pad);
+  brush.on('brush', function (event) {
+    const [begin, end] = event.selection.map(x => x - left_pad);
 
     const stepbegin = Math.floor(xscale.invert(begin));
     const stepend = Math.floor(xscale.invert(end));
@@ -1346,7 +1411,7 @@ function create_trace_view(
     .append('div')
     .attr(
       'style',
-      'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; height: 100%; gap: 10px',
+      'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; flex: 1; min-height: 0; gap: 10px',
     );
 
   const plot_svg = grid_container
@@ -1374,7 +1439,7 @@ function create_trace_view(
     .append('div')
     .attr(
       'style',
-      'grid-column: 1; grid-row: 3; width: 100%; height: 100%; overflow: auto;',
+      'grid-column: 1; grid-row: 3; width: 100%; height: 100%; min-height: 0; overflow: auto;',
     );
   const delegate = ContextViewer(context_div.append('pre').text('none'), data);
   plot.set_delegate(delegate);
@@ -1716,18 +1781,42 @@ pre {
 }
 html, body {
   height: 100%;
+  margin: 0;
   overflow: clip;
+}
+body {
+  display: flex;
+  flex-direction: column;
 }`;
 
 const head = d3.select('head');
 head.append('style').text(style);
 const body = d3.select('body');
-const snapshot_select = body.append('select');
-const view = body.append('select');
+const controls = body.append('div');
+const snapshot_select = controls.append('select');
+const view = controls.append('select');
 for (const x in kinds) {
   view.append('option').text(x);
 }
-const gpu = body.append('select');
+const gpu = controls.append('select');
+
+// Add interaction mode toggle (hover vs click)
+const interactionLabel = body.append('label')
+  .attr('style', 'margin-left: 15px; cursor: pointer;');
+const interactionCheckbox = interactionLabel.append('input')
+  .attr('type', 'checkbox')
+  .attr('id', 'interaction-mode-toggle')
+  .attr('style', 'cursor: pointer; margin-right: 5px;');
+interactionLabel.append('span').text('Require click to show trace (applies on file load)');
+
+interactionCheckbox.on('change', function() {
+  const mode = this.checked ? 'click' : 'hover';
+  setTraceInteractionMode(mode);
+  // Only refresh the view if a snapshot is already loaded
+  if (snapshot_select.node().value) {
+    selected_change();
+  }
+});
 
 function unpickle_and_annotate(data) {
   data = unpickle(data);
@@ -1778,12 +1867,12 @@ function snapshot_change(f) {
   }
   const selected_div = selection_to_div[key];
 
-  selected_div.attr('style', 'display: float; height: 100%');
+  selected_div.attr('style', 'display: flex; flex-direction: column; flex: 1; min-height: 0');
 }
 
 function selected_change() {
   for (const d of Object.values(selection_to_div)) {
-    d.attr('style', 'display: none; height: 100%');
+    d.attr('style', 'display: none; flex-direction: column; flex: 1; min-height: 0');
   }
   const f = snapshot_select.node().value;
   if (f === '') {
@@ -1885,3 +1974,6 @@ export function add_local_files(files, view_value) {
     selected_change();
   }
 }
+
+// Export configuration functions for external use
+export { setTraceInteractionMode, getTraceInteractionMode };

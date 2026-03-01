@@ -25,7 +25,7 @@ fmha_fwd_traits get_ck_fmha_varlen_fwd_traits(const mask_info &mask,
                            enable_bias ? bias_enum::elementwise_bias : bias_enum::no_bias,
                            has_lse,
                            has_dropout,
-                           false}; // do_fp8_static_quant
+                           quant_scale_enum::no_scale};
 }
 
 fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
@@ -101,12 +101,19 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          k.data_ptr(),
                          v.data_ptr(),
                          attn_bias_ptr, // bias
+                         nullptr, // q_descale_ptr
+                         nullptr, // k_descale_ptr
+                         nullptr, // v_descale_ptr
                          has_dropout_randval ? dropout_randval.data_ptr() : nullptr,
                          has_lse ? softmax_lse.data_ptr() : nullptr,
                          out.data_ptr(),
                          seqlens_q.data_ptr(), // seqstart_q
                          seqlens_k.data_ptr(), // seqstart_k
-                         nullptr,              // seqlen_kpads
+                         nullptr, // seqlen_q_ptr
+                         nullptr, // seqlen_k_ptr
+                         nullptr, // cu_seqlen_q_ptr
+                         nullptr, // cu_seqlen_k_ptr
+                         nullptr, // sink_ptr
                          total_q,
                          total_k,
                          b,
@@ -116,8 +123,6 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          h,             // nhead
                          h_k,           // nhead_k
                          softmax_scale, // scale_s
-                         1,             // scale_p
-                         1,             // scale_o
                          0.0f,          // logits_soft_cap
                          stride_q,
                          stride_k,
@@ -141,6 +146,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          batch_stride_o,
                          mask.left,
                          mask.right,
+                         0,             // sink_size
                          static_cast<ck_tile::index_t>(mask.type),
                          -1,                                // min_seqlen_q
                          p_dropout,
@@ -273,7 +279,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing
-    at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
     bool has_lse = true;
@@ -307,7 +313,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
         std::lock_guard<std::mutex> lock(gen->mutex_);
         auto philox_args = gen->philox_cuda_state(counter_offset);
         hipLaunchKernelGGL(
-            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
+            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::cuda::getCurrentCUDAStream(), philox_args, rng_state_ptr);
     }
 
     // remove const from attn_bias_
@@ -320,7 +326,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
 
     if (max_seqlen_k > 0) {
         auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
-        auto stream = at::cuda::getCurrentHIPStream().stream();
+        auto stream = at::cuda::getCurrentCUDAStream().stream();
         ck_tile::stream_config stream_config{stream};
 
         auto traits =

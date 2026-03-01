@@ -531,7 +531,9 @@ class PadMMTest(TestCase):
         ):
             opt_fn = torch.compile(fn, mode="max-autotune")
             ret, code = run_and_get_code(opt_fn, *args)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        # xref: https://github.com/pytorch/pytorch/pull/172780
+        if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
 
         code = [c for c in code if "decompose_k" not in c]
         # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).

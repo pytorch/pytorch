@@ -246,6 +246,10 @@ jobs:
           PACKAGE_TYPE: wheel
           UPLOAD_SUBFOLDER: ${{ env.BUILD_DEVICE }}
           PKG_DIR: ${{ runner.temp }}/artifacts
+          R2_UPLOAD: ${{ ((github.event_name == 'push' && github.event.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'true' || '' }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         shell: bash
         run: |
           set -ex

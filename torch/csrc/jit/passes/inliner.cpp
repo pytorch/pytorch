@@ -6,10 +6,6 @@
 
 namespace torch::jit {
 
-namespace prim {
-using namespace ::c10::prim;
-}
-
 GraphFunction* tryToGraphFunction(Node* n) {
   if (n->kind() == prim::CallFunction) {
     AT_ASSERT(n->input(0)->node()->kind() == prim::Constant);

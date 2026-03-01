@@ -114,7 +114,6 @@ def _broadcast_object(
         )
         # pyrefly: ignore [bad-argument-type]
         dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
-        # pyrefly: ignore [bad-argument-type]
         buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
         obj = torch.load(buffer, map_location=device, weights_only=False)
     return obj
@@ -172,7 +171,6 @@ class _DDPBucketAssignment:
         if len(self.parameters) == 0:
             raise ValueError("Empty bucket assignment")
         # DDP guarantees all parameters in the bucket have the same device
-        # pyrefly: ignore [read-only]
         self.device: torch.device = self.parameters[0].device
         self.tensor: torch.Tensor | None = None
 

@@ -194,7 +194,8 @@ def is_tensor_shardable(
     """
     from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
-    assert allow_unbacked_sharding in [None, True, False]
+    if allow_unbacked_sharding not in [None, True, False]:
+        raise AssertionError
     guard_fn = {
         None: bool,
         True: guard_or_false,
@@ -306,7 +307,8 @@ def map_placements_after_broadcast(
         elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
-            assert isinstance(placement, Shard | _StridedShard)
+            if not isinstance(placement, Shard | _StridedShard):
+                raise AssertionError
             shard_dim = normalize_dim(placement.dim, len(shape))
             new_shard_dim = broadcast_dims_map[shard_dim]
             if new_shard_dim != -1:
@@ -357,6 +359,7 @@ def expand_to_full_mesh_op_strategy(
     output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None = None,
     input_index: int = 1,
     inplace_op: bool = False,
+    allow_unbacked_sharding: bool | None = None,
     is_valid_strategy_cb: Callable[
         [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
@@ -398,6 +401,8 @@ def expand_to_full_mesh_op_strategy(
     kwargs_strategy = op_schema.kwargs_strategy
     input_args_strategy = args_strategy + kwargs_strategy
     all_strategies = []
+    # Track input placements if we skip strategies due to inplace placement mismatch
+    blocking_inplace_input_placements: tuple[Placement, ...] | None = None
     for strategy_comb in strategy_combs:
         spec_list: list[DTensorSpec | None] = []
         # Track how many non-None output specs we've seen (for output_tensor_meta indexing).
@@ -437,6 +442,28 @@ def expand_to_full_mesh_op_strategy(
             else:
                 spec_list.append(None)
 
+        # Skip strategy combinations that would create mixed partial types
+        # (except sum+avg which commute with each other).
+        # We check (type, reduce_op) pairs rather than just reduce_op because
+        # Partial subclasses like _MaskPartial have different reduction semantics
+        # even when they share the same reduce_op string.
+        has_mixed_partial = False
+        for spec in spec_list:
+            if spec is not None:
+                partial_kinds = {
+                    (type(p), p.reduce_op)
+                    for p in spec.placements
+                    if isinstance(p, Partial)
+                }
+                if len(partial_kinds) > 1:
+                    reduce_ops = {ro for _, ro in partial_kinds}
+                    types = {t for t, _ in partial_kinds}
+                    if not (len(types) == 1 and reduce_ops == {"sum", "avg"}):
+                        has_mixed_partial = True
+                        break
+        if has_mixed_partial:
+            continue
+
         input_specs: list[DTensorSpec] = [
             s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
         ]
@@ -451,6 +478,8 @@ def expand_to_full_mesh_op_strategy(
         if inplace_op and self_spec.placements != input_specs[0].placements:
             # if it's inplace op, we would only allow the OpSpec to be added when the
             # input_spec matches the first argument's runtime sharding, otherwise we skip
+            if blocking_inplace_input_placements is None:
+                blocking_inplace_input_placements = self_spec.placements
             continue
 
         # For out= variant ops, output placement must match the "out" kwarg's placement
@@ -479,7 +508,9 @@ def expand_to_full_mesh_op_strategy(
 
         # check all inputs are shardable
         if not all(
-            is_tensor_shardable(inp.shape, s)
+            is_tensor_shardable(
+                inp.shape, s, allow_unbacked_sharding=allow_unbacked_sharding
+            )
             for inp, s in zip(input_args_strategy, input_specs)
         ):
             continue
@@ -501,6 +532,18 @@ def expand_to_full_mesh_op_strategy(
             redistribute_cost=redistribute_cost,
         )
         all_strategies.append(strategy)
+
+    # If all strategies were filtered out due to inplace placement mismatch,
+    # raise a clear error message instead of returning an empty OpStrategy
+    # (which would later cause a cryptic "min() arg is an empty sequence" error)
+    if not all_strategies and blocking_inplace_input_placements is not None:
+        raise RuntimeError(
+            f"{op_schema.op}: in-place operations that require placement changes "
+            f"are not supported. The input has placement {blocking_inplace_input_placements}, "
+            f"but no valid strategy preserves this placement. "
+            f"Please use the out-of-place version of this operation instead."
+        )
+
     return OpStrategy(all_strategies)
 
 
