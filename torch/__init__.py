@@ -1606,6 +1606,13 @@ def get_deterministic_debug_mode() -> builtins.int:
         return 0
 
 
+_float32_matmul_precision_set_by_user = False
+
+
+def _is_float32_matmul_precision_set_by_user() -> bool:
+    return _float32_matmul_precision_set_by_user
+
+
 def get_float32_matmul_precision() -> str:
     r"""Returns the current value of float32 matrix multiplication precision. Refer to
     :func:`torch.set_float32_matmul_precision` documentation for more details.
@@ -1677,6 +1684,8 @@ def set_float32_matmul_precision(precision: str) -> None:
 
     """
     _C._set_float32_matmul_precision(precision)
+    global _float32_matmul_precision_set_by_user
+    _float32_matmul_precision_set_by_user = True
 
 
 def set_warn_always(b: builtins.bool, /) -> None:
