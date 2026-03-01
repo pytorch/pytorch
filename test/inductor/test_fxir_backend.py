@@ -395,7 +395,7 @@ class FxirTestCase(InductorTestCase):
 
         # Expect separate forward and backward graphs.
         (forward_gm, backward_gm) = self._compile_and_check(
-            foo, (x, y), expected_num_triton_kernels=3
+            foo, (x, y), expected_num_triton_kernels=4
         )
 
     def test_custom_compiler(self):
