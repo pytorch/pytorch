@@ -28,5 +28,6 @@ REGISTER_AVX2_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
 REGISTER_VSX_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
 REGISTER_ZVECTOR_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
 REGISTER_SVE256_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
+REGISTER_RVV_DISPATCH(flatten_indices_stub, &flatten_indices_cpu_kernel)
 
 } // namespace at::native
