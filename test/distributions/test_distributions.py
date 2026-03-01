@@ -3412,14 +3412,15 @@ class TestDistributions(DistributionsTestCase):
             self.assertEqual((1.0 / lambd), mean, atol=2e-2, rtol=2e-2)
             self.assertEqual((1.0 / lambd) ** 2, var, atol=2e-2, rtol=2e-2)
 
+        set_rng_seed(2)  # see Note [Randomized statistical tests]
         for dtype in [torch.float, torch.double, torch.bfloat16, torch.float16]:
             for lambd in [0.2, 0.5, 1.0, 1.5, 2.0, 5.0]:
-                sample_len = 50000
+                sample_len = 50_000
                 mean_var(lambd, torch.rand(sample_len, dtype=dtype))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(2)  # see Note [Randomized statistical tests]
         for rate in [1e-5, 1.0, 10.0]:
             self._check_sampler_sampler(
                 Exponential(rate),
@@ -3579,7 +3580,7 @@ class TestDistributions(DistributionsTestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_sample(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(3)  # see Note [Randomized statistical tests]
         for scale, alpha in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(
                 Pareto(scale, alpha),
@@ -7055,6 +7056,7 @@ class TestJit(DistributionsTestCase):
             )
 
     def test_variance(self):
+        set_rng_seed(3)  # see Note [Randomized statistical tests]
         for Dist, keys, values, sample in self._examples():
             if Dist in [Cauchy, HalfCauchy]:
                 continue  # infinite variance
