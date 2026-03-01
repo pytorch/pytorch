@@ -7738,8 +7738,10 @@ class TestLearnableBiases(InductorTestCase):
         loss = torch.nn.functional.mse_loss(attn_output, random_target)
         loss.backward()
 
-        assert bias.grad, "No gradient computed for bias"  # noqa: S101
-        assert torch.any(bias.grad != 0), "Gradient for bias is 0"  # noqa: S101
+        if bias.grad is None:
+            raise AssertionError("No gradient computed for bias")
+        if not torch.any(bias.grad != 0):
+            raise AssertionError("Gradient for bias is 0")
 
     @skip_on_cpu
     def test_backprop_error_case(self, device):

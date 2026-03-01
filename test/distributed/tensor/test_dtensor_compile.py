@@ -1723,6 +1723,26 @@ class outer_fn(torch.nn.Module):
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
 
+    def test_device_mesh_slicing_during_make_fx(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=8)
+        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
+
+        def fn(x):
+            # Slice the mesh during make_fx tracing. Previously this would fail
+            # because DeviceMesh.__getitem__ only disabled FakeTensorMode but not
+            # proxy tensor tracing, causing _local_scalar_dense errors in
+            # _get_mesh_tensor_from_full_mesh.
+            tp_mesh = mesh["tp"]
+            dt = DTensor.from_local(x, tp_mesh, [Shard(0)], run_check=False)
+            return dt.to_local()
+
+        x = torch.randn(4, 4)
+        traced = make_fx(fn, tracing_mode="fake")(x)
+        self.assertEqual(traced(x), fn(x))
+
     def test_compile_redistribute_flattened_mesh(self):
         """
         Test that redistribute works with pre-flattened meshes during compile.
