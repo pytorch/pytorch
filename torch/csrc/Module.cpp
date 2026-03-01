@@ -37,6 +37,7 @@
 #include <pybind11/stl.h>
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/library.h>
 #include <cstdlib>
 #include <iostream>
 #include <unordered_map>
@@ -2441,6 +2442,10 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_is_cached_tensor", [](const at::Tensor& t) {
     return at::caching::is_cached_tensor(t);
+  });
+
+  py_module.def("_get_cpp_symm_mem_args_registry", []() {
+    return torch::getCppSymmMemArgsRegistry();
   });
 
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {

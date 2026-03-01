@@ -406,6 +406,9 @@ def register_comm_lowerings():
 def register_symm_mem_lowerings():
     """
     Register lowerings for symmetric memory (symm_mem) operations.
+
+    This function automatically registers lowerings for all operations that have
+    symm_mem args metadata registered via Library.register_symm_mem_args().
     """
     try:
         symm_mem = torch.ops.symm_mem
@@ -417,6 +420,8 @@ def register_symm_mem_lowerings():
     except AttributeError:
         log.info("symm_mem ops not available, skipping symm_mem lowerings")
         return
+
+    from torch._library.simple_registry import singleton
 
     from .lowering import register_lowering
 
@@ -435,323 +440,114 @@ def register_symm_mem_lowerings():
                 "ensure the input is allocated as a symmetric memory buffer."
             )
 
-    @register_lowering(symm_mem.one_shot_all_reduce)
-    def _symm_mem_one_shot_all_reduce(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.one_shot_all_reduce.default,
-                inp,
-                reduce_op,
-                group_name,
-            ),
-        )
+    def _get_mutated_return_arg(schema):
+        """
+        For mutable ops that return an aliased tensor, find which argument is returned.
 
-    @register_lowering(symm_mem.one_shot_all_reduce_out)
-    def _symm_mem_one_shot_all_reduce_out(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-        out: ir.TensorBox,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.one_shot_all_reduce_out.default,
-                inp,
-                reduce_op,
-                group_name,
-                out,
-            ),
-        )
+        Returns:
+            Tuple of (arg_name, arg_index) for the argument that is returned, or None
+            if the op doesn't return an aliased tensor.
+        """
+        if not schema.is_mutable:
+            return None
 
-    @register_lowering(symm_mem.one_shot_all_reduce_copy)
-    def _symm_mem_one_shot_all_reduce_copy(
-        symm_buffer: ir.TensorBox,
-        local_input: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-    ):
-        _maybe_realize_symm_mem(symm_buffer, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.one_shot_all_reduce_copy.default,
-                symm_buffer,
-                local_input,
-                reduce_op,
-                group_name,
-            ),
-        )
+        if len(schema.returns) == 0:
+            return None
 
-    @register_lowering(symm_mem.one_shot_all_reduce_copy_out)
-    def _symm_mem_one_shot_all_reduce_copy_out(
-        symm_buffer: ir.TensorBox,
-        local_input: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-        out: ir.TensorBox,
-    ):
-        _maybe_realize_symm_mem(symm_buffer, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.one_shot_all_reduce_copy_out.default,
-                symm_buffer,
-                local_input,
-                reduce_op,
-                group_name,
-                out,
-            ),
-        )
+        if len(schema.returns) == 1:
+            ret = schema.returns[0]
+            if ret.alias_info is None:
+                return None
 
-    @register_lowering(symm_mem.two_shot_all_reduce_)
-    def _symm_mem_two_shot_all_reduce_(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        ir.FallbackKernel.create(
-            symm_mem.two_shot_all_reduce_.default,
-            inp,
-            reduce_op,
-            group_name,
-        )
-        return inp
+            ret_alias_set = ret.alias_info.after_set
+            for i, arg in enumerate(schema.arguments):
+                if arg.alias_info is not None and arg.alias_info.is_write:
+                    arg_alias_set = arg.alias_info.after_set
+                    if ret_alias_set == arg_alias_set:
+                        return (arg.name, i)
 
-    @register_lowering(symm_mem.two_shot_all_reduce_out)
-    def _symm_mem_two_shot_all_reduce_out(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-        output: ir.TensorBox,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.two_shot_all_reduce_out.default,
-                inp,
-                reduce_op,
-                group_name,
-                output,
-            ),
-        )
-
-    @register_lowering(symm_mem.multimem_all_reduce_)
-    def _symm_mem_multimem_all_reduce_(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        ir.FallbackKernel.create(
-            symm_mem.multimem_all_reduce_.default,
-            inp,
-            reduce_op,
-            group_name,
-        )
-        return inp
-
-    @register_lowering(symm_mem.multimem_one_shot_all_reduce)
-    def _symm_mem_multimem_one_shot_all_reduce(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.multimem_one_shot_all_reduce.default,
-                inp,
-                reduce_op,
-                group_name,
-            ),
-        )
-
-    @register_lowering(symm_mem.multimem_one_shot_all_reduce_out)
-    def _symm_mem_multimem_one_shot_all_reduce_out(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        group_name: str,
-        out: ir.TensorBox,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.multimem_one_shot_all_reduce_out.default,
-                inp,
-                reduce_op,
-                group_name,
-                out,
-            ),
-        )
-
-    @register_lowering(symm_mem.multimem_one_shot_reduce_out)
-    def _symm_mem_multimem_one_shot_reduce_out(
-        inp: ir.TensorBox,
-        reduce_op: str,
-        root: int,
-        group_name: str,
-        out: ir.TensorBox,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.multimem_one_shot_reduce_out.default,
-                inp,
-                reduce_op,
-                root,
-                group_name,
-                out,
-            ),
-        )
-
-    @register_lowering(symm_mem.multimem_all_gather_out)
-    def _symm_mem_multimem_all_gather_out(
-        inp: ir.TensorBox,
-        group_name: str,
-        out: ir.TensorBox,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.multimem_all_gather_out.default,
-                inp,
-                group_name,
-                out,
-            ),
-        )
-
-    @register_lowering(symm_mem.reduce_scatter_out)
-    def _symm_mem_reduce_scatter_out(
-        inp: ir.TensorBox,
-        group_name: str,
-        split_last_dim: bool,
-        output: ir.TensorBox,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir.FallbackKernel.create(
-                symm_mem.reduce_scatter_out.default,
-                inp,
-                group_name,
-                split_last_dim,
-                output,
-            ),
-        )
-
-    @register_lowering(symm_mem.all_to_all_vdev)
-    def _symm_mem_all_to_all_vdev(
-        inp: ir.TensorBox,
-        out: ir.TensorBox,
-        in_splits: ir.TensorBox,
-        out_splits_offsets: ir.TensorBox,
-        group_name: str,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        _maybe_realize_symm_mem(out, group_name)
-        ir.FallbackKernel.create(
-            symm_mem.all_to_all_vdev.default,
-            inp,
-            out,
-            in_splits,
-            out_splits_offsets,
-            group_name,
-        )
         return None
 
-    @register_lowering(symm_mem.all_to_all_vdev_2d)
-    def _symm_mem_all_to_all_vdev_2d(
-        inp: ir.TensorBox,
-        out: ir.TensorBox,
-        in_splits: ir.TensorBox,
-        out_splits_offsets: ir.TensorBox,
-        group_name: str,
-        major_align=None,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        _maybe_realize_symm_mem(out, group_name)
-        ir.FallbackKernel.create(
-            symm_mem.all_to_all_vdev_2d.default,
-            inp,
-            out,
-            in_splits,
-            out_splits_offsets,
-            group_name,
-            major_align,
-        )
-        return None
+    def _create_symm_mem_lowering(op, symm_mem_args_set, group_arg_name="group_name"):
+        """
+        Create a lowering function for an operator with symm_mem args.
 
-    @register_lowering(symm_mem.all_to_all_vdev_2d_offset)
-    def _symm_mem_all_to_all_vdev_2d_offset(
-        inp: ir.TensorBox,
-        out: ir.TensorBox,
-        in_splits_offsets: ir.TensorBox,
-        out_splits_offsets: ir.TensorBox,
-        group_name: str,
-    ):
-        _maybe_realize_symm_mem(inp, group_name)
-        _maybe_realize_symm_mem(out, group_name)
-        ir.FallbackKernel.create(
-            symm_mem.all_to_all_vdev_2d_offset.default,
-            inp,
-            out,
-            in_splits_offsets,
-            out_splits_offsets,
-            group_name,
-        )
-        return None
+        Args:
+            op: The operator to create lowering for
+            symm_mem_args_set: Set of argument names that require symmetric memory
+            group_arg_name: Name of the group_name argument (default: "group_name")
 
-    @register_lowering(symm_mem.tile_reduce)
-    def _symm_mem_tile_reduce(
-        in_tile: ir.TensorBox,
-        out_tile: ir.TensorBox,
-        root: int,
-        group_name: str,
-        reduce_op: str = "sum",
-    ):
-        _maybe_realize_symm_mem(in_tile, group_name)
-        _maybe_realize_symm_mem(out_tile, group_name)
-        ir.FallbackKernel.create(
-            symm_mem.tile_reduce.default,
-            in_tile,
-            out_tile,
-            root,
-            group_name,
-            reduce_op,
-        )
-        return None
+        Returns:
+            Lowering function that realizes symm_mem args and calls the operator
+        """
+        schema = op._schema
+        is_mutable = schema.is_mutable
+        mutated_return = _get_mutated_return_arg(schema) if is_mutable else None
 
-    @register_lowering(symm_mem.multi_root_tile_reduce)
-    def _symm_mem_multi_root_tile_reduce(
-        in_tiles,  # list of TensorBox
-        out_tile: ir.TensorBox,
-        roots,  # list of int
-        group_name: str,
-        reduce_op: str = "sum",
-    ):
-        for in_tile in in_tiles:
-            _maybe_realize_symm_mem(in_tile, group_name)
-        _maybe_realize_symm_mem(out_tile, group_name)
-        ir.FallbackKernel.create(
-            symm_mem.multi_root_tile_reduce.default,
-            in_tiles,
-            out_tile,
-            roots,
-            group_name,
-            reduce_op,
-        )
-        return None
+        def lowering_fn(*args, **kwargs):
+            arg_names = [arg.name for arg in schema.arguments]
+
+            all_args = {}
+            for i, arg_value in enumerate(args):
+                if i < len(arg_names):
+                    all_args[arg_names[i]] = arg_value
+            all_args.update(kwargs)
+
+            group_name = all_args.get(group_arg_name)
+
+            for arg_name in symm_mem_args_set:
+                arg_value = all_args.get(arg_name)
+                if isinstance(arg_value, ir.TensorBox):
+                    if group_name is not None:
+                        _maybe_realize_symm_mem(arg_value, group_name)
+                elif isinstance(arg_value, (list, tuple)):
+                    for item in arg_value:
+                        if isinstance(item, ir.TensorBox) and group_name is not None:
+                            _maybe_realize_symm_mem(item, group_name)
+
+            if mutated_return is not None:
+                # Inplace op: use _CollectiveKernel.create_inplace and return mutated arg
+                arg_name, arg_idx = mutated_return
+                mutated_arg = all_args.get(arg_name)
+                if mutated_arg is None and arg_idx < len(args):
+                    mutated_arg = args[arg_idx]
+
+                ir._CollectiveKernel.create_inplace(op, *args, **kwargs)
+                return mutated_arg
+            else:
+                # Non-mutating op: use FallbackKernel
+                result = ir.FallbackKernel.create(op, *args, **kwargs)
+                return pytree.tree_map(ir.TensorBox.create, result)
+
+        return lowering_fn
+
+    # Auto-register all symm_mem operations from the registry
+    registered_count = 0
+    for qualname, entry in singleton._data.items():
+        if not qualname.startswith("symm_mem::"):
+            continue
+
+        symm_mem_args = entry.symm_mem_args.get()
+        if symm_mem_args is None:
+            continue
+
+        try:
+            op = torch._library.utils.lookup_op(qualname)
+
+            # Create and register the lowering
+            lowering_fn = _create_symm_mem_lowering(op, symm_mem_args)
+            register_lowering(op)(lowering_fn)
+            registered_count += 1
+            log.debug(
+                "Auto-registered lowering for %s with symm_mem args: %s",
+                qualname,
+                symm_mem_args,
+            )
+
+        except (AttributeError, ValueError):
+            log.warning("Could not register lowering for %s", qualname)
+            continue
+
+    log.info(
+        "Automatically registered %d symm_mem operation lowerings", registered_count
+    )

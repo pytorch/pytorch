@@ -314,5 +314,53 @@ Library& Library::_fallback(CppFunction&& f) & {
   return *this;
 }
 
+// Static registry for C++ symm_mem args registrations
+namespace {
+struct SymmMemArgsRegistry {
+  std::unordered_map<std::string, std::vector<std::string>> registry;
+
+  static SymmMemArgsRegistry& get() {
+    static SymmMemArgsRegistry instance;
+    return instance;
+  }
+
+  void registerArgs(const std::string& qualname, const std::vector<std::string>& args) {
+    registry[qualname] = args;
+  }
+
+  const std::unordered_map<std::string, std::vector<std::string>>& getAll() const {
+    return registry;
+  }
+};
+} // anonymous namespace
+
+Library& Library::register_symm_mem_args(
+    const char* name,
+    std::initializer_list<const char*> arg_names) & {
+  // Construct the fully qualified name
+  at::OperatorName opname = _parseNameForLib(name);
+  std::string qualname = opname.name;
+  if (!opname.overload_name.empty()) {
+    qualname += "." + opname.overload_name;
+  }
+
+  // Convert initializer_list to vector
+  std::vector<std::string> args;
+  args.reserve(arg_names.size());
+  for (const char* arg : arg_names) {
+    args.emplace_back(arg);
+  }
+
+  // Store in C++ registry
+  SymmMemArgsRegistry::get().registerArgs(qualname, args);
+
+  return *this;
+}
+
+// Function to access the C++ registry from Python
+const std::unordered_map<std::string, std::vector<std::string>>&
+getCppSymmMemArgsRegistry() {
+  return SymmMemArgsRegistry::get().getAll();
+}
 
 } // namespace torch
