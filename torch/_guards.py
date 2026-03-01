@@ -664,6 +664,10 @@ class GuardsSet:
     def __bool__(self) -> bool:
         return bool(self.inner)
 
+    def clear(self) -> None:
+        self.inner = OrderedSet()
+        self.source_to_guards = defaultdict(list)
+
     def add(
         self, guard: Guard, *, collect_debug_stack: bool = True, skip: int = 0
     ) -> None:
