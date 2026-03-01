@@ -27,17 +27,28 @@ class EnableVmapFallbackWarnings:
 
 
 class TestVmapAPILegacy(TestCase):
-    def test_non_tensor_output_raises(self):
-        with self.assertRaisesRegex(
-            ValueError, "got type <class 'float'> as the return"
-        ):
-            output = vmap(lambda x: 3.14)(torch.ones(3))
+    def test_non_tensor_output_numeric(self):
+        # Numeric non-tensor outputs are expanded across the batch
+        result = vmap(lambda x: 3.14)(torch.ones(3))
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertEqual(result.shape, torch.Size([3]))
+        self.assertTrue((result == 3.14).all())
 
         def multiple_outputs(x):
             return x, 3
 
-        with self.assertRaisesRegex(ValueError, "got type <class 'int'> for return 1"):
-            vmap(multiple_outputs)(torch.ones(3))
+        tensor_out, int_out = vmap(multiple_outputs)(torch.ones(3))
+        self.assertEqual(tensor_out, torch.ones(3))
+        self.assertEqual(int_out, torch.full((3,), 3, dtype=torch.int64))
+
+    def test_non_tensor_output_none(self):
+        result = vmap(lambda x: (x, None))(torch.ones(3))
+        self.assertEqual(result[0], torch.ones(3))
+        self.assertIsNone(result[1])
+
+    def test_non_tensor_output_string_raises(self):
+        with self.assertRaisesRegex(ValueError, "must only return Tensors"):
+            vmap(lambda x: "hello")(torch.ones(3))
 
     def test_different_map_dim_size_raises(self):
         x = torch.randn(2)
@@ -97,10 +108,7 @@ class TestVmapAPILegacy(TestCase):
         self.assertEqual(outputs[0], x * x)
         self.assertEqual(outputs[1], x * x * x)
 
-    def test_multiple_outputs_error_cases(self):
-        # This is the same thing as
-        # def returns_tuple_of_tensors(x):
-        #     return x, x
+    def test_multiple_outputs_list(self):
         def returns_tuple_of_tensors(x):
             return (x, x)
 
@@ -112,15 +120,10 @@ class TestVmapAPILegacy(TestCase):
 
         x = torch.randn(3)
 
-        # should not throw
+        # tuples and lists both work
         vmap(returns_tuple_of_tensors)(x)
-
-        # jax supports these, but we don't yet
-        msg = "must only return Tensors, got type <class 'list'>"
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(returns_list_of_two_tensors)(x)
-        with self.assertRaisesRegex(ValueError, msg):
-            vmap(returns_list_of_one_tensor)(x)
+        vmap(returns_list_of_two_tensors)(x)
+        vmap(returns_list_of_one_tensor)(x)
 
     def test_nested_with_same_map_dim(self):
         x = torch.randn(2, 3, 5)
