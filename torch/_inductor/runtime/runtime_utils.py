@@ -247,41 +247,62 @@ def torch_dtype_to_jax(dtype: torch.dtype) -> str:
     return f"jnp.{dtype_name}"
 
 
-def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int) -> Any:
+def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int, axis: int = -1) -> Any:
     """
     Helper for partial reductions in Pallas kernels.
 
-    Reduces over contiguous axes whose product matches *red_numel* in the
-    original (un-tiled) tensor, returning the result with keepdims-style
-    shape for proper in-kernel broadcasting.
-
-    When running inside a tiled pallas_call the actual tile shape may differ
-    from ``(pw_numel, red_numel)``, so we reduce directly over the discovered
-    axes instead of reshaping to exact sizes.
+    *axis* hints at the direction of the reduction: -1 means the reduction
+    axes are the trailing (inner) axes, 0 means leading (outer) axes.
+    The function finds contiguous axes from that end whose product matches
+    *red_numel*, falling back to the old right-to-left heuristic.
 
     Args:
         reduce_fn: The reduction function to apply (e.g., jnp.sum, jnp.max)
         v: The input array to reduce
         pw_numel: The number of pointwise elements (used for axis detection)
         red_numel: The number of reduction elements (used for axis detection)
+        axis: Direction hint: -1 for inner (trailing) reduction axes,
+              0 for outer (leading) reduction axes.
 
     Returns:
         Reduced array with keepdims-style shape
     """
     shape = tuple(v.shape)
-    # Find contiguous axes whose product = red_numel (search from right)
+    nd = len(shape)
     red_axes = None
-    for i in range(len(shape) - 1, -1, -1):
+
+    if axis == 0:
+        # Search from the left (leading axes)
         prod = 1
-        for j in range(i, -1, -1):
-            prod *= shape[j]
+        for i in range(nd):
+            prod *= shape[i]
             if prod == red_numel:
-                red_axes = list(range(j, i + 1))
+                red_axes = list(range(0, i + 1))
                 break
-        if red_axes is not None:
-            break
+    else:
+        # Search from the right (trailing axes) — default / axis=-1
+        prod = 1
+        for i in range(nd - 1, -1, -1):
+            prod *= shape[i]
+            if prod == red_numel:
+                red_axes = list(range(i, nd))
+                break
+
     if red_axes is None:
-        red_axes = [len(shape) - 1]
+        # Fallback: search from right across all starting positions
+        for i in range(nd - 1, -1, -1):
+            prod = 1
+            for j in range(i, -1, -1):
+                prod *= shape[j]
+                if prod == red_numel:
+                    red_axes = list(range(j, i + 1))
+                    break
+            if red_axes is not None:
+                break
+
+    if red_axes is None:
+        red_axes = [nd - 1]
+
     result = reduce_fn(v, axis=tuple(red_axes), keepdims=True)
     return result
 

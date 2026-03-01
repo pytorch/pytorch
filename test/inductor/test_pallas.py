@@ -392,7 +392,6 @@ class PallasTestsMixin:
                 expected = fn(x, y)
                 self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_different_shapes(self):
         """Test with different tensor shapes."""
         if self.DEVICE == "cuda":
@@ -1111,6 +1110,41 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_cuda
+    def test_non_stride1_reduction(self):
+        """Test reductions along non-innermost axis on square tensors.
+
+        On square tensors (e.g. 8x8), the reduction axis cannot be inferred
+        from shape alone since both dims have the same size. This verifies
+        that stride-based axis detection works for both dim=0 and dim=1.
+        """
+        x = torch.randn(8, 8, device=self.DEVICE)
+        for dim in [0, 1]:
+            with self.subTest(dim=dim):
+                torch._dynamo.reset()
+
+                def fn(x, dim=dim):
+                    return x.sum(dim)
+
+                compiled = self._compile(fn)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    def test_multi_axis_reduction(self):
+        """Test combining reductions along different axes of the same tensor."""
+        x = torch.randn(8, 8, device=self.DEVICE)
+        torch._dynamo.reset()
+
+        def fn(x):
+            return x.sum(0) + x.sum(1)
+
+        compiled = self._compile(fn)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
     def test_rms_norm(self):
         """Test RMS normalization (mean-of-squares reduction + rsqrt)."""
 
@@ -1374,7 +1408,6 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_warpgroup_size_2d_128x128(self):
         """Test 2D tensor with 128x128 and tiling-exercising sizes."""
 
@@ -1569,7 +1602,6 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_nanogpt(self):
         """Test a minimal NanoGPT-style transformer block.
 

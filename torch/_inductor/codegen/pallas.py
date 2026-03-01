@@ -884,6 +884,9 @@ class PallasKernel(SIMDKernel):
                 self._output_buffer_names.append(dep.name)
         # Track which iteration variables are actually used in the kernel
         self.used_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
+        # Iteration vars that have been emitted in tile-relative form
+        # (safe for tiling even when they appear in the compute body)
+        self.tile_relative_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
         # Track if any load/store uses flatten-based indexing (buf[...].flatten()[idx])
         self.has_flatten_indexing = False
 
@@ -1443,6 +1446,30 @@ class PallasKernel(SIMDKernel):
         except (TypeError, ValueError):
             return None
 
+    def _get_reduction_axis(self) -> int:
+        """Determine which axis of the loaded array is the reduction axis.
+
+        Compares strides of reduction vs pointwise variables in the load
+        index expression. Returns 0 for outer-axis reduction, -1 for
+        inner-axis (stride-1) reduction.
+        """
+        if not self.load_index_exprs:
+            return -1
+        load_index = next(iter(self.load_index_exprs.values()))
+        r_vars = [v for v, e in self.range_tree_nodes.items() if e.is_reduction]
+        pw_vars = [v for v, e in self.range_tree_nodes.items() if not e.is_reduction]
+        if not r_vars or not pw_vars:
+            return -1
+        r_coeff = load_index.coeff(r_vars[0])
+        r_stride = self._safe_int(r_coeff) if r_coeff != 0 else 1
+        if r_stride is None:
+            r_stride = 1
+        pw_coeff = load_index.coeff(pw_vars[0])
+        pw_stride = self._safe_int(pw_coeff) if pw_coeff != 0 else 1
+        if pw_stride is None:
+            pw_stride = 1
+        return 0 if r_stride > pw_stride else -1
+
     def _compute_prefix_numel(self, prefixes: OrderedSet) -> Optional[int]:
         """Compute total numel for given prefixes (e.g., pointwise prefixes)."""
         result = 1
@@ -1899,7 +1926,14 @@ class PallasKernel(SIMDKernel):
     def _maybe_broadcast_1d_buffer(
         self, name: str, index: sympy.Expr, load_expr: str
     ) -> str:
-        """Reshape 1D buffers (e.g., batch norm mean) for higher-dim broadcasting."""
+        """Reshape 1D buffers for higher-dim broadcasting in reduction kernels.
+
+        When a 1D buffer (e.g. a reduction result from a prior kernel, or a
+        batch-norm parameter) is loaded into a kernel with 2+ iteration dims,
+        JAX right-aligns it for broadcasting: (N,) becomes (1, N).  This is
+        wrong when the buffer corresponds to a non-trailing axis; we reshape
+        to (N, 1, ...) so broadcasting matches the correct axis.
+        """
         buf_obj = V.graph.get_buffer(name)
         if buf_obj is None or len(buf_obj.get_size()) != 1:
             return load_expr
@@ -1908,9 +1942,6 @@ class PallasKernel(SIMDKernel):
         if buf_length is None:
             return load_expr
 
-        # Only graph inputs, not intermediate buffers or index tensors
-        if name.startswith("buf"):
-            return load_expr
         dtype = V.graph.get_dtype(name)
         if dtype is not None and not dtype.is_floating_point:
             return load_expr
@@ -1940,7 +1971,9 @@ class PallasKernel(SIMDKernel):
         if self._safe_int(entry.length) != buf_length:
             return load_expr
 
-        # Buffer length must uniquely match one iteration variable
+        # Buffer length must uniquely match one non-reduction iteration variable.
+        # If multiple pointwise vars share the same length (e.g. 2D pointwise
+        # kernel with both dims equal), the axis is ambiguous and we bail out.
         matching_vars = [
             v
             for v, e in self.range_tree_nodes.items()
@@ -1949,12 +1982,25 @@ class PallasKernel(SIMDKernel):
         if len(matching_vars) != 1:
             return load_expr
 
-        # Buffer length must uniquely match one ref buffer dimension
+        # Determine axis position from the iteration variable's position
+        # in the range tree (pointwise vars first, then reduction vars).
+        axis_pos = None
         matching_dims = [i for i, s in enumerate(ref_buf_size) if s == buf_length]
-        if len(matching_dims) != 1:
-            return load_expr
+        if len(matching_dims) == 1:
+            axis_pos = matching_dims[0]
+        else:
+            # Ambiguous by size (e.g. square tensor with reduction).
+            # Use the variable's position in the range tree.
+            pw_idx = 0
+            for sym, e in self.range_tree_nodes.items():
+                if sym == used_var:
+                    axis_pos = pw_idx
+                    break
+                if not e.is_reduction:
+                    pw_idx += 1
 
-        axis_pos = matching_dims[0]
+        if axis_pos is None:
+            return load_expr
         if axis_pos == len(ref_buf_size) - 1:
             return load_expr  # Last dim uses default broadcasting
 
@@ -2713,7 +2759,7 @@ class PallasKernel(SIMDKernel):
                 "Tuple reductions (e.g., welford_combine) not supported in Pallas backend"
             )
 
-        # Check if this reduction is already cached
+        # Check if this reduction is already cached.
         cache_key = (src_dtype, reduction_type, value)
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
@@ -2745,7 +2791,8 @@ class PallasKernel(SIMDKernel):
 
         if reduction_type == "xor_sum":
             if has_pointwise and pointwise_numel and reduction_numel:
-                reduction_expr = f"jnp.bitwise_xor.reduce({value}.reshape({pointwise_numel}, -1), axis=-1)"
+                reduction_axis = self._get_reduction_axis()
+                reduction_expr = f"jnp.bitwise_xor.reduce({value}, axis={reduction_axis})"
             else:
                 reduction_expr = f"jnp.bitwise_xor.reduce({value})"
         elif reduction_type in ("argmax", "argmin"):
@@ -2762,41 +2809,7 @@ class PallasKernel(SIMDKernel):
                 and reduction_numel
             )
             if is_partial_reduction and n_reduction_dims > 0:
-                # Partial reduction: determine the reduction axis from load index
-                # The reduction variable's coefficient in the index expression tells us its stride
-                # Higher stride = outer axis (lower axis number in row-major order)
-                reduction_axis = -1  # Default to last axis
-                if self.load_index_exprs:
-                    # Get the first load index expression
-                    load_index = next(iter(self.load_index_exprs.values()))
-                    # Find the reduction variable (starts with 'r')
-                    reduction_vars = [
-                        var
-                        for var, entry in self.range_tree_nodes.items()
-                        if entry.is_reduction
-                    ]
-                    if reduction_vars:
-                        r_var = reduction_vars[0]
-                        # Get the coefficient (stride) of the reduction variable
-                        r_coeff = load_index.coeff(r_var)
-                        r_stride = self._safe_int(r_coeff) if r_coeff != 0 else 1
-                        if r_stride is None:
-                            r_stride = 1
-                        # Get pointwise variable
-                        pw_vars = [
-                            var
-                            for var, entry in self.range_tree_nodes.items()
-                            if not entry.is_reduction
-                        ]
-                        if pw_vars:
-                            pw_var = pw_vars[0]
-                            pw_coeff = load_index.coeff(pw_var)
-                            pw_stride = self._safe_int(pw_coeff) if pw_coeff != 0 else 1
-                            if pw_stride is None:
-                                pw_stride = 1
-                            # Higher stride = earlier (outer) axis
-                            # For 2D: axis 0 has stride = dim1_size, axis 1 has stride = 1
-                            reduction_axis = 0 if r_stride > pw_stride else -1
+                reduction_axis = self._get_reduction_axis()
                 reduction_expr = f"{reduction_op}({value}, axis={reduction_axis})"
             else:
                 # Full reduction to scalar
@@ -2815,16 +2828,13 @@ class PallasKernel(SIMDKernel):
                 has_pointwise and n_reduction_dims > 0 and pointwise_numel is None
             )
             if is_partial_reduction:
-                # For partial reductions, we need to:
-                # 1. Find which axes are reduction axes (contiguous axes whose product = reduction_numel)
-                # 2. Move pointwise axes to front, reduction axes to back
-                # 3. Reshape to (pointwise_numel, reduction_numel) and reduce over last axis
-                # 4. Reshape output with 1s in reduced dims for proper broadcasting
                 reduction_op = reduction_ops[reduction_type]
-                # Use a helper to find reduction axes by product matching
-                reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+                reduction_axis = self._get_reduction_axis()
+                reduction_expr = f"pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel}, axis={reduction_axis})"
             elif is_symbolic_partial:
-                # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
+                # Symbolic sizes: use axis=0 for outer reduction.
+                # With symbolic shapes, the actual reduction is often handled
+                # by strided loads and axis=0 just squeezes a degenerate batch dim.
                 reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
             else:
                 # Full reduction to scalar
@@ -2875,9 +2885,12 @@ class PallasKernel(SIMDKernel):
         # If iteration variables appear in the compute body (not just in
         # load/store index resolution that collapses to [...]), tiling is
         # unsafe because the arange-based vars have full-tensor shapes.
+        # Exception: vars emitted in tile-relative form are safe.
         if self.used_iter_vars:
             compute_text = "\n".join(str(line) for line in self.compute._lines)
             for var_sym in self.used_iter_vars:
+                if var_sym in self.tile_relative_iter_vars:
+                    continue
                 if str(var_sym) in compute_text:
                     return False
 
@@ -3165,9 +3178,14 @@ class PallasKernel(SIMDKernel):
         # generated (used_iter_vars is populated during load/store codegen).
         self.tile_cpu_tpu = self._can_tile_cpu_tpu()
 
-        # Emit the kernel function with the correct signature
+        # Emit the kernel function with the correct signature.
+        # If any iteration variables were emitted in tile-relative form,
+        # add _pallas_tile and _pallas_ax2g as keyword-only kernel params.
+        extra_kernel_params = ""
+        if self.tile_relative_iter_vars:
+            extra_kernel_params = ", _pallas_tile=None, _pallas_ax2g=None"
         kernel_signature = (
-            f"def {kernel_name}_kernel({', '.join(ctx.full_kernel_params)}):"
+            f"def {kernel_name}_kernel({', '.join(ctx.full_kernel_params)}{extra_kernel_params}):"
         )
         code.writeline(kernel_signature)
 
@@ -3270,10 +3288,26 @@ class PallasKernel(SIMDKernel):
                 )
                 code.writeline(")")
 
+            # Define _pallas_tile and _pallas_ax2g for tile-relative iteration vars
+            if self.tile_relative_iter_vars:
+                if self.tile_cpu_tpu:
+                    # Tiled path: _tile and _ax2g computed by _codegen_tiled_specs
+                    code.writeline("_pallas_tile = _tile")
+                    code.writeline("_pallas_ax2g = _ax2g")
+                else:
+                    # Non-tiled path: tile = full output shape, no grid axes
+                    code.writeline("_pallas_tile = _pallas_out_shapes[0]")
+                    code.writeline("_pallas_ax2g = {}")
+
             # Wrap kernel with functools.partial to pass scalar arguments (size variables)
             partial_args = []
             for sv_param in ctx.size_var_params:
                 partial_args.append(f"{sv_param}={sv_param}")
+
+            # Pass tile info for tile-relative iteration variables
+            if self.tile_relative_iter_vars:
+                partial_args.append("_pallas_tile=_pallas_tile")
+                partial_args.append("_pallas_ax2g=_pallas_ax2g")
 
             if partial_args:
                 kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
@@ -3316,6 +3350,27 @@ from torch._inductor.runtime.runtime_utils import (
         elif not ctx.interpret_is_cpu:
             imports += "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
         ctx.code.splice(imports, strip=True)
+
+    def _get_iter_var_axis(self, var_sym: sympy.Symbol) -> Optional[int]:
+        """Map an iteration variable to its output tensor axis index.
+
+        Non-reduction variables map to axes 0, 1, 2, ... in order.
+        Reduction variables map to axes after all pointwise axes.
+        Returns None if the mapping cannot be determined.
+        """
+        pw_idx = 0
+        r_idx = 0
+        n_pw = sum(
+            1 for _, e in self.range_tree_nodes.items() if not e.is_reduction
+        )
+        for sym, entry in self.range_tree_nodes.items():
+            if sym == var_sym:
+                return pw_idx if not entry.is_reduction else n_pw + r_idx
+            if entry.is_reduction:
+                r_idx += 1
+            else:
+                pw_idx += 1
+        return None
 
     def _codegen_iteration_vars(
         self, kernel_body: IndentedBuffer, ctx: _CodegenContext
@@ -3434,7 +3489,32 @@ from torch._inductor.runtime.runtime_utils import (
                 arange = f"jnp.arange({length_str})"
                 kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
             else:
-                kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
+                # Simple 1D arange — emit tile-relative form so tiling is safe.
+                # When grid=(1,), _pallas_tile[ax] == full length and
+                # pl.program_id(0) == 0, so this degenerates to jnp.arange(N).
+                # Only do this when the var actually appears in compute body
+                # (otherwise tiling is not blocked and the full arange is fine).
+                # Skip for scatter/index kernels where the iter var is used
+                # as a global index, not a data value.
+                compute_text = "\n".join(str(line) for line in self.compute._lines)
+                var_in_compute = var_name in compute_text
+                can_tile_relative = (
+                    var_in_compute
+                    and not self.is_gpu
+                    and not self.outputs_need_read
+                    and not self.has_flatten_indexing
+                    and not entry.is_reduction
+                )
+                axis_idx = self._get_iter_var_axis(var_sym) if can_tile_relative else None
+                if axis_idx is not None:
+                    kernel_body.writeline(
+                        f"{var_name} = jnp.arange(_pallas_tile[{axis_idx}])"
+                        f" + pl.program_id(_pallas_ax2g.get({axis_idx}, 0))"
+                        f" * _pallas_tile[{axis_idx}]"
+                    )
+                    self.tile_relative_iter_vars.add(var_sym)
+                else:
+                    kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
 
     @staticmethod
     def _broadcast_axis_idx(
@@ -3999,6 +4079,30 @@ class PallasScheduling(SIMDScheduling):
         # Pallas/JAX can handle reductions to single elements efficiently
         # without requiring split reductions
         return OrderedSet([BackendFeature.REDUCE_TO_SINGLE_ELEMENT])
+
+    def can_fuse(self, node1, node2):  # type: ignore[override]
+        if not super().can_fuse(node1, node2):
+            return False
+        # Pallas partial reductions use keepdims, so fusing two reductions
+        # that read the same buffer with different index patterns produces
+        # intermediates with incompatible shapes (e.g. (1,8) + (8,1) = (8,8)
+        # instead of (8,)).  Prevent this by rejecting fusion when the read
+        # indices differ.
+        if node1.is_reduction() and node2.is_reduction():
+            from torch._inductor.dependencies import MemoryDep
+
+            reads1 = {}
+            for dep in node1.read_writes.reads:
+                if isinstance(dep, MemoryDep):
+                    reads1[dep.name] = dep.index
+            for dep in node2.read_writes.reads:
+                if isinstance(dep, MemoryDep) and dep.name in reads1:
+                    if reads1[dep.name] != dep.index:
+                        return False
+        return True
+
+    can_fuse_vertical = can_fuse  # type: ignore[assignment]
+    can_fuse_horizontal = can_fuse  # type: ignore[assignment]
 
     def define_kernel(
         self,
