@@ -1249,7 +1249,7 @@ def use_pipelined_autotuning() -> bool:
     )
 
 
-def _init_autotune_subprocess(fp32_precision: bool) -> bool:
+def _init_autotune_subprocess(fp32_precision: str) -> bool:
     """
     Warmup function run in the autotune subprocess.
     """
