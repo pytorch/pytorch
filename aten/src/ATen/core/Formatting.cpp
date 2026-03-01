@@ -44,6 +44,13 @@ std::string toString(const Scalar& s) {
 
 namespace at {
 
+namespace internal {
+// Global state for scientific notation control
+static bool& print_sci_mode() {
+  static bool enabled = true;
+  return enabled;
+}
+} // namespace internal
 std::ostream& operator<<(std::ostream& out, const DeprecatedTypeProperties& t) {
   return out << t.toString();
 }
@@ -116,7 +123,11 @@ static PrintFormat __printFormat(const Tensor& self) {
   if (intMode) {
     if (expMax > 9) {
       sz = 11;
-      return PrintFormat(scale, sz, FormatType::Scientific);
+      if (internal::print_sci_mode()) {
+        return PrintFormat(scale, sz, FormatType::Scientific);
+      } else {
+        return PrintFormat(scale, sz, FormatType::Fixed);
+      }
     } else {
       sz = static_cast<int>(expMax) + 1;
       return PrintFormat(scale, sz, FormatType::Default);
@@ -127,7 +138,11 @@ static PrintFormat __printFormat(const Tensor& self) {
       if (std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
         sz = sz + 1;
       }
-      return PrintFormat(scale, sz, FormatType::Scientific);
+      if (internal::print_sci_mode()) {
+        return PrintFormat(scale, sz, FormatType::Scientific);
+      } else {
+        return PrintFormat(scale, sz, FormatType::Fixed);
+      }
     } else {
       if (expMax > 5 || expMax < 0) {
         sz = 7;
@@ -378,6 +393,11 @@ std::ostream& print(
 
   fmt::print(stream, " ]");
   return stream;
+}
+
+// API to control scientific notation
+void set_printoption_sci_mode(bool enabled) {
+  internal::print_sci_mode() = enabled;
 }
 
 } // namespace at

@@ -14,6 +14,7 @@
 #include <torch/nested.h>
 #include <torch/nn.h>
 #include <torch/optim.h>
+#include <torch/print.h>
 #include <torch/serialize.h>
 #include <torch/sparse.h>
 #include <torch/special.h>
