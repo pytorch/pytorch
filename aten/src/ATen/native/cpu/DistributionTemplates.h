@@ -299,9 +299,13 @@ void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG gene
     using opmath_t = at::opmath_type<scalar_t>;
     auto from = static_cast<opmath_t>(from_);
     auto to = static_cast<opmath_t>(to_);
+    auto to_scalar = static_cast<scalar_t>(to_);
+    auto from_scalar = static_cast<scalar_t>(from_);
     at::uniform_real_distribution<opmath_t> uniform(from, to);
-    cpu_serial_kernel(iter, [&uniform, generator]() -> scalar_t {
-      return static_cast<scalar_t>(uniform(generator));
+    cpu_serial_kernel(iter, [&uniform, generator, to_scalar, from_scalar]() -> scalar_t {
+      auto value = static_cast<scalar_t>(uniform(generator));
+      // Clamp if the float→scalar_t cast rounded up to the upper bound
+      return value == to_scalar ? from_scalar : value;
     });
   });
 }
