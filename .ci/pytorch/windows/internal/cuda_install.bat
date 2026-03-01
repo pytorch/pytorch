@@ -43,7 +43,7 @@ if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
     set "ARGS=cuda_profiler_api_12.6 thrust_12.6 nvcc_12.6 cuobjdump_12.6 nvprune_12.6 nvprof_12.6 cupti_12.6 cublas_12.6 cublas_dev_12.6 cudart_12.6 cufft_12.6 cufft_dev_12.6 curand_12.6 curand_dev_12.6 cusolver_12.6 cusolver_dev_12.6 cusparse_12.6 cusparse_dev_12.6 npp_12.6 npp_dev_12.6 nvrtc_12.6 nvrtc_dev_12.6 nvml_dev_12.6 nvjitlink_12.6 nvtx_12.6"
 )
 
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.5.0.50_cuda12-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.10.2.21_cuda12-archive
 set CUDNN_LIB_FOLDER="lib"
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
@@ -70,7 +70,7 @@ if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
     set "ARGS=cuda_profiler_api_12.8 thrust_12.8 nvcc_12.8 cuobjdump_12.8 nvprune_12.8 nvprof_12.8 cupti_12.8 cublas_12.8 cublas_dev_12.8 cudart_12.8 cufft_12.8 cufft_dev_12.8 curand_12.8 curand_dev_12.8 cusolver_12.8 cusolver_dev_12.8 cusparse_12.8 cusparse_dev_12.8 npp_12.8 npp_dev_12.8 nvrtc_12.8 nvrtc_dev_12.8 nvml_dev_12.8 nvjitlink_12.8 nvtx_12.8"
 )
 
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.7.0.66_cuda12-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda12-archive
 set CUDNN_LIB_FOLDER="lib"
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
@@ -97,7 +97,7 @@ if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
     set "ARGS=cuda_profiler_api_12.9 thrust_12.9 nvcc_12.9 cuobjdump_12.9 nvprune_12.9 nvprof_12.9 cupti_12.9 cublas_12.9 cublas_dev_12.9 cudart_12.9 cufft_12.9 cufft_dev_12.9 curand_12.9 curand_dev_12.9 cusolver_12.9 cusolver_dev_12.9 cusparse_12.9 cusparse_dev_12.9 npp_12.9 npp_dev_12.9 nvrtc_12.9 nvrtc_dev_12.9 nvml_dev_12.9 nvjitlink_12.9 nvtx_12.9"
 )
 
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.10.2.21_cuda12-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.17.1.4_cuda12-archive
 set CUDNN_LIB_FOLDER="lib"
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (
@@ -124,7 +124,7 @@ if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
     set "ARGS="
 )
 
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.12.0.46_cuda13-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda13-archive
 set CUDNN_LIB_FOLDER="lib"
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 if not exist "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" (

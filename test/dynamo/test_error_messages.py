@@ -1008,7 +1008,7 @@ User code traceback:
     def test_assert_failure_in_generic_ctx_mgr(self, records):
         def fn(x):
             with GenericCtxMgr():
-                assert x is None
+                assert x is None  # noqa: S101
 
         with self.assertRaises(AssertionError):
             torch.compile(fn, backend="eager")(torch.randn(3))
@@ -1036,7 +1036,7 @@ User code traceback:
   File "test_error_messages.py", line N, in test_assert_failure_in_generic_ctx_mgr
     torch.compile(fn, backend="eager")(torch.randn(3))
   File "test_error_messages.py", line N, in fn
-    assert x is None
+    assert x is None  # noqa: S101
 """,
         )
 
@@ -2190,6 +2190,35 @@ Dynamo recompile limit exceeded
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0039.html""",
             )
+
+    @unittest.skipIf(
+        not torch.utils._triton.has_triton()
+        or not hasattr(__import__("triton"), "set_allocator"),
+        "requires triton with set_allocator support",
+    )
+    def test_triton_set_allocator(self):
+        import triton
+
+        def fn(x):
+            triton.set_allocator(lambda size, align, stream: None)
+            return x * 2 + 1
+
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(10)),
+            """\
+triton.set_allocator not supported
+  Explanation: triton.set_allocator is not supported inside torch.compile. It modifies global Triton allocator state and cannot be traced.
+  Hint: Move triton.set_allocator() outside of the torch.compile region (call it before the compiled function).
+
+  Developer debug context: triton.set_allocator called inside compiled region
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4026.html
+
+from user code:
+   File "test_error_messages.py", line N, in fn
+    triton.set_allocator(lambda size, align, stream: None)""",
+        )
 
 
 class NestedGraphBreakLoggingTests(

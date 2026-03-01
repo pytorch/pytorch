@@ -38,6 +38,7 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     nonstrict_trace,
+    override_cudagraphs,
     patch_dynamo_config,
     run,
     set_stance,
@@ -106,6 +107,7 @@ __all__ = [
     "reset",
     "reset_recompile_user_contexts",
     "run",
+    "override_cudagraphs",
     "error_on_graph_break",
     "set_recursion_limit",
     "set_stance",
@@ -164,6 +166,12 @@ def reset() -> None:
 
         # Reset cudagraph trees unconditionally since they are global state
         # not tied to a specific backend instance
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._higher_order_ops.wrap import inductor_code_side_table
+
+        kernel_side_table.reset_table()
+        inductor_code_side_table.reset_table()
+
         if torch.cuda.is_available():
             from torch._inductor.cudagraph_trees import reset_cudagraph_trees
 
