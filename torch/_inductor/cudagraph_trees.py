@@ -2609,7 +2609,16 @@ class CUDAGraphTreeManager:
         stor_stack_trace: dict[int, str | None] = {}
         for node in self.current_node._path_from_root:
             assert node.stack_traces is not None
-            assert len(node.tensor_weakrefs) == len(node.stack_traces)
+            # tensor_weakrefs and stack_traces may differ in length for the
+            # same reason that outputs_weakrefs and stack_traces can differ
+            # (see comment below). Use zip to safely handle length mismatches
+            # rather than asserting.
+            if len(node.tensor_weakrefs) != len(node.stack_traces):
+                log.warning(
+                    "tensor_weakrefs length (%d) != stack_traces length (%d)",
+                    len(node.tensor_weakrefs),
+                    len(node.stack_traces),
+                )
             for t, stack_trace in zip(node.tensor_weakrefs, node.stack_traces):
                 ten = None if t is None else t()
                 if ten is None:

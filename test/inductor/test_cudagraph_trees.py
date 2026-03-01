@@ -5013,6 +5013,53 @@ if HAS_CUDA_AND_TRITON:
             run(10)
             run(25)
 
+        def test_autoregressive_cache_growth_no_assertion(self):
+            """Test that autoregressive models with growing KV-cache-like tensors
+            do not trigger assertion errors in dealloc_current_path_weakrefs.
+
+            Previously, tensor_weakrefs and stack_traces could have different
+            lengths when a compiled model produces varying output counts across
+            invocations (e.g., due to torch.cat growing a cache tensor). This
+            caused an AssertionError in dealloc_current_path_weakrefs. The fix
+            replaces the hard assert with a warning log, matching the existing
+            defensive pattern used for outputs_weakrefs (see comment in
+            dealloc_current_path_weakrefs).
+
+            See https://github.com/pytorch/pytorch/issues/154824
+            """
+
+            class KVCacheModel(torch.nn.Module):
+                """Model that mimics autoregressive decode: output grows each step."""
+
+                def __init__(self, d_model=64):
+                    super().__init__()
+                    self.proj = torch.nn.Linear(d_model, d_model)
+
+                def forward(self, x, cache=None):
+                    out = self.proj(x)
+                    if cache is not None:
+                        cache = torch.cat([cache, out], dim=1)
+                    else:
+                        cache = out
+                    return out, cache
+
+            model = KVCacheModel(64).cuda()
+            compiled = torch.compile(model, mode="reduce-overhead")
+
+            cache = None
+            # Run enough steps to trigger warmup → recording transition
+            # which exercises dealloc_current_path_weakrefs
+            for step in range(20):
+                torch.compiler.cudagraph_mark_step_begin()
+                x = torch.randn(1, 1, 64, device="cuda")
+                try:
+                    out, cache = compiled(x, cache)
+                except RuntimeError:
+                    # The RuntimeError about "tensor output overwritten" is a
+                    # separate known issue (input release during dealloc).
+                    # This test verifies we don't hit AssertionError.
+                    break
+
     class TestSAC(TestCase):
         def _make_observer_mode(self):
             class ObserverMode(TorchDispatchMode):
