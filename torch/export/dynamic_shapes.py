@@ -723,9 +723,11 @@ def _tree_map_with_path(
         raise
 
 
-def _combine_args(f, args, kwargs) -> dict[str, Any]:
+def _combine_args(f, args, kwargs, preserve_order: bool = False) -> dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
+    # the exporter needs to preserve the original order of the arguments
+    # to match the dynamic shapes.
     if isinstance(f, ExportedProgram):
         f = f.module()
 
@@ -735,7 +737,38 @@ def _combine_args(f, args, kwargs) -> dict[str, Any]:
         else inspect.signature(f)
     )
     kwargs = kwargs if kwargs is not None else {}
-    return signature.bind(*args, **kwargs).arguments
+    combined_args = signature.bind(*args, **kwargs).arguments
+    if not preserve_order:
+        return combined_args
+
+    var_position_parameters = [
+        name
+        for name, p in signature.parameters.items()
+        if p.kind == inspect.Parameter.VAR_POSITIONAL
+    ]
+    if var_position_parameters:
+        n_positional_only = max(
+            [
+                i
+                for i, p in enumerate(signature.parameters.values())
+                if p.kind == inspect.Parameter.VAR_POSITIONAL
+            ]
+        )
+        combined_args_traced_order = dict(
+            zip(signature.parameters, args[:n_positional_only])
+        )
+        combined_args_traced_order[var_position_parameters[0]] = tuple(
+            args[n_positional_only:]
+        )
+    else:
+        combined_args_traced_order = dict(zip(signature.parameters, args))
+    for arg in kwargs:
+        if arg in combined_args:
+            combined_args_traced_order[arg] = combined_args[arg]
+    for key in combined_args:
+        if key not in combined_args_traced_order:
+            combined_args_traced_order[key] = combined_args[key]
+    return combined_args_traced_order
 
 
 class ShapesCollection:

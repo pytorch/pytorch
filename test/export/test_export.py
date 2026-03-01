@@ -18455,6 +18455,87 @@ def forward(self, x, y):
             self.assertEqual(eager_result, export_result)
             self.assertEqual(export_result.dtype, expected_dtype)
 
+    def test_mixed_named_and_unnamed_kwargs(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, **kwargs):
+                return x + kwargs["y"]
+
+        kwargs = dict(x=torch.randn((5, 6)), y=torch.randn((1, 6)))
+        model = Model()
+        expected = model(**kwargs)
+        ep = torch.export.export(
+            model,
+            (),
+            kwargs=kwargs,
+            dynamic_shapes={
+                "x": {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
+                "kwargs": {"y": {1: torch.export.Dim.DYNAMIC}},
+            },
+        )
+        # ep.module()(**kwargs): raises NameError: name 'L' is not defined
+        self.assertEqual(kwargs["x"] + kwargs["y"], expected)
+        inputs = [n.name for n in ep.graph.nodes if n.op == "placeholder"]
+        self.assertEqual(["x", "y"], inputs)
+
+    def test_mixed_named_and_unnamed_kwargs_with_args(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, x, **kwargs):
+                return a - x + kwargs["y"] - kwargs["z"]
+
+        args = (torch.randn((5, 6)),)
+        kwargs = dict(
+            x=torch.randn((5, 6)), y=torch.randn((1, 6)), z=torch.randn((1, 6)) + 10
+        )
+        model = Model()
+        expected = model(*args, **kwargs)
+        ep = torch.export.export(
+            model,
+            args,
+            kwargs=kwargs,
+            dynamic_shapes={
+                "a": {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
+                "x": {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
+                "kwargs": {
+                    "y": {1: torch.export.Dim.DYNAMIC},
+                    "z": {1: torch.export.Dim.DYNAMIC},
+                },
+            },
+        )
+        self.assertEqual(args[0] - kwargs["x"] + kwargs["y"] - kwargs["z"], expected)
+        inputs = [n.name for n in ep.graph.nodes if n.op == "placeholder"]
+        self.assertEqual(["a", "x", "y", "z"], inputs)
+
+    def test_mixed_named_and_unnamed_kwargs_with_generic_args(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, *args, **kwargs):
+                return a - args[0] * args[1] + kwargs["y"] - kwargs["z"]
+
+        args = (torch.randn((5, 6)), torch.randn((5, 6)), torch.randn((5, 6)))
+        kwargs = dict(y=torch.randn((1, 6)), z=torch.randn((1, 6)) + 10)
+        model = Model()
+        expected = model(*args, **kwargs)
+        ep = torch.export.export(
+            model,
+            args,
+            kwargs=kwargs,
+            dynamic_shapes={
+                "a": {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
+                "args": (
+                    {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
+                    {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
+                ),
+                "kwargs": {
+                    "y": {1: torch.export.Dim.DYNAMIC},
+                    "z": {1: torch.export.Dim.DYNAMIC},
+                },
+            },
+        )
+        self.assertEqual(
+            args[0] - args[1] * args[2] + kwargs["y"] - kwargs["z"], expected
+        )
+        inputs = [n.name for n in ep.graph.nodes if n.op == "placeholder"]
+        self.assertEqual(["a", "args_0", "args_1", "y", "z"], inputs)
+
 
 if __name__ == "__main__":
     run_tests()
