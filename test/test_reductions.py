@@ -1251,6 +1251,34 @@ class TestReductions(TestCase):
         self._test_minmax_helper(torch.amax, np.amax, device, dtype)
 
     @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.double)
+    def test_aminmax_grad(self, device, dtype):
+        # no dim: reduces over all elements
+        x = torch.randn(3, 4, dtype=dtype, device=device, requires_grad=True)
+        min_val, max_val = torch.aminmax(x)
+        (min_val + max_val).backward()
+        self.assertIsNotNone(x.grad)
+        self.assertEqual(x.grad.shape, x.shape)
+
+        # with dim
+        for dim in range(x.dim()):
+            for keepdim in (False, True):
+                x = torch.randn(3, 4, dtype=dtype, device=device, requires_grad=True)
+                min_val, max_val = torch.aminmax(x, dim=dim, keepdim=keepdim)
+                (min_val.sum() + max_val.sum()).backward()
+                self.assertIsNotNone(x.grad)
+                self.assertEqual(x.grad.shape, x.shape)
+
+        # gradcheck: verifies Jacobian numerically
+        x = torch.randn(3, 4, dtype=dtype, device=device, requires_grad=True)
+        self.assertTrue(torch.autograd.gradcheck(
+            lambda t: torch.aminmax(t), x, eps=1e-3, rtol=1e-3))
+        self.assertTrue(torch.autograd.gradcheck(
+            lambda t: torch.aminmax(t, dim=0, keepdim=True), x, eps=1e-3, rtol=1e-3))
+        self.assertTrue(torch.autograd.gradcheck(
+            lambda t: torch.aminmax(t, dim=1), x, eps=1e-3, rtol=1e-3))
+
+    @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     @dtypesIfXPU(torch.half, torch.float, torch.bfloat16)
