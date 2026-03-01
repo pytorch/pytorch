@@ -255,14 +255,9 @@ def _exec_fft(out, self, out_sizes, dim, *, forward):
     for d in dim:
         is_transformed_dim[d] = True
 
-    # std::partition
-    left, right = [], []
-    for d in dim_permute:
-        if not is_transformed_dim[d]:
-            left.append(d)
-        else:
-            right.append(d)
-    dim_permute = left + right
+    # std::partition + std::copy(dim.begin(), dim.end(), batch_end)
+    left = [d for d in dim_permute if not is_transformed_dim[d]]
+    dim_permute = left + list(dim)
     batch_end = len(left)
 
     self_strides = self.stride()
@@ -300,8 +295,9 @@ def _exec_fft(out, self, out_sizes, dim, *, forward):
 def _sort_dims(self: Tensor, dim: list[int], exclude_last: bool = False):
     sorted_dims = list(dim)
     self_strides = self.stride()
-    sorted_dims[: len(sorted_dims) - int(exclude_last)].sort(
-        key=lambda i: self_strides[i]
+    end = len(sorted_dims) - int(exclude_last)
+    sorted_dims[:end] = sorted(
+        sorted_dims[:end], key=lambda i: self_strides[i], reverse=True
     )
     return sorted_dims
 
@@ -314,6 +310,9 @@ def meta_fft_c2c(self, dim, normalization, forward):
     torch._check(self.dtype.is_complex)
     if not dim:
         return self.clone()
+
+    if device_hint(self) == "cpu" and not torch.backends.mkl.is_available():
+        return self.new_empty(self.size())
 
     sorted_dims = _sort_dims(self, dim)
     out = self.new_empty(self.size())
@@ -384,6 +383,14 @@ def meta_fft_r2c(self, dim, normalization, onesided):
                 output = working_tensor
 
         return output
+
+    elif torch.backends.mkl.is_available():
+        # _fft_r2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
+        sorted_dims = _sort_dims(self, dim, exclude_last=True)
+        output = self.new_empty(
+            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+        )
+        return _exec_fft(output, self, out_sizes, sorted_dims, forward=True)
 
     else:
         return self.new_empty(
@@ -488,7 +495,8 @@ def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int)
                 temp = self.clone(memory_format=torch.contiguous_format)
             return _exec_fft(output, temp, out_sizes, [dim[-1]], forward=False)
 
-    else:
+    elif torch.backends.mkl.is_available():
+        # _fft_c2r_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         input = self
         if len(dim) > 1:
             c2c_dims = dim[:-1]
@@ -499,6 +507,11 @@ def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int)
         out_sizes[dim[-1]] = lastdim
         out = self.new_empty(out_sizes, dtype=toRealValueType(self.dtype))
         return _exec_fft(out, input, out_sizes, dim, forward=False)
+
+    else:
+        out_sizes = list(self.size())
+        out_sizes[dim[-1]] = lastdim
+        return self.new_empty(out_sizes, dtype=toRealValueType(self.dtype))
 
 
 @register_meta(aten.copy_.default)
