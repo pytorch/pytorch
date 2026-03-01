@@ -37,14 +37,14 @@ from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 # Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
     dtype = X.dtype
-    res = ((torch.clamp(torch.round(X.to(torch.float32) * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale)
+    res = ((torch.clamp(torch.round(X.to(torch.float32) * (1.0 / scale)) + zero_point, quant_min, quant_max) - zero_point) * scale)
     return res.to(dtype)
 
 # Reference method for the gradient of the fake quantize operator
 # Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
 def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max):
     dtype = X.dtype
-    Xq = torch.round(X.to(torch.float32) * (1.0 / scale) + zero_point)
+    Xq = torch.round(X.to(torch.float32) * (1.0 / scale)) + zero_point
     mask = (Xq >= quant_min) * (Xq <= quant_max)
     res = torch.zeros_like(dY)
     res[mask] = dY[mask]
