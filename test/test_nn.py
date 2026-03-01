@@ -2909,6 +2909,36 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
             (hx + cx).sum().backward()
 
+    def test_LSTM_cell_input_hidden_dim_mismatch(self):
+        input_size = 5
+        hidden_size = 3
+        input = torch.randn(6, input_size)
+        hx = torch.randn(3, hidden_size)
+        cx = torch.randn(3, hidden_size)
+        lstm = nn.LSTMCell(input_size, hidden_size)
+        with self.assertRaisesRegex(RuntimeError, "same number of dimensions"):
+            for i in range(6):
+                hx, cx = lstm(input[i], (hx, cx))
+
+    def test_LSTM_cell_batch_mismatch(self):
+        input_size, hidden_size = 5, 3
+        x = torch.randn(2, input_size)      # batch=2
+        hx = torch.randn(3, hidden_size)    # batch=3
+        cx = torch.randn(3, hidden_size)
+        lstm = nn.LSTMCell(input_size, hidden_size)
+        with self.assertRaisesRegex(RuntimeError, "same batch size"):
+            lstm(x, (hx, cx))
+
+    def test_LSTM_cell_unbatched_ok(self):
+        input_size, hidden_size = 5, 3
+        x = torch.randn(input_size)
+        hx = torch.randn(hidden_size)
+        cx = torch.randn(hidden_size)
+        lstm = nn.LSTMCell(input_size, hidden_size)
+        hx2, cx2 = lstm(x, (hx, cx))
+        self.assertEqual(hx2.shape, (hidden_size,))
+        self.assertEqual(cx2.shape, (hidden_size,))
+
     def test_LSTM_cell_forward_input_size(self):
         input = torch.randn(3, 11)
         hx = torch.randn(3, 20)
