@@ -428,12 +428,13 @@ class _RemoteModule(nn.Module):
     def modules(self) -> Iterator[Module]:  # type: ignore[return]
         _raise_not_supported(self.modules.__name__)
 
-    def named_modules(
+    def named_modules(  # type: ignore[return]
         self,
         memo: set[Module] | None = None,
         prefix: str = "",
         remove_duplicate: bool = True,
-    ):
+        # pyrefly: ignore [bad-return]
+    ) -> Iterator[tuple[str, Module]]:
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self, mode: bool = True) -> Self:

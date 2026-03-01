@@ -2838,7 +2838,7 @@ class Module:
         memo: set["Module"] | None = None,
         prefix: str = "",
         remove_duplicate: bool = True,
-    ):
+    ) -> Iterator[tuple[str, "Module"]]:
         r"""Return an iterator over all modules in the network, yielding both the name of the module as well as the module itself.
 
         Args:
