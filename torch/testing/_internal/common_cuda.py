@@ -428,6 +428,26 @@ def xfailIfSM120OrLater(func):
 def xfailIfDistributedNotSupported(func):
     return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
 
+
+def xfailIfSM89OrLaterOnWindows(reason="Expected failure on Windows with CUDA SM >= 8.9"):
+    """Mark the test as expected failure when on Windows and CUDA SM >= 8.9."""
+    def decorator(test_fn):
+        return test_fn if not (IS_WINDOWS and SM89OrLater) else unittest.expectedFailure(test_fn)
+    return decorator
+
+
+def skipIfSM89OrLaterOnWindows(reason="Skipped on Windows with CUDA SM >= 8.9"):
+    """Skip the test when on Windows and CUDA SM >= 8.9."""
+    def decorator(test_fn):
+        @functools.wraps(test_fn)
+        def wrapped(*args, **kwargs):
+            if IS_WINDOWS and SM89OrLater:
+                raise unittest.SkipTest(reason)
+            return test_fn(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
 # When using nvcc from the CUDA toolkit its versuib must be at least the one from ptxas bundled with Triton
 TRITON_PTXAS_VERSION = (12, 8)
 requires_triton_ptxas_compat = unittest.skipIf(not torch.version.xpu

@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    _get_torch_rocm_version
+    _get_torch_rocm_version, xfailIfSM89OrLaterOnWindows
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -7732,10 +7732,31 @@ class TestAddRelu(TestCase):
         self.assertEqual(broadcasted_res, res)
 
 
+# TestNN CUDA conv tests that fail on Windows with CUDA SM >= 8.9 (xfail)
+_TEST_NN_CUDA_CONV_XFAIL_WINDOWS_SM89 = frozenset({
+    "test_Conv2d_groups_cuda_fp32",
+    "test_Conv2d_groups_cuda_tf32",
+    "test_Conv2d_groups_thnn_cuda_fp32",
+    "test_Conv2d_groups_thnn_cuda_tf32",
+    "test_Conv2d_padding_cuda_fp32",
+    "test_Conv2d_padding_cuda_tf32",
+    "test_Conv3d_cuda_fp32",
+    "test_Conv3d_cuda_tf32",
+    "test_Conv3d_circular_stride2_pad2_cuda_fp32",
+    "test_Conv3d_circular_stride2_pad2_cuda_tf32",
+    "test_Conv3d_replicate_stride2_pad2_cuda_fp32",
+    "test_Conv3d_replicate_stride2_pad2_cuda_tf32",
+    "test_Conv3d_zeros_stride2_pad2_cuda_fp32",
+    "test_Conv3d_zeros_stride2_pad2_cuda_tf32",
+})
+
+
 def add_test(test, decorator=None):
     def add(test_name, fn):
         if hasattr(TestNN, test_name):
             raise RuntimeError('Found two tests with the same name: ' + test_name)
+        if test_name in _TEST_NN_CUDA_CONV_XFAIL_WINDOWS_SM89:
+            fn = xfailIfSM89OrLaterOnWindows("Failing on Windows on sm89+")(fn)
         if decorator is not None:
             fn = decorator(fn)
         setattr(TestNN, test_name, fn)

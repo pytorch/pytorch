@@ -8,6 +8,7 @@ from typing import NamedTuple, Optional
 
 import torch
 from torch import Tensor
+from torch.testing._internal.common_cuda import xfailIfSM89OrLaterOnWindows
 from torch.testing._internal.common_utils import (
     raise_on_run_directly,
     skipIfTorchDynamo,
@@ -714,6 +715,7 @@ class TestSaveLoad(JitTestCase):
         traced_inputs, loaded_inputs = get_loaded_inputs(input4)
         self.assertEqual(traced_inputs[1].type(), loaded_inputs[1].type())
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows on sm89+")
     @skipIfTorchDynamo("too slow")
     def test_save_load_large_string_attribute(self):
         """

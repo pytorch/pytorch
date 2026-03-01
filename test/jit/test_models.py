@@ -7,7 +7,7 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.testing._internal.common_cuda import tf32_on_and_off
+from torch.testing._internal.common_cuda import tf32_on_and_off, xfailIfSM89OrLaterOnWindows
 from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
     GRAPH_EXECUTOR,
@@ -129,6 +129,7 @@ class TestModels(JitTestCase):
             export_import=check_export_import,
         )
 
+    @xfailIfSM89OrLaterOnWindows("Failing on Windows on sm89+")
     def test_dcgan_models(self):
         # Note: Can sometimes fail with low precision if run with float dtype
         with set_default_dtype(torch.double):

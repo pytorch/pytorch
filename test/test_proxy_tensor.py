@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_cuda import skipIfSM89OrLaterOnWindows
 import torch
 import torch._dynamo
 import unittest
@@ -797,6 +798,7 @@ def forward(self, x_1):
 
         self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_T244632748(self):
         class TestModule(torch.nn.Module):

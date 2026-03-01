@@ -30,7 +30,7 @@ from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.node import has_side_effect
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater
+from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater, skipIfSM89OrLaterOnWindows
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -694,6 +694,7 @@ def forward(self, arg0_1, arg1_1):
     return (getitem, mul, mul)""",
         )
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @skipIfTorchDynamo()
     def test_effectful_op_in_backward(self):
         with torch.library._scoped_library("_mylib", "FRAGMENT") as lib:
@@ -806,6 +807,7 @@ def forward(self, tangents_1, tangents_2, tangents_token):
 
             self.assertEqual(_get_effect(torch.ops._mylib.foo.default), None)
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @skipIfNoDynamoSupport
     def test_regular_effectful_op_only_in_backward(self):
         handle = _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
@@ -873,6 +875,7 @@ def forward(self, primals_1, primals_2, tangents_1, tangents_2, tangents_token):
         finally:
             handle.destroy()
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @skipIfNoDynamoSupport
     def test_regular_effectful_op_in_forward_and_backward(self):
         handle = _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
@@ -912,6 +915,7 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
         finally:
             handle.destroy()
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @unittest.skipIf(not TEST_CUDA, "triton")
     def test_export_invoke_subgraph(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:

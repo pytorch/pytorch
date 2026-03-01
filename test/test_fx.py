@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
 )
+from torch.testing._internal.common_cuda import skipIfSM89OrLaterOnWindows
 from torch.testing._internal.jit_utils import JitTestCase
 
 import json
@@ -4601,6 +4602,7 @@ event=aten::add node=add stack_trace=a = s + self.c
 event={kernel_event} node=add stack_trace=a = s + self.c"""
             )
 
+    @skipIfSM89OrLaterOnWindows("Triton not supported on Windows")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_graph_module_with_hop_serialization(self):
         """

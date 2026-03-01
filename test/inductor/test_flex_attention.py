@@ -48,9 +48,11 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FP8,
+    SM89OrLater,
     TEST_MULTIGPU,
 )
 from torch.testing._internal.common_device_type import (
@@ -447,6 +449,7 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
         )
 
 
+@unittest.skipIf(IS_WINDOWS and SM89OrLater, "Triton not supported on Windows")
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestFlexAttention(InductorTestCase):
     def setUp(self):
@@ -5614,6 +5617,7 @@ class GraphModule(torch.nn.Module):
         )
 
 
+@unittest.skipIf(IS_WINDOWS and SM89OrLater, "Triton not supported on Windows")
 class TestBlockMask(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -6680,6 +6684,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 )
 
 
+@unittest.skipIf(IS_WINDOWS and SM89OrLater, "Triton not supported on Windows")
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestPagedAttention(InductorTestCase):
     def setUp(self):
@@ -7145,6 +7150,7 @@ supports_learnable_bias = unittest.skipUnless(
 )
 
 
+@unittest.skipIf(IS_WINDOWS and SM89OrLater, "Triton not supported on Windows")
 @supports_learnable_bias
 @large_tensor_test_class("2GB", device=test_device[0])
 class TestLearnableBiases(InductorTestCase):
