@@ -1827,12 +1827,20 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.WEAKREF_ALIVE)
         handler = self._get_handler("WEAKREF_ALIVE")
 
-        obj = object()
-        expected = handler.get_metadata_fn(guard, obj)
+        # The guard spec receives the dereferenced value (ref()), not the
+        # weakref itself. A live referent resolves to the object; a dead
+        # one resolves to None.
+        class C:
+            pass
+
+        obj = C()
+        ref = weakref.ref(obj)
+        expected = handler.get_metadata_fn(guard, ref())
         self.assertIsNone(expected)
-        self.assertTrue(handler.eval_fn(obj, expected))
-        self.assertTrue(handler.eval_fn(42, expected))
-        self.assertFalse(handler.eval_fn(None, expected))
+        self.assertTrue(handler.eval_fn(ref(), expected))
+        # Delete the referent — weakref() now returns None
+        del obj
+        self.assertFalse(handler.eval_fn(ref(), expected))
 
     def test_set_contains(self):
         from torch._dynamo.guards import GuardBuilder

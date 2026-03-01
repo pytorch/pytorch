@@ -2147,7 +2147,7 @@ class GuardBuilder(GuardBuilderBase):
 
     # Dict versions change on any mutation, so a version captured during one
     # trace is meaningless for a later subgraph reuse check.
-    @skip_guard_check_spec
+    @unsupported_guard_check_spec
     def DICT_VERSION(self, guard: Guard) -> None:
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
@@ -2366,6 +2366,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def DUAL_LEVEL(self, guard: Guard) -> None:
         # Invalidate dual level if current dual level is different than the one
@@ -2380,6 +2381,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def FUNCTORCH_STACK_MATCH(self, guard: Guard) -> None:
         # Invalidate functorch code if current level is different than
@@ -2400,6 +2402,7 @@ class GuardBuilder(GuardBuilderBase):
             fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
+    # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def AUTOGRAD_SAVED_TENSORS_HOOKS(self, guard: Guard) -> None:
         get_hooks = torch._functorch._aot_autograd.utils.top_saved_tensors_hooks
@@ -2674,6 +2677,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         self.id_match_unchecked(guard)
 
+    # Delegates to ID_MATCH which already has a spec.
     @skip_guard_check_spec
     def MODULE_MATCH(self, guard: Guard) -> None:
         """Equals ID_MATCH on modules - better readability than directly calling ID_MATCH"""
@@ -2700,6 +2704,7 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self.FUNCTION_MATCH(guard)
 
+    # Delegates to ID_MATCH which already has a spec.
     @skip_guard_check_spec
     def BUILTIN_MATCH(self, guard: Guard) -> None:
         if self.save_guards:
@@ -2794,6 +2799,8 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    # Multi-source guard (two inputs aliasing) — not expressible as a
+    # single source → value check.
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     @skip_guard_check_spec
     def DUPLICATE_INPUT(self, guard: Guard, source_b: Source) -> None:
@@ -2910,18 +2917,22 @@ class GuardBuilder(GuardBuilderBase):
             return
         self.SEQUENCE_LENGTH(guard)
 
+    # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def GRAD_MODE(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
 
+    # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def DETERMINISTIC_ALGORITHMS(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
 
+    # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def FSDP_TRAINING_STATE(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
 
+    # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def GLOBAL_STATE(self, guard: Guard) -> None:
         output_graph = self.check_fn_manager.output_graph
@@ -2937,6 +2948,7 @@ class GuardBuilder(GuardBuilderBase):
             global_state, code, guard.user_stack
         )
 
+    # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
         assert self.check_fn_manager.torch_function_mode_stack is not None
@@ -2951,6 +2963,7 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    # Global state guard — not source-specific, checked separately at runtime.
     @skip_guard_check_spec
     def DEFAULT_DEVICE(self, guard: Guard) -> None:
         """Guard on CURRENT_DEVICE per torch.utils._device"""
