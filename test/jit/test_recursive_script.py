@@ -36,7 +36,7 @@ class TestRecursiveScript(JitTestCase):
                 self.x = None
 
             def forward(self):
-                assert self.x is None  # noqa: S101
+                assert self.x is None
 
         m = torch.jit.script(M())
         self.checkModule(M(), ())

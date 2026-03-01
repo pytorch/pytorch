@@ -266,11 +266,9 @@ class TestTorchbind(JitTestCase):
         inst = FooBar1234()
         scripted = torch.jit.script(inst)
         eic = self.getExportImportCopy(scripted)
-        if eic() != "deserialized":
-            raise AssertionError(f"Expected 'deserialized', got {eic()!r}")
+        assert eic() == "deserialized"
         for expected in ["deserialized", "was", "i"]:
-            if eic.f.pop() != expected:
-                raise AssertionError(f"Expected {expected!r}, got unexpected value")
+            assert eic.f.pop() == expected
 
     def test_torchbind_getstate(self):
         class FooBar4321(torch.nn.Module):
@@ -289,11 +287,9 @@ class TestTorchbind(JitTestCase):
         # values at instantiation in the test with some transformation, but
         # because it seems we serialize/deserialize multiple times, that
         # transformation isn't as you would it expect it to be.
-        if eic() != 7:
-            raise AssertionError(f"Expected 7, got {eic()!r}")
+        assert eic() == 7
         for expected in [7, 3, 3, 1]:
-            if eic.f.pop() != expected:
-                raise AssertionError(f"Expected {expected!r}, got unexpected value")
+            assert eic.f.pop() == expected
 
     def test_torchbind_deepcopy(self):
         class FooBar4321(torch.nn.Module):
@@ -307,11 +303,9 @@ class TestTorchbind(JitTestCase):
         inst = FooBar4321()
         scripted = torch.jit.script(inst)
         copied = copy.deepcopy(scripted)
-        if copied.forward() != 7:
-            raise AssertionError(f"Expected 7, got {copied.forward()!r}")
+        assert copied.forward() == 7
         for expected in [7, 3, 3, 1]:
-            if copied.f.pop() != expected:
-                raise AssertionError(f"Expected {expected!r}, got unexpected value")
+            assert copied.f.pop() == expected
 
     def test_torchbind_python_deepcopy(self):
         class FooBar4321(torch.nn.Module):
@@ -324,11 +318,9 @@ class TestTorchbind(JitTestCase):
 
         inst = FooBar4321()
         copied = copy.deepcopy(inst)
-        if copied() != 7:
-            raise AssertionError(f"Expected 7, got {copied()!r}")
+        assert copied() == 7
         for expected in [7, 3, 3, 1]:
-            if copied.f.pop() != expected:
-                raise AssertionError(f"Expected {expected!r}, got unexpected value")
+            assert copied.f.pop() == expected
 
     def test_torchbind_tracing(self):
         class TryTracing(torch.nn.Module):

@@ -85,10 +85,7 @@ class TestPythonIr(JitTestCase):
         for mul in mul_constant_int:
             with g.insert_point_guard(mul):
                 outputs = g.insertGraph(unrolled_mul.graph, list(mul.inputs()))
-                if len(outputs) != len(list(mul.outputs())):
-                    raise AssertionError(
-                        f"Expected {len(list(mul.outputs()))} outputs, got {len(outputs)}"
-                    )
+                assert len(outputs) == len(list(mul.outputs()))
                 for new_out, old_out in zip(outputs, g.outputs()):
                     old_out.replaceAllUsesWith(new_out)
                 mul.destroy()

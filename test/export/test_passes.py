@@ -576,8 +576,7 @@ class TestPasses(TestCase):
 
         for aten_schema in aten_schemas:
             val = aten_schema.split(".")
-            if len(val) > 2:
-                raise AssertionError(f"Expected at most 2 parts, got {len(val)}: {val}")
+            assert len(val) <= 2
             name = ""
             overload = ""
             if len(val) == 1:

@@ -574,10 +574,7 @@ def forward(self, x):
         )
 
         range_constraints = list(ep.range_constraints.keys())
-        if len(range_constraints) != 1:
-            raise AssertionError(
-                f"Expected 1 range constraint, got {len(range_constraints)}"
-            )
+        assert len(range_constraints) == 1
         symint = range_constraints[0]
 
         import sympy
@@ -657,10 +654,7 @@ def forward(self, x):
             args = (torch.randn(3, device=device), torch.randn(3, device=device))
             ep = torch.export.export(m, args=args)
             ep = ep.run_decompositions(decompose_custom_triton_ops=False)
-            if not torch.allclose(m(*args), ep.module()(*args)):
-                raise AssertionError(
-                    "Exported model output does not match eager output"
-                )
+            assert torch.allclose(m(*args), ep.module()(*args))
 
             serialized = ExportedProgramSerializer().serialize(ep)
 
@@ -780,8 +774,7 @@ def forward(self, x):
 
         ep = torch.export.export(m, args=args)
         ep = ep.run_decompositions(decompose_custom_triton_ops=False)
-        if not torch.allclose(eager_result, ep.module()(*args)):
-            raise AssertionError("Exported model output does not match eager result")
+        assert torch.allclose(eager_result, ep.module()(*args))
 
         # This should not raise - constexpr matching should work for bool values
         serialized = ExportedProgramSerializer().serialize(ep)
@@ -1492,7 +1485,7 @@ class TestDeserialize(TestCase):
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
-                assert x.size(0) in y  # noqa: S101
+                assert x.size(0) in y
                 return x + y
 
         f = Module()
@@ -2234,12 +2227,8 @@ class TestSerializeCustomClass(TestCase):
         serialized_vals = serialize(ep)
 
         ep_str = serialized_vals.exported_program.decode("utf-8")
-        if "class_fqn" not in ep_str:
-            raise AssertionError("'class_fqn' not found in serialized output")
-        if custom_obj._type().qualified_name() not in ep_str:
-            raise AssertionError(
-                f"'{custom_obj._type().qualified_name()}' not found in serialized output"
-            )
+        assert "class_fqn" in ep_str
+        assert custom_obj._type().qualified_name() in ep_str
 
         deserialized_ep = deserialize(serialized_vals)
 

@@ -67,13 +67,13 @@ class TestPackage(TestCase):
         x3 = torch.randn(5, 2)
 
         def spec(self, x):
-            assert x.shape[0] == 3  # noqa: S101
+            assert x.shape[0] == 3
 
         def spec2(self, x):
-            assert x.shape[0] == 4  # noqa: S101
+            assert x.shape[0] == 4
 
         def spec3(self, x):
-            assert x.shape[0] >= 5  # noqa: S101
+            assert x.shape[0] >= 5
             return {"x": (Dim("batch", min=5), Dim.STATIC)}
 
         package = _ExportPackage()

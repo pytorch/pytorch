@@ -27,8 +27,7 @@ from torch.testing._internal.jit_utils import (
 )
 
 
-if GRAPH_EXECUTOR is None:
-    raise AssertionError("GRAPH_EXECUTOR is not set")
+assert GRAPH_EXECUTOR is not None
 
 
 @unittest.skipIf(
@@ -224,21 +223,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             output_ref = func(input0, input1)
             for _ in range(2):
                 output = jit_f(input0, input1)
-                if output_ref[0].requires_grad != output[0].requires_grad:
-                    raise AssertionError(
-                        f"requires_grad mismatch for output[0]: "
-                        f"{output_ref[0].requires_grad} vs {output[0].requires_grad}"
-                    )
-                if output_ref[1][0].requires_grad != output[1][0].requires_grad:
-                    raise AssertionError(
-                        f"requires_grad mismatch for output[1][0]: "
-                        f"{output_ref[1][0].requires_grad} vs {output[1][0].requires_grad}"
-                    )
-                if output_ref[1][1].requires_grad != output[1][1].requires_grad:
-                    raise AssertionError(
-                        f"requires_grad mismatch for output[1][1]: "
-                        f"{output_ref[1][1].requires_grad} vs {output[1][1].requires_grad}"
-                    )
+                assert output_ref[0].requires_grad == output[0].requires_grad
+                assert output_ref[1][0].requires_grad == output[1][0].requires_grad
+                assert output_ref[1][1].requires_grad == output[1][1].requires_grad
 
     @unittest.skip(
         "disable until we property handle tensor lists with undefined gradients"

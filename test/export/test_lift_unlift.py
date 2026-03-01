@@ -119,11 +119,9 @@ class GraphBuilder:
     # NOTE: does not handle non-user-outputs atm
     def gen_graph_signature(self) -> ExportGraphSignature:
         output = [n for n in self.graph.nodes if n.op == "output"]
-        if len(output) != 1:
-            raise AssertionError(f"Expected 1 output node, got {len(output)}")
+        assert len(output) == 1
         output = output[0]
-        if len(output.args) != 1:
-            raise AssertionError(f"multiple outputs NYI, got {len(output.args)}")
+        assert len(output.args) == 1, "multiple outputs NYI"
 
         return ExportGraphSignature(
             input_specs=self.create_input_specs(),
