@@ -1803,10 +1803,24 @@ class Module:
                 full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
 
             if _global_forward_pre_hooks or self._forward_pre_hooks:
-                for hook_id, hook in (
-                    *_global_forward_pre_hooks.items(),
-                    *self._forward_pre_hooks.items(),
-                ):
+                for hook_id, hook in _global_forward_pre_hooks.items():
+                    if hook_id in _global_forward_hooks_with_kwargs:
+                        args_kwargs_result = hook(self, args, kwargs)  # type: ignore[misc]
+                        if args_kwargs_result is not None:
+                            if isinstance(args_kwargs_result, tuple) and len(args_kwargs_result) == 2:
+                                args, kwargs = args_kwargs_result
+                            else:
+                                raise RuntimeError(
+                                    "forward pre-hook must return None or a tuple "
+                                    f"of (new_args, new_kwargs), but got {args_kwargs_result}."
+                                )
+                    else:
+                        args_result = hook(self, args)
+                        if args_result is not None:
+                            if not isinstance(args_result, tuple):
+                                args_result = (args_result,)
+                            args = args_result
+                for hook_id, hook in self._forward_pre_hooks.items():
                     if hook_id in self._forward_pre_hooks_with_kwargs:
                         args_kwargs_result = hook(self, args, kwargs)  # type: ignore[misc]
                         if args_kwargs_result is not None:
@@ -1831,15 +1845,22 @@ class Module:
 
             result = forward_call(*args, **kwargs)
             if _global_forward_hooks or self._forward_hooks:
-                for hook_id, hook in (
-                    *_global_forward_hooks.items(),
-                    *self._forward_hooks.items(),
-                ):
-                    # mark that always called hook is run
-                    if hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called:
+                for hook_id, hook in _global_forward_hooks.items():
+                    if hook_id in _global_forward_hooks_always_called:
                         called_always_called_hooks.add(hook_id)
 
-                    if hook_id in self._forward_hooks_with_kwargs or hook_id in _global_forward_hooks_with_kwargs:
+                    if hook_id in _global_forward_hooks_with_kwargs:
+                        hook_result = hook(self, args, kwargs, result)
+                    else:
+                        hook_result = hook(self, args, result)
+
+                    if hook_result is not None:
+                        result = hook_result
+                for hook_id, hook in self._forward_hooks.items():
+                    if hook_id in self._forward_hooks_always_called:
+                        called_always_called_hooks.add(hook_id)
+
+                    if hook_id in self._forward_hooks_with_kwargs:
                         hook_result = hook(self, args, kwargs, result)
                     else:
                         hook_result = hook(self, args, result)
