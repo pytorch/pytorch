@@ -62,6 +62,17 @@ scaled_dot_product_attention.
 
     scaled_dot_product_attention
 
+Rotary Position Embedding (RoPE)
+--------------------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    rotary_embedding_frequencies
+    apply_rotary_emb
+    rotate_half
+
 Non-linear activation functions
 -------------------------------
 

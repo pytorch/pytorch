@@ -5099,6 +5099,87 @@ class TestAttnBias(NNTestCase):
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
+class TestRoPE(NNTestCase):
+    """Tests for rotary position embedding (F.apply_rotary_emb)."""
+
+    @parametrize("seq_dim", [1, 2])
+    @parametrize("interleaved", [False, True])
+    def test_rope_shape(self, device, seq_dim: int, interleaved: bool):
+        batch, seq, heads, dim = 2, 128, 8, 64
+        if seq_dim == 1:
+            q = torch.randn(batch, seq, heads, dim, device=device)
+            k = torch.randn(batch, seq, heads, dim, device=device)
+        else:
+            q = torch.randn(batch, heads, seq, dim, device=device)
+            k = torch.randn(batch, heads, seq, dim, device=device)
+        cos, sin = F.rotary_embedding_frequencies(dim, seq, device=device)
+        q_rot, k_rot = F.apply_rotary_emb(q, k, cos, sin, seq_dim=seq_dim, interleaved=interleaved)
+        self.assertEqual(q_rot.shape, q.shape)
+        self.assertEqual(k_rot.shape, k.shape)
+
+    def test_rope_frequencies_odd_dim_error(self, device):
+        with self.assertRaises(ValueError):
+            F.rotary_embedding_frequencies(63, 128, device=device)
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_rope_numerical_correctness(self, device, dtype: torch.dtype):
+        """Compare against a self-contained reference (HuggingFace-style)."""
+        batch, seq, heads, dim = 2, 64, 8, 128
+        atol = {torch.float32: 1e-5, torch.float16: 1e-3, torch.bfloat16: 1e-2}[dtype]
+
+        q = torch.randn(batch, heads, seq, dim, device=device, dtype=dtype)
+        k = torch.randn(batch, heads, seq, dim, device=device, dtype=dtype)
+
+        # Reference implementation (HuggingFace LlamaRotaryEmbedding style)
+        inv_freq = 1.0 / (10000.0 ** (torch.arange(0, dim, 2, device=device, dtype=torch.float32) / dim))
+        t = torch.arange(seq, device=device, dtype=torch.float32)
+        freqs = torch.outer(t, inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        cos_ref, sin_ref = emb.cos().to(dtype), emb.sin().to(dtype)
+
+        def rotate_half_ref(x):
+            x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2:]
+            return torch.cat((-x2, x1), dim=-1)
+
+        cos_b = cos_ref.unsqueeze(0).unsqueeze(0)
+        sin_b = sin_ref.unsqueeze(0).unsqueeze(0)
+        q_ref = q * cos_b + rotate_half_ref(q) * sin_b
+        k_ref = k * cos_b + rotate_half_ref(k) * sin_b
+
+        # Our implementation
+        cos, sin = F.rotary_embedding_frequencies(dim, seq, device=device, dtype=dtype)
+        q_rot, k_rot = F.apply_rotary_emb(q, k, cos, sin, seq_dim=2)
+
+        self.assertEqual(q_rot, q_ref, atol=atol, rtol=0)
+        self.assertEqual(k_rot, k_ref, atol=atol, rtol=0)
+
+    @expectedFailureMPS  # No double support
+    @skipIfTorchDynamo("gradcheck not compatible with dynamo")
+    def test_rope_gradcheck(self, device):
+        batch, seq, heads, dim = 1, 4, 2, 8
+        q = torch.randn(batch, seq, heads, dim, device=device, dtype=torch.float64, requires_grad=True)
+        k = torch.randn(batch, seq, heads, dim, device=device, dtype=torch.float64, requires_grad=True)
+        cos, sin = F.rotary_embedding_frequencies(dim, seq, device=device, dtype=torch.float64)
+
+        def fn(q, k):
+            return torch.stack(F.apply_rotary_emb(q, k, cos, sin))
+
+        self.assertTrue(gradcheck(fn, (q, k)))
+
+    def test_rope_norm_preservation(self, device):
+        """RoPE is a rotation, so it should preserve vector norms."""
+        batch, seq, heads, dim = 2, 16, 4, 32
+        q = torch.randn(batch, seq, heads, dim, device=device)
+        k = torch.randn(batch, seq, heads, dim, device=device)
+        cos, sin = F.rotary_embedding_frequencies(dim, seq, device=device)
+
+        q_rot, k_rot = F.apply_rotary_emb(q, k, cos, sin)
+
+        q_norms = q.norm(dim=-1)
+        q_rot_norms = q_rot.norm(dim=-1)
+        self.assertEqual(q_norms, q_rot_norms, atol=1e-5, rtol=0)
+
+
 if NOTEST_CPU:
     device_types = ("cuda", "mps", "mtia")
 else:
@@ -5114,6 +5195,7 @@ instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestSDPACpuOnly, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
+instantiate_device_type_tests(TestRoPE, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()

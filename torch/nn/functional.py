@@ -6123,6 +6123,196 @@ scaled_dot_product_attention = _add_docstr(
 )
 
 
+#
+# Rotary Position Embedding (RoPE)
+#
+
+
+def rotary_embedding_frequencies(
+    dim: int,
+    end: int,
+    theta: float = 10000.0,
+    *,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None,
+) -> tuple[Tensor, Tensor]:
+    r"""Precompute cosine and sine frequencies for rotary position embedding.
+
+    This computes the base frequencies for RoPE. For custom scaling methods
+    (YaRN, LLaMA3, NTK, etc.), users should compute their own cos/sin
+    and pass them to :func:`apply_rotary_emb` directly.
+
+    Args:
+        dim: Head dimension (must be even)
+        end: Maximum sequence length
+        theta: Base for frequency computation (default: 10000.0)
+        device: Device for output tensors
+        dtype: Output dtype (default: float32 for precision)
+
+    Returns:
+        Tuple of (cos, sin) tensors of shape ``[end, dim]``
+
+    Example::
+
+        >>> cos, sin = F.rotary_embedding_frequencies(dim=64, end=2048)
+        >>> cos.shape
+        torch.Size([2048, 64])
+        >>> # Apply to query/key
+        >>> q = torch.randn(2, 128, 8, 64)
+        >>> k = torch.randn(2, 128, 8, 64)
+        >>> q_rot, k_rot = F.apply_rotary_emb(q, k, cos[:128], sin[:128])
+
+    .. note::
+        The frequencies are computed using NeoX-style layout where the
+        cos/sin values are duplicated: ``[cos(f0), cos(f1), ..., cos(f0), cos(f1), ...]``
+        This supports the rotation ``x * cos + rotate_half(x) * sin``.
+
+    .. note::
+        This function uses float32 internally for numerical precision,
+        then casts to the requested dtype.
+    """
+    if dim % 2 != 0:
+        raise ValueError(f"dim must be even, got {dim}")
+    if dtype is None:
+        dtype = torch.float32
+
+    # Compute inverse frequencies: 1 / (theta^(2i/dim)) for i = 0, 1, ..., dim/2-1
+    inv_freq = 1.0 / (
+        theta ** (torch.arange(0, dim, 2, device=device, dtype=torch.float32) / dim)
+    )
+    # Compute positions
+    t = torch.arange(end, device=device, dtype=torch.float32)
+    # Compute frequencies: outer product of positions and inverse frequencies
+    freqs = torch.outer(t, inv_freq)  # [end, dim/2]
+    # Duplicate for NeoX-style: [end, dim]
+    cos = torch.cat([freqs.cos(), freqs.cos()], dim=-1).to(dtype)
+    sin = torch.cat([freqs.sin(), freqs.sin()], dim=-1).to(dtype)
+    return cos, sin
+
+
+def rotate_half(
+    x: Tensor,
+    interleaved: bool = False,
+) -> Tensor:
+    r"""Rotate half of the dimensions of the input tensor.
+
+    This is a building block for rotary position embeddings. It rearranges
+    elements to enable the rotation formula: ``x * cos + rotate_half(x) * sin``
+
+    Args:
+        x: Input tensor with shape ``[..., dim]`` where dim is even
+        interleaved: Rotation style.
+
+            - ``False`` (default): NeoX-style. Splits tensor in half and swaps.
+              Maps ``[x0, x1, ..., x_{d/2-1}, x_{d/2}, ..., x_{d-1}]``
+              to ``[-x_{d/2}, ..., -x_{d-1}, x0, ..., x_{d/2-1}]``.
+            - ``True``: GPT-J-style. Rotates adjacent pairs.
+              Maps ``[x0, x1, x2, x3, ...]`` to ``[-x1, x0, -x3, x2, ...]``.
+
+    Returns:
+        Rotated tensor with same shape as input
+
+    Example::
+
+        >>> x = torch.tensor([1., 2., 3., 4.])
+        >>> F.rotate_half(x, interleaved=False)  # NeoX style
+        tensor([-3., -4.,  1.,  2.])
+        >>> F.rotate_half(x, interleaved=True)   # GPT-J style
+        tensor([-2.,  1., -4.,  3.])
+    """
+    if interleaved:
+        x1 = x[..., ::2]
+        x2 = x[..., 1::2]
+        return torch.stack((-x2, x1), dim=-1).flatten(-2)
+    else:
+        x1, x2 = x.chunk(2, dim=-1)
+        return torch.cat((-x2, x1), dim=-1)
+
+
+def apply_rotary_emb(
+    query: Tensor,
+    key: Tensor,
+    cos: Tensor,
+    sin: Tensor,
+    seq_dim: int = 1,
+    interleaved: bool = False,
+) -> tuple[Tensor, Tensor]:
+    r"""Apply rotary position embedding to query and key tensors.
+
+    Implements the rotation: ``x_out = x * cos + rotate_half(x) * sin``
+
+    This operation is designed to be fusable by ``torch.compile`` with Inductor,
+    generating efficient CUDA kernels without requiring custom implementations.
+
+    Args:
+        query: Query tensor with shape depending on ``seq_dim``:
+            - ``seq_dim=1``: ``[batch, seq_len, num_heads, head_dim]`` (BSHD)
+            - ``seq_dim=2``: ``[batch, num_heads, seq_len, head_dim]`` (BHSD)
+        key: Key tensor with same layout as query
+        cos: Cosine frequencies with shape ``[seq_len, head_dim]``
+        sin: Sine frequencies with shape ``[seq_len, head_dim]``
+        seq_dim: Which dimension is the sequence dimension.
+            - ``1`` (default): BSHD layout
+            - ``2``: BHSD layout
+        interleaved: Use GPT-J style rotation (default: False for NeoX style)
+
+    Returns:
+        Tuple of (query_rotated, key_rotated) with same shapes as inputs
+
+    Example::
+
+        >>> # BSHD layout: [batch, seq, heads, dim]
+        >>> q = torch.randn(2, 128, 8, 64)
+        >>> k = torch.randn(2, 128, 8, 64)
+        >>> cos, sin = F.rotary_embedding_frequencies(64, 2048)
+        >>> q_rot, k_rot = F.apply_rotary_emb(q, k, cos[:128], sin[:128])
+
+        >>> # BHSD layout: [batch, heads, seq, dim]
+        >>> q = torch.randn(2, 8, 128, 64)
+        >>> k = torch.randn(2, 8, 128, 64)
+        >>> q_rot, k_rot = F.apply_rotary_emb(q, k, cos[:128], sin[:128], seq_dim=2)
+
+    With custom frequencies (e.g., for LLaMA3 scaling)::
+
+        custom_cos, custom_sin = my_llama3_freqs(...)  # User-defined
+        q_rot, k_rot = F.apply_rotary_emb(q, k, custom_cos, custom_sin)
+
+    .. note::
+        For KV-cache scenarios during inference, you can index into precomputed
+        frequencies to get the cos/sin for specific positions::
+
+            positions = torch.tensor([current_pos])
+            q_rot, k_rot = F.apply_rotary_emb(
+                q, k, cos[positions], sin[positions], seq_dim=1
+            )
+
+    .. note::
+        This function uses standard PyTorch operations that are efficiently
+        fused by ``torch.compile``. No custom CUDA kernels are needed.
+    """
+    # Reshape cos/sin for broadcasting
+    # cos/sin are [seq_len, dim], add broadcast dims based on layout
+    cos = cos.narrow(0, 0, query.size(seq_dim))
+    sin = sin.narrow(0, 0, query.size(seq_dim))
+
+    if seq_dim == 1:
+        # BSHD: [batch, seq, heads, dim] -> cos needs [1, seq, 1, dim]
+        cos_b = cos.unsqueeze(0).unsqueeze(2)
+        sin_b = sin.unsqueeze(0).unsqueeze(2)
+    elif seq_dim == 2:
+        # BHSD: [batch, heads, seq, dim] -> cos needs [1, 1, seq, dim]
+        cos_b = cos.unsqueeze(0).unsqueeze(0)
+        sin_b = sin.unsqueeze(0).unsqueeze(0)
+    else:
+        raise ValueError(f"seq_dim must be 1 or 2, got {seq_dim}")
+
+    # Apply rotation: x_out = x * cos + rotate_half(x) * sin
+    query_rot = query * cos_b + rotate_half(query, interleaved) * sin_b
+    key_rot = key * cos_b + rotate_half(key, interleaved) * sin_b
+
+    return query_rot, key_rot
+
+
 def _mha_shape_check(
     query: Tensor,
     key: Tensor,
