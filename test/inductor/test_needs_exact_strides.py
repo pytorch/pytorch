@@ -73,8 +73,10 @@ class TestNeedsExactStrides(InductorTestCase):
             )
 
             def impl(x, y):
-                assert x.transpose(2, 3).is_contiguous()
-                assert y.is_contiguous()
+                if not x.transpose(2, 3).is_contiguous():
+                    raise AssertionError
+                if not y.is_contiguous():
+                    raise AssertionError
                 return x.float() + y.float()
 
             def meta(x, y):
@@ -94,7 +96,8 @@ class TestNeedsExactStrides(InductorTestCase):
                     f_compile(x, other)
                 except TestPassed:
                     pass
-                assert called
+                if not called:
+                    raise AssertionError
 
 
 instantiate_parametrized_tests(TestNeedsExactStrides)

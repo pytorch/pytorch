@@ -43,6 +43,7 @@ exclude =
     ./functorch/docs,
     ./functorch/examples,
     ./functorch/docs/source/tutorials,
+    ./torch/testing/_internal/py312_intrinsics.py
     ./scripts,
     ./test/generated_type_hints_smoketest.py,
     ./third_party,

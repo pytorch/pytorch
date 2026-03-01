@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import dataclasses
 import io
 import logging
 import os
@@ -444,3 +445,9 @@ def standalone_compile(
     return standalone_compile(
         gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options, aot=aot
     )
+
+
+@dataclasses.dataclass
+class _CudagraphAnnotation:
+    fwd: Optional[bool]
+    bwd: Optional[bool]
