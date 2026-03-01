@@ -6,7 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -58,9 +58,7 @@ class OptimizerInput:
 
     def __init__(
         self,
-        params: Union[
-            list[Parameter], list[Tensor], dict[Any, Any], list[dict[str, Any]]
-        ],
+        params: list[Parameter] | list[Tensor] | dict[Any, Any] | list[dict[str, Any]],
         kwargs: dict[str, Any],
         desc: str = "",
     ):
@@ -1329,7 +1327,7 @@ def optim_error_inputs_func_sparseadam(device, dtype):
     return error_inputs
 
 
-def _get_device_type(device: Union[str, torch.device]) -> str:
+def _get_device_type(device: str | torch.device) -> str:
     # Returns the device type as a string, e.g., "cpu" or "cuda"
     if isinstance(device, torch.device):
         device = str(device.type)
