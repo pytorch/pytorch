@@ -32,7 +32,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, cast, Literal, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 from torch import sym_float, sym_int
@@ -151,7 +151,7 @@ IN_PLACE_DESUGARING_MAP = {
 _HandlerCallback = Callable[
     ["InstructionTranslator", typing.Any, typing.Any], VariableTracker | None
 ]
-_TrackersType = Union[type[VariableTracker], tuple[type[VariableTracker], ...]]
+_TrackersType = type[VariableTracker] | tuple[type[VariableTracker], ...]
 polyfill_fn_mapping = {
     operator.eq: polyfills.cmp_eq,
     operator.ne: polyfills.cmp_ne,
