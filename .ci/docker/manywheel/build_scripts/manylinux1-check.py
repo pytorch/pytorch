@@ -17,7 +17,7 @@ def is_manylinux1_compatible():
         # Fall through to heuristic check below
         pass
 
-    # Check glibc version. CentOS 5 uses glibc 2.5.
+    # manylinux1 baseline requires glibc 2.5.
     return have_compatible_glibc(2, 5)
 
 

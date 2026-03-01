@@ -3,9 +3,6 @@
 set -ex
 
 [ -n "$GLIBC_VERSION" ]
-if [[ -n "$CENTOS_VERSION" ]]; then
-  [ -n "$DEVTOOLSET_VERSION" ]
-fi
 
 yum install -y wget sed
 
@@ -19,8 +16,8 @@ if [[ "$GLIBC_VERSION" == "2.26" ]]; then
 fi
 mkdir -p glibc-$GLIBC_VERSION-build && cd glibc-$GLIBC_VERSION-build
 
-if [[ -n "$CENTOS_VERSION" ]]; then
-  export PATH=/opt/rh/devtoolset-$DEVTOOLSET_VERSION/root/usr/bin:$PATH
+if [[ -n "$DEVTOOLSET_VERSION" ]]; then
+  export PATH=/opt/rh/gcc-toolset-$DEVTOOLSET_VERSION/root/usr/bin:$PATH
 fi
 
 ../glibc-$GLIBC_VERSION/configure --prefix=/usr CFLAGS='-Wno-stringop-truncation -Wno-format-overflow -Wno-restrict -Wno-format-truncation -g -O2'

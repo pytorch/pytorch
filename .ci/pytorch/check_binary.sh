@@ -46,7 +46,7 @@ fi
 # The install root depends on both the package type and the os
 # All MacOS packages use conda, even for the wheel packages.
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
-  # NOTE: Only $PWD works on both CentOS and Ubuntu
+  # NOTE: Only $PWD works reliably across Linux build images
   export install_root="$PWD"
 else
 
