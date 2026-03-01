@@ -53,9 +53,15 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
                            at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
                            IndexType indicesWithinSliceStride,
                            T* kthValues) {
-  // Indices are limited to integer fp precision, so counts can fit in
-  // int32, regardless of IndexType
-  __shared__ int smem[32]; // one per each warp, up to warp limit
+  // smem is used for:
+  // 1. radixSelect: radix bin counts (RADIX_SIZE=4 elements)
+  // 2. exclusiveBinaryPrefixScan: warp prefix sums (≤32 elements)
+  // 3. findPattern: flag and value (2 elements, cast to scalar_t*)
+  //
+  // Type must be IndexType to safely handle sliceSize > INT_MAX.
+  // In radix selection, counts can exceed INT_MAX when billions of
+  // elements fall into a single radix bin.
+  __shared__ IndexType smem[32];
   IndexType slice = getLinearBlockId<IndexType>();
   if (slice >= numInputSlices) {
     return;
@@ -115,13 +121,13 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
       hasTopK = inRange && (convertedV < topKConverted);
     }
 
-    int index;
-    int carry;
-    at::cuda::exclusiveBinaryPrefixScan<int, true>(
-        smem, hasTopK, &index, &carry, AddOp<int>());
+    IndexType index;
+    IndexType carry;
+    at::cuda::exclusiveBinaryPrefixScan<IndexType, true>(
+        smem, hasTopK, &index, &carry, AddOp<IndexType>());
 
     if (hasTopK) {
-      int writeIndex = writeIndexStart + index;
+      IndexType writeIndex = writeIndexStart + index;
       CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
 
       IndexType topKOffset = writeIndex * topKWithinSliceStride;
@@ -149,13 +155,13 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK = inRange && (convertedV == topKConverted);
 
-    int index;
-    int carry;
-    at::cuda::exclusiveBinaryPrefixScan<int, true>(
-        smem, hasTopK, &index, &carry, AddOp<int>());
+    IndexType index;
+    IndexType carry;
+    at::cuda::exclusiveBinaryPrefixScan<IndexType, true>(
+        smem, hasTopK, &index, &carry, AddOp<IndexType>());
 
     if (hasTopK && index < topKRemaining) {
-      int writeIndex = writeIndexStart + index;
+      IndexType writeIndex = writeIndexStart + index;
       CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
 
       IndexType topKOffset = writeIndex * topKWithinSliceStride;
@@ -200,9 +206,10 @@ smaller) than the k-th element but phase 2 tops off the output as long as there 
 // start_index: index to write the result to. (output of function)
 // my_offset: offset to write the result to. (output of function)
 // warp_count: number of threads that have values to add to the output. (output of function)
+template <typename IndexType>
 __device__ __forceinline__ void reserveWarpSpace(bool hasTopK,
-                                                int& writeIndexStart,
-                                                int& start_index,
+                                                IndexType& writeIndexStart,
+                                                IndexType& start_index,
                                                 int& my_offset,
                                                 int& warp_count) {
   auto ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
@@ -213,7 +220,7 @@ __device__ __forceinline__ void reserveWarpSpace(bool hasTopK,
   // if > 0 threads have hasTopK == true within the warp,
   // reserve space for them by incrementing writeIndexStart atomically + saving the old value  as start index.
   if (warp_count > 0 && lane_id == 0) {
-    start_index = atomicAdd(&writeIndexStart, warp_count);
+    start_index = atomicAdd(&writeIndexStart, (IndexType)warp_count);
   }
   start_index = __shfl(start_index, 0); // broadcast the start index to all threads in the warp.
 
@@ -228,7 +235,7 @@ __device__ __forceinline__ void writeResult(T* topKSliceStart,
                                             IndexType topKWithinSliceStride,
                                             IndexType indicesWithinSliceStride,
                                             IndexType outputSliceSize,
-                                            int writeIndex,
+                                            IndexType writeIndex,
                                             T v,
                                             IndexType i){
   CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize); // assert that the write index is within the output slice size.
@@ -255,14 +262,15 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
                             IndexType indicesWithinSliceStride,
                             T* kthValues) {
 
-  // Indices are limited to integer fp precision, so counts can fit in
-  // int32, regardless of IndexType
+  // smem and counts must use IndexType to safely handle sliceSize > INT_MAX.
+  // In radix selection, counts tracks elements matching a radix pattern,
+  // which can exceed INT_MAX when billions of elements fall into one bin.
 
   // Maximum shared memory size for radix select (used in countRadixAggregateCounts): NUM_BUFFERS * MAX_WARPS * RADIX_SIZE.
   // HIP workgroups have at most 1024 threads. Warp size is at least 32 (can be 64 on some
   // architectures), so we use 32 for safety: 2 buffers * (1024/32) warps * 4 radix bins = 256.
-  __shared__ int smem[256];
-  __shared__ int writeIndexStart; // index to track where to write results. This is shared by all threads in the block. Increases atomically.
+  __shared__ IndexType smem[256];
+  __shared__ IndexType writeIndexStart; // index to track where to write results. This is shared by all threads in the block. Increases atomically.
 
   IndexType slice = getLinearBlockId<IndexType>();
   if (slice >= numInputSlices) {
@@ -325,7 +333,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
       hasTopK = (largest) ? (convertedV > topKConverted) : (convertedV < topKConverted);
     }
 
-    int start_index, my_offset, warp_count;
+    IndexType start_index;
+    int my_offset, warp_count;
     reserveWarpSpace(hasTopK, writeIndexStart, start_index, my_offset, warp_count);
 
     // now warp has reserved space for itself. If hasTopK == true, we need to find the index to write the result to.
@@ -364,7 +373,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
       hasTopK = convertedV == topKConverted;
     }
 
-    int start_index, my_offset, warp_count;
+    IndexType start_index;
+    int my_offset, warp_count;
     reserveWarpSpace(hasTopK, writeIndexStart, start_index, my_offset, warp_count);
 
     if ((warp_count > 0) && (outputSliceSize <= start_index)){
@@ -372,7 +382,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     }
 
     if (hasTopK){
-      int slots_available = outputSliceSize - start_index;
+      IndexType slots_available = outputSliceSize - start_index;
       if (my_offset < slots_available){
         writeResult(topKSliceStart,
           indicesSliceStart,
