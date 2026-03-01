@@ -328,7 +328,7 @@ endif()
 # setting nvcc arch flags
 torch_cuda_get_nvcc_gencode_flag(NVCC_FLAGS_EXTRA)
 # CMake 3.18 adds integrated support for architecture selection, but we can't rely on it
-if(DEFINED CMAKE_CUDA_ARCHITECTURES)
+if(DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT TORCH_CUDA_ARCH_LIST)
   message(WARNING
           "pytorch is not compatible with `CMAKE_CUDA_ARCHITECTURES` and will ignore its value. "
           "Please configure `TORCH_CUDA_ARCH_LIST` instead.")
