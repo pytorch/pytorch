@@ -4331,15 +4331,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_one_hot(self):
         class OneHot(torch.nn.Module):
-            def __init__(self, num_classes):
+            def __init__(self, num_classes, dtype=None):
                 super().__init__()
                 self.num_classes = num_classes
+                self.dtype = dtype
 
             def forward(self, x):
-                return torch.nn.functional.one_hot(x, self.num_classes)
+                dtype = self.dtype if self.dtype is not None else torch.long
+                return torch.nn.functional.one_hot(x, self.num_classes, dtype=dtype)
 
         x = torch.arange(10)
         self.run_test(OneHot(15), (x))
+        self.run_test(OneHot(15, torch.bool), (x))
+        self.run_test(OneHot(15, torch.uint8), (x))
 
         class OneHot(torch.nn.Module):
             def forward(self, x, num_classes):

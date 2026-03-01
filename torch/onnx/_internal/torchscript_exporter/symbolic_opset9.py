@@ -5081,7 +5081,7 @@ def __isnot_(g: jit_utils.GraphContext, self, other):
 
 
 @_onnx_symbolic("aten::one_hot")
-def one_hot(g: jit_utils.GraphContext, self, num_classes):
+def one_hot(g: jit_utils.GraphContext, self, num_classes, dtype):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     # onnxruntime supports limited type combinations for OneHot.
     if _type_utils.JitScalarType.from_value(
@@ -5093,7 +5093,11 @@ def one_hot(g: jit_utils.GraphContext, self, num_classes):
         _type_utils.JitScalarType.INT16,
     }:
         num_classes = g.op("Cast", num_classes, to_i=_C_onnx.TensorProtoDataType.INT64)
-    return g.op("OneHot", self, num_classes, values, axis_i=-1)
+    one_hot = g.op("OneHot", self, num_classes, values, axis_i=-1)
+    dtype = symbolic_helper._maybe_get_const(dtype, 'i')
+    if symbolic_helper._is_value(dtype):
+        dtype = 4  # Long
+    return g.op("Cast", one_hot, to_i=symbolic_helper.scalar_type_to_onnx[dtype])
 
 
 @_onnx_symbolic("aten::gather")

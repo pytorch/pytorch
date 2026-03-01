@@ -2,6 +2,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/DTensorState.h>
 
+#include <ATen/native/ReduceOpsUtils.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -15,8 +17,9 @@
 
 namespace at::native {
 
-Tensor one_hot(const Tensor &self, int64_t num_classes) {
+Tensor one_hot(const Tensor &self, int64_t num_classes, std::optional<ScalarType> dtype) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor of type LongTensor.");
+    auto out_dtype = get_dtype_from_self(self, dtype, true);
 
     // using meta bit test to catch Fake Tensor as well until __torch_function__
     if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit)) ||
@@ -30,7 +33,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
           // of the `index` Tensor.
           at::DTensorAllowImplicitReplication guard;
           at::Tensor index = at::arange(num_classes, self.options());
-          return at::eq(self.unsqueeze(-1), index).to(kLong);
+          return at::eq(self.unsqueeze(-1), index).to(out_dtype);
         }
     }
 
@@ -43,7 +46,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
             TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
         } else {
             shape.emplace_back(num_classes);
-            return at::empty_symint(shape, self.options());
+            return at::empty_symint(shape, self.options().dtype(out_dtype));
         }
     }
 
@@ -67,7 +70,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
     }
 
     shape.emplace_back(num_classes);
-    Tensor ret = at::zeros_symint(shape, self.options());
+    Tensor ret = at::zeros_symint(shape, self.options().dtype(out_dtype));
     ret.scatter_(-1, self.unsqueeze(-1), 1);
     return ret;
 }
