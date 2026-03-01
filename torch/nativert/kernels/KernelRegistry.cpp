@@ -1453,4 +1453,133 @@ REGISTER_CPU_KERNEL(
       KernelOutput(0) = at::repeat_interleave(self, repeats, dim, output_size);
     })
 
+REGISTER_CPU_KERNEL("torch.ops.aten.concat.default", aten_concat_default, {
+  const auto inputs = KernelInput(0).toTensorVector();
+  TORCH_CHECK(!inputs.empty(), "concat expects non-empty tensor list");
+  const auto dim = KernelInput(1).toInt();
+  if (KernelOutput(0).isNone()) {
+    KernelOutput(0) = at::cpu::cat(inputs, dim);
+    return;
+  }
+  auto& out = KernelOutput(0).toTensor();
+  at::cpu::cat_outf(inputs, dim, out);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.zeros_like.default", aten_zeros_like_default, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto dtype = KernelInput(1).toOptional<c10::ScalarType>();
+  const auto layout = KernelInput(2).toOptional<c10::Layout>();
+  const auto device = KernelInput(3).toOptional<c10::Device>();
+  const auto pin_memory = KernelInput(4).toOptional<bool>();
+  const auto memory_format = KernelInput(5).toOptional<c10::MemoryFormat>();
+  KernelOutput(0) = at::native::zeros_like(
+      self, dtype, layout, device, pin_memory, memory_format);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.flip.default", aten_flip_default, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto dims = KernelInput(1).toIntVector();
+  KernelOutput(0) = at::native::flip(self, dims);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.__or__.Tensor", aten___or___Tensor, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto& other = KernelInput(1).toTensor();
+  if (KernelOutput(0).isNone()) {
+    KernelOutput(0) = at::cpu::bitwise_or(self, other);
+    return;
+  }
+  auto& out = KernelOutput(0).toTensor();
+  at::cpu::bitwise_or_out(out, self, other);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.__and__.Tensor", aten___and___Tensor, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto& other = KernelInput(1).toTensor();
+  if (KernelOutput(0).isNone()) {
+    KernelOutput(0) = at::cpu::bitwise_and(self, other);
+    return;
+  }
+  auto& out = KernelOutput(0).toTensor();
+  at::cpu::bitwise_and_out(out, self, other);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.contiguous.default", aten_contiguous_default, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto memory_format =
+      KernelInput(1).toOptional<c10::MemoryFormat>().value_or(
+          c10::MemoryFormat::Contiguous);
+  KernelOutput(0) = self.contiguous(memory_format);
+})
+
+REGISTER_CPU_KERNEL(
+    "torch.ops.aten.scalar_tensor.default",
+    aten_scalar_tensor_default,
+    {
+      const auto s = KernelInput(0).toScalar();
+      const auto dtype = KernelInput(1).toOptional<c10::ScalarType>();
+      const auto layout = KernelInput(2).toOptional<c10::Layout>();
+      const auto device = KernelInput(3).toOptional<c10::Device>();
+      const auto pin_memory = KernelInput(4).toOptional<bool>();
+      KernelOutput(0) =
+          at::native::scalar_tensor(s, dtype, layout, device, pin_memory);
+    })
+
+REGISTER_CPU_KERNEL(
+    "torch.ops.aten.tensor_split.tensor_indices_or_sections",
+    aten_tensor_split_tensor_indices_or_sections,
+    {
+      const auto& self = KernelInput(0).toTensor();
+      const auto& tensor_indices_or_sections = KernelInput(1).toTensor();
+      const auto dim = KernelInput(2).toInt();
+      KernelOutput(0) =
+          at::native::tensor_split(self, tensor_indices_or_sections, dim);
+    })
+
+REGISTER_CPU_KERNEL("torch.ops.aten.unbind.int", aten_unbind_int, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto dim = KernelInput(1).toInt();
+  KernelOutput(0) = at::native::unbind(self, dim);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.to.device", aten_to_device, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto device = KernelInput(1).toDevice();
+  const auto dtype = KernelInput(2).toScalarType();
+  const auto non_blocking = KernelInput(3).toBool();
+  const auto copy = KernelInput(4).toBool();
+  const auto memory_format = KernelInput(5).toOptional<c10::MemoryFormat>();
+  KernelOutput(0) =
+      at::native::to(self, device, dtype, non_blocking, copy, memory_format);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.to.dtype", aten_to_dtype, {
+  const auto& self = KernelInput(0).toTensor();
+  const auto dtype = KernelInput(1).toScalarType();
+  const auto non_blocking = KernelInput(2).toBool();
+  const auto copy = KernelInput(3).toBool();
+  const auto memory_format = KernelInput(4).toOptional<c10::MemoryFormat>();
+  KernelOutput(0) =
+      at::native::to(self, dtype, non_blocking, copy, memory_format);
+})
+
+REGISTER_CPU_KERNEL("torch.ops.aten.arange.start", aten_arange_start, {
+  const auto start = KernelInput(0).toScalar();
+  const auto end = KernelInput(1).toScalar();
+  const auto dtype = KernelInput(2).toOptional<c10::ScalarType>();
+  const auto layout = KernelInput(3).toOptional<c10::Layout>();
+  const auto device = KernelInput(4).toOptional<c10::Device>();
+  const auto pin_memory = KernelInput(5).toOptional<bool>();
+  KernelOutput(0) =
+      at::native::arange(start, end, dtype, layout, device, pin_memory);
+})
+
+REGISTER_CPU_KERNEL(
+    "torch.ops.aten.lift_fresh_copy.default",
+    aten_lift_fresh_copy_default,
+    {
+      const auto& self = KernelInput(0).toTensor();
+      KernelOutput(0) = at::native::lift_fresh_copy(self);
+    })
+
 } // namespace torch::nativert
