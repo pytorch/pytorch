@@ -121,11 +121,10 @@ def _broadcast_object(
 
 class _ZeROJoinHook(JoinHook):
     def __init__(self, zero):
-        if not isinstance(zero, ZeroRedundancyOptimizer):
-            raise AssertionError(
-                "ZeRO join hook requires passing in a "
-                "ZeroRedundancyOptimizer instance as the state"
-            )
+        assert isinstance(zero, ZeroRedundancyOptimizer), (
+            "ZeRO join hook requires passing in a ZeroRedundancyOptimizer "
+            "instance as the state"
+        )
         self.zero = zero
         super().__init__()
 
@@ -269,10 +268,9 @@ class _OverlapInfo:
         meaning ``self.broadcast_handles`` is filled. This clears ``self.broadcast_handles``
         in preparation for the next iteration.
         """
-        if len(self.broadcast_handles) != self.num_bucket_assignments:
-            raise AssertionError(
-                f"Missing at least one broadcast handle on rank {dist.get_rank()}"
-            )
+        assert len(self.broadcast_handles) == self.num_bucket_assignments, (
+            f"Missing at least one broadcast handle on rank {dist.get_rank()}"
+        )
         _ = [x.wait() for x in self.broadcast_handles]
         self.broadcast_handles.clear()
 
@@ -703,11 +701,10 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             return self._partition_parameters_cache
 
         # Partition the parameters according to `params_per_rank`
-        if len(self._partition_parameters_cache) != 0:
-            raise AssertionError(
-                "Specifying `params_per_rank` should only be done when the "
-                "parameters have not been partitioned yet"
-            )
+        assert len(self._partition_parameters_cache) == 0, (
+            "Specifying `params_per_rank` should only be done when the "
+            "parameters have not been partitioned yet"
+        )
         if len(self.param_groups) != 1:
             raise RuntimeError(
                 "Specifying `params_per_rank` only supports a single parameter group"
@@ -768,12 +765,11 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             A :class:`list` of async work handles for the ``broadcast()`` s
             performed to synchronize the parameters.
         """
-        if self._overlap_with_ddp:
-            raise AssertionError(
-                "`_broadcast_params_from_rank()` should not be used if "
-                "`overlap_with_ddp=True`; instead, the broadcasting should "
-                "happen in the DDP communication hook"
-            )
+        assert not self._overlap_with_ddp, (
+            "`_broadcast_params_from_rank()` should not be used if "
+            "`overlap_with_ddp=True`; instead, the broadcasting should "
+            "happen in the DDP communication hook"
+        )
         handles = []
         if self.parameters_as_bucket_view:
             for dev_i_buckets in self._buckets:
@@ -851,11 +847,10 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             ...
         ...
         """
-        if not self.parameters_as_bucket_view:
-            raise AssertionError(
-                "`_device_to_params_per_rank` should only be used if "
-                "`parameters_as_bucket_view=True`"
-            )
+        assert self.parameters_as_bucket_view, (
+            "`_device_to_params_per_rank` should only be used if "
+            "`parameters_as_bucket_view=True`"
+        )
         if len(self._device_to_params_per_rank_cache) == 0:
             for rank, param_groups in enumerate(self._partition_parameters()):
                 for param_group in param_groups:
@@ -893,8 +888,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             if value < min_value:
                 min_value = value
                 min_index = i
-        if min_index < 0:
-            raise AssertionError("All indices are disallowed")
+        assert min_index >= 0, "All indices are disallowed"
         return min_index
 
     def _assign_bucket_subset_to_rank(
@@ -946,24 +940,21 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         mapping bucket indices to :class:`_DDPBucketAssignment` s for each
         rank.
         """
-        if not self._overlap_with_ddp:
-            raise AssertionError(
-                "`_bucket_assignments_per_rank` only be used if `overlap_with_ddp=True`"
-            )
+        assert self._overlap_with_ddp, (
+            "`_bucket_assignments_per_rank` only be used if `overlap_with_ddp=True`"
+        )
         if len(self._bucket_assignments_per_rank_cache) > 0:
             return self._bucket_assignments_per_rank_cache
 
         overlap_info = self._overlap_info
-        if overlap_info.status != _OverlapStatus.INITIALIZED:
-            raise AssertionError
+        assert overlap_info.status == _OverlapStatus.INITIALIZED
 
         self._bucket_assignments_per_rank_cache = [{} for _ in range(self.world_size)]
         params_per_bucket = overlap_info.params_per_bucket
 
         if overlap_info.shard_buckets:
             # Define the assignment threshold to approximate uniformity
-            if overlap_info.total_size is None:
-                raise AssertionError("`total_size` was not computed")
+            assert overlap_info.total_size is not None, "`total_size` was not computed"
             threshold = overlap_info.total_size / self.world_size  # type: ignore[operator]
             size_per_rank = [0 for _ in range(self.world_size)]
 
@@ -973,8 +964,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         if not overlap_info.shard_buckets:
             # Assign each DDP bucket entirely to a single rank
             for bucket_index, bucket_params in enumerate(params_per_bucket):
-                if len(bucket_params) <= 0:
-                    raise AssertionError("Empty bucket")
+                assert len(bucket_params) > 0, "Empty bucket"
                 assigned_rank = self._get_assigned_rank(bucket_index)
                 self._assign_bucket_subset_to_rank(
                     bucket_index,
@@ -995,8 +985,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 enumerate(params_per_bucket), key=lambda x: sum(p.numel() for p in x[1])
             )
             for bucket_index, bucket_params in params_per_bucket_enum:
-                if len(bucket_params) <= 0:
-                    raise AssertionError("Empty bucket")
+                assert len(bucket_params) > 0, "Empty bucket"
                 bucket_offset = 0
                 assignment_size = 0
                 for param_index, param in enumerate(bucket_params):
@@ -1103,15 +1092,13 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 else self.optim.step(closure=closure, **kwargs)
             )
         else:
-            if not self._overlap_with_ddp:
-                raise AssertionError(
-                    "Specifying `gradients` should not "
-                    "be used when `overlap_with_ddp=False`"
-                )
-            if closure is not None:
-                raise AssertionError(
-                    "`closure` is not supported when using a local functional optimizer"
-                )
+            assert self._overlap_with_ddp, (
+                "Specifying `gradients` should not "
+                "be used when `overlap_with_ddp=False`"
+            )
+            assert closure is None, (
+                "`closure` is not supported when using a local functional optimizer"
+            )
             loss = self.optim.step(gradients=gradients)
 
         # Sync any updated attributes in the local optimizer to the exposed
@@ -1255,10 +1242,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         for rank, local_state_dict in enumerate(self._all_state_dicts):
             local_param_groups = local_state_dict["param_groups"]
             global_param_groups = self._partition_parameters()[rank]
-            if len(local_param_groups) != len(global_param_groups):
-                raise AssertionError(
-                    "Mismatch between number of local and global parameter groups"
-                )
+            assert len(local_param_groups) == len(global_param_groups), (
+                "Mismatch between number of local and global parameter groups"
+            )
 
             for local_param_group, global_param_group in zip(
                 local_param_groups, global_param_groups
@@ -1268,11 +1254,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 local_param_indices = local_param_group["params"]
                 global_params = global_param_group["params"]
 
-                if len(local_param_indices) != len(global_params):
-                    raise AssertionError(
-                        "Mismatch between number of local and global "
-                        "parameters in parameter group"
-                    )
+                assert len(local_param_indices) == len(global_params), (
+                    "Mismatch between number of local and global parameters in parameter group"
+                )
                 for local_param_index, global_param in zip(
                     local_param_indices, global_params
                 ):
@@ -1305,10 +1289,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             dst_param_groups (list[dict]): parameter groups giving the
                 attribute settings to set.
         """
-        if len(src_param_groups) != len(dst_param_groups):
-            raise AssertionError(
-                "Mismatch between number of source and destination parameter groups"
-            )
+        assert len(src_param_groups) == len(dst_param_groups), (
+            "Mismatch between number of source and destination parameter groups"
+        )
         for src_param_group, dst_param_group in zip(src_param_groups, dst_param_groups):
             # Sync all attributes except the parameters
             for attr in filter(lambda x: x != "params", src_param_group.keys()):
@@ -1395,16 +1378,14 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 bucket_size = 0
                 dtype = None
                 for param in params:
-                    if not _is_trainable(param):
-                        raise AssertionError(
-                            "Model parameter "
-                            "corresponding to a gradient in a DDP bucket should "
-                            "require a gradient"
-                        )
+                    assert _is_trainable(param), (
+                        "Model parameter "
+                        "corresponding to a gradient in a DDP bucket should "
+                        "require a gradient"
+                    )
                     bucket_size += param.numel()
                     dtype = param.dtype  # assumes all same dtype
-                if bucket_size <= 0:
-                    raise AssertionError("Empty bucket")
+                assert bucket_size > 0, "Empty bucket"
 
                 # Construct the bucket tensor (assuming all dense and same dtype)
                 tensor = torch.empty(
@@ -1519,19 +1500,19 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
         The local optimizer is saved in ``self.optim``.
         """
-        if self._optim_constructor is None:
-            raise AssertionError("The local optimizer class has not been set")
+        assert self._optim_constructor is not None, (
+            "The local optimizer class has not been set"
+        )
 
         param_groups = self._partition_parameters()[self.rank]
         # `overlap_with_ddp=True` requires a local functional optimizer
         if self._overlap_with_ddp:
             # Functional optimizers only support a single parameter group and
             # require passing in the parameters as a list
-            if len(param_groups) != 1:
-                raise AssertionError(
-                    "Initializing the local functional optimizer "
-                    "with more than one parameter group"
-                )
+            assert len(param_groups) == 1, (
+                "Initializing the local "
+                "functional optimizer with more than one parameter group"
+            )
             params = param_groups[0]["params"]
             # Try to pass `_allow_empty_param_list=True` to avoid erroring
             if (
@@ -1581,22 +1562,20 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         # optimizer; remove this if/when the functional optimizers support
         # multiple parameter groups
         if self._overlap_with_ddp and not hasattr(self.optim, "param_groups"):
-            if not hasattr(self.optim, "param_group"):
-                raise AssertionError(
-                    "The functional optimizer should set at least one of "
-                    "the attributes `param_group` or `param_groups`"
-                )
+            assert hasattr(self.optim, "param_group"), (
+                "The functional optimizer should set at least one of the "
+                "attributes `param_group` or `param_groups`"
+            )
             self.optim.param_groups = [self.optim.param_group]  # type: ignore[attr-defined]
 
         self._sync_param_groups(self.optim.param_groups, self.param_groups)
 
     def _init_zero_for_overlap(self) -> None:
         r"""Perform a delayed initialization of the local optimizer and the supporting data structures."""
-        if not self._overlap_with_ddp:
-            raise AssertionError(
-                "`_init_zero_for_overlap()` should only be called when "
-                "`overlap_with_ddp=True`"
-            )
+        assert self._overlap_with_ddp, (
+            "`_init_zero_for_overlap()` should only be called when "
+            "`overlap_with_ddp=True`"
+        )
         self._overlap_info.status = _OverlapStatus.INITIALIZED
         self._clear_cache()
         self._partition_parameters(self._overlap_info.params_per_rank)
@@ -1611,12 +1590,11 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             bucket_index (int): index of the :class:`DistributedDataParallel`
                 bucket for which to get the assigned rank.
         """
-        if self._overlap_info.shard_buckets:
-            raise AssertionError(
-                "The bucket assignment requires global bucket information "
-                "and will be computed later; there should be no need to "
-                "use this method"
-            )
+        assert not self._overlap_info.shard_buckets, (
+            "The bucket assignment requires global bucket information and "
+            "will be computed later; there should be no need to use this "
+            "method"
+        )
         return bucket_index % self.world_size
 
     def _check_overlap_initialized(self):

@@ -14,8 +14,7 @@ import torch.distributed.tensor as dt
 import torch.distributed.tensor.debug
 
 
-if int(os.getenv("WORLD_SIZE", "1")) < 4:
-    raise AssertionError("We need at least 4 devices")
+assert int(os.getenv("WORLD_SIZE", "1")) >= 4, "We need at least 4 devices"
 rank = int(os.environ["RANK"])
 
 

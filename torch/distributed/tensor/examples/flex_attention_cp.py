@@ -39,8 +39,7 @@ def create_block_mask_cached(
 def flex_attn_example(world_size: int, rank: int) -> None:
     device_type = get_device_type()
     device_handle = getattr(torch, device_type, None)
-    if device_handle is None:
-        raise AssertionError(f"Unsupported device type: {device_type}")
+    assert device_handle is not None, f"Unsupported device type: {device_type}"
     num_devices_per_host = device_handle.device_count()
     device_handle.set_device(rank % num_devices_per_host)
     torch._dynamo.config.cache_size_limit = 1000
@@ -97,8 +96,7 @@ def flex_attn_example(world_size: int, rank: int) -> None:
 
     q, k, v = qkv
     out = compiled_flex_attention(q, k, v, score_mod=None, block_mask=block_mask)
-    if not isinstance(out, torch.Tensor):
-        raise AssertionError
+    assert isinstance(out, torch.Tensor)
     expect_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
     torch.testing.assert_close(out, expect_out, atol=1e-1, rtol=1e-2)
 
@@ -139,8 +137,7 @@ def flex_attn_example(world_size: int, rank: int) -> None:
         score_mod=None,
         block_mask=cp_block_mask,
     )
-    if not isinstance(cp_out, torch.Tensor):
-        raise AssertionError
+    assert isinstance(cp_out, torch.Tensor)
 
     # wrap the local output into a DTensor
     cp_out_dist = DTensor.from_local(cp_out, device_mesh, [Shard(seq_dim)])
@@ -174,8 +171,7 @@ def flex_attn_example(world_size: int, rank: int) -> None:
     cp_out.backward(grad_out_dist.to_local())
 
     for cp_flex_grad_dist, expect_grad in zip([t.grad for t in qkv_dist], grad2):
-        if not isinstance(cp_flex_grad_dist, DTensor):
-            raise AssertionError
+        assert isinstance(cp_flex_grad_dist, DTensor)
         torch.testing.assert_close(
             cp_flex_grad_dist.full_tensor(), expect_grad, atol=1e-1, rtol=1e-2
         )
