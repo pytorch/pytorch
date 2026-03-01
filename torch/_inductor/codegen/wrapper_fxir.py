@@ -30,7 +30,6 @@ from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
     ConvertIntKey,
     DivideByKey,
-    free_unbacked_symbols,
 )
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv
@@ -940,9 +939,6 @@ class FxConverter:
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
 
-        class UnbackedSymintsError(Exception):
-            pass
-
         def tune_kernel(tuner: CachingAutotuner, call_args: Sequence[Any]) -> None:
             from triton.runtime import driver
 
@@ -959,10 +955,7 @@ class FxConverter:
                 """
 
                 def to_size_hint_sympy_int(arg: Union[sympy.Expr, int]) -> int:
-                    if len(free_unbacked_symbols(arg)) > 0:
-                        # NYI: tuning args require backed symints.
-                        raise UnbackedSymintsError
-                    return V.graph.sizevars.size_hint(arg)
+                    return V.graph.sizevars.optimization_hint(arg)
 
                 def to_size_hint_list(arg: list[Union[torch.SymInt, int]]) -> list[int]:
                     args_sympy = [
@@ -989,11 +982,25 @@ class FxConverter:
         # The FX backend currently only supports compile-time tuning.
         kernel_name = tuner.fn.__name__
         if config.triton.autotune_at_compile_time:
-            try:
+            # Skip compile-time autotuning if any unbacked symbol lacks a user-provided
+            # optimization hint — autotuning with the generic fallback would
+            # produce meaningless results.
+            hinted = V.graph.sizevars.all_unbacked_explicitly_hinted
+            can_tune = True
+            for arg in call_args:
+                if isinstance(arg, torch.fx.Node):
+                    fake = arg.meta["val"]
+                    if not hinted(list(fake.shape) + list(fake.stride())):
+                        can_tune = False
+                        break
+                elif not hinted(arg):
+                    can_tune = False
+                    break
+            if can_tune:
                 tune_kernel(tuner, call_args)
-            except UnbackedSymintsError:
+            else:
                 log.info(
-                    "Detected unbacked symints. Skipping autotuning for kernel %s.",
+                    "Detected unhinted unbacked symints. Skipping compile-time autotuning for kernel %s.",
                     kernel_name,
                 )
         else:

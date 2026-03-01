@@ -84,13 +84,12 @@ def _default_custom_combo_kernel_horizontal_partition(
         not_reduction = [n for n in group_per_dim if n not in reduction]
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
+        # Scheduling heuristic: separate long reductions (rnumel > 2048).
+        # Uses optimization_hint with fallback=1 so unbacked defaults to short reduction.
         long_reduction = [
             n
             for n in reduction
-            if (
-                V.graph.sizevars.shape_env.has_hint(n.group[-1][-1])
-                and V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
-            )
+            if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -103,8 +102,10 @@ def _default_custom_combo_kernel_horizontal_partition(
             for n in not_reduction
             if not node_info_map[n].features.is_reduction()
             and len(node_info_map[n].tiling) == 2
-            and V.graph.sizevars.shape_env.has_hint(node_info_map[n].tiling["x"])
-            and V.graph.sizevars.size_hint(node_info_map[n].tiling["x"]) > LARGE_NUMELS
+            and V.graph.sizevars.optimization_hint(
+                node_info_map[n].tiling["x"], fallback=1
+            )
+            > LARGE_NUMELS  # type: ignore[arg-type]
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -722,18 +723,19 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
-        triton_meta[
-            "enable_fp_fusion"
-        ] = not config.emulate_precision_casts  # pyrefly: ignore[unsupported-operation]
+        triton_meta["enable_fp_fusion"] = (
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
+            not config.emulate_precision_casts
+        )
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
 
-        # pyrefly: ignore [unsupported-operation]
+        # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
         triton_meta["configs"] = [config_of(signature)]
 
         if TritonKernel._enable_pdl_codegen():
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
             triton_meta["launch_pdl"] = True
 
         mutated_args = self.get_mutated_args_sub_kernels()
@@ -999,7 +1001,7 @@ class ComboKernel(Kernel):
                         f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
-                    symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
+                    symval_hint = V.graph.sizevars.optimization_hint(arg_sig.expr)
 
                     # Force the seed_offset to be 0 so calls to the same kernel
                     # using different seed offset will have the same benchmark harness.
@@ -1009,7 +1011,7 @@ class ComboKernel(Kernel):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.get_current_device_or_throw()
-                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    count = V.graph.sizevars.optimization_hint(arg_sig.count)
                     # for benchmark harness, we ignore arg_sig.zero_mode and always zero it
                     result.writeline(
                         f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"

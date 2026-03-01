@@ -37,7 +37,11 @@ class BertSelfAttention(nn.Module):
         self.position_embedding_type = position_embedding_type
 
         if self.position_embedding_type is not None:
-            assert max_position_embeddings is not None
+            if max_position_embeddings is None:
+                raise AssertionError(
+                    "max_position_embeddings must not be None when "
+                    f"position_embedding_type is {self.position_embedding_type}"
+                )
             self.max_position_embeddings = max_position_embeddings
             self.distance_embedding = nn.Embedding(
                 2 * max_position_embeddings - 1, self.attention_head_size

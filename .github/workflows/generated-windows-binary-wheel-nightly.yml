@@ -14,6 +14,7 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - 'ciflow/binaries/*'
+      - 'ciflow/binaries_libtorch/*'
       - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
 
@@ -275,6 +276,9 @@ jobs:
       build_name: wheel-py3_10-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -513,6 +517,9 @@ jobs:
       build_name: wheel-py3_10-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -751,6 +758,9 @@ jobs:
       build_name: wheel-py3_10-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -989,6 +999,9 @@ jobs:
       build_name: wheel-py3_10-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1225,6 +1238,9 @@ jobs:
       build_name: wheel-py3_10-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1460,6 +1476,9 @@ jobs:
       build_name: wheel-py3_11-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1698,6 +1717,9 @@ jobs:
       build_name: wheel-py3_11-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1936,6 +1958,9 @@ jobs:
       build_name: wheel-py3_11-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2174,6 +2199,9 @@ jobs:
       build_name: wheel-py3_11-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2410,6 +2438,9 @@ jobs:
       build_name: wheel-py3_11-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2645,6 +2676,9 @@ jobs:
       build_name: wheel-py3_12-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2883,6 +2917,9 @@ jobs:
       build_name: wheel-py3_12-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3121,6 +3158,9 @@ jobs:
       build_name: wheel-py3_12-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3359,6 +3399,9 @@ jobs:
       build_name: wheel-py3_12-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3595,6 +3638,9 @@ jobs:
       build_name: wheel-py3_12-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3830,6 +3876,9 @@ jobs:
       build_name: wheel-py3_13-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4068,6 +4117,9 @@ jobs:
       build_name: wheel-py3_13-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4306,6 +4358,9 @@ jobs:
       build_name: wheel-py3_13-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4544,6 +4599,9 @@ jobs:
       build_name: wheel-py3_13-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4780,6 +4838,9 @@ jobs:
       build_name: wheel-py3_13-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -5015,6 +5076,9 @@ jobs:
       build_name: wheel-py3_13t-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13t-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -5253,6 +5317,9 @@ jobs:
       build_name: wheel-py3_13t-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13t-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -5491,6 +5558,9 @@ jobs:
       build_name: wheel-py3_13t-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -5729,6 +5799,9 @@ jobs:
       build_name: wheel-py3_13t-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_13t-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -5965,6 +6038,9 @@ jobs:
       build_name: wheel-py3_13t-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -6200,6 +6276,9 @@ jobs:
       build_name: wheel-py3_14-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -6438,6 +6517,9 @@ jobs:
       build_name: wheel-py3_14-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -6676,6 +6758,9 @@ jobs:
       build_name: wheel-py3_14-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -6914,6 +6999,9 @@ jobs:
       build_name: wheel-py3_14-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -7150,6 +7238,9 @@ jobs:
       build_name: wheel-py3_14-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -7385,6 +7476,9 @@ jobs:
       build_name: wheel-py3_14t-cpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14t-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -7623,6 +7717,9 @@ jobs:
       build_name: wheel-py3_14t-cuda12_6
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14t-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -7861,6 +7958,9 @@ jobs:
       build_name: wheel-py3_14t-cuda12_8
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -8099,6 +8199,9 @@ jobs:
       build_name: wheel-py3_14t-cuda13_0
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_14t-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -8335,4 +8438,254 @@ jobs:
       build_name: wheel-py3_14t-xpu
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cpu-shared-with-deps-release-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-py3_10-cpu-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cpu
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          path: pytorch
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cpu
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cpu-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cpu-shared-with-deps-release-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cpu-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda12_6-shared-with-deps-release-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-py3_10-cuda12_6-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cu126
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          path: pytorch
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cuda12_6
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda12_6-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cuda12_6-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_6-shared-with-deps-release-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_6-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda12_8-shared-with-deps-release-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-py3_10-cuda12_8-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cu128
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          path: pytorch
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cuda12_8
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda12_8-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cuda12_8-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_8-shared-with-deps-release-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_8-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda13_0-shared-with-deps-release-extract:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-py3_10-cuda13_0-build
+      - get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    timeout-minutes: 60
+    env:
+      DESIRED_CUDA: cu130
+      LIBTORCH_VARIANT: shared-with-deps
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          path: pytorch
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: wheel-py3_10-cuda13_0
+          path: "${{ runner.temp }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${{ runner.temp }}/libtorch_output"
+          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${{ runner.temp }}/wheel_artifact" \
+            --output-dir "${{ runner.temp }}/libtorch_output" \
+            --platform windows \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: libtorch-cuda13_0-shared-with-deps-release
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ runner.temp }}/libtorch_output/"
+  libtorch-cuda13_0-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda13_0-shared-with-deps-release-extract
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda13_0-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
     uses: ./.github/workflows/_binary-upload.yml

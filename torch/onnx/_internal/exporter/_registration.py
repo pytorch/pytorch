@@ -64,11 +64,8 @@ class OnnxDecompMeta:
                 if isinstance(self.onnx_function, onnxscript.OnnxFunction):
                     signature = _schemas.op_signature_from_function(
                         self.onnx_function,
-                        # pyrefly: ignore [missing-attribute]
                         self.onnx_function.function_ir.domain,
-                        # pyrefly: ignore [missing-attribute]
                         self.onnx_function.name,
-                        # pyrefly: ignore [missing-attribute]
                         since_version=self.onnx_function.opset.version,
                     )
                 else:
