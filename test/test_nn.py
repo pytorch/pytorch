@@ -7429,6 +7429,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         _batch_norm_stats(torch.randn(1, 96, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last, (0, 2, 3))
         _batch_norm_stats(torch.randn(1, 96, 112, 112, 112, dtype=torch.float, device='cuda'), torch.channels_last_3d, (0, 2, 3, 4))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_batchnorm_channels_last_backward_no_deadlock(self):
+        # Regression test for channels-last BatchNorm backward deadlock.
+        # This test intentionally does NOT check numerical accuracy.
+        # The test passes as long as backward completes without hanging.
+
+        torch.manual_seed(0)
+
+        x = torch.randn(
+            2, 32, 16, 16,
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        ).to(memory_format=torch.channels_last)
+
+        bn = torch.nn.BatchNorm2d(32).cuda()
+
+        y = bn(x)
+        y.sum().backward()
+
     def test_flatten(self):
         tensor_input = torch.randn(2, 1, 2, 3)
 
