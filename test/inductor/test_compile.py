@@ -230,6 +230,21 @@ class TestStandaloneInductor(TestCase):
         else:
             check_linux_debug_section(binary_path)
 
+    def test_clang_bracket_depth_flag(self):
+        from torch._inductor.cpp_builder import _get_optimization_cflags, _is_clang, get_cpp_compiler
+
+        compiler = get_cpp_compiler()
+        if not _is_clang(compiler):
+            self.skipTest("clang_bracket_depth only applies to Clang")
+
+        with torch._inductor.config.patch({"aot_inductor.clang_bracket_depth": 1024}):
+            cflags, _ = _get_optimization_cflags(compiler)
+            self.assertIn("fbracket-depth=1024", cflags)
+
+        with torch._inductor.config.patch({"aot_inductor.clang_bracket_depth": 0}):
+            cflags, _ = _get_optimization_cflags(compiler)
+            self.assertTrue(all("fbracket-depth" not in f for f in cflags))
+
 
 if __name__ == "__main__":
     if HAS_CPU:

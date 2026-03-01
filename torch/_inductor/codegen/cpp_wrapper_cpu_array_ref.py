@@ -781,6 +781,47 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             buf_name, python_kernel_name, get_args, op_overload, raw_args, outputs
         )
 
+    def generate_fallback_kernel_with_runtime_lookup_aot(
+        self,
+        op_overload,
+        raw_args,
+        output_args,
+        raw_outputs,
+    ):
+        self.allow_stack_allocation = False
+        (
+            tensor_call_args,
+            int_call_args,
+        ) = self.generate_extern_kernel_args_decl_if_needed(
+            op_overload, raw_args, output_args, raw_outputs,
+        )
+
+        wrapped_tensor_args = []
+        for arg in tensor_call_args:
+            if isinstance(arg, str) and arg.startswith(
+                ("buf", "arg", "wrap_with_raii_handle_if_needed")
+            ):
+                self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
+                arg = f"borrow_arrayref_tensor_as_tensor({arg})"
+            wrapped_tensor_args.append(arg)
+
+        int_call_str = self._generate_temporary_array_pointer(
+            "int64_t", int_call_args, force_mutable=True
+        )
+        tensor_call_str = self._generate_temporary_array_pointer(
+            "AtenTensorHandle", wrapped_tensor_args, force_mutable=True
+        )
+
+        extern_kernel_node_index = len(V.extern_kernel_nodes) - 1
+        self.writeline(
+            f"aoti_torch_proxy_executor_call_function(proxy_executor, "
+            f"{extern_kernel_node_index}, "
+            f"{len(int_call_args)}, "
+            f"{int_call_str}, "
+            f"{len(wrapped_tensor_args)}, "
+            f"{tensor_call_str});"
+        )
+
     def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         # aoti_torch_tensor_copy_ takes AtenTensorHandle as input,
         # while stack-allocation results in ArrayRefTensor
