@@ -218,7 +218,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         with context:
             model(inp).sum()
             state_dict = model.state_dict()
-            for name, dtensor in state_dict.items():
+            for dtensor in state_dict.values():
                 self.assertEqual(dtensor.device.type, "cpu")
 
     @skip_if_lt_x_gpu(2)

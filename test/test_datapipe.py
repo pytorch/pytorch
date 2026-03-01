@@ -1791,7 +1791,7 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(batch, arrs[i * bs : i * bs + len(batch)])
 
         # __len__ test: verifying that the overall length and of each batch is correct
-        for i, batch in enumerate(batch_dp):
+        for batch in batch_dp:
             self.assertEqual(len(batch), bs)
 
         # __len__ Test: the length is missing if the source DataPipe doesn't have length
