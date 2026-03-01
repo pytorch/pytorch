@@ -12,6 +12,8 @@ from torch._functorch.eager_transforms import (
 )
 from torch._functorch.functional_call import functional_call, stack_module_state
 
+from torch._functorch.einops import rearrange
+
 
 __all__ = [
     "grad",
@@ -24,6 +26,7 @@ __all__ = [
     "jacrev",
     "jvp",
     "linearize",
+    "rearrange",
     "vjp",
     "functional_call",
     "stack_module_state",
