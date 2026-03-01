@@ -12,7 +12,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAScaledBlas.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
@@ -61,14 +61,15 @@ class cublasCommonArgs;
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
-namespace scaled_blas = at::cuda::scaled;
+namespace scaled_blas = at::native::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
-using scaled_blas::_scaled_mm_allowed_device;
 
 namespace at::native {
 
-static bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
+namespace{
+
+bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
 #ifdef USE_ROCM
     static const std::vector<std::string> archs = {
         "gfx942",
@@ -92,12 +93,10 @@ static bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=fals
 }
 
 #ifdef USE_ROCM
-static bool _scaled_mm_is_fnuz() {
+bool _scaled_mm_is_fnuz() {
     return at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 }
 #endif
-
-namespace{
 
 /*
  * Scaling Type Determination:
@@ -663,10 +662,6 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 using namespace std::placeholders;
-
-namespace scaled_blas = at::cuda::scaled;
-using scaled_blas::ScaledGemmImplementation;
-using scaled_blas::convert_int_to_enum;
 
 std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 9> scale_kernel_dispatch = {{
   { "tensorwise_tensorwise", scaled_blas::check_tensorwise_recipe, ScaledGemmImplementation::TENSORWISE_TENSORWISE },

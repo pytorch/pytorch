@@ -1594,9 +1594,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     dict_source = TypeDictSource(klass_source)
                     install_guard(
                         dict_source.make_guard(
-                            functools.partial(
-                                GuardBuilder.DICT_CONTAINS, key=name, invert=True
-                            )
+                            functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
                         )
                     )
 
@@ -2860,9 +2858,10 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         return self._tuple_vt.get_python_hash()
 
     def is_python_equal(self, other: object) -> bool:
-        return isinstance(
-            other, UserDefinedTupleVariable
-        ) and self._tuple_vt.is_python_equal(other._tuple_vt)
+        other = (
+            other._tuple_vt if isinstance(other, UserDefinedTupleVariable) else other
+        )
+        return self._tuple_vt.is_python_equal(other)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):

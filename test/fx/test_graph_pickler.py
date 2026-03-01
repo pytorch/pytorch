@@ -15,6 +15,7 @@ import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
+from torch.fx import symbolic_trace
 from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._import_utils import import_dill
 
@@ -829,6 +830,20 @@ class TestNodeMetadataKeyFilter(TestCase):
             self.assertIn("source_fn_stack", pickle_data.meta)
             self.assertIn("nn_module_stack", pickle_data.meta)
             self.assertIn("custom_key", pickle_data.meta)
+
+
+class TestNodeStateSerialization(TestCase):
+    def test_type_entry_preserved_in_getstate(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.neg(x)
+                return y + 1
+
+        gm = symbolic_trace(M())
+        node = next(n for n in gm.graph.nodes if n.op == "call_function")
+        node.type = torch.Tensor
+        state = node.__getstate__()
+        self.assertIs(state["type"], torch.Tensor)
 
 
 if __name__ == "__main__":
