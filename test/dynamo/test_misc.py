@@ -11613,6 +11613,132 @@ def ___make_guard_fn():
         expected = fn(*inps)
         self.assertEqual(actual, expected)
 
+    def test_pytree_tree_map_custom_type_fullgraph(self):
+        """
+        Regression test for GitHub issue #173240.
+
+        tree_map with multiple custom pytree types failed with fullgraph=True due to
+        incorrect handling of type object comparisons in the dynamo polyfills.
+        The issue was in flatten_up_to where `node_type != treespec.type` would
+        fail because cmp_eq/cmp_ne polyfills incorrectly called __eq__ on type objects.
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class MyContainer:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        # Register as pytree node
+        python_pytree.register_pytree_node(
+            MyContainer,
+            lambda c: ([c.x, c.y], None),
+            lambda children, _: MyContainer(children[0], children[1]),
+        )
+
+        try:
+            # Create instances
+            c1 = MyContainer(x=torch.zeros(2, 3), y=torch.ones(2, 3))
+            c2 = MyContainer(x=torch.ones(2, 3), y=torch.zeros(2, 3))
+
+            def add_containers(a, b):
+                return python_pytree.tree_map(lambda x, y: x + y, a, b)
+
+            # Test without fullgraph (should work)
+            expected = add_containers(c1, c2)
+
+            # Test with fullgraph=True (this was failing before the fix)
+            add_containers_compiled = torch.compile(add_containers, fullgraph=True)
+            actual = add_containers_compiled(c1, c2)
+
+            self.assertEqual(actual.x, expected.x)
+            self.assertEqual(actual.y, expected.y)
+        finally:
+            # Unregister the custom pytree node to avoid affecting other tests
+            if MyContainer in python_pytree.SUPPORTED_NODES:
+                del python_pytree.SUPPORTED_NODES[MyContainer]
+
+    def test_type_eq_ne_comparison_builtin(self):
+        """
+        Test type.__eq__ and type.__ne__ for builtin types.
+
+        This tests that type comparisons work correctly when tracing through
+        type.__eq__ and type.__ne__ with builtin types like int, str, list.
+        """
+        def compare_builtin_types():
+            # These should be traced correctly
+            result1 = type.__eq__(int, int)
+            result2 = type.__ne__(str, int)
+            result3 = type.__eq__(list, list)
+            return result1, result2, result3
+
+        expected = compare_builtin_types()
+
+        compiled_fn = torch.compile(compare_builtin_types, fullgraph=True)
+        actual = compiled_fn()
+
+        self.assertEqual(actual[0], expected[0])  # int == int -> True
+        self.assertEqual(actual[1], expected[1])  # str != int -> True
+        self.assertEqual(actual[2], expected[2])  # list == list -> True
+
+    def test_type_eq_ne_comparison_custom_classes(self):
+        """
+        Test type.__eq__ and type.__ne__ for custom classes.
+
+        This tests that type comparisons work correctly for user-defined classes,
+        which is the core scenario from the fix for issue #173240.
+        """
+        class CustomA:
+            pass
+
+        class CustomB:
+            pass
+
+        def compare_custom_types():
+            # Compare custom types
+            result1 = type.__eq__(CustomA, CustomA)
+            result2 = type.__ne__(CustomA, CustomB)
+            result3 = type.__eq__(CustomB, CustomB)
+            return result1, result2, result3
+
+        expected = compare_custom_types()
+
+        compiled_fn = torch.compile(compare_custom_types, fullgraph=True)
+        actual = compiled_fn()
+
+        self.assertEqual(actual[0], expected[0])  # CustomA == CustomA -> True
+        self.assertEqual(actual[1], expected[1])  # CustomA != CustomB -> True
+        self.assertEqual(actual[2], expected[2])  # CustomB == CustomB -> True
+
+    def test_type_eq_ne_comparison_mixed_types(self):
+        """
+        Test type.__eq__ and type.__ne__ comparing builtin and custom types.
+
+        This tests mixed scenarios where custom types are compared with builtins.
+        """
+        class MyCustomType:
+            def __eq__(self, other):
+                # Instance eq that takes 2 args - should NOT be called for type comparison
+                return False
+
+        def compare_mixed_types():
+            # Builtin vs builtin
+            result1 = type.__eq__(int, int)
+            # Custom vs custom (important: should use type.eq, not instance.__eq__)
+            result2 = type.__ne__(MyCustomType, MyCustomType)
+            # Builtin vs custom
+            result3 = type.__eq__(int, MyCustomType)
+            return result1, result2, result3
+
+        expected = compare_mixed_types()
+
+        compiled_fn = torch.compile(compare_mixed_types, fullgraph=True)
+        actual = compiled_fn()
+
+        self.assertEqual(actual[0], expected[0])  # int == int -> True
+        self.assertEqual(actual[1], expected[1])  # MyCustomType != MyCustomType -> False
+        self.assertEqual(actual[2], expected[2])  # int != MyCustomType -> True
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 

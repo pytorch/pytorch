@@ -1574,6 +1574,35 @@ class BuiltinVariable(VariableTracker):
                     tx, getattr(float, name)(args[0].as_python_constant())
                 )
 
+        # Handle type.__eq__ and type.__ne__ for comparing type objects.
+        # This is needed for polyfills that use type.__eq__(a, b) to correctly
+        # compare type objects (classes) without incorrectly invoking instance
+        # __eq__ methods defined in the class.
+        # See https://github.com/pytorch/pytorch/issues/173240
+        if self.fn is type and name in ("__eq__", "__ne__") and len(args) == 2:
+            a, b = args
+
+            # Helper to extract the type value from a variable
+            def get_type_value(var: VariableTracker) -> type | None:
+                if isinstance(var, variables.UserDefinedClassVariable):
+                    return var.value
+                elif isinstance(var, BuiltinVariable) and isinstance(var.fn, type):
+                    return var.fn
+                elif isinstance(var, ConstantVariable) and isinstance(
+                    var.value, type
+                ):
+                    return var.value
+                return None
+
+            type_a = get_type_value(a)
+            type_b = get_type_value(b)
+
+            if type_a is not None and type_b is not None:
+                if name == "__eq__":
+                    return ConstantVariable.create(type_a == type_b)
+                else:  # __ne__
+                    return ConstantVariable.create(type_a != type_b)
+
         return super().call_method(tx, name, args, kwargs)
 
     def _call_int_float(

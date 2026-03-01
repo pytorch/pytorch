@@ -556,6 +556,17 @@ def cmp_eq(a: object, b: object) -> bool:
     # slow in some corner cases.
     # if a is b:
     #     return True
+
+    # Special handling for type objects (classes). When `a` is a type/class,
+    # `a.__eq__` would incorrectly access the instance __eq__ method defined
+    # in the class, not the type comparison method. For example, if MyClass
+    # defines `def __eq__(self, other)`, then `MyClass.__eq__` is that instance
+    # method, not the method for comparing type objects.
+    # We use `type.__eq__(a, b)` to correctly compare type objects.
+    # See https://github.com/pytorch/pytorch/issues/173240
+    if isinstance(a, type) and isinstance(b, type):
+        return type.__eq__(a, b)
+
     result = a.__eq__(b)
     if result is NotImplemented:
         result = b.__eq__(a)
@@ -563,6 +574,10 @@ def cmp_eq(a: object, b: object) -> bool:
 
 
 def cmp_ne(a: object, b: object) -> bool:
+    # Special handling for type objects - see cmp_eq for explanation
+    if isinstance(a, type) and isinstance(b, type):
+        return type.__ne__(a, b)
+
     # Check if __ne__ is overridden
     if isinstance(type(a).__ne__, types.FunctionType):
         result = a.__ne__(b)
