@@ -1069,22 +1069,27 @@ void Engine::evaluate_function(
   auto opt_parent_stream = (*func).stream();
   c10::OptionalStreamGuard parent_stream_guard{opt_parent_stream};
 
-  // Ensure that the incoming gradients are ready
-  for (size_t pos = 0; pos < inputs.ready_events.size(); ++pos) {
-    if (!inputs.buffer[pos].defined()) {
-      continue;
-    }
-    const auto device = inputs.buffer[pos].device();
-    bool is_accelerator = at::accelerator::isAccelerator(device.type());
-    if (!is_accelerator) {
-      continue;
-    }
-    auto& opt_ready_stream = inputs.ready_streams[pos];
-    auto& opt_ready_event = inputs.ready_events[pos];
-    TORCH_INTERNAL_ASSERT(opt_ready_stream && opt_parent_stream);
-    if (*opt_parent_stream != *opt_ready_stream) {
-      TORCH_INTERNAL_ASSERT(opt_ready_event);
-      opt_parent_stream->wait(opt_ready_event.value());
+  // Ensure that the incoming gradients are ready.
+  // Stream tracking vectors are lazily allocated, so skip entirely for
+  // CPU-only InputBuffers where no accelerator tensors were accumulated.
+  if (inputs.has_stream_tracking()) {
+    for (size_t pos = 0; pos < inputs.buffer.size(); ++pos) {
+      if (!inputs.buffer[pos].defined()) {
+        continue;
+      }
+      const auto device = inputs.buffer[pos].device();
+      bool is_accelerator = at::accelerator::isAccelerator(device.type());
+      if (!is_accelerator) {
+        continue;
+      }
+      auto& opt_ready_stream = inputs.ready_streams[pos];
+      auto& opt_ready_event = inputs.ready_events[pos];
+      TORCH_INTERNAL_ASSERT(opt_ready_stream && opt_parent_stream);
+      if (*opt_parent_stream != *opt_ready_stream) {
+        TORCH_INTERNAL_ASSERT(opt_ready_event);
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        opt_parent_stream->wait(opt_ready_event.value());
+      }
     }
   }
 

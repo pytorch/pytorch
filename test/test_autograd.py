@@ -10118,6 +10118,27 @@ for shape in [(1,), ()]:
         # Given gradients should not be modified inplace
         self.assertEqual(grad_out1, grad_out1_original)
 
+    def test_input_buffer_lazy_stream_tracking(self):
+        # Verify that lazy stream/event allocation in InputBuffer does not
+        # affect gradient correctness on CPU. Multiple uses of a tensor cause
+        # its grad_fn's InputBuffer to accumulate from multiple producers.
+        a = torch.randn(4, 4, requires_grad=True)
+        b = a * a
+        c = a + b
+        # b and a are each used twice, so their grad_fn InputBuffers accumulate
+        loss = (b + c).sum()
+        loss.backward()
+        expected = a.detach() * 2 + 1 + a.detach() * 2
+        self.assertEqual(a.grad, expected)
+
+        # Deep chain: many InputBuffers, all CPU-only
+        x = torch.randn(8, requires_grad=True)
+        out = x
+        for _ in range(100):
+            out = out * 1.0 + out * 0.0
+        out.sum().backward()
+        self.assertEqual(x.grad, torch.ones_like(x))
+
     def test_no_unnecessary_unwrapping(self):
         a = torch.randn(5, requires_grad=True)
         a_orig = a.detach().clone()

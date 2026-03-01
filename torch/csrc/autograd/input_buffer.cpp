@@ -215,6 +215,8 @@ void InputBuffer::add(
     }
     return;
   }
+  ensure_stream_tracking();
+
   // Handle the case where var is on an accelerator but producer node has no
   // canonical stream, e.g. this can happen if forward is DtoH
   const std::optional<c10::Stream>& opt_producer_stream =
@@ -315,6 +317,15 @@ void InputBuffer::add(
       ready_events[pos] = std::move(event);
     }
     ready_streams[pos] = accum_stream;
+  }
+}
+
+void InputBuffer::ensure_stream_tracking() {
+  if (opt_accum_streams.empty()) {
+    const auto size = buffer.size();
+    opt_accum_streams.resize(size);
+    ready_events.resize(size);
+    ready_streams.resize(size);
   }
 }
 
