@@ -17,26 +17,20 @@ def inline_invoke_subgraph(gm: GraphModule) -> GraphModule:
         if name and isinstance(mod, GraphModule):
             inline_invoke_subgraph(mod)
 
-    for node in list(gm.graph.nodes):
-        if not (
-            node.op == "call_function"
-            and node.target is torch.ops.higher_order.invoke_subgraph
-        ):
-            continue
-
+    invoke_nodes = list(
+        gm.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.invoke_subgraph
+        )
+    )
+    for node in invoke_nodes:
         get_attr_node = node.args[0]
         # args[1] is the identifier string, args[2:] are operands
         operands = node.args[2:]
 
         subgraph: GraphModule = getattr(gm, get_attr_node.target)
 
-        # Build mapping from subgraph nodes -> parent graph nodes
-        env = {}
-        subgraph_placeholders = [
-            n for n in subgraph.graph.nodes if n.op == "placeholder"
-        ]
-        for ph, operand in zip(subgraph_placeholders, operands):
-            env[ph] = operand
+        # Build mapping from subgraph placeholder nodes -> parent operands
+        env = dict(zip(subgraph.graph.find_nodes(op="placeholder"), operands))
 
         # Copy subgraph nodes into parent graph, inserting before the
         # invoke_subgraph node.
@@ -46,9 +40,7 @@ def inline_invoke_subgraph(gm: GraphModule) -> GraphModule:
                     continue
                 env[sub_node] = gm.graph.node_copy(sub_node, lambda n: env[n])
 
-        # The subgraph output node's first arg is a tuple of return values.
-        output_node = next(n for n in subgraph.graph.nodes if n.op == "output")
-        output_values = output_node.args[0]
+        output_values = subgraph.graph.output_node().args[0]
 
         # Replace getitem users of the invoke_subgraph result with the
         # corresponding inlined output.
