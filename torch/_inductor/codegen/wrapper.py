@@ -547,11 +547,17 @@ class EnterDeviceContextManagerLine(WrapperLine):
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
-            # Note _DeviceGuard has less overhead than device, but only accepts
-            # integers
-            code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
-            code.do_indent()
-            code.writeline(V.graph.device_ops.set_device(self.device_idx))
+            if config.normalize_cuda_device_for_cache:
+                # Use torch.cuda.current_device() so cached compiled code works
+                # on any device, enabling FxGraphCache sharing across distributed ranks.
+                # See pytorch/pytorch#108971.
+                code.writeline("with torch.cuda._DeviceGuard(torch.cuda.current_device()):")
+                code.do_indent()
+                code.writeline("torch.cuda.set_device(torch.cuda.current_device())")
+            else:
+                code.writeline(f"with {V.graph.device_ops.device_guard(self.device_idx)}:")
+                code.do_indent()
+                code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_enter_device_context_manager
@@ -1524,13 +1530,21 @@ class PythonWrapperCodegen(CodeGen):
         self.write_get_raw_stream_header()
         name = f"stream{device_idx}"
         if config.triton.autotune_at_compile_time:
-            self.kernel_autotune_calls.writeline(
-                f"{name} = get_raw_stream({device_idx})"
-            )
+            if config.normalize_cuda_device_for_cache:
+                self.kernel_autotune_calls.writeline(
+                    f"{name} = get_raw_stream(torch.cuda.current_device())"
+                )
+            else:
+                self.kernel_autotune_calls.writeline(
+                    f"{name} = get_raw_stream({device_idx})"
+                )
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
-        self.writeline(f"{name} = get_raw_stream({device_idx})")
+        if config.normalize_cuda_device_for_cache:
+            self.writeline(f"{name} = get_raw_stream(torch.cuda.current_device())")
+        else:
+            self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
     def get_codegened_graph(self):
@@ -1560,16 +1574,26 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.autotune_at_compile_time:
             # mimic logic of EnterDeviceContextManagerLine.codegen for the autotune code block
             self.write_triton_header_once()
-            self.kernel_autotune_calls.writeline(
-                f"with {V.graph.device_ops.device_guard(device_idx)}:"
-            )
+            if config.normalize_cuda_device_for_cache:
+                self.kernel_autotune_calls.writeline(
+                    "with torch.cuda._DeviceGuard(torch.cuda.current_device()):"
+                )
+            else:
+                self.kernel_autotune_calls.writeline(
+                    f"with {V.graph.device_ops.device_guard(device_idx)}:"
+                )
             self.kernel_autotune_calls.do_indent()
             if is_codegen_graph_partition_subgraph(self):
                 # Need get_raw_stream for subgraph
                 self.write_get_raw_stream_header()
-            self.kernel_autotune_calls.writeline(
-                f"stream{device_idx} = get_raw_stream({device_idx})"
-            )
+            if config.normalize_cuda_device_for_cache:
+                self.kernel_autotune_calls.writeline(
+                    f"stream{device_idx} = get_raw_stream(torch.cuda.current_device())"
+                )
+            else:
+                self.kernel_autotune_calls.writeline(
+                    f"stream{device_idx} = get_raw_stream({device_idx})"
+                )
         self.last_seen_device_guard_index = device_idx
 
     def codegen_device_guard_exit(self) -> None:
