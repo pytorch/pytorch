@@ -301,6 +301,23 @@ addmm_contiguous_subgraph_template = ContiguousTemplate(
 )
 
 
+def _try_decompose_mm_k1(mat1, mat2, out_dtype=None):
+    """When K == 1, the matmul is an outer product: (M, 1) @ (1, N) = (M, N).
+
+    Instead of a full GEMM, broadcast both tensors to (M, N) and do pointwise
+    multiplication, which is more efficient for this memory-bound case.
+
+    Returns the result tensor if K == 1, otherwise None.
+    """
+    k = mat1.get_size()[1]
+    if k != 1:
+        return None
+    result = lowerings[aten.mul](mat1, mat2)
+    if out_dtype is not None and out_dtype != mat1.get_dtype():
+        result = lowerings[prims.convert_element_type.default](result, out_dtype)
+    return result
+
+
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
@@ -324,6 +341,12 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             ),
             lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
         )
+
+    # When K == 1, decompose to pointwise ops instead of a full GEMM.
+    if mat1.get_device().type in ["cuda"] and layout is None:
+        result = _try_decompose_mm_k1(mat1, mat2, out_dtype=out_dtype)
+        if result is not None:
+            return result
 
     # Lower matmul-related operations (e.g., torch.matmul / torch.bmm / torch.addmm)
     # into native matmul IR using `ops.dot`. When we see a matmul pattern
@@ -603,6 +626,17 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    # When K == 1, decompose to pointwise ops: beta * inp + alpha * (mat1 * mat2)
+    if mat1.get_device().type in ["cuda"] and layout is None:
+        mm_result = _try_decompose_mm_k1(mat1, mat2)
+        if mm_result is not None:
+            if alpha != 1:
+                mm_result = lowerings[aten.mul](alpha, mm_result)
+            if beta == 0:
+                return mm_result
+            bias = inp if beta == 1 else lowerings[aten.mul](beta, inp)
+            return lowerings[aten.add](bias, mm_result)
+
     if use_native_matmul(mat1, mat2):
         if beta == 0:
             arg1 = 0
