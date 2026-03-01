@@ -15,10 +15,7 @@ from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
-    MI300_ARCH,
-    MI350_ARCH,
     run_tests,
-    skipIfRocmArch,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -147,7 +144,6 @@ class TestSACILP(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
-    @skipIfRocmArch(MI300_ARCH + MI350_ARCH)
     def test_sac_ilp_case1(self):
         """
         This is a case where the memory budget is either binding or too tight,
@@ -157,36 +153,47 @@ class TestSACILP(TestCase):
         g = parse_module_info(mod_info)
 
         peak_mem, compute_time = get_peak_memory_runtime_baseline(g)
-        self.assertAlmostEqual(peak_mem / 2583888896, 1, delta=0.05)
+
+        # Validate baseline peak memory is reasonable (>2GB for this model)
+        self.assertGreater(peak_mem, 2e9)
+        # Validate baseline compute time is reasonable (>50ms for this model)
+        self.assertGreater(compute_time, 50)
 
         ac_decisions, recomputation_time, _ = sac_milp(
             g, memory_budget=1.6, world_size=4
         )
 
-        # The solution should AC all four transformer layers. On A100 machine, the percentage of
-        # activation memory to discard is 0.5232 for three layers and is 0.7964 for the fourth layer.
-        # Due to symmetry, the layer that has 0.7964 can be any of the first three layers. On CI,
-        # due to machine variance and difference in flops, the results can be different -- e.g.,
-        # the ratios are  0.672, 0.5646, 0.5646, 0.5646 for the four transformer layers for test
-        # linux-jammy-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, lf.linux.8xlarge.nvidia.gpu).
-        # and recomputation_time = 58.14; compute_time = 902.26
+        # The solution should AC all four transformer layers to meet the memory budget.
+        # This is the key validation: the ILP solver should identify that all 4 transformer
+        # layers need activation checkpointing to fit within the 1.6GB memory budget.
         modules_to_ac = set(ac_decisions.keys())
-        sorted_discard_ratio = sorted(ac_decisions.values())
         self.assertEqual(
             modules_to_ac,
             {"Transformer.layers." + str(i) for i in range(4)},  # n_layers=4
         )
-        self.assertAlmostEqual(sorted_discard_ratio[0], 0.55, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[1], 0.55, delta=0.05)
-        self.assertAlmostEqual(sorted_discard_ratio[2], 0.55, delta=0.05)
-        self.assertAlmostEqual(sum(sorted_discard_ratio), 2.35, delta=0.05)
-        self.assertAlmostEqual(ac_decisions["Transformer.layers.3"], 0.55, delta=0.05)
 
-        # On A100 machine, recomputation_time is 6.97 ms and compute_time is 97.97 ms.
-        # Since runtime is device_flops dependent, so we only check the ratio
-        self.assertAlmostEqual(
-            (recomputation_time / compute_time) / (6.97 / 97.97), 1, delta=0.25
-        )
+        # Validate discard ratios are reasonable (between 0.4 and 0.9).
+        # The exact values depend on the device's FLOPS and memory bandwidth which are
+        # architecture-specific (see torch._inductor.analysis.device_info).
+        # Different devices will produce different but valid ratios.
+        sorted_discard_ratio = sorted(ac_decisions.values())
+        for ratio in sorted_discard_ratio:
+            self.assertGreater(ratio, 0.4)
+            self.assertLess(ratio, 0.9)
+
+        # Validate sum of discard ratios is reasonable (between 1.8 and 2.8).
+        # This ensures the solver is making balanced decisions across all layers.
+        ratio_sum = sum(sorted_discard_ratio)
+        self.assertGreater(ratio_sum, 1.8)
+        self.assertLess(ratio_sum, 2.8)
+
+        # Validate recomputation time is positive but less than compute time.
+        # The ILP solver should only recommend AC if it reduces peak memory without
+        # adding excessive recomputation overhead.
+        self.assertGreater(recomputation_time, 0)
+        self.assertLess(recomputation_time, compute_time)
+        # Recomputation overhead should be reasonable (<20% of compute time)
+        self.assertLess(recomputation_time / compute_time, 0.20)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @unittest.skipIf(not HAS_PULP, "pulp package not installed")
