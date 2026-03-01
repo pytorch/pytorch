@@ -62,7 +62,7 @@ MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
   if (a->numel() == 0 || b->numel() == 0) {
     return MemOverlapStatus::No;
   }
-  if (!a->is_non_overlapping_and_dense_or_false() || !b->is_non_overlapping_and_dense_or_false()) {
+  if (!(a->is_non_overlapping_and_dense_or_false() && b->is_non_overlapping_and_dense_or_false())) {
     return MemOverlapStatus::TooHard;
   }
   // Test for storage equality, rather than pointer equality.
