@@ -28,6 +28,23 @@ __all__ = ["Placement", "Shard", "Replicate", "Partial"]
 _RankTypeT = TypeVar("_RankTypeT", bound=RankType)
 
 
+@torch.library.custom_op("_dtensor::partition_for_partial", mutates_args=())
+def _partition_for_partial(tensor: torch.Tensor, local_rank: int) -> torch.Tensor:
+    if local_rank == 0:
+        return tensor.clone()
+    return torch.zeros_like(tensor)
+
+
+@_partition_for_partial.register_fake
+def _(tensor: torch.Tensor, local_rank: int) -> torch.Tensor:
+    return tensor.clone()
+
+
+@maybe_run_for_local_tensor
+def _call_partition_for_partial(tensor: torch.Tensor, local_rank: int) -> torch.Tensor:
+    return torch.ops._dtensor.partition_for_partial(tensor, local_rank)
+
+
 # Appease TestPublicBindings.test_correct_module_names
 Placement.__module__ = "torch.distributed.tensor.placement_types"
 
@@ -1278,9 +1295,8 @@ class Partial(torch._C._distributed.Partial):
 
         Mathematical analysis by reduce_op:
 
-        * "sum": partition(v) = v / n, then sum([v/n] * n) = v
-          Introduces floating-point error from the division and summation.
-          Error grows with n (the number of ranks).
+        * "sum": partition(v) assigns v to rank 0, zeros to all others.
+          Then sum(partitions) = v. Numerically exact.
 
         * "avg": partition(v) = v, then avg([v] * n) = v
           Numerically exact (averaging identical values).
@@ -1299,9 +1315,9 @@ class Partial(torch._C._distributed.Partial):
           that partitions a value such that reducing recovers the original.
           NOT SUPPORTED.
         """
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
         if self.reduce_op == "sum":
-            return tensor / num_chunks
+            local_rank = mesh._sym_get_coordinate(mesh_dim)
+            return _call_partition_for_partial(tensor, local_rank)
         elif self.reduce_op in ("avg", "min", "max"):
             return tensor
         else:
