@@ -16,7 +16,10 @@ from .base import TemplateConfigHeuristics
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator
+
+    from ..kernel_inputs import KernelInputs
+    from .params import KernelTemplateParams
 
 
 # Module-wide registry for template heuristics
@@ -194,3 +197,70 @@ def override_template_heuristics(
             if key in original_entries:
                 _TEMPLATE_HEURISTIC_REGISTRY[key] = original_entries[key]
         _HEURISTIC_CACHE.clear()
+
+
+@contextlib.contextmanager
+def with_fixed_template_config(
+    device_type: str,
+    template_op_pairs: list[tuple[str, str]],
+    config: KernelTemplateParams,
+) -> Iterator[None]:
+    """
+    Context manager to temporarily override heuristics to yield exactly one fixed config.
+
+    This is useful for cache replay, where we want to reconstruct the exact same
+    choice that was cached rather than regenerating all possible configs.
+
+    The real heuristic's get_extra_kwargs and adjust_kernel_inputs are preserved;
+    only _get_template_configs_impl is overridden to yield the fixed config.
+
+    Args:
+        device_type: Device type ("cuda", "cpu", "xpu")
+        template_op_pairs: List of (template_name, op_name) pairs to override.
+        config: The exact config to yield (must be a KernelTemplateParams instance)
+
+    Example:
+        from torch._inductor.template_heuristics.params import DictKernelTemplateParams
+
+        config = DictKernelTemplateParams({"BLOCK_M": 64, "BLOCK_N": 64, ...})
+        with with_fixed_template_config("cuda", [("mm", "mm")], config):
+            choices = V.choices.get_template_configs(kernel_inputs, [mm_template], "mm")
+            # choices will contain exactly one choice with the cached config
+    """
+    # Get the real heuristics first (before we modify anything)
+    # and save their original _get_template_configs_impl methods
+    heuristics_and_originals: list[
+        tuple[TemplateConfigHeuristics, Any]
+    ] = []
+
+    for template_name, op_name in template_op_pairs:
+        heuristic = get_template_heuristic(template_name, device_type, op_name)
+        original_impl = heuristic._get_template_configs_impl
+        heuristics_and_originals.append((heuristic, original_impl))
+
+    # Define the replacement implementation that yields the fixed config
+    def fixed_get_template_configs_impl(
+        self: TemplateConfigHeuristics,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        yield config.to_kwargs()
+
+    log.debug(
+        "with_fixed_template_config: overriding device_type=%s, template_op_pairs=%s with config=%s",
+        device_type,
+        template_op_pairs,
+        config,
+    )
+
+    try:
+        # Monkey-patch the real heuristics
+        for heuristic, _ in heuristics_and_originals:
+            heuristic._get_template_configs_impl = fixed_get_template_configs_impl.__get__(  # type: ignore[method-assign]
+                heuristic, type(heuristic)
+            )
+        yield
+    finally:
+        # Restore the original implementations
+        for heuristic, original_impl in heuristics_and_originals:
+            heuristic._get_template_configs_impl = original_impl  # type: ignore[method-assign]
