@@ -4,6 +4,7 @@ import dataclasses
 import os
 import pprint
 import re
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import List
@@ -34,6 +35,8 @@ Update the existing commitlist to commit bfcb687b9c.
 
 # Increase the allowed size of a CSV field to 1mil bytes for long files changed
 csv.field_size_limit(1000000)
+
+verbose = False
 
 
 @dataclasses.dataclass(frozen=False)
@@ -388,7 +391,13 @@ class CommitList:
 
         log_lines = commits.split("\n")
         hashes, titles = zip(*[log_line.split(" ", 1) for log_line in log_lines])
-        return [CommitList.gen_commit(commit_hash) for commit_hash in hashes]
+        result = []
+        for i, commit_hash in enumerate(hashes):
+            if verbose and (i % 10 == 0):
+                timestamp = time.strftime("%H:%M:%S")
+                print(f"[{timestamp}] Processing {i + 1} out of {len(hashes)} commits")
+            result.append(CommitList.gen_commit(commit_hash))
+        return result
 
     def filter(self, *, category=None, topic=None):
         commits = self.commits
@@ -558,7 +567,11 @@ def main():
         "--export-csv-categories", "--export_csv_categories", action="store_true"
     )
     parser.add_argument("--path", default="results/commitlist.csv")
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
+
+    global verbose
+    verbose = args.verbose
 
     if args.create_new:
         create_new(args.path, args.create_new[0], args.create_new[1])
