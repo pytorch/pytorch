@@ -21,12 +21,12 @@ namespace {
 
 using namespace at;
 
-Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, TensorOptions opt) {
+Tensor _triu_mask(c10::SymInt n, int64_t dims, bool diagonal, TensorOptions opt) {
   // get a mask that has value 1 whose indices satisfies i < j < k < ...
   // or i <= j <= k <= ... (depending on diagonal)
   Tensor range = at::arange(n, opt.dtype(kLong));
   std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range), "ij");
-  Tensor mask = at::full(index_grids[0].sizes(), true, opt.dtype(kBool));
+  Tensor mask = at::full_symint(index_grids[0].sym_sizes(), true, opt.dtype(kBool));
   if(diagonal) {
     for(int64_t i = 0; i < dims - 1; i++) {
       mask *= index_grids[i] <= index_grids[i+1];
@@ -37,6 +37,23 @@ Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, TensorOptions opt) {
     }
   }
   return mask;
+}
+
+// Binomial coefficient C(n, r), or C(n+r-1, r) when with_replacement is true.
+c10::SymInt compute_binomial_coeff(c10::SymInt n, int64_t r, bool with_replacement) {
+  if (with_replacement) {
+    n = n + (r - 1);
+  }
+
+  if (r == 0) {
+    return c10::SymInt(1);
+  }
+
+  c10::SymInt result(1);
+  for (int64_t i = 0; i < r; ++i) {
+    result = result * (n - i) / (i + 1);
+  }
+  return result;
 }
 
 }  // namespace
@@ -63,11 +80,16 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   if (r == 0) {
     return at::empty({0}, self.options());
   }
-  int64_t num_elements = self.numel();
+  c10::SymInt num_elements = self.sym_numel();
+  c10::SymInt expected_combinations = compute_binomial_coeff(num_elements, r, with_replacement);
+
   std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self), "ij");
   Tensor mask = _triu_mask(num_elements, r, with_replacement, self.options());
   for(Tensor &t : grids) {
     t = t.masked_select(mask);
+    TORCH_SYM_CHECK(t.sym_size(0).sym_eq(expected_combinations),
+                    "combinations: unexpected output size from masked_select, "
+                    "got ", t.sym_size(0), " but expected ", expected_combinations);
   }
   return at::stack(grids, 1);
 }

@@ -1367,6 +1367,90 @@ class TestInductorDynamic(TestCase):
         # Test backward pass as well - this is where the bug manifested
         out_compiled.sum().backward()
 
+    def test_combinations_dynamic_shapes(self, device):
+        # https://github.com/pytorch/pytorch/issues/163759
+        def fn(x):
+            return torch.combinations(x.flatten(), r=2)
+
+        x = torch.randn(3, 1, 1, device=device)
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        # Test that compiled output matches eager output
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
+
+        # Test with a different input shape to verify dynamic shapes work
+        x2 = torch.randn(4, 1, 1, device=device)
+        expected2 = fn(x2)
+        actual2 = compiled_fn(x2)
+        self.assertEqual(actual2, expected2)
+
+    def test_combinations_dynamic_shapes_with_replacement(self, device):
+        # https://github.com/pytorch/pytorch/issues/163759
+        def fn(x):
+            return torch.combinations(x, r=2, with_replacement=True)
+
+        x = torch.randn(4, device=device)
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
+
+        # Test with different input size
+        x2 = torch.randn(5, device=device)
+        expected2 = fn(x2)
+        actual2 = compiled_fn(x2)
+        self.assertEqual(actual2, expected2)
+
+    def test_combinations_dynamic_shapes_r1(self, device):
+        # https://github.com/pytorch/pytorch/issues/163759
+        def fn(x):
+            return torch.combinations(x, r=1)
+
+        x = torch.randn(5, device=device)
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
+
+        # Test with different input size
+        x2 = torch.randn(7, device=device)
+        expected2 = fn(x2)
+        actual2 = compiled_fn(x2)
+        self.assertEqual(actual2, expected2)
+
+    def test_combinations_dynamic_shapes_r3(self, device):
+        # https://github.com/pytorch/pytorch/issues/163759
+        def fn(x):
+            return torch.combinations(x, r=3)
+
+        x = torch.randn(5, device=device)
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
+
+        # Test with different input size
+        x2 = torch.randn(6, device=device)
+        expected2 = fn(x2)
+        actual2 = compiled_fn(x2)
+        self.assertEqual(actual2, expected2)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_combinations_unbacked_symint(self, device):
+        # https://github.com/pytorch/pytorch/issues/163759
+        def fn(x):
+            nz = torch.nonzero(x).squeeze(1)
+            return torch.combinations(nz, r=2)
+
+        x = torch.tensor([1, 0, 2, 0, 3, 4], device=device)
+        opt_fn = torch.compile(fn, dynamic=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
