@@ -28,7 +28,7 @@ import re
 import types
 from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, nullcontext
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch.nn
 from torch._guards import Source
@@ -149,7 +149,7 @@ def record_nn_module_stack(
 
 
 def guard_to_detect_forward_monkeypatching(
-    source: Optional[Source], mod: torch.nn.Module
+    source: Source | None, mod: torch.nn.Module
 ) -> None:
     # Users sometimes patch the forward method of a nn module instance to
     # perform optimizations like quantization. Though this is not a good
@@ -298,7 +298,7 @@ class NNModuleVariable(VariableTracker):
         tx: "InstructionTranslator",
         name: str,
         obj_source: Source,
-    ) -> Optional[VariableTracker]:
+    ) -> VariableTracker | None:
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
             getattribute_fn = inspect.getattr_static(type(base), "__getattribute__")
@@ -1254,7 +1254,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def getattr_helper(
         self, tx: "InstructionTranslator", field: str, name_vt: VariableTracker
-    ) -> Optional[VariableTracker]:
+    ) -> VariableTracker | None:
         dict_vt = self.var_getattr(tx, field)
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
