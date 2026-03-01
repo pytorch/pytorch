@@ -150,6 +150,77 @@ class TestBenchmarker(TestCase):
         self.assertEqual(captured_kwargs["warmup"], custom_warmup)
         self.assertEqual(captured_kwargs["rep"], custom_rep)
 
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
+    def test_benchmarker_cpu_override_dispatch(self, benchmarker_cls, device="cpu"):
+        # Registers a custom handler for 'cpu' and verifies dispatch uses it instead of the default path.
+        from torch._inductor.runtime import benchmarking as _bench
+
+        benchmarker = benchmarker_cls()
+
+        # Snapshot registry and restore at the end to avoid cross-test pollution.
+        orig = dict(_bench._BENCHMARK_DISPATCH)
+        try:
+            seen = {"cpu_override": 0}
+
+            def custom_cpu(self, fn, *, warmup, rep, **kw):
+                seen["cpu_override"] += 1
+                return "cpu-override"
+
+            # Override the built-in 'cpu' registration
+            _bench.register_benchmarker("cpu", custom_cpu, override=True)
+
+            # Ensure default CPU/GPU methods are NOT called if registry override works.
+            with (
+                patch.object(
+                    benchmarker_cls,
+                    "benchmark_cpu",
+                    side_effect=AssertionError(
+                        "benchmark_cpu should not be called when a custom 'cpu' handler is registered"
+                    ),
+                    create=True,
+                ),
+                patch.object(
+                    benchmarker_cls,
+                    "benchmark_gpu",
+                    side_effect=AssertionError(
+                        "benchmark_gpu should not be called for 'cpu' device"
+                    ),
+                    create=True,
+                ),
+            ):
+                (fn, fn_args, fn_kwargs), _ = self.make_params(device)
+                out = benchmarker.benchmark(fn, fn_args, fn_kwargs)
+                self.assertEqual(out, "cpu-override")
+                self.assertEqual(seen["cpu_override"], 1)
+        finally:
+            _bench._BENCHMARK_DISPATCH.clear()
+            _bench._BENCHMARK_DISPATCH.update(orig)
+
+    @unittest.skipIf(not HAS_CPU, "requires CPU")
+    @parametrize("benchmarker_cls", ALL_BENCHMARKER_CLASSES)
+    def test_benchmarker_cpu_override_runs_callable(
+        self, benchmarker_cls, device="cpu"
+    ):
+        from torch._inductor.runtime import benchmarking as _bench
+
+        benchmarker = benchmarker_cls()
+        orig = dict(_bench._BENCHMARK_DISPATCH)
+        try:
+            # Override CPU but still route to benchmark_cpu internally
+            def custom_cpu(self, f, *, warmup, rep, **kw):
+                # Just delegate to the original path; we want to ensure `f()` calls the user's fn.
+                return self.benchmark_cpu(f, warmup=warmup, rep=rep, **kw)
+
+            _bench.register_benchmarker("cpu", custom_cpu, override=True)
+            # Define a simple op and ensure it actually runs without TypeError
+            (fn, fn_args, fn_kwargs), _ = self.make_params(device)
+            out = benchmarker.benchmark(fn, fn_args, fn_kwargs, warmup=1, rep=1)
+            self.assertGreater(out, 0)
+        finally:
+            _bench._BENCHMARK_DISPATCH.clear()
+            _bench._BENCHMARK_DISPATCH.update(orig)
+
 
 if __name__ == "__main__":
     run_tests()

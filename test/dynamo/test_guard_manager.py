@@ -1576,7 +1576,7 @@ class SourceCloneTests(torch._dynamo.test_case.TestCase):
 
 
 class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
-    """Tests for the GuardCheckSpec extract_fn/eval_fn handlers on GuardBuilder."""
+    """Tests for the GuardCheckSpec get_metadata_fn/eval_fn handlers on GuardBuilder."""
 
     def _get_handler(self, name):
         from torch._dynamo.guards import GUARD_VALUE_DISPATCH
@@ -1594,7 +1594,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.TYPE_MATCH)
         handler = self._get_handler("TYPE_MATCH")
 
-        expected = handler.extract_fn(guard, 42)
+        expected = handler.get_metadata_fn(guard, 42)
         self.assertIs(expected, int)
         self.assertTrue(handler.eval_fn(100, expected))
         self.assertFalse(handler.eval_fn("hello", expected))
@@ -1605,7 +1605,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.CONSTANT_MATCH)
         handler = self._get_handler("CONSTANT_MATCH")
 
-        expected = handler.extract_fn(guard, 42)
+        expected = handler.get_metadata_fn(guard, 42)
         self.assertEqual(expected, 42)
         self.assertTrue(handler.eval_fn(42, expected))
         self.assertFalse(handler.eval_fn(99, expected))
@@ -1616,7 +1616,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.EQUALS_MATCH)
         handler = self._get_handler("EQUALS_MATCH")
 
-        expected = handler.extract_fn(guard, [1, 2, 3])
+        expected = handler.get_metadata_fn(guard, [1, 2, 3])
         self.assertTrue(handler.eval_fn([1, 2, 3], expected))
         self.assertFalse(handler.eval_fn([1, 2], expected))
 
@@ -1627,7 +1627,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("ID_MATCH")
 
         obj = object()
-        expected = handler.extract_fn(guard, obj)
+        expected = handler.get_metadata_fn(guard, obj)
         self.assertIs(expected, obj)
         self.assertTrue(handler.eval_fn(obj, expected))
         self.assertFalse(handler.eval_fn(object(), expected))
@@ -1638,7 +1638,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.CLASS_MATCH)
         handler = self._get_handler("CLASS_MATCH")
 
-        expected = handler.extract_fn(guard, dict)
+        expected = handler.get_metadata_fn(guard, dict)
         self.assertIs(expected, dict)
         self.assertTrue(handler.eval_fn(dict, expected))
         self.assertFalse(handler.eval_fn(list, expected))
@@ -1652,7 +1652,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         class Obj:
             weight = 1.0
 
-        expected = handler.extract_fn(guard, Obj())
+        expected = handler.get_metadata_fn(guard, Obj())
         self.assertEqual(expected, ("weight", True))
         self.assertTrue(handler.eval_fn(Obj(), expected))
 
@@ -1671,7 +1671,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
             weight = 1.0
 
         obj = Obj()
-        expected = handler.extract_fn(guard, obj)
+        expected = handler.get_metadata_fn(guard, obj)
         self.assertEqual(expected, ("bias", False))
         self.assertTrue(handler.eval_fn(obj, expected))
         # Adding the attr should fail the "not hasattr" guard
@@ -1684,7 +1684,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.SEQUENCE_LENGTH)
         handler = self._get_handler("SEQUENCE_LENGTH")
 
-        expected = handler.extract_fn(guard, [1, 2, 3])
+        expected = handler.get_metadata_fn(guard, [1, 2, 3])
         self.assertEqual(expected, 3)
         self.assertTrue(handler.eval_fn([4, 5, 6], expected))
         self.assertTrue(handler.eval_fn((7, 8, 9), expected))
@@ -1697,7 +1697,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("DICT_CONTAINS")
 
         d = {"a": 1, "b": 2}
-        expected = handler.extract_fn(guard, d)
+        expected = handler.get_metadata_fn(guard, d)
         self.assertEqual(expected, "a")
         self.assertTrue(handler.eval_fn({"a": 99}, expected))
         self.assertFalse(handler.eval_fn({"b": 1}, expected))
@@ -1711,7 +1711,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("DICT_NOT_CONTAINS")
 
         d = {"b": 2}
-        expected = handler.extract_fn(guard, d)
+        expected = handler.get_metadata_fn(guard, d)
         self.assertEqual(expected, "a")
         self.assertTrue(handler.eval_fn({"b": 1}, expected))
         self.assertFalse(handler.eval_fn({"a": 1}, expected))
@@ -1728,7 +1728,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
             pass
 
         obj = Obj()
-        expected = handler.extract_fn(guard, obj)
+        expected = handler.get_metadata_fn(guard, obj)
         self.assertEqual(expected, "hidden")
         self.assertTrue(handler.eval_fn(obj, expected))
         obj.hidden = 1  # type: ignore[attr-defined]
@@ -1743,7 +1743,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         def fn():
             return 42
 
-        expected = handler.extract_fn(guard, fn)
+        expected = handler.get_metadata_fn(guard, fn)
         self.assertIs(expected, fn.__code__)
         self.assertTrue(handler.eval_fn(fn, expected))
 
@@ -1759,7 +1759,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("TENSOR_MATCH")
 
         t = torch.randn(3, 4)
-        expected = handler.extract_fn(guard, t)
+        expected = handler.get_metadata_fn(guard, t)
         self.assertEqual(expected, extract_tensor_metadata(t))
         self.assertTrue(handler.eval_fn(t, expected))
         self.assertTrue(handler.eval_fn(torch.randn(3, 4), expected))
@@ -1775,7 +1775,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.EMPTY_NN_MODULE_HOOKS_DICT)
         handler = self._get_handler("EMPTY_NN_MODULE_HOOKS_DICT")
 
-        expected = handler.extract_fn(guard, {})
+        expected = handler.get_metadata_fn(guard, {})
         self.assertIsNone(expected)
         self.assertTrue(handler.eval_fn({}, expected))
         self.assertFalse(handler.eval_fn({"hook": lambda: None}, expected))
@@ -1786,11 +1786,11 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.BOOL_MATCH)
         handler = self._get_handler("BOOL_MATCH")
 
-        expected = handler.extract_fn(guard, True)
+        expected = handler.get_metadata_fn(guard, True)
         self.assertTrue(handler.eval_fn(True, expected))
         self.assertFalse(handler.eval_fn(False, expected))
 
-        expected_false = handler.extract_fn(guard, False)
+        expected_false = handler.get_metadata_fn(guard, False)
         self.assertTrue(handler.eval_fn(False, expected_false))
         self.assertFalse(handler.eval_fn(True, expected_false))
 
@@ -1800,7 +1800,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.NONE_MATCH)
         handler = self._get_handler("NONE_MATCH")
 
-        expected = handler.extract_fn(guard, None)
+        expected = handler.get_metadata_fn(guard, None)
         self.assertIsNone(expected)
         self.assertTrue(handler.eval_fn(None, expected))
         self.assertFalse(handler.eval_fn(0, expected))
@@ -1815,7 +1815,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         def my_fn():
             return 42
 
-        expected = handler.extract_fn(guard, my_fn)
+        expected = handler.get_metadata_fn(guard, my_fn)
         self.assertIs(expected, my_fn)
         self.assertTrue(handler.eval_fn(my_fn, expected))
         self.assertFalse(handler.eval_fn(lambda: 42, expected))
@@ -1828,7 +1828,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("WEAKREF_ALIVE")
 
         obj = object()
-        expected = handler.extract_fn(guard, obj)
+        expected = handler.get_metadata_fn(guard, obj)
         self.assertIsNone(expected)
         self.assertTrue(handler.eval_fn(obj, expected))
         self.assertTrue(handler.eval_fn(42, expected))
@@ -1841,7 +1841,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("SET_CONTAINS")
 
         s = {"a", "b", "c"}
-        expected = handler.extract_fn(guard, s)
+        expected = handler.get_metadata_fn(guard, s)
         self.assertEqual(expected, "a")
         self.assertTrue(handler.eval_fn({"a", "x"}, expected))
         self.assertFalse(handler.eval_fn({"b", "c"}, expected))
@@ -1855,7 +1855,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("SET_NOT_CONTAINS")
 
         s = {"a", "b"}
-        expected = handler.extract_fn(guard, s)
+        expected = handler.get_metadata_fn(guard, s)
         self.assertEqual(expected, "z")
         self.assertTrue(handler.eval_fn({"a", "b"}, expected))
         self.assertFalse(handler.eval_fn({"a", "z"}, expected))
@@ -1866,7 +1866,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         guard = self._make_guard(GuardBuilder.NOT_NONE_MATCH)
         handler = self._get_handler("NOT_NONE_MATCH")
 
-        expected = handler.extract_fn(guard, torch.randn(2))
+        expected = handler.get_metadata_fn(guard, torch.randn(2))
         self.assertIsNone(expected)
         self.assertTrue(handler.eval_fn(torch.randn(3), expected))
         self.assertTrue(handler.eval_fn(42, expected))
@@ -1879,7 +1879,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("DISPATCH_KEY_SET_MATCH")
 
         dks = torch._C._dispatch_keys(torch.randn(3))
-        expected = handler.extract_fn(guard, dks)
+        expected = handler.get_metadata_fn(guard, dks)
         self.assertEqual(expected, dks.raw_repr())
         self.assertTrue(handler.eval_fn(dks, expected))
         # Different tensor with same dispatch keys should match
@@ -1893,7 +1893,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("TUPLE_ITERATOR_LEN")
 
         it = iter((1, 2, 3))
-        expected = handler.extract_fn(guard, it)
+        expected = handler.get_metadata_fn(guard, it)
         self.assertEqual(expected, 3)
         self.assertTrue(handler.eval_fn(iter((4, 5, 6)), expected))
         self.assertFalse(handler.eval_fn(iter((1,)), expected))
@@ -1905,7 +1905,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("RANGE_ITERATOR_MATCH")
 
         it = iter(range(1, 10, 2))
-        expected = handler.extract_fn(guard, it)
+        expected = handler.get_metadata_fn(guard, it)
         self.assertTrue(handler.eval_fn(iter(range(1, 10, 2)), expected))
         self.assertFalse(handler.eval_fn(iter(range(0, 10, 2)), expected))
         self.assertFalse(handler.eval_fn(iter(range(1, 10, 3)), expected))
@@ -1917,7 +1917,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("NN_MODULE")
 
         mod = torch.nn.Linear(3, 4)
-        expected = handler.extract_fn(guard, mod)
+        expected = handler.get_metadata_fn(guard, mod)
         self.assertIs(expected, mod)
         self.assertTrue(handler.eval_fn(mod, expected))
         self.assertFalse(handler.eval_fn(torch.nn.Linear(3, 4), expected))
@@ -1931,7 +1931,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("MAPPING_KEYS_CHECK")
 
         mp = types.MappingProxyType({"a": 1, "b": 2})
-        expected = handler.extract_fn(guard, mp)
+        expected = handler.get_metadata_fn(guard, mp)
         self.assertEqual(expected, ["a", "b"])
         self.assertTrue(
             handler.eval_fn(types.MappingProxyType({"a": 10, "b": 20}), expected)
@@ -1945,7 +1945,7 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         handler = self._get_handler("DICT_KEYS_MATCH")
 
         d = {"a": 1, "b": 2, "c": 3}
-        expected = handler.extract_fn(guard, d)
+        expected = handler.get_metadata_fn(guard, d)
         self.assertEqual(expected, ["a", "b", "c"])
         self.assertTrue(handler.eval_fn({"a": 10, "b": 20, "c": 30}, expected))
         self.assertFalse(handler.eval_fn({"a": 1, "b": 2}, expected))
