@@ -114,6 +114,7 @@ if TYPE_CHECKING:
         TritonKernelType,
     )
 
+    from .dicts import DunderDictVariable
     from .lists import BaseListVariable, ListVariable
     from .tensor import TensorVariable
 
@@ -340,12 +341,14 @@ def _create_nested_fn(
 
 fn_known_dunder_attrs = {
     "__annotations__",
-    "__defaults__",
-    "__kwdefaults__",
-    "__code__",
-    "__globals__",
     "__closure__",
+    "__code__",
+    "__defaults__",
     "__doc__",
+    "__globals__",
+    "__kwdefaults__",
+    "__name__",
+    "__module__",
 }
 
 
@@ -369,6 +372,8 @@ def fn_var_getattr(
         raise_observed_exception(AttributeError, tx)
 
     # Special handling for known dunder attributes
+    # TODO(guilhermeleobas): this check should go through fn.__dict__ first as
+    # functools.partial can override it
     if name in fn_known_dunder_attrs:
         subobj = getattr(fn, name)
     if source:
@@ -377,11 +382,50 @@ def fn_var_getattr(
 
 
 class BaseUserFunctionVariable(VariableTracker):
+    def __init__(
+        self, dict_vt: "DunderDictVariable | None" = None, **kwargs: Any
+    ) -> None:
+        super().__init__(**kwargs)
+        self.dict_vt: DunderDictVariable | None = dict_vt
+
+    def get_source(self) -> Source | None:
+        return self.source
+
+    def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
+        if self.dict_vt is None:
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
+        return self.dict_vt
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__setattr__":
+            return self.get_dict_vt(tx).call_method(
+                tx, "__setitem__", list(args), kwargs
+            )
+        elif name == "__delattr__":
+            return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
+        return super().call_method(tx, name, list(args), kwargs)
+
     def get_filename(self) -> str:
         return self.get_code().co_filename
 
     def get_name(self) -> str:
         return self.get_code().co_name
+
+    def get_qualname(self) -> str:
+        if sys.version_info >= (3, 11):
+            return self.get_code().co_qualname
+        else:
+            return self.get_name()
+
+    def get_doc(self) -> str | None:
+        # stored in code.co_consts[0]
+        return self.get_code().co_consts[0]
 
     def get_globals(self) -> dict[str, Any]:
         raise NotImplementedError
@@ -415,11 +459,13 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> ConstantVariable:
         result = False
 
-        try:
-            result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
-        except NotImplementedError:
-            if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
-                result = True
+        if name in fn_known_dunder_attrs or name == "__dict__":
+            result = True
+        else:
+            try:
+                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
+            except NotImplementedError:
+                result = False
         return VariableTracker.build(tx, result)
 
     def closure_vars(self, tx: "InstructionTranslator") -> dict[str, VariableTracker]:
@@ -580,7 +626,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name in cmp_name_to_op_mapping:
+        if name == "__dict__":
+            return self.get_dict_vt(tx)
+        elif name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(self, name)
         source = self.get_source()
         return fn_var_getattr(tx, self.fn, source, name)
@@ -627,6 +675,25 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Improper error_on_graph_break() call. Please fix your call to error_on_graph_break(). "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
+        elif self.fn is torch._dynamo.override_cudagraphs:
+            try:
+                bound = inspect.signature(self.fn).bind(*args, **kwargs)
+                bound.apply_defaults()
+                fwd = bound.arguments["fwd"]
+                bwd = bound.arguments["bwd"]
+                if isinstance(fwd, VariableTracker):
+                    fwd = fwd.as_python_constant()
+                if isinstance(bwd, VariableTracker):
+                    bwd = bwd.as_python_constant()
+                return variables.CudagraphOverrideVariable(fwd, bwd)
+            except Exception as e:
+                raise RuntimeError(
+                    "Improper override_cudagraphs() call. Please fix your call to override_cudagraphs(). "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
+        elif self.fn is torch._dynamo.bytecode_debugger.breakpoint:
+            tx.output._emit_debugger_breakpoint = True
+            return variables.CONSTANT_VARIABLE_NONE
         # Handle a `nonstrict_trace(fn)` call
         elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
@@ -1647,7 +1714,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         f_globals: dict[str, Any],
         defaults: VariableTracker | None,
         kwdefaults: VariableTracker | None,
-        annotations: VariableTracker | None,
         closure: VariableTracker | None,
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
@@ -1665,7 +1731,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.f_globals = f_globals
         self.defaults = defaults
         self.kwdefaults = kwdefaults
-        self.annotations = annotations
         self.closure = closure
         self.wrapped_fn: VariableTracker | None = wrapped_fn
 
@@ -1754,8 +1819,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__defaults__ = self.defaults.as_python_constant()
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.as_python_constant()
-        if self.annotations:
-            annotations = self.annotations.as_python_constant()
+        if self.dict_vt and self.dict_vt.contains("__annotations__"):
+            annotations = self.dict_vt.getitem("__annotations__").as_python_constant()
             if isinstance(annotations, tuple):
                 from itertools import pairwise
 
@@ -1766,25 +1831,56 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__annotations__ = annotations
         return func
 
-    def call_setattr(
-        self,
-        tx: "InstructionTranslator",
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ) -> VariableTracker:
-        tx.output.side_effects.store_attr(self, name_var.value, val)  # type: ignore[attr-defined]
-        return CONSTANT_VARIABLE_NONE
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        fn_dict = self.get_dict_vt(tx)
 
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            return self.call_setattr(tx, *args)
-        return super().call_method(tx, name, list(args), kwargs)
+        # Some dunder attributes (__name__, __doc__, etc) are stored in the C
+        # field slot. I guess it won't be too bad if we store them in the
+        # __dict__ field.
+
+        # annotations should be stored in the __dict__ field
+        if name == "__annotations__":
+            return self.get_dict_vt(tx).getitem_or_default(
+                name,
+                lambda: variables.ConstDictVariable(
+                    {},
+                    source=self.source and AttrSource(self.source, "__annotations__"),
+                    mutation_type=ValueMutationNew(),
+                ),
+            )
+        elif name == "__code__":
+            return self.code
+        elif name == "__defaults__":
+            d = getattr(self, "defaults", None)
+            return d.as_python_constant() if d else ConstantVariable.create(None)
+        elif name == "__dict__":
+            return self.get_dict_vt(tx)
+        elif name == "__type_params__":
+            return fn_dict.getitem_or_default(
+                name,
+                lambda: variables.TupleVariable(
+                    [],
+                    source=self.source and AttrSource(self.source, "__type_params__"),
+                ),
+            )
+        elif name in ("__name__", "__qualname__", "__doc__", "__module__"):
+            val = getattr(self, f"get_{name[2:-2]}")()
+            return fn_dict.getitem_or_default(
+                name,
+                lambda: ConstantVariable.create(
+                    val, source=self.source and AttrSource(self.source, name)
+                ),
+            )
+        elif name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
+        else:
+            if fn_dict.contains(name):
+                return fn_dict.getitem(name)
+            else:
+                # should `var_getattr` raise AttributeError if not found?
+                # I'm wondering if this method is a helper that it is faster
+                # than going through BuiltinVariable(getattr).call_function(...)
+                raise_observed_exception(AttributeError, tx)
 
     def has_closure(self) -> bool:
         return self.closure is not None
@@ -1806,6 +1902,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return VariableTracker.build(tx, hasattr(self, "code"))
         if name == "__defaults__":
             return VariableTracker.build(tx, hasattr(self, "defaults"))
+        vt = ConstantVariable.create(name)
+        if vt in self.get_dict_vt(tx):
+            return CONSTANT_VARIABLE_TRUE
         return super().call_obj_hasattr(tx, name)
 
     def has_self(self) -> bool:
@@ -1866,14 +1965,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
-        if self.annotations:
+        if self.dict_vt and self.dict_vt.contains("__annotations__"):
+            annotations = self.dict_vt.getitem("__annotations__")
             try:
-                annotations = self.annotations.as_python_constant()
+                annotations = annotations.as_python_constant()
                 codegen.extend_output(
                     [codegen.create_load_const_unchecked(annotations)]
                 )
             except NotImplementedError:
-                codegen(self.annotations)
+                codegen(annotations)
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
@@ -1921,7 +2021,6 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
             wrapped.f_globals,
             wrapped.defaults,
             wrapped.kwdefaults,
-            wrapped.annotations,
             wrapped.closure,
             wrapped.wrapped_fn,
         )
@@ -2414,32 +2513,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 raise ValueError(f"Unsupported all_reduce op: {reduce_op}")
             kwargs["op"] = VariableTracker.build(tx, REDUCE_OP_TO_STR[reduce_op])
         return self.replacement_var.call_function(tx, args, kwargs)
-
-
-class FunctoolsWrapsVariable(UserFunctionVariable):
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not kwargs and len(args) == 1:
-
-            def wraps(fn: Any) -> VariableTracker:
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wrapped_fn=args[0])
-                unimplemented(
-                    gb_type="functools.wraps",
-                    context=f"{fn}",
-                    explanation="`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
-                    hints=[
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            return variables.LambdaVariable(wraps)
-
-        return super().call_function(tx, args, kwargs)
 
 
 class CollectionsNamedTupleFunction(UserFunctionVariable):

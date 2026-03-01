@@ -870,7 +870,8 @@ def forward(self, x_1, output_1):
         prev_c = CONSTANT_C
         # If the behavior of triton kernels change, this test will fail
         CONSTANT_C = tl.constexpr(10)
-        assert CONSTANT_C != prev_c
+        if CONSTANT_C == prev_c:
+            raise AssertionError
 
         t = torch.randn(5, device=GPU_TYPE)
         torch_result = call_triton(t)
@@ -4278,7 +4279,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         def foo(x, w):
             M, K = x.shape
             KB, N = w.shape
-            assert K == KB, f"incompatible dimensions {K}, {KB}"
+            assert K == KB, f"incompatible dimensions {K}, {KB}"  # noqa: S101
 
             z = torch.empty((M, N), device=x.device, dtype=x.dtype)
 
@@ -4370,7 +4371,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
         # should always pass
-        assert add(x, y).mean() == 2, "Problem with add kernel"
+        if add(x, y).mean() != 2:
+            raise AssertionError("Problem with add kernel")
 
         # assert that the user_defined_* flags are properly set on the kernel before compilation
         self.assertEqual(isinstance(add_kernel, Autotuner), True)

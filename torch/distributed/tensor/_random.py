@@ -130,7 +130,8 @@ class _PhiloxState:
 
     @offset.setter
     def offset(self, offset: torch.Tensor) -> None:
-        assert offset.numel() == 1
+        if offset.numel() != 1:
+            raise AssertionError
         self._state[8:] = offset.view(torch.uint8)
 
     @property
@@ -139,7 +140,8 @@ class _PhiloxState:
 
     @seed.setter
     def seed(self, seed: torch.Tensor) -> None:
-        assert seed.numel() == 1
+        if seed.numel() != 1:
+            raise AssertionError
         self._state[:8] = seed.view(torch.uint8)
 
 
@@ -194,7 +196,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         run_state_sync: bool = True,
     ):
         super().__init__(_resolve_device(device_mesh=device_mesh))
-        assert self._device_handle is not None
+        if self._device_handle is None:
+            raise AssertionError
         # DTensor RNG tracker so far only supports CUDA/CUDA-like devices
         if self._device.type == "cpu":
             raise RuntimeError(
@@ -265,7 +268,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
             ):
-                assert self._device_handle is not None
+                if self._device_handle is None:
+                    raise AssertionError
                 self._device_handle.set_rng_state(state.state)
                 try:
                     yield  # execute the region code
@@ -335,7 +339,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         """
         mesh = spec.mesh
         mesh_coordinate = mesh.get_coordinate()
-        assert mesh_coordinate is not None
+        if mesh_coordinate is None:
+            raise AssertionError
 
         # Compute shard index and total number of shards on each tensor dim
         shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
@@ -422,14 +427,16 @@ def _calc_shard_info(
                 dim_map[shard_dim] = [i]
             else:
                 mesh_dim_list = dim_map[shard_dim]
-                assert isinstance(mesh_dim_list, list)
+                if not isinstance(mesh_dim_list, list):
+                    raise AssertionError
                 mesh_dim_list.append(i)
 
     # Compute shard coordinate:
     # The coordinate on each tensor dim is a tuple (idx, range)
     # If a DTensor is partitioned on its dim i into n shards, and the current rank
     # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
-    assert mesh_coordinate is not None
+    if mesh_coordinate is None:
+        raise AssertionError
     mesh_size = mesh.shape
     shard_idx_by_dim = []
     total_num_shards_by_dim = []  # total number of shards on each tensor dim
@@ -464,7 +471,8 @@ def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int
 def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
     device_type = device_mesh.device_type
     device_handle = _get_device_handle(device_type)
-    assert device_handle is not None
+    if device_handle is None:
+        raise AssertionError
     device_idx = device_mesh.get_rank() % device_handle.device_count()
 
     @maybe_run_for_local_tensor
