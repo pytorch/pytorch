@@ -626,11 +626,6 @@ void Graph::lint() const {
       node_set nodes_set(ALL_OF(b->nodes()));
       node_set inputs_set{b->input_};
       node_set output_set{b->output_};
-      // TODO: Make a more type safe std::includes wrapper which disallows use
-      // on non-ordered containers
-      AT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
-      AT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(inputs_set)));
-      AT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(output_set)));
 
       sum_set.insert(ALL_OF(nodes_set));
       sum_set.insert(ALL_OF(inputs_set));
@@ -644,7 +639,7 @@ void Graph::lint() const {
       for (auto kv : anticipated_uses) {
         AT_ASSERT(kv.second == -1);
       }
-      AT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
+      AT_ASSERT(sum_set == all_nodes_set);
     }
   };
   LintImpl(*this).check_graph();
