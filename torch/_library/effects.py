@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import Optional
 
 import torch
 
@@ -32,7 +31,7 @@ class EffectHolder:
         self._set_default_effect()
 
     def _set_default_effect(self) -> None:
-        self._effect: Optional[EffectType] = None
+        self._effect: EffectType | None = None
 
         # If the op contains a ScriptObject input, we want to mark it as having effects
         namespace, opname = torch._library.utils.parse_namespace(self.qualname)
@@ -63,14 +62,14 @@ class EffectHolder:
                     return
 
     @property
-    def effect(self) -> Optional[EffectType]:
+    def effect(self) -> EffectType | None:
         return self._effect
 
     @effect.setter
     def effect(self, _):
         raise RuntimeError("Unable to directly set kernel.")
 
-    def register(self, effect: Optional[EffectType]) -> RegistrationHandle:
+    def register(self, effect: EffectType | None) -> RegistrationHandle:
         """Register an effect
 
         Returns a RegistrationHandle that one can use to de-register this
