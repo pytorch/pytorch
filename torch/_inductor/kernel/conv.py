@@ -614,6 +614,9 @@ def convolution(
         and is_ones(dilation)
         and not transposed
         and is_zeros(output_padding)
+        # Triton conv templates only work correctly for 1x1 kernels due to loop unrolling issues
+        # See https://github.com/triton-lang/triton/issues/1254
+        and is_ones(kernel_shape)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
         and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
