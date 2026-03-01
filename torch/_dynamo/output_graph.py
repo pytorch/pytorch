@@ -2699,6 +2699,11 @@ class OutputGraph(OutputGraphCommon):
             if hasattr(compiler_fn, "__name__")
             else "<unknown compiler_fn>"
         )
+        if config.inline_invoke_subgraph:
+            from torch._dynamo.inline_invoke_subgraph import inline_invoke_subgraph
+
+            gm = inline_invoke_subgraph(gm)
+
         try:
             _step_logger()(logging.INFO, f"calling compiler function {name}")
             if config.verify_correctness:
