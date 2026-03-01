@@ -859,7 +859,8 @@ invoke_subgraph_auto_guard_cache: bool = False
 
 # When True, run a post-tracing pass that inlines all invoke_subgraph HOPs
 # back into the parent graph, producing a flat FX graph. Useful when
-# downstream compilers don't support HOPs.
+# downstream compilers (like vllm-compile) don't support HOPs or prefer a
+# flat graph.
 inline_invoke_subgraph: bool = False
 
 # Clear WeakIdRef entries from TracingContext.tensor_to_context and
