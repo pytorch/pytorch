@@ -822,30 +822,6 @@ class _TorchDynamoContext:
         def get_compiler_config() -> Any:
             return self.compiler_config
 
-        from .package import DynamoCache
-
-        # If self._package is lazily initialized, we should check the dynamo cache now
-        if config.caching_precompile:
-            if self._package is not None and not self._package.is_initialized():
-                fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
-                result = DynamoCache.load(fn_key)
-                if result is None:
-                    # Create a fresh CompilePackage
-                    self._package.initialize(fn_key, None, ignore_inlined_sources=False)
-                else:
-                    try:
-                        self._package.initialize(
-                            fn_key, result.dynamo, ignore_inlined_sources=False
-                        )
-                        self._package.install(result.backends)
-                    except RuntimeError:
-                        log.warning(
-                            "Failed to load entry from dynamo cache", exc_info=True
-                        )
-                        self._package.initialize(
-                            fn_key, None, ignore_inlined_sources=False
-                        )
-
         fn = innermost_fn(fn)
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
@@ -952,6 +928,31 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
+            # lazily initialize
+            if config.caching_precompile:
+                from .package import DynamoCache
+
+                if self._package is not None and not self._package.is_initialized():
+                    fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
+                    result = DynamoCache.load(fn_key)
+                    if result is None:
+                        # Create a fresh CompilePackage
+                        self._package.initialize(
+                            fn_key, None, ignore_inlined_sources=False
+                        )
+                    else:
+                        try:
+                            self._package.initialize(
+                                fn_key, result.dynamo, ignore_inlined_sources=False
+                            )
+                            self._package.install(result.backends)
+                        except RuntimeError:
+                            log.warning(
+                                "Failed to load entry from dynamo cache", exc_info=True
+                            )
+                            self._package.initialize(
+                                fn_key, None, ignore_inlined_sources=False
+                            )
             prior_eval_frame_override: _EvalFrameOverride | None = None
             if self.fullgraph:
                 prior_eval_frame_override = set_eval_frame_override(

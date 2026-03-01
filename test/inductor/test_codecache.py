@@ -636,6 +636,100 @@ class TestFxGraphCache(TestCase):
         {
             "fx_graph_cache": True,
             "fx_graph_remote_cache": False,
+        }
+    )
+    @torch._dynamo.config.patch(
+        {
+            "caching_precompile": True,
+        }
+    )
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("dynamic", (False, True))
+    @torch._functorch.config.patch({"enable_autograd_cache": True})
+    def test_caching_precompile_with_func_mode(self, device, dtype, dynamic):
+        """
+        Verify that we can hot load functions from the cache with global ctx.
+        """
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+        if device == "cpu" and dtype == torch.float32:
+            raise unittest.SkipTest("skip float32 on CPU")
+        if (
+            device == "cuda"
+            and torch.version.hip is None
+            and dtype == torch.bfloat16
+            and not SM80OrLater
+        ):
+            raise unittest.SkipTest("requires SM80 or later")
+
+        def fn(x, y):
+            return x.cos() @ y
+
+        a = torch.rand(100, 100, device=device)
+        b = torch.rand(100, 100, device=device)
+
+        # Record artifacts
+        with fresh_cache():
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
+
+            # A first call should miss in the cache.
+            with torch.amp.autocast(device_type=device, dtype=dtype):
+                eager_result = fn(a, b)
+                compiled_result = compiled_fn(a, b)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 1)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 0)
+
+            artifacts = torch.compiler.save_cache_artifacts()
+
+        self.assertIsNotNone(artifacts)
+
+        artifact_bytes, cache_info = artifacts
+
+        self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+        self.reset()
+
+        # Clean triton kernels
+        shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+        # We did not load anything so dont hit yet
+        with fresh_cache():
+            # With caching precompile, we have to re torch.compile the function
+            # to trigger cache lookup
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
+            with torch.amp.autocast(device_type=device, dtype=dtype):
+                eager_result = fn(a, b)
+                compiled_result = compiled_fn(a, b)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 0)
+        # Hot load and hit
+        self.reset()
+        with fresh_cache(), torch.compiler.set_stance("fail_on_recompile"):
+            cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
+            self.assertEqual(len(cache_info.precompile_artifacts), 1)
+
+            # With caching precompile, we have to re torch.compile the function
+            # to trigger cache lookup
+            compiled_fn = torch.compile(fn, dynamic=dynamic)
+
+            with torch.amp.autocast(device_type=device, dtype=dtype):
+                eager_result = fn(a, b)
+                compiled_result = compiled_fn(a, b)
+            self.assertEqual(eager_result, compiled_result)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_miss"], 2)
+            self.assertEqual(counters["dynamo_cache"]["dynamo_cache_hit"], 1)
+        self.reset()
+        shutil.rmtree(cache_dir(), ignore_errors=True)
+        torch._C._dynamo.eval_frame._reset_precompile_entries(fn.__code__)
+
+    @requires_triton()
+    @config.patch(
+        {
+            "fx_graph_cache": True,
+            "fx_graph_remote_cache": False,
             "autotune_local_cache": True,
         }
     )
