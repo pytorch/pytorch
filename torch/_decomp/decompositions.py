@@ -2738,6 +2738,167 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
     return ret / (length_h * length_w)
 
 
+def _max_pool_nd_with_indices(
+    self: Tensor,
+    kernel_size: list[int],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
+    ceil_mode: bool,
+    n_dim: int,
+) -> tuple[Tensor, Tensor]:
+    def _expand(val: list[int], default: Optional[list[int]] = None) -> list[int]:
+        if not val:
+            torch._check(default is not None, lambda: "default must be provided")
+            return default  # type: ignore[return-value]
+        return val * n_dim if len(val) == 1 else list(val)
+
+    ks = _expand(kernel_size)
+    st = _expand(stride, default=ks)
+    pa = _expand(padding)
+    di = _expand(dilation)
+
+    torch._check(
+        self.ndim in (n_dim + 1, n_dim + 2),
+        lambda: f"Expected {n_dim + 1}D or {n_dim + 2}D input, got {self.ndim}D",
+    )
+
+    is_batched = self.ndim == n_dim + 2
+    if not is_batched:
+        self = self.unsqueeze(0)
+
+    input_sizes = list(self.shape[-n_dim:])
+    device = self.device
+
+    output_sizes = [
+        torch._meta_registrations.pooling_output_shape(
+            input_sizes[d], ks[d], pa[d], st[d], di[d], ceil_mode
+        )
+        for d in range(n_dim)
+    ]
+
+    # Pad with -inf so out-of-bounds positions never win the max. For integer
+    # types, iinfo.min is a valid data value, so padding with it causes ties
+    # in argmax that produce wrong indices. Promote to a wider type so the
+    # sentinel is strictly below any representable value in the original dtype.
+    dtype = self.dtype
+    promoted = False
+    if dtype is torch.bool:
+        fill_value = 0.0
+    elif dtype.is_floating_point:
+        fill_value = float("-inf")
+    else:
+        info = torch.iinfo(dtype)
+        if info.bits < 32:
+            self = self.to(torch.int32)
+        elif info.bits < 64:
+            self = self.to(torch.int64)
+        fill_value = float(info.min - 1) if info.bits < 64 else float(info.min)
+        promoted = True
+
+    # Compute asymmetric padding: left = pa[d], right may be larger for ceil_mode
+    pad_args: list[int] = []
+    for d in reversed(range(n_dim)):  # F.pad takes last dim first
+        left = pa[d]
+        needed = (output_sizes[d] - 1) * st[d] + (ks[d] - 1) * di[d] + 1
+        right = max(0, needed - (input_sizes[d] + 2 * pa[d])) + pa[d]
+        pad_args.extend([left, right])
+    x = F.pad(self, pad_args, value=fill_value)
+
+    # Build index tensor per spatial dim: idx[out_pos, ker_pos] = out_pos * stride + ker_pos * dilation
+    # Reshape each for broadcasting into the Cartesian product of all dims
+    idx_tensors = []
+    for d in range(n_dim):
+        idx = (
+            torch.arange(output_sizes[d], device=device, dtype=torch.int64).unsqueeze(1)
+            * st[d]
+            + torch.arange(ks[d], device=device, dtype=torch.int64).unsqueeze(0) * di[d]
+        )
+        shape = [1] * (2 * n_dim)
+        shape[2 * d] = output_sizes[d]
+        shape[2 * d + 1] = ks[d]
+        idx_tensors.append(idx.reshape(shape))
+
+    # Advanced indexing gathers all pooling windows at once via broadcasting.
+    # Result: (N, C, out_0, k_0, out_1, k_1, ..., out_{n-1}, k_{n-1})
+    windows = x[(Ellipsis, *idx_tensors)]
+
+    # Permute to (N, C, out_0, ..., out_{n-1}, k_0, ..., k_{n-1})
+    n_batch = 2
+    perm = list(range(n_batch))
+    perm += [n_batch + 2 * d for d in range(n_dim)]
+    perm += [n_batch + 2 * d + 1 for d in range(n_dim)]
+    windows = windows.permute(perm)
+
+    # Flatten kernel dims and take the max
+    out_shape = list(windows.shape[: n_batch + n_dim])
+    windows = windows.reshape(*out_shape, -1)
+    values, local_argmax = windows.max(dim=-1)
+
+    # Convert local_argmax in [0, prod(ks)) to per-dim kernel offsets via divmod
+    kernel_pos = []
+    remaining = local_argmax
+    for d in range(n_dim):
+        divisor = 1
+        for dd in range(d + 1, n_dim):
+            divisor *= ks[dd]
+        kernel_pos.append(remaining // divisor)
+        remaining = remaining % divisor
+
+    # Compute flat index into the original (unpadded) input spatial volume
+    orig_coords = []
+    for d in range(n_dim):
+        shape = [1] * (n_batch + n_dim)
+        shape[n_batch + d] = output_sizes[d]
+        out_pos = torch.arange(
+            output_sizes[d], device=device, dtype=torch.int64
+        ).reshape(shape)
+        orig_coords.append(out_pos * st[d] + kernel_pos[d] * di[d] - pa[d])
+
+    flat_indices = orig_coords[0]
+    for d in range(1, n_dim):
+        flat_indices = flat_indices * input_sizes[d] + orig_coords[d]
+
+    if promoted:
+        values = values.to(dtype)
+
+    if not is_batched:
+        values = values.squeeze(0)
+        flat_indices = flat_indices.squeeze(0)
+
+    return values, flat_indices
+
+
+@register_decomposition(aten.max_pool2d_with_indices)
+@out_wrapper("out", "indices")
+def max_pool2d_with_indices(
+    self: Tensor,
+    kernel_size: list[int],
+    stride: list[int] = (),
+    padding: list[int] = (0,),
+    dilation: list[int] = (1,),
+    ceil_mode: bool = False,
+) -> tuple[Tensor, Tensor]:
+    return _max_pool_nd_with_indices(
+        self, kernel_size, stride, padding, dilation, ceil_mode, n_dim=2
+    )
+
+
+@register_decomposition(aten.max_pool3d_with_indices)
+@out_wrapper("out", "indices")
+def max_pool3d_with_indices(
+    self: Tensor,
+    kernel_size: list[int],
+    stride: list[int] = (),
+    padding: list[int] = (0,),
+    dilation: list[int] = (1,),
+    ceil_mode: bool = False,
+) -> tuple[Tensor, Tensor]:
+    return _max_pool_nd_with_indices(
+        self, kernel_size, stride, padding, dilation, ceil_mode, n_dim=3
+    )
+
+
 def _max_unpoolnd(
     self: TensorLike, indices: TensorLike, output_size: list[int], dim: int
 ):
