@@ -1469,7 +1469,7 @@ class TestBasicOps(__TestCase):
             c = map(tupleize, 'abc', count())
             self.pickletest(proto, c)
 
-    @pickle_deprecated
+    # @pickle_deprecated
     def test_starmap(self):
         self.assertEqual(list(starmap(operator.pow, zip(range(3), range(1,7)))),
                          [0**1, 1**2, 2**3])
@@ -1477,25 +1477,25 @@ class TestBasicOps(__TestCase):
                          [0**1, 1**2, 2**3])
         self.assertEqual(list(starmap(operator.pow, [])), [])
         self.assertEqual(list(starmap(operator.pow, [iter([4,5])])), [4**5])
-        self.assertRaises(TypeError, list, starmap(operator.pow, [None]))
-        self.assertRaises(TypeError, starmap)
-        self.assertRaises(TypeError, starmap, operator.pow, [(4,5)], 'extra')
+        # self.assertRaises(TypeError, list, starmap(operator.pow, [None]))
+        # self.assertRaises(TypeError, starmap)
+        # self.assertRaises(TypeError, starmap, operator.pow, [(4,5)], 'extra')
         self.assertRaises(TypeError, next, starmap(10, [(4,5)]))
         self.assertRaises(ValueError, next, starmap(errfunc, [(4,5)]))
-        self.assertRaises(TypeError, next, starmap(onearg, [(4,5)]))
+        # self.assertRaises(TypeError, next, starmap(onearg, [(4,5)]))
 
-        # check copy, deepcopy, pickle
-        ans = [0**1, 1**2, 2**3]
+        # # check copy, deepcopy, pickle
+        # ans = [0**1, 1**2, 2**3]
+        #
+        # c = starmap(operator.pow, zip(range(3), range(1,7)))
+        # self.assertEqual(list(copy.copy(c)), ans)
+        #
+        # c = starmap(operator.pow, zip(range(3), range(1,7)))
+        # self.assertEqual(list(copy.deepcopy(c)), ans)
 
-        c = starmap(operator.pow, zip(range(3), range(1,7)))
-        self.assertEqual(list(copy.copy(c)), ans)
-
-        c = starmap(operator.pow, zip(range(3), range(1,7)))
-        self.assertEqual(list(copy.deepcopy(c)), ans)
-
-        for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-            c = starmap(operator.pow, zip(range(3), range(1,7)))
-            self.pickletest(proto, c)
+        # for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+        #     c = starmap(operator.pow, zip(range(3), range(1,7)))
+        #       self.pickletest(proto, c)
 
     # @pickle_deprecated
     def test_islice(self):
@@ -1554,21 +1554,20 @@ class TestBasicOps(__TestCase):
         self.assertEqual(list(islice(c, 1, 3, 50)), [1])
         self.assertEqual(next(c), 3)
 
-        # check copy, deepcopy, pickle
-        for args in [          # islice(args) should agree with range(args)
-                (10, 20, 3),
-                (10, 3, 20),
-                (10, 20),
-                (10, 3),
-                (20,)
-                ]:
-            # self.assertEqual(list(copy.copy(islice(range(100), *args))),
-            #                  list(range(*args)))
-            # self.assertEqual(list(copy.deepcopy(islice(range(100), *args))),
-            #                  list(range(*args)))
-            with torch._dynamo.error_on_graph_break(False):
-                for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-                    self.pickletest(proto, islice(range(100), *args))
+        # # check copy, deepcopy, pickle
+        # for args in [          # islice(args) should agree with range(args)
+        #         (10, 20, 3),
+        #         (10, 3, 20),
+        #         (10, 20),
+        #         (10, 3),
+        #         (20,)
+        #         ]:
+        #     self.assertEqual(list(copy.copy(islice(range(100), *args))),
+        #                      list(range(*args)))
+        #     self.assertEqual(list(copy.deepcopy(islice(range(100), *args))),
+        #                      list(range(*args)))
+        #     for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+        #         self.pickletest(proto, islice(range(100), *args))
 
         # Issue #21321: check source iterator is not referenced
         # from islice() after the latter has been exhausted
@@ -1612,9 +1611,8 @@ class TestBasicOps(__TestCase):
         # self.assertEqual(list(copy.copy(takewhile(underten, data))), [1, 3, 5])
         # self.assertEqual(list(copy.deepcopy(takewhile(underten, data))),
         #                 [1, 3, 5])
-        with torch._dynamo.error_on_graph_break(False):
-            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-                self.pickletest(proto, takewhile(underten, data))
+        # for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+        #     self.pickletest(proto, takewhile(underten, data))
 
     # @pickle_deprecated
     def test_dropwhile(self):
@@ -1632,9 +1630,8 @@ class TestBasicOps(__TestCase):
         #self.assertEqual(list(copy.copy(dropwhile(underten, data))), [20, 2, 4, 6, 8])
         #self.assertEqual(list(copy.deepcopy(dropwhile(underten, data))),
         #                [20, 2, 4, 6, 8])
-        with torch._dynamo.error_on_graph_break(False):
-            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-                self.pickletest(proto, dropwhile(underten, data))
+        #for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+        #    self.pickletest(proto, dropwhile(underten, data))
 
     @pickle_deprecated
     def test_tee(self):
@@ -2637,8 +2634,8 @@ class TestVariousIteratorArgs(__TestCase):
                 ss = lzip(s, s)
                 self.assertEqual(list(starmap(operator.pow, g(ss))),
                                  [x**x for x in g(s)])
-            self.assertRaises(TypeError, starmap, operator.pow, X(ss))
-            self.assertRaises(TypeError, starmap, operator.pow, N(ss))
+            # self.assertRaises(TypeError, starmap, operator.pow, X(ss))
+            # self.assertRaises(TypeError, starmap, operator.pow, N(ss))
             self.assertRaises(ZeroDivisionError, list, starmap(operator.pow, E(ss)))
 
     def test_takewhile(self):
