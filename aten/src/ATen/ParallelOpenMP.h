@@ -37,8 +37,7 @@ inline void invoke_parallel(
   std::atomic<int64_t> tid_counter{0};
   std::atomic<int64_t> next{begin};
   int64_t chunk_size = std::max<int64_t>(
-      grain_size > 0 ? grain_size : 1,
-      divup((end - begin), num_threads));
+      grain_size > 0 ? grain_size : 1, divup((end - begin), num_threads));
 
 #pragma omp parallel
   {
