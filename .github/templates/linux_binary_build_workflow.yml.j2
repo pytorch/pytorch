@@ -38,6 +38,8 @@ env:
   ALPINE_IMAGE: "arm64v8/alpine"
   {%- elif "s390x" in build_environment %}
   ALPINE_IMAGE: "docker.io/s390x/alpine"
+  {%- elif "ppc64le" in build_environment %}
+  ALPINE_IMAGE: "docker.io/ppc64le/alpine"
   {%- else %}
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   {%- endif %}
@@ -77,6 +79,10 @@ jobs:
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       timeout-minutes: 420
+      {%- elif "ppc64le" in build_environment %}
+      runs_on: linux.ppc64le
+      ALPINE_IMAGE: "docker.io/ppc64le/alpine"
+      timeout-minutes: 420
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       timeout-minutes: 300
@@ -114,6 +120,9 @@ jobs:
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
+      {%- elif "ppc64le" in build_environment %}
+      runs_on: linux.ppc64le
+      ALPINE_IMAGE: "docker.io/ppc64le/alpine"
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
       {%- elif config["gpu_arch_type"] == "cuda" %}
