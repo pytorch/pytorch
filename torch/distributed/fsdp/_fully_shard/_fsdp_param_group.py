@@ -223,6 +223,8 @@ class FSDPParamGroup:
         # fp32 parameters since the all-reduce input is allocated in the RS
         # stream and will have no refs to it after being upcast to fp32)
         self._all_reduce_state: AllReduceState | None = None
+        # Create a zero buffer for missing parameters
+        self._zero_buf: torch.Tensor | None = None
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
@@ -231,6 +233,11 @@ class FSDPParamGroup:
         trainable_params: list[FSDPParam] = [
             p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
+        if trainable_params:
+            grad_type = (
+                trainable_params[0].param_dtype or trainable_params[0].orig_dtype
+            )
+            self._zero_buf = torch.zeros(1, dtype=grad_type, device=self.device)
         orig_dtypes = {p.orig_dtype for p in trainable_params}
         reduce_dtypes = {p.reduce_dtype for p in trainable_params}
         if len(trainable_params) > 0 and len(orig_dtypes) != 1:
@@ -510,8 +517,9 @@ class FSDPParamGroup:
                 return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
-            fsdp_params_with_grad: list[FSDPParam] = []
+            fsdp_params_with_grad: list[FSDPParam | None] = []
             unsharded_grads: list[torch.Tensor] = []
+
             for fsdp_param in self.fsdp_params:
                 if not hasattr(fsdp_param, "_unsharded_param"):
                     continue
@@ -525,6 +533,20 @@ class FSDPParamGroup:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
+                elif (
+                    fsdp_param.sharded_param.requires_grad
+                    and not self.is_sharded
+                    and self._zero_buf is not None
+                ):
+                    # Models like the Qwen3 with mixture of experts will trigger different experts in different ranks.
+                    # This leads to different sets of missing parameters in different ranks,
+                    # and thus leading `unsharded_grads` to be different across ranks.
+                    # Need a way to account for the "missing" grads that are not in `unsharded_grads` to ensure
+                    # reduce-scatter has the same input sizes across ranks.
+                    zero_grad = self._zero_buf.expand(fsdp_param._orig_size)
+                    fsdp_params_with_grad.append(None)
+                    unsharded_grads.append(zero_grad)
+
             if self.reshard_after_backward:
                 self.reshard()
         if len(fsdp_params_with_grad) == 0:

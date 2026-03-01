@@ -4,6 +4,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import threading
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable
@@ -1845,6 +1846,75 @@ class TestFullyShardCudaGraph(FSDPTest):
                 for graph_grad, ref_grad in zip(static_output_grads, ref_grads):
                     self.assertTrue(torch.equal(graph_grad, ref_grad))
                 model.zero_grad(set_to_none=True)
+
+
+class SomeUnusedParamModel(nn.Module):
+    def __init__(self, use_sometimes: bool):
+        super().__init__()
+        self.always_used = nn.Linear(8, 8, bias=False)
+        self.sometimes_used = nn.Linear(8, 8, bias=False)
+        self.frozen_layer = nn.Linear(8, 8, bias=False)
+        self.frozen_layer.weight.requires_grad = False
+        self.use_sometimes = use_sometimes
+
+    def forward(self, x):
+        out = self.always_used(x)
+        if self.use_sometimes:
+            out += self.sometimes_used(x)
+        out += self.frozen_layer(x)
+        return out
+
+
+class TestFSDPMissingParamGrad(FSDPTest):
+    """
+    This test makes sure that even when a layer is sometimes used during the forward of the backward computation
+    in FSDP, the fsdp_params will gather all the params with the requires_grad=True flag so the reduce-scatter
+    will receive the same input size for all ranks.
+    """
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    def test_unused_param_grad_no_deadlock(self):
+        if device_type.type == "cuda":
+            torch.cuda.set_device(self.rank)
+        device = torch.device(device_type.type, self.rank)
+        model = SomeUnusedParamModel(use_sometimes=self.rank == 0).to(device)
+        cloned_param_list = [p.clone() for p in model.parameters()]
+        fully_shard(model)
+
+        x = torch.randn(2, 8, device=device)
+
+        loss = model(x).sum()
+        loss.backward()
+
+        sync_done = threading.Event()
+        sync_thread = threading.Thread(
+            target=lambda: (torch.cuda.synchronize(device), sync_done.set()),
+            daemon=True,
+        )
+        sync_thread.start()
+        local_ok = sync_done.wait(timeout=10)
+
+        gloo_pg = dist.new_group(backend="gloo")
+        result = torch.tensor([int(local_ok)])
+        dist.all_reduce(result, op=dist.ReduceOp.MIN, group=gloo_pg)
+        dist.destroy_process_group(gloo_pg)
+
+        if result.item() == 0:
+            self.fail(
+                "Backward reduce-scatter deadlocked due to mismatched gradient "
+                "tensor sizes across ranks."
+            )
+
+        for param, param_clone in zip(
+            model.parameters(), cloned_param_list, strict=True
+        ):
+            assert torch.equal(param.full_tensor(), param_clone), (
+                "FSDP should not modify the original parameters"
+            )
 
 
 if __name__ == "__main__":
