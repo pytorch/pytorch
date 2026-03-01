@@ -1547,7 +1547,7 @@ class DeviceCachingAllocator {
       std::shared_ptr<GatheredContext> context) {
     if (!record_history)
       return;
-    bool should_skip = skip_actions_list.count(action) > 0;
+    bool should_skip = skip_actions_list.contains(action);
     if (should_skip)
       return;
     TraceEntry te(

@@ -1,6 +1,8 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/util/env.h>
 #include <array>
+#include <algorithm>
+#include <bit>
 
 namespace c10::CachingAllocator {
 
@@ -41,13 +43,11 @@ AcceleratorAllocatorConfig::AcceleratorAllocatorConfig() {
 }
 
 size_t AcceleratorAllocatorConfig::roundup_power2_divisions(size_t size) {
-  size_t log_size = (63 - llvm::countLeadingZeros(size));
+  size_t log_size = 63 - std::countl_zero(size);
 
   // Our intervals start at 1MB and end at 64GB
-  const size_t interval_start =
-      63 - llvm::countLeadingZeros(kRoundUpPowerOfTwoStart);
-  const size_t interval_end =
-      63 - llvm::countLeadingZeros(kRoundUpPowerOfTwoEnd);
+  const size_t interval_start = 63 - std::countl_zero(kRoundUpPowerOfTwoStart);
+  const size_t interval_end = 63 - std::countl_zero(kRoundUpPowerOfTwoEnd);
   TORCH_CHECK_VALUE(
       interval_end - interval_start == kRoundUpPowerOfTwoIntervals,
       "kRoundUpPowerOfTwoIntervals mismatch");
@@ -144,7 +144,7 @@ size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
       tokenizer.checkToken(++i, ":");
       size_t value = tokenizer.toSizeT(++i);
       TORCH_CHECK_VALUE(
-          value == 0 || llvm::isPowerOf2_64(value),
+          value == 0 || std::has_single_bit(value),
           "For roundups, the divisions has to be power of 2 or 0 to disable roundup ");
 
       if (tokenizer[value_index] == ">") {
@@ -158,10 +158,10 @@ size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
       } else {
         size_t boundary = tokenizer.toSizeT(value_index);
         TORCH_CHECK_VALUE(
-            llvm::isPowerOf2_64(boundary),
+            std::has_single_bit(boundary),
             "For roundups, the intervals have to be power of 2 ");
 
-        size_t index = 63 - llvm::countLeadingZeros(boundary);
+        size_t index = 63 - std::countl_zero(boundary);
         index =
             std::clamp(index, size_t{0}, roundup_power2_divisions_.size() - 1);
 
@@ -188,7 +188,7 @@ size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
   } else { // Keep this for backwards compatibility
     size_t value = tokenizer.toSizeT(i);
     TORCH_CHECK_VALUE(
-        llvm::isPowerOf2_64(value),
+        std::has_single_bit(value),
         "For roundups, the divisions has to be power of 2 ");
     std::fill(
         roundup_power2_divisions_.begin(),

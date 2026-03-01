@@ -1,6 +1,8 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <bit>
+
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
@@ -113,7 +115,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
       const auto& keys =
           c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
       TORCH_CHECK_VALUE(
-          keys.find(key) != keys.end(),
+          keys.contains(key),
           "Unrecognized key '",
           key,
           "' in CUDA allocator config.");
@@ -167,7 +169,7 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
   tokenizer.checkToken(++i, ":");
   size_t val2 = tokenizer.toSizeT(++i);
   TORCH_CHECK_VALUE(
-      llvm::isPowerOf2_64(val2),
+      std::has_single_bit(val2),
       "Number of register threads has to be power of 2, got ",
       val2);
   auto maxThreads = CUDAAllocatorConfig::pinned_max_register_threads();
