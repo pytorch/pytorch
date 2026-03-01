@@ -3751,6 +3751,36 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
         self.writeline(ExitSubgraphLine(self))
 
+    def codegen_switch(self, switch_node) -> None:
+        name = switch_node.get_name()
+
+        outer_inputs = [buf.codegen_reference() for buf in switch_node.operands]
+
+        index = switch_node.index.codegen_reference()
+        if not isinstance(switch_node.index, ir.ShapeAsConstantBuffer):
+            # move the Tensor predicate to host
+            index = f"{index}.item()"
+
+        self.writeline(f"{name} = [None] * {len(switch_node.outputs)}")
+        for i, subgraph in enumerate(switch_node.branch_subgraphs):
+            if i == 0:
+                self.writeline(f"if {index} <= {i}:")
+            elif i == len(switch_node.branch_subgraphs) - 1:
+                self.writeline("else:")
+            else:
+                self.writeline(f"elif {index} == {i}:")
+            self.writeline(EnterSubgraphLine(self, subgraph.graph))
+            if V.graph.aot_mode:
+                outer_outputs = [
+                    f"{name}[{j}]" for j in range(len(switch_node.outputs))
+                ]
+                self.codegen_subgraph_by_inlining(
+                    subgraph, outer_inputs, outer_outputs
+                )
+            else:
+                self.codegen_subgraph(subgraph, outer_inputs, name)
+            self.writeline(ExitSubgraphLine(self))
+
     def codegen_while_loop(self, while_loop, stack_output):
         """while_loop is codegened as a host side while_loop"""
 

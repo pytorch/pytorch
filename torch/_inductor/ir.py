@@ -9204,6 +9204,7 @@ class Conditional(ExternKernel):
         false_outputs = false_fn.graph.graph_outputs
 
         for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
+            # NOTE: This looks like a bug! s/true_outputs/outputs
             if _has_aliased_buffers(true_outputs):
                 raise AssertionError(
                     "Output aliasing is currently not supported in compiled torch.cond. "
@@ -9292,6 +9293,181 @@ class Conditional(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_conditional(self)
+        wrapper.codegen_unbacked_symbol_defs_for_outputs(
+            self.get_name(), self.outputs, getattr(self, "unbacked_bindings", {})
+        )
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        if unbacked_bindings := getattr(self, "unbacked_bindings", None):
+            resolved = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, unbacked_bindings
+            )
+            assert resolved is not None
+            return OrderedSet(resolved.keys())
+        else:
+            return OrderedSet()
+
+
+@ir_dataclass(frozen=False)
+class SwitchCond(ExternKernel):
+    """IR node representing torch.switch — N-way branching by index."""
+
+    index: Optional[IRNode] = None
+    operands: Optional[Sequence[IRNode]] = None
+    branch_subgraphs: Optional[Sequence[Subgraph]] = None
+    outputs: Optional[Sequence[MultiOutput]] = None
+
+    def __init__(
+        self,
+        index: IRNode,
+        operands: Sequence[IRNode],
+        branch_subgraphs: Sequence[Subgraph],
+        layout: MultiOutputLayout,
+        unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]],
+    ) -> None:
+        self.index = index
+        self.operands = operands
+        self.branch_subgraphs = branch_subgraphs
+
+        sym_args, tensor_args = _split_by_sym_type([index, *operands])
+
+        super().__init__(
+            name=None,
+            layout=layout,
+            inputs=tensor_args,
+            constant_args=sym_args,
+        )
+        if unbacked_bindings is not None:
+            self.unbacked_bindings = unbacked_bindings
+
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    @staticmethod
+    def _maybe_expr(s: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
+        if isinstance(s, int):
+            return s
+        return s.node.expr
+
+    @classmethod
+    def create(
+        cls,
+        index: TensorBox,
+        branch_fns: Sequence[Subgraph],
+        operands: list[TensorBox],
+    ) -> list[MultiOutput]:
+        # TODO: .lowering.switch
+        """Create a Sequence of IRNodes from a conditional statement (see .lowering.switch)"""
+        index = cls.realize_input(index)
+        operands = [cls.realize_input(x) for x in operands]
+        fx_operands: Argument = V.graph.current_node.args[-1]
+
+        assert isinstance(fx_operands, Sequence), type(fx_operands)
+        assert all(isinstance(n, Node) for n in fx_operands)
+        fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
+        fake_outputs = V.graph.current_node.meta["val"]
+
+        def _require_exact_strides(
+            graph_outputs: Sequence[IRNode],
+            fake_tensors: Sequence[torch.Tensor],
+        ) -> list[IRNode]:
+            ret = []
+            for output, fake in zip(graph_outputs, fake_tensors):
+                if isinstance(output, ShapeAsConstantBuffer):
+                    ret.append(output)
+                else:
+                    ret.append(
+                        ExternKernel.require_exact_strides(
+                            TensorBox(output), fake.stride(), allow_padding=False
+                        )
+                    )
+            return ret
+
+        for subgraph in branch_fns:
+            if subgraph.graph is None:
+                # create and lower subgraphs
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_operands)
+                    # Force subgraph outputs to have the expected strides from
+                    # FakeTensor metadata. This ensures both branches produce
+                    # outputs with consistent strides.
+                    subgraph.graph.graph_outputs = _require_exact_strides(
+                        subgraph.graph.graph_outputs, fake_outputs
+                    )
+
+        assert all(fn.graph is not None for fn in branch_fns)
+        branch_outputs = [fn.graph.graph_outputs for fn in branch_fns]
+
+        for i, outputs in enumerate(branch_outputs):
+            if _has_aliased_buffers(outputs):
+                raise AssertionError(
+                    "Output aliasing is currently not supported in compiled torch.switch. "
+                    f"The outputs of the branch{i} subgraph of torch.cond are aliased: {outputs}"
+                )
+
+        # make sure true and false outputs are structurally equivalent
+        assert all(len(a) == len(b) for (a, b) in itertools.pairwise(branch_outputs))
+        for i, outputs in enumerate(zip(*branch_outputs)):
+            assert all(a.get_device() == b.get_device() for a, b in itertools.pairwise(outputs)), (i, *outputs)
+            assert all(a.get_dtype() == b.get_dtype() for a, b in itertools.pairwise(outputs)), (i, *outputs)
+            assert all(a.get_layout().offset == b.get_layout().offset for a, b in itertools.pairwise(outputs)), (i, *outputs)
+
+        # Determine device from operands and predicate
+        # The predicate can be on a different device (e.g., CPU for control flow)
+        # while the data operands and outputs should be on the compute device, so
+        # using predicate device as a fallback.
+        device = next(
+            o.get_device()
+            for o in operands + [index]
+            if not isinstance(o, ShapeAsConstantBuffer)
+        )
+        unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env,
+            V.graph.current_node.meta.get("unbacked_bindings", None),
+        )
+        assert device is not None, "cannot determine device"
+        switch_node = SwitchCond(
+            index=index,
+            operands=operands,
+            branch_subgraphs=branch_fns,
+            layout=MultiOutputLayout(device=device),
+            unbacked_bindings=unbacked_bindings,
+        )
+
+        outputs = [
+            MultiOutput(
+                FixedLayout(
+                    device=output.get_device()
+                    if output.get_device() is not None
+                    else device,
+                    dtype=output.get_dtype(),
+                    size=[SwitchCond._maybe_expr(sz) for sz in merged_output.size()],
+                    stride=[
+                        SwitchCond._maybe_expr(sz) for sz in merged_output.stride()
+                    ],
+                    offset=output.get_layout().offset,
+                    is_pinned=output.get_layout().is_pinned,
+                ),
+                switch_node,
+                [(list, i)],
+            )
+            # as all branch outputs are equivalent,
+            # we can use either of them here as a "template"
+            for i, (output, merged_output) in enumerate(
+                zip(branch_outputs[0], V.graph.current_node.meta["val"])
+            )
+        ]
+
+        switch_node.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        wrapper.codegen_switch(self)
         wrapper.codegen_unbacked_symbol_defs_for_outputs(
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", {})
         )

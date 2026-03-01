@@ -2099,6 +2099,57 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.writeline(ExitSubgraphLine(self))
         self.writeline("}")
 
+    def codegen_switch(self, switch_node):
+        """
+        // Generated code example
+        switch (std::clamp(index, 0, N)) {
+        case 0: {
+          ...
+        } break;
+        ...
+        case N: {
+          ...
+        } break;
+        default:
+          throw std::runtime_error(...);
+        }
+        """
+        outer_inputs = [f"{buf.codegen_reference()}" for buf in switch_node.operands]
+        outer_outputs = []
+        for out in switch_node.outputs:
+            # in ABI-compatible mode, ir.MultiOutput is not codegened,
+            # hence pre-declare output variables directly and separately
+            self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
+            outer_outputs.append(out.get_name())
+
+        if not isinstance(switch_node.index, ir.ShapeAsConstantBuffer):
+            # in ABI-compatible mode, we need to use the ABI shim function
+            # to extract a C++ bool from the underlying scalar bool Tensor
+            index = f"{switch_node.index.get_name()}_scalar"
+            if index not in self.used_cond_predicate: # NOTE: why used_cond_predicate?
+                self.codegen_tensor_item(
+                    torch.int64,
+                    switch_node.index.codegen_reference(),
+                    index,
+                )
+                self.used_cond_predicate.add(index)
+        else:
+            # the index is not a Tensor: SymBool or Python bool
+            index = switch_node.index.codegen_reference()
+
+        n_branches = len(switch_node.branch_subgraphs)
+
+        self.writeline(f"switch (std::clamp<int64_t>({index}, 0, {n_branches-1})) {{")
+        for i, subgraph in enumerate(switch_node.branch_subgraphs):
+            self.writeline(f"case {i}: {{")
+            self.writeline(EnterSubgraphLine(self, subgraph.graph))
+            self.codegen_subgraph(subgraph, outer_inputs, outer_outputs)
+            self.writeline(ExitSubgraphLine(self))
+            self.writeline("} break;")
+        self.writeline("default:")
+        self.writeline("    throw std::runtime_error(\"torch.switch unreachable, this is a PyTorch bug.\");");
+        self.writeline("}")
+
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
         # TODO (desertfire) - This function is the old way of supporting
         # subgraph codegen by inlining subgraphs in the output code. For python

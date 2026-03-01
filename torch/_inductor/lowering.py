@@ -7582,6 +7582,18 @@ def cond(
     return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 
+@register_lowering(torch.ops.higher_order.switch, type_promotion_kind=None)
+def switch(index, branches, operands):
+    if any(isinstance(x, IRNode) and is_triton(x) for x in [index, *operands]):
+        msg = "control flow operator: torch.switch."
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.SwitchCond.create(index, branches, operands)
+    return list(map(TensorBox.create, result))
+
+
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
     # TODO: when graph_partition is enabled, skip - partitioning handles control flow
