@@ -157,14 +157,16 @@ std::vector<ParameterMetadata> unpack_input_parameters(
 AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     c10::DispatchKey dispatch_key,
     std::string_view ns,
-    std::string_view op_name_with_overload)
+    std::string_view op_name_with_overload,
+    bool dynamic)
     : dispatch_key_(dispatch_key),
       ns_(std::string(ns)),
       op_name_with_overload_(std::string(op_name_with_overload)),
       device_(c10::dispatchKeyToDeviceType(dispatch_key_), 0),
-      pyinterpreter_(getPyInterpreter()) {
+      pyinterpreter_(getPyInterpreter()),
+      dynamic_(dynamic) {
   auto device_name = c10::DeviceTypeName(device_.type());
-  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
+  auto& registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
           device_.type() == c10::DeviceType::XPU ||
@@ -196,11 +198,15 @@ bool AOTIPythonKernelHolder::cache_lookup(
     const torch::jit::Stack* stack,
     AOTIKernelMetadata& aoti_kernel_metadata) {
   TORCH_CHECK_NOT_IMPLEMENTED(
-      op.schema().returns().size() == 1,
-      "Not implemented for operations that return either multiple values or no value.");
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      op.schema().returns()[0].type()->isSubtypeOf(c10::TensorType::get()),
-      "Not implemented for operations that return a non-Tensor value.");
+      op.schema().returns().size() >= 1,
+      "Not implemented for operations that return no value.");
+  for (const auto& ret : op.schema().returns()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        ret.type()->isSubtypeOf(c10::TensorType::get()),
+        "Not implemented for operations that return a non-Tensor value. "
+        "Got return type: ",
+        ret.type()->str());
+  }
 
   auto inputs_metadata =
       unpack_input_parameters(op.schema().arguments(), *stack);
@@ -405,7 +411,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
 std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
     load_aoti_model_runner(const std::string& so_path) {
   auto device_name = c10::DeviceTypeName(device_.type());
-  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
+  auto& registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
           device_.type() == c10::DeviceType::XPU ||
@@ -431,6 +437,13 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
   } else if (device_.type() == c10::DeviceType::CPU) {
     return std::make_shared<AOTIModelContainerRunnerCpu>(so_path);
   } else {
+    TORCH_CHECK(
+        registered_aoti_runner.find(device_name) !=
+            registered_aoti_runner.end(),
+        "AOTI eager mode: no runner registered for device ",
+        device_name,
+        ". External device backends must register an AOTI model runner factory "
+        "using RegisterAOTIModelRunner before using AOTI eager mode.");
     auto aoti_model_runer_fn = registered_aoti_runner[device_name];
     return aoti_model_runer_fn(
         so_path, 1, device_name, "", /*run_single_threaded=*/false);
@@ -448,6 +461,16 @@ void AOTIPythonKernelHolder::cache_miss(
       kernel != nullptr,
       "Unsupported device: ",
       c10::DeviceTypeName(device_.type()));
+
+  // Populate the in-memory cache so subsequent calls hit cache_hit.
+  auto inputs_metadata =
+      unpack_input_parameters(op.schema().arguments(), *stack);
+  AOTIKernelMetadata aoti_kernel_metadata;
+  aoti_kernel_metadata.parameter_metadata_list_ = std::move(inputs_metadata);
+  aoti_kernel_metadata.kernel_runner_ = kernel;
+  aoti_kernel_metadata.is_dynamic_ = dynamic_;
+  aoti_kernel_cache_.push_back(std::move(aoti_kernel_metadata));
+
   auto inputs = unpack_tensors(op.schema().arguments(), *stack, device_);
   auto outputs = kernel->run(inputs);
   torch::jit::drop(*stack, op.schema().arguments().size());
@@ -513,7 +536,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       py::str(ns_str).ptr(),
       py::str(op_name_with_overload_).ptr(),
       py::str(c10::DeviceTypeName(device_.type(), true)).ptr(),
-      py::bool_(false).ptr(),
+      py::bool_(dynamic_).ptr(),
       op_py_func.ptr(),
       args_kwargs.first.ptr(),
       args_kwargs.second.ptr(),
