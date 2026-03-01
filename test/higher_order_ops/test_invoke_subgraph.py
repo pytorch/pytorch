@@ -3277,15 +3277,10 @@ class NegativeTesting(TestCase):
 class TestInlineInvokeSubgraph(TestCase):
     def _assert_no_invoke_subgraph(self, fn, args):
         """Compile fn and verify the backend receives no invoke_subgraph HOPs."""
-        graphs = []
-
-        def capture_backend(gm, example_inputs):
-            graphs.append(gm)
-            return gm.forward
-
-        res = torch.compile(fn, backend=capture_backend, fullgraph=True)(*args)
-        self.assertTrue(len(graphs) > 0)
-        for gm in graphs:
+        backend = EagerAndRecordGraphs()
+        res = torch.compile(fn, backend=backend, fullgraph=True)(*args)
+        self.assertTrue(len(backend.graphs) > 0)
+        for gm in backend.graphs:
             for node in gm.graph.nodes:
                 self.assertFalse(
                     node.op == "call_function"
