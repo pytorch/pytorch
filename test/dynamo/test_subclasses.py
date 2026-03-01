@@ -3752,8 +3752,6 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
-    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
-    @unittest.expectedFailure
     def test_in_graph_construction_from_intermediate_5(self):
         # non-shared intermediate
         def fn(values):
@@ -4186,6 +4184,68 @@ Eq(s20, s77)""",
     @unittest.expectedFailure
     def test_subclass_dense_subclass_dense_view(self):
         self._input_view_test("subclass_dense_subclass_dense")
+
+    def test_jagged_nested_tensor_in_graph_creation_from_regular_tensor(self):
+        """Test creating jagged nested tensor inside compile from regular input (issue #168307)"""
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return torch.nested.as_nested_tensor(x, layout=torch.jagged)
+
+        x = torch.randn(3, 4, 5)
+        result = f(x)
+        self.assertEqual(result.size(0), 3)
+
+    def test_jagged_nested_tensor_expand_and_convert(self):
+        """Test expanding tensor and converting to jagged nested tensor inside compile (issue #168307)"""
+
+        class Model(torch.nn.Module):
+            def __init__(self, seq_len, dim):
+                super().__init__()
+                self.register_buffer("i", torch.randn(1, seq_len, dim))
+
+            def forward(self, x):
+                batch_size = x.shape[0]
+                expanded_i = self.i.expand(batch_size, -1, -1)
+                nested_i = torch.nested.as_nested_tensor(
+                    expanded_i, layout=torch.jagged
+                )
+                return nested_i
+
+        model = Model(seq_len=10, dim=4)
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        x = torch.randn(2, 10, 4)
+        result = compiled_model(x)
+        self.assertEqual(result.size(0), 2)
+
+    def test_jagged_nested_tensor_input_and_in_graph_creation(self):
+        """Test nested tensor input with additional nested tensor created inside compile (issue #168307)"""
+
+        class Model(torch.nn.Module):
+            def __init__(self, seq_len, dim):
+                super().__init__()
+                self.register_buffer("weight", torch.randn(1, seq_len, dim))
+
+            def forward(self, x):
+                # x is already a nested tensor input
+                # Create another nested tensor inside the graph
+                batch_size = x.size(0)
+                expanded_weight = self.weight.expand(batch_size, -1, -1)
+                weight_nested = torch.nested.as_nested_tensor(
+                    expanded_weight, layout=torch.jagged
+                )
+                # Operate on both nested tensors
+                return x.values() + weight_nested.values()
+
+        model = Model(seq_len=10, dim=4)
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+
+        # Create nested tensor input
+        tensors = [torch.randn(10, 4) for _ in range(3)]
+        x = torch.nested.as_nested_tensor(tensors, layout=torch.jagged)
+
+        result = compiled_model(x)
+        self.assertEqual(result.shape, x.values().shape)
 
 
 instantiate_parametrized_tests(TestNestedTensor)
