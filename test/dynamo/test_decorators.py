@@ -1485,6 +1485,31 @@ class DecoratorTests(PytreeRegisteringTestCase):
         compiled_out = compiled_fn(x, y)
         self.assertEqual(eager_out, compiled_out)
 
+    def test_assume_constant_result_on_cached_property(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._cached_id = None
+
+            @property
+            def cached_id(self) -> int:
+                if self._cached_id is None:
+                    self._cached_id = 42
+                return self._cached_id
+
+            def forward(self, x):
+                return x * self.cached_id
+
+        torch._dynamo.assume_constant_result(MyModule.cached_id.fget)
+
+        model = MyModule()
+        x = torch.tensor([1.0, 2.0, 3.0])
+        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
+        result_eager = model(x)
+        result_compiled = compiled_model(x)
+
+        self.assertTrue(torch.allclose(result_eager, result_compiled))
+
     def test_set_stance_aot_eager_then_compile(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
