@@ -14,6 +14,7 @@ import random
 import re
 import tempfile
 from collections.abc import Callable
+from enum import Enum
 from itertools import chain, count
 from typing import Any, TYPE_CHECKING
 
@@ -89,6 +90,24 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 pexpr = PythonPrinter().doprint
+
+
+def _sanitize_for_repr(obj: Any) -> Any:
+    """Convert Enum values to their underlying value for valid Python repr in code generation."""
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_repr(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_repr(v) for v in obj]
+    # For namedtuples (have _fields), use _replace to preserve the type
+    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
+        return obj._replace(
+            **{field: _sanitize_for_repr(getattr(obj, field)) for field in obj._fields}
+        )
+    if isinstance(obj, tuple):
+        return tuple(_sanitize_for_repr(v) for v in obj)
+    if isinstance(obj, Enum):
+        return obj.value
+    return obj
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool]
@@ -2697,12 +2716,14 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
+        # Sanitize triton_meta to convert Enum values for valid Python repr
+        sanitized_triton_meta = _sanitize_for_repr(triton_meta)
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
                 configs={[*map(config_to_dict, configs)]!r},
                 inductor_meta={inductor_meta!r},
-                triton_meta={triton_meta!r},
+                triton_meta={sanitized_triton_meta!r},
                 filename=__file__,
                 custom_kernel=True,
             )
