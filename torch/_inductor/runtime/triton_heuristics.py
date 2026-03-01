@@ -2876,16 +2876,20 @@ def pointwise(
 
     configs = None
     if len(size_hints) == 1:
+        # 1D kernels can use larger blocks since TRITON_MAX_BLOCK["X"] is 4096
+        bs_1d = max(256, min(numel // 128, 2048))
         if not inductor_meta.get("autotune_pointwise", True) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
-            configs = [triton_config_with_settings(size_hints, bs)]
+            configs = [triton_config_with_settings(size_hints, bs_1d)]
         else:
             configs = [
-                triton_config_with_settings(size_hints, bs, num_elements_per_warp=256),
                 triton_config_with_settings(
-                    size_hints, bs // 2, num_elements_per_warp=64
+                    size_hints, bs_1d, num_elements_per_warp=512
+                ),
+                triton_config_with_settings(
+                    size_hints, bs_1d // 2, num_elements_per_warp=64
                 ),
                 *hinted_configs,
             ]
