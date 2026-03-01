@@ -7207,7 +7207,37 @@ register_lowering(aten.clamp_max)(minimum)
 neg = register_pointwise(aten.neg)
 abs = register_pointwise(aten.abs)
 reciprocal = register_pointwise_numeric(aten.reciprocal)
-register_pointwise(aten.remainder)
+register_op_dtype_propagation_rules(
+    "remainder", ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT, None
+)
+
+
+# Use ops.fmod for floating-point types instead of the default ops.remainder
+# (which decomposes to ops.mod). Triton's % operator (used by ops.mod) loses
+# precision for large float values, while libdevice.fmod (used by ops.fmod)
+# is precise.
+@register_lowering(aten.remainder, broadcast=True)
+def remainder(a, b):
+    is_integral = is_boolean_type(a) or is_integer_type(a)
+
+    if is_integral:
+
+        def fn(a, b):
+            return ops.remainder(a, b)
+
+    else:
+
+        def fn(a, b):
+            r = ops.fmod(a, b)
+            cond = ops.and_(
+                ops.ne(r, ops.constant(0, torch.int32)),
+                ops.ne(ops.signbit(r), ops.signbit(b)),
+            )
+            return ops.where(cond, ops.add(r, b), r)
+
+    return make_pointwise(fn)(a, b)
+
+
 sign = register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)

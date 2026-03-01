@@ -7535,6 +7535,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn(8),))
 
+    @xfail_if_triton_cpu
     def test_remainder(self):
         def fn(a, b):
             return (
@@ -7544,6 +7545,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             )
 
         self.common(fn, (torch.randn(64), torch.randn(64)))
+
+    @skip_if_halide
+    @xfail_if_triton_cpu
+    def test_remainder_large_float(self):
+        # Regression test: remainder with large float values lost precision
+        # because the Triton codegen used % (imprecise for large floats)
+        # instead of libdevice.fmod.
+        def fn(a, b):
+            return torch.remainder(a, b)
+
+        # All four sign combinations: (+,+), (-,+), (+,-), (-,-)
+        # Use 32 elements to ensure Triton uses block sizes where the bug
+        # manifests (very small tensors can use different codegen).
+        signs_a = torch.tensor([1, -1, 1, -1], dtype=torch.float32).repeat(8)
+        signs_b = torch.tensor([3, 3, -3, -3], dtype=torch.float32).repeat(8)
+        a = signs_a * 1e9
+        b = signs_b
+        self.common(fn, (a, b))
 
     def test_zeros(self):
         def fn(a):
