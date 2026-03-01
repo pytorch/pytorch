@@ -117,7 +117,6 @@ case ${CUDA_VERSION} in
     13.0)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
         export TORCH_NVCC_FLAGS="-compress-mode=size"
-        export BUILD_BUNDLE_PTXAS=1
         ;;
     *) echo "unknown cuda version $CUDA_VERSION"; exit 1 ;;
 esac
