@@ -706,6 +706,30 @@ graph():
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 3)
 
+    def test_compile_try_except_attribute_error(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/174166
+        # torch.compile should support try/except: AttributeError in try block
+        # should be caught and fallback executed.
+        class BuggyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = torch.nn.Parameter(torch.tensor([2.0]))
+
+            def forward(self, x):
+                try:
+                    return x.this_attribute_does_not_exist
+                except AttributeError:
+                    return x * self.scale
+
+        m = BuggyModule()
+        x = torch.randn(4, 4)
+        out_eager = m(x)
+        self.assertEqual(out_eager.shape, (4, 4))
+        opt_m = torch.compile(m, backend="eager")
+        out_compiled = opt_m(x)
+        self.assertEqual(out_compiled.shape, (4, 4))
+        self.assertEqual(out_eager.shape, out_compiled.shape)
+
     def test_module_not_callable(self):
         def fn(x):
             return torch.fft(x)

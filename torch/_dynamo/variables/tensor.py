@@ -47,6 +47,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
+    raise_observed_exception,
     TorchRuntimeError,
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
@@ -319,7 +320,7 @@ class TensorVariable(VariableTracker):
 
     def dynamic_getattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
         fake_val = self.proxy.node.meta["example_value"]
         # For getattrs on tensors without sources,
         # we can do better than the default (creating a GetAttrVariable)
@@ -374,7 +375,10 @@ class TensorVariable(VariableTracker):
         if get_custom_getattr(_input_associated_real_value):
             raise NotImplementedError
 
-        real_value = getattr(_input_associated_real_value, name)
+        try:
+            real_value = getattr(_input_associated_real_value, name)
+        except AttributeError:
+            return None
 
         attr_source = AttrSource(self.source, name)
 
@@ -606,7 +610,11 @@ class TensorVariable(VariableTracker):
             result = self.dynamic_getattr(tx, name)
 
         if result is None:
-            raise NotImplementedError
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[f"'Tensor' object has no attribute '{name}'"],
+            )
         return result
 
     def call_id(self, tx: "InstructionTranslator") -> VariableTracker:
