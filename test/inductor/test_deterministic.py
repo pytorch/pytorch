@@ -48,6 +48,18 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
+    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires CUDA with Triton")
+    def test_replication_pad_fullgraph_compilation(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        self.addCleanup(torch.use_deterministic_algorithms, prior)
+
+        torch.use_deterministic_algorithms(True)
+        module = torch.nn.ReplicationPad1d(2).to(GPU_TYPE)
+        compiled = torch.compile(module, fullgraph=True)
+
+        inputs = torch.zeros(3, 3, device=GPU_TYPE)
+        self.assertEqual(compiled(inputs), module(inputs))
+
     @skipIfXpu(msg="pad_mm is not enabled for XPU.")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):

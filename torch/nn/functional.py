@@ -5419,7 +5419,7 @@ def pad(
         return handle_torch_function(
             torch.nn.functional.pad, (input,), input, pad, mode=mode, value=value
         )
-    if not torch.jit.is_scripting():
+    if not torch.jit.is_scripting() and not torch.compiler.is_compiling():
         if torch.are_deterministic_algorithms_enabled() and (
             input.is_cuda or input.is_xpu
         ):
