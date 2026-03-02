@@ -1,5 +1,8 @@
 # Owner(s): ["module: inductor"]
+from unittest.mock import patch
+
 import torch
+from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.repro.aoti import (
     AOTIMinifierError,
     export_for_aoti_minifier,
@@ -9,6 +12,26 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MinifierUtilsTests(TestCase):
+    def test_invalid_output_user_error_classification(self):
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with patch(
+            "torch.export.export",
+            side_effect=UserError(
+                UserErrorType.INVALID_OUTPUT,
+                "mocked invalid output user error",
+            ),
+        ):
+            gm = export_for_aoti_minifier(
+                SimpleModel(),
+                (torch.randn(2, 2),),
+                strict=True,
+                skip_export_error=False,
+            )
+            self.assertTrue(gm is None)
+
     def test_invalid_output(self):
         class SimpleModel(torch.nn.Module):
             def __init__(self):
