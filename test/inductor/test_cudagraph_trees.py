@@ -5125,9 +5125,6 @@ if HAS_CUDA_AND_TRITON:
                 new_state = old_state.clone_state()
 
                 if capture_cuda_graph:
-                    # state should be register to the graph
-                    graph.register_generator_state(new_state)
-
                     # only capturing the backward
                     with torch.cuda.graph(graph):
                         repro_perm = graphsafe_backward(generator, new_state)

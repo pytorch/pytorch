@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <limits>
+#include <optional>
 #include <stack>
 
 #if defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
@@ -29,6 +30,12 @@ namespace cuda {
 // Standalone way to get a unique mempool id usable as a pool=... argument
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
+
+struct CUDAGraph;
+
+// Get the CUDAGraph associated with a capture ID, if any.
+// Returns nullptr if no graph is associated with the given capture ID.
+TORCH_CUDA_CPP_API CUDAGraph* get_graph_from_capture_id(CaptureId_t capture_id);
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
@@ -54,9 +61,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(CUDAGraph&& other) = delete;
   CUDAGraph& operator=(CUDAGraph&& other) = delete;
 
-  // See Note [Explicit Registration of Generators to the CUDA Graph]
+  // See Note [Lazy Registration of Generators to the CUDA Graph]
+  // Called internally by CUDAGeneratorState::get_capture_state() during capture
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
-  void register_generator_state(const at::Generator& generator);
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
@@ -77,8 +84,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       cudaGraphConditionalHandle handle,
       const Tensor& scalar_cuda_pred_tensor);
 
+  MempoolId_t mempool_id() const { return mempool_id_; }
+  c10::DeviceIndex capture_device() const { return capture_dev_; }
+
  private:
-  std::function<bool(cudaStream_t)> create_allocate_filter();
+  template <typename StreamType>
+  std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
 
  protected:
@@ -136,11 +147,13 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 #if !defined(USE_ROCM) && (defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
   std::stack<at::cuda::CUDAStreamGuard> conditional_node_streams_;
   std::stack<CaptureId_t> conditional_graph_capture_ids_;
-  std::stack<
-      ska::flat_hash_map<c10::intrusive_ptr<at::CUDAGeneratorState>, uint64_t>>
-      conditional_rng_snapshots_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
+
+template <>
+std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const;
+template <>
+std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>() const;
 
 } // namespace cuda
 } // namespace at
