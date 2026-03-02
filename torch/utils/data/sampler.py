@@ -5,6 +5,21 @@ from typing import Generic, TypeVar
 
 import torch
 
+from torch.utils.data.coordinate_sampler import (
+    Coordinate2D,
+    Coordinate3D,
+    CoordinateBatchSampler,
+    CoordinateSampler,
+    CoordinateSampler3D,
+    coordinates_to_tensor,
+    create_coordinate_sampler,
+    DistributedCoordinateSampler,
+    GridCoordinateSampler,
+    SpatialBatchSampler,
+    tensor_to_coordinates,
+    WeightedCoordinateSampler,
+)
+
 
 # Note: For benchmarking changes to samplers, see:
 # /benchmarks/data/samplers_bench.py
@@ -14,10 +29,20 @@ import torch
 
 __all__ = [
     "BatchSampler",
+    "CoordinateBatchSampler",
+    "CoordinateSampler",
+    "CoordinateSampler3D",
+    "coordinates_to_tensor",
+    "create_coordinate_sampler",
+    "DistributedCoordinateSampler",
+    "GridCoordinateSampler",
     "RandomSampler",
     "Sampler",
     "SequentialSampler",
+    "SpatialBatchSampler",
     "SubsetRandomSampler",
+    "tensor_to_coordinates",
+    "WeightedCoordinateSampler",
     "WeightedRandomSampler",
 ]
 
