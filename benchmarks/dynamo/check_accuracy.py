@@ -34,20 +34,14 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
     if "rocm" in expected_filename:
         flaky_models.update(
             {
-                "Background_Matting",
-                "mnasnet1_0",
                 "llava",
                 "repvgg_a2",
-                "resnet152",
                 "resnet18",
                 "resnet50",
-                "stable_diffusion_unet",
                 "torchrec_dlrm",
                 "shufflenet_v2_x1_0",
                 "vgg16",
                 "BERT_pytorch",
-                # LLM
-                "google/gemma-2-2b",
                 "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
                 # Discovered on gfx950 CI after ROCm 7.2 upgrade, eager mode non determinism
                 "alexnet",
