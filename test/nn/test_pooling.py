@@ -124,6 +124,127 @@ class TestAvgPool(TestCase):
                         actual = actual.view(1, actual.numel())
                         expected = self._sum_pool3d(input, (i, j, k)) / divisor
                         self.assertEqual(actual, expected, rtol=0, atol=1e-5)
+    
+    def test_result_tensor_shape_avg_pool_2d_count_include_pad(self):
+        # let's use odd tensor sizes
+        h, dim = 1, 3
+        kernel_size = (dim - 1, dim - 1)
+        padding = 1
+
+        # no overlap for predictable results of avg
+        stride = math.ceil(dim / 2) + padding
+
+        input_tensor = torch.rand(h, dim, dim, dtype = torch.double)
+
+        # exclude padded values
+        pool_no_pads = nn.AvgPool2d(
+            kernel_size = kernel_size,
+            stride = stride,
+            padding = padding,
+            count_include_pad = False
+        )
+        output_tensor_no_pads = pool_no_pads(input_tensor)
+
+        # include padded zeros to decrease avg result values
+        pool_incl_pads = nn.AvgPool2d(
+            kernel_size = kernel_size,
+            stride = stride,
+            padding = padding,
+            count_include_pad = True
+        )
+        output_tensor_with_pads = pool_incl_pads(input_tensor)
+
+        # all values in tensor where 0 pads where excluded must be greater than where it was included
+        self.assertEqual(torch.all(output_tensor_no_pads.gt(output_tensor_with_pads)).item(), True)
+
+
+    def test_result_tensor_shape_avg_pool_2d_ceil_mode_true(self):
+        h, dim = 1, 3
+        kernel_size = (dim - 1, dim - 1)
+        # let's use overlaping for window
+        stride = math.ceil(dim / 2)
+
+        input_tensor = torch.rand(h, dim, dim, dtype = torch.double)
+        # ceil_mode = True will force using math.ceil() to calculate output tensor size
+        pool = nn.AvgPool2d(kernel_size = kernel_size, stride = stride, ceil_mode = True)
+        output_tensor = pool(input_tensor)
+
+        # tensor should be shrinked to kernel size
+        self.assertEqual(output_tensor.shape, torch.Size([h, kernel_size[0], kernel_size[1]]))
+
+    def test_result_tensor_shape_avg_pool_2d_ceil_mode_false(self):
+        h, dim = 1, 3
+        kernel_size = (dim - 1, dim - 1)
+        # let's use overlaping for window
+        stride = math.ceil(dim / 2)
+
+        input_tensor = torch.rand(h, dim, dim, dtype = torch.double)
+        # ceil_mode = False will force using math.floor() to calculate output tensor size
+        pool = nn.AvgPool2d(kernel_size = kernel_size, stride = stride, ceil_mode = False)
+        output_tensor = pool(input_tensor)
+
+        # tensor should be shrinked to 1, 1
+        self.assertEqual(output_tensor.shape, torch.Size([h, 1, 1]))
+
+    def test_result_tensor_shape_avg_pool_3d_ceil_mode_false(self):
+        h, dim = 1, 3
+        kernel_size = (dim - 1, dim - 1, dim - 1)
+        # let's use overlaping for window
+        stride = math.ceil(dim / 2)
+
+        input_tensor = torch.rand(h, dim, dim, dim, dtype = torch.double)
+        # ceil_mode = False will force using math.floor() to calculate output tensor size
+        pool = nn.AvgPool3d(kernel_size = kernel_size, stride = stride, ceil_mode = False)
+        output_tensor = pool(input_tensor)
+
+        # tensor should be shrinked to 1, 1, 1
+        self.assertEqual(output_tensor.shape, torch.Size([h, 1, 1, 1]))
+
+    def test_result_tensor_shape_avg_pool_3d_ceil_mode_true(self):
+        h, dim = 1, 3
+        kernel_size = (dim - 1, dim - 1, dim - 1)
+        # let's use overlaping for window
+        stride = math.ceil(dim / 2)
+
+        input_tensor = torch.rand(h, dim, dim, dim, dtype = torch.double)
+        # ceil_mode = False will force using math.floor() to calculate output tensor size
+        pool = nn.AvgPool3d(kernel_size = kernel_size, stride = stride, ceil_mode = True)
+        output_tensor = pool(input_tensor)
+
+        # tensor should be shrinked to kernel size
+        self.assertEqual(output_tensor.shape, torch.Size([h, dim - 1, dim - 1, dim - 1]))
+
+    def test_result_tensor_shape_avg_pool_3d_count_include_pad(self):
+        # let's use odd tensor sizes
+        h, dim = 1, 3
+        kernel_size = (dim - 1, dim - 1, dim - 1)
+        padding = 1
+
+        # no overlap for predictable results of avg
+        stride = math.ceil(dim / 2) + padding
+
+        input_tensor = torch.rand(h, dim, dim, dim, dtype = torch.double)
+
+        # exclude padded values
+        pool_no_pads = nn.AvgPool3d(
+            kernel_size = kernel_size,
+            stride = stride,
+            padding = padding,
+            count_include_pad = False
+        )
+        output_tensor_no_pads = pool_no_pads(input_tensor)
+
+        # include padded zeros to decrease avg result values
+        pool_incl_pads = nn.AvgPool3d(
+            kernel_size = kernel_size,
+            stride = stride,
+            padding = padding,
+            count_include_pad = True
+        )
+        output_tensor_with_pads = pool_incl_pads(input_tensor)
+
+        # all values in tensor where 0 pads where excluded must be greater than where it was included
+        self.assertEqual(torch.all(output_tensor_no_pads.gt(output_tensor_with_pads)).item(), True)
 
     def test_avg_pool1d_ceil_mode(self):
         # Regression test for gh-36977
