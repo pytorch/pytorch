@@ -19,6 +19,7 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
+    LAMB,
     LBFGS,
     Muon,
     NAdam,
@@ -811,6 +812,68 @@ def optim_error_inputs_func_asgd(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="Invalid weight_decay value: -0.5",
+            ),
+        ]
+    return error_inputs
+
+
+def optim_inputs_func_lamb(device, dtype=None):
+    return [
+        OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lr": 1e-3}, desc="non-default lr"),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.01},
+            desc="nonzero weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.01, "maximize": True},
+            desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"lr": 1e-3, "betas": (0.9, 0.99)},
+            desc="non-default betas",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"lr": 1e-3, "eps": 1e-8},
+            desc="non-default eps",
+        ),
+    ]
+
+
+def optim_error_inputs_func_lamb(device, dtype):
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
+    if _get_device_type(device) == "cpu":
+        error_inputs += [
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(1.0, 0.0)),
+                    desc="beta1 should be between 0 and 1",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid beta parameter at index 0: 1.0",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, weight_decay=-1),
+                    desc="weight_decay should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid weight_decay value: -1",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, eps=-1e-6),
+                    desc="eps should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid epsilon value: -1e-06",
             ),
         ]
     return error_inputs
@@ -1866,6 +1929,28 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_step_is_noop_for_zero_grads",
+            ),
+        ),
+    ),
+    OptimizerInfo(
+        LAMB,
+        optim_inputs_func=optim_inputs_func_lamb,
+        optim_error_inputs_func=optim_error_inputs_func_lamb,
+        supported_impls=("foreach", "differentiable"),
+        skips=(
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),

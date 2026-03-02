@@ -164,6 +164,7 @@ for input, target in dataset:
     SparseAdam
     Adamax
     ASGD
+    LAMB
     LBFGS
     Muon
     NAdam
@@ -210,6 +211,7 @@ Below is a table showing the available and default implementations of each algor
     :class:`SparseAdam`;for-loop;no;no
     :class:`Adamax`;foreach;yes;no
     :class:`ASGD`;foreach;yes;no
+    :class:`LAMB`;foreach;yes;no
     :class:`LBFGS`;for-loop;no;no
     :class:`Muon`;for-loop;no;no
     :class:`NAdam`;foreach;yes;no
@@ -234,6 +236,7 @@ Below table is showing the stability status for fused implementations:
     :class:`SparseAdam`;unsupported;unsupported;unsupported
     :class:`Adamax`;unsupported;unsupported;unsupported
     :class:`ASGD`;unsupported;unsupported;unsupported
+    :class:`LAMB`;unsupported;unsupported;unsupported
     :class:`LBFGS`;unsupported;unsupported;unsupported
     :class:`Muon`;unsupported;unsupported;unsupported
     :class:`NAdam`;unsupported;unsupported;unsupported

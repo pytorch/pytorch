@@ -15,6 +15,7 @@ from torch.optim.adam import Adam as Adam
 from torch.optim.adamax import Adamax as Adamax
 from torch.optim.adamw import AdamW as AdamW
 from torch.optim.asgd import ASGD as ASGD
+from torch.optim.lamb import LAMB as LAMB
 from torch.optim.lbfgs import LBFGS as LBFGS
 from torch.optim.nadam import NAdam as NAdam
 from torch.optim.optimizer import Optimizer as Optimizer
@@ -43,6 +44,7 @@ del rmsprop  # type: ignore[name-defined] # noqa: F821
 del optimizer  # type: ignore[name-defined] # noqa: F821
 del nadam  # type: ignore[name-defined] # noqa: F821
 del lbfgs  # type: ignore[name-defined] # noqa: F821
+del lamb  # type: ignore[name-defined] # noqa: F821
 
 __all__ = [
     "Adafactor",
@@ -52,6 +54,7 @@ __all__ = [
     "Adamax",
     "AdamW",
     "ASGD",
+    "LAMB",
     "LBFGS",
     "lr_scheduler",
     "Muon",
