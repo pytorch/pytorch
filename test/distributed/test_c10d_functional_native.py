@@ -900,16 +900,18 @@ class CompileTest(TestCase):
         torch.accelerator.set_device_index(0)
         self.device = torch.accelerator.current_accelerator()
 
-        store = FakeStore()
-        dist.init_process_group(
-            backend="fake",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
+        if not dist.is_initialized():
+            store = FakeStore()
+            dist.init_process_group(
+                backend="fake",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+            )
 
     def tearDown(self):
-        dist.destroy_process_group()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1150,7 +1152,7 @@ class CompileTest(TestCase):
             FileCheck()
             .check(
                 "buf0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced"
-                ".default([arg3_1, arg2_1, arg1_1, arg0_1]"
+                ".default([arg0_1, arg1_1, arg2_1, arg3_1]"
             )
             .check("buf1 = buf0[0]")
             .check("buf2 = buf0[1]")

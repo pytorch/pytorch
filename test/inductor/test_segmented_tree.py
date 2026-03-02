@@ -46,7 +46,8 @@ class TestSegmentedTree(TestCase):
     def test_basic_construction(self):
         values = [1, 3, 5, 7, 9]
         tree = SegmentedTree(values, add_op, max_op, 0)
-        assert tree.summarize_range(0, 4) == 9
+        if tree.summarize_range(0, 4) != 9:
+            raise AssertionError(f"Expected 9, got {tree.summarize_range(0, 4)}")
 
     def test_empty_array(self):
         with self.assertRaises(ValueError):
@@ -61,9 +62,10 @@ class TestSegmentedTree(TestCase):
             for end in range(start, len(values)):
                 expected = naive_range_max(values, start, end)
                 actual = tree.summarize_range(start, end)
-                assert actual == expected, (
-                    f"Range [{start}:{end}] expected {expected}, got {actual}"
-                )
+                if actual != expected:
+                    raise AssertionError(
+                        f"Range [{start}:{end}] expected {expected}, got {actual}"
+                    )
 
     @given(
         values=positive_integers, range_indices=st.data(), update_value=update_values
@@ -87,9 +89,10 @@ class TestSegmentedTree(TestCase):
             for j in range(i, len(values)):
                 expected = naive_range_max(naive_values, i, j)
                 actual = tree.summarize_range(i, j)
-                assert actual == expected, (
-                    f"After update, range [{i}:{j}] expected {expected}, got {actual}"
-                )
+                if actual != expected:
+                    raise AssertionError(
+                        f"After update, range [{i}:{j}] expected {expected}, got {actual}"
+                    )
 
     @given(values=positive_integers, range_data=st.data())
     def test_multiple_operations(self, values, range_data):
@@ -107,9 +110,10 @@ class TestSegmentedTree(TestCase):
             if operation_type == "query":
                 expected = naive_range_max(naive_values, start, end)
                 actual = tree.summarize_range(start, end)
-                assert actual == expected, (
-                    f"Range query [{start}:{end}] expected {expected}, got {actual}"
-                )
+                if actual != expected:
+                    raise AssertionError(
+                        f"Range query [{start}:{end}] expected {expected}, got {actual}"
+                    )
             else:  # update
                 update_value = range_data.draw(update_values)
                 tree.update_range(start, end, update_value)
@@ -120,40 +124,55 @@ class TestSegmentedTree(TestCase):
         tree = SegmentedTree(values, add_op, max_op, 0)
 
         for i in range(len(values)):
-            assert tree.summarize_range(i, i) == values[i], (
-                f"Single element range at index {i} failed"
-            )
+            if tree.summarize_range(i, i) != values[i]:
+                raise AssertionError(f"Single element range at index {i} failed")
 
     def test_full_array_range(self):
         values = [1, 3, 5, 7, 9]
         tree = SegmentedTree(values, add_op, max_op, 0)
 
         # Test querying the entire array
-        assert tree.summarize_range(0, len(values) - 1) == max(values)
+        if tree.summarize_range(0, len(values) - 1) != max(values):
+            raise AssertionError(
+                f"Expected {max(values)}, got {tree.summarize_range(0, len(values) - 1)}"
+            )
 
         # Update the entire array and test again
         update_value = 10
         tree.update_range(0, len(values) - 1, update_value)
         expected = max([v + update_value for v in values])
-        assert tree.summarize_range(0, len(values) - 1) == expected
+        if tree.summarize_range(0, len(values) - 1) != expected:
+            raise AssertionError(
+                f"Expected {expected}, got {tree.summarize_range(0, len(values) - 1)}"
+            )
 
     def test_boundary_conditions(self):
         values = [1, 3, 5, 7, 9]
         tree = SegmentedTree(values, add_op, max_op, 0)
 
         # Test first element
-        assert tree.summarize_range(0, 0) == values[0]
+        if tree.summarize_range(0, 0) != values[0]:
+            raise AssertionError(
+                f"Expected {values[0]}, got {tree.summarize_range(0, 0)}"
+            )
 
         # Test last element
-        assert tree.summarize_range(len(values) - 1, len(values) - 1) == values[-1]
+        if tree.summarize_range(len(values) - 1, len(values) - 1) != values[-1]:
+            raise AssertionError(
+                f"Expected {values[-1]}, got {tree.summarize_range(len(values) - 1, len(values) - 1)}"
+            )
 
         # Test first two elements
-        assert tree.summarize_range(0, 1) == max(values[0:2])
+        if tree.summarize_range(0, 1) != max(values[0:2]):
+            raise AssertionError(
+                f"Expected {max(values[0:2])}, got {tree.summarize_range(0, 1)}"
+            )
 
         # Test last two elements
-        assert tree.summarize_range(len(values) - 2, len(values) - 1) == max(
-            values[-2:]
-        )
+        if tree.summarize_range(len(values) - 2, len(values) - 1) != max(values[-2:]):
+            raise AssertionError(
+                f"Expected {max(values[-2:])}, got {tree.summarize_range(len(values) - 2, len(values) - 1)}"
+            )
 
     def test_invalid_ranges(self):
         values = [1, 3, 5, 7, 9]
@@ -208,9 +227,10 @@ class TestSegmentedTree(TestCase):
             for j in range(i, len(values)):
                 expected = naive_range_max(naive_values, i, j)
                 actual = tree.summarize_range(i, j)
-                assert actual == expected, (
-                    f"After overlapping updates, range [{i}:{j}] expected {expected}, got {actual}"
-                )
+                if actual != expected:
+                    raise AssertionError(
+                        f"After overlapping updates, range [{i}:{j}] expected {expected}, got {actual}"
+                    )
 
     def test_sequential_updates_and_queries(self):
         values = [2, 4, 6, 8, 10, 12, 14]
@@ -239,15 +259,17 @@ class TestSegmentedTree(TestCase):
                     for j in range(i, len(values)):
                         expected = naive_range_max(naive_values, i, j)
                         actual = tree.summarize_range(i, j)
-                        assert actual == expected, (
-                            f"After update ({start}, {end}, {value}), query [{i}:{j}] expected {expected}, got {actual}"
-                        )
+                        if actual != expected:
+                            raise AssertionError(
+                                f"After update ({start}, {end}, {value}), query [{i}:{j}] expected {expected}, got {actual}"
+                            )
             else:  # query
                 _, start, end = op
                 expected = naive_range_max(naive_values, start, end)
-                assert tree.summarize_range(start, end) == expected, (
-                    f"Query [{start}:{end}] expected {expected}, got {tree.summarize_range(start, end)}"
-                )
+                if tree.summarize_range(start, end) != expected:
+                    raise AssertionError(
+                        f"Query [{start}:{end}] expected {expected}, got {tree.summarize_range(start, end)}"
+                    )
 
 
 if __name__ == "__main__":

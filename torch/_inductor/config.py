@@ -568,11 +568,14 @@ force_same_precision: bool = Config(
 # as expected before turning it on for everyone.
 multi_kernel_hints: list[int] = []
 
+
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CUTEDSL, NVGEMM, CK, CKTILE, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# NVGEMM: NVIDIA Universal GEMM via cutlass_api (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
 # CPP: CPP templates and kernels for CPU.
@@ -893,6 +896,8 @@ combo_kernel_max_num_args = 250
 # allowing different sub-kernels to use different tile sizes based on their heuristics.
 # When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
 combo_kernel_per_subkernel_blocks = False
+# When True, only pointwise kernels are eligible for combo kernel fusion.
+combo_kernels_pointwise_only = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
@@ -1037,7 +1042,14 @@ class aten_distributed_optimizations:
     # Method for estimating collective runtime
     # "analytical": Use bandwidth formulas (default)
     # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
+    # In deterministic mode, this setting is ignored and "analytical" is used.
     collective_estimator: Literal["analytical", "benchmark"] = "analytical"
+
+    # Method for estimating compute (ATen op) runtime
+    # "analytical": Use roofline model estimates (deterministic, no GPU sync)
+    # "benchmark": Use GPU benchmarking (more accurate, requires GPU sync)
+    # In deterministic mode, this setting is ignored and "analytical" is used.
+    compute_estimator: Literal["analytical", "benchmark"] = "benchmark"
 
     # Maximum memory increase above baseline for prefetch operations
     # Uses minimum of absolute cap and ratio of baseline
@@ -1052,13 +1064,19 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
-    # Bucket exposed collectives first
-    bucket_exposed_first: bool = True
+    # Bucket exposed collectives first (None means auto)
+    bucket_exposed_first: bool | None = None
+
+    # Experimental setting to bucket only internode communications
+    bucket_only_internode_comms: bool = False
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
     # as atomic units with memory-bound runtime estimates.
     enable_fusion_regions: Optional[bool] = None
+
+    # Prioritize bucketing during overlap scheduling by grouping candidates by bucket key
+    prioritize_bucketing_during_scheduling: bool = True
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1329,13 +1347,6 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
 
 enable_autograd_for_aot: bool = False
-
-_debug_cpu_to_tpu_pallas: bool = Config(
-    env_name_force="PALLAS_TARGET_TPU", default=False
-)
-pallas_take_first_jax_device_only: bool = Config(
-    env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
-)
 
 
 def get_worker_log_path() -> Optional[str]:
@@ -2271,6 +2282,9 @@ cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 # "triton", "halide" (experimental) or "pallas" (experimental)
 cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
 
+# Backend to use for TPU codegen
+tpu_backend: Literal["pallas"] = "pallas"
+
 # Backend to use for XPU codegen either "triton"
 xpu_backend: Literal["triton"] = "triton"
 
@@ -2443,6 +2457,16 @@ class lookup_table:
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
 
+    # Force custom op autotuning choice selection:
+    # - None: normal autotuning (default)
+    # - True: force decomposition to win
+    # - False: force fallback to win
+    force_custom_op_decomposition: Optional[bool] = None
+
+    # Force custom op autotuning to prevent grouping ranges by implementation.
+    # When True, each range is treated as a separate impl group, forcing torch.cond dispatch.
+    force_no_impl_grouping: bool = False
+
     max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False
@@ -2502,6 +2526,11 @@ class eager_numerics:
     )
 
     disable_ftz: bool = False
+
+    # Use the CUDA toolkit's libdevice instead of Triton's bundled version.
+    # Triton bundles its own libdevice.10.bc which may use different polynomial
+    # coefficients than CUDA's version, causing ~1 ULP differences in pow.
+    use_pytorch_libdevice: bool = False
 
 
 # Mode to emulate PyTorch eager numerics when doing lower precision compute

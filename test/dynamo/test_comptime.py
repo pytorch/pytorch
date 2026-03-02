@@ -61,7 +61,7 @@ FakeTensor(..., size=(s77,))
 [FakeTensor(..., size=(s77,)), 2]
 (FakeTensor(..., size=(s77,)), 2)
 {'foo': FakeTensor(..., size=(s77,))}
-range(1, 3, 1)
+range(1, 3)
 Employee(name='foo', id=2)
 UserDefinedListVariable(mylist)
 set()

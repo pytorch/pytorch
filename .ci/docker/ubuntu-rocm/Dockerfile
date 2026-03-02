@@ -65,6 +65,8 @@ RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_magma.sh ${R
 RUN rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
+ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
+RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
 
 # ROCm environment variables are set in /etc/rocm_env.sh by install_rocm.sh
 # and sourced via /etc/bash.bashrc for interactive shells.
@@ -76,17 +78,6 @@ ENV LC_ALL C.UTF-8
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
-
-# (optional) Install UCC
-ARG UCX_COMMIT
-ARG UCC_COMMIT
-ENV UCX_COMMIT $UCX_COMMIT
-ENV UCC_COMMIT $UCC_COMMIT
-ENV UCX_HOME /usr
-ENV UCC_HOME /usr
-ADD ./common/install_ucc.sh install_ucc.sh
-RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh
 
 COPY ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl

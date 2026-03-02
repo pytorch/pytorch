@@ -7,11 +7,11 @@
         "Some binaries have custom builds; see https://github.com/pytorch/test-infra/blob/main/.github/workflows/clang-tidy-linux.yml and https://github.com/pytorch/test-infra/blob/main/.github/workflows/clang-tidy-macos.yml"
     ],
     "clang-format": {
-        "Darwin-arm": {
+        "Darwin-arm64": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-arm/19.1.4/clang-format",
             "hash": "f0da3ecf0ab1e9b50e8c27bd2d7ca0baa619e2f4b824b35d79d46356581fa552"
         },
-        "Darwin-i386": {
+        "Darwin-x86_64": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-i386/19.1.4/clang-format",
             "hash": "f5eb5037b9aa9d1d2de650fb2e0fe1a2517768a462fae8e98791a67b698302f4"
         },
@@ -25,11 +25,11 @@
         }
     },
     "clang-tidy": {
-        "Darwin-i386": {
+        "Darwin-x86_64": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-i386/19.1.4/clang-tidy",
             "hash": "7b5da17d3f8b1c18c77d043999f05293f43402affb16de15dfcb276971984a3e"
         },
-        "Darwin-arm": {
+        "Darwin-arm64": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-arm/19.1.4/clang-tidy",
             "hash": "04243f4044fe6d95f6d51d15be803331c3cbb61f2d8fcfeba5a5dec1e7ae6dfb"
         },
@@ -43,11 +43,11 @@
         }
     },
     "actionlint": {
-        "Darwin-i386": {
+        "Darwin-x86_64": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.7.7/Darwin_amd64/actionlint",
             "hash": "996affd492c57441c5ecfe00dedaef1fde056872d242c0cf7cc15de058d59d03"
         },
-        "Darwin-arm": {
+        "Darwin-arm64": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.7.7/Darwin_arm64/actionlint",
             "hash": "00aba386d026da33be6e85dd5a46d7af4dd9e4d6cbdb02335f4b267162fd2d9e"
         },

@@ -75,7 +75,8 @@ class TestMixin:
         key_type: type[icache.Key],
         value_type: type[icache.Value],
     ) -> bool:
-        assert len(cache_type.__orig_bases__) == 1
+        if len(cache_type.__orig_bases__) != 1:
+            raise AssertionError
         generic_base = cache_type.__orig_bases__[0]
         _key_type, _value_type = generic_base.__args__
         if ((_key_type != icache.Key) and (_key_type != key_type)) or (

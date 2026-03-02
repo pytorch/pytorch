@@ -8,6 +8,7 @@ from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementList,
+    RuntimeSchemaInfo,
     StrategyType,
 )
 from torch.distributed.tensor._ops.utils import (
@@ -74,7 +75,10 @@ def embedding_strategy(op_schema: OpSchema) -> StrategyType:
     return expand_to_full_mesh_op_strategy(mesh, op_schema, single_mesh_dim_strategies)
 
 
-@register_op_strategy(aten.embedding_dense_backward.default)
+@register_op_strategy(
+    aten.embedding_dense_backward.default,
+    schema_info=RuntimeSchemaInfo(static_argnum=2),
+)
 def embedding_dense_backward_strategy(op_schema: OpSchema) -> StrategyType:
     """
     This strategy handles embedding op. We have two possible embedding shardings:

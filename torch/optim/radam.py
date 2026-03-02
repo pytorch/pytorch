@@ -132,7 +132,7 @@ class RAdam(Optimizer):  # noqa: D101
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -323,7 +323,6 @@ def _single_tensor_radam(
         rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
 
         def _compute_rect():
-            # pyrefly: ignore [unsupported-operation]
             return (
                 (rho_t - 4)
                 * (rho_t - 2)
@@ -338,7 +337,6 @@ def _single_tensor_radam(
             else:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
 
-            # pyrefly: ignore [unsupported-operation]
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
         # Compute the variance rectification term and update parameters accordingly

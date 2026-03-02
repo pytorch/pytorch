@@ -228,7 +228,6 @@ class OutputLogger(nn.Module):
         if isinstance(x, torch.Tensor):
             self.stats.append(x.detach())
         elif isinstance(x, tuple) and len(x) == 2 and len(x[1]) == 2:
-            # pyrefly: ignore [bad-index]
             new_res = (x[0].detach(), (x[1][0].detach(), x[1][1].detach()))
             self.stats_rnn.append(new_res)
         return x
