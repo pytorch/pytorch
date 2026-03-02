@@ -329,6 +329,8 @@ class TORCH_API Context {
   void setDeterministicAlgorithms(bool /*b*/, bool /*warn_only*/);
   bool deterministicFillUninitializedMemory() const;
   void setDeterministicFillUninitializedMemory(bool /*b*/);
+  int32_t maxSegmentLengthPerCta() const;
+  void setMaxSegmentLengthPerCta(int32_t /*length*/);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -463,6 +465,7 @@ class TORCH_API Context {
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
+  int32_t _max_segment_length_per_cta = -1; // -1 means use default
   std::array<at::SDPBackend, at::num_sdp_backends> sdp_priority_order = {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,

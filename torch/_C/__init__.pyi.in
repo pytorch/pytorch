@@ -1259,6 +1259,10 @@ def _get_deterministic_fill_uninitialized_memory() -> (
 def _set_deterministic_fill_uninitialized_memory(
     arg: _bool,
 ) -> None: ...  # THPModule_setDeterministicFillUninitializedMemory
+def _get_max_segment_length_per_cta() -> int: ...  # THPModule_maxSegmentLengthPerCta
+def _set_max_segment_length_per_cta(
+    arg: int,
+) -> None: ...  # THPModule_setMaxSegmentLengthPerCta
 def _get_nnpack_enabled() -> _bool: ...  # THPModule_userEnabledNNPACK
 def _set_nnpack_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledNNPACK
 def _get_warnAlways() -> _bool: ...  # THPModule_warnAlways

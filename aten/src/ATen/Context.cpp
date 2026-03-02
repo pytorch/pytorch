@@ -154,6 +154,14 @@ void Context::setDeterministicFillUninitializedMemory(bool b) {
   _deterministic_fill_uninitialized_memory = b;
 }
 
+int32_t Context::maxSegmentLengthPerCta() const {
+  return _max_segment_length_per_cta;
+}
+
+void Context::setMaxSegmentLengthPerCta(int32_t length) {
+  _max_segment_length_per_cta = length;
+}
+
 void Context::alertNotDeterministic(std::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
     if (globalContext().deterministicAlgorithmsWarnOnly()) {
