@@ -364,6 +364,36 @@ struct VecConvert<float, 1, Float8_e5m2, 1> {
   }
 };
 
+template <>
+struct VecConvert<float, 2, Float8_e4m3fn, 1> {
+  static inline VectorizedN<float, 2> apply(
+      const VectorizedN<Float8_e4m3fn, 1>& src_n) {
+    at::vec::Vectorized<Float8_e4m3fn> src = src_n[0];
+    __m512i values = src;
+    __m512 result0, result1;
+    cvtfp8e4m3_fp32(_mm512_castsi512_si128(values), result0);
+    cvtfp8e4m3_fp32(_mm512_extracti32x4_epi32(values, 1), result1);
+    return VectorizedN<float, 2>(
+        at::vec::Vectorized<float>(result0),
+        at::vec::Vectorized<float>(result1));
+  }
+};
+
+template <>
+struct VecConvert<Float8_e4m3fn, 1, float, 2> {
+  static inline VectorizedN<Float8_e4m3fn, 1> apply(
+      const VectorizedN<float, 2>& src_n) {
+    at::vec::Vectorized<float> src0 = src_n[0];
+    at::vec::Vectorized<float> src1 = src_n[1];
+    __m128i lane0 = cvtfp32_fp8e4m3(src0);
+    __m128i lane1 = cvtfp32_fp8e4m3(src1);
+    __m512i result = _mm512_setzero_si512();
+    result = _mm512_inserti32x4(result, lane0, 0);
+    result = _mm512_inserti32x4(result, lane1, 1);
+    return at::vec::Vectorized<Float8_e4m3fn>(result);
+  }
+};
+
 #endif
 
 } // namespace CPU_CAPABILITY
