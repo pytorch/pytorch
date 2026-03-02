@@ -407,6 +407,20 @@ class TestShapeOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.clamp(X)
 
+    def test_clamp_min_float16_overflow_consistency(self, device):
+        # Test for issue #153187: clamp_min should raise error on overflow
+        # for float16 tensors consistently on both CPU and CUDA
+        tensor_data = [[1.0, float('nan')], [-1.0, 0.0]]
+        large_value = 4.35294e+26  # Value that exceeds float16 range
+
+        # Create float16 tensor
+        x = torch.tensor(tensor_data, device=device, dtype=torch.float16)
+
+        # Both CPU and CUDA should raise RuntimeError for overflow
+        error_msg = "value cannot be converted to type at::Half without overflow"
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.clamp_min(x, large_value)
+
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_flip(self, device, dtype):
         make_from_data = partial(torch.tensor, device=device, dtype=dtype)
