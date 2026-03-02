@@ -896,11 +896,7 @@ class GraphModule(torch.nn.Module):
         ref = fn(x)
         backend = AotEagerAndRecordGraphs()
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-        with mock.patch(
-            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.allow_side_effects",
-            False,
-        ):
-            res = opt_fn(x)
+        res = opt_fn(x)
 
         self.assertEqual(ref, res)
 
@@ -986,15 +982,11 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(10, 10)
         backend = AotEagerAndRecordGraphs()
         opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
-        with mock.patch(
-            "torch._dynamo.variables.higher_order_ops.InvokeSubgraphHigherOrderVariable.allow_side_effects",
-            False,
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.invoke_subgraph",
         ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                r"Higher Order Operator: torch\.ops\.higher_order\.invoke_subgraph",
-            ):
-                opt_fn(x)
+            opt_fn(x)
 
     def test_dce(self):
         @nested_compile_region
@@ -1513,13 +1505,12 @@ class GraphModule(torch.nn.Module):
             return result
 
         x = torch.randn(8, requires_grad=False)
+        # Side effects in nested compile regions cause a graph break because
+        # allow_side_effects=False for invoke_subgraph.
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        # TODO When a filtered aliased intermediate is captured by side effects,
-        # it will fail later with "does not belong to this Graph" error
-        # because the proxy from the inner graph is used in the outer graph.
         with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "does not belong to this Graph",
+            torch._dynamo.exc.Unsupported,
+            "Unsafe side effect",
         ):
             opt_fn(x)
 
