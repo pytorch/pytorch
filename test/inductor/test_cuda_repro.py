@@ -325,7 +325,10 @@ class CudaReproTests(TestCase):
 
         mod = make_fx(forward)()
         compiled = compile_fx_inner(mod, ())
-        assert compiled([])[0].device.type == "cuda"
+        if compiled([])[0].device.type != "cuda":
+            raise AssertionError(
+                f"Expected device type 'cuda', got {compiled([])[0].device.type!r}"
+            )
 
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
@@ -613,7 +616,8 @@ class CudaReproTests(TestCase):
             for (sh, st, dt, dev, rg) in args
         ]
         with torch.cuda.amp.autocast(enabled=False):
-            assert same_two_models(mod, opt_mod, args), "Dynamo failed"
+            if not same_two_models(mod, opt_mod, args):
+                raise AssertionError("Dynamo failed")
 
     @config.patch(allow_buffer_reuse=False)
     def test_issue103461(self):
@@ -718,9 +722,8 @@ class CudaReproTests(TestCase):
         kernel.run(inout1, in0, xnumel, stream=stream0)
         kernel.run(inout2, in0, xnumel, stream=stream0)
 
-        assert same(inout1, inout2, tol=0.001, equal_nan=True), (
-            "failed autotune with inplace kernel"
-        )
+        if not same(inout1, inout2, tol=0.001, equal_nan=True):
+            raise AssertionError("failed autotune with inplace kernel")
 
     def test_sort_stride_issue(self):
         # This minified testcase comes from detectron2_maskrcnn_r_50_fpn
@@ -737,7 +740,8 @@ class CudaReproTests(TestCase):
             for (sh, st, dt, dev, rg) in args
         ]
         result = forward(*args)
-        assert same(result, torch.sort(args[0], descending=True, dim=1)[0])
+        if not same(result, torch.sort(args[0], descending=True, dim=1)[0]):
+            raise AssertionError
 
     def test_scalar_triton_index(self):
         # The indirect indexing via a scalar like below used to lead to
@@ -750,7 +754,8 @@ class CudaReproTests(TestCase):
         a = torch.randn((8,), dtype=torch.float32, device="cuda")
 
         fn_optimized = torch.compile(fn, backend="inductor")
-        assert same(fn(a), fn_optimized(a))
+        if not same(fn(a), fn_optimized(a)):
+            raise AssertionError
 
     def test_indirect_indexing_dense_mask(self):
         def fn(x, y):
@@ -767,7 +772,8 @@ class CudaReproTests(TestCase):
         b = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
 
         fn_optimized = torch.compile(fn, backend="inductor")
-        assert same(fn(a, b), fn_optimized(a, b))
+        if not same(fn(a, b), fn_optimized(a, b)):
+            raise AssertionError
 
     def test_simplify_dims(self):
         def fn(a):
@@ -817,7 +823,8 @@ class CudaReproTests(TestCase):
         fn_compiled = compile_fx_inner(fn_fx, [x1, y])
         fn(x2, y)
         fn_compiled([x3, y])
-        assert same(x2, x3)
+        if not same(x2, x3):
+            raise AssertionError
 
     @config.patch({"triton.autotune_pointwise": True})
     def test_inplace_buffer_autotune(self):
@@ -911,9 +918,8 @@ class CudaReproTests(TestCase):
         ]
 
         for dec_inp in dec_inputs:
-            assert same_two_models(mod, opt_mod, [enc_out, dec_inp], only_fwd=True), (
-                "Inductor with dynamic shapes failed"
-            )
+            if not same_two_models(mod, opt_mod, [enc_out, dec_inp], only_fwd=True):
+                raise AssertionError("Inductor with dynamic shapes failed")
 
     def test_issue97695_1input(self):
         def fn(arg3_1, relu, permute_1):
@@ -932,10 +938,12 @@ class CudaReproTests(TestCase):
         mod = make_fx(fn, tracing_mode="real")(*args)
         compiled = compile_fx_inner(mod, args)
         ref = compiled(list(args))
-        assert same(ref, correct)
+        if not same(ref, correct):
+            raise AssertionError
 
         ref = torch.compile(fn, fullgraph=True)(*args)
-        assert same(ref, correct)
+        if not same(ref, correct):
+            raise AssertionError
 
     def test_issue_103924(self):
         class MyModule(torch.nn.Module):
@@ -972,7 +980,8 @@ class CudaReproTests(TestCase):
         correct = fn(*args)
 
         ref = torch.compile(fn, fullgraph=True)(*args)
-        assert same(ref, correct)
+        if not same(ref, correct):
+            raise AssertionError
 
     def test_scatter_index_not_wrapped(self):
         src = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], device=self.device)
@@ -1028,8 +1037,8 @@ class CudaReproTests(TestCase):
     def test_uint_view_copy(self):
         @torch.compile
         def view_copy(target, source):
-            assert target.dtype == torch.bfloat16
-            assert source.dtype == torch.uint16
+            assert target.dtype == torch.bfloat16  # noqa: S101
+            assert source.dtype == torch.uint16  # noqa: S101
             target.view(torch.uint16).copy_(source)
 
         target = torch.ones(1024, dtype=torch.bfloat16, device="cuda")
@@ -1334,7 +1343,8 @@ class CudaReproTests(TestCase):
         mod = make_fx(fn, tracing_mode="real")(*args)
         compiled = compile_fx_inner(mod, args)
         ref = compiled(list(args))
-        assert same(ref, correct)
+        if not same(ref, correct):
+            raise AssertionError
 
     @config.patch({"triton.cudagraphs": True})
     def test_index_put_inplace_cudagraph(self):
@@ -1890,7 +1900,7 @@ class CudaReproTests(TestCase):
     def test_dynamic_persistent_reductions(self):
         @torch.compile(dynamic=True)
         def inner_reduce(x):
-            assert x.shape[1] <= 1024
+            assert x.shape[1] <= 1024  # noqa: S101
             return x.sum(1)
 
         a = torch.randn(50, 600, device="cuda")
@@ -1900,7 +1910,7 @@ class CudaReproTests(TestCase):
 
         @torch.compile(dynamic=True)
         def outer_reduce(x):
-            assert x.shape[0] <= 64
+            assert x.shape[0] <= 64  # noqa: S101
             return x.sum(0)
 
         out, code = run_and_get_code(outer_reduce, a)
@@ -2454,7 +2464,10 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         class Foo(torch.nn.Module):
             def __init__(self, quantiles: torch.Tensor) -> None:
                 super().__init__()
-                assert quantiles.shape[0] > 0
+                if quantiles.shape[0] <= 0:
+                    raise AssertionError(
+                        f"Expected quantiles.shape[0] > 0, got {quantiles.shape[0]}"
+                    )
                 quantiles = quantiles.T
                 self.q = torch.nn.Parameter(quantiles, requires_grad=False)
 
@@ -2705,6 +2718,31 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         compile_decimal = Decimal(compile_out.item())
 
         self.assertEqual(compile_decimal, Decimal(0))
+
+    @config.patch(
+        {"triton.use_block_ptr": True, "triton.codegen_upcast_to_fp32": False}
+    )
+    def test_float16_reduction_with_int_output(self):
+        @torch.compile
+        def fn(input: torch.Tensor) -> torch.Tensor:
+            return torch.argmax(input, dim=0)
+
+        input = torch.randn(20, 20, device="cuda", dtype=torch.float16)
+        _, code = run_and_get_code(fn, input)
+        # There should not be any conversions to float16 in this code, since the input
+        # is already float16 and the output is int64.
+        self.assertNotIn(".to(tl.float16)", code[0])
+
+    @config.patch("eager_numerics.division_rounding", True)
+    def test_reciprocal_precision_rounding(self):
+        # Test that reciprocal matches eager when division_rounding is enabled.
+        # This requires OpDecompositions.reciprocal to use float32 constant so
+        # that div_rn can be applied (the dtype check requires both operands float32).
+        def fn(x):
+            return torch.reciprocal(x)
+
+        x = torch.randn(1000, device="cuda", dtype=torch.float32) + 0.1
+        self.common(fn, [x])
 
 
 if __name__ == "__main__":

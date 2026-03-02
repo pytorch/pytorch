@@ -102,18 +102,18 @@ class TestUtils(TestCase):
             loss = loss_fn(output, target)
             loss.backward()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def add(x, y):
             return x + y
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it(x):
             y = x.sum()
             if y > 0:
                 return x + y.item()
             return x - y.item()
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def break_it2(x):
             y = x.sum()
             if y > 0:
@@ -212,6 +212,32 @@ class TestUtils(TestCase):
         fn(x)
         self.assertEqual(traced_code_lists, [])
 
+    def test_add_record_function_data(self):
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", False),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data("test_event")
+            mock_rf.assert_not_called()
+
+        with (
+            mock.patch("torch.autograd.profiler._is_profiler_enabled", True),
+            mock.patch("torch.autograd.profiler.record_function") as mock_rf,
+        ):
+            utils.CompileEventLogger.add_record_function_data(
+                "test_event", key1="value1", key2="value2"
+            )
+            mock_rf.assert_called_once_with("test_event_data: key1=value1, key2=value2")
+
     def test_reinplace_counters_use_trigger_name_not_enum_value(self):
         """Test that ReinplaceCounters uses trigger.name in dictionary keys instead of the enum value"""
         from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
@@ -304,7 +330,7 @@ class TestDynamoTimed(TestCase):
     def warmup(self):
         # Helper to make sure any process-global lru_caches (e.g., torch_key())
         # have already executed. Just compile something.
-        @torch.compile
+        @torch.compile(backend="inductor")
         def add(x, y):
             return x + y
 

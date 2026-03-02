@@ -4,7 +4,6 @@ import os
 import re
 import sys
 import unittest
-from unittest import mock
 
 import torch
 import torch._dynamo
@@ -53,24 +52,18 @@ except ImportError:
 test_classes = {}
 
 
-def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
+def make_pallas(cls):
     """Create a test class variant that uses Pallas backend.
 
     Args:
         cls: The test class to create a Pallas variant of.
-        _debug_cpu_to_tpu_pallas: If True, route CPU operations to TPU.
     """
     patches = [
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
     ]
-    if _debug_cpu_to_tpu_pallas:
-        cls_prefix = "PallasTpu"
-        suffix = "_pallas_tpu"
-        patches.append((config, "_debug_cpu_to_tpu_pallas", True))
-    else:
-        cls_prefix = "Pallas"
-        suffix = "_pallas"
+    cls_prefix = "Pallas"
+    suffix = "_pallas"
 
     # Mark tests based on sentinel files in pallas_expected_failures/ and pallas_skip_tests/
     for name in cls.__dict__:
@@ -97,6 +90,9 @@ def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
         decorator=skip_decorator,
     )
 
+    # Pallas does not support float64 or int64
+    test_class._unsupported_input_gen_types = {"double"}
+
     test_classes[test_class.__name__] = test_class
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
@@ -104,34 +100,22 @@ def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
     return test_class
 
 
-def skip_if_tpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if config._debug_cpu_to_tpu_pallas:
-            self.skipTest("Not yet working on TPU")
-        fn(self, *args, **kwargs)
+def _skip_if(condition_fn, reason):
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            if condition_fn(self):
+                self.skipTest(reason)
+            fn(self, *args, **kwargs)
 
-    return wrapper
+        return wrapper
 
-
-def skip_if_cpu(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if self.DEVICE == "cpu":
-            self.skipTest("Not yet working on CPU")
-        fn(self, *args, **kwargs)
-
-    return wrapper
+    return decorator
 
 
-def skip_if_cuda(fn):
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        if self.DEVICE == "cuda":
-            self.skipTest("Not yet working on GPU")
-        fn(self, *args, **kwargs)
-
-    return wrapper
+skip_if_tpu = _skip_if(lambda self: self.DEVICE == "tpu", "Not yet working on TPU")
+skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
+skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
 
 
 class PallasTestsMixin:
@@ -171,8 +155,15 @@ class PallasTestsMixin:
                 pass
 
     def _compile(self, fn):
-        key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
-        return torch.compile(fn, backend="inductor", options={key: "pallas"})
+        device_to_backend_key = {
+            "cuda": "cuda_backend",
+            "cpu": "cpu_backend",
+            "tpu": "tpu_backend",
+        }
+        key = device_to_backend_key[self.DEVICE]
+        return torch.compile(
+            fn, backend="inductor", options={key: "pallas"}, dynamic=False
+        )
 
     def test_simple_add(self):
         """Test basic element-wise addition."""
@@ -180,13 +171,17 @@ class PallasTestsMixin:
         def fn(a, b):
             return a + b
 
-        compiled = self._compile(fn)
-
-        a = torch.randn(1024, device=self.DEVICE)
-        b = torch.randn(1024, device=self.DEVICE)
-        result = compiled(a, b)
-        expected = fn(a, b)
-        self.assertEqual(result, expected)
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(2048,), (2048, 128)]
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                a = torch.randn(shape, device=self.DEVICE)
+                b = torch.randn(shape, device=self.DEVICE)
+                result = compiled(a, b)
+                expected = fn(a, b)
+                self.assertEqual(result, expected)
 
     def test_simple_mul(self):
         """Test basic element-wise multiplication."""
@@ -194,13 +189,17 @@ class PallasTestsMixin:
         def fn(a, b):
             return a * b
 
-        compiled = self._compile(fn)
-
-        a = torch.randn(1024, device=self.DEVICE)
-        b = torch.randn(1024, device=self.DEVICE)
-        result = compiled(a, b)
-        expected = fn(a, b)
-        self.assertEqual(result, expected)
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(2048,), (2048, 128)]
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                a = torch.randn(shape, device=self.DEVICE)
+                b = torch.randn(shape, device=self.DEVICE)
+                result = compiled(a, b)
+                expected = fn(a, b)
+                self.assertEqual(result, expected)
 
     def test_sin(self):
         """Test sin operation."""
@@ -208,12 +207,16 @@ class PallasTestsMixin:
         def fn(x):
             return torch.sin(x)
 
-        compiled = self._compile(fn)
-
-        x = torch.randn(1024, device=self.DEVICE)
-        result = compiled(x)
-        expected = fn(x)
-        self.assertEqual(result, expected)
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes.append((2048,))
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
 
     def test_fused_ops(self):
         """Test fused operations (sin + add)."""
@@ -328,14 +331,7 @@ class PallasTestsMixin:
     def test_compile_options(self):
         """Test that Pallas backend is properly configured."""
 
-        @torch.compile(
-            backend="inductor",
-            options={
-                ("cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"): "pallas"
-            },
-        )
-        def pallas_fn(a, b):
-            return a.sin() + b.cos()
+        pallas_fn = self._compile(lambda a, b: a.sin() + b.cos())
 
         _, (code,) = run_and_get_code(
             pallas_fn,
@@ -350,11 +346,7 @@ class PallasTestsMixin:
     def test_jax_jit_wrapper_is_emitted(self):
         """Ensure generated Pallas code wraps pl.pallas_call in jax.jit."""
 
-        key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
-
-        @torch.compile(backend="inductor", options={key: "pallas"})
-        def pallas_fn(a, b):
-            return a + b
+        pallas_fn = self._compile(lambda a, b: a + b)
 
         _, (code,) = run_and_get_code(
             pallas_fn,
@@ -383,18 +375,22 @@ class PallasTestsMixin:
         self.assertNotIn("torch.", wrapper_block)
 
     def test_2d_tensor(self):
-        """Test with 2D tensors (though current implementation flattens)."""
+        """Test with 2D tensors."""
 
         def fn(x, y):
             return x + y
 
-        compiled = self._compile(fn)
-
-        x = torch.randn(32, 32, device=self.DEVICE)
-        y = torch.randn(32, 32, device=self.DEVICE)
-        result = compiled(x, y)
-        expected = fn(x, y)
-        self.assertEqual(result, expected)
+        shapes = [(32, 32)]
+        if self.DEVICE != "cuda":
+            shapes.append((16, 2048))
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                y = torch.randn(shape, device=self.DEVICE)
+                result = compiled(x, y)
+                expected = fn(x, y)
+                self.assertEqual(result, expected)
 
     @skip_if_tpu
     def test_different_shapes(self):
@@ -450,7 +446,7 @@ class PallasTestsMixin:
         compiled = self._compile(operate_on_tensor)
 
         # Create a transposed (non-contiguous) view
-        x = torch.randn(64, 32, device=self.DEVICE)
+        x = torch.randn(128, 128, device=self.DEVICE)
         x_t = x.t()  # Non-contiguous view
         self.assertFalse(x_t.is_contiguous())
 
@@ -555,10 +551,12 @@ class PallasTestsMixin:
         """Test 2D transposed input patterns."""
         compiled = self._compile(lambda x: x * 2.0 + 1.0)
 
-        base_2d = torch.randn(32, 32, device=self.DEVICE)
-        x = base_2d.t()  # (32, 32) with stride (1, 32)
-        self.assertFalse(x.is_contiguous())
-        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+        for rows, cols in [(32, 32), (2048, 2048)]:
+            with self.subTest(rows=rows, cols=cols):
+                base_2d = torch.randn(rows, cols, device=self.DEVICE)
+                x = base_2d.t()
+                self.assertFalse(x.is_contiguous())
+                self.assertEqual(compiled(x), x * 2.0 + 1.0)
 
     def test_stride_non_contiguous_3d(self):
         """Test 3D non-contiguous input patterns."""
@@ -760,20 +758,26 @@ class PallasTestsMixin:
         expected = fn(x, row_indices)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex64_mul(self):
         """Test complex64 multiplication."""
 
         def fn(a, b):
             return a * b
 
-        compiled = self._compile(fn)
+        sizes = [128]
+        if self.DEVICE != "cuda":
+            sizes.append(2048)
+        for size in sizes:
+            with self.subTest(size=size):
+                compiled = self._compile(fn)
+                a = torch.randn(size, dtype=torch.complex64, device=self.DEVICE)
+                b = torch.randn(size, dtype=torch.complex64, device=self.DEVICE)
+                result = compiled(a, b)
+                expected = fn(a, b)
+                self.assertEqual(result, expected)
 
-        a = torch.randn(128, dtype=torch.complex64, device=self.DEVICE)
-        b = torch.randn(128, dtype=torch.complex64, device=self.DEVICE)
-        result = compiled(a, b)
-        expected = fn(a, b)
-        self.assertEqual(result, expected)
-
+    @skip_if_tpu
     def test_complex_conj(self):
         """Test complex conjugate."""
 
@@ -787,6 +791,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_real(self):
         """Test extracting real part of complex tensor."""
 
@@ -800,6 +805,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_imag(self):
         """Test extracting imaginary part of complex tensor."""
 
@@ -813,6 +819,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_abs(self):
         """Test complex absolute value (magnitude)."""
 
@@ -826,6 +833,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex128_conj(self):
         """Test complex128 conjugate operation."""
 
@@ -839,6 +847,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_mul_scalar(self):
         """Test complex multiplication with scalar."""
 
@@ -852,6 +861,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_conj_mul(self):
         """Test conjugate followed by multiplication."""
 
@@ -872,13 +882,17 @@ class PallasTestsMixin:
         def fn(x, y):
             return torch.where(x > 0, x, y)
 
-        compiled = self._compile(fn)
-
-        x = torch.randn(1024, device=self.DEVICE)
-        y = torch.randn(1024, device=self.DEVICE)
-        result = compiled(x, y)
-        expected = fn(x, y)
-        self.assertEqual(result, expected)
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(2048,), (2048, 128)]
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                y = torch.randn(shape, device=self.DEVICE)
+                result = compiled(x, y)
+                expected = fn(x, y)
+                self.assertEqual(result, expected)
 
     def test_clamp(self):
         """Test torch.clamp operation."""
@@ -886,12 +900,16 @@ class PallasTestsMixin:
         def fn(x):
             return torch.clamp(x, -1.0, 1.0)
 
-        compiled = self._compile(fn)
-
-        x = torch.randn(1024, device=self.DEVICE) * 2
-        result = compiled(x)
-        expected = fn(x)
-        self.assertEqual(result, expected)
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(2048,), (2048, 128)]
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE) * 2
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
 
     def test_comparison_ops(self):
         """Test comparison operations."""
@@ -902,13 +920,17 @@ class PallasTestsMixin:
             eq = a == b
             return gt.float() + lt.float() + eq.float()
 
-        compiled = self._compile(fn)
-
-        a = torch.randn(1024, device=self.DEVICE)
-        b = torch.randn(1024, device=self.DEVICE)
-        result = compiled(a, b)
-        expected = fn(a, b)
-        self.assertEqual(result, expected)
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(2048,), (2048, 128)]
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                a = torch.randn(shape, device=self.DEVICE)
+                b = torch.randn(shape, device=self.DEVICE)
+                result = compiled(a, b)
+                expected = fn(a, b)
+                self.assertEqual(result, expected)
 
     def test_logical_ops(self):
         """Test logical operations."""
@@ -916,14 +938,19 @@ class PallasTestsMixin:
         def fn(a, b):
             return torch.logical_and(a > 0, b > 0).float()
 
-        compiled = self._compile(fn)
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes += [(2048,), (2048, 128)]
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                a = torch.randn(shape, device=self.DEVICE)
+                b = torch.randn(shape, device=self.DEVICE)
+                result = compiled(a, b)
+                expected = fn(a, b)
+                self.assertEqual(result, expected)
 
-        a = torch.randn(1024, device=self.DEVICE)
-        b = torch.randn(1024, device=self.DEVICE)
-        result = compiled(a, b)
-        expected = fn(a, b)
-        self.assertEqual(result, expected)
-
+    @skip_if_tpu
     def test_sign(self):
         """Test sign operation."""
 
@@ -994,49 +1021,57 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_sum_reduction(self):
         """Test sum reduction."""
 
         def fn(x):
             return x.sum()
 
-        compiled = self._compile(fn)
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes.append((2048,))
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
 
-        x = torch.randn(1024, device=self.DEVICE)
-        result = compiled(x)
-        expected = fn(x)
-        self.assertEqual(result, expected)
-
-    @skip_if_tpu
     def test_max_reduction(self):
         """Test max reduction."""
 
         def fn(x):
             return x.max()
 
-        compiled = self._compile(fn)
+        shapes = [(1024,)]
+        if self.DEVICE != "cuda":
+            shapes.append((2048,))
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
 
-        x = torch.randn(1024, device=self.DEVICE)
-        result = compiled(x)
-        expected = fn(x)
-        self.assertEqual(result, expected)
-
-    @skip_if_tpu
     def test_min_reduction(self):
         """Test min reduction."""
 
         def fn(x):
             return x.min()
 
-        compiled = self._compile(fn)
+        shapes = [(16,)]
+        if self.DEVICE != "cuda":
+            shapes.append((2048,))
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
 
-        x = torch.randn(16, device=self.DEVICE)
-        result = compiled(x)
-        expected = fn(x)
-        self.assertEqual(result, expected)
-
-    @skip_if_tpu
     @skip_if_tpu
     def test_prod_reduction(self):
         """Test prod reduction."""
@@ -1047,79 +1082,95 @@ class PallasTestsMixin:
             # Use smaller values to avoid overflow
             return (x * 0.1).prod()
 
-        compiled = self._compile(fn)
-
-        x = torch.randn(16, device=self.DEVICE)
-        result = compiled(x)
-        expected = fn(x)
-        self.assertEqual(result, expected)
+        shapes = [(16,)]
+        if self.DEVICE != "cuda":
+            shapes.append((2048,))
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
 
     @skip_if_cuda
     def test_softmax_two_pass(self):
         """Test two-pass softmax (max reduction + sum reduction)."""
 
-        def fn(x):
-            return torch.softmax(x, dim=-1)
+        for shape in [(32, 64), (2048, 64)]:
+            with self.subTest(shape=shape):
+                torch._dynamo.reset()
 
-        compiled = self._compile(fn)
+                def fn(x):
+                    return torch.softmax(x, dim=-1)
 
-        x = torch.randn(32, 64, device=self.DEVICE)
-        result = compiled(x)
-        expected = fn(x)
-        self.assertEqual(result, expected)
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
 
     @skip_if_cuda
     def test_rms_norm(self):
         """Test RMS normalization (mean-of-squares reduction + rsqrt)."""
 
-        def fn(x, weight):
-            variance = x.pow(2).mean(-1, keepdim=True)
-            x = x * torch.rsqrt(variance + 1e-6)
-            return x * weight
+        for rows, cols in [(32, 64), (2048, 64)]:
+            with self.subTest(rows=rows, cols=cols):
+                torch._dynamo.reset()
 
-        compiled = self._compile(fn)
+                def fn(x, weight):
+                    variance = x.pow(2).mean(-1, keepdim=True)
+                    x = x * torch.rsqrt(variance + 1e-6)
+                    return x * weight
 
-        x = torch.randn(32, 64, device=self.DEVICE)
-        weight = torch.randn(64, device=self.DEVICE)
-        result = compiled(x, weight)
-        expected = fn(x, weight)
-        self.assertEqual(result, expected)
+                compiled = self._compile(fn)
+                x = torch.randn(rows, cols, device=self.DEVICE)
+                weight = torch.randn(cols, device=self.DEVICE)
+                result = compiled(x, weight)
+                expected = fn(x, weight)
+                self.assertEqual(result, expected)
 
     @skip_if_cuda
+    @skip_if_tpu
     def test_welford(self):
         """Test Welford variance/mean computation (two-pass fallback)."""
 
-        def fn(x):
-            return torch.var_mean(x, dim=-1, keepdim=True)
+        for shape in [(32, 64), (2048, 64)]:
+            with self.subTest(shape=shape):
+                torch._dynamo.reset()
 
-        compiled = self._compile(fn)
+                def fn(x):
+                    return torch.var_mean(x, dim=-1, keepdim=True)
 
-        x = torch.randn(32, 64, device=self.DEVICE)
-        var_result, mean_result = compiled(x)
-        var_expected, mean_expected = fn(x)
-        self.assertEqual(mean_result, mean_expected)
-        self.assertEqual(var_result, var_expected)
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                var_result, mean_result = compiled(x)
+                var_expected, mean_expected = fn(x)
+                self.assertEqual(mean_result, mean_expected)
+                self.assertEqual(var_result, var_expected)
 
     @skip_if_cuda
     def test_layer_norm(self):
         """Test layer normalization (mean + variance reduction, normalize, scale + shift)."""
 
-        def fn(x, weight, bias):
-            mean = x.mean(-1, keepdim=True)
-            variance = (x - mean).pow(2).mean(-1, keepdim=True)
-            x = (x - mean) * torch.rsqrt(variance + 1e-6)
-            return x * weight + bias
+        for rows, cols in [(32, 64), (2048, 64)]:
+            with self.subTest(rows=rows, cols=cols):
+                torch._dynamo.reset()
 
-        compiled = self._compile(fn)
+                def fn(x, weight, bias):
+                    mean = x.mean(-1, keepdim=True)
+                    variance = (x - mean).pow(2).mean(-1, keepdim=True)
+                    x = (x - mean) * torch.rsqrt(variance + 1e-6)
+                    return x * weight + bias
 
-        x = torch.randn(32, 64, device=self.DEVICE)
-        weight = torch.randn(64, device=self.DEVICE)
-        bias = torch.randn(64, device=self.DEVICE)
-        result = compiled(x, weight, bias)
-        expected = fn(x, weight, bias)
-        self.assertEqual(result, expected)
+                compiled = self._compile(fn)
+                x = torch.randn(rows, cols, device=self.DEVICE)
+                weight = torch.randn(cols, device=self.DEVICE)
+                bias = torch.randn(cols, device=self.DEVICE)
+                result = compiled(x, weight, bias)
+                expected = fn(x, weight, bias)
+                self.assertEqual(result, expected)
 
-    @skip_if_cpu
     @skip_if_cuda
     @skip_if_tpu
     def test_rope(self):
@@ -1142,6 +1193,50 @@ class PallasTestsMixin:
         sin = torch.randn(32, 32, device=self.DEVICE)
         result = compiled(x, cos, sin)
         expected = fn(x, cos, sin)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_rope_interleaved(self):
+        """Test Rotary Position Embedding with interleaved halves.
+
+        Uses even/odd stride-2 slicing instead of contiguous halves, then
+        reassembles via stack + reshape. Exercises strided input access.
+        """
+
+        def fn(x, cos, sin):
+            x1 = x[..., 0::2]
+            x2 = x[..., 1::2]
+            o1 = x1 * cos - x2 * sin
+            o2 = x2 * cos + x1 * sin
+            return torch.stack([o1, o2], dim=-1).reshape_as(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(32, 64, device=self.DEVICE)
+        cos = torch.randn(32, 32, device=self.DEVICE)
+        sin = torch.randn(32, 32, device=self.DEVICE)
+        result = compiled(x, cos, sin)
+        expected = fn(x, cos, sin)
+        self.assertEqual(result, expected)
+
+    @skip_if_cuda
+    @skip_if_tpu
+    def test_chained_stride_slice(self):
+        """Test that chained stride slices compose into a single strided access.
+
+        x[:, 1::2][:, 2::3][:, 3::4] should compose to x[:, 23::24].
+        """
+
+        def fn(x):
+            return x[:, 1::2][:, 2::3][:, 3::4] + 1
+
+        compiled = self._compile(fn)
+
+        # last dim = 480 which is divisible by 24
+        x = torch.randn(4, 480, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
         self.assertEqual(result, expected)
 
     @skip_if_tpu
@@ -1172,12 +1267,16 @@ class PallasTestsMixin:
             # View float32 tensor as int32 (same byte size)
             return x.view(torch.int32)
 
-        compiled = self._compile(fn)
-
-        x = torch.randn(128, device=self.DEVICE, dtype=torch.float32)
-        result = compiled(x)
-        expected = fn(x)
-        self.assertEqual(result, expected)
+        sizes = [128]
+        if self.DEVICE != "cuda":
+            sizes.append(2048)
+        for size in sizes:
+            with self.subTest(size=size):
+                compiled = self._compile(fn)
+                x = torch.randn(size, device=self.DEVICE, dtype=torch.float32)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
 
     def test_dtype_bitcast_float16_to_int16(self):
         """Test dtype bitcast from float16 to int16."""
@@ -1275,20 +1374,24 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_warpgroup_size_2d_128x128(self):
-        """Test 2D tensor with 128x128 elements."""
+        """Test 2D tensor with 128x128 and tiling-exercising sizes."""
 
         def fn(x, y):
             return x + y
 
-        compiled = self._compile(fn)
-
-        # 128x128 = 16384 elements, multiple of 128
-        x = torch.randn(128, 128, device=self.DEVICE)
-        y = torch.randn(128, 128, device=self.DEVICE)
-        result = compiled(x, y)
-        expected = fn(x, y)
-        self.assertEqual(result, expected)
+        shapes = [(128, 128)]
+        if self.DEVICE != "cuda":
+            shapes.append((2048, 2048))
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                compiled = self._compile(fn)
+                x = torch.randn(shape, device=self.DEVICE)
+                y = torch.randn(shape, device=self.DEVICE)
+                result = compiled(x, y)
+                expected = fn(x, y)
+                self.assertEqual(result, expected)
 
     def test_warpgroup_size_small_tensor(self):
         """Test with very small tensor (less than warpgroup size).
@@ -1465,7 +1568,8 @@ class PallasTestsMixin:
         expected = fn(*ws, x)
         self.assertEqual(result, expected)
 
-    @skip_if_cuda  # Mosaic GPU backend doesn't support axis-based reductions needed for softmax
+    @skip_if_cuda
+    @skip_if_tpu
     def test_nanogpt(self):
         """Test a minimal NanoGPT-style transformer block.
 
@@ -1566,28 +1670,14 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():
+    from torch_tpu import api as tpu_api  # type: ignore[import-not-found]
 
-    @config.patch({"_debug_cpu_to_tpu_pallas": True})
+    tpu_api.tpu_device()  # initialize TPU runtime
+
     class PallasTestsTPU(PallasTestsMixin, TestCase):
-        DEVICE = "cpu"
+        DEVICE = "tpu"
 
-        @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
-        def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
-            def fn(a, b):
-                return a + b
-
-            with self.assertRaisesRegex(
-                RuntimeError,
-                (
-                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                    "Please make sure that you have a TPU available and that JAX is configured correctly."
-                ),
-            ):
-                torch.compile(
-                    fn, backend="inductor", options={"cpu_backend": "pallas"}
-                )(torch.randn(16), torch.randn(16))
-
-    make_pallas(test_torchinductor.SweepInputsTpuTest, _debug_cpu_to_tpu_pallas=True)
+    make_pallas(test_torchinductor.SweepInputsTpuTest)
 
 
 if __name__ == "__main__":

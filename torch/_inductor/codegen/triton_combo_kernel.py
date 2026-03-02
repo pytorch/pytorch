@@ -17,6 +17,7 @@ from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import (
     RoundRobinComboKernelGrid,
     SequentialComboKernelGrid,
+    SequentialFlattenComboKernelGrid,
 )
 from ..scheduler import BaseSchedulerNode
 from ..utils import Placeholder, triton_version_uses_attrs_dict
@@ -83,13 +84,12 @@ def _default_custom_combo_kernel_horizontal_partition(
         not_reduction = [n for n in group_per_dim if n not in reduction]
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
+        # Scheduling heuristic: separate long reductions (rnumel > 2048).
+        # Uses optimization_hint with fallback=1 so unbacked defaults to short reduction.
         long_reduction = [
             n
             for n in reduction
-            if (
-                V.graph.sizevars.shape_env.has_hint(n.group[-1][-1])
-                and V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
-            )
+            if V.graph.sizevars.optimization_hint(n.group[-1][-1], fallback=1) > 2048  # type: ignore[arg-type]
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -102,8 +102,10 @@ def _default_custom_combo_kernel_horizontal_partition(
             for n in not_reduction
             if not node_info_map[n].features.is_reduction()
             and len(node_info_map[n].tiling) == 2
-            and V.graph.sizevars.shape_env.has_hint(node_info_map[n].tiling["x"])
-            and V.graph.sizevars.size_hint(node_info_map[n].tiling["x"]) > LARGE_NUMELS
+            and V.graph.sizevars.optimization_hint(
+                node_info_map[n].tiling["x"], fallback=1
+            )
+            > LARGE_NUMELS  # type: ignore[arg-type]
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -166,6 +168,10 @@ class PartitionState:
 
 
 class ComboKernel(Kernel):
+    """
+    A kernel that combines multiple sub-kernels into a single fused kernel.
+    """
+
     @staticmethod
     def _update_partition(
         partition_state: PartitionState,
@@ -319,18 +325,83 @@ class ComboKernel(Kernel):
                     else (kernel.min_x_blocks_list[i], True)
                 )
                 xblock_str = (
-                    (
-                        f"tl.cdiv({xnumels}, XBLOCK_{i})"
-                        if config.combo_kernel_per_subkernel_blocks
-                        else f"tl.cdiv({xnumels}, XBLOCK)"
-                    )
-                    if not no_x_dim
-                    else f"{xnumels}"
+                    f"tl.cdiv({xnumels}, XBLOCK)" if not no_x_dim else f"{xnumels}"
                 )
                 if i == 0:
                     code.splice(f"num_xblocks_{i} = {xblock_str}")
                 else:
                     code.splice(f"num_xblocks_{i} = num_xblocks_{i - 1} + {xblock_str}")
+
+    class SequentialFlattenGridDispatch:
+        """
+        Flattened grid dispatch for per-subkernel blocks.
+        Uses flattened grid (sum of x*y blocks, 1, 1) and computes
+        x_pid_offset, y_pid_offset from the flattened pid.
+        """
+
+        grid_expr = SequentialFlattenComboKernelGrid
+
+        @classmethod
+        def codegen_pid_range(
+            cls, kernel: "ComboKernel", num: int, code: IndentedBuffer
+        ) -> None:
+            if num == 0:
+                cls._calculate_total_blocks(kernel, code)
+                code.splice(f"if pid < num_blocks_{num}:")
+            else:
+                code.splice(f"elif pid < num_blocks_{num}:")
+
+            with code.indent():
+                # Compute local pid within this subkernel's block range
+                if num == 0:
+                    code.splice("local_pid = pid")
+                else:
+                    code.splice(f"local_pid = pid - num_blocks_{num - 1}")
+
+                # Compute x/y indices from flattened local_pid
+                if kernel.y_tree_list[num]:
+                    code.splice(f"x_pid_offset = local_pid % x_blocks_{num}")
+                    code.splice(f"y_pid_offset = local_pid // x_blocks_{num}")
+                else:
+                    code.splice("x_pid_offset = local_pid")
+
+        @classmethod
+        def _calculate_total_blocks(
+            cls, kernel: "ComboKernel", code: IndentedBuffer
+        ) -> None:
+            """
+            Calculate total blocks for each subkernel (x_blocks * y_blocks)
+            and cumulative block counts for dispatch boundaries.
+            """
+            for i, sub_kernel in enumerate(kernel.sub_kernels):
+                no_x_dim = sub_kernel.no_x_dim
+                xnumel = (
+                    kernel.min_x_blocks_list[i] if no_x_dim else kernel.x_numels_list[i]
+                )
+                x_blocks_str = (
+                    f"tl.cdiv({xnumel}, XBLOCK_{i})" if not no_x_dim else f"{xnumel}"
+                )
+                code.splice(f"x_blocks_{i} = {x_blocks_str}")
+
+                if kernel.y_tree_list[i]:
+                    numel = V.graph.sizevars.simplify(kernel.y_tree_list[i].numel)
+                    ynumel = (
+                        int(numel)
+                        if isinstance(numel, (Integer, int))
+                        else f"ynumel_{i}"
+                    )
+                    code.splice(f"y_blocks_{i} = tl.cdiv({ynumel}, YBLOCK_{i})")
+
+                blocks_expr = (
+                    f"x_blocks_{i} * y_blocks_{i}"
+                    if kernel.y_tree_list[i]
+                    else f"x_blocks_{i}"
+                )
+                code.splice(
+                    f"num_blocks_{i} = {blocks_expr}"
+                    if i == 0
+                    else f"num_blocks_{i} = num_blocks_{i - 1} + {blocks_expr}"
+                )
 
     class RoundRobinDispatch:
         """
@@ -375,7 +446,13 @@ class ComboKernel(Kernel):
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
         self.dispatch_class: Optional[
-            type[Union[ComboKernel.SequentialDispatch, ComboKernel.RoundRobinDispatch]]
+            type[
+                Union[
+                    ComboKernel.SequentialDispatch,
+                    ComboKernel.SequentialFlattenGridDispatch,
+                    ComboKernel.RoundRobinDispatch,
+                ]
+            ]
         ] = None
         self.block_args: list[str] = []
         # there following are used when autotuning is disabled
@@ -406,10 +483,19 @@ class ComboKernel(Kernel):
         Only allow optimize_mask=True when 1) sequential dispatch is used,
         2) numels except x dimension are the same for each sub kernel.
         """
+        # Flattened dispatch: all dimensions derived from single pid
+        if config.combo_kernel_per_subkernel_blocks:
+            pid_cache = {
+                "tl.program_id(0)": "x_pid_offset",
+                "tl.program_id(1)": "y_pid_offset",
+            }
+        else:
+            pid_cache = {"tl.program_id(0)": "pid_offset"}
+
         return triton_kernel_cls(
             tiling,
             features=features,
-            pid_cache={"tl.program_id(0)": "pid_offset"},
+            pid_cache=pid_cache,
             optimize_mask=optimize_mask,
             is_combo_kernel=True,
             # foreach kernels don't work with cooperative reductions
@@ -594,7 +680,7 @@ class ComboKernel(Kernel):
         if self.dispatch_class is not None:
             return
         if config.combo_kernel_per_subkernel_blocks:
-            self.dispatch_class = ComboKernel.SequentialDispatch
+            self.dispatch_class = ComboKernel.SequentialFlattenGridDispatch
             return
         # mixed_sizes is used for optimize_mask, so it only allows sequential dispatch
         # Not mixed sizes on y dim technically is ok to use round robin as wells.
@@ -638,9 +724,9 @@ class ComboKernel(Kernel):
             "constants": {},
         }
         triton_meta["enable_fp_fusion"] = (
-            # pyrefly: ignore [bad-typed-dict-key]
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
             not config.emulate_precision_casts
-        )  # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
+        )
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
@@ -701,6 +787,9 @@ class ComboKernel(Kernel):
                 )
                 @triton.jit
             """
+
+        self.triton_meta = triton_meta
+        self.inductor_meta = inductor_meta
 
         return heuristics_line
 
@@ -860,6 +949,7 @@ class ComboKernel(Kernel):
                         code, sub_kernel, num
                     )
                     sub_kernel.codegen_body()
+                    sub_kernel._filter_pdl(sub_kernel.body)
                     uniquified_body = self.uniquify_block_sizes(
                         sub_kernel.body, num, uniquify
                     )
@@ -911,7 +1001,7 @@ class ComboKernel(Kernel):
                         f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
-                    symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
+                    symval_hint = V.graph.sizevars.optimization_hint(arg_sig.expr)
 
                     # Force the seed_offset to be 0 so calls to the same kernel
                     # using different seed offset will have the same benchmark harness.
@@ -921,7 +1011,7 @@ class ComboKernel(Kernel):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.get_current_device_or_throw()
-                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    count = V.graph.sizevars.optimization_hint(arg_sig.count)
                     # for benchmark harness, we ignore arg_sig.zero_mode and always zero it
                     result.writeline(
                         f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
@@ -1031,6 +1121,8 @@ class ComboKernel(Kernel):
             call_args,
             triton=True,
             arg_types=arg_types,
+            triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
         )
 
     def combo_grid_meta(self, size_hints_list: list[dict[str, int]]) -> dict[str, Any]:
