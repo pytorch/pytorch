@@ -89,6 +89,8 @@ isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability()
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
+isPVCDevice = torch.xpu.is_available() and torch.xpu.get_device_capability()["version"] == "12.60.7"
+
 TEST_WITH_CK = TEST_WITH_ROCM and torch.backends.cuda.preferred_rocm_fa_library() == torch.backends.cuda._ROCmFABackends['ck']
 
 def _check_equal(
@@ -4944,6 +4946,7 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
             self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
+@unittest.skipIf(isPVCDevice, "PVC LTS driver not support those tests")
 class TestAttnBias(NNTestCase):
 
     def run_test(
