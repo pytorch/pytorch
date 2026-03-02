@@ -8358,6 +8358,22 @@ class FallbackKernel(ExternKernelAlloc):
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
+        # Try to lower functional custom ops to their out-variant via
+        # ExternKernelOut for buffer reuse. Only affects ops with the
+        # torch.Tag.out_variant tag (custom ops / symm_mem), not aten ops.
+        if isinstance(kernel, torch._ops.OpOverload):
+            from .custom_op_out_lowering import try_lower_to_out_variant
+
+            result = try_lower_to_out_variant(
+                kernel,
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                kwargs,
+            )
+            if result is not None:
+                return result  # type: ignore[return-value]
+
         # We need this extra check for input alignment since the example
         # inputs we created are always aligned.
         has_unaligned_input = any(is_unaligned(arg) for arg in tensor_args)
