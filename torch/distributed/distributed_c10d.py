@@ -2033,7 +2033,7 @@ def _new_process_group_helper(
             pg._set_default_backend(ProcessGroup.BackendType.NCCL)
         elif Backend._plugins.keys():
             custom_backend = next(iter(Backend._plugins.keys()))
-            if custom_backend in backend_config.device_backend_map.values():
+            if custom_backend.lower() in backend_config.device_backend_map.values():
                 pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
         else:
             pg._set_default_backend(ProcessGroup.BackendType.GLOO)
