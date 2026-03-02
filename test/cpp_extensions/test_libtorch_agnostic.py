@@ -47,13 +47,6 @@ def skipIfTorchVersionLessThan(major, minor):
     return decorator
 
 
-def _has_cpp_stacktrace_in_error(msg):
-    # x86: "C++ CapturedTraceback:"; aarch64: "Exception raised from" + "frame #"
-    return "C++ CapturedTraceback:" in msg or (
-        "Exception raised from" in msg and "frame #" in msg
-    )
-
-
 @unittest.skipIf(
     sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
     "Cpython limited API not available, see https://github.com/python/cpython/issues/111506",
@@ -1373,9 +1366,9 @@ except RuntimeError as e:
         )
 
         if show_cpp_stacktraces:
-            self.assertTrue(
-                _has_cpp_stacktrace_in_error(error_message),
-                f"Expected C++ stack trace in error message, got: {error_message}",
+            self.assertRegex(
+                error_message,
+                r"C\+\+ CapturedTraceback:|Exception raised from[\s\S]*frame #",
             )
             self.assertRegex(
                 error_message,
@@ -1545,9 +1538,9 @@ except RuntimeError as e:
         )
 
         if show_cpp_stacktraces:
-            self.assertTrue(
-                _has_cpp_stacktrace_in_error(error_message),
-                f"Expected C++ stack trace in error message, got: {error_message}",
+            self.assertRegex(
+                error_message,
+                r"C\+\+ CapturedTraceback:|Exception raised from[\s\S]*frame #",
             )
             self.assertRegex(
                 error_message,
