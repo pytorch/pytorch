@@ -248,8 +248,12 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
+        b8,
+        f16,
         f32,
         f64,
+        i32,
+        i64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
     "view_as_complex": {f16},
 }
