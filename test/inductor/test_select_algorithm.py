@@ -6,8 +6,6 @@ from collections.abc import Callable
 from typing import Any, Optional, Union
 from unittest.mock import patch
 
-import pytest
-
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
@@ -292,10 +290,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @pytest.mark.xfail(
-        condition=torch.version.cuda,
-        reason="C++ wrapper dynamic shapes fails on CUDA",
-    )
     @patches
     def test_mm_plus_mm3(self):
         @torch.compile

@@ -85,7 +85,8 @@ def _insert_single_dim_replication_strategy(
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
     """
     for strategy in single_dim_strategies_with_placeholders:
-        assert not all(isinstance(p, Replicate) for p in strategy)
+        if all(isinstance(p, Replicate) for p in strategy):
+            raise AssertionError
     single_dim_strategies_with_placeholders.insert(
         0, [Replicate()] * (num_outputs + num_input_tensors)
     )
@@ -138,11 +139,13 @@ def _fill_single_dim_strategy_placeholders(
                         # with other metadata (e.g. split_factor) from the sharding class
                         expanded_strategy.append(shard_builder(maybe_placeholder.dim))
                     else:
-                        assert isinstance(maybe_placeholder, Placement)
+                        if not isinstance(maybe_placeholder, Placement):
+                            raise AssertionError
                         expanded_strategy.append(maybe_placeholder)
                 expanded_strategies_over_one_mesh_dim.append(expanded_strategy)
         else:
-            assert all(isinstance(p, Placement) for p in s)
+            if not all(isinstance(p, Placement) for p in s):
+                raise AssertionError
             expanded_strategies_over_one_mesh_dim.append(cast(list[Placement], (s)))
 
     return expanded_strategies_over_one_mesh_dim
@@ -155,7 +158,8 @@ def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
         if isinstance(obj, DTensorSpec):
             unique_placements.update(obj.placements)
         elif isinstance(obj, OpStrategy):
-            assert len(obj.strategies) == 1
+            if len(obj.strategies) != 1:
+                raise AssertionError
             unique_placements.update(obj.strategies[0].output_spec.placements)
         elif isinstance(obj, TupleStrategy):
             for child in obj.children:
@@ -197,8 +201,12 @@ def _build_output_specs(
     per_mesh_dim_placements is indexed [mesh_dim][output_idx]. output_metas must
     have exactly num_outputs elements.
     """
-    assert num_outputs > 0
-    assert len(output_metas) == num_outputs
+    if num_outputs <= 0:
+        raise AssertionError(f"Expected num_outputs > 0, got {num_outputs}")
+    if len(output_metas) != num_outputs:
+        raise AssertionError(
+            f"Expected {num_outputs} output_metas, got {len(output_metas)}"
+        )
 
     def _placements_for_output(out_idx: int) -> tuple[Placement, ...]:
         return tuple(out[out_idx] for out in per_mesh_dim_placements)

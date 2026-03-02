@@ -1182,6 +1182,14 @@ class TritonOverrides(OpOverrides):
         triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
+        # Triton's scalar_constant() treats -0.0 as 0 (since -0.0 == 0 in Python),
+        # Work around by encoding -0.0 as its IEEE 754 hex in uint and bitcasting.
+        if value == 0 and math.copysign(1.0, value) < 0:
+            if triton_type == "tl.float32":
+                return f"tl.full({shape}, 0x80000000, tl.uint32).to({triton_type}, bitcast=True)"
+            elif triton_type == "tl.float64":
+                return f"tl.full({shape}, 0x8000000000000000, tl.uint64).to({triton_type}, bitcast=True)"
+
         # NOTE: We use tl.full here to get the expected type.
         # Otherwise, subnormal float32 values are treated as fp64
         # causing fp32 * fp64 promotion and different numerical results.
@@ -1780,11 +1788,22 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
-        # Similar to div_floor_kernel_cuda in pytorch core.
-        # Notice that // in triton behaves as truncdiv instead of floordiv
-        quot = f"{a} // {b}"
-        rem = f"{a} % {b}"
-        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+        # Notice that // in triton behaves as truncdiv instead of floordiv.
+        #
+        # We avoid feeding negative values into Triton's // operator because
+        # Triton's AxisInfo analysis incorrectly deduplicates signed division
+        # results for contiguous inputs (triton-lang/triton#XXXX). Instead we
+        # use bitwise complement (~) to make the dividend non-negative:
+        #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
+        # For negative b we negate both operands first.
+        zero = ops.constant(0, torch.int32)
+        b_neg = ops.lt(b, zero)
+        a = ops.where(b_neg, ops.sub(zero, a), a)
+        b = ops.where(b_neg, ops.sub(zero, b), b)
+        a_neg = ops.lt(a, zero)
+        a = ops.where(a_neg, ops.bitwise_not(a), a)
+        quot = ops.truncdiv(a, b)
+        return ops.where(a_neg, ops.bitwise_not(quot), quot)
 
     @staticmethod
     def sign(x):

@@ -851,9 +851,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
             return_getters_groups.append(return_getters)
 
-        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
-            f"failed to set ranges {remaining} {lengths}"
-        )
+        assert all(
+            V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 

@@ -29,7 +29,8 @@ def _update_module_param(param_list: list[tuple[nn.Module, str, nn.Parameter]]):
     """
     for item in param_list:
         parent_module, module_path, t = item
-        assert hasattr(parent_module, module_path)
+        if not hasattr(parent_module, module_path):
+            raise AssertionError
         delattr(parent_module, module_path)
         setattr(parent_module, module_path, t)
 
