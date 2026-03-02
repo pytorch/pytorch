@@ -71,9 +71,7 @@ from .split_cat import POST_GRAD_PATTERNS
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
-PatternMatcherPass = functools.partial(
-    PatternMatcherPassBase, subsystem="post_grad_passes"
-)
+PatternMatcherPass = PatternMatcherPassBase
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -118,10 +116,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     The IR here has been normalized and functionalized.
     """
-    GraphTransformObserver = functools.partial(
-        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
-        subsystem="post_grad_passes",
-    )
+    GraphTransformObserver = torch.fx.passes.graph_transform_observer.GraphTransformObserver
 
     if not torch._dynamo.config.skip_fsdp_hooks:
         remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
@@ -1063,13 +1058,13 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
         end = 2**63 - 1
     slice_scatter_dim_size = self.shape[dim]
     if (
-        self.shape == src.shape
-        and start == 0
+        statically_known_true(sym_eq(self.shape, src.shape))
+        and statically_known_true(sym_eq(start, 0))
         and (
             statically_known_true(end >= 2**63 - 1)
             or statically_known_true(end >= slice_scatter_dim_size)
         )
-        and step == 1
+        and statically_known_true(sym_eq(step, 1))
     ):
         return True
     return False
@@ -1077,12 +1072,12 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
 
 @register_noop_decomp(aten.repeat)
 def repeat_noop(self, repeats):
-    return all(r == 1 for r in repeats)
+    return all(statically_known_true(sym_eq(r, 1)) for r in repeats)
 
 
 @register_noop_decomp(aten.constant_pad_nd)
 def constant_pad_nd(x, padding, fill_value=0):
-    return all(p == 0 for p in padding)
+    return all(statically_known_true(sym_eq(p, 0)) for p in padding)
 
 
 @register_noop_decomp(torch.ops.prims.convert_element_type)
