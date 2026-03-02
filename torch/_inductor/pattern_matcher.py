@@ -1357,6 +1357,17 @@ class ReplacementPatternEntry(PatternEntry):
                 replace(output_nodes[0], replacement)
 
         match.erase_nodes()
+        #Incermentally update region ids
+        if added_replacement_nodes:
+            added_set = set(added_replacement_nodes)
+            first_added = None
+            for node in graph.nodes:
+                if node in added_set:
+                    first_added = node
+                    break
+            
+            if first_added is not None:
+                update_mutation_region_ids_from(graph, first_added)
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         assert match.replacement_graph is not None
@@ -1961,6 +1972,26 @@ def compute_mutation_region_ids(graph: torch.fx.Graph) -> None:
             mutation_region_id += 1
         nd.meta["mutation_region_id"] = mutation_region_id
 
+# Attempt to update mutable_region_ids incrementally from mutation point
+def update_mutable_region_ids(graph: torch.fx.Graph, start_node: torch.fx.Node) -> None:
+    if start_node is None:
+        return
+    prev_node = start_node.prev
+    if prev_node is not None and "mutation_region_id" in prev_node.meta:
+        mutation_region_id = prev_node.meta["mutation_region_id"]
+    else:
+        mutation_region_id = 0
+    
+    # Iterate and update from mutation point to end of the graph
+    n = start_node
+    while n is not None:
+        if n.op != "output" and is_mutation_op(n):
+            mutation_region_id += 1
+        n.meta["mutation_region_id"] = mutation_region_id
+        n = n.next
+    
+        
+    
 
 def _wrap_bound_method(fn: Any, argnames: list[str]) -> Any:
     """
