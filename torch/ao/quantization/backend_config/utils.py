@@ -280,7 +280,9 @@ def _get_pattern_in_reversed_nested_tuple_format(
         (a, b, c) = config.pattern
         return (c, (b, a))
     else:
-        raise ValueError("Expected a tuple with 2 or 3 elements, got: ", config.pattern)
+        raise ValueError(
+            f"Expected a tuple with 2 or 3 elements, got: {config.pattern}"
+        )
 
 
 def _get_fuser_method_in_reversed_nested_tuple_format(
@@ -306,7 +308,7 @@ def _get_fuser_method_in_reversed_nested_tuple_format(
     if config._pattern_complex_format is not None:
         return config.fuser_method
     if not isinstance(config.pattern, tuple):
-        raise ValueError("Expected pattern to be a tuple, got: ", config.pattern)
+        raise ValueError(f"Expected pattern to be a tuple, got: {config.pattern}")
 
     # Pattern is specified in the simple tuple format, need to convert
     if len(config.pattern) == 2:
@@ -314,4 +316,6 @@ def _get_fuser_method_in_reversed_nested_tuple_format(
     elif len(config.pattern) == 3:
         return _reverse3(config.fuser_method)
     else:
-        raise ValueError("Expected a tuple with 2 or 3 elements, got: ", config.pattern)
+        raise ValueError(
+            f"Expected a tuple with 2 or 3 elements, got: {config.pattern}"
+        )

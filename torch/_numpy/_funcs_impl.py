@@ -210,7 +210,7 @@ def _split_helper(tensor, indices_or_sections, axis, strict=False):
         # NB: drop split=..., it only applies to split_helper_int
         return _split_helper_list(tensor, list(indices_or_sections), axis)
     else:
-        raise TypeError("split_helper: ", type(indices_or_sections))
+        raise TypeError(f"split_helper: {type(indices_or_sections)}")
 
 
 def _split_helper_int(tensor, indices_or_sections, axis, strict=False):
