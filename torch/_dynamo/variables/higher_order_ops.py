@@ -5107,7 +5107,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = True
     supports_aliasing = False
-    allow_side_effects = True
+    allow_side_effects = False
     # invoke_subgraph is NOT desugared in AOTAutograd, so the HOP input/output
     # shouldn't alias. For checkpoint HOP, we inline it so we don't need
     # alias analysis as functionalization would just work on the flat graph.
@@ -5231,29 +5231,19 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         if auto_cache:
             guards_before = tx.output.guards.inner.copy()
 
-        # Trace the subgraph.
-        # Auto-cached functions have no side effects, so disable
-        # allow_side_effects to prevent collect_intermediate_outputs from
-        # adding extra SymInt outputs that complicate caching.
         assert self._HOP_NAME is not None
-        old_allow_side_effects = self.allow_side_effects
-        if auto_cache:
-            self.allow_side_effects = False
         with dynamo_timed("invoke_subgraph_trace"):
-            try:
-                (
-                    p_args,
-                    p_kwargs,
-                    example_value,
-                    body_r,
-                    body_gmod,
-                    body_name,
-                    body_graph_output_vts,
-                ) = self.create_wrapped_node(
-                    tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME
-                )
-            finally:
-                self.allow_side_effects = old_allow_side_effects
+            (
+                p_args,
+                p_kwargs,
+                example_value,
+                body_r,
+                body_gmod,
+                body_name,
+                body_graph_output_vts,
+            ) = self.create_wrapped_node(
+                tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME
+            )
 
         if len(p_kwargs) > 0:
             unimplemented(
