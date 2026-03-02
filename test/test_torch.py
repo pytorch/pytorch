@@ -10329,6 +10329,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
+    def test_storage_segfault(self):
+        # Regression test for gh-169210
+        # Ensure .bfloat16() on UntypedStorage raises a safe error instead of crashing
+        import torch
+        s = torch.UntypedStorage(10)
+        msg = "Direct conversion of UntypedStorage to bfloat16 is not supported"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            s.bfloat16()
+
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_storage_preserve_nonhermetic_in_hermetic_context(self):
         from torch.library import Library, impl

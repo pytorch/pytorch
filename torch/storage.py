@@ -470,6 +470,10 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
             raise NotImplementedError("Not available for 'meta' device type")
         return super().__getitem__(*args, **kwargs)
 
+    def bfloat16(self):
+        # Fixes gh-169210: Prevent segfault when converting UntypedStorage to bfloat16.
+        raise RuntimeError("Direct conversion of UntypedStorage to bfloat16 is not supported. Please wrap the storage in a Tensor first.")
+
     @property
     def is_cuda(self):
         return self.device.type == "cuda"
