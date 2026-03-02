@@ -523,7 +523,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
             ],
             "nn.functional.padreplicate_negative": [torch.bool],
-            "nn.functional.pdist": None,
             "nn.functional.relu": [torch.bool],
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
@@ -964,6 +963,7 @@ if torch.backends.mps.is_available():
 
         SKIPLIST_GRAD = {
             "nn.functional.pairwise_distance": [torch.float16],
+            "nn.functional.pdist": [torch.float16],
             # failed assertion `destination datatype must be fp32'
             "nn.functional.conv1d": [torch.float16],
             "nn.functional.conv2d": [torch.float16],

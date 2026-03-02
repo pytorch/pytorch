@@ -1114,6 +1114,14 @@ class TestMPS(TestCaseMPS):
             return torch.empty(r1, r2, device=x.device)
         return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
 
+    def _brute_pdist(self, x, p=2):
+        n = x.shape[0]
+        if n <= 1:
+            return torch.empty(0, device=x.device, dtype=x.dtype)
+        full = torch.norm(x[:, None, :] - x[None, :, :], p=p, dim=-1)
+        idx = torch.triu_indices(n, n, 1, device=x.device)
+        return full[idx[0], idx[1]]
+
     def test_cdist_norm(self, device="mps"):
         for r1 in [3, 4]:
             for m in [2, 3]:
@@ -1147,6 +1155,59 @@ class TestMPS(TestCaseMPS):
                             actual = torch.cdist(x, y, p=p)
                             expected = self._brute_cdist(x, y, p=p)
                             self.assertEqual(expected, actual)
+
+    def test_pdist_norm(self, device="mps"):
+        for n in [3, 4, 6]:
+            for m in [2, 5]:
+                for p in [0, 1, 1.5, 2, 2.5, float('inf')]:
+                    x = torch.randn(n, m, device=device)
+                    actual = torch.pdist(x, p=p)
+                    expected = self._brute_pdist(x, p=p)
+                    self.assertEqual(expected, actual)
+
+    def test_pdist_non_contiguous(self, device="mps"):
+        x = torch.randn(6, 8, device=device).mT
+        self.assertFalse(x.is_contiguous())
+        y_mps = torch.pdist(x, p=2)
+        y_cpu = torch.pdist(x.cpu(), p=2)
+        self.assertEqual(y_cpu, y_mps)
+
+    def test_pdist_empty_and_degenerate(self, device="mps"):
+        def helper(shape):
+            x = torch.randn(shape, device=device)
+            if x.numel() == 0:
+                with self.assertRaisesRegex(RuntimeError, "Input tensor is empty"):
+                    torch.pdist(x)
+            else:
+                self.assertEqual(torch.pdist(x.cpu()), torch.pdist(x))
+
+        helper((0, 4))
+        helper((1, 4))
+        helper((4, 0))
+
+    def test_pdist_backward(self, device="mps"):
+        for p in [0, 1, 1.5, 2, 2.5, float("inf")]:
+            x_cpu = torch.randn(5, 7, device="cpu", dtype=torch.float, requires_grad=True)
+            x_mps = x_cpu.detach().to(device).requires_grad_(True)
+            g_cpu = torch.randn(10, device="cpu", dtype=torch.float)
+            g_mps = g_cpu.to(device)
+
+            y_cpu = torch.pdist(x_cpu, p=p)
+            y_mps = torch.pdist(x_mps, p=p)
+            y_cpu.backward(g_cpu)
+            y_mps.backward(g_mps)
+
+            self.assertEqual(y_cpu, y_mps.cpu())
+            self.assertEqual(x_cpu.grad, x_mps.grad.cpu())
+
+    def test_pdist_backward_same_inputs(self, device="mps"):
+        for p in [0, 1, 1.5, 2, 2.5, float("inf")]:
+            x = torch.randn(1, 6, device=device).expand(4, 6).clone().requires_grad_(True)
+            grad = torch.randn(6, device=device)
+            y = torch.pdist(x, p=p)
+            y.backward(grad)
+            if not torch.isfinite(x.grad).all():
+                raise AssertionError("expected x.grad to be finite")
 
     def test_mm(self):
         B = torch.ones(5, 6).to("mps")
