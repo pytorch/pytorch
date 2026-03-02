@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/im2col_shape_check.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -26,6 +27,16 @@ static void col2im_out_mps_template(const Tensor& input,
                                     IntArrayRef dilation,
                                     IntArrayRef padding,
                                     IntArrayRef stride) {
+  TORCH_CHECK(output_size.size() == 2, "It is expected output_size equals to 2, but got size ", output_size.size());
+
+  TORCH_CHECK(kernel_size.size() == 2, "It is expected kernel_size equals to 2, but got size ", kernel_size.size());
+
+  TORCH_CHECK(dilation.size() == 2, "It is expected dilation equals to 2, but got size ", dilation.size());
+
+  TORCH_CHECK(padding.size() == 2, "It is expected padding equals to 2, but got size ", padding.size());
+
+  TORCH_CHECK(stride.size() == 2, "It is expected stride equals to 2, but got size ", stride.size());
+
   auto output_height = output_size[0];
   auto output_width = output_size[1];
   auto kernel_height = kernel_size[0];
@@ -44,9 +55,22 @@ static void col2im_out_mps_template(const Tensor& input,
     col_tensor = col_tensor.unsqueeze(0);
   }
 
+  // Perform shape validation using the same check as CPU implementation
+  col2im_shape_check(col_tensor,
+                     Tensor(),
+                     output_height,
+                     output_width,
+                     kernel_height,
+                     kernel_width,
+                     dilation_height,
+                     dilation_width,
+                     pad_height,
+                     pad_width,
+                     stride_height,
+                     stride_width);
+
   auto batch_size = col_tensor.size(0);
   auto n_input_plane = col_tensor.size(1);
-  TORCH_CHECK(n_input_plane % (kernel_height * kernel_width) == 0, "col2im_mps: invalid number of input channels");
   auto n_output_plane = n_input_plane / (kernel_height * kernel_width);
   auto input_batch_stride = col_tensor.stride(0);
 
