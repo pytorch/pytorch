@@ -51,11 +51,22 @@ class SocketOptions {
     return connect_backoff_;
   }
 
+  SocketOptions& reuse_port(bool value) noexcept {
+    reuse_port_ = value;
+    return *this;
+  }
+
+  bool reuse_port() const noexcept {
+    return reuse_port_;
+  }
+
+
  private:
   bool prefer_ipv6_ = true;
   std::chrono::milliseconds connect_timeout_{std::chrono::seconds{30}};
   std::shared_ptr<Backoff> connect_backoff_{
       std::make_shared<FixedBackoff>(std::chrono::milliseconds(1000))};
+  bool reuse_port_ = false;
 };
 
 class SocketImpl;
