@@ -56,6 +56,15 @@ def _clear_sharding_prop_cache():
     _clear_fast_path_sharding_prop_cache()
 
 
+def _reinit_dispatch_logger():
+    """
+    Resets the cached DTensor dispatch logger state so that the next DTensor
+    dispatch re-checks whether debug logging is enabled. Call this after
+    changing the log level on the ``torch.distributed.tensor._dispatch`` logger.
+    """
+    torch._C._reinit_DTensor_dispatch_logger()
+
+
 # Set namespace for exposed private names
 CommDebugMode.__module__ = "torch.distributed.tensor.debug"
 visualize_sharding.__module__ = "torch.distributed.tensor.debug"
