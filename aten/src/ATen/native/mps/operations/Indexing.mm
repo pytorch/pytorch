@@ -307,7 +307,10 @@ static Tensor& nonzero_out_native_mps(const Tensor& self, Tensor& out_) {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
-  at::native::resize_output(out_, {total_nonzero, nDim});
+  if (at::native::resize_output(out_, {total_nonzero, nDim})) {
+    // Default to fortran-contiguous output to match CPU/CUDA behavior (see gh-46224)
+    out_.as_strided_({total_nonzero, nDim}, {1, total_nonzero});
+  }
   if (out_.numel() == 0) {
     return out_;
   }
@@ -392,7 +395,10 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
-  at::native::resize_output(out_, {total_nonzero, nDim});
+  if (at::native::resize_output(out_, {total_nonzero, nDim})) {
+    // Default to fortran-contiguous output to match CPU/CUDA behavior (see gh-46224)
+    out_.as_strided_({total_nonzero, nDim}, {1, total_nonzero});
+  }
   if (out_.numel() == 0) {
     return out_;
   }

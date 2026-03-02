@@ -11590,6 +11590,16 @@ class TestAdvancedIndexing(TestCaseMPS):
         t1.start()
         t2.start()
 
+    def test_nonzero_stride(self):
+        # Test that nonzero preserves non-contiguous strides from gradient
+        # This ensures MPS behavior matches CPU/CUDA
+        # See https://github.com/pytorch/pytorch/issues/170175
+        device = "mps"
+        x = torch.randn(1, 1, 3, 3, device=device)
+        grad = torch.gradient(x, dim=(2, 3))[0]
+        with self.assertRaises(RuntimeError):
+            torch.nonzero(grad).view(-1)
+
     def test_sliced_view_cast(self):
         # This used to crash on MacOS Sequoia
         # See https://github.com/pytorch/pytorch/issues/137800
