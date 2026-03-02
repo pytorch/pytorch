@@ -908,7 +908,7 @@ class Optimizer:
         Example:
             >>> # xdoctest: +SKIP
             >>> model = torch.nn.Linear(10, 10)
-            >>> optim = torch.optim.SGD(model.parameters(), lr=3e-4)
+            >>> optim = torch.optim.Adam(model.parameters(), lr=3e-4)
             >>> scheduler1 = torch.optim.lr_scheduler.LinearLR(
             ...     optim,
             ...     start_factor=0.1,
