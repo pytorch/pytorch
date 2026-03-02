@@ -138,6 +138,9 @@ _memory_format_test_lib.impl(
 _memory_format_test_lib.impl(
     "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "CUDA"
 )
+_memory_format_test_lib.impl(
+    "fn_with_memory_format_arg", _fn_with_memory_format_arg_impl, "XPU"
+)
 
 
 @torch.library.register_fake("aoti_custom_ops::fn_with_memory_format_arg")
@@ -156,6 +159,7 @@ def _fn_with_layout_arg_impl(x, layout):
 
 _layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CPU")
 _layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "CUDA")
+_layout_test_lib.impl("fn_with_layout_arg", _fn_with_layout_arg_impl, "XPU")
 
 
 @torch.library.register_fake("aoti_custom_ops::fn_with_layout_arg")
