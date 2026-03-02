@@ -3087,6 +3087,7 @@ class FakeTensorMode(TorchDispatchMode):
         aten.view.default,
         aten._unsafe_view.default,
         aten.slice.Tensor,
+        aten.one_hot.default,
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:

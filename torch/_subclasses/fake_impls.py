@@ -1019,6 +1019,24 @@ def slice_forward(
         return self.as_strided(sizes, strides, storage_offset)  # type: ignore[return-value]
 
 
+@register_op_impl(torch.ops.aten.one_hot.default)
+def one_hot(fake_mode, func, self, num_classes=-1):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    size = tuple(self.size())
+    if guard_or_false(num_classes == -1):
+        num_classes = fake_mode.shape_env.create_unbacked_symint()
+    torch._check(num_classes >= 1, lambda: "num_classes must be positive.")
+    return self.new_empty(size + (num_classes,))
+
+
 @register_op_impl(torch.ops.aten.masked_select.default)
 def masked_select(
     fake_mode: FakeTensorMode, func: OpOverload, self: FakeTensor, mask: FakeTensor

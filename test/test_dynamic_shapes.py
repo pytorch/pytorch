@@ -4047,6 +4047,20 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     def test_unbacked_slice_with_step_cpp_wrapper(self):
         self.test_unbacked_slice_with_step()
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_unbacked_one_hot(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            y = torch.arange(10)
+            n = x.item()
+            torch._check(n >= 10)
+            torch._check(n <= 100)
+            return torch.nn.functional.one_hot(y, n)
+
+        out = f(torch.tensor([20]))
+        print(out)
+
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_slice_with_tensor_indices(self):
