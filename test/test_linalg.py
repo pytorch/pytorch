@@ -1045,6 +1045,14 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    def test_det_backward(self):
+        # Regression test for #80761.
+        input = torch.tensor([[0.]], dtype=torch.float64, requires_grad=True)
+        self.assertTrue(torch.autograd.gradcheck(torch.det, inputs=input))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigh(self, device, dtype):
