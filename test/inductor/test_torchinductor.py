@@ -3068,6 +3068,16 @@ class CommonTemplate:
         self.common(fn, (make_arg(1, dtype=torch.float32),))
         self.common(fn, (make_arg(1, dtype=torch.int64),))
 
+    def test_arange7(self):
+        def fn(x):
+            # Create a small tensor with int64 values > INT32_MAX
+            idx = torch.arange(0, 2, device=x.device, dtype=torch.int64)
+            large_val = torch.tensor(2147483648, dtype=torch.int64, device=x.device)
+            return idx * large_val
+
+        x = torch.zeros(1, device=self.device)
+        self.common(fn, (x,))
+
     def test_linspace1(self):
         def fn(x):
             return torch.linspace(0.125, 0.875, 7, device=x.device) + x
