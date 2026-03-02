@@ -1231,7 +1231,7 @@ class MultiheadAttention(Module):
 
     def _reset_parameters(self) -> None:
         if self._qkv_same_embed_dim:
-            xavier_uniform_(self.in_proj_weight)
+            xavier_uniform_(self.in_proj_weight, gain=math.sqrt(2))
         else:
             xavier_uniform_(self.q_proj_weight)
             xavier_uniform_(self.k_proj_weight)
