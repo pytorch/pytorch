@@ -294,7 +294,8 @@ class SideEffects:
                     "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`",
                     "If the HOP is a nested compile region (torch.compiler.nested_compile_region), consider removing "
                     "the side effect from the region. Side effects prevent compile-time caching of the region, "
-                    "reducing the compile time benefit.",
+                    "reducing the compile time benefit. If you must keep the side effect, set "
+                    "`torch._dynamo.config.allow_side_effects_under_nested_compile_region = True`.",
                 ],
             )
         return False
