@@ -814,6 +814,29 @@ class TestMultiThreadedDTensorOps(DTensorOpTestBase, TestDTensorOps):
 
     def test_one_hot(self):
         self.run_one_hot()
+        
+    def test_dtensor_anomaly_detection_nan(self):
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+
+        x = torch.randn(4, 4, requires_grad=True, device=DEVICE_TYPE)
+        dx = distribute_tensor(x, self.mesh, [Replicate()])
+
+        with torch.autograd.detect_anomaly(check_nan=True):
+            y = dx * 2
+            loss = y.sum()
+            loss.backward()
+
+        x_nan = torch.randn(4, 4, requires_grad=True, device=DEVICE_TYPE)
+        with torch.no_grad():
+             x_nan[0][0] = float('nan')
+
+        dx_nan = distribute_tensor(x_nan, self.mesh, [Replicate()])
+
+        with self.assertRaisesRegex(RuntimeError, "returned nan values"):
+            with torch.autograd.detect_anomaly(check_nan=True):
+                y = dx_nan * dx_nan
+                loss = y.sum()
+                loss.backward()
 
 
 class TestLocalDTensorOps(TestDTensorOps):

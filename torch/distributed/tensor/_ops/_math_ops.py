@@ -311,6 +311,7 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.sum.dim_IntList: "sum",
     prims.sum.default: "sum",
     aten.any.default: "sum",
+    aten._is_any_true.default: "sum",
     aten.any.dim: "sum",
     aten.any.dims: "sum",
     aten.any.out: "sum",
