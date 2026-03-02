@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import logging
 import multiprocessing
 import multiprocessing.connection
@@ -98,11 +99,11 @@ def _wrap(fn, i, args, error_file):
 
 class ProcessContext:
     def __init__(self, processes, error_files):
-        self.error_files = error_files
         self.processes = processes
-        self.sentinels = {
+        self.__sentinels = {
             process.sentinel: index for index, process in enumerate(processes)
         }
+        self.__error_files = error_files
 
     def pids(self):
         return [int(process.pid) for process in self.processes]
@@ -133,18 +134,18 @@ class ProcessContext:
                 still don't exit, wait another grace period before killing them.
         """
         # Ensure this function can be called even when we're done.
-        if len(self.sentinels) == 0:
+        if len(self.__sentinels) == 0:
             return True
 
         # Wait for any process to fail or all of them to succeed.
         ready = multiprocessing.connection.wait(
-            self.sentinels.keys(),
+            self.__sentinels.keys(),
             timeout=timeout,
         )
 
         error_index = None
         for sentinel in ready:
-            index = self.sentinels.pop(sentinel)
+            index = self.__sentinels.pop(sentinel)
             process = self.processes[index]
             process.join()
             if process.exitcode != 0:
@@ -154,7 +155,7 @@ class ProcessContext:
         # Return if there was no error.
         if error_index is None:
             # Return whether or not all processes have been joined.
-            return len(self.sentinels) == 0
+            return len(self.__sentinels) == 0
         # An error occurred. Clean-up all processes before returning.
         # First, allow a grace period for processes to shutdown themselves.
         if grace_period is not None:
@@ -182,33 +183,34 @@ class ProcessContext:
 
         # The file will only be created if the process crashed.
         failed_process = self.processes[error_index]
-        if not os.access(self.error_files[error_index], os.R_OK):
-            exitcode = self.processes[error_index].exitcode
-            if exitcode < 0:
-                try:
-                    name = signal.Signals(-exitcode).name
-                except ValueError:
-                    name = f"<Unknown signal {-exitcode}>"
-                raise ProcessExitedException(
-                    f"process {error_index:d} terminated with signal {name}",
-                    error_index=error_index,
-                    error_pid=failed_process.pid,
-                    exit_code=exitcode,
-                    signal_name=name,
-                )
-            else:
-                raise ProcessExitedException(
-                    f"process {error_index:d} terminated with exit code {exitcode:d}",
-                    error_index=error_index,
-                    error_pid=failed_process.pid,
-                    exit_code=exitcode,
-                )
-
-        with open(self.error_files[error_index], "rb") as fh:
-            original_trace = pickle.load(fh)
         msg = f"\n\n-- Process {error_index:d} terminated with the following error:\n"
-        msg += original_trace
-        raise ProcessRaisedException(msg, error_index, failed_process.pid)
+        flag = False
+        with contextlib.suppress(FileNotFoundError, IOError):
+            with open(self.__error_files[error_index], "rb") as fh:
+                original_trace = pickle.load(fh)
+                msg += original_trace
+            flag = True
+            os.remove(self.__error_files[error_index])
+        if flag:
+            raise ProcessRaisedException(
+                msg, error_index=error_index, error_pid=failed_process.pid
+            )
+        exitcode = self.processes[error_index].exitcode
+        msg = f"process {error_index:d} terminated with exit code {exitcode:d}"
+        if exitcode < 0:
+            sig = -exitcode
+            name = (
+                f"<Unknown signal {sig}>"
+                if sig not in signal.valid_signals()
+                else signal.Signals(sig).name
+            )
+            msg = f"process {error_index:d} terminated with signal {name}"
+        raise ProcessExitedException(
+            msg,
+            error_index=error_index,
+            error_pid=failed_process.pid,
+            exit_code=exitcode,
+        )
 
 
 class SpawnContext(ProcessContext):
