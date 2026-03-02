@@ -712,8 +712,15 @@ class StructuredTraceTest(TestCase):
 """,  # noqa: B950
             )
         else:
+            text = self.buffer.getvalue()
+            # after https://github.com/pytorch/pytorch/pull/172633,
+            # on multiple platforms this name subtly changed, but flakily.
+            text = text.replace(
+                "torch_dynamo_resume_in___init___at_105_ORIGINAL_BYTECODE",
+                "torch_dynamo_resume_in___init___at_103_ORIGINAL_BYTECODE",
+            )
             self.assertExpectedInline(
-                self.buffer.getvalue(),
+                text,
                 """\
 {"dynamo_start": {"stack": "STACK"}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"artifact": {"name": "dynamo_graph_break_reason", "encoding": "string"}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
@@ -810,8 +817,20 @@ class StructuredTraceTest(TestCase):
 
         fn(torch.ones(1))
 
+        text = self.buffer.getvalue()
+        # after https://github.com/pytorch/pytorch/pull/172633,
+        # on multiple platforms this name subtly changed, but flakily.
+        text = text.replace(
+            "torch_dynamo_resume_in_fn_at_816_ORIGINAL_BYTECODE",
+            "torch_dynamo_resume_in_fn_at_808_ORIGINAL_BYTECODE",
+        )
+        text = text.replace(
+            "torch_dynamo_resume_in_fn_at_816_MODIFIED_BYTECODE",
+            "torch_dynamo_resume_in_fn_at_808_MODIFIED_BYTECODE",
+        )
+
         self.assertExpectedInline(
-            self.buffer.getvalue(),
+            text,
             """\
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"artifact": {"name": "dynamo_graph_break_reason", "encoding": "string"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
