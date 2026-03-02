@@ -273,11 +273,25 @@ class autocast:
             else cache_enabled
         )
 
-        device_name = (
-            self.device
-            if self.device == self.custom_backend_name
-            else self.device.upper()
-        )
+        def _is_dtype_supported(self, supported_dtypes):
+            device_name = (
+                self.device
+                if self.device == self.custom_backend_name
+                else self.device.upper()
+            )
+
+            if self.fast_dtype not in supported_dtypes:
+                error_message = (
+                    f"In {device_name} autocast, but the target dtype is not supported. Disabling autocast.\n"
+                    f"{device_name} Autocast only supports dtypes of "
+                    + ", ".join(map(str, supported_dtypes))
+                    + " currently."
+                )
+                warnings.warn(error_message, stacklevel=2)
+                return False
+
+            return True
+
         if enabled:
             # Special case for CUDA AMP and bfloat16 support
             if self.device == "cuda":
@@ -294,19 +308,11 @@ class autocast:
                     raise RuntimeError(
                         "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
                     )
-            elif self.fast_dtype not in device_supported_dtypes:
-                error_message = (
-                    f"In {device_name} autocast, but the target dtype is not supported. Disabling autocast.\n"
-                    f"{device_name} Autocast only supports dtypes of "
-                    + ", ".join(map(str, device_supported_dtypes))
-                    + " currently."
-                )
-                warnings.warn(error_message, stacklevel=2)
-                enabled = False
+            elif self.device == "mps":
+                enabled = _is_dtype_supported(self, device_supported_dtypes)
                 # Special case for MPS bfloat16 support on macOS < 14
                 if (
-                    self.device == "mps"
-                    and self.fast_dtype == torch.bfloat16
+                    self.fast_dtype == torch.bfloat16
                     and not torch.backends.mps.is_macos_or_newer(14, 0)
                 ):
                     error_message = (
@@ -315,6 +321,11 @@ class autocast:
                     )
                     warnings.warn(error_message, stacklevel=2)
                     enabled = False
+            elif self.device == "xpu":
+                xpu_supported_dtypes = device_supported_dtypes + [torch.float32]
+                enabled = _is_dtype_supported(self, xpu_supported_dtypes)
+            else:
+                enabled = _is_dtype_supported(self, device_supported_dtypes)
         self._enabled = enabled
 
     def __enter__(self):
