@@ -160,7 +160,7 @@ void check_channel(int channel, int world_size) {
       channel,
       ")");
   const size_t num_channels = c10d::symmetric_memory::get_signal_pad_size() /
-      sizeof(uint32_t) * world_size;
+      (sizeof(uint32_t) * world_size);
   TORCH_CHECK(
       static_cast<size_t>(channel) < num_channels,
       "The maximum supported channel for barrier(), put_signal() and wait_signal() is ",
