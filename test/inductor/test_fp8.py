@@ -34,6 +34,7 @@ from torch.testing._internal.inductor_utils import (
     _quantize_rowwise,
     _quantize_tensorwise,
     _to_fp8_saturated,
+    GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     is_big_gpu,
@@ -332,7 +333,7 @@ class TestFP8Types(TestCase):
             amax_buffer_compiled, amax_buffer, rtol=1e-2, atol=1e-2
         )
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("4,2048,4096",))
@@ -343,7 +344,7 @@ class TestFP8Types(TestCase):
         shape: str,
         keepdim: bool,
     ):
-        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device="cuda")
+        float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=GPU_TYPE)
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -374,11 +375,11 @@ class TestFP8Types(TestCase):
         compiled_ln_fp8_quant = torch.compile(ln_fp8, backend="inductor")
 
         x_shape = (batch_size, sequence_length, hidden_size)
-        x = torch.rand(*x_shape, device="cuda", dtype=torch.half)
-        scale = torch.tensor(0.2, device="cuda", dtype=torch.float)
+        x = torch.rand(*x_shape, device=GPU_TYPE, dtype=torch.half)
+        scale = torch.tensor(0.2, device=GPU_TYPE, dtype=torch.float)
 
-        amax_buffer_compiled = torch.zeros((1), device="cuda", dtype=torch.half)
-        amax_buffer = torch.zeros((1), device="cuda", dtype=torch.half)
+        amax_buffer_compiled = torch.zeros((1), device=GPU_TYPE, dtype=torch.half)
+        amax_buffer = torch.zeros((1), device=GPU_TYPE, dtype=torch.half)
         _ = compiled_ln_fp8_quant(x, scale, amax_buffer_compiled)
         compiled_latency = utils.do_bench_using_profiling(
             functools.partial(compiled_ln_fp8_quant, x, scale, amax_buffer_compiled)

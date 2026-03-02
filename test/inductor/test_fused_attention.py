@@ -182,11 +182,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 )
 
     def _test_insignificant_strides(self):
-        if self.device == "xpu":
-            self.skipTest(
-                "The operator 'aten::_scaled_dot_product_efficient_attention'"
-                " is not currently implemented for the XPU device. "
-            )
         f32 = torch.float32
 
         # repro taken from https://github.com/pytorch/pytorch/issues/124289

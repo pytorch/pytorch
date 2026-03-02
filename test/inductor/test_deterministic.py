@@ -15,7 +15,6 @@ from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -48,7 +47,6 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
-    @skipIfXpu(msg="pad_mm is not enabled for XPU.")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):

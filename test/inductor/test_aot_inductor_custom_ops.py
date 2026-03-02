@@ -501,7 +501,7 @@ class AOTInductorTestsTemplate:
         args = (torch.randn(4, 4, device=self.device),)
         self.check_model(m, args)
 
-    @skipIfXpu
+    @skipIfXpu(msg="compile error - torch-xpu-ops: 2609")
     @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):
