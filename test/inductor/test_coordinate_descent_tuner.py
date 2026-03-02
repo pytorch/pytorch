@@ -113,6 +113,38 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
         self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
 
+    def test_native_matmul_block_numel_limit(self):
+        # Test that native_matmul configs exceeding Triton's max tensor numel are rejected
+        tuner = CoordescTuner(is_native_matmul=True)
+
+        # Valid config: 128 * 128 * 64 = 1,048,576 (exactly at limit)
+        valid_config = triton.Config(
+            {"YBLOCK": 128, "XBLOCK": 128, "R0_BLOCK": 64}, num_warps=8, num_stages=1
+        )
+        self.assertTrue(tuner.is_valid_config(valid_config))
+
+        # Invalid config: 128 * 256 * 64 = 2,097,152 (exceeds limit)
+        invalid_config = triton.Config(
+            {"YBLOCK": 128, "XBLOCK": 256, "R0_BLOCK": 64}, num_warps=8, num_stages=1
+        )
+        self.assertFalse(tuner.is_valid_config(invalid_config))
+
+        # Invalid config: 256 * 128 * 64 = 2,097,152 (exceeds limit)
+        invalid_config2 = triton.Config(
+            {"YBLOCK": 256, "XBLOCK": 128, "R0_BLOCK": 64}, num_warps=8, num_stages=1
+        )
+        self.assertFalse(tuner.is_valid_config(invalid_config2))
+
+        # Invalid config: 128 * 128 * 128 = 2,097,152 (exceeds limit)
+        invalid_config3 = triton.Config(
+            {"YBLOCK": 128, "XBLOCK": 128, "R0_BLOCK": 128}, num_warps=8, num_stages=1
+        )
+        self.assertFalse(tuner.is_valid_config(invalid_config3))
+
+        # Non-native_matmul tuner should not apply this restriction
+        regular_tuner = CoordescTuner(is_native_matmul=False)
+        self.assertTrue(regular_tuner.is_valid_config(invalid_config))
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:

@@ -20,6 +20,8 @@ TRITON_MAX_BLOCK = {
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_RSPLIT = 64
+# Triton enforces a maximum tensor numel of 2^20 elements per block
+TRITON_MAX_TENSOR_NUMEL = 1 << 20
 
 
 class ReductionHint(Enum):
