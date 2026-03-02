@@ -120,6 +120,8 @@ if torch.backends.mps.is_available():
             "nn.functional.conv_transpose1d",
             "nn.functional.conv_transpose2d",
             "nn.functional.conv_transpose3d",
+            "nn.functional.adaptive_avg_pool1d",
+            "nn.functional.adaptive_avg_pool2d",
             "nn.functional.feature_alpha_dropoutwithout_train",
             "nn.functional.padcircular",
             "nn.functional.softminwith_dtype",
@@ -612,9 +614,6 @@ if torch.backends.mps.is_available():
             "linalg.pinvhermitian": None,
             "linalg.pinvsingular": None,  # Missing `aten::linalg_qr.out`.
             "nonzero_static": None,
-            # MPS: input sizes must be divisible by output sizes
-            "nn.functional.adaptive_avg_pool1d": None,
-            "nn.functional.adaptive_avg_pool2d": None,
             # Convolution for integral types is not supported on MPS
             "nn.functional.conv1d": [torch.int64],
             "nn.functional.conv2d": [torch.int64],

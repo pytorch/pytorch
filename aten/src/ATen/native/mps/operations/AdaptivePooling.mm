@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/AdaptivePooling.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -17,6 +18,7 @@
 #include <ATen/ops/avg_pool2d_backward.h>
 #include <ATen/ops/max_pool2d_with_indices.h>
 #include <ATen/ops/max_pool2d_with_indices_backward.h>
+#include <ATen/ops/mm.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/ones_like.h>
 #endif
@@ -59,8 +61,32 @@ static void set_kernel_params(int64_t isizeH,
 }
 } // namespace mps
 
+namespace {
+
+Tensor build_adaptive_avg_pool2d_weight(int64_t input_size, int64_t output_size, const Tensor& input) {
+  TORCH_CHECK(output_size > 0, "adaptive_avg_pool2d(): output sizes must be positive");
+
+  const auto weight_dtype = input.scalar_type();
+  auto weight = at::zeros({output_size, input_size}, input.options().device(kCPU).dtype(weight_dtype));
+
+  for (const auto out_idx : c10::irange(output_size)) {
+    const auto start = start_index(out_idx, output_size, input_size);
+    const auto end = end_index(out_idx, output_size, input_size);
+    const double scale = 1.0 / static_cast<double>(end - start);
+    weight[out_idx].narrow(0, start, end - start).fill_(scale);
+  }
+
+  return weight.to(kMPS);
+}
+
+} // namespace
+
 // Adaptive average pooling
 Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size, Tensor& output) {
+  TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
+  TORCH_CHECK((input.dim() == 3 || input.dim() == 4),
+              "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ",
+              input.sizes());
   for (int64_t i = 1; i < input.ndimension(); i++) {
     TORCH_CHECK(input.size(i) > 0,
                 "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
@@ -70,43 +96,57 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
                 i,
                 " being empty");
   }
+  TORCH_CHECK(input.scalar_type() == output.scalar_type(),
+              "expected dtype ",
+              input.scalar_type(),
+              " for `output` but got dtype ",
+              output.scalar_type());
 
-  int64_t isizeH = input.size(-2);
-  int64_t isizeW = input.size(-1);
-  int64_t osizeH = output_size[0];
-  int64_t osizeW = output_size[1];
+  const auto output_height = output_size[0];
+  const auto output_width = output_size[1];
+  TORCH_CHECK(output_height > 0 && output_width > 0, "adaptive_avg_pool2d(): output sizes must be positive");
 
-  int64_t strideH = 0, strideW = 0;
-  int64_t kernel_sizeH = 0, kernel_sizeW = 0;
+  const bool has_batch = input.dim() == 4;
+  const auto memory_format = input.suggest_memory_format();
+  const bool restore_channels_last = has_batch && memory_format == MemoryFormat::ChannelsLast;
 
-  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW, true);
-
-  if (isizeH >= osizeH) {
-    output = at::avg_pool2d(input,
-                            IntArrayRef({kernel_sizeH, kernel_sizeW}),
-                            IntArrayRef({strideH, strideW}),
-                            IntArrayRef({0, 0}),
-                            false,
-                            true,
-                            std::nullopt);
+  if (has_batch) {
+    output.resize_({input.size(0), input.size(1), output_height, output_width}, memory_format);
   } else {
-    Tensor phony_grad = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    auto input_sizes = input.sizes();
-    std::vector<int64_t> phony_shape{input_sizes.begin(), input_sizes.end() - 2};
-    phony_shape.push_back(output_size[0]);
-    phony_shape.push_back(output_size[1]);
-    phony_grad.resize_(IntArrayRef(phony_shape));
-    output = at::avg_pool2d_backward(input,
-                                     phony_grad,
-                                     IntArrayRef({kernel_sizeH, kernel_sizeW}),
-                                     IntArrayRef({strideH, strideW}),
-                                     IntArrayRef({0, 0}),
-                                     false,
-                                     true,
-                                     std::nullopt);
-    // Multiply output by kernel size
-    output = at::mul(output, kernel_sizeH * kernel_sizeW);
+    output.resize_({input.size(0), output_height, output_width});
   }
+  if (output.numel() == 0) {
+    return output;
+  }
+
+  Tensor contiguous_input = has_batch ? input : input.unsqueeze(0);
+  contiguous_input = contiguous_input.contiguous(MemoryFormat::Contiguous);
+
+  const auto batch = contiguous_input.size(0);
+  const auto channels = contiguous_input.size(1);
+  const auto input_height = contiguous_input.size(2);
+  const auto input_width = contiguous_input.size(3);
+
+  const auto weight_w = build_adaptive_avg_pool2d_weight(input_width, output_width, contiguous_input).t();
+  const auto weight_h = build_adaptive_avg_pool2d_weight(input_height, output_height, contiguous_input).t();
+
+  auto reshaped = contiguous_input.reshape({batch * channels * input_height, input_width});
+  auto temp = at::mm(reshaped, weight_w).view({batch, channels, input_height, output_width});
+  temp = temp.permute({0, 1, 3, 2}).contiguous();
+
+  auto reduced = at::mm(temp.reshape({batch * channels * output_width, input_height}), weight_h);
+  reduced = reduced.view({batch, channels, output_width, output_height}).permute({0, 1, 3, 2});
+
+  if (!has_batch) {
+    reduced = reduced.squeeze(0);
+  }
+  if (restore_channels_last && reduced.dim() == 4) {
+    reduced = reduced.contiguous(MemoryFormat::ChannelsLast);
+  } else {
+    reduced = reduced.contiguous();
+  }
+
+  output.copy_(reduced);
 
   return output;
 }
@@ -114,8 +154,8 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
 Tensor adaptive_avg_pool2d_mps(at::Tensor const& input, IntArrayRef output_size) {
   IntArrayRef output_shape;
 
-  auto osizeH = output_size[0];
-  auto osizeW = output_size[1];
+  auto output_height = output_size[0];
+  auto output_width = output_size[1];
 
   std::vector<long long> out_dims = {};
 
@@ -125,14 +165,14 @@ Tensor adaptive_avg_pool2d_mps(at::Tensor const& input, IntArrayRef output_size)
 
     out_dims.push_back(sizeB);
     out_dims.push_back(sizeD);
-    out_dims.push_back(osizeH);
-    out_dims.push_back(osizeW);
+    out_dims.push_back(output_height);
+    out_dims.push_back(output_width);
     output_shape = IntArrayRef(out_dims);
   } else {
     auto sizeD = input.size(0);
     out_dims.push_back(sizeD);
-    out_dims.push_back(osizeH);
-    out_dims.push_back(osizeW);
+    out_dims.push_back(output_height);
+    out_dims.push_back(output_width);
     output_shape = IntArrayRef(out_dims);
   }
 
@@ -142,40 +182,66 @@ Tensor adaptive_avg_pool2d_mps(at::Tensor const& input, IntArrayRef output_size)
 }
 
 Tensor adaptive_avg_pool2d_backward_mps(const Tensor& gradOutput, const Tensor& input) {
-  int64_t isizeH = input.size(-2);
-  int64_t isizeW = input.size(-1);
-  int64_t osizeH = gradOutput.size(-2);
-  int64_t osizeW = gradOutput.size(-1);
+  adaptive_pool_empty_output_check(gradOutput, "adaptive_avg_pool2d_backward");
+  TORCH_CHECK(gradOutput.dim() == input.dim(),
+              __func__,
+              ": Expected dimensions ",
+              input.dim(),
+              " for `grad_output` but got dimensions ",
+              gradOutput.dim());
+  TORCH_CHECK((gradOutput.dim() == 3 || gradOutput.dim() == 4),
+              __func__,
+              ": Expected 3D or 4D tensor, but got ",
+              input.sizes());
+  TORCH_CHECK(input.scalar_type() == gradOutput.scalar_type(),
+              __func__,
+              ": Expected dtype ",
+              input.scalar_type(),
+              " for `grad_output` but got dtype ",
+              gradOutput.scalar_type());
 
-  int64_t strideH = 0, strideW = 0;
-  int64_t kernel_sizeH = 0, kernel_sizeW = 0;
+  const bool has_batch = gradOutput.dim() == 4;
+  const auto memory_format = input.suggest_memory_format();
+  const bool restore_channels_last = has_batch && memory_format == MemoryFormat::ChannelsLast;
 
-  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW, true);
+  Tensor grad_output_contig = has_batch ? gradOutput : gradOutput.unsqueeze(0);
+  grad_output_contig = grad_output_contig.contiguous(MemoryFormat::Contiguous);
 
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  if (gradInput.numel() != 0) {
-    if (isizeH >= osizeH) {
-      gradInput = at::avg_pool2d_backward(gradOutput,
-                                          input,
-                                          IntArrayRef({kernel_sizeH, kernel_sizeW}),
-                                          IntArrayRef({strideH, strideW}),
-                                          IntArrayRef({0, 0}),
-                                          false,
-                                          true,
-                                          std::nullopt);
-    } else {
-      gradInput = at::avg_pool2d(gradOutput,
-                                 IntArrayRef({kernel_sizeH, kernel_sizeW}),
-                                 IntArrayRef({strideH, strideW}),
-                                 IntArrayRef({0, 0}),
-                                 false,
-                                 true,
-                                 std::nullopt);
-      gradInput = at::mul(gradInput, kernel_sizeH * kernel_sizeW);
+  if (grad_output_contig.numel() == 0) {
+    auto grad_input = at::zeros_like(input);
+    if (restore_channels_last && grad_input.dim() == 4) {
+      grad_input = grad_input.contiguous(MemoryFormat::ChannelsLast);
     }
+    return grad_input;
   }
 
-  return gradInput;
+  const auto batch = grad_output_contig.size(0);
+  const auto channels = grad_output_contig.size(1);
+  const auto output_height = grad_output_contig.size(2);
+  const auto output_width = grad_output_contig.size(3);
+  const auto input_height = input.size(-2);
+  const auto input_width = input.size(-1);
+
+  const auto weight_w = build_adaptive_avg_pool2d_weight(input_width, output_width, grad_output_contig);
+  const auto weight_h = build_adaptive_avg_pool2d_weight(input_height, output_height, grad_output_contig);
+
+  auto grad_temp = grad_output_contig.permute({0, 1, 3, 2}).contiguous();
+  grad_temp = at::mm(grad_temp.reshape({batch * channels * output_width, output_height}), weight_h)
+                  .view({batch, channels, output_width, input_height})
+                  .permute({0, 1, 3, 2})
+                  .contiguous();
+
+  auto grad_input = at::mm(grad_temp.reshape({batch * channels * input_height, output_width}), weight_w)
+                        .view({batch, channels, input_height, input_width});
+
+  if (!has_batch) {
+    grad_input = grad_input.squeeze(0);
+  }
+  if (restore_channels_last && grad_input.dim() == 4) {
+    grad_input = grad_input.contiguous(MemoryFormat::ChannelsLast);
+  }
+
+  return grad_input;
 }
 
 // Adaptive max pooling
