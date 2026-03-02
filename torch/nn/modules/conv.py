@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import math
 from typing import Literal, Optional
-from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
@@ -1377,31 +1376,6 @@ class ConvTranspose3d(_ConvTransposeNd):
             self.groups,
             self.dilation,
         )
-
-
-# TODO: Deprecate and remove the following alias `_ConvTransposeMixin`.
-#
-# `_ConvTransposeMixin` was a mixin that was removed.  It is meant to be used
-# with `_ConvNd` to construct actual module classes that implements conv
-# transpose ops:
-#
-#   class MyConvTranspose(_ConvNd, _ConvTransposeMixin):
-#       ...
-#
-# In PyTorch, it has been replaced by `_ConvTransposeNd`, which is a proper
-# subclass of `_ConvNd`.  However, some user code in the wild still (incorrectly)
-# use the internal class `_ConvTransposeMixin`.  Hence, we provide this alias
-# for BC, because it is cheap and easy for us to do so, even though that
-# `_ConvTransposeNd` is really not a mixin anymore (but multiple inheritance as
-# above would still work).
-class _ConvTransposeMixin(_ConvTransposeNd):
-    @deprecated(
-        "`_ConvTransposeMixin` is a deprecated internal class. "
-        "Please consider using public APIs.",
-        category=FutureWarning,
-    )
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
 
 
 # TODO: Conv2dLocal
