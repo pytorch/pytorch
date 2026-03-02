@@ -904,6 +904,37 @@ class TestMPS(TestCaseMPS):
         y_mps = F.conv1d(x.to("mps"), weight.to("mps"))
         self.assertEqual(y_cpu, y_mps)
 
+    def test_conv_transpose3d_inf_weight(self):
+        def assert_match(inp, weight):
+            out_cpu = F.conv_transpose3d(inp, weight)
+            out_mps = F.conv_transpose3d(inp.to("mps"), weight.to("mps")).cpu()
+            self.assertEqual(out_mps, out_cpu)
+
+        weight = torch.zeros((1, 1, 3, 3, 3), dtype=torch.float32)
+        weight[0, 0, 0, 0, 0] = float("inf")
+
+        base_input = torch.zeros((1, 1, 5, 5, 5), dtype=torch.float32)
+        assert_match(base_input, weight)
+
+        positive_input = base_input.clone()
+        positive_input[0, 0, 2, 2, 2] = 1.0
+        assert_match(positive_input, weight)
+
+        negative_input = base_input.clone()
+        negative_input[0, 0, 1, 1, 1] = -2.0
+        assert_match(negative_input, weight)
+
+        mixed_input = torch.zeros((1, 2, 1, 1, 1), dtype=torch.float32)
+        mixed_input[0, 0, 0, 0, 0] = 1.0
+        mixed_input[0, 1, 0, 0, 0] = 1.0
+        mixed_weight = torch.zeros((2, 1, 1, 1, 1), dtype=torch.float32)
+        mixed_weight[0, 0, 0, 0, 0] = float("inf")
+        mixed_weight[1, 0, 0, 0, 0] = float("-inf")
+
+        cpu_nan = F.conv_transpose3d(mixed_input, mixed_weight)
+        mps_nan = F.conv_transpose3d(mixed_input.to("mps"), mixed_weight.to("mps")).cpu()
+        self.assertEqual(cpu_nan.isnan(), mps_nan.isnan())
+
     def test_triu_inf(self, device="mps", dtype=torch.float):
         for diag in [-1, 0, 1]:
             mask = torch.full((3, 6, 6), float("-inf"))

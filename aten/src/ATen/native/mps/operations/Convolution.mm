@@ -4,9 +4,13 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_mps_convolution_native.h>
 #include <ATen/ops/_mps_convolution_transpose_native.h>
+#include <ATen/ops/isinf.h>
 #include <ATen/ops/mps_convolution_backward_native.h>
 #include <ATen/ops/mps_convolution_transpose_backward_native.h>
+#include <ATen/ops/nan_to_num.h>
+#include <c10/util/Optional.h>
 #include <fmt/format.h>
+#include <limits>
 
 namespace at::native {
 
@@ -634,8 +638,74 @@ Tensor _mps_convolution_transpose(const Tensor& input_t,
       (input_t.dim() == 5 && (input_t.scalar_type() == kHalf || input_t.scalar_type() == kBFloat16));
   TORCH_CHECK(!is_unsupported_3d_dtype, "ConvTranspose 3D with BF16 or FP16 types is not supported on MPS");
 
+  auto inf_mask = at::isinf(weight_t);
+  if (!inf_mask.any().item<bool>()) {
+    return mps_convolution_transpose_forward(input_t, weight_t, padding, output_padding, stride, dilation, groups);
+  }
+
+  Tensor finite_weight = at::nan_to_num(weight_t, c10::nullopt, 0.0, 0.0);
   auto output_t =
-      mps_convolution_transpose_forward(input_t, weight_t, padding, output_padding, stride, dilation, groups);
+      mps_convolution_transpose_forward(input_t, finite_weight, padding, output_padding, stride, dilation, groups);
+
+  auto pos_inf_mask = weight_t == std::numeric_limits<double>::infinity();
+  auto neg_inf_mask = weight_t == -std::numeric_limits<double>::infinity();
+  const bool has_pos_inf = pos_inf_mask.any().item<bool>();
+  const bool has_neg_inf = neg_inf_mask.any().item<bool>();
+  if (!has_pos_inf && !has_neg_inf) {
+    return output_t;
+  }
+
+  auto bool_options = output_t.options().dtype(at::kBool);
+  Tensor plus_inf_mask = at::empty(output_t.sizes(), bool_options);
+  plus_inf_mask.zero_();
+  Tensor minus_inf_mask = at::empty(output_t.sizes(), bool_options);
+  minus_inf_mask.zero_();
+
+  auto grad_pos_mask = input_t > 0;
+  auto grad_neg_mask = input_t < 0;
+  const bool grad_pos_any = grad_pos_mask.any().item<bool>();
+  const bool grad_neg_any = grad_neg_mask.any().item<bool>();
+
+  auto run_mask_conv = [&](const Tensor& grad_mask_bool, const Tensor& weight_mask_bool) -> Tensor {
+    auto grad_mask = grad_mask_bool.to(input_t.scalar_type());
+    auto weight_mask = weight_mask_bool.to(weight_t.scalar_type());
+    auto conv =
+        mps_convolution_transpose_forward(grad_mask, weight_mask, padding, output_padding, stride, dilation, groups);
+    return conv > 0;
+  };
+
+  if (has_pos_inf) {
+    if (grad_pos_any) {
+      plus_inf_mask = plus_inf_mask | run_mask_conv(grad_pos_mask, pos_inf_mask);
+    }
+    if (grad_neg_any) {
+      minus_inf_mask = minus_inf_mask | run_mask_conv(grad_neg_mask, pos_inf_mask);
+    }
+  }
+  if (has_neg_inf) {
+    if (grad_pos_any) {
+      minus_inf_mask = minus_inf_mask | run_mask_conv(grad_pos_mask, neg_inf_mask);
+    }
+    if (grad_neg_any) {
+      plus_inf_mask = plus_inf_mask | run_mask_conv(grad_neg_mask, neg_inf_mask);
+    }
+  }
+
+  auto nan_mask = plus_inf_mask & minus_inf_mask;
+  if (nan_mask.any().item<bool>()) {
+    output_t.masked_fill_(nan_mask, std::numeric_limits<double>::quiet_NaN());
+  }
+
+  auto plus_only = plus_inf_mask & (~minus_inf_mask);
+  if (plus_only.any().item<bool>()) {
+    output_t.masked_fill_(plus_only, std::numeric_limits<double>::infinity());
+  }
+
+  auto minus_only = minus_inf_mask & (~plus_inf_mask);
+  if (minus_only.any().item<bool>()) {
+    output_t.masked_fill_(minus_only, -std::numeric_limits<double>::infinity());
+  }
+
   return output_t;
 }
 
