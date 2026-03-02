@@ -4351,6 +4351,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
+    torch.ops.aten._assert_async.msg((index >= 0).all(), "index out of range")
     if index.ndim == 0:
         index = index.unsqueeze(0)
     if x.ndim == 0:
