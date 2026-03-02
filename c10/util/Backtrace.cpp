@@ -17,7 +17,15 @@
 #pragma comment(lib, "Dbghelp.lib")
 #endif
 
-#if SUPPORTS_BACKTRACE
+#if SUPPORTS_LIBBACKTRACE
+#include <backtrace-supported.h>
+#include <backtrace.h>
+#include <dlfcn.h>
+#include <iomanip>
+#include <regex>
+#endif
+
+#if SUPPORTS_LIBBACKTRACE || SUPPORTS_BACKTRACE
 C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-dynamic-exception-spec")
 #include <cxxabi.h>
@@ -116,6 +124,159 @@ class GetBacktraceImpl {
 
  private:
   AndroidBacktraceState state_;
+};
+
+#elif SUPPORTS_LIBBACKTRACE && BACKTRACE_SUPPORTS_THREADS
+
+struct BacktraceData {
+  std::vector<uintptr_t> pcs;
+  size_t max_frames;
+};
+
+struct PrintData {
+  size_t frame_curr; // frame being printed
+  size_t frame_prev; // last frame to be printed
+  backtrace_state* bt_state;
+  bool skip_python_frames;
+  bool has_skipped_python_frames;
+  std::ostringstream os;
+};
+
+void error_callback(void* /* data */, const char* msg, int errnum) {
+  fprintf(stderr, "libbacktrace: %s (%d)\n", msg, errnum);
+}
+
+int collect_frame_callback(void* data, uintptr_t pc) {
+  BacktraceData* bt_data = (BacktraceData*)data;
+  if (bt_data->pcs.size() >= bt_data->max_frames) {
+    return 1; // buffer is full, cannot continue tracing
+  }
+  bt_data->pcs.push_back(pc);
+  return 0;
+}
+
+void print_syminfo_callback(
+    void* data,
+    uintptr_t pc,
+    const char* symname,
+    uintptr_t /* symval */,
+    uintptr_t /* symsize */) {
+  PrintData* pdata = (PrintData*)data;
+
+  Dl_info info;
+  bool dladdr_success = dladdr((void*)pc, &info) != 0;
+
+  if (pdata->skip_python_frames && dladdr_success) {
+    static const std::regex python(R"(\b(lib)?python3?\b)");
+    if (std::regex_search(info.dli_fname, python)) {
+      if (!std::exchange(pdata->has_skipped_python_frames, true)) {
+        pdata->os << "<omitting python frames>\n";
+      }
+      return;
+    }
+    pdata->has_skipped_python_frames = false;
+  }
+
+  pdata->os << "frame #" << pdata->frame_curr << ": ";
+  pdata->os << std::hex << std::showbase;
+  if (symname != nullptr) {
+    pdata->os << symname;
+  } else if (dladdr_success && info.dli_sname != nullptr) {
+    pdata->os << info.dli_sname;
+  } else if (dladdr_success) {
+    pdata->os << "<+" << (pc - (uintptr_t)info.dli_fbase) << '>';
+  } else {
+    pdata->os << '<' << pc << '>';
+  }
+
+  if (dladdr_success) {
+    pdata->os << " from " << info.dli_fname;
+  }
+
+  pdata->os << '\n' << std::noshowbase << std::dec;
+}
+
+int print_pcinfo_callback(
+    void* data,
+    uintptr_t pc,
+    const char* filename,
+    int lineno,
+    const char* function) {
+  PrintData* pdata = (PrintData*)data;
+
+  // According to libbacktrace's documentation, backtrace_pcinfo
+  // might invoke the callback more than once if the PC happens
+  // to describe an inlined call. GDB seems to not be printing
+  // these inlined calls. To match it's behavior, we only print
+  // the first time this function is invoked on a PC.
+  if (std::exchange(pdata->frame_prev, pdata->frame_curr) ==
+      pdata->frame_curr) {
+    return 0;
+  }
+
+  if (function == nullptr) {
+    backtrace_syminfo(
+        pdata->bt_state, pc, print_syminfo_callback, error_callback, data);
+    return 0;
+  }
+
+  int status = 0;
+  char* demangled = abi::__cxa_demangle(function, nullptr, nullptr, &status);
+  pdata->os << "frame #" << pdata->frame_curr << ": "
+            << (status == 0 ? demangled : function) << " from "
+            << (filename ? filename : "???") << ':' << lineno << '\n';
+  free(demangled);
+  return 0;
+}
+
+class GetBacktraceImpl {
+ public:
+  static backtrace_state* state() {
+    static backtrace_state* bt_state = [] {
+      return backtrace_create_state(
+          nullptr, BACKTRACE_SUPPORTS_THREADS, error_callback, nullptr);
+    }();
+    return bt_state;
+  }
+
+  C10_ALWAYS_INLINE GetBacktraceImpl(
+      size_t frames_to_skip,
+      size_t maximum_number_of_frames,
+      bool skip_python_frames)
+      : skip_python_frames_(skip_python_frames) {
+    backtrace_.pcs.reserve(maximum_number_of_frames);
+    backtrace_.max_frames = maximum_number_of_frames;
+    backtrace_simple(
+        state(),
+        frames_to_skip,
+        collect_frame_callback,
+        error_callback,
+        (void*)&backtrace_);
+  }
+
+  std::string symbolize() const {
+    PrintData pdata;
+    pdata.frame_curr = 0;
+    pdata.frame_prev = -1;
+    pdata.bt_state = state();
+    pdata.skip_python_frames = skip_python_frames_;
+    pdata.has_skipped_python_frames = false;
+
+    for (size_t i = 0; i < backtrace_.pcs.size(); ++i) {
+      pdata.frame_curr = i;
+      backtrace_pcinfo(
+          pdata.bt_state,
+          backtrace_.pcs[i],
+          print_pcinfo_callback,
+          error_callback,
+          (void*)&pdata);
+    }
+
+    return pdata.os.str();
+  }
+
+  bool skip_python_frames_;
+  BacktraceData backtrace_;
 };
 
 #elif SUPPORTS_BACKTRACE // !defined(C10_ANDROID)
