@@ -12072,6 +12072,71 @@ def sample_inputs_abs(op_info, device, dtype, requires_grad, op_kwargs=None, **k
             requires_grad=requires_grad,
         ))
 
+def sample_inputs_ternary_beta_family(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg_probs = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        exclude_zero=True,
+        low=0.1,
+        high=0.9,
+    )
+
+    make_arg_params = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        exclude_zero=True,
+        low=0.1,
+    )
+    li_make_arg = [make_arg_params, make_arg_params, make_arg_probs]
+
+    test_cases = [
+        (((S, S), (S, S), (S, S)), False),
+        (((S, 1), (1, S), (S, S)), False),
+        (((S, S, 1), (1, S), (1,)), True),
+        (((), (), ()), False),
+        (((), (), (S, S)), True),
+        (((S, S, 1), (1, S), ()), True),
+    ]
+
+    for input_args, broadcasts_input in test_cases:
+        args = tuple(
+            li_make_arg[idx](arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+            for idx, arg in enumerate(input_args)
+        )
+        yield SampleInput(*args).with_metadata(broadcasts_input=broadcasts_input)
+
+def sample_inputs_binary_beta_family(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg_params = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        exclude_zero=True,
+        low=0.1,
+    )
+
+    li_make_arg = [make_arg_params, make_arg_params]
+
+    test_cases = [
+        (((S, S), (S, S)), False),
+        (((S, S), (S, 1)), False),
+        (((1,), (S, S)), True),
+        (((), ()), False),
+        (((S, S), ()), True),
+        (((), (1, S)), True),
+    ]
+    for input_args, broadcasts_input in test_cases:
+        args = tuple(
+            li_make_arg[idx](arg, exclude_zero=True) if isinstance(arg, tuple) else arg
+            for idx, arg in enumerate(input_args)
+        )
+        yield SampleInput(*args).with_metadata(broadcasts_input=broadcasts_input)
+
+
 # Operator database (sorted alphabetically)
 op_db: list[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -12457,6 +12522,60 @@ op_db: list[OpInfo] = [
                # vmap: calling random operator not supported
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+           )),
+    OpInfo('special.betainc',
+           aten_name='special_betainc',
+           ref=scipy.special.betainc,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_inplace_autograd=False,
+           supports_fwgrad_bwgrad=True,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_ternary_beta_family,
+           skips=(
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapjvpall_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapvjp_has_batch_rule"),
+           )),
+    OpInfo('special.betaincinv',
+           aten_name='special_betaincinv',
+           ref=scipy.special.betaincinv,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_inplace_autograd=False,
+           supports_fwgrad_bwgrad=True,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_ternary_beta_family,
+           skips=(
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapjvpall_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapvjp_has_batch_rule"),
+           )),
+    OpInfo('special.betaln',
+           aten_name='special_betaln',
+           ref=scipy.special.betaln,
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_inplace_autograd=False,
+           supports_fwgrad_bwgrad=True,
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_binary_beta_family,
+           skips=(
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapjvpall_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestOperators", "test_vmapvjp_has_batch_rule"),
            )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),

@@ -1036,6 +1036,30 @@
 - name: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
   self: not_implemented("zeta")
 
+- name: special_betaln(Tensor a, Tensor b) -> Tensor
+  a: grad * (at::digamma(a) - at::digamma(a + b))
+  b: grad * (at::digamma(b) - at::digamma(a + b))
+  result: (at::digamma(a_p) - at::digamma(a_p + b_p)) * a_t + (at::digamma(b_p) - at::digamma(a_p + b_p)) * b_t
+
+
+- name: special_betainc(Tensor a, Tensor b, Tensor x) -> Tensor
+  a, b, x: "[&]() {
+            if (!grad.defined())
+              return std::make_tuple(Tensor(), Tensor(), Tensor());
+            auto [g_a, g_b, g_x] = _special_betainc_partials(a, b, x);
+            return std::make_tuple(grad * g_a, grad * g_b, grad * g_x); }()"
+  result: "[&]() { auto [g_a, g_b, g_x] = _special_betainc_partials(a_p, b_p, x_p);
+                   return g_a * a_t + g_b * b_t + g_x * x_t; }()"
+
+- name: special_betaincinv(Tensor a, Tensor b, Tensor y) -> Tensor
+  a, b, y: "[&]() {
+            if (!grad.defined())
+              return std::make_tuple(Tensor(), Tensor(), Tensor());
+            auto [g_a, g_b, g_y] = _special_betaincinv_partials(a, b, y);
+            return std::make_tuple(grad * g_a, grad * g_b, grad * g_y); }()"
+  result: "[&]() { auto [g_a, g_b, g_y] = _special_betaincinv_partials(a_p, b_p, y_p);
+                   return g_a * a_t + g_b * b_t + g_y * y_t; }()"
+
 - name: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.zero_()

@@ -452,6 +452,44 @@ inline Tensor& zeta_out(
   return torch::special_zeta_out(result, self, other);
 }
 
+/// Computes betaln
+/// ```
+inline Tensor betaln(const Tensor& a, const Tensor& b) {
+  return torch::special_betaln(a, b);
+}
+
+inline Tensor& betaln_out(Tensor& result, const Tensor& a, const Tensor& b) {
+  return torch::special_betaln_out(result, a, b);
+}
+
+/// Computes betainc
+/// ```
+inline Tensor betainc(const Tensor& a, const Tensor& b, const Tensor& x) {
+  return torch::special_betainc(a, b, x);
+}
+
+inline Tensor& betainc_out(
+    Tensor& result,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& x) {
+  return torch::special_betainc_out(result, a, b, x);
+}
+
+/// Computes betaincinv
+/// ```
+inline Tensor betaincinv(const Tensor& a, const Tensor& b, const Tensor& y) {
+  return torch::special_betaincinv(a, b, y);
+}
+
+inline Tensor& betaincinv_out(
+    Tensor& result,
+    const Tensor& a,
+    const Tensor& b,
+    const Tensor& y) {
+  return torch::special_betaincinv_out(result, a, b, y);
+}
+
 /// Computes the zeroth order modified Bessel function of the first kind of
 /// input, elementwise See
 /// https://pytorch.org/docs/main/special.html#torch.special.i0

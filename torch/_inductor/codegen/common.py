@@ -1226,6 +1226,11 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         cpp=lambda x: f"airy_ai_forward({x})",
         name="special_airy_ai",
     ),
+    betainc=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        cpp=lambda a, b, x: f"calc_betainc({a}, {b}, {x})",
+        name="special_betainc",
+    ),
     bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x: f"bessel_j0_forward({x})",

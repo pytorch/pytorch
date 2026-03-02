@@ -7172,6 +7172,13 @@ register_lowering(
     aten.special_erf, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )(erf)
 
+make_fallback(aten._special_betainc_partials)
+
+make_fallback(aten.special_betaincinv)
+make_fallback(aten._special_betaincinv_partials)
+
+make_fallback(aten.special_betaln)
+
 register_pointwise_numeric(aten.log1p)
 register_pointwise_numeric(aten.tan)
 register_pointwise_numeric(aten.tanh)

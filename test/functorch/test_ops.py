@@ -1429,6 +1429,9 @@ class TestOperators(TestCase):
                 xfail("svd_lowrank", ""),
                 xfail("nn.functional.feature_alpha_dropout", "with_train"),
                 xfail("special.log_ndtr", ""),
+                xfail("special.betainc", ""),
+                xfail("special.betaincinv", ""),
+                xfail("special.betaln", ""),
                 xfail("fft.ihfft2"),  # conj_physical fallback
                 xfail("fft.ihfftn"),  # conj_physical fallback
                 xfail("nn.functional.max_unpool3d", "grad"),

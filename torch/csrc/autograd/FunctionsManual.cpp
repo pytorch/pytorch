@@ -22,6 +22,7 @@
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/TensorOptions.h>
+#include <c10/util/MathConstants.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/util/accumulate.h>

@@ -13801,6 +13801,76 @@
     CompositeExplicitAutograd: special_zeta_out
   tags: pointwise
 
+- func: special_betainc(Tensor a, Tensor b, Tensor x) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  structured_delegate: special_betainc.out
+  tags: pointwise
+
+- func: special_betainc.out(Tensor a, Tensor b, Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_betainc_out
+  tags: pointwise
+
+- func: special_betaln(Tensor a, Tensor b) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  structured_delegate: special_betaln.out
+  tags: pointwise
+
+- func: special_betaln.out(Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_betaln_out
+  tags: pointwise
+
+- func: special_betaincinv(Tensor a, Tensor b, Tensor y) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  structured_delegate: special_betaincinv.out
+  tags: pointwise
+
+- func: special_betaincinv.out(Tensor a, Tensor b, Tensor y, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_betaincinv_out
+  tags: pointwise
+
+- func: _special_betainc_partials(Tensor a, Tensor b, Tensor x) -> (Tensor, Tensor, Tensor)
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    Meta: _special_betainc_partials_meta
+    CPU: _special_betainc_partials
+    CUDA: _special_betainc_partials_cuda
+  tags: pointwise
+
+
+- func: _special_betaincinv_partials(Tensor a, Tensor b, Tensor y) -> (Tensor, Tensor, Tensor)
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    Meta: _special_betaincinv_partials_meta
+    CPU: _special_betaincinv_partials
+    CUDA: _special_betaincinv_partials_cuda
+  tags: pointwise
+
 - func: special_i0(Tensor self) -> Tensor
   python_module: special
   variants: function
