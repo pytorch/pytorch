@@ -2446,6 +2446,78 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_capture_failure_recovery(self):
+        """Test that RNG operations and memory are properly cleaned up after a failed capture.
+
+        When CUDA graph capture fails (e.g., due to sync operations like .item()),
+        the following should be properly cleaned up:
+        1. Generator state - capturing_ flag should be reset to False
+        2. Memory pool - any memory allocated during failed capture should be released
+
+        Without proper cleanup:
+        - RNG operations fail with "Offset increment outside graph capture encountered unexpectedly"
+        - Memory allocated during failed capture would leak
+        """
+        # Clear cache and record baseline memory
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        mem_before = torch.cuda.memory_allocated()
+
+        # First capture - intentionally fail with sync during capture
+        graph = torch.cuda.CUDAGraph()
+        x = torch.randn(1, device="cuda")
+
+        large_tensor = None
+        with self.assertRaisesRegex(
+            RuntimeError, "(operation not permitted|operation failed)"
+        ):
+            with torch.cuda.graph(graph):
+                # Allocate some memory during capture that should be released on failure
+                large_tensor = torch.randn(32 * 1024 * 1024, device="cuda")  # 128MB
+                x.item()  # Sync during capture causes failure
+
+        # Clean up the failed graph and tensors - this should release the memory pool
+        # Note: large_tensor was allocated before the exception, so it's still alive
+        # and must be explicitly deleted for the memory to be freed
+        del x
+        del large_tensor
+        del graph
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+        # Verify memory is released (allowing small overhead for internal state)
+        mem_after_cleanup = torch.cuda.memory_allocated()
+        # Memory should be back to approximately baseline (within 1MB tolerance)
+        # If the 128MB tensor was not released, this would fail
+        self.assertLess(
+            mem_after_cleanup - mem_before,
+            1024 * 1024,  # 1MB tolerance
+            f"Memory not properly released after failed capture: "
+            f"before={mem_before}, after={mem_after_cleanup}, "
+            f"leaked={(mem_after_cleanup - mem_before) / (1024 * 1024):.1f} MB",
+        )
+
+        # Second capture - should succeed if generator state was properly cleaned up
+        graph2 = torch.cuda.CUDAGraph()
+        a = torch.randn(8, device="cuda")
+
+        # This RNG operation should work - it would fail with
+        # "Offset increment outside graph capture encountered unexpectedly"
+        # if the generator state was not cleaned up properly
+        with torch.cuda.graph(graph2):
+            b = a + 1
+            c = torch.randn(8, device="cuda")  # RNG operation inside capture
+
+        # Verify the graph works
+        graph2.replay()
+
+        # RNG operations outside capture should also work
+        d = torch.randn(8, device="cuda")
+        self.assertEqual(d.shape, torch.Size([8]))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     @serialTest()
     @setBlasBackendsToDefaultFinally
     def test_repeat_graph_capture_cublas_workspace_memory(self):

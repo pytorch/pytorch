@@ -140,7 +140,32 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream.stream() == capture_stream_.stream(),
               "Capture must end on the same stream it began on.");
 
-  AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
+  // Use try-catch to ensure generator states and allocator pools are cleaned up
+  // even if cudaStreamEndCapture fails (e.g., due to sync operations like .item()
+  // during capture). Without this, the generator's capturing_ flag remains true,
+  // causing subsequent RNG operations to fail with:
+  // "Offset increment outside graph capture encountered unexpectedly."
+  try {
+    AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
+  } catch (...) {
+    // Clean up generator states - must call capture_epilogue to reset capturing_ flag
+    for (auto& [generator_state, wholegraph_increments] :
+         captured_generator_states_) {
+      generator_state->capture_epilogue();
+    }
+    // End allocator pool allocation and release memory.
+    // Wrap in try-catch to ensure we don't lose the original exception
+    // and that we re-throw it after cleanup completes.
+    try {
+      c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+      at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
+      c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
+      at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);
+    } catch (const std::exception& e) {
+      TORCH_WARN("CUDA graph capture failed and cleanup also failed: ", e.what());
+    }
+    throw;
+  }
 
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
@@ -275,11 +300,6 @@ void CUDAGraph::reset() {
   //
   // Calling reset() in the C++ destructor, with warnings instead of exceptions
   // if calls fail, is the compromise we chose.
-  //
-  // If capture_begin, the capture, or capture_end failed at some point, this CUDAGraph, the generator,
-  // and the allocator could end up in all kinds of weird states depending where failure occurred.
-  // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
-  // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
   if (capture_ended_) {
     // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
     // private pool cleanup
