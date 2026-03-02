@@ -15541,6 +15541,46 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = " ".join(code)
         self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
+    @torch._functorch.config.patch(donated_buffer=False)
+    def test_complex_scalar_istft_pattern(self):
+        if not self.is_dtype_supported(torch.complex64):
+            raise unittest.SkipTest("complex64 not supported on device")
+
+        filter_length = 256
+        hop_length = 64
+        win_length = 256
+
+        window = torch.hann_window(win_length, device=self.device)
+
+        def fn(magnitude, phase):
+            return torch.istft(
+                magnitude * torch.exp(phase * 1j),
+                filter_length,
+                hop_length,
+                win_length,
+                window=window,
+            )
+
+        n_fft_bins = filter_length // 2 + 1
+        num_frames = 10
+
+        magnitude = torch.randn(
+            n_fft_bins,
+            num_frames,
+            dtype=torch.float32,
+            device=self.device,
+            requires_grad=True,
+        )
+        phase = torch.randn(
+            n_fft_bins,
+            num_frames,
+            dtype=torch.float32,
+            device=self.device,
+            requires_grad=True,
+        )
+
+        self.common(fn, (magnitude, phase), check_gradient=True)
+
     @requires_cuda_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_addcmul_type_promotion(self):

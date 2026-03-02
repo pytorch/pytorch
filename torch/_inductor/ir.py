@@ -8091,11 +8091,12 @@ class FallbackKernel(ExternKernelAlloc):
             if library_utils.is_tensorlist_like_type(info.type):
                 if arg is not None:
                     for optional_tensor_arg in arg:
-                        add_alias(optional_tensor_arg)
+                        if isinstance(optional_tensor_arg, IRNode):
+                            add_alias(optional_tensor_arg)
             else:
                 assert library_utils.is_tensor_like_type(info.type)
-
-                add_alias(arg)
+                if isinstance(arg, IRNode):
+                    add_alias(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
