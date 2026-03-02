@@ -207,45 +207,55 @@ def initialize_cuda_context_rng():
 
 
 @contextlib.contextmanager
+def tf32(
+    enable=True,
+    *,
+    test_self=None,
+    precision=None,
+    math_sdp_precision='ieee',
+):
+    """
+    Context manager for TF32 and related settings. Restores previous state on exit.
+    All parameters are optional; None means "do not change".
+
+    Args:
+        enable: True to enable TF32 for CUDA operations., False to disable, None to leave unchanged.
+        precision: If set with test_self, temporarily set test_self.precision.
+        test_self: Test class instance to set precision.
+        math_sdp_precision: Temporarily set math_sdp.fp32_precision.
+    """
+    change_precision = precision is not None and test_self is not None
+    old_precision = test_self.precision if change_precision else None
+    old_math_sdp_fp32_precision = torch.backends.cuda.math_sdp.fp32_precision if math_sdp_precision is not None else None
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32 if enable is not None else None
+    try:
+        if change_precision:
+            test_self.precision = precision
+        if math_sdp_precision is not None:
+            torch.backends.cuda.math_sdp.fp32_precision = math_sdp_precision
+        if enable is not None:
+            torch.backends.cuda.matmul.allow_tf32 = enable
+            with torch.backends.cudnn.flags(
+                enabled=None, benchmark=None, deterministic=None, allow_tf32=enable
+            ):
+                yield
+        else:
+            yield
+    finally:
+        if math_sdp_precision is not None:
+            torch.backends.cuda.math_sdp.fp32_precision = old_math_sdp_fp32_precision
+        if enable is not None:
+            torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+        if change_precision:
+            test_self.precision = old_precision
+
+
 def tf32_off():
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
-            yield
-    finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+    return tf32(False, math_sdp_precision=None)
 
 
-@contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    old_precision = self.precision
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        self.precision = tf32_precision
-        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
-            yield
-    finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
-        self.precision = old_precision
-
-
-@contextlib.contextmanager
-def tf32_enabled():
-    """
-    Context manager to temporarily enable TF32 for CUDA operations.
-    Restores the previous TF32 state after exiting the context.
-    """
-    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = True
-        with torch.backends.cudnn.flags(
-            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
-        ):
-            yield
-    finally:
-        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
+    return tf32(True, test_self=self, precision=tf32_precision, math_sdp_precision=None)
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
