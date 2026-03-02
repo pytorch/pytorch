@@ -531,7 +531,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
         &heuristicResult,
         &returnedResult));
   } else {
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+    cublasStatus_t heuristic_status = cublasLtMatmulAlgoGetHeuristic(
         ltHandle,
         computeDesc.descriptor(),
         Adesc.descriptor(),
@@ -541,7 +541,26 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
         preference.descriptor(),
         1,
         &heuristicResult,
-        &returnedResult));
+        &returnedResult);
+#ifdef USE_ROCM
+    if (heuristic_status != CUBLAS_STATUS_SUCCESS) {
+      // HipblasLt heuristic lookup may transiently fail for some GEMM descriptors.
+      // An immediate retry often succeeds, retry once before surfacing the error.
+      TORCH_WARN("ROCm: bgemm retrying heuristic");
+      heuristic_status = cublasLtMatmulAlgoGetHeuristic(
+          ltHandle,
+          computeDesc.descriptor(),
+          Adesc.descriptor(),
+          Bdesc.descriptor(),
+          Cdesc.descriptor(),
+          Cdesc.descriptor(),
+          preference.descriptor(),
+          1,
+          &heuristicResult,
+          &returnedResult);
+    }
+#endif
+    TORCH_CUDABLAS_CHECK(heuristic_status);
   }
   if (returnedResult == 0) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
