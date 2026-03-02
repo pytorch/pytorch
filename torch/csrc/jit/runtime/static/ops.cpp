@@ -1346,7 +1346,7 @@ namespace {
 
 struct ToArgs {
   std::optional<at::ScalarType> dtype;
-  c10::Layout layout;
+  c10::Layout layout{};
   bool know_to_will_alias = false;
   std::optional<c10::MemoryFormat> memory_format;
 };

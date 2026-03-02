@@ -724,6 +724,7 @@ Constant constantToValue(
       std::vector<std::vector<int64_t>> ret;
       for (const auto& inner_list : jsonArg.get_as_int_lists()) {
         std::vector<int64_t> inner_ret;
+        inner_ret.reserve(inner_list.size());
         for (const auto& val : inner_list) {
           inner_ret.push_back(val);
         }

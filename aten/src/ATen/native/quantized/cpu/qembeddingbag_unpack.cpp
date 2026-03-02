@@ -166,7 +166,7 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
 Tensor qembeddingbag_byte_unpack_meta(const Tensor& packed_weight) {
   const auto packed_weight_sizes = packed_weight.sym_sizes();
   const auto col_dim = packed_weight_sizes.size() - 1;
-  const auto input_columns = packed_weight_sizes[col_dim];
+  const auto& input_columns = packed_weight_sizes[col_dim];
   // The last 2 values are used to store the FP32 scale and zero_point values
   // per row.
   const auto output_columns = input_columns - 2 * c10::SymInt(sizeof(float));

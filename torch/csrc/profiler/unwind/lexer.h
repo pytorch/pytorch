@@ -17,13 +17,14 @@ struct LexerImpl {
 
   template <typename T>
   T read() {
-    T result;
     auto end = next_ + sizeof(T);
     UNWIND_CHECK(
         !checked || end <= end_,
         "read out of bounds {} >= {}",
         (void*)end,
         (void*)end_);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    T result;
     memcpy(&result, next_, sizeof(T));
     next_ = end;
     return result;

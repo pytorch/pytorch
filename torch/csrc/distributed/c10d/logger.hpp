@@ -28,14 +28,14 @@ struct ProcessGroupStatus {
   std::string lastCompletedWorkName;
 
   // the sizes of the last work enqueued
-  size_t lastEnqueuedNumelIn;
-  size_t lastEnqueuedNumelOut;
+  size_t lastEnqueuedNumelIn{};
+  size_t lastEnqueuedNumelOut{};
   // the sizes of the last work completed
-  size_t lastCompletedNumelIn;
-  size_t lastCompletedNumelOut;
+  size_t lastCompletedNumelIn{};
+  size_t lastCompletedNumelOut{};
   // the sizes of the last work started
-  size_t lastStartedNumelIn;
-  size_t lastStartedNumelOut;
+  size_t lastStartedNumelIn{};
+  size_t lastStartedNumelOut{};
 };
 
 class TORCH_API Logger {

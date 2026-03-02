@@ -1006,7 +1006,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   BackendType backendType_;
   std::string pg_desc_;
-  int64_t splitCounter_;
+  int64_t splitCounter_{};
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.

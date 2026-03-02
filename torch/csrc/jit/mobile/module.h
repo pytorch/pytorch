@@ -182,8 +182,8 @@ class TORCH_API Module {
 };
 
 struct TORCH_API ModuleInfo {
-  uint64_t bytecode_version;
-  uint64_t operator_version;
+  uint64_t bytecode_version{};
+  uint64_t operator_version{};
   std::unordered_map<std::string, int> opname_to_num_args;
   std::unordered_set<std::string> function_names;
   std::unordered_set<std::string> type_names;

@@ -540,7 +540,7 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
     }
   }
 
-  auto info = at::native::make_info(self, std::move(indices));
+  auto info = at::native::make_info(self, indices);
   build_index_op(*this, info, result);
   return TORCH_PRECOMPUTE_STRUCT2(index, Tensor)()
       .set_sizes(std::move(info.indexed_sizes))
@@ -782,7 +782,7 @@ Tensor _unsafe_masked_index(
     return at::clamp(*index, -size, size - 1);
   };
 
-  torch::List<std::optional<Tensor>> clamped_indices(indices);
+  const torch::List<std::optional<Tensor>>& clamped_indices(indices);
   std::transform(
       indices.begin(),
       indices.end(),
@@ -846,7 +846,7 @@ Tensor _unsafe_masked_index_put_accumulate(
     return at::clamp(*index, -size, size - 1);
   };
 
-  torch::List<std::optional<Tensor>> clamped_indices(indices);
+  const torch::List<std::optional<Tensor>>& clamped_indices(indices);
   std::transform(
       indices.begin(),
       indices.end(),
@@ -2682,9 +2682,7 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
   indices_broadcasted =
       indices_broadcasted.remainder(self_broadcasted.size(dim));
   return std::make_tuple(
-      std::move(self_broadcasted),
-      std::move(indices_broadcasted),
-      std::move(dim));
+      std::move(self_broadcasted), std::move(indices_broadcasted), dim);
 }
 
 inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {

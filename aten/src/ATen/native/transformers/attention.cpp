@@ -176,7 +176,7 @@ void debug_assert_shape(int line, const Tensor& t, c10::IntArrayRef shape) {
   if (t.is_nested()) {
     return;
   }
-  for (auto idx : c10::irange(shape.size())) {
+  for (auto idx [[maybe_unused]]: c10::irange(shape.size())) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         shape[idx] == 0 || t.sizes()[idx] == shape[idx],
         "(called from line ",

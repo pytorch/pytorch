@@ -70,7 +70,7 @@ private:
 void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet) {
   auto nesting_value = dispatch_trace_nesting_value();
   for (int64_t i = 0; i < nesting_value; ++i) std::cerr << ' ';
-  std::cerr << label << " op=[" << op_name << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << ']' << std::endl;
+  std::cerr << label << " op=[" << op_name << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << ']' << '\n';
 }
 } // namespace detail
 
@@ -371,7 +371,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
     *this,
     dispatch_key,
     std::move(kernel),
-    std::move(cpp_signature),
+    cpp_signature,
     std::move(inferred_function_schema),
     std::move(debug)
   );

@@ -264,7 +264,7 @@ struct TORCH_API StringCordView {
     // skip extra complexity and just use string_view::iterator
     // directly.
     struct FastRepr {
-      std::string_view::iterator it;
+      std::string_view::iterator it{};
       const StringCordView* str;
 
       FastRepr() : str(nullptr) {}

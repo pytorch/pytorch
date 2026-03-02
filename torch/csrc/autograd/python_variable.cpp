@@ -1807,7 +1807,7 @@ static PyObject* THPVariable_dtensor_new(
 
 struct NativeRuntimeSchemaInfo {
   py::object static_kwargkey;
-  size_t static_argnum;
+  size_t static_argnum{};
 };
 
 NativeRuntimeSchemaInfo unpack_runtime_schema_info(

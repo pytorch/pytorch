@@ -496,9 +496,9 @@ struct GenericViewFunc : public ViewFunc {
       torch::jit::Stack non_tensor_stack,
       size_t aliased_input_idx_val,
       c10::OperatorHandle op)
-      : non_tensor_stack_(non_tensor_stack),
+      : non_tensor_stack_(std::move(non_tensor_stack)),
         aliased_input_idx_val_(aliased_input_idx_val),
-        op_(op) {
+        op_(std::move(op)) {
     // This should report saved Tensors and SymInts.
     // We already have an assert that ensure there are no Tensors here
     // by making sure there is only one Tensor input.

@@ -135,7 +135,7 @@ void fillDynamicInputs(
   // fill the stack with dynamic values from execution frame,
   // including tensor, tensors, symint, symints
 
-  for (auto [idx, value] : arguments.getDynamicArgs()) {
+  for (const auto& [idx, value] : arguments.getDynamicArgs()) {
     TORCH_CHECK(
         idx < stack.size(),
         "Invalid index",

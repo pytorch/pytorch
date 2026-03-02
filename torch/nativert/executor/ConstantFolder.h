@@ -10,7 +10,7 @@
 namespace torch::nativert {
 
 struct Foldable {
-  Node* node;
+  Node* node{nullptr};
   std::unique_ptr<OpKernel> kernel;
 };
 

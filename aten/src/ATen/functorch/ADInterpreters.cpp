@@ -139,7 +139,7 @@ static void autogradBasedTransformSendToNext(
   std::bitset<default_bitset_size> outputs_aliasing_immutable; // set = 1 for all bits
   if(!grad_special_case) {
     for (auto idx = stack->size() - args_size; idx < stack->size(); idx++) {
-      const auto ivalue = (*stack)[idx];
+      const auto& ivalue = (*stack)[idx];
       if (!ivalue.isTensor()) {
         continue; // only input that can be aliased is a tensor, not a tensor list (expect in ops without returns)
       }

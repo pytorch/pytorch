@@ -581,10 +581,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     bool enabled_{false};
 
     // From ProcessGroupNCCL
-    int rank_;
-    int size_;
-    int globalRank_;
-    int pgId_;
+    int rank_{};
+    int size_{};
+    int globalRank_{};
+    int pgId_{};
 
     // Reference to the store so that we can log start/end event.
     c10::intrusive_ptr<Store> store_;

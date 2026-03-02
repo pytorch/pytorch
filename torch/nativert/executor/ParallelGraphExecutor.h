@@ -46,8 +46,8 @@ class ThreadPoolExecutor;
 typedef std::function<void()> Work;
 
 struct WorkUnit {
-  const Node* node;
-  OpKernel* kernel;
+  const Node* node{nullptr};
+  OpKernel* kernel{nullptr};
   std::vector<WorkUnit*> users;
   void run(ThreadPoolExecutor* executor, SessionState* sessionState);
 };

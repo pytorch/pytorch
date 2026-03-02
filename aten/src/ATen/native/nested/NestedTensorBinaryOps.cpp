@@ -77,7 +77,7 @@ static Tensor NestedTensor_elementwise_Tensor(
     const Tensor& other,
     const std::string& op_name,
     bool supports_striding,
-    Func f) {
+    const Func& f) {
   Tensor self_contiguous = self;
   Tensor other_contiguous = other;
   // self is a scalar
@@ -238,7 +238,7 @@ static Tensor& NestedTensor_elementwise__Tensor(
     Tensor& self,
     const Tensor& other,
     const std::string& op_name,
-    Func f) {
+    const Func& f) {
   // self is a scalar
   if (!self.is_nested() && self.dim() == 0 && self.numel() == 1) {
     auto other_impl = get_nested_tensor_impl(other);

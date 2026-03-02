@@ -183,9 +183,9 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
 
 template <>
 struct ExtraFields<EventType::Backend> {
-  int64_t start_time_us_;
-  int64_t end_time_us_;
-  int64_t debug_handle_;
+  int64_t start_time_us_{};
+  int64_t end_time_us_{};
+  int64_t debug_handle_{};
   at::RecordScope scope_;
   std::string name_;
   std::string backend_;
@@ -252,7 +252,7 @@ static_assert(
     "Non-Trivial member of ExtraFields<EventType::OutOfMemory>.");
 
 struct PyFrameState {
-  int line_no_;
+  int line_no_{};
   at::StringView filename_;
   at::StringView funcname_;
 };
@@ -455,13 +455,13 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
 struct KinetoObserverContext : public at::ObserverContext {
   struct Event {
     TorchOpBasicFields basic_fields_;
-    c10::approx_time_t start_time_;
+    c10::approx_time_t start_time_{};
 
     // Set in the exit callback.
     c10::approx_time_t end_time_{
         std::numeric_limits<c10::approx_time_t>::min()};
 
-    bool allow_tf32_cublas_;
+    bool allow_tf32_cublas_{};
     std::unique_ptr<perf_counters_t> counters_;
     extra_meta_t* extra_nccl_meta_{};
   };

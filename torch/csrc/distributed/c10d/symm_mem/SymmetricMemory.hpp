@@ -143,8 +143,8 @@ TORCH_API void set_group_info(
     c10::intrusive_ptr<Store> store);
 
 struct GroupInfo {
-  int rank;
-  int world_size;
+  int rank{};
+  int world_size{};
   c10::intrusive_ptr<c10d::Store> store;
 };
 

@@ -9,7 +9,7 @@
 typedef std::function<void(PyObject*, PyObject*, bool)> THPCopyFunction;
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPCopyInfo {
-  PyTypeObject* srcType; // Python type of src tensor/storage
+  PyTypeObject* srcType{nullptr}; // Python type of src tensor/storage
   THPCopyFunction copy; // copy function
   bool non_blocking; // true if copy implements an 'non_blocking' copy
   bool broadcast; // true if the copy implements a broadcast copy

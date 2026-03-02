@@ -7,7 +7,7 @@ QTensorImpl::QTensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
     QuantizerPtr quantizer)
-    : TensorImpl(std::move(storage), std::move(key_set), data_type),
+    : TensorImpl(std::move(storage), key_set, data_type),
       quantizer_(std::move(quantizer)) {}
 
 QTensorImpl::QTensorImpl(
@@ -16,7 +16,7 @@ QTensorImpl::QTensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
     QuantizerPtr quantizer)
-    : TensorImpl(type, std::move(storage), std::move(key_set), data_type),
+    : TensorImpl(type, std::move(storage), key_set, data_type),
       quantizer_(std::move(quantizer)) {}
 
 const char* QTensorImpl::tensorimpl_type_name() const {
