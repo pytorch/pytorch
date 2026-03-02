@@ -9,10 +9,8 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch._ops import OpOverload
-from torch.utils._ordered_set import OrderedSet
 
 from . import ir
-from .virtualized import V
 
 
 if TYPE_CHECKING:
@@ -64,28 +62,25 @@ def try_lower_to_out_variant(
         return _lower_single_output(
             kernel,
             out_op,
-            out_arg_names,
             example_output,
             tensor_args,
             non_tensor_args,
             kwargs,
         )
 
-    # TODO: multi-output ops (tuple/list returns) need a packed node
-    # (CustomOpMultiOutputNode) for the .out() call plus per-output children
-    # (AllocatingMultiOutput, should_allocate=True) for buffer planning.
+    # TODO: multi-output ops (tuple/list returns) will be handled in a
+    # follow-up via CustomOpMultiOutputNode + AllocatingMultiOutput.
     return None
 
 
 def _lower_single_output(
     kernel: OpOverload,
     out_op: OpOverload,
-    out_arg_names: list[str],
     example_output: torch.Tensor,
     tensor_args: Sequence[ir.IRNode],
     non_tensor_args: Sequence[Any],
     kwargs: dict[str, Any],
-) -> Optional[ir.IRNode]:
+) -> ir.ExternKernelOut:
     """Lower a single-output functional op to ExternKernelOut."""
     layout = ir.FixedLayout(
         device=example_output.device,
@@ -94,17 +89,18 @@ def _lower_single_output(
         stride=[*example_output.stride()],
     )
 
-    node = CustomOpExternKernelOut(
+    python_kernel_name = _make_python_kernel_name(out_op)
+
+    node = ir.ExternKernelOut(
         layout=layout,
         inputs=list(tensor_args),
         constant_args=list(non_tensor_args),
-        out_op=out_op,
-        out_arg_names=out_arg_names,
-        op_overload=out_op,
         kwargs=kwargs,
+        python_kernel_name=python_kernel_name,
+        op_overload=out_op,
     )
 
-    log.debug("Lowered %s -> %s (out args: %s)", kernel, out_op, out_arg_names)
+    log.debug("Lowered %s -> %s via ExternKernelOut", kernel, out_op)
     return node
 
 
@@ -114,66 +110,3 @@ def _make_python_kernel_name(out_op: OpOverload) -> str:
     op_name = out_op._schema.name.split("::")[1]
     overload = out_op._overloadname
     return f"torch.ops.{ns}.{op_name}.{overload}"
-
-
-def _codegen_input_args(node: ir.ExternKernel) -> list[str]:
-    """Codegen positional + constant args as strings."""
-    assert ir.is_node_sequence(node.inputs)
-    args = [x.codegen_reference() for x in node.inputs]  # type: ignore[union-attr]
-    for const in node.constant_args:
-        args.append(V.graph.wrapper_code.val_to_arg_str(const))
-    return args
-
-
-def _codegen_kwargs(node: ir.ExternKernel, skip_names: OrderedSet[str]) -> list[str]:
-    """Codegen keyword args, skipping names in ``skip_names``."""
-    result = []
-    for k, v in node.kwargs.items():
-        if k not in skip_names:
-            result.append(f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}")
-    return result
-
-
-class CustomOpExternKernelOut(ir.ExternKernelOut):
-    """ExternKernelOut with flexible out-arg naming from schema.
-
-    Uses the schema's actual out-arg name (e.g. "result") instead of
-    hardcoded "out=". Inherits should_allocate()=True for buffer reuse.
-    """
-
-    out_op: OpOverload
-    out_arg_names: list[str]
-
-    def __init__(
-        self,
-        layout: ir.Layout,
-        inputs: Sequence[ir.IRNode],
-        constant_args: Sequence[Any] = (),
-        out_op: Optional[OpOverload] = None,
-        out_arg_names: Optional[list[str]] = None,
-        op_overload: Optional[OpOverload] = None,
-        kwargs: Optional[dict[str, Any]] = None,
-    ) -> None:
-        assert out_op is not None, "out_op is required"
-        python_kernel_name = _make_python_kernel_name(out_op)
-        super().__init__(
-            layout=layout,
-            inputs=inputs,
-            constant_args=constant_args,
-            kwargs=kwargs,
-            python_kernel_name=python_kernel_name,
-            op_overload=op_overload,
-        )
-        self.out_op = out_op
-        self.out_arg_names = out_arg_names or ["out"]
-
-    def codegen(self, wrapper: Any) -> None:
-        self.codegen_comment(wrapper)
-        args = _codegen_input_args(self)
-        kwargs_list = _codegen_kwargs(self, skip_names=OrderedSet(self.out_arg_names))
-        kernel_name = self.get_kernel_name()
-        out_ref = self.codegen_reference()
-
-        all_args = [*args, *kwargs_list]
-        all_args.append(f"{self.out_arg_names[0]}={out_ref}")
-        wrapper.writeline(f"{kernel_name}({', '.join(all_args)})")

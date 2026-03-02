@@ -2,7 +2,6 @@
 """
 Tests for inductor lowering of functional custom ops to out-variant via ExternKernelOut.
 """
-import unittest
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -13,7 +12,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
-requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 DEVICES = ("cpu", GPU_TYPE) if HAS_GPU else ("cpu",)
 
@@ -50,7 +48,7 @@ class TestCustomOpOutLowering(InductorTestCase):
     def test_add_one_lowered_to_out(self, device):
         """Test that a simple functional op gets lowered to its out-variant."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            func_op, out_op = self._register_add_one_ops(lib)
+            self._register_add_one_ops(lib)
 
             def f(x):
                 return torch.ops.mylib.add_one(x)
