@@ -1345,5 +1345,145 @@ class TestSingleDimStrategyRegistration(TestCase):
         self.assertIsNone(result, "No-output op should return None")
 
 
+class TestPropagateOutputSharding(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.world_size = 8
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_propagate_output_sharding_mm(self):
+        from torch.distributed.tensor._sharding_prop import propagate_output_sharding
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(2, 4))
+        left_meta, right_meta = _get_mm_metas()
+
+        result = propagate_output_sharding(
+            mesh,
+            torch.ops.aten.mm.default,
+            (left_meta, right_meta),
+            [(Shard(0), Replicate()), (Replicate(), Replicate())],
+        )
+        self.assertIsInstance(result, DTensorSpec)
+        self.assertEqual(result.placements, (Shard(0), Replicate()))
+        self.assertEqual(result.tensor_meta.shape, torch.Size([64, 64]))
+
+    def test_propagate_output_sharding_mm_mismatch(self):
+        from torch.distributed.tensor._sharding_prop import propagate_output_sharding
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(2, 4))
+        left_meta, right_meta = _get_mm_metas()
+
+        # Shard(0) on both inputs for mm is not a valid strategy; redistribution needed.
+        result = propagate_output_sharding(
+            mesh,
+            torch.ops.aten.mm.default,
+            (left_meta, right_meta),
+            [(Shard(0), Replicate()), (Shard(0), Replicate())],
+        )
+        self.assertIsNone(result)
+
+    def test_propagate_output_sharding_with_non_tensor_args(self):
+        from torch.distributed.tensor._sharding_prop import propagate_output_sharding
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        meta = TensorMeta(
+            shape=torch.Size([8, 16]),
+            stride=(16, 1),
+            dtype=torch.float32,
+        )
+
+        result = propagate_output_sharding(
+            mesh,
+            torch.ops.aten.sum.dim_IntList,
+            (meta, [1], False),
+            [(Shard(0),)],
+        )
+        self.assertIsInstance(result, DTensorSpec)
+        self.assertEqual(result.placements, (Shard(0),))
+        self.assertEqual(result.tensor_meta.shape, torch.Size([8]))
+
+    def test_propagate_output_sharding_multi_output(self):
+        from torch.distributed.tensor._sharding_prop import propagate_output_sharding
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        meta = TensorMeta(
+            shape=torch.Size([8, 16]),
+            stride=(16, 1),
+            dtype=torch.float32,
+        )
+
+        # topk along dim=1 with replicated input should produce replicated outputs
+        result = propagate_output_sharding(
+            mesh,
+            torch.ops.aten.topk.default,
+            (meta, 4, 1),
+            [(Replicate(),)],
+        )
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        for spec in result:
+            self.assertIsInstance(spec, DTensorSpec)
+            self.assertEqual(spec.placements, (Replicate(),))
+            self.assertEqual(spec.tensor_meta.shape, torch.Size([8, 4]))
+
+    def test_propagate_output_sharding_sort(self):
+        from torch.distributed.tensor._sharding_prop import propagate_output_sharding
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        meta = TensorMeta(
+            shape=torch.Size([8, 16]),
+            stride=(16, 1),
+            dtype=torch.float32,
+        )
+
+        # sort along dim=1 with Shard(0) input: sharding is on a different dim,
+        # so it should propagate without redistribution.
+        result = propagate_output_sharding(
+            mesh,
+            torch.ops.aten.sort.default,
+            (meta, 1),
+            [(Shard(0),)],
+        )
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        for spec in result:
+            self.assertIsInstance(spec, DTensorSpec)
+            self.assertEqual(spec.placements, (Shard(0),))
+            self.assertEqual(spec.tensor_meta.shape, torch.Size([8, 16]))
+
+    def test_propagate_output_sharding_split(self):
+        from torch.distributed.tensor._sharding_prop import propagate_output_sharding
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        meta = TensorMeta(
+            shape=torch.Size([8, 16]),
+            stride=(16, 1),
+            dtype=torch.float32,
+        )
+
+        # split along dim=0 with size 4, input is Shard(1) so the split dim
+        # is independent of the sharded dim. split returns List[Tensor], which
+        # surfaces as a tuple of DTensorSpecs.
+        result = propagate_output_sharding(
+            mesh,
+            torch.ops.aten.split.Tensor,
+            (meta, 4, 0),
+            [(Shard(1),)],
+        )
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)  # 8 / 4 = 2 chunks
+        for spec in result:
+            self.assertIsInstance(spec, DTensorSpec)
+            self.assertEqual(spec.placements, (Shard(1),))
+            self.assertEqual(spec.tensor_meta.shape, torch.Size([4, 16]))
+
+
 if __name__ == "__main__":
     run_tests()

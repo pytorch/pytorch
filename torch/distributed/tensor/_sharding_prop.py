@@ -36,7 +36,7 @@ from torch.distributed.tensor._utils import (
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.distributed.tensor.placement_types import _StridedShard, Placement, Shard
 from torch.utils._pytree import tree_map
 
 
@@ -298,6 +298,149 @@ def _select_min_cost_strategy(
         )
 
     return strategy.strategies[selected_strategy_index]
+
+
+def _try_single_dim_fast_path(
+    propagator: "ShardingPropagator",
+    op_schema: OpSchema,
+    mesh: DeviceMesh,
+    strategy_info: "_SingleDimStrategyInfo",
+    in_placements: Sequence[tuple[Placement, ...]],
+) -> OutputSpecType | None:
+    """
+    Try to resolve output sharding by checking per-mesh-dim strategy match.
+
+    Returns the output spec if all mesh dims match, or None if no exact match
+    is found (caller should fall through to the slow path).
+    """
+    from torch.distributed.tensor._ops.single_dim_strategy import (
+        _build_output_specs,
+        _PreparedSingleDimStrategy,
+    )
+
+    out_tensor_meta = propagator._propagate_tensor_meta(op_schema)
+    wrapped_schema = propagator._wrap_with_op_strategy(op_schema)
+    prepared = _PreparedSingleDimStrategy(
+        strategy_info,
+        wrapped_schema,
+        out_tensor_meta,
+        num_inputs=len(in_placements),
+    )
+
+    # Per-mesh-dim lookup: check if input placements match a valid strategy.
+    selected_output_placements: list[tuple[Placement, ...]] = []
+    for mesh_dim in range(mesh.ndim):
+        input_key = tuple(pt[mesh_dim] for pt in in_placements)
+        output_for_dim = prepared.strategy_lookup.get(input_key)
+        if output_for_dim is not None:
+            selected_output_placements.append(output_for_dim)
+        else:
+            return None
+
+    if prepared.num_outputs == 0:
+        return None
+
+    return _build_output_specs(
+        mesh,
+        selected_output_placements,
+        prepared.num_outputs,
+        prepared.output_metas,
+    )
+
+
+def propagate_output_sharding(
+    mesh: DeviceMesh,
+    op: OpOverload,
+    op_args: tuple[object, ...],
+    in_placements: Sequence[tuple[Placement, ...]],
+    op_kwargs: dict[str, object] | None = None,
+) -> OutputSpecType:
+    """
+    Given a mesh, ATen op, input tensor metadata, and input placements, determine
+    the output sharding (placements + tensor meta) for all output tensors without
+    constructing DTensors.
+
+    Args:
+        mesh: The device mesh for the operation.
+        op: The ATen operator overload (e.g., ``aten.mm.default``).
+        op_args: Positional args matching the op schema. Use ``TensorMeta`` for
+            tensor arguments and actual values for non-tensor arguments (e.g.,
+            ``dim`` for ``aten.sum.dim_IntList``).
+        in_placements: One tuple of placements per ``TensorMeta`` in ``op_args``,
+            in order of appearance. Lists of ``TensorMeta`` (e.g. for cat) each
+            consume one entry per element.
+        op_kwargs: Optional keyword arguments for the op.
+
+    Returns:
+        ``DTensorSpec`` for single-tensor output, a tuple of ``DTensorSpec | None``
+        for multi-tensor output, or ``None`` if the given input placements don't
+        match any valid strategy (redistribution would be needed).
+    """
+    from torch.distributed.tensor import DTensor
+
+    propagator = DTensor._op_dispatcher.sharding_propagator
+
+    # Build args_schema: replace TensorMeta with DTensorSpec, pass through others.
+    placement_iter = iter(in_placements)
+    args_schema: list[object] = []
+    needs_pytree = False
+    for arg in op_args:
+        if isinstance(arg, TensorMeta):
+            placements = next(placement_iter)
+            args_schema.append(DTensorSpec(mesh, tuple(placements), tensor_meta=arg))
+        elif isinstance(arg, list) and arg and isinstance(arg[0], TensorMeta):
+            needs_pytree = True
+            args_schema.append(
+                [
+                    DTensorSpec(mesh, tuple(next(placement_iter)), tensor_meta=m)
+                    for m in arg
+                ]
+            )
+        else:
+            args_schema.append(arg)
+
+    kwargs_schema: dict[str, object] = {}
+    if op_kwargs:
+        for k, v in op_kwargs.items():
+            if isinstance(v, TensorMeta):
+                placements = next(placement_iter)
+                kwargs_schema[k] = DTensorSpec(mesh, tuple(placements), tensor_meta=v)
+            else:
+                kwargs_schema[k] = v
+
+    # Determine schema_info for this op.
+    schema_info = propagator.op_to_schema_info.get(op)
+    if schema_info is None:
+        schema_info = propagator.op_to_schema_info_for_single_dim_strategy.get(op)
+    if needs_pytree and (schema_info is None or not schema_info.needs_pytree):
+        schema_info = RuntimeSchemaInfo(
+            static_argnum=schema_info.static_argnum if schema_info else 100,
+            static_kwargkey=schema_info.static_kwargkey if schema_info else None,
+            needs_pytree=True,
+        )
+
+    op_schema = OpSchema(
+        op=op,
+        args_schema=tuple(args_schema),
+        kwargs_schema=kwargs_schema,
+        schema_info=schema_info,
+    )
+
+    # Fast path for single-dim strategy ops: check per-mesh-dim whether the
+    # input placements match a valid strategy, avoiding combinatorial expansion
+    # and cost computation.
+    strategy_info = propagator.op_single_dim_strategy_funcs.get(op)
+    if strategy_info is not None and not op.name().startswith("aten::_foreach_"):
+        result = _try_single_dim_fast_path(
+            propagator, op_schema, mesh, strategy_info, in_placements
+        )
+        if result is not None:
+            return result
+
+    output_sharding = propagator.propagate_op_sharding_non_cached(op_schema)
+    if output_sharding.needs_redistribute:
+        return None
+    return output_sharding.output_spec
 
 
 class ShardingPropagator:
