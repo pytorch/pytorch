@@ -451,6 +451,10 @@ std::string CUDAHooks::showConfig() const {
     oss << '\n';
   }
   oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << '\n';
+#else
+  // ROCm version info
+  oss << "  - ROCm " << (ROCM_VERSION / 10000) << '.'
+      << (ROCM_VERSION / 100 % 100) << '.' << (ROCM_VERSION % 100) << '\n';
 #endif
 
 #if !defined(USE_ROCM)
