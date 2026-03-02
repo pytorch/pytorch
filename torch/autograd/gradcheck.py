@@ -1080,7 +1080,7 @@ Expected:
 """.strip()
 
 
-def _test_batched_grad_forward_ad(func, inputs) -> bool:
+def _test_batched_grad_forward_ad(func, inputs, nondet_tol=0.0) -> bool:
     fwAD = torch.autograd.forward_ad  # To avoid early import issues (do we need this?)
     if not isinstance(inputs, tuple):
         raise AssertionError("Expected inputs to be a tuple")
@@ -1130,7 +1130,9 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
             ) from ex
 
         for input_idx, (res, exp) in enumerate(zip(result, expected)):
-            if torch.allclose(res, exp):
+            if torch.allclose(res, exp) or (
+                nondet_tol > 0 and (res - exp).abs().max() <= nondet_tol
+            ):
                 continue
             raise GradcheckError(
                 _get_failed_batched_grad_test_msg(
@@ -2148,7 +2150,7 @@ def _gradcheck_helper(
     )
 
     if check_batched_forward_grad:
-        _test_batched_grad_forward_ad(func, tupled_inputs)
+        _test_batched_grad_forward_ad(func, tupled_inputs, nondet_tol)
 
     # Short circuit because remaining tests rely on backward AD to be implemented
     if not check_backward_ad:
