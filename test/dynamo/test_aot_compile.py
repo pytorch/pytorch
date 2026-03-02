@@ -1088,7 +1088,7 @@ from user code:
         actual = compiled_fn(*inputs)
         self.assertEqual(expected, actual)
 
-    @skipIfXpu(msg="CompiledAOTI need XPU support - xpu-ops: 2806")
+    @skipIfXpu(msg="CompiledAOTI need XPU support - torch-xpu-ops: 2806")
     def test_aot_compile_with_aoti(self):
         with torch.device(device_type):
             from torch._dynamo.hooks import Hooks
