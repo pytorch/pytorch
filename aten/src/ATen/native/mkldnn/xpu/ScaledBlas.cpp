@@ -43,22 +43,29 @@ using at::blas::SwizzleType;
 
 namespace {
 /*
- * Scaling Type Determination:
- * ---------------------------
- * Conditions and corresponding Scaling Types:
+ * Scaling Type Determination (XPU):
+ * -------------------------------------------
+ * All scale tensors must be float32 and contiguous in the inner dim
+ * (stride(1) == 1) for blockwise modes.
  *
- * - If scale tensor is `Float8_e8m0fnu` or `Float8_e4m3fn`:
- *   - Returns BlockWise (with additional size checks).
+ * For matrix A [M, K] and scale_a:
+ *   - TensorWise:    scale_a is a singleton (numel==1)
+ *   - RowWise:       scale_a has shape [M, 1]
+ *   - BlockWise1x128: scale_a has shape [M, K//128], stride(1)==1
+ *   - BlockWise128x128: scale_a has shape [M//128, K//128], stride(1)==1
  *
- * - Else if scale.numel() == 1:
- *   - Returns TensorWise.
+ * For matrix B [K, N] and scale_b:
+ *   - TensorWise:    scale_b is a singleton (numel==1)
+ *   - RowWise:       scale_b has shape [1, N]
+ *   - BlockWise1x128: scale_b has shape [K//128, N], stride(1)==1
+ *   - BlockWise128x128: scale_b has shape [K//128, N//128], stride(1)==1
  *
- * - Else if scale.dim() == 2 && scale.size(0) == outer_dim && scale.size(1) ==
- * 1:
- *   - Returns RowWise.
- *
- * - Otherwise:
- *   - Returns Error.
+ * Supported (A, B) scaling combinations:
+ *   - (TensorWise, TensorWise)
+ *   - (RowWise, RowWise)
+ *   - (BlockWise128x128, BlockWise1x128)  -- DeepSeek-style
+ *   - (BlockWise1x128, BlockWise128x128)
+ *   - (BlockWise1x128, BlockWise1x128)
  */
 
 bool is_tensorwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
@@ -73,14 +80,44 @@ bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
       scale.is_contiguous());
 }
 
+// XPU uses row-major (inner-dim-contiguous) scale tensors for both A and B.
+// For a matrix t [rows, cols]:
+//   BlockWise1x128:   scale has shape [rows, cols//128], stride(1)==1
+//   BlockWise128x128: scale has shape [rows//128, cols//128], stride(1)==1
+bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  return (
+      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
+      scale.dim() == 2 && scale.size(0) == t.size(0) &&
+      scale.size(1) == ceil_div<int64_t>(t.size(1), 128) &&
+      scale.stride(1) == 1);
+}
+
+bool is_blockwise_128x128_scaling(
+    const at::Tensor& t,
+    const at::Tensor& scale) {
+  return (
+      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
+      scale.dim() == 2 && scale.size(0) == ceil_div<int64_t>(t.size(0), 128) &&
+      scale.size(1) == ceil_div<int64_t>(t.size(1), 128) &&
+      scale.stride(1) == 1);
+}
+
 bool is_desired_scaling(
     const at::Tensor& t,
     const at::Tensor& scale,
     ScalingType desired_scaling) {
-  auto result = desired_scaling == ScalingType::TensorWise
-      ? is_tensorwise_scaling(t, scale)
-      : is_rowwise_scaling(t, scale);
-  return result;
+  switch (desired_scaling) {
+    case ScalingType::TensorWise:
+      return is_tensorwise_scaling(t, scale);
+    case ScalingType::RowWise:
+      return is_rowwise_scaling(t, scale);
+    case ScalingType::BlockWise1x128:
+      return is_blockwise_1x128_scaling(t, scale);
+    case ScalingType::BlockWise128x128:
+      return is_blockwise_128x128_scaling(t, scale);
+    default:
+      return false;
+  }
 }
 
 std::pair<ScalingType, ScalingType> get_joint_scaling(
@@ -90,8 +127,16 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
     const at::Tensor& scale_a,
     const at::Tensor& scale_b) {
   for (auto [lhs, rhs] : options) {
+    // For blockwise, XPU scale shapes are row-major for both A and B, so B is
+    // checked directly (not transposed). For TensorWise/RowWise we use the .t()
+    // convention (matching B's transposed view) as before.
+    bool use_blockwise_b =
+        (rhs == ScalingType::BlockWise1x128 ||
+         rhs == ScalingType::BlockWise128x128);
+    const at::Tensor& b_check = use_blockwise_b ? b : b.t();
+    const at::Tensor& scale_b_check = use_blockwise_b ? scale_b : scale_b.t();
     if (is_desired_scaling(a, scale_a, lhs) &&
-        is_desired_scaling(b.t(), scale_b.t(), rhs)) {
+        is_desired_scaling(b_check, scale_b_check, rhs)) {
       return {lhs, rhs};
     }
   }
@@ -104,6 +149,24 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ", 1) and scale_b should be (1, ",
       b.size(1),
       "), and both should be contiguous.\n"
+      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      a.size(0),
+      ", ",
+      ceil_div<int64_t>(a.size(1), 128),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0), 128),
+      ", ",
+      b.size(1),
+      "), both with stride(1)==1.\n"
+      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      ceil_div<int64_t>(a.size(0), 128),
+      ", ",
+      ceil_div<int64_t>(a.size(1), 128),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0), 128),
+      ", ",
+      ceil_div<int64_t>(b.size(1), 128),
+      "), both with stride(1)==1.\n"
       "Got a.dtype()=",
       a.scalar_type(),
       ", scale_a.dtype()=",
@@ -160,30 +223,32 @@ Tensor& _scaled_gemm(
 } // namespace
 
 // Computes matrix multiply + bias while applying scaling to input and output
-// matrices Scales are only applicable when matrices are of Float8 type and
-// assumed to be equal to 1.0 by default. If output matrix type is 16 or 32-bit
-// type, scale_result is not applied. Known limitations:
+// matrices. Scales are only applicable when matrices are of Float8 type.
+// Scale tensors must be float32 with stride(1)==1 for blockwise modes.
+// Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
-//  - Only works if matrices sizes are divisible by 32
-//  - If 1-dimensional tensors are used then scale_a should be size =
-//  mat1.size(0)
-//    and scale_b should have size = to mat2.size(1)
+//  - Only works if matrices sizes are divisible by 16
 //  Arguments:
-//    - `mat1`: the first operand of the matrix multiply, can be type
-//    `torch.float8_e4m3fn` or `torch.float8_e5m2`
-//    - `mat2`: the second operand of the matrix multiply, can be type
-//    `torch.float8_e4m3fn` or `torch.float8_e5m2`
-//    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
-//    - `out_dtype`: the output dtype, can either be a float8 or a higher
-//    precision floating point type
-//    - `scale_a`: a tensor with the inverse scale of `mat1`, whose
-//    shape/strides/dtype depend on the scaling scheme
-//    - `scale_b`: a tensor with the inverse scale of `mat2`, whose
-//    shape/strides/dtype depend on the scaling scheme
-//    - `scale_result`: a scalar tensor with the scale of the output, only
-//    utilized if the output is a float8 type
-//    - `use_fast_accum`: Not applicable for XPU. For now, it should always be
-//    false.
+//    - `mat1`: the first operand [M, K], type `torch.float8_e4m3fn` or
+//    `torch.float8_e5m2`
+//    - `mat2`: the second operand [K, N], type `torch.float8_e4m3fn` or
+//    `torch.float8_e5m2`
+//    - `bias`: optional bias of size N, type `torch.float16`, `torch.bfloat16`,
+//    or `torch.float32`
+//    - `out_dtype`: the output dtype
+//    - `scale_a`: inverse scale of `mat1`; shape depends on scaling scheme:
+//        TensorWise: scalar tensor;
+//        RowWise: [M, 1];
+//        BlockWise1x128: [M, K//128];
+//        BlockWise128x128: [M//128, K//128]
+//    - `scale_b`: inverse scale of `mat2`; shape depends on scaling scheme:
+//        TensorWise: scalar tensor;
+//        RowWise: [1, N];
+//        BlockWise1x128: [K//128, N];
+//        BlockWise128x128: [K//128, N//128]
+//    - `scale_result`: a scalar tensor with the scale of the output (not
+//    currently supported on XPU)
+//    - `use_fast_accum`: not supported on XPU, silently ignored
 //    - `out`: a reference to the output tensor
 
 Tensor& _scaled_mm_out_xpu(
@@ -227,6 +292,12 @@ Tensor& _scaled_mm_out_xpu(
       {
           std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
           std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
+          std::make_pair(
+              ScalingType::BlockWise128x128, ScalingType::BlockWise1x128),
+          std::make_pair(
+              ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
+          std::make_pair(
+              ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
       },
       mat1,
       mat2,
