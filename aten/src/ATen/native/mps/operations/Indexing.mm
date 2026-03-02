@@ -616,8 +616,10 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
               "index_select(): Index to scalar can have only 1 value, got ",
               num_indices,
               " value(s)");
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-              "index_select(): Expected dtype int32 or int64 for index");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int ||
+                  index.scalar_type() == ScalarType::Short || index.scalar_type() == ScalarType::UInt16 ||
+                  index.scalar_type() == ScalarType::Byte,
+              "index_select(): Expected dtype int16, uint16, int32, int64, or uint8 for index");
   TORCH_CHECK(self.scalar_type() == output.scalar_type(),
               "index_select(): self and output must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(), "index_select(): Indexing dim ", dim, " is out of bounds of tensor");

@@ -101,11 +101,11 @@ struct _EmbeddingBagKernelCacheImpl : private StorageMixins... {
         // if the cache doesn't store the kernel for the incoming block size
         // (so it is different from the one stored in corresponding mixin)
         // regenerate the kernel (not writing it into the cache so we avoid locks)
-        if (block_size != _CallbackAndBlockSize<has_weight, TIndex, TData>::blockSize) {
+        if (block_size != this->_CallbackAndBlockSize<has_weight, TIndex, TData>::blockSize) {
             return _CallbackAndBlockSize<has_weight, TIndex, TData>::generateCallback(block_size);
         }
         // else retrieve the cached kernel from the corresponding mixin
-        return _CallbackAndBlockSize<has_weight, TIndex, TData>::callback;
+        return this->_CallbackAndBlockSize<has_weight, TIndex, TData>::callback;
     }
 };
 

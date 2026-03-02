@@ -2118,7 +2118,13 @@ class TestIndexing(TestCase):
                     out2 = ref_index_select(src, dim, idx)
                     self.assertEqual(out, out2)
 
-        for idx_type in (torch.int32, torch.int64):
+        for idx_type in (
+            torch.int16,
+            torch.uint16,
+            torch.int32,
+            torch.int64,
+            torch.uint8,
+        ):
             other_sizes = (3, 2)
             dim = 1
             src = make_arg(other_sizes, num_src, dim, True)

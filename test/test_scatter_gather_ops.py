@@ -135,6 +135,19 @@ class TestScatterGather(TestCase):
         expected = torch.tensor(((False, False), (True, True)), device=device, dtype=dtype)
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
+    @parametrize("index_dtype", [torch.uint8, torch.uint16, torch.int16])
+    @dtypes(torch.float32, torch.float64, torch.int32, torch.int64)
+    def test_gather_small_index_dtypes(self, device, dtype, index_dtype):
+        # Test that uint8, uint16, and int16 indices work for gather
+        src = torch.tensor(((1.0, 2.0, 3.0), (4.0, 5.0, 6.0)), device=device, dtype=dtype)
+        idx_base = torch.tensor(((0, 2), (1, 0)), device=device, dtype=torch.long)
+        idx_test = idx_base.to(index_dtype)
+
+        actual_test = torch.gather(src, 1, idx_test)
+        actual_long = torch.gather(src, 1, idx_base)
+
+        self.assertEqual(actual_test, actual_long, atol=0, rtol=0)
+
     @parametrize("sparse_grad", [False, True])
     @dtypes(torch.float32, torch.float64)
     def test_gather_backward_with_empty_index_tensor(self, device, dtype, sparse_grad):

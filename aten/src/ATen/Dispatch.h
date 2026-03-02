@@ -775,11 +775,17 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 #define AT_DISPATCH_BIT_TYPES(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_BIT_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_INDEX_TYPES(TYPE, NAME, ...)     \
-  AT_DISPATCH_SWITCH(                                \
-      TYPE,                                          \
-      NAME,                                          \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(               \
-          at::ScalarType::Int, index_t, __VA_ARGS__) \
-          AT_PRIVATE_CASE_TYPE_USING_HINT(           \
-              at::ScalarType::Long, index_t, __VA_ARGS__))
+#define AT_DISPATCH_INDEX_TYPES(TYPE, NAME, ...)                 \
+  AT_DISPATCH_SWITCH(                                            \
+      TYPE,                                                      \
+      NAME,                                                      \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                           \
+          at::ScalarType::Byte, index_t, __VA_ARGS__)            \
+          AT_PRIVATE_CASE_TYPE_USING_HINT(                       \
+              at::ScalarType::Short, index_t, __VA_ARGS__)       \
+              AT_PRIVATE_CASE_TYPE_USING_HINT(                   \
+                  at::ScalarType::UInt16, index_t, __VA_ARGS__)  \
+                  AT_PRIVATE_CASE_TYPE_USING_HINT(               \
+                      at::ScalarType::Int, index_t, __VA_ARGS__) \
+                      AT_PRIVATE_CASE_TYPE_USING_HINT(           \
+                          at::ScalarType::Long, index_t, __VA_ARGS__))
