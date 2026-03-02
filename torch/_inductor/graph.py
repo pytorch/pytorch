@@ -1426,10 +1426,12 @@ class GraphLowering(torch.fx.Interpreter):
                             *args, **kwargs
                         )
 
-            if layout_constraints:
+            if layout_constraints and target is not torch.ops.aten.copy_.default:
                 # layout_constraints are allowed to make new copies of the inputs.
                 # if they do, and if the target is mutable, then we need to
                 # write the new values back into the original inputs.
+                # Since copy_ is the mutation propagation mechanism, skip mutation
+                # propagation for copy_ itself to avoid infinite recursion.
                 self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
 
             return out
