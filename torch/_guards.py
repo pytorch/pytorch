@@ -4,7 +4,9 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import hashlib
 import logging
+import pickle
 import re
 import threading
 import traceback
@@ -1142,13 +1144,24 @@ def dataclass_with_cached_hash(
     cls: type[T] | None = None, **kwargs: Any
 ) -> type[T] | Callable[[type[T]], type[T]]:
     def wrap(cls_inner: type[T]) -> type[T]:
-        new_cls = dataclasses.dataclass(cls_inner, **kwargs)
+        new_cls = dataclasses.dataclass(cls_inner, unsafe_hash=False, **kwargs)
         old_hash = cls_inner.__hash__
 
         def __hash__(self) -> int:
-            if not hasattr(self, "_hash"):
-                object.__setattr__(self, "_hash", old_hash(self))
-            return self._hash
+            if hasattr(self, "_hash"):
+                return self._hash
+            try:
+                field_values = tuple(
+                    getattr(self, f.name) for f in dataclasses.fields(self)
+                )
+                hash_result = int(
+                    hashlib.sha256(pickle.dumps(field_values)).hexdigest(), 16
+                )
+            except Exception:
+                # Fall back to dataclass-generated hash if pickling fails
+                hash_result = old_hash(self)
+            object.__setattr__(self, "_hash", hash_result)
+            return hash_result
 
         def __reduce__(self):
             # Exclude _hash from pickling to ensure deterministic cache keys.
