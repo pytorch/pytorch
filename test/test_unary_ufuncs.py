@@ -685,6 +685,78 @@ class TestUnaryUfuncs(TestCase):
         ):
             torch.polygamma(-1, torch.tensor([1.0, 2.0], device=device))
 
+    @onlyCUDA
+    def test_polygamma_cpu_cuda_consistency(self, device):
+        """Test that polygamma produces consistent results between CPU and CUDA.
+
+        This test verifies that CPU and CUDA implementations produce the same results
+        (matching NaN/Inf patterns and finite values) for moderate orders (n = 0-50).
+        Extreme values (n > 100) may have differences which is acceptable per maintainer feedback.
+        """
+        # Test moderate orders (focus on commonly used values)
+        orders = [0, 1, 2, 3, 5, 10, 20, 30, 50]
+
+        # Test various input ranges with double precision for numerical accuracy
+        test_inputs = [
+            torch.linspace(-2.0, 2.0, 20, dtype=torch.double),  # Negative to positive
+            torch.linspace(0.1, 5.0, 20, dtype=torch.double),    # Positive only
+            torch.linspace(-5.0, -0.1, 20, dtype=torch.double),  # Negative only
+        ]
+
+        for n in orders:
+            for x in test_inputs:
+                cpu_result = torch.polygamma(n, x)
+                cuda_result = torch.polygamma(n, x.to(device)).cpu()
+
+                # Check NaN consistency - both should have NaN at same positions
+                cpu_nan = torch.isnan(cpu_result)
+                cuda_nan = torch.isnan(cuda_result)
+                self.assertEqual(
+                    cpu_nan,
+                    cuda_nan,
+                    msg=f"NaN mismatch for n={n}, x range [{x.min():.2f}, {x.max():.2f}]",
+                )
+
+                # Check Inf consistency - both should have Inf at same positions
+                cpu_inf = torch.isinf(cpu_result)
+                cuda_inf = torch.isinf(cuda_result)
+                self.assertEqual(
+                    cpu_inf,
+                    cuda_inf,
+                    msg=f"Inf mismatch for n={n}, x range [{x.min():.2f}, {x.max():.2f}]",
+                )
+
+                # Check finite values - assertEqual handles tensor comparison with tolerance
+                finite_mask = ~(cpu_nan | cpu_inf)
+                if finite_mask.any():
+                    self.assertEqual(
+                        cpu_result[finite_mask],
+                        cuda_result[finite_mask],
+                        msg=f"Finite mismatch for n={n}, x range [{x.min():.2f}, {x.max():.2f}]",
+                    )
+
+        # Also explicitly test the reported issue case (n=200, linspace(-2, 2, 10))
+        n = 200
+        x = torch.linspace(-2.0, 2.0, 10, dtype=torch.double)
+        cpu_result = torch.polygamma(n, x)
+        cuda_result = torch.polygamma(n, x.to(device)).cpu()
+
+        cpu_nan = torch.isnan(cpu_result)
+        cuda_nan = torch.isnan(cuda_result)
+        self.assertEqual(cpu_nan, cuda_nan, msg="NaN mask mismatch for n=200 repro case")
+
+        cpu_inf = torch.isinf(cpu_result)
+        cuda_inf = torch.isinf(cuda_result)
+        self.assertEqual(cpu_inf, cuda_inf, msg="Inf mask mismatch for n=200 repro case")
+
+        finite = ~(cpu_nan | cpu_inf)
+        if finite.any():
+            self.assertEqual(
+                cpu_result[finite],
+                cuda_result[finite],
+                msg="Finite values mismatch for n=200 repro case",
+            )
+
     # TODO resolve with opinfos
     @onlyCPU
     def test_op_invert(self, device):
