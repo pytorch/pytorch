@@ -17,6 +17,14 @@ torch.utils.rename_privateuse1_backend("openreg")
 torch._register_device_module("openreg", torch_openreg.openreg)
 torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
 
+if torch.distributed.is_available():
+    try:
+        torch.distributed.Backend.register_backend(
+            "occl", torch_openreg._C._createProcessGroupOCCL, devices=["openreg"]
+        )
+    except Exception as e:
+        raise RuntimeError("Failed to register 'occl' process group backend.") from e
+
 
 # LITERALINCLUDE START: AUTOLOAD
 def _autoload():
