@@ -4304,6 +4304,88 @@ class GraphModule(torch.nn.Module):
         finally:
             torch = old_torch
 
+    def test_structural_pattern_matching_cpython_suite(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class Point:
+            x: int
+            y: int
+
+        class CustomArgs:
+            __match_args__ = ("a", "b")
+
+            def __init__(self, a, b):
+                self.a = a
+                self.b = b
+
+        class A:
+            B = 10
+
+            class C:
+                D = 20
+
+        def patma_comprehensive(obj):
+            match obj:
+                case Point(0, 0):
+                    return "Origin"
+                case Point(0, y=y):
+                    return f"Y-Axis at {y}"
+                case Point(x, y) if x == y:
+                    return f"Diagonal at {x}"
+                case CustomArgs(a, b):
+                    return f"Custom({a}, {b})"
+                case A.B:
+                    return "Matched Class Attribute A.B"
+                case A.C.D:
+                    return "Matched Nested Attribute A.C.D"
+                case int(z):
+                    return f"Integer: {z}"
+                case [Point(x1, y1), Point(x2, y2)]:
+                    return f"Line ({x1},{y1}) to ({x2},{y2})"
+                case _:
+                    return "Mismatch"
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(patma_comprehensive)
+
+        self.assertEqual(opt_fn(Point(0, 0)), "Origin")
+        self.assertEqual(opt_fn(Point(0, 5)), "Y-Axis at 5")
+        self.assertEqual(opt_fn(Point(3, 3)), "Diagonal at 3")
+        self.assertEqual(opt_fn(CustomArgs(1, 2)), "Custom(1, 2)")
+        self.assertEqual(opt_fn(10), "Matched Class Attribute A.B")
+        self.assertEqual(opt_fn(20), "Matched Nested Attribute A.C.D")
+        self.assertEqual(opt_fn(99), "Integer: 99")
+        self.assertEqual(opt_fn([Point(0, 0), Point(1, 1)]), "Line (0,0) to (1,1)")
+        self.assertEqual(opt_fn("string"), "Mismatch")
+
+        def patma_tensor_safety(obj):
+            match obj:
+                case Point():
+                    return "Matched Point"
+                case _:
+                    return "Mismatch"
+
+        opt_tensor_fn = torch._dynamo.optimize(cnts)(patma_tensor_safety)
+        t = torch.randn(2)
+        self.assertEqual(opt_tensor_fn(t), "Mismatch")
+
+    def test_match_class_backends_coverage(self):
+        def fn(x):
+            match x:
+                case torch.Tensor():
+                    return x * 2
+                case _:
+                    return torch.zeros(1)
+
+        inp = torch.randn(4)
+        eager_res = fn(inp)
+
+        for backend in ("eager", "aot_eager", "inductor"):
+            torch._dynamo.reset()
+            comp_res = torch.compile(fn, backend=backend)(inp)
+            self.assertEqual(eager_res, comp_res)
+
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_wrap_triton_handled_during_tracing(self):
         import triton

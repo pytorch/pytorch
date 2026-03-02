@@ -3933,6 +3933,41 @@ class InstructionTranslatorBase(
             )
         )
 
+    def MATCH_CLASS(self, inst: Instruction) -> None:
+        names = self.pop().realize()
+        cls_type = self.pop().realize()
+        subject = self.pop().realize()
+
+        try:
+            match_result = self.call_function(
+                BuiltinVariable(isinstance), [subject, cls_type], {}
+            )
+        except AssertionError:
+            match_result = ConstantVariable.create(False)
+        except Exception:
+            raise
+
+        if isinstance(match_result, ConstantVariable):
+            if match_result.value:
+                getattr_var = BuiltinVariable(getattr)
+                extracted_vars = []
+                for name in names.as_python_constant():
+                    # type: ignore[arg-type]
+                    val = getattr_var.call_function(
+                        self, [subject, ConstantVariable.create(name)], {}
+                    )
+                    extracted_vars.append(val)
+                self.push(TupleVariable(extracted_vars))
+            else:
+                self.push(ConstantVariable.create(None))
+        else:
+            unimplemented(
+                gb_type="MATCH_CLASS_dynamic_isinstance",
+                context="dynamic isinstance",
+                explanation="MATCH_CLASS: cannot statically resolve isinstance",
+                hints=[],
+            )
+
     def MATCH_SEQUENCE(self, inst: Instruction) -> None:
         tos = self.stack[-1]
         self.push(
