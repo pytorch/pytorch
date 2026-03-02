@@ -2791,6 +2791,106 @@ class TestCustomOpAPI(TestCase):
             self.assertEqual(w.grad, torch.full_like(w, 2 * 3 * 42))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_with_torch_func_grad(self):
+        """Test that register_autograd works with torch.func.grad (Issue #170834)"""
+
+        @torch.library.custom_op(
+            "_torch_testing::numpy_sin_for_grad", mutates_args=()
+        )
+        def numpy_sin(x: torch.Tensor) -> torch.Tensor:
+            x_np = x.cpu().numpy()
+            y_np = np.sin(x_np)
+            return torch.from_numpy(y_np).to(device=x.device)
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * x.cos()
+
+        numpy_sin.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+
+        # Test with torch.func.grad - this was failing before the fix
+        grad_fn = torch.func.grad(lambda x: numpy_sin(x).sum())
+        grad_x = grad_fn(x)
+
+        expected = x.cos()
+        self.assertTrue(torch.allclose(grad_x, expected))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_no_setup_context_with_grad(self):
+        """Test that register_autograd without setup_context works with torch.func.grad"""
+
+        @torch.library.custom_op(
+            "_torch_testing::simple_double_for_grad", mutates_args=()
+        )
+        def simple_double(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        def backward(ctx, grad):
+            return grad * 2
+
+        # Register without setup_context
+        simple_double.register_autograd(backward)
+
+        x = torch.randn(3, requires_grad=True)
+
+        # Should work with regular backward
+        y = simple_double(x)
+        y.sum().backward()
+        self.assertEqual(x.grad, torch.full_like(x, 2.0))
+
+        # torch.func.grad should also work
+        x2 = torch.randn(3, requires_grad=True)
+        grad_fn = torch.func.grad(lambda x: simple_double(x).sum())
+        grad_x = grad_fn(x2)
+        self.assertEqual(grad_x, torch.full_like(x2, 2.0))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_with_grad_grad(self):
+        """Test that register_autograd works with torch.func.grad(grad(...)) (Issue #170834)
+
+        This tests higher-order gradients to ensure the _SingleLevelFunction mechanism
+        properly supports nested functorch transforms.
+        """
+
+        @torch.library.custom_op(
+            "_torch_testing::cube_for_grad_grad", mutates_args=()
+        )
+        def cube(x: torch.Tensor) -> torch.Tensor:
+            return x**3
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            # d/dx[x^3] = 3x^2
+            # This backward uses differentiable PyTorch ops so grad(grad(...)) works
+            return grad * 3 * x**2
+
+        cube.register_autograd(backward, setup_context=setup_context)
+
+        # Use a scalar tensor for simpler verification
+        x = torch.tensor(2.0)
+
+        # Test grad(grad(...)) - second derivative
+        # f(x) = x^3
+        # f'(x) = 3x^2
+        # f''(x) = 6x
+        grad_fn = torch.func.grad(cube)
+        grad_grad_fn = torch.func.grad(grad_fn)
+        result = grad_grad_fn(x)
+
+        expected = 6 * x  # f''(2.0) = 12.0
+        self.assertEqual(result, expected)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema_error(self):
         with self.assertRaisesRegex(ValueError, "the op mutates {'x'}"):
 
