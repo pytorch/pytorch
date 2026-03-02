@@ -989,7 +989,9 @@ def test_openreg(test_module, test_directory, options):
         return return_code
 
     # Run the openreg C++ unit tests (gtest) built by cmake.
-    ortests_bin = os.path.join(openreg_dir, "build", "third_party", "openreg", "ortests")
+    ortests_bin = os.path.join(
+        openreg_dir, "build", "third_party", "openreg", "ortests"
+    )
     if os.path.isfile(ortests_bin):
         return_code = shell([ortests_bin], cwd=openreg_dir)
         if return_code != 0:
