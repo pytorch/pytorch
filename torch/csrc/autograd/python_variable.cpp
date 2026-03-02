@@ -1888,7 +1888,7 @@ static bool DTensor_OpSchema_recompute_comparison_key_impl(
     comparison_key = PyTuple_Pack(
         2,
         self_handle.attr(dtensor_interned_strings.op).ptr(),
-        args_to_hash_tup.release().ptr());
+        args_to_hash_tup.ptr());
   }
   if (!comparison_key) {
     return false;
