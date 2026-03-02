@@ -110,6 +110,120 @@ class TestCustomOpOutLowering(InductorTestCase):
             self.assertIn("out0=", code)
             self.assertIn("out1=", code)
 
+    # ---- _out_variant.py unit tests ----
+
+    def test_to_out_variant_finds_add_one(self):
+        """Test that to_out_variant() finds the .out overload for single-output op."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_add_one_ops(lib)
+
+            from torch._library._out_variant import to_out_variant
+
+            found = to_out_variant(func_op.default)
+            self.assertIsNotNone(found)
+            self.assertEqual(found, out_op)
+
+    def test_to_out_variant_finds_split_add(self):
+        """Test that to_out_variant() finds .out for a two-output op."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_split_add_ops(lib)
+
+            from torch._library._out_variant import to_out_variant
+
+            found = to_out_variant(func_op.default)
+            self.assertIsNotNone(found)
+            self.assertEqual(found, out_op)
+
+    def test_to_out_variant_raises_for_mutable_op(self):
+        """Test that to_out_variant() raises RuntimeError for mutable ops."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("inplace_sin(Tensor(a!) x) -> ()")
+
+            def _inplace_sin_impl(x):
+                x.sin_()
+
+            lib.impl("inplace_sin", _inplace_sin_impl, "CompositeImplicitAutograd")
+
+            from torch._library._out_variant import to_out_variant
+
+            with self.assertRaises(RuntimeError):
+                to_out_variant(torch.ops.mylib.inplace_sin.default)
+
+    # ---- Additional integration tests ----
+
+    @parametrize("device", DEVICES)
+    def test_chained_ops_buffer_reuse(self, device):
+        """Test that chained custom ops participate in buffer reuse."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_add_one_ops(lib)
+
+            def f(x):
+                y1 = torch.ops.mylib.add_one(x)
+                y2 = y1 * 2.0
+                y3 = torch.ops.mylib.add_one(y2)
+                y4 = y3 + 1.0
+                y5 = torch.ops.mylib.add_one(y4)
+                return y5
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+            self.assertIn(".out(", code)
+            self.assertIn("# reuse", code)
+            self.assertIn("empty_strided", code)
+
+    @parametrize("device", DEVICES)
+    def test_op_without_out_variant_falls_through(self, device):
+        """Test that ops without an out-variant fall through to FallbackKernel."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("no_out_op(Tensor x) -> Tensor")
+
+            def _impl(x):
+                return x + 1
+
+            lib.impl("no_out_op", _impl, "CompositeExplicitAutograd")
+
+            @torch.library.register_fake("mylib::no_out_op", lib=lib)
+            def _fake(x):
+                return x.new_empty(x.shape)
+
+            def f(x):
+                return torch.ops.mylib.no_out_op(x)
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+
+    @parametrize("device", DEVICES)
+    def test_multi_output_buffer_reuse(self, device):
+        """Test that multi-output op buffers participate in buffer reuse."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_split_add_ops(lib)
+            self._register_add_one_ops(lib)
+
+            def f(x):
+                a, b = torch.ops.mylib.split_add(x, 1.0, 2.0)
+                c = torch.sin(a)
+                d = torch.ops.mylib.add_one(c)
+                return d + b
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+            self.assertIn(".out(", code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
