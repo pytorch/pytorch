@@ -3,7 +3,7 @@
 import contextlib
 import os
 import sys
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -86,7 +86,7 @@ class AllReducer(Joinable):
     per-iteration collective communication.
     """
 
-    def __init__(self, device, process_group):
+    def __init__(self, device, process_group: dist.ProcessGroup):
         super().__init__()
         self.device = device
         self.process_group = process_group
@@ -120,7 +120,7 @@ class AllReducer(Joinable):
         return self.device
 
     @property
-    def join_process_group(self) -> Any:
+    def join_process_group(self) -> dist.ProcessGroup:
         return self.process_group
 
     def find_common_rank(self, rank, to_consider):
@@ -157,8 +157,10 @@ class TestJoin(MultiProcessTestCase):
         return WORLD_SIZE
 
     @property
-    def process_group(self):
-        return dist.group.WORLD
+    def process_group(self) -> dist.ProcessGroup:
+        pg = dist.group.WORLD
+        assert pg is not None, "No process group available"
+        return pg
 
     def tearDown(self):
         try:

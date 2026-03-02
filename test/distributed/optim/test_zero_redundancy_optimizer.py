@@ -1047,8 +1047,10 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 return device
 
             @property
-            def join_process_group(self):
-                return dist.group.WORLD
+            def join_process_group(self) -> dist.ProcessGroup:
+                pg = dist.group.WORLD
+                assert pg is not None, "No process group available"
+                return pg
 
         num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
         grads = grads_at_each_iter[-num_grads_after_joining:]

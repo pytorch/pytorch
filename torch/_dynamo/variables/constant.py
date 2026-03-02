@@ -150,7 +150,7 @@ its type to `common_constant_types`.
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
         return ConstantVariable.create(
-            self.value[arg.as_python_constant()],
+            self.value[arg.as_python_constant()],  # pyrefly: ignore[bad-index]
         )
 
     @staticmethod

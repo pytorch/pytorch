@@ -12,5 +12,4 @@ reveal_type(t_sort)  # E: torch.return_types.sort
 t_qr = torch.linalg.qr(t)
 t_qr[0].shape == [2, 2]  # noqa: B015
 t_qr.Q.shape == [2, 2]  # noqa: B015
-# TODO: Fixme, should be Tuple[{Tensor}, {Tensor}, fallback=torch.return_types.qr]
-reveal_type(t_qr)  # E: Any
+reveal_type(t_qr)  # E: fallback=torch.linalg.QRResult

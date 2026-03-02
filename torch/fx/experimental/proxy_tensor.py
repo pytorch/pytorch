@@ -2843,7 +2843,7 @@ def get_innermost_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     return get_proxy_mode()
 
 
-def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
+def get_proxy_mode() -> ProxyTorchDispatchMode | None:
     """
     Current the currently active proxy tracing mode, or None if
     we are not currently tracing.  This includes pre-dispatch proxy
