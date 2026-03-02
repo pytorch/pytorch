@@ -17,20 +17,45 @@ if TYPE_CHECKING:
 class ComplexTensor(Tensor):
     """A class that decomposes all ops on complex Tensors into their real and imaginary parts."""
 
-    _re: Tensor
-    _im: Tensor
+    _data: Tensor
 
-    def __new__(cls, real: Tensor, imag: Tensor) -> Self:
+    def __new__(
+        cls,
+        real: Tensor,
+        imag: Tensor | None = None,
+        /,
+        *,
+        neg_flag: bool = False,
+        conj_flag: bool = False,
+    ) -> Self:
         """Initialize a ComplexTensor from its real and imaginary parts."""
         from ._ops.common import REAL_TO_COMPLEX
 
-        shape = real.shape
-        device = real.device
-
         # TODO (hameerabbasi): `torch.compile` sometimes fails here without making these
         # contiguous. Why?
-        real = real.contiguous()
-        imag = imag.contiguous()
+        if imag is None:
+            if real.is_neg():
+                neg_flag = not neg_flag
+                real = torch._neg_view(real)
+            if real.dtype.is_complex:
+                if real.is_conj():
+                    conj_flag = not conj_flag
+                    real = torch._conj(real)
+                data = torch.view_as_real(real)
+            else:
+                if real.shape[-1] != 2:
+                    raise RuntimeError(
+                        f"Expected `real.shape[-1] == 2`, got `{real.shape=}`."
+                    )
+                data = real
+
+        else:
+            data = torch.stack([real.detach(), imag.detach()], dim=-1)
+
+        real = data[..., 0]
+        imag = data[..., 1]
+        shape = real.shape
+        device = real.device
 
         # TODO (hameerabbasi):
         # What should we do with dtype?
@@ -80,18 +105,30 @@ class ComplexTensor(Tensor):
             layout=layout,
             requires_grad=False,
         )
-        res._re = real.clone().detach()
-        res._im = imag.clone().detach()
+        res._data = data.detach()
+        torch._C._set_conj(res, conj_flag)
+        torch._C._set_neg(res, neg_flag)
 
         return res
 
+    def __init__(self, *a: Any, **kw: Any) -> None:
+        super().__init__()
+
     @property
     def re(self) -> Tensor:
-        return self._re
+        negate = self.is_neg()
+        real = self._data[..., 0]
+        if negate:
+            real = torch._neg_view(real)
+        return real
 
     @property
     def im(self) -> Tensor:
-        return self._im
+        negate = self.is_neg() != self.is_conj()
+        imag = self._data[..., 1]
+        if negate:
+            imag = torch._neg_view(imag)
+        return imag
 
     @classmethod
     def __torch_dispatch__(  # type: ignore[bad-override]
@@ -114,12 +151,15 @@ class ComplexTensor(Tensor):
 
     @staticmethod
     def from_interleaved(t: Tensor) -> ComplexTensor:
-        t_real = torch.real(t)
-        t_imag = torch.imag(t) if t.dtype.is_complex else torch.zeros_like(t_real)
-        return Complex.apply(t_real, t_imag)
+        return Complex.apply(t)
 
     def as_interleaved(self) -> Tensor:
-        return torch.complex(self.real, self.imag)
+        out = torch.view_as_complex(self._data)
+        if self.is_conj():
+            out = torch._conj(out)
+        if self.is_neg():
+            out = torch._neg_view(out)
+        return out
 
     @staticmethod
     def __tensor_unflatten__(
@@ -128,24 +168,26 @@ class ComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> ComplexTensor:
-        if meta is not None:
-            raise AssertionError(f"meta must be None, got {meta}")
-        re, im = inner_tensors["re"], inner_tensors["im"]
-        return ComplexTensor(re, im)
+        data = inner_tensors["_data"]
+        return ComplexTensor(
+            data, neg_flag=meta["neg_flag"], conj_flag=meta["conj_flag"]
+        )
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
-        return ["re", "im"], None
+        return ["_data"], {"neg_flag": self.is_neg(), "conj_flag": self.is_conj()}
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
-        return f"ComplexTensor(real={self.re!r}, imag={self.im!r})"
+        return f"ComplexTensor({self._data!r}, conj_flag={self.is_conj()!r}, neg_flag={self.is_neg()!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
-        return self.re.is_pinned(device)
+        return self._data.is_pinned(device)
 
 
 class Complex(Function):
     @staticmethod
-    def forward(ctx: FunctionCtx, real: Tensor, imag: Tensor) -> ComplexTensor:  # type: ignore[bad-override]
+    def forward(  # type: ignore[bad-override]
+        ctx: FunctionCtx, real: Tensor, imag: Tensor | None = None
+    ) -> ComplexTensor:
         return ComplexTensor(real, imag)
 
     @staticmethod

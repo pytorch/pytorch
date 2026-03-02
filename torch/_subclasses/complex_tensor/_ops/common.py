@@ -187,7 +187,7 @@ def split_complex_arg(
 
 def split_complex_tensor(complex_tensor: ComplexTensor) -> tuple[Tensor, Tensor]:
     """Split a ComplexTensor into its real and imaginary parts."""
-    return complex_tensor.re, complex_tensor.im
+    return torch.resolve_neg(complex_tensor.re), torch.resolve_neg(complex_tensor.im)
 
 
 def complex_to_real_dtype(dtype: torch.dtype) -> torch.dtype:
@@ -228,14 +228,14 @@ def register_binary_nonlinear(
     """Register a "multiplication-style" op, e.g. aten.mul, aten.mm, ..."""
 
     def impl(
-        lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
+        a: ComplexTensor, b: ComplexTensor, *args: Any, **kwargs: Any
     ) -> ComplexTensor:
-        a_r, a_i = split_complex_arg(lhs)
-        b_r, b_i = split_complex_arg(rhs)
-        out_dt, (a_r, a_i, b_r, b_i) = promote_tensors(a_r, a_i, b_r, b_i)
+        out_dt, (a, b) = promote_tensors(a, b)
+        a_r, a_i = split_complex_arg(a)
+        b_r, b_i = split_complex_arg(b)
         real = op(a_r, b_r, *args, **kwargs) - op(a_i, b_i, *args, **kwargs)
         imag = op(a_r, b_i, *args, **kwargs) + op(a_i, b_r, *args, **kwargs)
-        return ComplexTensor(real.to(out_dt), imag.to(out_dt))
+        return ComplexTensor(real, imag).to(out_dt)  # type: ignore[bad-return]
 
     func_name = _get_func_name(op)
     impl.__name__ = func_name
@@ -298,6 +298,25 @@ def _as_interleaved(arg: ComplexTensor | Any) -> Tensor | Any:
     if isinstance(arg, ComplexTensor):
         return arg.as_interleaved()
     return arg
+
+
+class WrapComplexMode(TorchDispatchMode):
+    def __torch_dispatch__(
+        self,
+        func: OpOverload,
+        types: tuple[type],
+        args: tuple = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        if kwargs is None:
+            kwargs = {}
+        if func.overloadpacket == torch.ops.aten.complex:
+            from .._core import Complex
+
+            return Complex.apply(*args)
+        args = tree_map(_as_complex_tensor, args)
+        kwargs = tree_map(_as_complex_tensor, kwargs)
+        return tree_map(_as_complex_tensor, func(*args, **kwargs))
 
 
 class ComplexTensorMode(TorchDispatchMode):
