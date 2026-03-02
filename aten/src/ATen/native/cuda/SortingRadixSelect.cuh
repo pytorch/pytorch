@@ -3,6 +3,7 @@
 #include <ATen/cuda/AsmUtils.cuh>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/DeviceUtils.cuh>
+#include <type_traits>
 
 namespace at::native {
 
@@ -215,10 +216,17 @@ __device__ void countRadixUsingMask(
   }
 
   // Now, for each warp, sum values
+  // Note: uint64_t on Linux is unsigned long, but CUDA atomicAdd expects
+  // unsigned long long. We use reinterpret_cast for compatibility.
   if (at::cuda::getLaneId() == 0) {
 #pragma unroll
     for (uint32_t i = 0; i < RadixSize; ++i) {
-      gpuAtomicAddNoReturn(&smem[i], counts[i]);
+      if constexpr (std::is_same_v<CountType, uint64_t>) {
+        atomicAdd(reinterpret_cast<unsigned long long*>(smem) + i,
+                  static_cast<unsigned long long>(counts[i]));
+      } else {
+        atomicAdd(&smem[i], counts[i]);
+      }
     }
   }
 
