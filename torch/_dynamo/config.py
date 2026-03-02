@@ -848,6 +848,13 @@ enable_aot_compile = False
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Any | None = None
 
+# Allow externally visible side effects inside nested compile regions
+# (torch.compiler.nested_compile_region). When False (default), side effects
+# cause a graph break. Enable this if your region intentionally mutates
+# outer-scope state, at the cost of disabling compile-time caching for that
+# region.
+allow_side_effects_under_nested_compile_region: bool = False
+
 # Experimental flag to enable regional compile on invoke_subgraph HOP.
 # For testing only!
 enable_invoke_subgraph_regional_compile: bool = False
