@@ -7707,6 +7707,37 @@ class TestConstantPadNd(TestCase):
         nhwc_padded = torch.constant_pad_nd(nhwc_tensor, [1, 2], 0.5)
         self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
+    def test_pad_int64_precision(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/170798
+        # Padding value should preserve int64 precision for values > 2^53
+        v = 2**53 + 1
+        result = torch.nn.functional.pad(
+            input=torch.tensor([v], dtype=torch.int64),
+            pad=(0, 1),
+            value=v,
+        )
+        self.assertEqual(result[0].item(), v)
+        self.assertEqual(result[1].item(), v)
+
+        # Also test with int64 max value
+        v_max = torch.iinfo(torch.int64).max
+        result_max = torch.nn.functional.pad(
+            input=torch.tensor([v_max], dtype=torch.int64),
+            pad=(1, 1),
+            value=v_max,
+        )
+        self.assertEqual(result_max[0].item(), v_max)
+        self.assertEqual(result_max[1].item(), v_max)
+        self.assertEqual(result_max[2].item(), v_max)
+
+        # Test with constant_pad_nd directly
+        result_direct = torch.constant_pad_nd(
+            torch.tensor([v], dtype=torch.int64),
+            [0, 1],
+            v,
+        )
+        self.assertEqual(result_direct[1].item(), v)
+
 
 class TestAddRelu(TestCase):
     def test_add_relu(self):

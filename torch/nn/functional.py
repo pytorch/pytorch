@@ -5353,7 +5353,7 @@ def pad(
     input: Tensor,
     pad: list[int],
     mode: str = "constant",
-    value: Optional[float] = None,
+    value: Optional[int | float] = None,
 ) -> Tensor:
     r"""
     pad(input, pad, mode="constant", value=None) -> Tensor
