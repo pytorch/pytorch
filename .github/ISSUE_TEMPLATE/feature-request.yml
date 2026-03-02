@@ -11,6 +11,7 @@ body:
     value: >
       #### Note: Please write your feature request in English to ensure it can be understood and addressed by the development team.
 - type: textarea
+  id: feature-motivation
   attributes:
     label: 🚀 The feature, motivation and pitch
     description: >
@@ -18,11 +19,13 @@ body:
   validations:
     required: true
 - type: textarea
+  id: alternatives
   attributes:
     label: Alternatives
     description: >
       A description of any alternative solutions or features you've considered, if any.
 - type: textarea
+  id: additional-context
   attributes:
     label: Additional context
     description: >

@@ -31,6 +31,7 @@ body:
         If the above requirements are met, add the label "topic: fuzzer" to your issue.
 
   - type: textarea
+    id: bug-description
     attributes:
       label: 🐛 Describe the bug
       description: |
@@ -49,6 +50,7 @@ body:
       required: false
 
   - type: textarea
+    id: error-logs
     attributes:
       label: Error logs
       description: |
@@ -59,6 +61,7 @@ body:
       required: false
 
   - type: textarea
+    id: versions
     attributes:
       label: Versions
       description: |
