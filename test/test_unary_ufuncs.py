@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     numpy_to_torch_dtype_dict,
     run_tests,
     skipIfNoSciPy,
+    skipIfRocm,
     slowTest,
     suppress_warnings,
     TEST_SCIPY,
@@ -1615,6 +1616,7 @@ class TestUnaryUfuncs(TestCase):
     @onlyCUDA
     @dtypes(torch.int8)
     @largeTensorTest("8GB")
+    @skipIfRocm(msg="ROCM tries to allocate 60GB")
     def test_nonzero_large(self, device, dtype):
         indices = (
             torch.tensor((0, 2, 3, 4, 6, 100, 103, 2**30, 2**31 - 3, 2**31 - 2)),
@@ -1897,8 +1899,7 @@ class TestUnaryUfuncs(TestCase):
         tensor = torch.randint(low=1, high=10, size=(5,), device=device, dtype=dtype)
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            r"result type .* can't be cast to the desired output type"
+            RuntimeError, r"result type .* can't be cast to the desired output type"
         ):
             tensor.mvlgamma_(2)
 
@@ -1910,6 +1911,50 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
+
+    # Tests for isinf with Float8 types (Issue #149002)
+    # Float8 types e4m3fn, e4m3fnuz, e5m2fnuz, e8m0fnu cannot represent infinity
+    # by design, so isinf() should return all False for these types.
+    @onlyNativeDeviceTypes
+    @dtypes(
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+        torch.float8_e8m0fnu,
+    )
+    def test_isinf_float8_no_infinity_types(self, device, dtype):
+        """Test that isinf returns all False for Float8 types without infinity."""
+        x = torch.tensor([1.0, 2.0, -1.0, 0.0], device=device).to(dtype)
+        result = torch.isinf(x)
+        self.assertEqual(result.dtype, torch.bool)
+        self.assertFalse(result.any().item())
+
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float8_e5m2)
+    def test_isinf_float8_e5m2_can_have_infinity(self, device, dtype):
+        """Test that isinf correctly detects infinity for Float8_e5m2."""
+        # Float8_e5m2 CAN represent infinity
+        x = torch.tensor([1.0, float("inf"), -1.0, float("-inf")], device=device).to(
+            dtype
+        )
+        result = torch.isinf(x)
+        expected = torch.tensor([False, True, False, True], device=device)
+        self.assertEqual(result, expected)
+
+    @onlyNativeDeviceTypes
+    @dtypes(
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+        torch.float8_e8m0fnu,
+    )
+    def test_isinf_float8_empty_tensor(self, device, dtype):
+        """Test isinf on empty Float8 tensors."""
+        x = torch.tensor([], device=device).to(dtype)
+        result = torch.isinf(x)
+        self.assertEqual(result.shape, torch.Size([0]))
+        self.assertEqual(result.dtype, torch.bool)
+
 
 instantiate_device_type_tests(TestUnaryUfuncs, globals())
 

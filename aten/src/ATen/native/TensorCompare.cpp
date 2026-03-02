@@ -459,6 +459,17 @@ Tensor isinf(const Tensor& self) {
     return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
   }
 
+  // Note: Float8 types e4m3fn, e4m3fnuz, e5m2fnuz, and e8m0fnu cannot represent
+  // infinity by design (the "fn" suffix means "finite, no infinity", and
+  // "fnuz" means "finite, no NaN, unsigned zero"). Return all false.
+  // Only Float8_e5m2 can represent infinity.
+  if (self.scalar_type() == kFloat8_e4m3fn ||
+      self.scalar_type() == kFloat8_e4m3fnuz ||
+      self.scalar_type() == kFloat8_e5m2fnuz ||
+      self.scalar_type() == kFloat8_e8m0fnu) {
+    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+
   // Note: a complex value is infinite when either part is infinite
   if (self.is_complex()) {
     return at::isinf(at::real(self)).__ior__(at::isinf(at::imag(self)));
