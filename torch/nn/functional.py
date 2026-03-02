@@ -5635,7 +5635,7 @@ def triplet_margin_with_distance_loss(
 
     # Check validity of reduction mode
     if reduction not in ("mean", "sum", "none"):
-        raise ValueError(f"{reduction} is not a valid value for reduction")
+        raise ValueError(f"'{reduction}' is not a valid reduction mode. Expected 'none', 'mean', or 'sum'.")
 
     # Check validity of margin
     if margin <= 0:
