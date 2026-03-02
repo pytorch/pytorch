@@ -3,12 +3,17 @@ ROCm Multi-Architecture Support Utilities
 Compile LLVM IR to multi-arch bundles that HIP can load automatically.
 """
 
+import logging
 import os
+import re
 import subprocess
 from typing import Optional
 
 import torch
 from torch.utils.cpp_extension import _join_rocm_home, ROCM_HOME
+
+
+log = logging.getLogger(__name__)
 
 
 def get_rocm_compiler() -> str:
@@ -69,19 +74,20 @@ def get_rocm_bundler() -> str:
 
 
 def get_rocm_target_archs() -> list[str]:
-    """
-    Get target architectures from environment or config.
-    Returns: List of architecture strings (e.g., ['gfx90a', 'gfx942'])
-    """
-    # Check PYTORCH_ROCM_ARCH environment variable
     env_archs = os.environ.get("PYTORCH_ROCM_ARCH", "").strip()
     if env_archs:
         archs = [arch.strip() for arch in env_archs.replace(";", ",").split(",")]
         archs = [arch for arch in archs if arch]
         if archs:
+            # Ensure current device arch is included
+            if torch.cuda.is_available():
+                current_arch = torch.cuda.get_device_properties(0).gcnArchName.split(
+                    ":"
+                )[0]
+                if current_arch not in archs:
+                    archs.append(current_arch)
             return archs
 
-    # Try to get from inductor config
     try:
         from torch._inductor import config
 
@@ -94,6 +100,43 @@ def get_rocm_target_archs() -> list[str]:
         pass
 
     return torch.cuda.get_arch_list()
+
+
+def _sanitize_llvm_ir_for_rocm(llvm_ir_path: str) -> str:
+    """
+    Sanitize LLVM IR to be compatible with ROCm's clang.
+
+    Triton's LLVM (upstream) may emit attributes and metadata that ROCm's
+    older clang does not yet support. Only strips attributes confirmed to
+    cause parse errors — preserves all others to maintain correct codegen.
+
+    Currently strips:
+        - nocreateundeforpoison: function attribute (upstream LLVM, not in ROCm)
+        - dwarfAddressSpace: debug metadata field (upstream LLVM, not in ROCm)
+
+    Returns:
+        Path to sanitized .ll file, or original path if no changes needed.
+    """
+    with open(llvm_ir_path) as f:
+        content = f.read()
+
+    sanitized = content
+    sanitized = re.sub(r"\bnocreateundeforpoison\b\s*", "", sanitized)
+    sanitized = re.sub(r",\s*dwarfAddressSpace:\s*\d+", "", sanitized)
+
+    if sanitized == content:
+        return llvm_ir_path
+
+    sanitized_path = llvm_ir_path + ".sanitized.ll"
+    with open(sanitized_path, "w") as f:
+        f.write(sanitized)
+
+    log.debug(
+        "Sanitized LLVM IR for ROCm clang compatibility: %s -> %s",
+        llvm_ir_path,
+        sanitized_path,
+    )
+    return sanitized_path
 
 
 def compile_llvm_ir_to_code_object(
@@ -119,6 +162,9 @@ def compile_llvm_ir_to_code_object(
         clang = get_rocm_compiler()
     except RuntimeError:
         return False
+
+    # Sanitize LLVM IR to remove attributes unsupported by ROCm's clang
+    llvm_ir_path = _sanitize_llvm_ir_for_rocm(llvm_ir_path)
 
     # Using clang and not hipcc since we are not compiling source code
     # Instead we use the LLVM IR (.ll) provided by triton
