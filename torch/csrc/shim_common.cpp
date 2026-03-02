@@ -697,6 +697,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
   });
 }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 AOTI_TORCH_EXPORT AOTITorchError torch_from_blob_v2(
     void* data,
     int64_t ndim,
@@ -745,3 +746,4 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob_v2(
     *ret_new_tensor = torch::aot_inductor::new_tensor_handle(std::move(tensor));
   });
 }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
