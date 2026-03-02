@@ -13,8 +13,8 @@ void and_kernel_cuda(TensorIterator& iter) {
       kHalf, kBFloat16, kBool, iter.common_dtype(), "and_cuda", [&]() {
         gpu_reduce_kernel<scalar_t, bool>(
             iter,
-            func_wrapper<bool>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-              return (static_cast<bool>(a) && static_cast<bool>(b));
+            func_wrapper<bool>([] GPU_LAMBDA(bool acc, scalar_t val) -> bool {
+              return (acc && static_cast<bool>(val));
             }),
             true);
       });
@@ -25,8 +25,8 @@ void or_kernel_cuda(TensorIterator& iter) {
       kHalf, kBFloat16, kBool, iter.common_dtype(), "or_cuda", [&]() {
         gpu_reduce_kernel<scalar_t, bool>(
             iter,
-            func_wrapper<bool>([] GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
-              return (static_cast<bool>(a) || static_cast<bool>(b));
+            func_wrapper<bool>([] GPU_LAMBDA(bool acc, scalar_t val) -> bool {
+              return (acc || static_cast<bool>(val));
             }),
             false);
       });
