@@ -65,6 +65,9 @@ class _StorageBase:
     def copy_(self, source: T, non_blocking: _bool | None = None) -> T:
         raise NotImplementedError
 
+    def usm_share_(self, device: DeviceLikeType) -> T:
+        raise NotImplementedError
+
     def new(self) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
@@ -208,7 +211,7 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def from_file(cls, filename, shared, nbytes) -> _StorageBase | TypedStorage:
+    def from_file(cls, filename, shared, nbytes, usm) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     @classmethod
@@ -1407,8 +1410,8 @@ class TypedStorage:
         return self._to(torch.float8_e4m3fnuz)
 
     @classmethod
-    def from_file(cls, filename, shared, size):
-        """from_file(filename, shared=False, size=0) -> Storage
+    def from_file(cls, filename, shared, size, usm):
+        """from_file(filename, shared=False, size=0, usm=False) -> Storage
 
         Creates a CPU storage backed by a memory-mapped file.
 
@@ -1420,17 +1423,23 @@ class TypedStorage:
         then the file must contain at least ``size * sizeof(Type)`` bytes
         (``Type`` is the type of storage). If ``shared`` is ``True`` the file will be created if needed.
 
+        ``usm`` indicates whether to use shared CPU memory to devices supporting unified memory
+        (iGPU or NVIDIA Jetson) for skip copy between CPU and device. This is only supported 
+        on Linux systems now.
+
         Args:
             filename (str): file name to map
             shared (bool): whether to share memory (whether ``MAP_SHARED`` or ``MAP_PRIVATE`` is passed to the
                             underlying `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_)
             size (int): number of elements in the storage
+            usm (bool): whether to use share CPU memory to devices supporting
+                            unified memory (iGPU or NVIDIA Jetson).
         """
         _warn_typed_storage_removal()
         if cls == TypedStorage:
             raise RuntimeError("from_file can only be called on derived classes")
         untyped_storage = UntypedStorage.from_file(
-            filename, shared, size * torch._utils._element_size(cls.dtype)
+            filename, shared, size * torch._utils._element_size(cls.dtype), usm
         )
         storage = cls(wrap_storage=untyped_storage)
         return storage

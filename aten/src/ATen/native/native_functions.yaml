@@ -16165,3 +16165,12 @@
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
+
+# Native function for USM (Unified Shared Memory) sharing
+# 'self' is a dummy tensor on the target device (carries device info)
+# 'src' is the CPU storage containing the data to share
+- func: _usm_share_from(Tensor self, Storage src) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: usm_share_from_cuda
+    MPS: usm_share_from_mps
