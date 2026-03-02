@@ -1823,9 +1823,8 @@ def has_cusolver():
 
 
 def has_hipsolver():
-    rocm_version = _get_torch_rocm_version()
-    # hipSOLVER is disabled on ROCM < 5.3
-    return rocm_version >= (5, 3)
+    # hipSOLVER is available on all supported ROCm versions (6.0+)
+    return torch.version.hip is not None
 
 
 # Skips a test on CUDA if cuSOLVER is not available,
