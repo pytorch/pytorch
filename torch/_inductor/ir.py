@@ -3616,6 +3616,18 @@ class DtypeView(BaseView):
     def get_size(self) -> Sequence[Expr]:
         return self.data.get_size()
 
+    def make_reindexer(
+        self,
+    ) -> Callable[[Sequence[Expr]], Sequence[Expr]]:
+        # DtypeView only changes the dtype, not the shape or layout,
+        # so the reindexer is an identity function
+        def reindex(
+            index: Sequence[Expr],
+        ) -> Sequence[Expr]:
+            return index
+
+        return reindex
+
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         inner = self.data.make_loader()
 
