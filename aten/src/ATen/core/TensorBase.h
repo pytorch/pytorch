@@ -210,6 +210,14 @@ class TORCH_API TensorBase {
     return std::move(impl_);
   }
 
+  void unsafeSetTensorImpl(const TensorBase &x) {
+    impl_ = x.impl_;
+  }
+
+  void unsafeSetTensorImpl(TensorBase &&x) {
+    impl_ = std::move(x.impl_);
+  }
+
   bool defined() const {
     return impl_;
   }
