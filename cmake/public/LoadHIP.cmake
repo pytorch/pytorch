@@ -184,6 +184,7 @@ if(HIP_FOUND)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
   find_package_and_print_version(rocsolver REQUIRED)
+  find_package_and_print_version(hipsparselt REQUIRED)
   # workaround cmake 4 build issue
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0.0")
     message(WARNING "Work around hiprtc cmake failure for cmake >= 4")
@@ -200,9 +201,6 @@ if(HIP_FOUND)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
     find_package_and_print_version(rocm_smi REQUIRED)
   endif()
-
-  # Optional components.
-  find_package_and_print_version(hipsparselt)  # Will be required when ready.
 
   list(REMOVE_DUPLICATES ROCM_INCLUDE_DIRS)
 

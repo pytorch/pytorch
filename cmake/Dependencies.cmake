@@ -1087,6 +1087,7 @@ if(USE_ROCM)
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::hipsparselt
       )
+      set(CAFFE2_USE_HIPSPARSELT ${USE_HIPSPARSELT})
     endif()
 
     # ROCM-SMI needed to support symmetric memory
