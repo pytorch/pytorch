@@ -2804,15 +2804,18 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         # To work around this, we pass in the fileno directly and hope that
         # it is valid.
         stdout_fileno = 1
+        if isinstance(command, str):
+            is_posix = os.name == 'posix'
+            command = shlex.split(command, posix=is_posix)
         subprocess.run(
             command,
-            shell=IS_WINDOWS and IS_HIP_EXTENSION,
+            shell=False,
             stdout=stdout_fileno if verbose else subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=build_directory,
             check=True,
             env=env)
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.

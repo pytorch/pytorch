@@ -1,17 +1,27 @@
 # mypy: ignore-errors
-
+import os
+import shlex
 import subprocess
 
 
 def test(cmd, limit):
     print(f"Testing PYTORCH_JIT_OPT_LIMIT=tensorexpr_fuser={limit} {cmd}")
-    p = subprocess.run(
-        f"PYTORCH_JIT_OPT_LIMIT=tensorexpr_fuser={limit} {cmd}",
-        shell=True,
-        capture_output=True,
-        encoding="utf-8",
-        check=False,
-    )
+    cur_env = os.environ.copy()
+    cur_env["PYTORCH_JIT_OPT_LIMIT"] = f"tensorexpr_fuser={limit}"
+    is_posix = os.name == "posix"
+    cmd = shlex.split(cmd, posix=is_posix)
+    try:
+        p = subprocess.run(
+            cmd,
+            env=cur_env,
+            shell=False,
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+    except OSError:
+        print("bad")
+        return 0
     print(p.stdout)
     f = "INTERNAL ASSERT FAILED"
     if f in p.stdout or f in p.stderr:
