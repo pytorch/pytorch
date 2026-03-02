@@ -72,7 +72,7 @@ from ..utils import (
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import CONSTANT_VARIABLE_NONE, CONSTANT_VARIABLE_TRUE, ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
-from .script_object import TorchScriptObjectVariable
+from .script_object import TorchScriptObjectVariable, Unsupported
 from .user_defined import UserDefinedClassVariable
 
 
@@ -373,9 +373,17 @@ class TensorVariable(VariableTracker):
 
         if get_custom_getattr(_input_associated_real_value):
             raise NotImplementedError
-
-        real_value = getattr(_input_associated_real_value, name)
-
+#############
+        print(" dynamic_getattr called for:", name)
+        from torch._dynamo.exc import Unsupported
+        
+        try:
+            real_value = getattr(_input_associated_real_value, name)
+        except AttributeError:
+            raise Unsupported(
+        f"AttributeError during getattr tracing for attribute '{name}'"
+    )
+##############
         attr_source = AttrSource(self.source, name)
 
         # Typically we'd want to use variable builder here

@@ -18,6 +18,8 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 
+#from pytorch.test.dynamo.test_interop import fn
+
 
 class CustomException(Exception):
     pass
@@ -461,6 +463,24 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(4)
         self.assertEqual(mod(x), opt_mod(x))
+
+    ###############
+    def test_attribute_error_try_except_tensor(self):
+        import torch
+
+        def fn(x):
+            try:
+                return x.non_existent_attribute
+            except AttributeError:
+                return x * 2
+
+        x = torch.tensor(3)
+
+        eager = fn(x)
+        compiled = torch.compile(fn)(x)
+
+        self.assertEqual(eager, compiled)
+    ###############
 
     def test_attribute_error_from_getattr(self):
         class Mock:
