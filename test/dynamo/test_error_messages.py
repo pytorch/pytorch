@@ -1918,6 +1918,7 @@ HOP: Unsafe side effect
   Higher Order Operator: torch.utils.checkpoint.checkpoint
   Explanation: Mutating a variable from outside the scope of this HOP is not supported.
   Hint: If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a side effect in forward method. Eager activation checkpointing replays that side-effect while recomputing the forward in the backward. If you are ok with side-effect not replayed in the backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
+  Hint: If the HOP is a nested compile region (torch.ops.higher_order.invoke_subgraph / torch.compiler.nested_compile_region), consider removing the side effect from the region. Side effects prevent compile-time caching of the region, reducing the compile time benefit. If you must keep the side effect, set `torch._dynamo.config.allow_side_effects_under_nested_compile_region = True`.
 
   Developer debug context: Attempted to mutate ListVariable(length=0)
 
@@ -1966,6 +1967,7 @@ HOP: Unsafe side effect
   Higher Order Operator: torch.utils.checkpoint.checkpoint
   Explanation: Mutating a variable from outside the scope of this HOP is not supported.
   Hint: If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a side effect in forward method. Eager activation checkpointing replays that side-effect while recomputing the forward in the backward. If you are ok with side-effect not replayed in the backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
+  Hint: If the HOP is a nested compile region (torch.ops.higher_order.invoke_subgraph / torch.compiler.nested_compile_region), consider removing the side effect from the region. Side effects prevent compile-time caching of the region, reducing the compile time benefit. If you must keep the side effect, set `torch._dynamo.config.allow_side_effects_under_nested_compile_region = True`.
 
   Developer debug context: Attempted to mutate ListVariable(length=0)
 
@@ -2005,6 +2007,7 @@ HOP: Unsafe side effect
   Higher Order Operator: torch.utils.checkpoint.checkpoint
   Explanation: Mutating a variable from outside the scope of this HOP is not supported.
   Hint: If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a side effect in forward method. Eager activation checkpointing replays that side-effect while recomputing the forward in the backward. If you are ok with side-effect not replayed in the backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`
+  Hint: If the HOP is a nested compile region (torch.ops.higher_order.invoke_subgraph / torch.compiler.nested_compile_region), consider removing the side effect from the region. Side effects prevent compile-time caching of the region, reducing the compile time benefit. If you must keep the side effect, set `torch._dynamo.config.allow_side_effects_under_nested_compile_region = True`.
 
   Developer debug context: Attempted to mutate ListVariable(length=0)
 
