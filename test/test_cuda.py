@@ -2469,7 +2469,6 @@ exit(2)
         free_bytes_after, _ = torch.cuda.mem_get_info()
         used_gb_after = (total_bytes - free_bytes_after) / 1e9
 
-        self.assertFalse(used_gb_before + 0.1 < used_gb_after)
         self.assertGreater(0.005 + used_gb_before, used_gb_after)
 
     @unittest.skipIf(
