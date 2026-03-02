@@ -1666,7 +1666,7 @@ void do_avg_pool_nhwc_on_AVX_n(
     int hsize,
     int wsize,
     int csize) {
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
   // buffer for channel accumulator, used to interchange channel-loop
   // to inner-most, so that memory access of the input tensor data is
   // continuous.
@@ -1681,9 +1681,9 @@ void do_avg_pool_nhwc_on_AVX_n(
   Vectorized<float> acc_buffer_fp[cb_size];
 
 #ifdef CPU_CAPABILITY_AVX2
-  if (vec_width == 8) {
+  if constexpr (vec_width == 8) {
 #else
-  if (vec_width == 16) {
+  if constexpr (vec_width == 16) {
 #endif
     for (int c = c_start; c < csize; c += cb_step) {
       int cend = std::min(cb_size, (csize - c) / vec_width);
@@ -1753,12 +1753,12 @@ void do_avg_pool_on_AVX_n(
     int64_t stride_D,
     int64_t stride_H,
     int64_t stride_W) {
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
   constexpr int vec_width = Vectorized<T>::size() / 4;
 #ifdef CPU_CAPABILITY_AVX2
-  if (vec_width == 8) {
+  if constexpr (vec_width == 8) {
 #else
-  if (vec_width == 16) {
+  if constexpr (vec_width == 16) {
 #endif
     for (; c + vec_width <= channel_size; c += vec_width) {
       int64_t tcntr = 0;
@@ -2198,12 +2198,12 @@ int64_t do_quantized_bilinear_on_AVX_n(
     const int64_t h1p,
     const int64_t w1p) {
   int64_t c = 0;
-#if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
   constexpr auto vec_width = Vectorized<T>::size() / 4;
 #ifdef CPU_CAPABILITY_AVX2
-  if (vec_width == 8) {
+  if constexpr (vec_width == 8) {
 #else
-  if (vec_width == 16) {
+  if constexpr (vec_width == 16) {
 #endif
     for (; c + vec_width <= channels; c += vec_width) {
       Vectorized<float> pos1_fp_v[4];
