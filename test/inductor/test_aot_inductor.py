@@ -2027,7 +2027,9 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
-    @skipIfXpu(msg="FlashAttentionForward headdim limitation on xpu - xpu-ops: 2698")
+    @skipIfXpu(
+        msg="FlashAttentionForward headdim limitation on xpu - torch-xpu-ops: 2698"
+    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
     )

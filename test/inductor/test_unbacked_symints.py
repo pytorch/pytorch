@@ -499,9 +499,9 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(msg="FlashAttentionForward headdim limitation on xpu")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
-    @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
         if device == "cpu":
@@ -526,9 +526,9 @@ class TestUnbackedSymints(InductorTestCase):
         x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
         torch.compile(fn, fullgraph=True)(x)
 
+    @skipIfXpu(msg="FlashAttentionForward headdim limitation on xpu")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
-    @skipIfXpu(msg="scaled_dot_product_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
         if device == "cpu":
