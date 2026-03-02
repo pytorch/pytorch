@@ -12073,6 +12073,27 @@ class TestAutogradDeviceType(TestCase):
             ):
                 gradgradcheck(fn, (input, 0, idx, src, "prod"))
 
+    def test_scatter_index_reduce_amax_amin_no_nan_grad(self, device):
+        # tests that gradients are finite when include_self=False and all values
+        # scatter to the same position (N_to_distribute could be 0 without the fix)
+        fns = (torch.scatter_reduce, torch.index_reduce)
+        reduces = ("amin", "amax")
+        for fn, reduction in product(fns, reduces):
+            fill_value = float("-inf") if reduction == "amax" else float("inf")
+            base = torch.full(
+                (1,), fill_value, device=device, dtype=torch.float64, requires_grad=True
+            )
+            idx = torch.zeros(8, dtype=torch.long, device=device)
+            src = torch.randn(8, device=device, dtype=torch.float64, requires_grad=True)
+
+            out = fn(base, 0, idx, src, reduction, include_self=False)
+            out.sum().backward()
+
+            self.assertTrue(
+                torch.all(torch.isfinite(src.grad)),
+                f"{fn.__name__} {reduction}: src.grad contains non-finite values",
+            )
+
     @skipIfMPS  # the test doesn't work on MPS as double types are not supported
     def test_parameter_resize(self, device):
         asd = torch.nn.Parameter(torch.ones(16, dtype=torch.double, device=device))
