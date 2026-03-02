@@ -2,6 +2,7 @@
 
 import sys
 import tempfile
+import unittest
 from typing import Any, IO
 
 import torch
@@ -561,6 +562,50 @@ instantiate_parametrized_tests(TestDistributedStateDictSaveLoadRot13)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadZStandard)
 instantiate_parametrized_tests(TestDistributedReshardOnLoad)
+
+
+_CUDA_THREAD_COUNTS = {1, 2, 4}
+
+
+@unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+class TestMultiThreadedCudaSave(TestCase):
+    @parametrize("thread_count", _CUDA_THREAD_COUNTS)
+    def test_save_load_cuda_tensors(self, thread_count: int) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = {
+                f"weight_{i}": torch.randn(64, 64, device="cuda") for i in range(8)
+            }
+
+            fs_writer = FileSystemWriter(path=path, thread_count=thread_count)
+            save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=fs_writer,
+                no_dist=True,
+            )
+
+            state_dict_to_load = {
+                k: torch.zeros_like(v, device="cpu")
+                for k, v in state_dict_to_save.items()
+            }
+
+            fs_reader = FileSystemReader(path=path)
+            load_state_dict(
+                state_dict=state_dict_to_load,
+                storage_reader=fs_reader,
+                no_dist=True,
+            )
+
+            for key in state_dict_to_save:
+                self.assertTrue(
+                    torch.equal(
+                        state_dict_to_save[key].cpu(),
+                        state_dict_to_load[key],
+                    ),
+                    f"Tensor {key} mismatch with thread_count={thread_count}",
+                )
+
+
+instantiate_parametrized_tests(TestMultiThreadedCudaSave)
 
 if __name__ == "__main__":
     run_tests()
