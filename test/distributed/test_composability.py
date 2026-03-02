@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_WITH_ROCM,
 )
 
 
@@ -290,9 +289,6 @@ class ComposabilityTest(MultiProcContinuousTest):
         ],
     )
     def test_pp_fsdp(self, dp_type, ScheduleClass):
-        if TEST_WITH_ROCM:
-            return
-
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size // 2, 2)
         mesh_dim_names = ("dp", "pp")
@@ -393,9 +389,6 @@ class ComposabilityTest(MultiProcContinuousTest):
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     def test_pp_fsdp_unshard_reshard_runtime(self, dp_type):
         """Test FSDP UNSHARD/RESHARD functionality using _PipelineScheduleRuntime with custom schedules."""
-        if TEST_WITH_ROCM:
-            return
-
         torch.get_device_module(device_type).set_device(self.device)
         mesh_shape = (self.world_size, 1)
         mesh_dim_names = ("dp", "pp")
