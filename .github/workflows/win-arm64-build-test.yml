@@ -95,6 +95,7 @@ jobs:
           PYTORCH_FINAL_PACKAGE_DIR: C:/${{ github.run_id }}/build-results/
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           BUILD_WHEEL: 1
+          BUILD_TEST: 1
           MAX_JOBS: 8
           PYTHON_VERSION: "3.12"
           SCCACHE_BUCKET: "ossci-compiler-cache"
@@ -144,6 +145,11 @@ jobs:
         shell: cmd
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
 
       - name: Bootstrap Rust
         shell: cmd

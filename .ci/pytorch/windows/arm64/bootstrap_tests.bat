@@ -11,6 +11,25 @@ echo * > .venv\.gitignore
 call .\.venv\Scripts\activate
 where python
 
+:: add APL to PATH for runtime dependencies
+if exist "%DEPENDENCIES_DIR%\armpl_24.10\bin" set PATH=%DEPENDENCIES_DIR%\armpl_24.10\bin;%PATH%
+
+:: ------------------------------------------------------------------
+:: Ensure MSVC ARM64 runtime DLLs are discoverable at runtime
+:: IMPORTANT: use delayed expansion to avoid PATH parsing errors
+:: ------------------------------------------------------------------
+setlocal EnableDelayedExpansion
+
+for /d %%D in (
+  "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Redist\MSVC\*\arm64\Microsoft.VC143.CRT"
+) do (
+  if exist "%%D\vcruntime140.dll" (
+    set "PATH=%%D;!PATH!"
+  )
+)
+
+endlocal & set "PATH=%PATH%"
+
 :: install dependencies
 python -m pip install --upgrade pip
 pip install -r requirements.txt
