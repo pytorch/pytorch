@@ -19,7 +19,11 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU_AND_TRITON
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+    requires_xpu_and_triton,
+)
 
 
 aten = torch.ops.aten
@@ -995,11 +999,32 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(5 <= torch._inductor.metrics.generated_kernel_count <= 6)
 
-    @requires_gpu_and_triton
+    @requires_cuda_and_triton
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", True)
     @torch._inductor.config.patch("triton.autotune_at_compile_time", True)
     def test_dynamic_shapes_persistent_reduction_mixed_x_dim_cuda(self):
+        def fn(x, y, z):
+            return x.sum(1), y.mean(1), z.max(1)
+
+        inps = (
+            torch.rand(16, 128, device=GPU_TYPE),
+            torch.rand(32, 128, device=GPU_TYPE),
+            torch.rand(32, 256, device=GPU_TYPE),
+        )
+        torch._dynamo.mark_dynamic(inps[0], 0, min=1, max=256)
+        torch._dynamo.mark_dynamic(inps[1], 0, min=1, max=256)
+        torch._dynamo.mark_dynamic(inps[2], 0, min=1, max=256)
+        out_eager = fn(*inps)
+        out_compiled = torch.compile(fn)(*inps)
+
+        self.assertEqual(out_eager, out_compiled)
+
+    @requires_xpu_and_triton
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
+    @torch._dynamo.config.patch("assume_static_by_default", True)
+    @torch._inductor.config.patch("triton.autotune_at_compile_time", True)
+    def test_dynamic_shapes_persistent_reduction_mixed_x_dim_xpu(self):
         def fn(x, y, z):
             return x.sum(1), y.mean(1), z.max(1)
 
