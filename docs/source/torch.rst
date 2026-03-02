@@ -21,7 +21,9 @@ Tensors
     get_default_device
     set_default_tensor_type
     numel
+    get_printoptions
     set_printoptions
+    printoptions
     set_flush_denormal
 
 .. _tensor-creation-ops:
