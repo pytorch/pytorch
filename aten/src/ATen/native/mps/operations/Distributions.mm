@@ -637,7 +637,7 @@ static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
       MPSGraphTensor* binnedSamplesTensor = [mpsGraph multiplicationWithPrimaryTensor:categoriesTensor
                                                                       secondaryTensor:sampleMask
                                                                                  name:nil];
-      MPSGraphTensor* reducedTensor = [mpsGraph reductionSumWithTensor:binnedSamplesTensor axis:-1 name:nil];
+      MPSGraphTensor* reducedTensor = [mpsGraph reductionMaximumWithTensor:binnedSamplesTensor axis:-1 name:nil];
       MPSGraphTensor* reshapeTensor = [mpsGraph reshapeTensor:reducedTensor
                                                     withShape:@[ ns_numDist, ns_n_sample ]
                                                          name:nil];

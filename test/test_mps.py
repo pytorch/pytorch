@@ -8345,6 +8345,33 @@ class TestMPS(TestCaseMPS):
         helper(np.array([1, 1, 1, 1, 1]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
         helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
 
+    def test_multinomial_no_out_of_range_indices(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/136623
+        probs = torch.tensor(
+            [
+                4.3330236804e-04,
+                1.6706718498e-07,
+                5.6105983504e-07,
+                2.5240040486e-05,
+                5.4649823142e-05,
+                5.5108112283e-03,
+                9.9348586798e-01,
+                4.5977579077e-08,
+                4.8896443332e-04,
+                3.4132514770e-07,
+            ],
+            device="mps",
+        )
+        num_classes = probs.numel()
+        draws = 250_000
+        loops = 40
+        seed_base = 0x1234
+        for loop in range(loops):
+            torch.manual_seed(seed_base + loop)
+            samples = torch.multinomial(probs, draws, replacement=True)
+            max_seen = int(samples.max())
+            self.assertLess(max_seen, num_classes, msg=f"loop={loop}, max_seen={max_seen}, num_classes={num_classes}")
+
     def test_non_contiguous_sampling_variation(self):
         torch.manual_seed(42)
         # transpose so it's made non-contiguous
