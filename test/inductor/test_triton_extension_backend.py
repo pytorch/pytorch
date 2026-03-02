@@ -2,6 +2,7 @@
 import functools
 import random
 import string
+import sys
 import unittest
 from pathlib import Path
 from typing import Any, Optional
@@ -151,6 +152,16 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
         ).check("device_str='privateuseone'").run(code)
 
     def _register_custom_backend_with_heuristics(self, device):
+        path_to_ext_heuristics = str(
+            Path(__file__).parent / "extension_backends" / "triton"
+        )
+        # Add the path to sys.path in the parent process so that the
+        # ExtensionCachingAutotuner class (defined in extension_triton_heuristics)
+        # can be resolved when the compiled kernel is unpickled from the
+        # compile subprocess back into the parent process.
+        if path_to_ext_heuristics not in sys.path:
+            sys.path.append(path_to_ext_heuristics)
+
         class ExtensionTritonKernel(codegen.triton.TritonKernel):
             @classmethod
             @functools.lru_cache(None)
@@ -158,9 +169,6 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
                 default_imports = super().gen_common_triton_imports()
                 custom_imports = IndentedBuffer()
                 custom_imports.splice(default_imports)
-                path_to_ext_heuristics = (
-                    Path(__file__).parent / "extension_backends" / "triton"
-                )
 
                 custom_imports.splice(f"""
                     import sys
