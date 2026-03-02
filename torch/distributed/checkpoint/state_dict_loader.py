@@ -294,6 +294,8 @@ def _load_state_dict(
         all_reads = storage_reader.read_data(final_local_plan, planner)
 
         all_reads.wait()
+
+        planner.finish_load()
         return None
 
     if use_collectives:
