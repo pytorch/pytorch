@@ -3934,6 +3934,55 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
     return out.squeeze(0) if not is_batched else out
 
 
+def error_inputs_conv_transpose1d(op_info, device, **kwargs):
+    """Error inputs for conv_transpose1d: output_padding >= stride and output_padding >= dilation."""
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # Test case: output_padding >= stride (and >= dilation with default dilation=1)
+    # This should raise an error
+    yield ErrorInput(
+        SampleInput(
+            make_arg((1, 1, 4)),
+            args=(make_arg((1, 1, 3)), None),
+            kwargs={'stride': 1, 'padding': 0, 'output_padding': 1}
+        ),
+        error_type=RuntimeError,
+        error_regex='output padding must be smaller than either stride or dilation'
+    )
+
+
+def error_inputs_conv_transpose2d(op_info, device, **kwargs):
+    """Error inputs for conv_transpose2d: output_padding >= stride and output_padding >= dilation."""
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # Test case: output_padding >= stride (and >= dilation with default dilation=1)
+    yield ErrorInput(
+        SampleInput(
+            make_arg((1, 1, 4, 4)),
+            args=(make_arg((1, 1, 3, 3)), None),
+            kwargs={'stride': 1, 'padding': 0, 'output_padding': 1}
+        ),
+        error_type=RuntimeError,
+        error_regex='output padding must be smaller than either stride or dilation'
+    )
+
+
+def error_inputs_conv_transpose3d(op_info, device, **kwargs):
+    """Error inputs for conv_transpose3d: output_padding >= stride and output_padding >= dilation."""
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # Test case: output_padding >= stride (and >= dilation with default dilation=1)
+    yield ErrorInput(
+        SampleInput(
+            make_arg((1, 1, 4, 4, 4)),
+            args=(make_arg((1, 1, 3, 3, 3)), None),
+            kwargs={'stride': 1, 'padding': 0, 'output_padding': 1}
+        ),
+        error_type=RuntimeError,
+        error_regex='output padding must be smaller than either stride or dilation'
+    )
+
+
 def sample_inputs_conv_transpose1d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -15916,6 +15965,7 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose1d,
+           error_inputs_func=error_inputs_conv_transpose1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -15967,6 +16017,7 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose2d,
+           error_inputs_func=error_inputs_conv_transpose2d,
            # Runs very slowly on slow-gradcheck for complex.
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -16021,6 +16072,7 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(
                torch.float16, torch.chalf, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose3d,
+           error_inputs_func=error_inputs_conv_transpose3d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
