@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/mps/MPSGraphTahoeOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/_mps_convolution_native.h>
 #include <ATen/ops/_mps_convolution_transpose_native.h>
@@ -301,7 +302,17 @@ Tensor _mps_convolution(const Tensor& input_t,
                         IntArrayRef stride,
                         IntArrayRef dilation,
                         int64_t groups) {
-  return _mps_convolution_impl(input_t, weight_t, bias_opt, padding, stride, dilation, groups, std::nullopt);
+  // https://github.com/pytorch/pytorch/issues/169342 Need to avoid strided inputs
+  // until bug fix lands in the OS. Issue started in MacOS26 on M5 devices.
+  const bool is_m5_device = is_gpu_family(MTLGPUFamilyApple10);
+  return _mps_convolution_impl(is_m5_device ? input_t.contiguous() : input_t,
+                               weight_t,
+                               bias_opt,
+                               padding,
+                               stride,
+                               dilation,
+                               groups,
+                               std::nullopt);
 }
 
 static Tensor mps_convolution_backward_input(IntArrayRef input_size,
