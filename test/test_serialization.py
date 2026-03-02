@@ -741,7 +741,7 @@ class SerializationMixin:
 
         error_msg = r'Attempting to deserialize object on a CUDA device'
         with self.assertRaisesRegex(RuntimeError, error_msg):
-            _ = torch.load(buf)
+            _ = torch.load(buf, weights_only=False)
 
     def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
@@ -1154,6 +1154,39 @@ class TestOldSerialization(TestCase, SerializationMixin):
 
 
 class TestSerialization(TestCase, SerializationMixin):
+    def test_sequential_load_zipfile_stream(self):
+        # Regression test for Issue #169763
+        import io
+        buffer = io.BytesIO()
+        t1 = torch.tensor([1., 2., 3.])
+        t2 = torch.tensor([4., 5., 6.])
+        torch.save(t1, buffer)
+        torch.save(t2, buffer)
+        buffer.seek(0)
+        loaded1 = torch.load(buffer, weights_only=False)
+        self.assertEqual(t1, loaded1)
+        loaded2 = torch.load(buffer, weights_only=False)
+        self.assertEqual(t2, loaded2)
+
+    def test_sequential_load_zipfile_weights_only_error(self):
+        # Regression test for Issue #169763: Ensure clear error for unsupported concatenated streams
+        import io
+        buffer = io.BytesIO()
+        t1 = torch.tensor([1., 2., 3.])
+        t2 = torch.tensor([4., 5., 6.])
+        torch.save(t1, buffer)
+        torch.save(t2, buffer)
+        buffer.seek(0)
+
+        # First load succeeds
+        loaded1 = torch.load(buffer, weights_only=True)
+        self.assertEqual(t1, loaded1)
+
+        # Second load must fail with clear message
+        msg = "only supports files saved with the zipfile-based serialization format starting at the beginning of the stream"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.load(buffer, weights_only=True)
+
     @parametrize('weights_only', (True, False))
     def test_serialization_zipfile(self, weights_only):
         data = self._test_serialization_data()
@@ -5285,6 +5318,46 @@ class TestSubclassSerialization(TestCase):
         ):
             torch.load(modified_buffer, weights_only=True)
 
+
+
+class TestSequentialZipLoad(TestCase):
+    def test_sequential_load_zip_weights_only(self):
+        # Verifies fix for https://github.com/pytorch/pytorch/issues/169763
+        import io
+
+        tensor1 = torch.tensor([1, 2, 3], dtype=torch.int32)
+        tensor2 = torch.tensor([4, 5, 6], dtype=torch.float32)
+
+        buffer = io.BytesIO()
+        torch.save(tensor1, buffer)
+        torch.save(tensor2, buffer)
+        buffer.seek(0)
+
+        t1 = torch.load(buffer, weights_only=True)
+        self.assertTrue(torch.equal(t1, tensor1))
+
+        # Second load MUST fail
+        msg = "torch.load(..., weights_only=True) only supports files saved with the zipfile-based serialization format starting at the beginning of the stream"
+        with self.assertRaisesRegex(RuntimeError, str(re.escape(msg))):
+             torch.load(buffer, weights_only=True)
+
+
+
+    def test_legacy_load_uint32(self):
+        # Verifies fix for Bug 2 in https://github.com/pytorch/pytorch/issues/169763
+        # Legacy load of uint32 should not raise AttributeError on _untyped_storage
+        if not hasattr(torch, 'uint32'):
+            return
+
+        import io
+        tensor = torch.tensor([1, 4, 5], dtype=torch.uint32)
+        buffer = io.BytesIO()
+        torch.save(tensor, buffer, _use_new_zipfile_serialization=False)
+        buffer.seek(0)
+
+        # This was failing with AttributeError before the fix
+        loaded = torch.load(buffer, weights_only=False)
+        self.assertTrue(torch.equal(loaded, tensor))
 
 instantiate_device_type_tests(TestBothSerialization, globals())
 instantiate_parametrized_tests(TestSubclassSerialization)
