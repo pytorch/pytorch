@@ -153,12 +153,15 @@ else
     USE_KINETO=1
 fi
 
+USE_CCACHE=${USE_CCACHE:-0}
+
 echo "Calling setup.py bdist at $(date)"
 
 time CMAKE_ARGS=${CMAKE_ARGS[@]} \
     EXTRA_CAFFE2_CMAKE_FLAGS=${EXTRA_CAFFE2_CMAKE_FLAGS[@]} \
     BUILD_LIBTORCH_CPU_WITH_DEBUG=$BUILD_DEBUG_INFO \
     USE_NCCL=${USE_NCCL} USE_RCCL=${USE_RCCL} USE_KINETO=${USE_KINETO} \
+    USE_CCACHE=${USE_CCACHE} \
     python -m build --wheel --no-isolation --outdir /tmp/$WHEELHOUSE_DIR
 echo "Finished setup.py bdist at $(date)"
 
