@@ -200,7 +200,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_out_mps)
   int64_t strideH = 0, strideW = 0;
   int64_t kernel_sizeH = 0, kernel_sizeW = 0;
 
-  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW);
+  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW, true);
 
   at::max_pool2d_with_indices_out(const_cast<Tensor&>(output),
                                   const_cast<Tensor&>(indices),
