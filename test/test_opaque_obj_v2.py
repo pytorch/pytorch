@@ -2300,19 +2300,19 @@ def forward(self, L_x_ : torch.Tensor):
             actual,
             f"""\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_scale_obj_ : {fx_class}, L_x_: "f32[2, 2]"):
+    def forward(self, L_scale_obj_ : test_opaque_obj_v2_OpaqueMultiplier, L_x_: "f32[2, 2]"):
         l_scale_obj_ = L_scale_obj_
         l_x_ = L_x_
 
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_scale_obj_, l_x_);  subgraph_0 = l_scale_obj_ = l_x_ = None
-        getitem_2: "f32[2, 2]" = invoke_subgraph[0];  invoke_subgraph = None
+        getitem: "f32[2, 2]" = invoke_subgraph[0];  invoke_subgraph = None
 
-        add: "f32[2, 2]" = getitem_2 + getitem_2;  getitem_2 = None
+        add: "f32[2, 2]" = getitem + getitem;  getitem = None
         return (add,)
 
     class subgraph_0(torch.nn.Module):
-        def forward(self, l_scale_obj_ : {fx_class}, l_x_: "f32[2, 2]"):
+        def forward(self, l_scale_obj_ : test_opaque_obj_v2_OpaqueMultiplier, l_x_: "f32[2, 2]"):
             result: "f32[2, 2]" = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
 
             result_1: "f32[2, 2]" = result * 2;  result = None
