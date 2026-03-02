@@ -1786,8 +1786,7 @@ class triton:
     enable_pdl = os.environ.get("TORCHINDUCTOR_ENABLE_PDL", "0") == "1"
 
     mix_order_reduction = (
-        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
-        == "1"
+        os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "1") == "1"
     )
     mix_order_reduction_initial_xblock = 1
 
