@@ -13390,6 +13390,24 @@ class TestMetalLibrary(TestCaseMPS):
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
+class TestMPSAcceleratorAPI(TestCaseMPS):
+    """Test the unified torch.accelerator API for MPS."""
+
+    def test_memory_stats(self):
+        """Test that memory stats are accessible."""
+        # Allocate some tensors
+        tensors = [torch.randn(100, 100, device='mps') for _ in range(5)]
+
+        # These methods should exist and return valid values
+        current_mem = torch.mps.current_allocated_memory()
+        driver_mem = torch.mps.driver_allocated_memory()
+
+        self.assertGreater(current_mem, 0)
+        self.assertGreaterEqual(driver_mem, current_mem)
+
+        # Clean up
+        del tensors
+
 # to achieve this.
 instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
@@ -13401,6 +13419,7 @@ instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
 instantiate_parametrized_tests(TestMetalLibrary)
+instantiate_parametrized_tests(TestMPSAcceleratorAPI)
 
 if __name__ == "__main__":
     run_tests()

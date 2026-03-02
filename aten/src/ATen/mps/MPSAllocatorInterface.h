@@ -4,6 +4,7 @@
 
 #include <ATen/core/ATen_fwd.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/CachingDeviceAllocator.h>
 #include <c10/util/Registry.h>
 
 #define MB(x) (x * 1048576UL)
@@ -12,7 +13,7 @@ namespace at::mps {
 
 // this is a public interface to access MPSAllocator.
 // Do not declare methods that would depend on MPS or Metal frameworks.
-class IMPSAllocator : public c10::Allocator {
+class IMPSAllocator : public c10::DeviceAllocator {
  public:
   // see the comments in MPSAllocator.h for the description of these methods.
   virtual void emptyCache() const = 0;
@@ -40,6 +41,16 @@ class IMPSAllocator : public c10::Allocator {
       const void* ptr) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
+
+  // Override DeviceAllocator methods (non-const, required to avoid name hiding)
+  bool initialized() override = 0;
+  void emptyCache(c10::MempoolId_t mempool_id = {0, 0}) override = 0;
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) override = 0;
+  void resetAccumulatedStats(c10::DeviceIndex device) override = 0;
+  void resetPeakStats(c10::DeviceIndex device) override = 0;
+  std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override = 0;
+  void recordStream(const c10::DataPtr& ptr, c10::Stream stream) override = 0;
 };
 
 class IMpsAllocatorCallback {
