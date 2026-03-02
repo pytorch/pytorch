@@ -425,6 +425,23 @@ def forward(self, arg0_1):
             ],
         )
 
+    def test_chromium_event_timed_profiling(self):
+        # chromium_event_timed should emit profiler events so they appear in
+        # the stock profiler, not just in tlparse traces.
+        from torch._dynamo.utils import chromium_event_timed
+
+        with torch.profiler.profile(with_stack=False) as prof:
+            with chromium_event_timed("test_chromium_event"):
+                x = torch.rand((2, 2))
+                _ = x.sin()
+
+        self.assertTrue(
+            any(
+                "test_chromium_event (chromium_event_timed)" in evt.name
+                for evt in prof.events()
+            )
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
