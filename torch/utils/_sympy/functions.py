@@ -1346,6 +1346,13 @@ class Identity(sympy.Function):
     def __int__(self) -> int:
         return int(self.args[0])
 
+    def _eval_evalf(self, prec):
+        # only unwrap comparable integer constants.
+        arg = self.args[0]
+        if arg.is_Integer and arg.is_comparable:
+            return arg
+        return None
+
     def __float__(self) -> float:
         return float(self.args[0])
 
