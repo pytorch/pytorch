@@ -100,8 +100,9 @@ static Tensor NestedTensor_elementwise_Tensor(
       self_impl->get_storage_offsets()
     );
   }
-  // special case when other is dense (CUDA only for now)
-  if (self.is_nested() && !other.is_nested() && self.is_cuda() && other.is_cuda()) {
+  // special case when other is dense (CUDA/XPU only for now)
+  if (self.is_nested() && !other.is_nested() &&
+      ((self.is_cuda() && other.is_cuda()) || (self.is_xpu() && other.is_xpu()))) {
     auto self_ptr = get_nested_tensor_impl(self);
     auto other_ = other;
     // check for the [B, *, D], [B, 1, D] case -> use custom kernel
