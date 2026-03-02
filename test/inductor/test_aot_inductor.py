@@ -5206,7 +5206,10 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.fft.fftn(x), torch.fft.fftn(x).real
 
-        example_inputs = (torch.randn(16, 16, 16, device=self.device),)
+        # non-contiguous input to test stride logic
+        example_inputs = (
+            torch.randn(16, 16, 1, 16, device=self.device).expand(16, 16, 16, 16),
+        )
         self.check_model(Model(), example_inputs)
 
     def test_bool_input(self):
