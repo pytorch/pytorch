@@ -661,19 +661,28 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             metadata._flatten_into(tangent_metadata, fake_mode, state)
 
         # Add aliasing information to tangent_metadata
-        # Two tangents are aliased if they are the same tensor object (using id())
+        # Two tangents are aliased if they share the same storage and storage_offset
         # We create a tuple of tuples where each inner tuple contains indices of aliased tensors
         # e.g. ((0, 1),) would mean there is one aliasing group, and the first and second tangents are aliased
         # e.g. () would mean there is no aliasing between tangents
-        tensor_to_indices: dict[int, list[int]] = defaultdict(list)
+        from torch.multiprocessing.reductions import StorageWeakRef
+
+        storage_to_indices: dict[tuple[StorageWeakRef, int], list[int]] = defaultdict(
+            list
+        )
         for i, tangent in enumerate(filtered_grad_outs):
-            if isinstance(tangent, torch.Tensor):
-                tensor_to_indices[id(tangent)].append(i)
+            if isinstance(tangent, torch.Tensor) and torch._C._has_storage(tangent):
+                # Use (StorageWeakRef, storage_offset) as key
+                storage_key = (
+                    StorageWeakRef(tangent.untyped_storage()),
+                    tangent.storage_offset(),
+                )
+                storage_to_indices[storage_key].append(i)
 
         aliasing_groups = tuple(
             sorted(
                 tuple(indices)
-                for indices in tensor_to_indices.values()
+                for indices in storage_to_indices.values()
                 if len(indices) > 1
             )
         )
