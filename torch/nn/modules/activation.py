@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import math
 import warnings
 
 import torch
@@ -1231,7 +1232,12 @@ class MultiheadAttention(Module):
 
     def _reset_parameters(self) -> None:
         if self._qkv_same_embed_dim:
-            xavier_uniform_(self.in_proj_weight)
+            # For packed in_proj_weight (3*embed_dim, embed_dim), xavier_uniform_
+            # computes fan_out=3*embed_dim. To match the initialization statistics
+            # of separate Q/K/V weights (each embed_dim, embed_dim with fan_out=embed_dim),
+            # we use gain=sqrt(2) to compensate: sqrt((2*E)/(4*E)) = sqrt(1/2), so
+            # gain=sqrt(2) scales bounds to match. See issue #166378.
+            xavier_uniform_(self.in_proj_weight, gain=math.sqrt(2.0))
         else:
             xavier_uniform_(self.q_proj_weight)
             xavier_uniform_(self.k_proj_weight)

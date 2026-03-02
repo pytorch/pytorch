@@ -513,6 +513,81 @@ class TestMultiheadAttentionNN(NNTestCase):
         self.assertIsNone(mha.in_proj_bias)
         self.assertIsNone(mha.out_proj.bias)
 
+    def test_multihead_attn_in_proj_weight_initialization_consistency(self):
+        """
+        Test that packed in_proj_weight has consistent initialization with
+        separate q/k/v_proj_weights.
+
+        When _qkv_same_embed_dim is True, in_proj_weight has shape (3*embed_dim, embed_dim).
+        When _qkv_same_embed_dim is False, q/k/v_proj_weight each have shape (embed_dim, embed_dim).
+
+        Both cases should produce weights with equivalent initialization statistics
+        (same variance/bounds from xavier_uniform_).
+
+        See https://github.com/pytorch/pytorch/issues/166378
+        """
+        import math
+
+        embed_dim = 512
+        num_heads = 8
+
+        # Case 1: _qkv_same_embed_dim = True (packed in_proj_weight)
+        mha_packed = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
+
+        # Case 2: _qkv_same_embed_dim = False (separate q/k/v_proj_weight)
+        mha_separate = torch.nn.MultiheadAttention(
+            embed_dim, num_heads, batch_first=True,
+            kdim=embed_dim + 1,  # Force separate projections
+            vdim=embed_dim + 2
+        )
+
+        # Verify the expected configuration
+        self.assertTrue(mha_packed._qkv_same_embed_dim)
+        self.assertFalse(mha_separate._qkv_same_embed_dim)
+        self.assertEqual(mha_packed.in_proj_weight.shape, (3 * embed_dim, embed_dim))
+        self.assertEqual(mha_separate.q_proj_weight.shape, (embed_dim, embed_dim))
+
+        # Calculate expected bound for xavier_uniform_ with fan_in=fan_out=embed_dim
+        # xavier_uniform_ uses: bound = gain * sqrt(6 / (fan_in + fan_out))
+        expected_bound = math.sqrt(6.0 / (embed_dim + embed_dim))
+
+        # For uniform distribution U(-a, a), variance = a^2 / 3
+        expected_variance = (expected_bound ** 2) / 3
+
+        # Verify packed weights have correct statistics
+        packed_var = mha_packed.in_proj_weight.data.var().item()
+        packed_max = mha_packed.in_proj_weight.data.abs().max().item()
+
+        # Verify separate q_proj_weight has correct statistics
+        separate_q_var = mha_separate.q_proj_weight.data.var().item()
+        separate_q_max = mha_separate.q_proj_weight.data.abs().max().item()
+
+        # Check that both have approximately the same variance (within 10% tolerance)
+        # This tolerance accounts for random sampling variation
+        ratio = packed_var / separate_q_var
+        self.assertGreater(ratio, 0.9, f"Variance ratio {ratio:.3f} is too low, expected ~1.0")
+        self.assertLess(ratio, 1.1, f"Variance ratio {ratio:.3f} is too high, expected ~1.0")
+
+        # Check that both are close to expected variance (within 5% of expected)
+        self.assertAlmostEqual(
+            packed_var, expected_variance, delta=expected_variance * 0.05,
+            msg=f"Packed variance {packed_var:.6f} differs from expected {expected_variance:.6f}"
+        )
+        self.assertAlmostEqual(
+            separate_q_var, expected_variance, delta=expected_variance * 0.05,
+            msg=f"Separate variance {separate_q_var:.6f} differs from expected {expected_variance:.6f}"
+        )
+
+        # Check that max values are within expected bounds (with small margin for edge cases)
+        self.assertLessEqual(
+            packed_max, expected_bound * 1.01,
+            msg=f"Packed max {packed_max:.6f} exceeds expected bound {expected_bound:.6f}"
+        )
+        self.assertLessEqual(
+            separate_q_max, expected_bound * 1.01,
+            msg=f"Separate max {separate_q_max:.6f} exceeds expected bound {expected_bound:.6f}"
+        )
+
     def _test_multihead_attn_invalid_shape_impl(self, mha):
         # Batched (3D) query cases
         query = torch.randn(4, 4, 4)
