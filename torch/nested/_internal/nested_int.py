@@ -1,4 +1,4 @@
-from typing import *  # noqa: F403
+from typing import Any
 
 import torch
 from torch.fx.experimental._constant_symnode import ConstantIntNode
@@ -42,7 +42,7 @@ class NestedIntNode:
     def nested_int_coeff(self) -> int:
         return self.coeff
 
-    def maybe_as_int(self) -> Optional[int]:
+    def maybe_as_int(self) -> int | None:
         return None
 
     def is_int(self) -> bool:

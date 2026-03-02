@@ -13,7 +13,7 @@ from torch.jit._script import RecursiveScriptModule, ScriptModule
 
 
 def freeze(
-    mod, preserved_attrs: Optional[list[str]] = None, optimize_numerics: bool = True
+    mod, preserved_attrs: list[str] | None = None, optimize_numerics: bool = True
 ):
     r"""Freeze ScriptModule, inline submodules, and attributes as constants.
 
@@ -132,7 +132,7 @@ def freeze(
 
 
 def run_frozen_optimizations(
-    mod, optimize_numerics: bool = True, preserved_methods: Optional[list[str]] = None
+    mod, optimize_numerics: bool = True, preserved_methods: list[str] | None = None
 ) -> None:
     r"""
     Run a series of optimizations looking for patterns that occur in frozen graphs.
@@ -191,7 +191,7 @@ def run_frozen_optimizations(
 
 
 def optimize_for_inference(
-    mod: ScriptModule, other_methods: Optional[list[str]] = None
+    mod: ScriptModule, other_methods: list[str] | None = None
 ) -> ScriptModule:
     """
     Perform a set of optimization passes to optimize a model for the purposes of inference.

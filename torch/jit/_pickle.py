@@ -7,8 +7,6 @@
 # a type attached and restored via `restore_type_tag` below. The legacy
 # functions should stick around for backwards-compatibility.
 
-from typing import Union
-
 
 def build_intlist(data: list[int]) -> list[int]:
     return data
@@ -26,7 +24,7 @@ def build_boollist(data: list[bool]) -> list[bool]:
     return data
 
 
-def build_tensor_from_id(data: Union[int, object]) -> Union[int, None]:
+def build_tensor_from_id(data: int | object) -> int | None:
     if isinstance(data, int):
         # just the id, can't really do anything
         return data
