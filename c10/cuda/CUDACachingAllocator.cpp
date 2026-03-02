@@ -4302,6 +4302,9 @@ class NativeCachingAllocator : public CUDAAllocator {
         CUDAAllocatorConfig::graph_capture_record_stream_reuse();
     md.roundup_power2_divisions =
         AcceleratorAllocatorConfig::roundup_power2_divisions();
+    md.max_round_threshold =
+        AcceleratorAllocatorConfig::pinned_max_round_threshold();
+    md.max_cached_size = AcceleratorAllocatorConfig::pinned_max_cached_size();
 
     return result;
   }

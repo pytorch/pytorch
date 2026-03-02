@@ -922,6 +922,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str roundup_power2_divisions_s = "roundup_power2_divisions";
   py::str graph_capture_record_stream_reuse_s =
       "graph_capture_record_stream_reuse";
+  py::str max_round_threshold_s = "max_round_threshold";
+  py::str max_cached_size_s = "max_cached_size";
 
   allocator_settings[last_allocator_settings_s] =
       snapshot.config_metadata.last_allocator_settings;
@@ -939,6 +941,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       snapshot.config_metadata.pinned_use_host_register;
   allocator_settings[graph_capture_record_stream_reuse_s] =
       snapshot.config_metadata.graph_capture_record_stream_reuse;
+  allocator_settings[max_round_threshold_s] =
+      snapshot.config_metadata.max_round_threshold;
+  allocator_settings[max_cached_size_s] =
+      snapshot.config_metadata.max_cached_size;
   unsigned int roundup_key = 1;
   py::dict roundup_settings;
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {

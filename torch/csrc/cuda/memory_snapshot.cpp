@@ -466,6 +466,8 @@ std::string _memory_snapshot_pickled() {
   IValue roundup_power2_divisions_s = "roundup_power2_divisions";
   IValue graph_capture_record_stream_reuse_s =
       "graph_capture_record_stream_reuse";
+  IValue max_round_threshold_s = "max_round_threshold";
+  IValue max_cached_size_s = "max_cached_size";
 
   allocator_settings.insert(
       last_allocator_settings_s,
@@ -489,6 +491,11 @@ std::string _memory_snapshot_pickled() {
   allocator_settings.insert(
       graph_capture_record_stream_reuse_s,
       snapshot.config_metadata.graph_capture_record_stream_reuse);
+  allocator_settings.insert(
+      max_round_threshold_s,
+      int64_t(snapshot.config_metadata.max_round_threshold));
+  allocator_settings.insert(
+      max_cached_size_s, int64_t(snapshot.config_metadata.max_cached_size));
   unsigned int roundup_key = 1;
   auto roundup_settings = new_dict();
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {
