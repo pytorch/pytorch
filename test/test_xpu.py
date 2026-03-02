@@ -2901,6 +2901,8 @@ class TestXPUAPISanity(TestCase):
                 self.assertTrue(value.group(1) in ["ON", "1"])
             else:
                 self.assertTrue(value.group(1) in ["OFF", "0"])
+            value = re.search(r"SYCL_COMPILER_VERSION=([^,]+)", config)
+            self.assertEqual(value.group(1), torch.version.xpu)
         else:
             self.assertTrue(value.group(1) in ["OFF", "0"])
             self.assertFalse(torch.distributed.is_xccl_available())
