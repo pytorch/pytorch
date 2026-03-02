@@ -20,7 +20,7 @@
 #include <ATen/ops/quantize_per_tensor.h>
 #endif
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__)
 
 template <int kSpatialDim>
 at::Tensor PackedConvWeight<kSpatialDim>::apply_dynamic(
