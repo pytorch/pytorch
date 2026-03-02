@@ -259,7 +259,7 @@ class UserErrorType(Enum):
     UNSUPPORTED_ALIASED_MUTATED_DYNAMIC_INPUTS = auto()
 
 
-class UserError(Unsupported):
+class UserError(TorchDynamoException):
     def __init__(
         self, error_type: UserErrorType, msg: str, case_name: str | None = None
     ) -> None:
@@ -278,8 +278,12 @@ class UserError(Unsupported):
             else:
                 msg += "\n"
             msg += exportdb_error_message(case_name)
-        super().__init__(msg, case_name if case_name else "UserError")
+        super().__init__(msg)
+        self.real_stack = torch._guards.TracingContext.extract_stack()
+        self.skip_frame = False
+        self.logged = False
         self.error_type = error_type
+        self.msg = msg
         self.message = msg
 
 

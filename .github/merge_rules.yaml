@@ -602,10 +602,12 @@
   - soumith
   - gchanan
   - ezyang
-  - dzhulgakov
   - malfet
   - albanD
   - ptrblck
+  - jspisak
+  - ngimel
+  - Chillee
   mandatory_checks_name:
   - EasyCLA
   - Lint

@@ -3067,9 +3067,6 @@ class TestAutotuneCache(TestCase):
 
     @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "Requires static cuda launcher, which does not support ROCM"
-    )
     @config.patch({"use_static_triton_launcher": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
