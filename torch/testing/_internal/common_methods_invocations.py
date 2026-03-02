@@ -24702,6 +24702,10 @@ python_ref_db = [
         "_refs.nn.functional.hardtanh",
         torch_opinfo_name="nn.functional.hardtanh",
         supports_out=True,
+        skips=(
+            DecorateInfo(unittest.skip("ATen allows min_val > max_val but nn.functional does not"),
+                         "TestCommon", "test_python_ref_errors"),
+        )
     ),
     PythonRefInfo(  # TODO: Port this to an UnaryOpInfo
         "_refs.nn.functional.gelu",
