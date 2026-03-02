@@ -231,13 +231,9 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if torch.cuda.is_available() and torch.cuda.device_count() >= x:
+            if torch.accelerator.is_available() and torch.accelerator.device_count() >= x:
                 return func(*args, **kwargs)
-            if TEST_HPU and torch.hpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if TEST_XPU and torch.xpu.device_count() >= x:
-                return func(*args, **kwargs)
-            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
+            if allow_cpu and not torch.accelerator.is_available():
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
@@ -455,23 +451,33 @@ def requires_accelerator_dist_backend(backends=None):
     Decorator to skip tests if no accelerator communication backend (NCCL, XCCL, HCCL) is available.
 
     Args:
-        backends (Optional[List[str]]): Specific accelerator backends to check (e.g., ["nccl", "xccl", "hccl"]).
-                                       If None, checks all supported accelerator backends (NCCL, XCCL, HCCL).
+        backends (Optional[List[str]]): Specific accelerator backends to check
+            (e.g., ["nccl", "xccl", "hccl"]). Any registered PrivateUse1 backend
+            is always checked in addition to the listed backends.
+            If None, checks all known accelerator backends (NCCL, XCCL, HCCL)
+            plus any registered PrivateUse1 backend.
 
     Returns:
         callable: A decorator that skips the test if no specified accelerator backend is available.
     """
     if backends is None:
         backends = ACCELERATOR_DIST_BACKENDS
+    
+    _backend_availability_checks = {
+        "nccl": c10d.is_nccl_available,
+        "xccl": c10d.is_xccl_available,
+        "hccl": lambda: TEST_HPU,
+    }
+
+    def _is_privateuse1_backend_available() -> bool:
+        """Check if a PrivateUse1 backend is registered."""
+        pu1_device = torch._C._get_privateuse1_backend_name()
+        return c10d.Backend.default_device_backend_map.get(pu1_device) is not None
 
     backend_available = any(
-        {
-            "nccl": c10d.is_nccl_available,
-            "xccl": c10d.is_xccl_available,
-            "hccl": lambda: TEST_HPU,
-        }.get(backend, lambda: False)()
+        _backend_availability_checks.get(backend, lambda: False)()
         for backend in backends
-    )
+    ) or _is_privateuse1_backend_available()
 
     return skip_but_pass_in_sandcastle_if(
         not backend_available,
@@ -1163,14 +1169,8 @@ class DistributedTestBase(MultiProcessTestCase):
             pass
 
     def backend(self, device) -> str:
-        if "cuda" in device:
-            return "nccl"
-        elif "hpu" in device:  # intel gaudi
-            return "hccl"
-        elif "xpu" in device:
-            return "xccl"
-        else:
-            return "gloo"
+        device_type = torch.device(device).type if isinstance(device, str) else device.type
+        return c10d.Backend.default_device_backend_map.get(device_type, "gloo")
 
     def create_pg(self, device, world_size=None):
         if world_size is None:
@@ -1183,7 +1183,8 @@ class DistributedTestBase(MultiProcessTestCase):
             rank=self.rank,
             store=store,
         )
-        if "nccl" in self.backend(device) or "xccl" in self.backend(device):
+        backend = self.backend(device)
+        if backend in ACCELERATOR_DIST_BACKENDS:
             torch.accelerator.set_device_index(self.rank)
         return torch.distributed.distributed_c10d._get_default_group()
 
@@ -1922,11 +1923,18 @@ class MultiProcContinuousTest(TestCase):
         if cls._processes_spawned:
             return
 
-        # Handle both method and string attribute for device_type
+        # Handle method, property, and string attribute for device_type
         # (instantiate_device_type_tests sets device_type as a string attribute,
         # making this compatible as a drop-in replacement for MultiProcessTestCase)
-        device_type_attr = cls.device_type
-        if callable(device_type_attr):
+        device_type_attr = cls.__dict__.get("device_type", cls.device_type)
+        if isinstance(device_type_attr, classmethod):
+            device_type = device_type_attr.__func__(cls)
+        elif isinstance(device_type_attr, property):
+            # Note: fget expects an instance but we pass cls since no instance
+            # exists yet. This works because DTensorTestMixin.device_type only
+            # accesses class-level attributes (world_size, module constants).
+            device_type = device_type_attr.fget(cls)
+        elif callable(device_type_attr):
             device_type = device_type_attr()
         else:
             device_type = device_type_attr
