@@ -184,7 +184,10 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = torch.amp.autocast(device_type=device, dtype=torch.float16)
             atol, rtol = 5e-2, 5e-2
         else:
-            assert check_autocast == torch.float32
+            if check_autocast != torch.float32:
+                raise AssertionError(
+                    f"Expected check_autocast to be torch.float32, got {check_autocast}"
+                )
             maybe_autocast = contextlib.nullcontext()
         if check_quantization:
             raise NotImplementedError("not supported, please migrate to torchao")
@@ -251,7 +254,10 @@ class TestPatternMatcherBase(TestCase):
             for op in include_ops:
                 self.assertIn(op, source_code)
             if num_include_ops is not None:
-                assert len(include_ops) == len(num_include_ops)
+                if len(include_ops) != len(num_include_ops):
+                    raise AssertionError(
+                        f"len(include_ops)={len(include_ops)} != len(num_include_ops)={len(num_include_ops)}"
+                    )
                 for i in range(len(include_ops)):
                     self.assertEqual(
                         source_code.count(include_ops[i]), num_include_ops[i]
@@ -267,7 +273,8 @@ class TestPatternMatcherBase(TestCase):
 
 class TestPatternMatcherGeneric(TestPatternMatcherBase):
     def _test_conv_unary_base(self, dim=4):
-        assert dim == 4 or dim == 5
+        if dim != 4 and dim != 5:
+            raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
 
         class M(torch.nn.Module):
             def __init__(
@@ -360,7 +367,8 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self._test_conv_unary_base(dim=5)
 
     def _test_conv_transpose_unary_base(self, dim=4):
-        assert dim == 4 or dim == 5
+        if dim != 4 and dim != 5:
+            raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
 
         class M(torch.nn.Module):
             def __init__(
@@ -453,7 +461,8 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self._test_conv_transpose_unary_base(dim=5)
 
     def _test_conv_binary_base(self, dim=4):
-        assert dim == 4 or dim == 5
+        if dim != 4 and dim != 5:
+            raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
 
         class M(torch.nn.Module):
             def __init__(
@@ -554,7 +563,8 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self._test_conv_binary_base(dim=5)
 
     def _test_conv_binary_broadcast_shapes_base(self, dim=4):
-        assert dim == 4 or dim == 5
+        if dim != 4 and dim != 5:
+            raise AssertionError(f"Expected dim to be 4 or 5, got {dim}")
         torch.manual_seed(12345)
 
         class M(torch.nn.Module):

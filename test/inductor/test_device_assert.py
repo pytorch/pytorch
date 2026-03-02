@@ -22,11 +22,11 @@ class TestTorchDeviceAssertTrigger(TestCase):
         def func():
             a = torch.tensor([1.0, -2.0], device="cpu")
             result = torch.all(a > 0)
-            assert result, "should throw"
+            assert result, "should throw"  # noqa: S101
 
         def func_inline():
             a = torch.tensor([1.0, -2.0], device="cpu")
-            assert torch.all(a > 0), "should throw"
+            assert torch.all(a > 0), "should throw"  # noqa: S101
 
         with self.assertRaisesRegex(RuntimeError, "should throw"):
             torch._dynamo.reset()
@@ -43,11 +43,11 @@ class TestTorchDeviceAssertTrigger(TestCase):
         def func():
             a = torch.tensor([1.0, 2.0], device="cpu")
             result = torch.all(a > 0)
-            assert result, "should throw"
+            assert result, "should throw"  # noqa: S101
 
         def func_inline():
             a = torch.tensor([1.0, 2.0], device="cpu")
-            assert torch.all(a > 0), "should throw"
+            assert torch.all(a > 0), "should throw"  # noqa: S101
 
         torch._dynamo.reset()
         f_c = torch.compile(func, backend=backend)
@@ -65,7 +65,7 @@ class TestTorchDeviceAssertTrigger(TestCase):
         def func():
             a = torch.tensor([1.0, 2.0], device=device_type)
             result = torch.all(a > 0)
-            assert result, "should throw"
+            assert result, "should throw"  # noqa: S101
 
         torch._dynamo.reset()
         f_c = torch.compile(func, backend="inductor")
@@ -82,7 +82,7 @@ class TestTorchDeviceAssertTrigger(TestCase):
         def fn():
             a = torch.tensor([1.0, 2.0], device=device_type)
             result = torch.all(a > 0)
-            assert result, "should throw"
+            assert result, "should throw"  # noqa: S101
 
         def should_not_throw(fn):
             try:

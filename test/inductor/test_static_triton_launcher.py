@@ -92,7 +92,8 @@ class TestStaticTritonLauncher(TestCase):
         result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
         # Test reload cubin from raw here
         old_cubin_path = result.cubin_path
-        assert old_cubin_path is not None
+        if old_cubin_path is None:
+            raise AssertionError
         result.cubin_path = None
         result.reload_cubin_from_raw(old_cubin_path)
         device_interface = get_interface_for_device(GPU_TYPE)

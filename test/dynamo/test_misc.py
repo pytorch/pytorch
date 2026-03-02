@@ -13055,6 +13055,90 @@ fn
         self.assertEqual(ref_t, res_t)
         self.assertEqual(ref_obj.field, res_obj.field)
 
+    def test_data_descriptor_priority_over_instance_dict(self):
+        # CPython: data descriptors on the type take priority over instance
+        # dict values. Verify Dynamo follows this ordering.
+        class Foo:
+            @property
+            def x(self):
+                return 10
+
+        foo = Foo()
+        # Manually put a different value in the instance dict.
+        # The property (data descriptor) should still win.
+        foo.__dict__["x"] = 999
+
+        def fn(t):
+            return t + foo.x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.randn(4)
+        ref = fn(t)
+        res = opt_fn(t)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref, t + 10)
+
+    def test_instance_dict_priority_over_non_data_descriptor(self):
+        # CPython: instance dict values take priority over non-data
+        # descriptors (those with only __get__, no __set__/__delete__).
+        class Desc:
+            def __init__(self, val):
+                self.val = val
+
+            def __get__(self, obj, cls):
+                return self.val * 100
+
+        class Foo:
+            x = Desc(7)
+
+        foo = Foo()
+        # Instance dict value should shadow the non-data descriptor.
+        foo.__dict__["x"] = 10
+
+        def fn(t):
+            return t + foo.x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.randn(4)
+        ref = fn(t)
+        res = opt_fn(t)
+        self.assertEqual(ref, res)
+        # CPython: instance dict wins → foo.x is 10, not 700
+        self.assertEqual(ref, t + 10)
+
+    def test_user_defined_data_descriptor(self):
+        # A user-defined data descriptor (has __get__ + __set__) on the type
+        # should be invoked even when the same name exists in the instance dict.
+        class ValidatedAttr:
+            def __set_name__(self, owner, name):
+                self.storage_name = "_" + name
+
+            def __get__(self, obj, cls):
+                if obj is None:
+                    return self
+                return getattr(obj, self.storage_name)
+
+            def __set__(self, obj, value):
+                setattr(obj, self.storage_name, value)
+
+        class Foo:
+            x = ValidatedAttr()
+
+            def __init__(self, x):
+                self.x = x
+
+        foo = Foo(10)
+
+        def fn(t):
+            return t + foo.x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        t = torch.randn(4)
+        ref = fn(t)
+        res = opt_fn(t)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref, t + 10)
+
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
         with self.assertRaisesRegex(

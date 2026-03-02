@@ -275,9 +275,11 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             ]
 
             f(W, nested_seqs)
-            assert saved_graph[0] is not None
+            if saved_graph[0] is None:
+                raise AssertionError("saved_graph[0] is None")
             matmuls = [n for n in saved_graph[0].nodes if n.target == torch.mm]
-            assert len(matmuls) == 1
+            if len(matmuls) != 1:
+                raise AssertionError(f"Expected 1 matmul, got {len(matmuls)}")
 
         inner_test()
 

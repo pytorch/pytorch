@@ -62,7 +62,11 @@ class GlobalContext:
         """Reconstructs from (leaves, ctx)."""
         output = cls()
         summary_spec, tensor_spec = ctx
-        assert len(leaves) == summary_spec.num_leaves + tensor_spec.num_leaves
+        if len(leaves) != summary_spec.num_leaves + tensor_spec.num_leaves:
+            raise AssertionError(
+                f"Expected {summary_spec.num_leaves + tensor_spec.num_leaves} leaves, "
+                f"got {len(leaves)}"
+            )
         output._summaries = pytree.tree_unflatten(
             leaves[: summary_spec.num_leaves], summary_spec
         )

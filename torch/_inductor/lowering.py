@@ -2992,7 +2992,7 @@ make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_t
 make_fallback(aten._pdist_forward, require_contiguous)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
 make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
-if torch.xpu.is_available():
+if torch.xpu._is_compiled():
     make_fallback(
         aten.embedding_dense_backward, warn=False
     )  # (XPU-only and faster than decomp)
@@ -3114,6 +3114,7 @@ make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
 make_fallback(torch._prims.rng_prims.graphsafe_run_with_rng_state)
+make_fallback(torch._prims.rng_prims.run_dtensor_rng_op)
 
 
 # Implemented / Half implemented
