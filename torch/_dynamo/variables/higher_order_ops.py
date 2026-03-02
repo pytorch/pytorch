@@ -1781,6 +1781,10 @@ def speculate_subgraph_with_auto_output_flattening(
             # - `lifted_freevars`: Free variables lifted as inputs to the subgraph
             # - `graph_output_vts`: Only the tensor/symint VTs that are actual
             #   FX graph outputs (basically the vts associated with graph outputs)
+            # Propagate has_side_effect from the subtracer to the graph so
+            # callers can check it after the subtracer context exits.
+            graph._has_side_effect = subtracer.has_side_effect
+
             return (
                 output,
                 graph,
@@ -5236,7 +5240,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         )
 
         flat = flatten_args_kwargs(tx, fn_args_vt, kwargs)
-        is_auto_cacheable(body_r, flat.flat_vts)
+        is_auto_cacheable(body_r, flat.flat_vts, body_gmod.graph._has_side_effect)
 
         p_args = (
             p_args[0],
