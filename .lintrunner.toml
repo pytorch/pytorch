@@ -400,6 +400,36 @@ command = [
 is_formatter = true
 
 [[linter]]
+code = 'NO_DATA_PTR'
+include_patterns = [
+    '**/*.c',
+    '**/*.cc',
+    '**/*.cpp',
+    '**/*.cuh',
+    '**/*.cu',
+    '**/*.cxx',
+    '**/*.h',
+    '**/*.hpp',
+    '**/*.hxx',
+    '**/*.m',
+    '**/*.mm',
+    '**/*.hip',
+]
+exclude_patterns = [
+    '**/contrib/**',
+    'third_party/**',
+    'build/**',
+    'test/cpp/jit/upgrader_models/*.ptl',
+    'test/cpp/jit/upgrader_models/*.ptl.ff',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/no_data_ptr_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+
+[[linter]]
 code = 'SPACES'
 include_patterns = ['**']
 exclude_patterns = [
