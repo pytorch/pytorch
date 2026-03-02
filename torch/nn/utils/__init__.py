@@ -19,6 +19,7 @@ from .memory_format import (
     convert_conv3d_weight_memory_format,
 )
 from .spectral_norm import remove_spectral_norm, spectral_norm
+from .summary import LayerInfo, ModelSummary, summary
 from .weight_norm import remove_weight_norm, weight_norm
 
 
@@ -34,6 +35,8 @@ __all__ = [
     "fuse_linear_bn_eval",
     "fuse_linear_bn_weights",
     "get_total_norm",
+    "LayerInfo",
+    "ModelSummary",
     "parameters_to_vector",
     "parametrizations",
     "parametrize",
@@ -43,6 +46,7 @@ __all__ = [
     "skip_init",
     "spectral_norm",
     "stateless",
+    "summary",
     "vector_to_parameters",
     "weight_norm",
 ]
