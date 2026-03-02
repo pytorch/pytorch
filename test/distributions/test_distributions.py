@@ -1821,26 +1821,30 @@ class TestDistributions(DistributionsTestCase):
 
     def test_torch_binomial_dtype_errors(self):
         dtypes = [torch.int, torch.long, torch.short]
+        devices = ["cpu"]
+        if TEST_CUDA:
+            devices.append("cuda")
 
-        for count_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=count_dtype)
-            total_prob = torch.tensor([0.5, 0.5], dtype=torch.float)
+        for device in devices:
+            for count_dtype in dtypes:
+                total_count = torch.tensor([10, 10], dtype=count_dtype, device=device)
+                total_prob = torch.tensor([0.5, 0.5], dtype=torch.float, device=device)
 
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for count.*",
-            ):
-                torch.binomial(total_count, total_prob)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "binomial only supports floating-point dtypes for count.*",
+                ):
+                    torch.binomial(total_count, total_prob)
 
-        for prob_dtype in dtypes:
-            total_count = torch.tensor([10, 10], dtype=torch.float)
-            total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype)
+            for prob_dtype in dtypes:
+                total_count = torch.tensor([10, 10], dtype=torch.float, device=device)
+                total_prob = torch.tensor([0.5, 0.5], dtype=prob_dtype, device=device)
 
-            with self.assertRaisesRegex(
-                ValueError,
-                "binomial only supports floating-point dtypes for prob.*",
-            ):
-                torch.binomial(total_count, total_prob)
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "binomial only supports floating-point dtypes for prob.*",
+                ):
+                    torch.binomial(total_count, total_prob)
 
     @set_default_dtype(torch.double)
     def test_multinomial_1d(self):
