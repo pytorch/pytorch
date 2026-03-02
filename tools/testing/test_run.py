@@ -295,7 +295,9 @@ class ShardedTest:
         if self.num_shards != other.num_shards:
             return self.num_shards < other.num_shards
 
-        # None is the smallest value
+        # None is the smallest value, but equal None values shouldn't be ordered.
+        if self.time is None and other.time is None:
+            return False
         if self.time is None:
             return True
         if other.time is None:
