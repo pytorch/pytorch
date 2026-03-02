@@ -1844,7 +1844,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_source_serialization(self):
         # Test that "equal" sources with different hashes serialize to the same result
-        print("???")
         src1 = LocalSource("x")
         src2 = LocalSource("x")
 
