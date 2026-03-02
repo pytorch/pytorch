@@ -2922,6 +2922,72 @@ class Module:
         """
         return self.train(False)
 
+    def forward_by_train(self, *args: Any, **kwargs: Any) -> Any:
+        r"""Execute forward pass in training mode.
+
+        This method automatically sets the module to training mode before
+        calling forward. This is a convenience method to ensure the module
+        is in the correct mode for training.
+
+        .. warning::
+            This method calls :meth:`train()` on every invocation, which may
+            have performance implications in training loops. Consider calling
+            :meth:`train()` once before the loop instead.
+
+        Args:
+            *args: Variable length argument list passed to forward.
+            **kwargs: Arbitrary keyword arguments passed to forward.
+
+        Returns:
+            The output of the forward pass.
+
+        Example::
+
+            >>> model = nn.Linear(10, 5)
+            >>> input = torch.randn(3, 10)
+            >>> # Automatically sets training mode
+            >>> output = model.forward_by_train(input)
+            >>> assert model.training == True
+        """
+        self.train()
+        return self(*args, **kwargs)
+
+    def forward_by_eval(self, *args: Any, **kwargs: Any) -> Any:
+        r"""Execute forward pass in evaluation mode.
+
+        This method automatically sets the module to evaluation mode before
+        calling forward. This is a convenience method to ensure the module
+        is in the correct mode for inference.
+
+        .. warning::
+            This method calls :meth:`eval()` on every invocation, which may
+            have performance implications. Consider calling :meth:`eval()` once
+            before inference instead.
+
+        .. note::
+            This method does not disable gradient computation. Use
+            :func:`torch.no_grad()` or :func:`torch.inference_mode()` context
+            managers for that purpose.
+
+        Args:
+            *args: Variable length argument list passed to forward.
+            **kwargs: Arbitrary keyword arguments passed to forward.
+
+        Returns:
+            The output of the forward pass.
+
+        Example::
+
+            >>> model = nn.Linear(10, 5)
+            >>> input = torch.randn(3, 10)
+            >>> # Automatically sets evaluation mode
+            >>> with torch.no_grad():
+            >>>     output = model.forward_by_eval(input)
+            >>> assert model.training == False
+        """
+        self.eval()
+        return self(*args, **kwargs)
+
     def requires_grad_(self, requires_grad: bool = True) -> Self:
         r"""Change if autograd should record operations on parameters in this module.
 
