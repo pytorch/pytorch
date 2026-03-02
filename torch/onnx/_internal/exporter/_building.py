@@ -271,11 +271,11 @@ def _get_or_create_constant(
     # float representation of complex numbers
     if isinstance(arg, complex):
         # Convert the complex number to a float
-        # pyrefly: ignore [bad-assignment]
         arg = (arg.real, arg.imag)
 
     if isinstance(arg, list):
         # Make the arg hashable
+        # pyrefly: ignore [bad-argument-type]
         arg = tuple(arg)
 
     constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
@@ -439,7 +439,6 @@ def _process_python_sequences(
             # when the expected input type is INT64
             # We assume this only happens for 0D cases
             if all(isinstance(val, ir.Value) for val in arg):
-                # pyrefly: ignore
                 expanded_args = [_reshape_to_1d_tensor(opset, val) for val in arg]
                 named_inputs[name] = opset.Concat(*expanded_args, axis=0)
                 continue

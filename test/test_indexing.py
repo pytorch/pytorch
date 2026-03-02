@@ -1816,7 +1816,7 @@ class TestIndexing(TestCase):
 
     @parametrize("reduce", ["prod", "amin", "amax", "mean"])
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS  # Unimplemented for MPS device
+    @dtypesIfMPS(torch.int32, torch.float32)
     def test_index_reduce(self, device, dtype, reduce):
         size = (3, 4, 5)
         index_dtypes = [torch.int, torch.long]

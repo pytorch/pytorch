@@ -84,7 +84,7 @@ namespace {
 jiterator_also_stringify_as(jiterator_code(
   template <typename T>
   JITERATOR_HOST_DEVICE T chbevl(T x, const T array[], const int len) {
-    T b0, b1, b2;
+    T b0, b1, b2 = 0;
 
     b0 = array[0];
     b1 = 0;
@@ -1294,7 +1294,7 @@ C10_HOST_DEVICE c10::complex<T> exp2_impl(c10::complex<T> x) {
 template <typename T>
 inline typename std::enable_if_t<std::is_floating_point_v<T>, T>
 chbevl(const T x, const T array[], size_t len) {
-  T b0, b1, b2;
+  T b0, b1, b2 = static_cast<T>(0.0);
 
   b0 = array[0];
   b1 = static_cast<T>(0.0);

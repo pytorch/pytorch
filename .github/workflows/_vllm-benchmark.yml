@@ -14,7 +14,7 @@ on:
       build_environment:
         required: true
         type: string
-        description: The build environment name, e.g. linux-jammy-cuda12.9-py3.12-gcc11
+        description: The build environment name, e.g. linux-jammy-cuda13.0-py3.12-gcc11
       pytorch_branch:
         required: false
         type: string
@@ -106,7 +106,7 @@ jobs:
             dist/ao/torchao-*.whl \
             dist/vllm/vllm-*.whl \
             dist/deepgemm/deep_gemm-*.whl \
-            --extra-index-url https://download.pytorch.org/whl/cu129 \
+            --extra-index-url https://download.pytorch.org/whl/cu130 \
             --index-strategy unsafe-best-match
 
       - name: Print some debug information
@@ -208,7 +208,8 @@ jobs:
 
           # Fail when there is no result or if the metrics are all zero
           python3 pytorch/pytorch-integration-testing/.github/scripts/check_benchmark_results.py \
-            --benchmark-results "${BENCHMARK_RESULTS}"
+            --benchmark-results "${BENCHMARK_RESULTS}" \
+            --strict
 
       - name: Authenticate with AWS
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0

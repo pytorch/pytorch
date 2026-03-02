@@ -116,6 +116,7 @@ flex_decoding_template = TritonTemplate(
     source=load_flex_template("flex_decode")
     + load_flex_template("utilities")
     + load_flex_template("common"),
+    always_freeze_layout=True,
 )
 
 

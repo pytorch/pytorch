@@ -432,7 +432,8 @@ class TestOperatorReorderForPeakMemory(TestCase):
             nodes = gm.find_nodes(
                 op="call_function", target=torch.ops.aten._foreach_add.Scalar
             )
-            assert len(nodes) == 1
+            if len(nodes) != 1:
+                raise AssertionError
             node = nodes[0]
             nodes[0].target = torch.ops.aten._foreach_add_.Scalar
             for inp, out in zip(node.args[0], list(node.users.keys())):

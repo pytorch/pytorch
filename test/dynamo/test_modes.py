@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import operator
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -17,6 +18,9 @@ from torch.overrides import (
     _get_current_function_mode_stack,
     BaseTorchFunctionMode,
     TorchFunctionMode,
+)
+from torch.testing._internal.common_device_type import (
+    IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
 )
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE
@@ -1321,6 +1325,615 @@ class outer_fn(torch.nn.Module):
             1,
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_aot_autograd_over_dynamo_train_step(self):
+        """Test a full training step with nn.Module traced by AOTAutograd over Dynamo.
+
+        This tests a realistic training scenario where:
+        1. We have an actual nn.Module with parameters
+        2. make_fx traces the forward and backward as a single graph
+        3. Inside the module, a torch.compile'd function with invoke_subgraph is called
+        4. We use torch.autograd.grad to compute gradients (not .backward())
+        5. Gradients are returned explicitly from the traced function
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        torch._dynamo.reset()
+
+        # Use a compile counter to track how many times Dynamo compiles
+        compile_counter = CompileCounterWithBackend("invoke_subgraph")
+
+        # Define a simple MLP module
+        class SimpleMLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(4, 8)
+                self.fc2 = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = torch.relu(x)
+                x = self.fc2(x)
+                return x
+
+        model = SimpleMLP()
+
+        # Inner compiled function that will be called inside the training step
+        def inner_fn(x):
+            return x * 2 + 1
+
+        compiled_inner = torch.compile(inner_fn, backend=compile_counter)
+
+        # Training step function that uses the model and compiled inner function
+        def train_step(params, x):
+            # params is a flat list of parameters: [fc1.weight, fc1.bias, fc2.weight, fc2.bias]
+            fc1_weight, fc1_bias, fc2_weight, fc2_bias = params
+
+            # Manual forward pass using functional style
+            h = torch.nn.functional.linear(x, fc1_weight, fc1_bias)
+            h = torch.relu(h)
+            # Apply compiled inner function
+            h = compiled_inner(h)
+            out = torch.nn.functional.linear(h, fc2_weight, fc2_bias)
+
+            # Compute loss
+            loss = out.sum()
+
+            # Compute gradients using torch.autograd.grad
+            grads = torch.autograd.grad(loss, params)
+
+            return (loss, *grads)
+
+        # Prepare inputs
+        x = torch.randn(2, 4)
+        params = (
+            model.fc1.weight.detach().clone().requires_grad_(True),
+            model.fc1.bias.detach().clone().requires_grad_(True),
+            model.fc2.weight.detach().clone().requires_grad_(True),
+            model.fc2.bias.detach().clone().requires_grad_(True),
+        )
+
+        # Trace using make_fx
+        fx_graph = make_fx(train_step, _disable_torch_fn_metadata_mode=True)(params, x)
+
+        # Run the traced graph
+        result = fx_graph(params, x)
+        loss = result[0]
+        grads = result[1:]
+
+        # Basic sanity checks
+        self.assertEqual(loss.shape, ())
+        self.assertEqual(len(grads), 4)
+        self.assertEqual(grads[0].shape, params[0].shape)  # fc1.weight grad
+        self.assertEqual(grads[1].shape, params[1].shape)  # fc1.bias grad
+        self.assertEqual(grads[2].shape, params[2].shape)  # fc2.weight grad
+        self.assertEqual(grads[3].shape, params[3].shape)  # fc2.bias grad
+
+        # Check that we got a graph with invoke_subgraph
+        graph_code = fx_graph.print_readable(print_output=False)
+        self.assertIn("invoke_subgraph", graph_code)
+
+        # Check compile count - should be exactly 1 compilation
+        self.assertEqual(
+            compile_counter.frame_count,
+            1,
+            f"Expected 1 compilation, got {compile_counter.frame_count}",
+        )
+
+    @requires_gpu
+    def test_nested_compile_dynamic(self):
+        """Test that wrap_compiled_regions works with dynamic shapes."""
+
+        d_model = 64
+
+        class MMLayer(torch.nn.Module):
+            def __init__(self, d_model: int):
+                super().__init__()
+                self.linear = torch.nn.Linear(d_model, d_model)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        torch._dynamo.reset()
+
+        layer = MMLayer(d_model).to(GPU_TYPE)
+        compiled_mm = torch.compile(
+            layer,
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            dynamic=True,
+        )
+
+        x = torch.randn(2, d_model, device=GPU_TYPE)
+        result = compiled_mm(x)
+        self.assertEqual(result.shape, (2, d_model))
+        torch.testing.assert_close(result, layer(x))
+
+        # Different batch size reuses the same compiled code
+        x2 = torch.randn(5, d_model, device=GPU_TYPE)
+        result2 = compiled_mm(x2)
+        self.assertEqual(result2.shape, (5, d_model))
+        torch.testing.assert_close(result2, layer(x2))
+
+    @requires_gpu
+    def test_nested_compile_input_mutation(self):
+        """Test nested compile with input mutation inside a compiled region.
+
+        Uses regional_inductor with fx_traceback.annotate to compile
+        a layer that mutates a buffer.
+        """
+        import contextlib
+
+        import torch.fx.traceback as fx_traceback
+        from functorch.compile import nop
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
+        from torch._export.utils import _compiling_state_context
+        from torch._functorch.aot_autograd import (
+            aot_compile_joint_with_descriptors,
+            aot_export_joint_with_descriptors,
+        )
+        from torch._guards import tracing, TracingContext
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.passes.regional_inductor import regional_inductor
+
+        def regional_inductor_invoke_subgraph(gm, args):
+            out_gm = regional_inductor(gm, args)
+            return invoke_subgraph_inner_compiler(out_gm, args)
+
+        def aot_eager_regional_inductor_invoke_subgraph():
+            return aot_autograd(
+                fw_compiler=regional_inductor_invoke_subgraph,
+                bw_compiler=regional_inductor_invoke_subgraph,
+                keep_inference_input_mutations=True,
+            )
+
+        d_model = 64
+
+        class MutatingLayer(torch.nn.Module):
+            def __init__(self, d_model: int):
+                super().__init__()
+                self.linear = torch.nn.Linear(d_model, d_model)
+                self.register_buffer("call_count", torch.tensor(0, dtype=torch.int64))
+
+            def forward(self, x):
+                with fx_traceback.annotate({"compile_with_inductor": 0}):
+                    self.call_count.add_(1)
+                return self.linear(x)
+
+        class StackedMutating(torch.nn.Module):
+            def __init__(self, d_model: int, n_layers: int = 2):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [
+                        torch.compile(
+                            MutatingLayer(d_model),
+                            backend=aot_eager_regional_inductor_invoke_subgraph(),
+                        )
+                        for _ in range(n_layers)
+                    ]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        with (
+            torch._dynamo.config.patch(force_compile_during_fx_trace=True),
+            torch._inductor.config.patch(wrap_inductor_compiled_regions=True),
+            torch._functorch.config.patch(force_non_lazy_backward_lowering=True),
+        ):
+            torch._dynamo.reset()
+
+            model = StackedMutating(d_model, n_layers=2).to(GPU_TYPE)
+
+            x = torch.randn(2, d_model, device=GPU_TYPE, requires_grad=True)
+
+            fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+            saved_params = list(model.parameters())
+            saved_buffers = list(model.buffers())
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(tracing(TracingContext(fake_mode)))
+                stack.enter_context(_compiling_state_context())
+                stack.enter_context(fake_mode)
+
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack,
+                    model,
+                    args=(x,),
+                    kwargs={},
+                    keep_inference_input_mutations=True,
+                    _disable_torch_fn_metadata_mode=True,
+                )
+                gm = joint_with_descriptors.graph_module
+                print("=== input_mutation outer graph ===")
+                print(gm.print_readable(print_output=False))
+                compiled_fn = aot_compile_joint_with_descriptors(
+                    joint_with_descriptors,
+                    fw_compiler=nop,
+                    bw_compiler=nop,
+                )
+
+            def wrapped_fn(*args, **kwargs):
+                return compiled_fn(
+                    *saved_params,
+                    *saved_buffers,
+                    *args,
+                    **kwargs,
+                )
+
+            out = wrapped_fn(x)
+            out.sum().backward()
+
+    @requires_gpu
+    def test_nested_compile_output_aliases_input(self):
+        """Test nested compile where output is a view-alias of input.
+
+        Uses regional_inductor with fx_traceback.annotate to compile
+        a layer that returns a view of its input.
+        """
+        import contextlib
+
+        import torch.fx.traceback as fx_traceback
+        from functorch.compile import nop
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
+        from torch._export.utils import _compiling_state_context
+        from torch._functorch.aot_autograd import (
+            aot_compile_joint_with_descriptors,
+            aot_export_joint_with_descriptors,
+        )
+        from torch._guards import tracing, TracingContext
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.passes.regional_inductor import regional_inductor
+
+        def regional_inductor_invoke_subgraph(gm, args):
+            out_gm = regional_inductor(gm, args)
+            return invoke_subgraph_inner_compiler(out_gm, args)
+
+        def aot_eager_regional_inductor_invoke_subgraph():
+            return aot_autograd(
+                fw_compiler=regional_inductor_invoke_subgraph,
+                bw_compiler=regional_inductor_invoke_subgraph,
+                keep_inference_input_mutations=True,
+            )
+
+        d_model = 64
+
+        class ViewLayer(torch.nn.Module):
+            def __init__(self, d_model: int):
+                super().__init__()
+                self.linear = torch.nn.Linear(d_model, d_model)
+
+            def forward(self, x):
+                y = self.linear(x)
+                with fx_traceback.annotate({"compile_with_inductor": 0}):
+                    # View-alias: unsqueeze then squeeze back
+                    return y.unsqueeze(1).squeeze(1)
+
+        class StackedView(torch.nn.Module):
+            def __init__(self, d_model: int, n_layers: int = 2):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [
+                        torch.compile(
+                            ViewLayer(d_model),
+                            backend=aot_eager_regional_inductor_invoke_subgraph(),
+                        )
+                        for _ in range(n_layers)
+                    ]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        with (
+            torch._dynamo.config.patch(force_compile_during_fx_trace=True),
+            torch._inductor.config.patch(wrap_inductor_compiled_regions=True),
+            torch._functorch.config.patch(force_non_lazy_backward_lowering=True),
+        ):
+            torch._dynamo.reset()
+
+            model = StackedView(d_model, n_layers=2).to(GPU_TYPE)
+
+            x = torch.randn(2, d_model, device=GPU_TYPE, requires_grad=True)
+
+            fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+            saved_params = list(model.parameters())
+            saved_buffers = list(model.buffers())
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(tracing(TracingContext(fake_mode)))
+                stack.enter_context(_compiling_state_context())
+                stack.enter_context(fake_mode)
+
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack,
+                    model,
+                    args=(x,),
+                    kwargs={},
+                    keep_inference_input_mutations=True,
+                    _disable_torch_fn_metadata_mode=True,
+                )
+                gm = joint_with_descriptors.graph_module
+                print("=== output_aliases_input outer graph ===")
+                print(gm.print_readable(print_output=False))
+                compiled_fn = aot_compile_joint_with_descriptors(
+                    joint_with_descriptors,
+                    fw_compiler=nop,
+                    bw_compiler=nop,
+                )
+
+            def wrapped_fn(*args, **kwargs):
+                return compiled_fn(
+                    *saved_params,
+                    *saved_buffers,
+                    *args,
+                    **kwargs,
+                )
+
+            out = wrapped_fn(x)
+            out.sum().backward()
+
+    @unittest.skipUnless(
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
+        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+    )
+    def test_nested_compile_transformer_with_flex_attention_compiled_layers(
+        self,
+    ):
+        """Test a transformer model with 4 identical compiled layers using flex_attention.
+
+        This test:
+        1. Creates a small transformer model with 4 identical layers using flex_attention
+        2. Compiles each layer with the invoke_subgraph + regional_inductor backend
+        3. Passes the entire model through aot_export_joint_with_descriptors()
+        4. Verifies the final graph has invoke_subgraph HOPs
+        """
+        import torch.distributed as dist
+        import torch.fx.traceback as fx_traceback
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.backends.debugging import invoke_subgraph_inner_compiler
+        from torch._guards import tracing, TracingContext
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import (
+            distribute_module,
+            distribute_tensor,
+            DTensor,
+            Replicate,
+        )
+        from torch.fx.passes.regional_inductor import regional_inductor
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        def regional_inductor_invoke_subgraph(gm, args):
+            out_gm = regional_inductor(gm, args)
+            return invoke_subgraph_inner_compiler(out_gm, args)
+
+        def aot_eager_regional_inductor_invoke_subgraph():
+            return aot_autograd(
+                fw_compiler=regional_inductor_invoke_subgraph,
+                bw_compiler=regional_inductor_invoke_subgraph,
+                # Keep input mutations in the graph
+                keep_inference_input_mutations=True,
+            )
+
+        d_model, n_heads, d_ff = 64, 4, 128
+        batch_size, seq_len = 2, 32
+
+        # dumb mask mod that closes over a tensor
+        mask_bias = torch.tensor(0, device=GPU_TYPE, dtype=torch.int32)
+
+        def mask_mod(b_idx, h_idx, q_idx, k_idx):
+            return (q_idx >= k_idx) | (mask_bias == 1)
+
+        # Create block mask from the mask_mod
+        block_mask = create_block_mask(
+            mask_mod=mask_mod,
+            B=batch_size,
+            H=None,  # Broadcast over heads
+            Q_LEN=seq_len,
+            KV_LEN=seq_len,
+            device=GPU_TYPE,
+        )
+
+        # Transformer layer with flex_attention
+        class TransformerLayer(torch.nn.Module):
+            def __init__(self, d_model: int, n_heads: int, d_ff: int):
+                super().__init__()
+                self.n_heads = n_heads
+                self.head_dim = d_model // n_heads
+                self.d_model = d_model
+
+                # Attention projections
+                self.q_proj = torch.nn.Linear(d_model, d_model)
+                self.k_proj = torch.nn.Linear(d_model, d_model)
+                self.v_proj = torch.nn.Linear(d_model, d_model)
+                self.out_proj = torch.nn.Linear(d_model, d_model)
+
+                # Layer norms
+                self.norm1 = torch.nn.LayerNorm(d_model)
+                self.norm2 = torch.nn.LayerNorm(d_model)
+
+                # FFN
+                self.ff = torch.nn.Sequential(
+                    torch.nn.Linear(d_model, d_ff),
+                    torch.nn.GELU(),
+                    torch.nn.Linear(d_ff, d_model),
+                )
+
+                # give the model a buffer mutation so we can test auto_functionalize too
+                self.register_buffer("_call_count", torch.tensor(0, dtype=torch.int64))
+
+            def forward(self, x):
+                # Mutate the buffer to trigger input mutation detection
+                self._call_count.add_(1)
+
+                batch_size, seq_len, _ = x.shape
+
+                # Pre-norm for attention
+                normed = self.norm1(x)
+
+                # Compute Q, K, V
+                q = self.q_proj(normed)
+                k = self.k_proj(normed)
+                v = self.v_proj(normed)
+
+                # Reshape for multi-head attention: (B, S, D) -> (B, H, S, D_head)
+                q = q.view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(
+                    1, 2
+                )
+                k = k.view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(
+                    1, 2
+                )
+                v = v.view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(
+                    1, 2
+                )
+
+                with fx_traceback.annotate({"compile_with_inductor": 0}):
+                    attn_out_local = flex_attention(
+                        q.to_local(),
+                        k.to_local(),
+                        v.to_local(),
+                        block_mask=block_mask,
+                    )
+                    attn_out = DTensor.from_local(
+                        attn_out_local, device_mesh, [Replicate()]
+                    )
+
+                attn_out = (
+                    attn_out.transpose(1, 2).contiguous().view(batch_size, seq_len, -1)
+                )
+                attn_out = self.out_proj(attn_out)
+
+                x = x + attn_out
+
+                x = x + self.ff(self.norm2(x))
+
+                return x
+
+        # Transformer model with 4 identical layers
+        class SmallTransformer(torch.nn.Module):
+            def __init__(
+                self, d_model: int, n_heads: int, d_ff: int, n_layers: int = 4
+            ):
+                super().__init__()
+                self.layers = torch.nn.ModuleList(
+                    [
+                        torch.compile(
+                            TransformerLayer(d_model, n_heads, d_ff),
+                            backend=aot_eager_regional_inductor_invoke_subgraph(),
+                        )
+                        for _ in range(n_layers)
+                    ]
+                )
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = layer(x)
+                return x
+
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=0, world_size=2)
+        device_mesh = init_device_mesh(GPU_TYPE, (2,))
+
+        with (
+            # Needed when wrapping a compiled region with FX tracing
+            torch._dynamo.config.patch(force_compile_during_fx_trace=True),
+            # Needed because our inner compiled region uses inductor (for flex)
+            torch._inductor.config.patch(wrap_inductor_compiled_regions=True),
+            # AOTAutograd normally tries to "delay backward compilation to bw runtime",
+            # but for nested compile we actually need it to happen when we trace the fw.
+            torch._functorch.config.patch(force_non_lazy_backward_lowering=True),
+        ):
+            torch._dynamo.reset()
+
+            model = SmallTransformer(d_model, n_heads, d_ff, n_layers=4)
+            model = model.to(GPU_TYPE)
+
+            def replicate_all(name, module, device_mesh):
+                for param_name, param in module.named_parameters(recurse=False):
+                    dist_param = torch.nn.Parameter(
+                        distribute_tensor(param, device_mesh, [Replicate()])
+                    )
+                    module.register_parameter(param_name, dist_param)
+
+            model = distribute_module(model, device_mesh, replicate_all)
+
+            x = torch.randn(
+                batch_size,
+                seq_len,
+                d_model,
+                device=GPU_TYPE,
+                dtype=torch.float32,
+                requires_grad=True,
+            )
+            x = DTensor.from_local(x, device_mesh, [Replicate()])
+
+            import contextlib
+
+            from functorch.compile import nop
+            from torch._export.utils import _compiling_state_context
+            from torch._functorch.aot_autograd import (
+                aot_compile_joint_with_descriptors,
+                aot_export_joint_with_descriptors,
+            )
+            from torch._functorch.partitioners import default_partition
+            from torch._guards import detect_fake_mode
+            from torch._subclasses import FakeTensorMode
+
+            fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+
+            saved_params = list(model.parameters())
+            saved_buffers = list(model.buffers())
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(tracing(TracingContext(fake_mode)))
+                stack.enter_context(_compiling_state_context())
+                if fake_mode is not None:
+                    stack.enter_context(fake_mode)
+
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack,
+                    model,
+                    args=(x,),
+                    kwargs={},
+                    keep_inference_input_mutations=True,
+                    # see https://github.com/pytorch/pytorch/pull/172087
+                    _disable_torch_fn_metadata_mode=True,
+                )
+                gm = joint_with_descriptors.graph_module
+                fake_mode = detect_fake_mode()
+                num_fwd_outputs = (
+                    joint_with_descriptors._aot_state.fw_metadata.num_forward
+                )
+                fwd_gm, bwd_gm = default_partition(
+                    gm, None, num_fwd_outputs=num_fwd_outputs
+                )
+                compiled_fn = aot_compile_joint_with_descriptors(
+                    joint_with_descriptors,
+                    fw_compiler=nop,
+                    bw_compiler=nop,
+                )
+
+            def wrapped_fn(*args, **kwargs):
+                return compiled_fn(
+                    *saved_params,
+                    *saved_buffers,
+                    *args,
+                    **kwargs,
+                )
+
+            out = wrapped_fn(x)
+            out.sum().backward()
+
+        dist.destroy_process_group()
 
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):

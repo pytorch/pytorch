@@ -8,7 +8,7 @@ from typing import Any, Optional
 import torch
 import torch._inductor.runtime.runtime_utils
 from torch import Tensor
-from torch._dynamo.utils import counters, dynamo_timed
+from torch._dynamo.utils import counters
 from torch._inductor import utils
 from torch._inductor.autoheuristic.autoheuristic import (
     AHContext,
@@ -468,21 +468,17 @@ def should_pad(
     input: Tensor | None = None,
 ) -> bool:
     _can_pad = can_pad(mat1, mat2, op, input)
-    with dynamo_timed(
-        "pad_mm_benchmark",
-        log_pt2_compile_event=False,
-        dynamo_compile_column_us="compile_time_autotune_time_us",
-    ):
-        return _can_pad and _should_pad(match, mat1, mat2, op, input)
+    # Note that if you're tempted to insert a dynamo_timed call here, this function can
+    # be called enough that the dynamo_timed overhead is not negligible.
+    return _can_pad and _should_pad(match, mat1, mat2, op, input)
 
 
 def get_do_bench() -> Callable[[Callable[[], Any]], float]:
-    with dynamo_timed("pad_mm_benchmark_get_do_bench"):
-        return functools.partial(
-            # pyrefly: ignore [bad-argument-type]
-            torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
-            warmup=5,
-        )
+    return functools.partial(
+        # pyrefly: ignore [bad-argument-type]
+        torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
+        warmup=5,
+    )
 
 
 @memoizers.should_pad_memoizer.memoize(

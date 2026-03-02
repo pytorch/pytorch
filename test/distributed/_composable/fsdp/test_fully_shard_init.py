@@ -93,7 +93,8 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_move_states_to_device_dtensor_valid(self):
-        assert self.world_size >= 4, f"{self.world_size}"
+        if not (self.world_size >= 4):
+            raise AssertionError(f"Expected world_size >= 4, but got {self.world_size}")
         dp_size = 2
         global_mesh = init_device_mesh(
             device_type.type,
@@ -125,7 +126,8 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_move_states_to_device_dtensor_invalid(self):
-        assert self.world_size >= 4, f"{self.world_size}"
+        if not (self.world_size >= 4):
+            raise AssertionError(f"Expected world_size >= 4, but got {self.world_size}")
         dp_size = 2
         global_accelerator_mesh = init_device_mesh(
             device_type.type,
@@ -153,6 +155,48 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
         )
         with self.assertRaisesRegex(ValueError, regex):
             fully_shard(model, mesh=dp_mesh)
+
+
+class TestFullyShardContainerSubclasses(FSDPTestMultiThread):
+    """Tests that fully_shard accepts ModuleDict/ModuleList subclasses that implement forward()."""
+
+    class DictWithForward(nn.ModuleDict):
+        def __init__(self, in_features=8, out_features=8):
+            super().__init__({"lin": nn.Linear(in_features, out_features)})
+
+        def forward(self, x):
+            return self["lin"](x)
+
+    class ListWithForward(nn.ModuleList):
+        def __init__(self, in_features=8, out_features=8):
+            super().__init__([nn.Linear(in_features, out_features)])
+
+        def forward(self, x):
+            out = x
+            for m in self:
+                out = m(out)
+            return out
+
+    @property
+    def world_size(self) -> int:
+        return 1
+
+    @skip_if_lt_x_gpu(1)
+    def test_moduledict_subclass_with_forward(self):
+        model = self.DictWithForward(8, 8)
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        # Should not raise due to container type since forward() is implemented
+        fsdp_model = fully_shard(model, mesh=mesh)
+        x = torch.randn(2, 8, device=device_type)
+        _ = fsdp_model(x)
+
+    @skip_if_lt_x_gpu(1)
+    def test_modulelist_subclass_with_forward(self):
+        model = self.ListWithForward(8, 8)
+        mesh = init_device_mesh(device_type.type, (self.world_size,))
+        fsdp_model = fully_shard(model, mesh=mesh)
+        x = torch.randn(2, 8, device=device_type)
+        _ = fsdp_model(x)
 
 
 class TestFullyShardMeshArg(FSDPTestMultiThread):
@@ -662,7 +706,8 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_meta_device_2d_init(self):
-        assert self.world_size >= 4, f"{self.world_size}"
+        if not (self.world_size >= 4):
+            raise AssertionError(f"Expected world_size >= 4, but got {self.world_size}")
         dp_size = 2
         global_mesh = init_device_mesh(
             device_type.type,
@@ -836,7 +881,8 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_1d_process_group_init(self):
-        assert self.world_size == 4, f"{self.world_size}"
+        if not (self.world_size == 4):
+            raise AssertionError(f"Expected world_size == 4, but got {self.world_size}")
         # For convenience, use device mesh's infra to construct the DP PG
         # (in practice, the trainer would do it manually via `new_group()`)
         dp_size = 2
@@ -899,9 +945,10 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_2d_process_group_init(self):
         shard_mesh_dim_size = 2
-        assert self.world_size % shard_mesh_dim_size == 0, (
-            f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
-        )
+        if not (self.world_size % shard_mesh_dim_size == 0):
+            raise AssertionError(
+                f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
+            )
         replicate_mesh_dim_size = self.world_size // shard_mesh_dim_size
         mesh_dim_names = ("replicate", "shard")
         ref_mesh = init_device_mesh(
@@ -1166,7 +1213,10 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
                 if dim_size > largest_dim_size:
                     largest_dim = dim
                     largest_dim_size = dim_size
-            assert largest_dim >= 0, f"{param.shape}"
+            if not (largest_dim >= 0):
+                raise AssertionError(
+                    f"Expected largest_dim >= 0, but got {largest_dim} for shape {param.shape}"
+                )
             return Shard(largest_dim)
 
         for layer in model.layers:
@@ -1215,7 +1265,10 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
                 for placement in param.placements:
                     if isinstance(placement, Shard):
                         shard_dim = param.ndim - 1 - placement.dim
-                        assert shard_dim >= 0, f"{param.shape}"
+                        if not (shard_dim >= 0):
+                            raise AssertionError(
+                                f"Expected shard_dim >= 0, but got {shard_dim} for shape {param.shape}"
+                            )
                         return Shard(shard_dim)
             return Shard(0)
 
@@ -1262,8 +1315,14 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
                 if dim_size > largest_dim_size:
                     largest_dim = dim
                     largest_dim_size = dim_size
-            assert largest_dim >= 0, f"{param.shape}"
-            assert largest_dim < param.ndim, f"{largest_dim=} {param.shape}"
+            if not (largest_dim >= 0):
+                raise AssertionError(
+                    f"Expected largest_dim >= 0, but got {largest_dim} for shape {param.shape}"
+                )
+            if not (largest_dim < param.ndim):
+                raise AssertionError(
+                    f"Expected largest_dim < param.ndim, but got {largest_dim=} {param.shape}"
+                )
             return Shard(largest_dim)
 
         with self.assertRaisesRegex(

@@ -710,7 +710,7 @@ ops_test_common.duplicate_opinfo_for_prims(OPS_DB, "special.zeta", "zeta")
 OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_SUBTESTS)
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
-assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
-assert NONDETERMINISTIC_OPS.issubset(TESTED_OPS), (
-    f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS"
-)
+if not TESTED_OPS.issubset(ALL_OPS_IN_DB):
+    raise AssertionError(f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB")
+if not NONDETERMINISTIC_OPS.issubset(TESTED_OPS):
+    raise AssertionError(f"{NONDETERMINISTIC_OPS - TESTED_OPS} not in TESTED_OPS")

@@ -25,9 +25,6 @@ self-hosted-runner:
     - linux.aws.h100
     - linux.aws.h100.4
     - linux.aws.h100.8
-    - linux.4xlarge.nvidia.gpu
-    - linux.8xlarge.nvidia.gpu
-    - linux.16xlarge.nvidia.gpu
     - linux.g5.4xlarge.nvidia.gpu
     - linux.c7i.2xlarge
     # Pytorch/pytorch AWS Linux Runners on Linux Foundation account
@@ -37,9 +34,6 @@ self-hosted-runner:
     - lf.linux.12xlarge
     - lf.linux.24xlarge
     - lf.linux.arm64.2xlarge
-    - lf.linux.4xlarge.nvidia.gpu
-    - lf.linux.8xlarge.nvidia.gpu
-    - lf.linux.16xlarge.nvidia.gpu
     - lf.linux.g5.4xlarge.nvidia.gpu
     - lf.linux.c7i.2xlarge
     # Repo-specific IBM hosted S390x runner
@@ -63,6 +57,7 @@ self-hosted-runner:
     - linux.rocm.gpu.mi250.4
     - linux.rocm.gpu.2
     - linux.rocm.gpu.4
+    - linux.rocm.mi210.docker-cache
     - linux.rocm.mi250.docker-cache
     # gfx942 runners
     - linux.rocm.gpu.gfx942.1

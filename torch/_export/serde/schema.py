@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Annotated, Optional
+from typing import Annotated
 
 from torch._export.serde.union import _Union, _union_dataclass
 
@@ -15,6 +15,11 @@ TREESPEC_VERSION = 1
 
 # NOTE: If you updated the schema, please run `scripts/export/update_schema.py`
 # to update the auto generated files.
+#
+# There are also mappings from serialized enum values to c10 enum member names.
+# These are used by scripts/export/update_schema.py to generate C++ conversion
+# functions for oss_proxy_executor.cpp.
+# When adding new enum values, update both the enum AND the mapping.
 class ScalarType(IntEnum):
     UNKNOWN = 0
     BYTE = 1
@@ -56,10 +61,49 @@ class MemoryFormat(IntEnum):
     PreserveFormat = 4
 
 
+SCALAR_TYPE_TO_C10: dict[int, str] = {
+    ScalarType.BYTE: "Byte",
+    ScalarType.CHAR: "Char",
+    ScalarType.SHORT: "Short",
+    ScalarType.INT: "Int",
+    ScalarType.LONG: "Long",
+    ScalarType.HALF: "Half",
+    ScalarType.FLOAT: "Float",
+    ScalarType.DOUBLE: "Double",
+    ScalarType.COMPLEXHALF: "ComplexHalf",
+    ScalarType.COMPLEXFLOAT: "ComplexFloat",
+    ScalarType.COMPLEXDOUBLE: "ComplexDouble",
+    ScalarType.BOOL: "Bool",
+    ScalarType.BFLOAT16: "BFloat16",
+    ScalarType.UINT16: "UInt16",
+    ScalarType.FLOAT8E4M3FN: "Float8_e4m3fn",
+    ScalarType.FLOAT8E5M2: "Float8_e5m2",
+    ScalarType.FLOAT8E4M3FNUZ: "Float8_e4m3fnuz",
+    ScalarType.FLOAT8E5M2FNUZ: "Float8_e5m2fnuz",
+}
+
+LAYOUT_TO_C10: dict[int, str] = {
+    Layout.SparseCoo: "Sparse",
+    Layout.SparseCsr: "SparseCsr",
+    Layout.SparseCsc: "SparseCsc",
+    Layout.SparseBsr: "SparseBsr",
+    Layout.SparseBsc: "SparseBsc",
+    Layout._mkldnn: "Mkldnn",
+    Layout.Strided: "Strided",
+}
+
+MEMORY_FORMAT_TO_C10: dict[int, str] = {
+    MemoryFormat.ContiguousFormat: "Contiguous",
+    MemoryFormat.ChannelsLast: "ChannelsLast",
+    MemoryFormat.ChannelsLast3d: "ChannelsLast3d",
+    MemoryFormat.PreserveFormat: "Preserve",
+}
+
+
 @dataclass
 class Device:
     type: Annotated[str, 10]
-    index: Annotated[Optional[int], 20] = None
+    index: Annotated[int | None, 20] = None
 
 
 @_union_dataclass
@@ -76,7 +120,7 @@ class SymExprHint(_Union):
 @dataclass
 class SymExpr:
     expr_str: Annotated[str, 10]
-    hint: Annotated[Optional[SymExprHint], 20] = None
+    hint: Annotated[SymExprHint | None, 20] = None
 
 
 @_union_dataclass
@@ -228,7 +272,7 @@ class NamedArgument:
     # Argument name from the operator schema
     name: Annotated[str, 10]
     arg: Annotated[Argument, 20]
-    kind: Annotated[Optional[ArgumentKind], 30] = None
+    kind: Annotated[ArgumentKind | None, 30] = None
 
 
 @dataclass
@@ -237,9 +281,9 @@ class Node:
     inputs: Annotated[list[NamedArgument], 20]
     outputs: Annotated[list[Argument], 30]
     metadata: Annotated[dict[str, str], 40]
-    is_hop_single_tensor_return: Annotated[Optional[bool], 50] = None
+    is_hop_single_tensor_return: Annotated[bool | None, 50] = None
     # For BC, default is None so older serialized models without 'name' can be loaded.
-    name: Annotated[Optional[str], 60] = None
+    name: Annotated[str | None, 60] = None
 
 
 @dataclass
@@ -388,8 +432,8 @@ class GraphSignature:
 
 @dataclass
 class RangeConstraint:
-    min_val: Annotated[Optional[int], 10]
-    max_val: Annotated[Optional[int], 20]
+    min_val: Annotated[int | None, 10]
+    max_val: Annotated[int | None, 20]
 
 
 @dataclass
@@ -404,13 +448,13 @@ class ModuleCallSignature:
 
     # This field is used to prettify the graph placeholders
     # after we Ser/Der and retrace
-    forward_arg_names: Annotated[Optional[list[str]], 50] = None
+    forward_arg_names: Annotated[list[str] | None, 50] = None
 
 
 @dataclass
 class ModuleCallEntry:
     fqn: Annotated[str, 10]
-    signature: Annotated[Optional[ModuleCallSignature], 30] = None
+    signature: Annotated[ModuleCallSignature | None, 30] = None
 
 
 @dataclass
@@ -474,7 +518,7 @@ class PayloadMeta:
     # are serialized using pickle.
     use_pickle: Annotated[bool, 30]
     # Custom Objects don't have tensor_meta and will be serialized using pickle
-    tensor_meta: Annotated[Optional[TensorMeta], 40]
+    tensor_meta: Annotated[TensorMeta | None, 40]
 
 
 # The mapping from payload FQN to its metadata.
@@ -504,11 +548,11 @@ class AOTInductorModelPickleData:
     # These fields tell whether floating point inputs/outputs should be converted to
     # a certain type. If None, the dtypes that the AOTInductor engine inferred from the sample
     # inputs are used.
-    floating_point_input_dtype: Annotated[Optional[int], 4] = None
-    floating_point_output_dtype: Annotated[Optional[int], 5] = None
+    floating_point_input_dtype: Annotated[int | None, 4] = None
+    floating_point_output_dtype: Annotated[int | None, 5] = None
 
     # Whether AOTInductor runtime is for CPU.
-    aot_inductor_model_is_cpu: Annotated[Optional[bool], 6] = None
+    aot_inductor_model_is_cpu: Annotated[bool | None, 6] = None
 
 
 @dataclass

@@ -1008,7 +1008,7 @@ User code traceback:
     def test_assert_failure_in_generic_ctx_mgr(self, records):
         def fn(x):
             with GenericCtxMgr():
-                assert x is None
+                assert x is None  # noqa: S101
 
         with self.assertRaises(AssertionError):
             torch.compile(fn, backend="eager")(torch.randn(3))
@@ -1036,7 +1036,7 @@ User code traceback:
   File "test_error_messages.py", line N, in test_assert_failure_in_generic_ctx_mgr
     torch.compile(fn, backend="eager")(torch.randn(3))
   File "test_error_messages.py", line N, in fn
-    assert x is None
+    assert x is None  # noqa: S101
 """,
         )
 

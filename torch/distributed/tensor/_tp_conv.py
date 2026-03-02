@@ -112,8 +112,10 @@ def tp_convolution(
     local_tensor_kwargs: dict[str, object],
     dim_map: list[int],
 ) -> object:
-    assert op_call == aten.convolution.default
-    assert len(local_tensor_args) == 9
+    if op_call != aten.convolution.default:
+        raise AssertionError
+    if len(local_tensor_args) != 9:
+        raise AssertionError
 
     rank = dist.get_rank()
     size = dist.get_world_size()
@@ -121,8 +123,10 @@ def tp_convolution(
     weight = cast(torch.Tensor, local_tensor_args[1])
     stride, padding, dilation = local_tensor_args[3:6]
 
-    assert _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation)
-    assert isinstance(padding, list)
+    if not _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation):
+        raise AssertionError
+    if not isinstance(padding, list):
+        raise AssertionError
 
     if not _requires_data_exchange(padding, dim_map):
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
@@ -132,7 +136,8 @@ def tp_convolution(
         d = weight.shape[-1] - 1
         d1 = d // 2
         d2 = d - d1
-        assert d1 + d2 == d
+        if d1 + d2 != d:
+            raise AssertionError
         right = (rank + 1) % size
         left = (rank - 1 + size) % size
 
@@ -166,8 +171,10 @@ def tp_convolution_backward(
     local_tensor_kwargs: dict[str, object],
     dim_map: list[int],
 ) -> object:
-    assert op_call == aten.convolution_backward.default
-    assert len(local_tensor_args) == 11
+    if op_call != aten.convolution_backward.default:
+        raise AssertionError
+    if len(local_tensor_args) != 11:
+        raise AssertionError
 
     rank = dist.get_rank()
     size = dist.get_world_size()
@@ -176,8 +183,10 @@ def tp_convolution_backward(
     weight = cast(torch.Tensor, local_tensor_args[2])
     stride, padding, dilation = local_tensor_args[4:7]
 
-    assert _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation)
-    assert isinstance(padding, list)
+    if not _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation):
+        raise AssertionError
+    if not isinstance(padding, list):
+        raise AssertionError
 
     if not _requires_data_exchange(padding, dim_map):
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
@@ -187,7 +196,8 @@ def tp_convolution_backward(
         d = weight.shape[3] - 1
         d1 = d // 2
         d2 = d - d1
-        assert d1 + d2 == d
+        if d1 + d2 != d:
+            raise AssertionError
         right = (rank + 1) % size
         left = (rank - 1 + size) % size
 
@@ -243,9 +253,11 @@ def convolution_handler(
     # sharding propagation
     dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
-    assert output_sharding is not None, "output sharding should not be None"
+    if output_sharding is None:
+        raise AssertionError("output sharding should not be None")
     output_spec = output_sharding.output_spec
-    assert isinstance(output_spec, dtensor.DTensorSpec)
+    if not isinstance(output_spec, dtensor.DTensorSpec):
+        raise AssertionError
 
     # local propagation
     local_results = tp_convolution(
@@ -266,7 +278,10 @@ def convolution_backward_handler(
     # Redistribute grad_output tensor to the same placement as input tensor
     # pyrefly: ignore [bad-assignment]
     args = list(args)
-    assert isinstance(args[0], dtensor.DTensor) and isinstance(args[1], dtensor.DTensor)
+    if not (
+        isinstance(args[0], dtensor.DTensor) and isinstance(args[1], dtensor.DTensor)
+    ):
+        raise AssertionError
     # pyrefly: ignore [unsupported-operation]
     args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
     args = tuple(args)
@@ -277,8 +292,10 @@ def convolution_backward_handler(
     # sharding propagation
     dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
-    assert output_sharding is not None, "output sharding should not be None"
-    assert isinstance(op_info.flat_args_schema[0], dtensor.DTensorSpec)
+    if output_sharding is None:
+        raise AssertionError("output sharding should not be None")
+    if not isinstance(op_info.flat_args_schema[0], dtensor.DTensorSpec):
+        raise AssertionError
 
     # local propagation
     local_results = tp_convolution_backward(

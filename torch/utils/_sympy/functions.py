@@ -200,12 +200,10 @@ class FloorDiv(sympy.Function):
 
     @property
     def base(self) -> sympy.Basic:
-        # pyrefly: ignore [missing-attribute]
         return self.args[0]
 
     @property
     def divisor(self) -> sympy.Basic:
-        # pyrefly: ignore [missing-attribute]
         return self.args[1]
 
     def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
@@ -305,7 +303,6 @@ class FloorDiv(sympy.Function):
         return None
 
     def _eval_is_nonnegative(self) -> bool | None:
-        # pyrefly: ignore [missing-attribute]
         p, q = self.args[:2]
         if all([p.is_integer, q.is_integer, p.is_nonnegative, q.is_nonnegative]):
             return True
@@ -374,7 +371,6 @@ class ModularIndexing(sympy.Function):
         return None
 
     def _eval_is_nonnegative(self) -> bool | None:
-        # pyrefly: ignore [missing-attribute]
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
@@ -470,11 +466,8 @@ class PythonMod(sympy.Function):
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
     def _ccode(self, printer) -> str:
-        # pyrefly: ignore [missing-attribute]
         p = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
-        # pyrefly: ignore [missing-attribute]
         q = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
-        # pyrefly: ignore [missing-attribute]
         abs_q = str(q) if self.args[1].is_positive else f"abs({q})"
         return f"({p} % {q}) < 0 ? {p} % {q} + {abs_q} : {p} % {q}"
 
@@ -557,7 +550,6 @@ class CeilToInt(sympy.Function):
             return sympy.Integer(math.ceil(float(number)))
 
     def _ccode(self, printer) -> str:
-        # pyrefly: ignore [missing-attribute]
         number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
         return f"ceil({number})"
 
@@ -723,7 +715,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         Return seen_symbols if all atoms in all args are all unique symbols,
         else returns None. initial_set can be used to represent initial value for seen_symbols
         """
-        seen_symbols = set() if initial_set is None else initial_set
+        seen_symbols = set() if initial_set is None else initial_set.copy()
         for arg in args:
             for element in arg.atoms():
                 if not isinstance(element, sympy.core.symbol.Symbol):
@@ -828,7 +820,6 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             if not cond:
                 return ai.func(*[do(i, a) for i in ai.args], evaluate=False)
             if isinstance(ai, cls):
-                # pyrefly: ignore [missing-attribute]
                 return ai.func(*[do(i, a) for i in ai.args if i != a], evaluate=False)
             return a
 
@@ -1006,7 +997,6 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
         return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
     def _eval_is_negative(self):  # type:ignore[override]
-        # pyrefly: ignore [missing-attribute]
         return fuzzy_and(a.is_negative for a in self.args)
 
 
@@ -1025,7 +1015,6 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
         return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
     def _eval_is_negative(self):  # type:ignore[override]
-        # pyrefly: ignore [missing-attribute]
         return fuzzy_or(a.is_negative for a in self.args)
 
 
@@ -1160,9 +1149,7 @@ class IntTrueDiv(sympy.Function):
             return sympy.Float(int(base) / int(divisor))
 
     def _ccode(self, printer) -> str:
-        # pyrefly: ignore [missing-attribute]
         base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
-        # pyrefly: ignore [missing-attribute]
         divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
         return f"((int){base}/(int){divisor})"
 
@@ -1329,16 +1316,13 @@ class Identity(sympy.Function):
     precedence = 10
 
     def __repr__(self) -> str:  # type: ignore[override]
-        # pyrefly: ignore [missing-attribute]
         return f"Identity({self.args[0]})"
 
     def _sympystr(self, printer) -> str:
         """Controls how sympy's StrPrinter prints this"""
-        # pyrefly: ignore [missing-attribute]
         return f"({printer.doprint(self.args[0])})"
 
     def _eval_is_real(self):
-        # pyrefly: ignore [missing-attribute]
         return self.args[0].is_real
 
     def _eval_is_integer(self):
@@ -1348,26 +1332,21 @@ class Identity(sympy.Function):
     def is_number(self):
         # Treat Identity as numeric only when the argument is comparable.
         # This avoids creating numeric non-comparable Identity(I) terms.
-        # pyrefly: ignore [missing-attribute]
         return bool(self.args[0].is_number and self.args[0].is_comparable)
 
     @property
     def is_comparable(self):
         # Delegate comparability to the wrapped argument.
-        # pyrefly: ignore [missing-attribute]
         return bool(self.args[0].is_comparable)
 
     def _eval_expand_identity(self, **hints):
         # Removes the identity op.
-        # pyrefly: ignore [missing-attribute]
         return self.args[0]
 
     def __int__(self) -> int:
-        # pyrefly: ignore [missing-attribute]
         return int(self.args[0])
 
     def __float__(self) -> float:
-        # pyrefly: ignore [missing-attribute]
         return float(self.args[0])
 
 

@@ -2,13 +2,13 @@ name: rocm-mi200
 
 on:
   push:
-    branches:
-      - release/*
+    #branches:
+      #- release/*
     tags:
       - ciflow/rocm-mi200/*
   workflow_dispatch:
-  schedule:
-    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
+  #schedule:
+    #- cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
 
 
 concurrency:

@@ -5,7 +5,7 @@ import dataclasses
 import re
 import sys
 from itertools import count, zip_longest
-from typing import Any, Optional, Union
+from typing import Any
 from typing_extensions import Self
 
 import sympy
@@ -65,7 +65,7 @@ TRITON_SIGNATURE_TO_CPP = {
 }
 
 
-def signature_is_tma_desc(sig: Optional[str]) -> bool:
+def signature_is_tma_desc(sig: str | None) -> bool:
     """Check if a Triton signature represents a TMA descriptor."""
     if not sig:
         return False
@@ -88,6 +88,67 @@ class DeferredTritonCallWrapper:
     kernel_name: str
     kernel_name_to_body: dict[str, str]
     arg_types: list[Any]
+
+    def _get_cpp_param_type(self, name: str, arg_type: Any) -> str:
+        """Get the C++ parameter declaration for a given arg type."""
+        if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
+            return f"const {name}_type_& {name}"
+        elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
+            return f"int64_t {name}"
+        elif arg_type is float:
+            return f"float {name}"
+        elif arg_type is bool:
+            return f"bool {name}"
+        else:
+            raise ValueError(f"Unexpected arg type {arg_type}")
+
+    def _write_wrapper_signature(
+        self,
+        prefix: IndentedBuffer,
+        wrapper: CppWrapperGpu,
+        arg_names: list[str],
+        arg_types: list[Any] | None = None,
+    ) -> None:
+        """Write the wrapper function signature including template and parameters."""
+        if arg_types is None:
+            arg_types = self.arg_types
+
+        # Generate template types for tensor arguments
+        template_types = [
+            f"typename {name}_type_"
+            for name, arg_type in zip(arg_names, arg_types)
+            if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg))
+        ]
+        if V.graph.aot_mode:
+            template_types.append("typename kernels_type_")
+
+        if template_types:
+            prefix.writeline(f"template <{', '.join(template_types)}>")
+
+        # Build parameter list
+        param_lines = [
+            self._get_cpp_param_type(name, arg_type)
+            for name, arg_type in zip(arg_names, arg_types)
+        ]
+        param_lines.append("int32_t device_idx_")
+        param_lines.append(
+            maybe_hipify_code_wrapper(
+                f"{wrapper.device_codegen.cpp_stream_type()} stream_"
+            )
+        )
+        if V.graph.aot_mode:
+            param_lines.append("kernels_type_& kernels_")
+        param_lines.append(
+            "const std::optional<std::string>& cubin_dir_ = std::nullopt"
+        )
+
+        # Write function signature
+        prefix.writeline(f"static inline void {self.wrapper_name}(")
+        with prefix.indent():
+            for i, param in enumerate(param_lines):
+                comma = "," if i < len(param_lines) - 1 else ""
+                prefix.writeline(f"{param}{comma}")
+        prefix.writeline("){")
 
     def generate(self, wrapper: CppWrapperGpu):
         """
@@ -122,42 +183,9 @@ class DeferredTritonCallWrapper:
         else:
             kernel_var_name = f"kernels_.{self.kernel_name}"
 
-        # tensors can be RAIIAtenTensorHandle or ConstantHandle, so make them template types
-        template_types = [
-            f"typename {name}_type_"
-            for name, arg_type in zip(def_args, arg_types)
-            if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg))
-        ]
-        if V.graph.aot_mode:
-            template_types.append("typename kernels_type_")
-        if template_types:
-            prefix.writeline(f"template <{', '.join(template_types)}>")
-        prefix.writeline(f"static inline void {self.wrapper_name}(")
-        with prefix.indent():
-            assert len(def_args) == len(arg_types), (def_args, arg_types)
-            for name, arg_type in zip(def_args, arg_types):
-                if isinstance(arg_type, (torch_dtype, UnwrapUnspecArg)):
-                    prefix.writeline(f"const {name}_type_& {name},")
-                elif issubclass(arg_type, (SymbolicCallArg, sympy.Expr, int)):
-                    prefix.writeline(f"int64_t {name},")
-                elif arg_type is float:
-                    prefix.writeline(f"float {name},")
-                elif arg_type is bool:
-                    prefix.writeline(f"bool {name},")
-                else:
-                    raise ValueError(f"Unexpected arg type {arg_type}")
-            prefix.writeline("int32_t device_idx_,")
-            prefix.writeline(
-                maybe_hipify_code_wrapper(
-                    f"{wrapper.device_codegen.cpp_stream_type()} stream_,"
-                )
-            )
-            if V.graph.aot_mode:
-                prefix.writeline("kernels_type_& kernels_,")
-            prefix.writeline(
-                "const std::optional<std::string>& cubin_dir_ = std::nullopt"
-            )
-        prefix.writeline("){")
+        # Write wrapper function signature
+        self._write_wrapper_signature(prefix, wrapper, def_args, arg_types)
+
         with prefix.indent():
             if V.graph.aot_mode:
                 # Emit the original Triton kernel for debugging purposes
@@ -430,9 +458,9 @@ class CppWrapperGpu(CppWrapperCpu):
     @staticmethod
     def create(
         is_subgraph: bool,
-        subgraph_name: Optional[str],
-        parent_wrapper: Optional[PythonWrapperCodegen],
-        partition_signatures: Optional[GraphPartitionSignature] = None,
+        subgraph_name: str | None,
+        parent_wrapper: PythonWrapperCodegen | None,
+        partition_signatures: GraphPartitionSignature | None = None,
     ):
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
@@ -510,9 +538,9 @@ class CppWrapperGpu(CppWrapperCpu):
         self,
         kernel_name: str,
         kernel_body: str,
-        metadata: Optional[str] = None,
+        metadata: str | None = None,
         gpu: bool = True,
-        cpp_definition: Optional[str] = None,
+        cpp_definition: str | None = None,
     ):
         if gpu:
             self._kernel_name_to_body[kernel_name] = kernel_body
@@ -630,12 +658,12 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def generate_args_decl(
         self,
-        code: Union[IndentedBuffer, Self],
+        code: IndentedBuffer | Self,
         call_args,
         arg_types,
         arg_signatures,
         is_triton_kernel=True,
-        scratch_spaces: Optional[dict[str, int]] = None,
+        scratch_spaces: dict[str, int] | None = None,
     ):
         """
         Generates any declarations of args to pass into a kernel call, and then returns the arg names.

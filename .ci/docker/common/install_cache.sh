@@ -77,10 +77,15 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-write_sccache_stub cc
-write_sccache_stub c++
-write_sccache_stub gcc
-write_sccache_stub g++
+# Skip all sccache wrapping for theRock nightly: sccache PATH wrappers
+# intercept assembly (.s) compilation and fail because the assembler does not
+# produce the .d dependency file that sccache expects.
+if [ "$ROCM_VERSION" != "nightly" ]; then
+  write_sccache_stub cc
+  write_sccache_stub c++
+  write_sccache_stub gcc
+  write_sccache_stub g++
+fi
 
 # NOTE: See specific ROCM_VERSION case below.
 if [ "x$ROCM_VERSION" = x ]; then

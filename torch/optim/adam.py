@@ -423,7 +423,6 @@ def _single_tensor_adam(
                     if weight_decay.requires_grad:
                         grad = grad.addcmul_(param.clone(), weight_decay)
                     else:
-                        # pyrefly: ignore [bad-argument-type]
                         grad = grad.add(param, alpha=weight_decay)
                 else:
                     grad = grad.add(param, alpha=weight_decay)

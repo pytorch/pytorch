@@ -456,7 +456,14 @@ at::BlasBackend Context::blasPreferredBackend() {
   // Rather than put logic for interpreting what Default means at every
   // call site for blasPreferredBackend(), we set it to an actual value.
   if (blas_preferred_backend == at::BlasBackend::Default) {
+#ifdef USE_ROCM
+    // May change to cuBLASLt in the code below
     blas_preferred_backend = at::BlasBackend::Cublas;
+#else
+    blas_preferred_backend = hasCuBLASLt()
+      ? at::BlasBackend::Cublaslt
+      : at::BlasBackend::Cublas;
+#endif
     // This logic sits in the getter because it needs to validate
     // values set via env vars such as TORCH_BLAS_PREFER_CUBLASLT
     // which initialize the backend without calling the setter
