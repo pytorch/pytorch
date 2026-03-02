@@ -230,6 +230,28 @@ class TestFFT(TestCase):
                 self.assertEqual(x, y, exact_dtype=(
                     forward != torch.fft.fft or x.is_complex()))
 
+    # Test for MKL FFT energy normalization issue with 2048x2048 matrices
+    # See: https://github.com/pytorch/pytorch/issues/169670
+    @skipCPUIfNoFFT
+    @onlyNativeDeviceTypes
+    def test_fft_2048x2048_energy_preservation(self, device):
+        # This test specifically checks the workaround for the MKL FFT energy
+        # normalization bug that occurs with exactly 2048x2048 2D FFTs on Intel CPUs
+        x = torch.randn(2048, 2048, device=device, dtype=torch.float32)
+        
+        # Calculate energy before FFT round-trip
+        energy_before = torch.sum(torch.abs(x) ** 2)
+        
+        # Do FFT round-trip: ifft2(fft2(x))
+        x_fft = torch.fft.fft2(x)
+        x_reconstructed = torch.fft.ifft2(x_fft).real
+        
+        # Calculate energy after FFT round-trip
+        energy_after = torch.sum(torch.abs(x_reconstructed) ** 2)
+        
+        # Energy should be preserved (with tolerance for numerical precision)
+        self.assertEqual(energy_before, energy_after, atol=1e-3, rtol=1e-3)
+
     # Note: NumPy will throw a ValueError for an empty input
     @onlyNativeDeviceTypes
     @ops(spectral_funcs, allowed_dtypes=(torch.half, torch.float, torch.complex32, torch.cfloat))
