@@ -391,6 +391,7 @@ test_h100_symm_mem() {
 }
 
 test_b200_symm_mem() {
+  # TEST
   _run_symm_mem_tests
 }
 

@@ -220,6 +220,13 @@ def requires_nvshmem(  # type: ignore[no-untyped-def]
     ```
     """
 
+    if not has_triton():
+        raise RuntimeError(
+            "@requires_nvshmem requires Triton support. "
+            "Ensure Triton is installed and a compatible device (e.g., CUDA GPU) is available. "
+            "Check that torch.cuda.is_available() returns True."
+        )
+
     import triton
     from triton.runtime.jit import JITFunction
 
