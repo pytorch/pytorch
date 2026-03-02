@@ -469,10 +469,12 @@ def _post_forward(
         # recomputed forward
         if handle and handle._training_state == HandleTrainingState.BACKWARD_PRE:
             return output
+        # Only execute for native forward (non-recomputed)
+        if torch._C._current_graph_task_id() == -1:
+            state._exec_order_data.record_post_forward(handle)
+            if reshard_fn is not None:
+                reshard_fn(state, handle)
 
-        state._exec_order_data.record_post_forward(handle)
-        if reshard_fn is not None:
-            reshard_fn(state, handle)
         # Register pre-backward hooks to unshard the flat parameters for the
         # gradient computation (if needed)
         output = _register_pre_backward_hooks(state, module, output, handle)
