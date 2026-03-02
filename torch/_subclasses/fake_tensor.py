@@ -936,6 +936,12 @@ class FakeTensor(Tensor):
         # cpu - zero-dim tensors can be called in cuda kernels,
         # so overwrite the common_device if it the only existing
         # device comes from a cpu zero-dim tensor
+
+        # allow mixed device for aten.where in FakeTensor
+        if func is aten.where.default or func is aten.where.self:
+            # where() is shape-only; device doesn't matter in FakeTensorMode
+            return torch.device("cpu"), False
+
         common_device = None
         has_scalar_only_inputs = False
         is_cpu_zero_dim = None

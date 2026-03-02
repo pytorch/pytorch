@@ -1224,6 +1224,15 @@ def embedding_bag(
     with fake_mode:
         return meta_embedding_bag(*args, **kwargs)
 
+# Use the meta embedding kernel under FakeTensorMode to compute 
+# output shape without triggering device propagation errors 
+# from mixed cpu/meta inputs.
+@register_op_impl(aten.embedding.default)
+def embedding_fake(fake_mode, func, *args, **kwargs):
+    from torch._meta_registrations import embedding as meta_embedding
+    with fake_mode:
+        return meta_embedding(*args, **kwargs)
+
 
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten._unsafe_index_put.default)
