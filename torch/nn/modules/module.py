@@ -1977,6 +1977,16 @@ class Module:
                     else:
                         d.discard(name)
 
+        # Respect data descriptors (e.g. property setters) defined on the class.
+        # This matches Python's normal attribute-setting behavior and lets users
+        # opt out of registration via a custom setter.
+        attr = inspect.getattr_static(self.__class__, name, None)
+        if attr is not None:
+            set_ = getattr(attr, "__set__", None)
+            if set_ is not None:
+                set_(self, value)
+                return
+
         params = self.__dict__.get("_parameters")
         if isinstance(value, Parameter):
             if params is None:
