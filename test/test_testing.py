@@ -2475,6 +2475,10 @@ class TestImports(TestCase):
                          "  - Use TYPE_CHECKING if you are using sympy + strings if you are using sympy on type annotations\n"
                          "  - Import things that depend on SymPy locally")
 
+    def test_not_import_triton(self) -> None:
+        out = self._check_python_output("import torch;import sys;print('triton' not in sys.modules)")
+        self.assertEqual(out.strip(), "True")
+
     @parametrize('path', ['torch', 'functorch'])
     def test_no_mutate_global_logging_on_import(self, path) -> None:
         # Calling logging.basicConfig, among other things, modifies the global

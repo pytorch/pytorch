@@ -1218,6 +1218,10 @@ class TestSerialization(TestCase, SerializationMixin):
 
         with BytesIOContext() as f:
             torch.save(big_model.state_dict(), f)
+            # Delete the original model before loading another one to
+            # reduce peak memory from ~12GB to ~8GB
+            del big_model
+            gc.collect()
             f.seek(0)
             torch.load(f)
 
