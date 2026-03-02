@@ -747,6 +747,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
+    @torch._inductor.config.patch(layout_optimization=True)
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self, groups):
