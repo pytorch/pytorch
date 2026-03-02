@@ -5191,6 +5191,9 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._dynamo import invoke_subgraph_cache
+        from torch._dynamo.utils import dynamo_timed
+
         fn_var = args[0]
         fn_args_vt = args[1:]
 
@@ -5206,16 +5209,44 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 )
                 raise
 
+        auto_cache = torch._dynamo.config.invoke_subgraph_auto_guard_cache
+
+        # Auto-cache lookup
+        if auto_cache:
+            with dynamo_timed("invoke_subgraph_cache_lookup"):
+                flat = invoke_subgraph_cache.flatten_args_kwargs(tx, fn_args_vt, kwargs)
+                match = invoke_subgraph_cache.find_cache_match(
+                    tx, fn_var, flat.flat_vts, flat.arg_sources
+                )
+            if match is not None:
+                hc_log.debug(
+                    "auto_guard_cache: cache hit for '%s', reusing subgraph '%s'",
+                    fn_var,
+                    match.body_name,
+                )
+                with dynamo_timed("invoke_subgraph_stamp_out"):
+                    return invoke_subgraph_cache.stamp_out_cached_subgraph(
+                        tx, flat, match
+                    )
+
+        # Snapshot guards before tracing for auto-cache delta computation
+        guards_before = None
+        if auto_cache:
+            guards_before = tx.output.guards.inner.copy()
+
         assert self._HOP_NAME is not None
-        (
-            p_args,
-            p_kwargs,
-            example_value,
-            body_r,
-            body_gmod,
-            body_name,
-            body_graph_output_vts,
-        ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
+        with dynamo_timed("invoke_subgraph_trace"):
+            (
+                p_args,
+                p_kwargs,
+                example_value,
+                body_r,
+                body_gmod,
+                body_name,
+                body_graph_output_vts,
+            ) = self.create_wrapped_node(
+                tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME
+            )
 
         if len(p_kwargs) > 0:
             unimplemented(
@@ -5227,22 +5258,38 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 ],
             )
 
+        # Store config in the body graph module meta
         if isinstance(config, NestedCompileRegionOptions):
             body_gmod.meta["nested_region_config"] = config
-
-        from torch._dynamo.invoke_subgraph_cache import (
-            flatten_args_kwargs,
-            is_auto_cacheable,
-        )
-
-        flat = flatten_args_kwargs(tx, fn_args_vt, kwargs)
-        is_auto_cacheable(body_r, flat.flat_vts)
 
         p_args = (
             p_args[0],
             body_name,
             *p_args[1:],
         )
+
+        # Auto-cache save
+        if auto_cache:
+            flat = invoke_subgraph_cache.flatten_args_kwargs(tx, fn_args_vt, kwargs)
+            if invoke_subgraph_cache.is_auto_cacheable(body_r, flat.flat_vts):
+                condition = invoke_subgraph_cache.build_auto_cache_condition(
+                    tx, flat.flat_vts, flat.arg_sources, guards_before
+                )
+                if condition is not None:
+                    invoke_subgraph_cache.save_cache_entry(
+                        tx,
+                        fn_var,
+                        flat.proxy_node_to_idx,
+                        flat.arg_sources,
+                        body_name,
+                        body_gmod,
+                        config,
+                        p_args,
+                        body_r,
+                        example_value,
+                        condition,
+                    )
+
         return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
             tx,
             torch._higher_order_ops.invoke_subgraph,
