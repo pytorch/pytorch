@@ -7,7 +7,7 @@ import warnings
 import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Callable, Iterator, Mapping
-from typing import Any, Optional, overload, TypeVar, Union
+from typing import Any, cast, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch
@@ -1968,7 +1968,7 @@ class Module:
             f"'{type(self).__name__}' object has no attribute '{name}'"
         )
 
-    def __setattr__(self, name: str, value: Union[Tensor, "Module"]) -> None:
+    def __setattr__(self, name: str, value: object) -> None:
         def remove_from(*dicts_or_sets) -> None:
             for d in dicts_or_sets:
                 if name in d:
@@ -2028,7 +2028,9 @@ class Module:
                 modules[name] = value
             else:
                 buffers = self.__dict__.get("_buffers")
-                if isinstance(value, Buffer) or buffers is not None and name in buffers:
+                if isinstance(value, Buffer) or (
+                    buffers is not None and name in buffers
+                ):
                     if value is not None and not (
                         isinstance(value, torch.Tensor)
                         or hasattr(value, "__torch_function__")
@@ -2037,6 +2039,8 @@ class Module:
                             f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
                             "(torch.nn.Buffer, torch.Tensor or None expected)"
                         )
+                    # cast to (Tensor | None) for the type checker
+                    value = cast("Tensor | None", value)
                     if isinstance(value, Buffer):
                         persistent = value.persistent
                     else:
