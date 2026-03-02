@@ -601,6 +601,7 @@ def foreach_max_strategy(op_schema: OpSchema) -> TupleStrategy:
     [
         aten._linalg_svd.default,
         aten.linalg_qr.default,
+        aten.linalg_pinv.atol_rtol_tensor,
         # TODO: The diagonal ops can have an improved sharding strategy for
         # shard placements that does not require redistributing to replicate.
         aten.diagonal_copy.default,
