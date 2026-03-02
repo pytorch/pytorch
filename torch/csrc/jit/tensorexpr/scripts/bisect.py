@@ -24,7 +24,7 @@ def test(cmd, limit):
     return 0
 
 
-def bisect(cmd):
+def jit_bisect(cmd):
     last_good = 0
     first_bad = 10000
     skips = set()
@@ -70,6 +70,6 @@ if __name__ == "__main__":
     @click.command()
     @click.option("--cmd", required=True)
     def cli(cmd):
-        bisect(cmd)
+        jit_bisect(cmd)
 
     cli()

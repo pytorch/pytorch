@@ -1,0 +1,11 @@
+name: Reusable Checkout Workflow
+
+on:
+  workflow_call:
+
+jobs:
+  checkout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
