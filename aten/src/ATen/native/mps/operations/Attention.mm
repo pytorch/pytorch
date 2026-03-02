@@ -461,8 +461,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   bool supports_sdpa_vector = (query_seq_len <= 8) && (query_seq_len <= k_.size(2)) &&
       ((!mask_.has_value()) || (mask_.value().dtype() == at::kBool)) && sdpa_vector_supported_head_dim;
 
+  // kernel path fails correctness for bs > 1.
+  // Issue: https://github.com/pytorch/pytorch/issues/170837
+  auto batch_size = query.size(0);
+
   // boolean to decide if we can use kernel paths
-  bool supports_fast_sdpa = !is_causal && supports_sdpa_vector;
+  bool supports_fast_sdpa = !is_causal && supports_sdpa_vector && batch_size == 1;
 
   // if none of the fast paths apply, fall back to the generic mps graph solution
   if (!supports_fast_sdpa) {
