@@ -4671,6 +4671,17 @@ def interpolate(  # noqa: F811
             option together with ``align_corners=False``, interpolation result would match Pillow
             result for downsampling operation. Supported modes: ``'bilinear'``, ``'bicubic'``.
 
+    Examples::
+        >>> input = torch.arange(1, 5, dtype=torch.float32).view(1, 1, 2, 2)
+        >>> input
+        tensor([[[[1., 2.],
+                  [3., 4.]]]])
+        >>> F.interpolate(input, size=(4, 4), mode='nearest')
+        tensor([[[[1., 1., 2., 2.],
+                  [1., 1., 2., 2.],
+                  [3., 3., 4., 4.],
+                  [3., 3., 4., 4.]]]])
+
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot. For some dtypes, it can produce
         negative values or values greater than 255 for images. Explicitly call ``result.clamp(min=0,max=255)``
