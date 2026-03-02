@@ -75,6 +75,9 @@ android {
             doNotStrip "**/*.so"
             logger.warn('WARNING: nativeLibsDoNotStrip==true; debug symbols included')
         }
+        jniLibs {
+            useLegacyPackaging true
+        }
     }
 
     useLibrary 'android.test.runner'
