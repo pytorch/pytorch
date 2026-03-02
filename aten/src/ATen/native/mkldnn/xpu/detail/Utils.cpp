@@ -18,6 +18,13 @@ dnnl::memory make_onednn_memory(
       ptr == nullptr ? DNNL_MEMORY_ALLOCATE : ptr);
 }
 
+dnnl::memory make_onednn_memory(
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    const void* ptr) {
+  return make_onednn_memory(md, engine, (void*)ptr);
+}
+
 dnnl::memory::format_tag get_dnnl_default_format(
     int ndims,
     bool is_channels_last,

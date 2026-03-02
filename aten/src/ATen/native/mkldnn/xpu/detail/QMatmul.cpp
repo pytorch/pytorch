@@ -525,7 +525,7 @@ sycl::event scaled_matmul(
   };
 
   auto scratchpad =
-      make_onednn_memory(matmul_pd.scratchpad_desc(), engine, nullptr);
+      make_onednn_memory(matmul_pd.scratchpad_desc(), engine, (void*)nullptr);
 
   // 3. Setup Args for exec
   std::unordered_map<int, dnnl::memory> args;
