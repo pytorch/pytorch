@@ -611,3 +611,10 @@ Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hugh
 ## License
 
 PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
+
+## Beginner Example (Text Only)
+
+If you are new to PyTorch, a good starting point is to understand what tensors are
+and how basic tensor operations work. Beginners are encouraged to follow the
+official tutorials and experiment with simple examples such as creating tensors,
+checking their shapes, and performing basic arithmetic operations.
