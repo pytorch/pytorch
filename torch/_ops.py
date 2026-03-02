@@ -945,12 +945,12 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
                 # TODO: We also need to handle tensor subclasses here
                 # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-                curr_mode = type(_get_current_dispatch_mode())
-                if curr_mode is None:
+                raw_mode = _get_current_dispatch_mode()
+                if raw_mode is None:
                     raise AssertionError(
                         "Illegal invocation of dispatch on DispatchKey.Python without a mode."
                     )
-
+                curr_mode = type(raw_mode)
                 if curr_mode not in self.python_key_table:
                     if isinstance(self, TorchBindOpOverload):
                         with (
