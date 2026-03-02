@@ -1244,6 +1244,27 @@ class FakeTensorTest(TestCase):
         self.assertEqual(out[1].dtype, eye.dtype)
         self.assertEqual(out[2].dtype, eye.dtype)
 
+    def test_conv_transpose_zero_size_output(self):
+        # https://github.com/pytorch/pytorch/issues/171093
+        if not torch.cuda.is_available():
+            raise unittest.SkipTest("requires cuda")
+        if torch.version.hip:
+            raise unittest.SkipTest("ROCm/MIOpen does not support zero-sized output")
+
+        # ConvTranspose2d that produces zero-size output
+        # Output size = (input_size - 1) * stride - 2 * padding + kernel_size
+        #             = (2 - 1) * 2 - 2 * 2 + 2 = 0
+        #             = [1, 1, 0, 0]
+        # Initialize the model outside of FakeTensorMode so that PropagateRealTensors
+        # can correctly handle the real tensor weights.
+        conv = torch.nn.ConvTranspose2d(3, 1, 2, 2, 2, bias=False).cuda()
+        with FakeTensorMode():
+            x = torch.randn(1, 3, 2, 2, device="cuda")
+            # This should NOT raise "Output size is too small" on CUDA with cuDNN
+            # logic in meta_registrations.py: if not is_cudnn: check(...)
+            out = conv(x)
+            self.assertEqual(out.shape, torch.Size([1, 1, 0, 0]))
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 
