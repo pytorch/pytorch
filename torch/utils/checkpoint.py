@@ -1399,7 +1399,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         return out
 
 
-def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mutation=False):
+def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mutation=False, storage=None,):
     """
     Helper to avoid recomputing certain ops during activation checkpointing.
 
@@ -1478,7 +1478,8 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     else:
         raise TypeError("policy_fn_or_list must be either a function or a list of ops.")
 
-    storage: Dict[Any, List[Any]] = defaultdict(list)
+    if storage is None:
+        storage = defaultdict(list)
     return (
         _CachingTorchDispatchMode(policy_fn, storage),
         _CachedTorchDispatchMode(policy_fn, storage, allow_cache_entry_mutation),
@@ -1668,7 +1669,25 @@ class GraphExecGroup:
         # Private API to be used by utils like AC
         return torch._C._get_graph_exec_group()
 
+def get_tensors_from_selective_storage(storage: Dict[Any, List[Any]]) -> List[torch.Tensor]:
+    """
+    Utility to flatten and retrieve all tensors currently held in the
+    selective checkpointing storage.
+    """
+    all_tensors = []
+    for tensor_list in storage.values():
+        for item in tensor_list:
+            if isinstance(item, torch.Tensor):
+                all_tensors.append(item)
+            # Handle PyTorch's internal _VersionWrapper
+            elif hasattr(item, 'val') and isinstance(item.val, torch.Tensor):
+                all_tensors.append(item.val)
+    return all_tensors
 
+def clean_selective_storage(storage: Dict[Any, List[Any]]) -> None:
+    """Helper to clear storage after offloading."""
+    storage.clear()
+    
 # Note: [compiled autograd and checkpoint unpack hook]
 # When tracing via compiled autograd, this hook will be visible to the
 # compiler if the forward of this checkpointed region ran in eager.
