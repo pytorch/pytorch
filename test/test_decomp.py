@@ -1187,6 +1187,22 @@ class DecompOneOffTests(TestCase):
             torch._decomp.decompositions._weight_norm_interface(inp, inp2),
         )
 
+    @onlyCUDA
+    @skipIfCrossRef
+    def test_fused_dropout_p0(self, device):
+        input_tensor = torch.randn(10, 10, dtype=torch.float32, device=device)
+        p = 0.0
+        generator = None
+
+        fn = torch.ops.aten._fused_dropout
+        compile_fn = torch.compile(fn, backend="eager")
+
+        ref = fn(input_tensor, p, generator)
+        res = compile_fn(input_tensor, p, generator)
+
+        self.assertTrue(torch.allclose(ref[0], res[0], equal_nan=True))
+        self.assertTrue(torch.allclose(ref[1], res[1]))
+
     @onlyCPU
     @skipIfCrossRef
     @skipOps(
