@@ -134,6 +134,10 @@ class PendingFusion:
         return (self.node1, self.node2)
 
 
+class FusionRejected(Exception):
+    """Signal that a fusion must be rejected after backend fusion changes contiguity."""
+
+
 class MixOrderReduction:
     """
     This class contains utility functions to decide if we should fuse reductions
@@ -2193,16 +2197,28 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         device = self.node1.get_device()
         backend = self.scheduler.get_backend(device)
 
+        def _ensure_contiguous(
+            node_a: BaseSchedulerNode, node_b: BaseSchedulerNode
+        ) -> None:
+            if not (
+                MixOrderReduction.is_contiguous_node(node_a)
+                or MixOrderReduction.is_contiguous_node(node_b)
+            ):
+                raise FusionRejected("mix-order reduction contiguity lost after fusion")
+
         if isinstance(other, FusedMixOrderReductions):
             fused_node1 = backend.fuse(self.node1, other.node1)
             fused_node2 = backend.fuse(self.node2, other.node2)
+            _ensure_contiguous(fused_node1, fused_node2)
             return FusedMixOrderReductions(fused_node1, fused_node2)
         else:
             if self.sub_node_can_fuse(self.node1, other, (self.node2,)):
                 fused_node = backend.fuse(self.node1, other)
+                _ensure_contiguous(fused_node, self.node2)
                 return FusedMixOrderReductions(fused_node, self.node2)
             else:
                 fused_node = backend.fuse(self.node2, other)
+                _ensure_contiguous(self.node1, fused_node)
                 return FusedMixOrderReductions(self.node1, fused_node)
 
 
@@ -4429,7 +4445,15 @@ class Scheduler:
 
         device = node1.get_device()
         assert node2.get_device() == device
-        node3 = self.get_backend(device).fuse(node1, node2)
+        try:
+            node3 = self.get_backend(device).fuse(node1, node2)
+        except FusionRejected:
+            fusion_log.debug(
+                "fusion rejected after backend fuse for %s + %s",
+                node1.get_name(),
+                node2.get_name(),
+            )
+            return node1
         fused_nodes.remove(node1)
         fused_nodes.remove(node2)
         fused_nodes.add(node3)

@@ -160,6 +160,30 @@ class MixOrderReductionTest(TestBase):
         # shared memory.
         self.assertEqual(metrics.codegen_mix_order_reduction, 0)
 
+    @inductor_config.patch(split_reductions=False)
+    def test_mix_order_reduction_invalid_fuse(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        # Regression: mix-order reduction can appear valid pre-fusion, but a pointwise
+        # fused into one side can change access patterns and break the contiguity
+        # invariant. This test builds a reduction + pointwise path plus a second
+        # reduction, matching the shape/ordering pattern seen in the XPU failure.
+
+        def f(x):
+            # First reduction (contiguous on its own).
+            r1 = x.sum(dim=1)
+            # Pointwise depends on both reduced and unreduced data, so fusing it
+            # with the reduction can change access strides.
+            y = r1 * x[:, 0]
+            # Second reduction across a different dimension to trigger mix-order logic.
+            r2 = x.sum(dim=0)
+            return y, r2
+
+        # Large, asymmetric shape encourages mix-order reduction heuristics.
+        x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+
     @inductor_config.patch(coordinate_descent_tuning=True)
     def test_XBLOCK_coordest_tuning(self):
         """
