@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import gc
+import traceback
 import typing
+import weakref
 from collections.abc import Callable
 from typing import overload, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, Self, TypeVar
@@ -136,6 +138,27 @@ class CUDAGraph(_CUDAGraph):
 
     def replay(self) -> None:
         r"""Replay the CUDA work captured by this graph."""
+        death_records = getattr(self, "tensor_inputs_death_records", None)
+        if death_records:
+            entries = []
+            for rec in death_records:
+                entries.append(
+                    f"Function: {rec['func']}\n"
+                    f"Argument: {rec['arg']}\n"
+                    "Python backtrace at creation:\n"
+                    f"{rec['creation_python']}"
+                    "C++ backtrace at creation:\n"
+                    f"{rec['creation_cpp']}"
+                    "Python backtrace at death:\n"
+                    f"{rec['death_python']}"
+                )
+            message = (
+                "Tensor captured for CUDA graph was freed before graph replay.\n"
+                + "\n---\n".join(entries)
+            )
+            # Clear after reporting to avoid duplicate reports on subsequent calls.
+            death_records.clear()
+            raise ValueError(message)
         super().replay()
 
     def reset(self) -> None:
@@ -178,6 +201,105 @@ class CUDAGraph(_CUDAGraph):
         """  # noqa: B950
         return super().raw_cuda_graph_exec()
 
+    def __del__(self) -> None:
+        if hasattr(self, "tensor_inputs_used"):
+            # If we were tracking tensor liveness for this graph, drop the weakrefs.
+            try:
+                self.tensor_inputs_used.clear()
+            except Exception:
+                pass
+        if hasattr(self, "tensor_inputs_death_records"):
+            try:
+                self.tensor_inputs_death_records.clear()
+            except Exception:
+                pass
+
+
+# Avoid a circular dependency
+def create_collect_inputs_dispatch_mode(cuda_graph):
+    from torch.utils._python_dispatch import TorchDispatchMode
+
+    class CollectInputsDispatchMode(TorchDispatchMode):
+        def __init__(self, graph):
+            self.supports_higher_order_operators = True
+            self.graph = graph
+            # This is hacky, but we keep the weakrefs alive as long as
+            # the cuda graph is alive by making them an instance
+            # variable on the cuda graph we are doing stream capture
+            # to.
+            self.graph.tensor_inputs_used = set()
+            self.graph.tensor_inputs_death_records = []
+            self.tensor_inputs_used_during_capture = weakref.WeakKeyDictionary()
+            super().__init__()
+
+        def __torch_dispatch__(self, func, types, args, kwargs=None):
+            resolved_kwargs = {} if kwargs is None else kwargs
+
+            # Record the tensors used by this op only if they are part
+            # of the graph
+            if not torch.cuda.is_current_stream_capturing():
+                return func(*args, **resolved_kwargs)
+
+            # Avoid a circular dependency
+            from torch.utils.cpp_backtrace import get_cpp_backtrace
+
+            python_backtrace = "".join(traceback.format_stack()[:-1])
+            cpp_backtrace = get_cpp_backtrace()
+
+            func_name = getattr(func, "__name__", str(func))
+
+            def make_death_callback(arg_desc: str):
+                creation_py = python_backtrace
+                creation_cpp = cpp_backtrace
+
+                def death_callback(_):
+                    try:
+                        death_py = "".join(traceback.format_stack()[:-1])
+                        self.graph.tensor_inputs_death_records.append(
+                            {
+                                "func": func_name,
+                                "arg": arg_desc,
+                                "creation_python": creation_py,
+                                "creation_cpp": creation_cpp,
+                                "death_python": death_py,
+                            }
+                        )
+                    except Exception:
+                        # Best-effort; avoid raising from GC callback.
+                        pass
+
+                return death_callback
+
+            for idx, arg in enumerate(args):
+                for maybe_tensor in torch.utils._pytree.tree_iter(arg):
+                    if isinstance(maybe_tensor, torch.Tensor):
+                        self.tensor_inputs_used_during_capture[maybe_tensor] = (
+                            make_death_callback(f"args[{idx}]")
+                        )
+
+            for name, arg in resolved_kwargs.items():
+                for maybe_tensor in torch.utils._pytree.tree_iter(arg):
+                    if isinstance(maybe_tensor, torch.Tensor):
+                        self.tensor_inputs_used_during_capture[maybe_tensor] = (
+                            make_death_callback(f"kwargs['{name}']")
+                        )
+
+            return func(*args, **resolved_kwargs)
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            super().__exit__(exc_type, exc_val, exc_tb)
+            # Inputs that happened to die during stream capture will
+            # have already been removed from
+            # self.tensor_inputs_used_during_capture
+            for (
+                tensor,
+                death_callback,
+            ) in self.tensor_inputs_used_during_capture.items():
+                self.graph.tensor_inputs_used.add(weakref.ref(tensor, death_callback))
+            self.tensor_inputs_used_during_capture = None
+
+    return CollectInputsDispatchMode(cuda_graph)
+
 
 class graph:
     r"""Context-manager that captures CUDA work into a :class:`torch.cuda.CUDAGraph` object for later replay.
@@ -217,6 +339,7 @@ class graph:
         pool: _POOL_HANDLE | None = None,
         stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
+        debug_options: Optional[set] = None,
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
@@ -233,6 +356,10 @@ class graph:
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
+        self.debug_options = debug_options or set()
+
+        if "input_liveness" in self.debug_options:
+            self.collect_inputs = create_collect_inputs_dispatch_mode(cuda_graph)
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -260,8 +387,12 @@ class graph:
             # pyrefly: ignore [bad-keyword-argument]
             capture_error_mode=self.capture_error_mode,
         )
+        if "input_liveness" in self.debug_options:
+            self.collect_inputs.__enter__()
 
     def __exit__(self, *args: object) -> None:
+        if "input_liveness" in self.debug_options:
+            self.collect_inputs.__exit__(*args)
         self.cuda_graph.capture_end()
         self.stream_ctx.__exit__(*args)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()

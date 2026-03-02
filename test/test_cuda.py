@@ -3869,6 +3869,83 @@ with torch.cuda.graph(g):
                 .strip()
             )
 
+    def test_cuda_graph_detect_killed_input(self):
+        input_to_kill = torch.zeros(1024, device="cuda")
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            graph, capture_error_mode="relaxed", debug_options={"input_liveness"}
+        ):
+            input_to_kill += 1
+
+        graph.replay()
+
+        del input_to_kill
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Tensor captured for CUDA graph was freed before graph replay",
+        ):
+            graph.replay()
+
+    def test_cuda_graph_detect_killed_input_ignore_non_capture_stream(self):
+        input_to_kill = torch.zeros(1024, device="cuda")
+
+        extra_work_tensor = torch.zeros(1024, device="cuda")
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            graph, capture_error_mode="relaxed", debug_options={"input_liveness"}
+        ):
+            input_to_kill += 1
+            with torch.cuda.stream(torch.cuda.Stream()):
+                extra_work_tensor.fill_(42)
+
+        del extra_work_tensor
+        # Should not throw an exception
+        graph.replay()
+
+    def test_cuda_graph_detected_killed_input_overriden(self):
+        input_tensor = torch.zeros(1024, device="cuda")
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            graph, capture_error_mode="relaxed", debug_options={"input_liveness"}
+        ):
+            # This creates a new torch.Tensor object referring,
+            # distinct from the one originally bound to input_tensor
+            input_tensor = input_tensor + 1
+
+        del extra_work_tensor
+        # Should not throw an exception
+        graph.replay()
+
+    def test_cuda_graph_detected_killed_input_ignore_temporaries(self):
+        input_tensor = torch.zeros(1024, device="cuda")
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(
+            graph, capture_error_mode="relaxed", debug_options={"input_liveness"}
+        ):
+            temp = input_tensor + 1
+            # temp is an input to this
+            out = temp + 1
+            del temp
+
+        # Should not throw an exception
+        graph.replay()
+
+    # TODO: Figure out what to do if we have an allocated tensor from
+    # a previous graph get deleted by a future graph, if all graphs
+    # share a memory pool. This should be "safe", right? We could
+    # potentially introspect the private pool. If an input is from
+    # this graph's private pool, then there is no need to give an
+    # error when the preceding graph is run, right?
+
+    # TODO: Also think about what to do when there are several graphs
+    # sharing a memory pool In this case, they should not reference
+    # each others' outputs as inputs, so it is probably pretty safe to
+    # ignore that.
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device="cuda")
         mean, invstd = torch.batch_norm_gather_stats(
