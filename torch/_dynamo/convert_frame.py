@@ -1553,8 +1553,6 @@ def _compile(
                 package=package,
             )
         except exc.SkipFrame as e:
-            if one_graph:
-                log.debug("No graph captured with export/fullgraph=True")
             assert e._torch_dynamo_tracer_output is not None
             return ConvertFrameReturn(), e._torch_dynamo_tracer_output
 
@@ -2274,6 +2272,18 @@ class CatchErrorsWrapper:
                 is_in_any_mode_without_ignore_compile_internals()
             )
 
+        def _raise_if_fullgraph_no_graph(result: ConvertFrameReturn) -> None:
+            if (
+                getattr(self._torchdynamo_orig_backend, "_one_graph", False)
+                and not getattr(self._torchdynamo_orig_backend, "_export", False)
+                and frame.f_code in always_optimize_code_objects
+                and result.guarded_code is None
+            ):
+                raise exc.FullGraphCompileError(
+                    "torch.compile(..., fullgraph=True) was requested, but Dynamo did not capture "
+                    f"a graph for {frame.f_code.co_name} ({frame.f_code.co_filename}:{frame.f_code.co_firstlineno})."
+                )
+
         if (
             # TODO: the first condition is not covered by any test
             has_started_execution
@@ -2300,7 +2310,9 @@ class CatchErrorsWrapper:
                     skip_reason,
                     frame.f_code.co_filename,
                 )
-            return ConvertFrameReturn()
+            result = ConvertFrameReturn()
+            _raise_if_fullgraph_no_graph(result)
+            return result
 
         if (
             frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
@@ -2339,6 +2351,7 @@ class CatchErrorsWrapper:
             result = self._torchdynamo_orig_backend(
                 frame, cache_entry, self.hooks, frame_state, skip=1
             )
+            _raise_if_fullgraph_no_graph(result)
             return result
 
 
