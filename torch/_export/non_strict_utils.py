@@ -9,7 +9,7 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -138,7 +138,7 @@ def make_sourced_prefixes(nn_module, args, kwargs) -> _KeyPathTrie:
 
 
 def key_path_to_source(
-    kp: KeyPath, sourced_prefixes: Optional[_KeyPathTrie] = None
+    kp: KeyPath, sourced_prefixes: _KeyPathTrie | None = None
 ) -> Source:
     """
     Given a key path, return the source for the key path.
@@ -171,7 +171,7 @@ def fakify(
     t: Any,
     t_constraints: dict[int, dict[int, Constraint]],
     sources: dict[tuple[int, int], list[Source]],
-    sourced_prefixes: Optional[_KeyPathTrie] = None,
+    sourced_prefixes: _KeyPathTrie | None = None,
 ):
     source = key_path_to_source(kp, sourced_prefixes=sourced_prefixes)
     if (
@@ -485,7 +485,7 @@ def make_fake_inputs(
 
         names: dict[str, tuple[int, int]] = {}
         source_pairs: list[tuple[Source, Source]] = []
-        derived_equalities: list[tuple[Source, Union[Source, Symbol], Callable]] = []
+        derived_equalities: list[tuple[Source, Source | Symbol, Callable]] = []
         phantom_symbols: dict[str, Symbol] = {}
         relaxed_sources: set[Source] = set()
         for constraint in constraints:
@@ -519,7 +519,7 @@ def make_fake_inputs(
 
 def _flatten_dynamic_shapes(
     combined_args: dict[str, Any],
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any]],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any],
 ) -> list[Any]:
     flat_shapes = []
 
@@ -546,7 +546,7 @@ def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
 def produce_guards_and_solve_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
 ):
@@ -626,8 +626,8 @@ def _constrain_user_specified_dimhint_range(
     range_constraints,
     shape_env,
     keypath: KeyPath,
-    i: Optional[int] = None,
-) -> Optional[str]:
+    i: int | None = None,
+) -> str | None:
     trace_vr = (
         range_constraints[symint.node.expr]
         if not is_int(symint)
@@ -696,7 +696,7 @@ def make_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
     combined_args: dict[str, Any],
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
     num_lifted_inputs: int,
 ):
     """
@@ -865,7 +865,7 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 
 
 def _get_graph_inputs_of_type_nn_module(
-    args: Optional[tuple[tuple[Any], dict[Any, Any]]],
+    args: tuple[tuple[Any], dict[Any, Any]] | None,
 ) -> set[type[torch.nn.Module]]:
     if args is None:
         return set()
@@ -892,7 +892,7 @@ def _exit_enable_graph_inputs_of_type_nn_module(
 
 @contextlib.contextmanager
 def _enable_graph_inputs_of_type_nn_module(
-    args: Optional[tuple[tuple[Any], dict[Any, Any]]],
+    args: tuple[tuple[Any], dict[Any, Any]] | None,
 ):
     if args is None:
         yield
@@ -941,7 +941,7 @@ def _fakify_script_objects(
     mod: torch.nn.Module,
     args: Sequence[Any],
     kwargs: dict[Any, Any],
-    fake_mode: Optional[torch._subclasses.fake_tensor.FakeTensorMode],
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode | None,
 ):
     # This context manager is used to fakify script objects into FakeScriptObject.
     # Inputs:

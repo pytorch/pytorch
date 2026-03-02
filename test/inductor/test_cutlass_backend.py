@@ -233,7 +233,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cutlass.cutlass_backend_min_gemm_size": 100000,
+                # Make it slightly too large to be accepted (m*n*k)
+                "cutlass.cutlass_backend_min_gemm_size": 100 * 100 * 10 + 1,
                 "cutlass.cutlass_max_profiling_configs": 2,
             }
         ):
@@ -927,13 +928,15 @@ class TestCutlassBackend(TestCase):
             }
         ):
             counters["inductor"]["cutlass_epilogue_fusion_counter"] = 0
-            assert mm is not None
+            if mm is None:
+                raise AssertionError("mm is None")
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
             actual_count = counters["inductor"]["cutlass_epilogue_fusion_counter"]
-            assert actual_count == expected_fuse_count, (
-                f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
-            )
+            if actual_count != expected_fuse_count:
+                raise AssertionError(
+                    f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
+                )
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -1166,7 +1169,8 @@ class TestCutlassBackend(TestCase):
         cache = torch._inductor.codecache.LocalCache().lookup(
             "sparse_semi_structured_mm"
         )
-        assert cache is not None
+        if cache is None:
+            raise AssertionError("cache is None")
         high = cache[
             f"[('cuda', 'torch.float16', {m}, {k // 2}, {k // 2}, 1, 0), "
             f"('cuda', 'torch.int16', {m}, {k // 16}, {k // 16}, 1, 0), "
@@ -1176,7 +1180,10 @@ class TestCutlassBackend(TestCase):
         for kernel, duration in high.items():
             if kernel.startswith("cutlass_gemm") and not math.isinf(duration):
                 cutlass_kernels_count += 1
-        assert cutlass_kernels_count > 0
+        if cutlass_kernels_count <= 0:
+            raise AssertionError(
+                f"Expected cutlass_kernels_count > 0, got {cutlass_kernels_count}"
+            )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1210,18 +1217,26 @@ class TestCutlassBackend(TestCase):
                         torch.compile(my_addmm, dynamic=False)(x, a, b, 1.0, 2.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
-                    assert op_name == "addmm"
+                    if op_name != "addmm":
+                        raise AssertionError(
+                            f"Expected op_name 'addmm', got {op_name!r}"
+                        )
                     cuda_template_count = 0
                     for choice in choices:
                         if isinstance(choice, CUTLASSTemplateCaller):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
-                            assert isinstance(op_conf_name, str)
-                            assert "pingpong" not in op_conf_name, (
-                                "All pingpong Kernels should have been filtered"
-                            )
+                            if not isinstance(op_conf_name, str):
+                                raise AssertionError(
+                                    f"Expected op_conf_name to be str, got {type(op_conf_name)}"
+                                )
+                            if "pingpong" in op_conf_name:
+                                raise AssertionError(
+                                    "All pingpong Kernels should have been filtered"
+                                )
                             cuda_template_count += 1
-                    assert cuda_template_count > 0, "No CUTLASSTemplateCaller choices"
+                    if cuda_template_count <= 0:
+                        raise AssertionError("No CUTLASSTemplateCaller choices")
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1255,18 +1270,26 @@ class TestCutlassBackend(TestCase):
                         torch.compile(addmm, dynamic=False)(x, a, b, 1.0, 1.0)
                     args, _ = sa.call_args
                     op_name, choices, _, __ = args
-                    assert op_name == "addmm"
+                    if op_name != "addmm":
+                        raise AssertionError(
+                            f"Expected op_name 'addmm', got {op_name!r}"
+                        )
                     cuda_template_count = 0
                     for choice in choices:
                         if isinstance(choice, CUTLASSTemplateCaller):
                             choice_info = choice.info_dict()
                             op_conf_name = choice_info.get("op_conf_name", "")
-                            assert isinstance(op_conf_name, str)
-                            assert "pingpong" in op_conf_name, (
-                                "Only pingpong Kernels should have been allowed"
-                            )
+                            if not isinstance(op_conf_name, str):
+                                raise AssertionError(
+                                    f"Expected op_conf_name to be str, got {type(op_conf_name)}"
+                                )
+                            if "pingpong" not in op_conf_name:
+                                raise AssertionError(
+                                    "Only pingpong Kernels should have been allowed"
+                                )
                             cuda_template_count += 1
-                    assert cuda_template_count > 0, "No CUTLASSTemplateCaller choices"
+                    if cuda_template_count <= 0:
+                        raise AssertionError("No CUTLASSTemplateCaller choices")
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -1337,19 +1360,23 @@ class TestCutlassBackend(TestCase):
                             if isinstance(choice, CUTLASSTemplateCaller):
                                 choice_info = choice.info_dict()
                                 op_conf_name = choice_info.get("op_conf_name", "")
-                                assert isinstance(op_conf_name, str)
+                                if not isinstance(op_conf_name, str):
+                                    raise AssertionError(
+                                        f"Expected op_conf_name to be str, got {type(op_conf_name)}"
+                                    )
                                 if use_fast_accum:
-                                    assert "fastaccum" in op_conf_name, (
-                                        "Only fastaccum Kernels should have been allowed"
-                                    )
+                                    if "fastaccum" not in op_conf_name:
+                                        raise AssertionError(
+                                            "Only fastaccum Kernels should have been allowed"
+                                        )
                                 else:
-                                    assert "fastaccum" not in op_conf_name, (
-                                        "fastaccum Kernels should have been filtered"
-                                    )
+                                    if "fastaccum" in op_conf_name:
+                                        raise AssertionError(
+                                            "fastaccum Kernels should have been filtered"
+                                        )
                                 cuda_template_count += 1
-                        assert cuda_template_count > 0, (
-                            "No CUTLASSTemplateCaller choices"
-                        )
+                        if cuda_template_count <= 0:
+                            raise AssertionError("No CUTLASSTemplateCaller choices")
 
         run_test(True)
         run_test(False)
@@ -1412,13 +1439,17 @@ class TestCutlassBackend(TestCase):
                 )
                 args, _ = sa.call_args
                 op_name, choices, _, __ = args
-                assert op_name == "mm"
+                if op_name != "mm":
+                    raise AssertionError(f"Expected op_name 'mm', got {op_name!r}")
                 cuda_template_count = 0
                 for choice in choices:
                     if isinstance(choice, CUTLASSTemplateCaller):
                         choice_info = choice.info_dict()
                         op_conf_name = choice_info.get("op_conf_name", "")
-                        assert isinstance(op_conf_name, str)
+                        if not isinstance(op_conf_name, str):
+                            raise AssertionError(
+                                f"Expected op_conf_name to be str, got {type(op_conf_name)}"
+                            )
                         cuda_template_count += 1
 
                 self.assertGreater(
@@ -1524,7 +1555,8 @@ class TestCutlassBackend(TestCase):
 
                 sources = ctx.sources
 
-            assert len(sources) >= 1
+            if len(sources) < 1:
+                raise AssertionError(f"Expected len(sources) >= 1, got {len(sources)}")
 
             # Get names for temporary source and executable files.
             cu_file = NamedTemporaryFile("w", suffix=".cu", delete=False)  # noqa: SIM115
@@ -1605,7 +1637,8 @@ class TestCutlassBackend(TestCase):
             match = re.search(
                 r"Got cutlass configs: total number of ops: (\d+)", output
             )
-            assert match, "Expect to find the cutlass configs log"
+            if not match:
+                raise AssertionError("Expect to find the cutlass configs log")
             num_ops = int(match.group(1))
             self.assertTrue(num_ops > 0, "The number of ops should be greater than 0")
 

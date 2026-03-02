@@ -5,12 +5,13 @@ import functools
 import itertools
 import math
 import operator
+import os
 import re
 import sys
 import warnings
 from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, Optional
 
 import sympy
 
@@ -209,7 +210,7 @@ def reduction_combine(
     var,
     next_value,
     helper_val=None,
-    index: Optional[sympy.Symbol] = None,
+    index: sympy.Symbol | None = None,
     src_dtype=None,
 ):
     is_bool = src_dtype == torch.bool
@@ -314,11 +315,11 @@ def move_code_under_inner_loop(
 
 
 def reduction_prefix_array(
-    acc_var: Union[str, CSEVariable],
+    acc_var: str | CSEVariable,
     acc_type: str,
     reduction_type: str,
     dtype: torch.dtype,
-    len: Union[str, int],
+    len: str | int,
     init_fn,
 ):
     """
@@ -463,7 +464,7 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
 @functools.lru_cache
 def stride_at_vec_range(
-    index: sympy.Expr, var: sympy.Symbol, vec_length: Optional[int] = None
+    index: sympy.Expr, var: sympy.Symbol, vec_length: int | None = None
 ):
     if vec_length:
         index = simplify_index_in_vec_range(index, var, vec_length)
@@ -522,10 +523,10 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
     def __init__(
         self,
         scheduler: "Scheduler",
-        outer_fused_nodes: list[Union[FusedSchedulerNode, SchedulerNode]],
+        outer_fused_nodes: list[FusedSchedulerNode | SchedulerNode],
         outer_loop_fusion_depth,
     ):
-        self.outer_fused_nodes: list[Union[FusedSchedulerNode, SchedulerNode]] = (
+        self.outer_fused_nodes: list[FusedSchedulerNode | SchedulerNode] = (
             outer_fused_nodes
         )
         self.outer_loop_fusion_depth = outer_loop_fusion_depth
@@ -645,8 +646,8 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
 class RecordOptimizationContext:
     def __init__(self, func_name: str = ""):
         self.func_name = func_name
-        self.current_node: Optional[torch.fx.Node] = None
-        self.opt_ctx: Optional[OptimizationContext] = None
+        self.current_node: torch.fx.Node | None = None
+        self.opt_ctx: OptimizationContext | None = None
 
     def __enter__(self):
         assert V.interpreter
@@ -741,6 +742,18 @@ class CppOverrides(OpOverrides):
                 node2_input_lowp = node_output_lowp # hit store cache
                 node2_input = node1_output # hit cse cache
             """
+            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
+        return csevar
+
+    @staticmethod
+    def round_to_int(x, dtype, src_dtype=None, use_compute_types=True):
+        assert isinstance(x, CppCSEVariable)
+        if src_dtype is None:
+            src_dtype = x.dtype
+        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
+        csevar = V.kernel.cse.generate(V.kernel.compute, expr)
+        csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
+        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
 
@@ -1660,6 +1673,22 @@ class CppVecOverrides(CppOverrides):
         return csevar
 
     @staticmethod
+    def round_to_int(x, dtype, src_dtype=None, use_compute_types=True):
+        assert dtype in [
+            torch.uint8,
+            torch.int8,
+            torch.int32,
+        ], f"{__name__} does not support {dtype}"
+        assert isinstance(x, CppCSEVariable)
+        src_dtype = x.dtype
+        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
+        csevar = V.kernel.cse.generate(V.kernel.compute, expr)
+        csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
+        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
+        return csevar
+
+    @staticmethod
     def log1p(x):
         bug = config.cpp.inject_log1p_bug_TESTING_ONLY
         if bug == "accuracy":
@@ -1724,7 +1753,7 @@ class CppVecOverrides(CppOverrides):
                     assert isinstance(other_vec_var, CppCSEVariable), other_vec_var
                     body_vec_var.dtype = dtype
                     other_vec_var.dtype = dtype
-                    overrides: type[Union[CppOverrides, CppVecOverrides]] = (
+                    overrides: type[CppOverrides | CppVecOverrides] = (
                         # pyrefly: ignore [bad-assignment]
                         V.kernel.overrides
                     )  # type: ignore[has-type]
@@ -1736,7 +1765,8 @@ class CppVecOverrides(CppOverrides):
                 V.kernel.compute,
                 code,
             )
-            result.is_vec = True
+            assert isinstance(csevar, CppCSEVariable)
+            csevar.is_vec = True
         elif result.is_vec:
             csevar = V.kernel.cse.generate(
                 V.kernel.compute, f"{mask} ? {body_code_vec} : {other_code_vec}"
@@ -1934,7 +1964,7 @@ class CppKernel(Kernel):
         # Indicate this kernel will be moved under the inner for-loop
         # See move_code_under_inner_loop
         self.inner_itervars: list[sympy.Symbol] = []
-        self.call_ranges: Optional[tuple[sympy.Expr, ...]] = None
+        self.call_ranges: tuple[sympy.Expr, ...] | None = None
         self.ranges: list[sympy.Expr] = []
         self.itervars: list[sympy.Symbol] = []
         self.reduction_depth = None
@@ -2012,7 +2042,7 @@ class CppKernel(Kernel):
         for var_name in self.reduction_var_names:
             replace_acc_name(self.stores, var_name, f"{var_name}_local")
 
-    def gen_body(self, code: Optional[BracesBuffer] = None):
+    def gen_body(self, code: BracesBuffer | None = None):
         assert code is None
         code = BracesBuffer()
         with contextlib.ExitStack() as stack:
@@ -2150,7 +2180,7 @@ class CppKernel(Kernel):
 
     def _gen_reduction_prefix(
         self,
-        acc: Union[CSEVariable, str],
+        acc: CSEVariable | str,
         acc_type: str,
         rtype: str,
         dtype: torch.dtype,
@@ -2162,7 +2192,7 @@ class CppKernel(Kernel):
         # Otherwise, we will define and initialize a reduction array
         # => float tmp_acc0_arr[size];
         # => for (int i = 0; i < size; i++) tmp_acc0_arr[i] = 0;
-        def inner(size: Optional[int] = None):
+        def inner(size: int | None = None):
             if size is None:
                 return f"{acc_type} {acc} = {init_fn(rtype, dtype)};"
             else:
@@ -2177,7 +2207,7 @@ class CppKernel(Kernel):
 
         return inner
 
-    def finalize_reduction_prefix(self, size: Optional[int] = None):
+    def finalize_reduction_prefix(self, size: int | None = None):
         for gen_fn in self.reduction_prefix_generators:
             self.reduction_prefix.splice(gen_fn(size))
 
@@ -2200,18 +2230,7 @@ class CppKernel(Kernel):
             # chunk size to balance accuracy and performance
             chunk_size = 4096
 
-            # use acc helper If cannot get size_hint
-            try:
-                reduction_size_hint = V.graph.sizevars.size_hint(reduction_size)
-            except Exception:
-                return True
-
-            if reduction_size_hint > chunk_size:
-                # use helper if the reduction size is too large
-                V.graph.sizevars.check_lt(chunk_size, reduction_size)
-                return True
-            else:
-                V.graph.sizevars.check_leq(reduction_size, chunk_size)
+            return V.graph.sizevars.guard_or_false(sympy.Gt(reduction_size, chunk_size))
         return False
 
     def _acc_helper_init(
@@ -2379,9 +2398,8 @@ class CppKernel(Kernel):
 
     def size_hint(self):
         assert self.call_ranges is not None
-        return V.graph.sizevars.size_hint(
-            sympy_product(self.call_ranges), fallback=8192
-        )
+        expr = sympy_product(self.call_ranges)
+        return V.graph.sizevars.optimization_hint(expr)
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         assert isinstance(self, CppKernelProxy)
@@ -2584,7 +2602,13 @@ class CppKernel(Kernel):
     def create_cse_var(self, *args, **kwargs):
         return CppCSEVariable(*args, **kwargs)
 
-    def get_to_dtype_expr(self, src, dtype, src_dtype):
+    def get_to_dtype_expr(self, src, dtype, src_dtype, rounding=False):
+        if (
+            rounding
+            and dtype in [torch.int8, torch.uint8]
+            and src_dtype in [torch.float, torch.double]
+        ):
+            return f"c10::convert<{DTYPE_TO_CPP[dtype]}>(std::round({src}))"
         return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({src})"
 
     def cache_dtype_convert(self, dst, dst_dtype, src, src_dtype):
@@ -2594,8 +2618,8 @@ class CppKernel(Kernel):
     def codegen_conditions(
         self,
         code: BracesBuffer,
-        prefix: Optional[str] = None,
-        var: Optional[sympy.Symbol] = None,
+        prefix: str | None = None,
+        var: sympy.Symbol | None = None,
     ):
         if prefix is None:
             prefix = ""
@@ -2711,7 +2735,7 @@ class CppVecKernel(CppKernel):
         var: str,
         index: sympy.Expr,
         dtype: torch.dtype,
-        load_mask: Optional[CppCSEVariable] = None,
+        load_mask: CppCSEVariable | None = None,
     ):
         """
         Get a load line str that loads a vector from `var` at `index` of type `dtype`.
@@ -2745,13 +2769,13 @@ class CppVecKernel(CppKernel):
 
     def _load_or_store_non_contiguous(
         self,
-        var: Optional[str],
+        var: str | None,
         index: sympy.Expr,
         dtype: torch.dtype,
-        buffer: Optional[IndentedBuffer] = None,
-        store_value: Optional[Union[str, CppCSEVariable]] = None,
+        buffer: IndentedBuffer | None = None,
+        store_value: str | CppCSEVariable | None = None,
         accu_store: bool = False,
-    ) -> Optional[CppCSEVariable]:
+    ) -> CppCSEVariable | None:
         """
         Load or store a vector in a non-contiguous way. The vector is initialized from an array that is
         filled in an inner loop over the tiling factor.
@@ -2908,7 +2932,7 @@ class CppVecKernel(CppKernel):
 
     def _get_store_line(
         self,
-        value: Union[str, CppCSEVariable],
+        value: str | CppCSEVariable,
         var: str,
         index: sympy.Expr,
         dtype: torch.dtype,
@@ -3165,7 +3189,7 @@ class CppVecKernel(CppKernel):
                 reduction_combine_fn=self.reduction_combine_vec,
                 reduction_init_fn=self.reduction_init_vec,
             )
-        tmpvar: Union[str, CSEVariable]
+        tmpvar: str | CSEVariable
         is_bool = dtype == torch.bool
         if horizontal_reduction:
             # Horizontal reduction
@@ -3355,9 +3379,9 @@ class CppVecKernel(CppKernel):
         var,
         next_value,
         helper_val=None,
-        index: Optional[sympy.Symbol] = None,
-        horizontal_reduction: Optional[bool] = None,
-        src_dtype: Optional[torch.dtype] = torch.float32,
+        index: sympy.Symbol | None = None,
+        horizontal_reduction: bool | None = None,
+        src_dtype: torch.dtype | None = torch.float32,
     ):
         is_bool = src_dtype == torch.bool
         if reduction_type == "max":
@@ -3490,10 +3514,10 @@ class CppVecKernel(CppKernel):
         cond = f"({cond}).all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
-    def get_to_dtype_expr(self, src, dtype, src_dtype):
+    def get_to_dtype_expr(self, src, dtype, src_dtype, rounding=False):
         assert isinstance(src, CppCSEVariable)
         if not src.is_vec:
-            return super().get_to_dtype_expr(src, dtype, src_dtype)
+            return super().get_to_dtype_expr(src, dtype, src_dtype, rounding)
         src_cpp_type = DTYPE_TO_CPP[src_dtype]
         src_num_vectors = self._get_num_vectors(src_dtype)
         dst_cpp_type = DTYPE_TO_CPP[dtype]
@@ -3504,10 +3528,22 @@ class CppVecKernel(CppKernel):
         elif src_dtype == torch.bool and dtype != torch.bool:
             expr = f"{src}.to<{dst_cpp_type},{dst_num_vectors}>()"
         elif src_dtype != dtype:
-            if src_num_vectors == dst_num_vectors == 1:
-                expr = f"at::vec::convert<{dst_cpp_type}>({src})"
+            expr = ""
+            if (
+                rounding
+                and src_dtype in [torch.float, torch.double]
+                and dtype in [torch.int8, torch.uint8]
+            ):
+                expr = "at::vec::round_convert"
             else:
-                expr = f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+                expr = "at::vec::convert"
+            if src_num_vectors == dst_num_vectors == 1:
+                expr = expr + f"<{dst_cpp_type}>({src})"
+            else:
+                expr = (
+                    expr
+                    + f"<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+                )
         return expr
 
 
@@ -3733,7 +3769,7 @@ class CppTile2DKernel(CppVecKernel):
         )
 
 
-def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[Optional[torch.dtype], bool]:
+def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[torch.dtype | None, bool]:
     """
     Returns the low precision data type (torch.float16/torch.bfloat16) contained in the nodes
     and if all the nodes can codegen with this data type without converting to float.
@@ -3741,7 +3777,7 @@ def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[Optional[torch.dtype], bool]
     """
     sub_blocks = [_body.root_block] + list(_body.subblocks.values())
 
-    _lowp_fp_type: Optional[torch.dtype] = None
+    _lowp_fp_type: torch.dtype | None = None
     _use_fp32 = False
     for sub_block in sub_blocks:
         for _node in sub_block.graph.nodes:
@@ -3937,7 +3973,7 @@ class TilingSelect:
                     if tiling_indice < 0 or tiling_indice >= len(call_ranges):
                         continue
                     if has_free_symbols(call_ranges):
-                        call_range = V.graph.sizevars.size_hint(
+                        call_range = V.graph.sizevars.optimization_hint(
                             call_ranges[tiling_indice], fallback=0
                         )
                         if call_range < factor_lowp:
@@ -4040,7 +4076,7 @@ class CppKernelProxy(CppKernel):
 
     def legalize_lowp_fp_dtype_loopbody(self, loop_body: LoopBody):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            def get_input_dtype(node: torch.fx.Node) -> Optional[torch.dtype]:
+            def get_input_dtype(node: torch.fx.Node) -> torch.dtype | None:
                 """Get input dtype for nodes that may consumes lowp fp dt"""
                 if node.target == "store":
                     return V.graph.get_dtype(node.args[1])  # type: ignore[arg-type]
@@ -4054,7 +4090,7 @@ class CppKernelProxy(CppKernel):
                 else:
                     return None
 
-            def get_output_dtype(node: torch.fx.Node) -> Optional[torch.dtype]:
+            def get_output_dtype(node: torch.fx.Node) -> torch.dtype | None:
                 """Get output dtype for nodes that may produce lowp fp dt"""
                 if node.target == "load":
                     assert len(node.args) == 3
@@ -4523,7 +4559,7 @@ class CppKernelProxy(CppKernel):
         for kernel in self.kernels:
             kernel.update_stores_with_parallel_reduction()
 
-    def gen_body(self, code: Optional[BracesBuffer] = None):
+    def gen_body(self, code: BracesBuffer | None = None):
         assert code is not None
         if_prefix = "C10_LIKELY"
         for kernel in self.kernels:
@@ -4779,7 +4815,7 @@ class CppScheduling(BaseScheduling):
             else:
                 return FusedSchedulerNode.fuse(node1, node2)
 
-    def _why_fuse_nodes(self, node1, node2) -> Optional[ReasonFusedNodes]:
+    def _why_fuse_nodes(self, node1, node2) -> ReasonFusedNodes | None:
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
 
@@ -5304,7 +5340,7 @@ class CppScheduling(BaseScheduling):
 
     def codegen_node(
         self,
-        node: Union[OuterLoopFusedSchedulerNode, FusedSchedulerNode, SchedulerNode],
+        node: OuterLoopFusedSchedulerNode | FusedSchedulerNode | SchedulerNode,
     ):
         """
         Turn an set of pre-fused nodes into a C++ kernel.
@@ -5357,9 +5393,7 @@ class CppScheduling(BaseScheduling):
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
         ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: list[Optional[ir.Operation]] = [
-            n.node for n in epilogue_nodes
-        ]
+        epilogue_ir_nodes: list[ir.Operation | None] = [n.node for n in epilogue_nodes]
         assert all(isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes), (
             "Epilogue nodes must all be instances of ir.ComputedBuffer"
         )
@@ -5597,7 +5631,19 @@ class WorkSharing:
         if not self.in_parallel:
             self.num_threads = threads
             self.in_parallel = True
-            if config.cpp.dynamic_threads:
+            # Decide whether to use dynamic threading
+            use_dynamic = False
+            if config.cpp.threads >= 1:
+                # User explicitly set config.cpp.threads (hardcode it)
+                use_dynamic = False
+            elif threads == os.cpu_count():
+                # Thread count matches system CPU count (most likely default, use dynamic)
+                use_dynamic = True
+            else:
+                # Thread count differs from system (user probably set it so hardcode)
+                use_dynamic = False
+
+            if use_dynamic or config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
             else:
                 self.code.writeline(f"#pragma omp parallel num_threads({threads})")
@@ -5625,8 +5671,8 @@ class WorkSharing:
 
 @dataclasses.dataclass
 class LoopLevel:
-    var: Optional[sympy.Expr] = None
-    size: Optional[sympy.Expr] = None
+    var: sympy.Expr | None = None
+    size: sympy.Expr | None = None
     offset: sympy.Expr = sympy.S.Zero
     # Note [tiled_size]
     # We may do loop-tiling at this loop level.
@@ -5720,8 +5766,8 @@ class LoopNest:
     2D tiling at both the innermost and outer levels.
     """
 
-    loops: Optional[list[LoopLevel]] = None
-    kernel: Optional[CppKernel] = None
+    loops: list[LoopLevel] | None = None
+    kernel: CppKernel | None = None
 
     @staticmethod
     def build(kernel: CppKernel):
@@ -5731,7 +5777,7 @@ class LoopNest:
         reduction_depth = kernel.reduction_depth
         assert reduction_depth is not None
 
-        loops: Optional[list[LoopLevel]] = None
+        loops: list[LoopLevel] | None = None
         for loop_idx, (var, size) in enumerate(zip(itervars, ranges)):
             loop = LoopLevel(var, size)
             if not loops:

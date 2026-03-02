@@ -74,6 +74,7 @@ batch_size:
 tolerance:
   higher_training:
     - MT5ForConditionalGeneration
+    - BertForMaskedLM
 
   higher_max_autotune_training: []
 

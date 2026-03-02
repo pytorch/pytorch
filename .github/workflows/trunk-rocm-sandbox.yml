@@ -1,13 +1,13 @@
 name: trunk-rocm-sandbox
 
 on:
-  push:
-    branches:
-      - main
-      - release/*
+  #push:
+  #  branches:
+  #    - main
+  #    - release/*
   workflow_dispatch:
   schedule:
-    - cron: 29 8 * * *  # about 1:29am PDT
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -55,15 +55,17 @@ jobs:
       sync-tag: rocm-build
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1.test" },
-          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1.test" },
-          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1.test" },
-          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1.test" },
-          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1.test" },
-          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.gfx950.1.test" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.gfx950.4.test" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.gfx950.4.test" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.gfx950.4.test" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi210.1.test" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi210.1.test" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi210.1.test" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi210.1.test" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi210.1.test" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi210.1.test" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi210.1.test" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi210.1.test" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu.mi210.2.test" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu.mi210.2.test" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu.mi210.2.test" },
         ]}
     secrets: inherit
 

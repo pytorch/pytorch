@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_functools.py b/test/dynamo/cpython/3_13/test_functools.py
-index 9793df50a3d..1f067fa696c 100644
+index 9793df50a3d..63d611ffb15 100644
 --- a/test/dynamo/cpython/3_13/test_functools.py
 +++ b/test/dynamo/cpython/3_13/test_functools.py
 @@ -1,3 +1,22 @@
@@ -25,6 +25,15 @@ index 9793df50a3d..1f067fa696c 100644
  import abc
  import builtins
  import collections
+@@ -61,7 +80,7 @@ class MyDict(dict):
+     pass
+ 
+ 
+-class TestPartial:
++class _TestPartial:
+ 
+     def test_basic_examples(self):
+         p = self.partial(capture, 1, 2, a=10, b=20)
 @@ -187,12 +206,13 @@ class TestPartial:
  
      def test_nested_optimization_bug(self):
@@ -93,7 +102,7 @@ index 9793df50a3d..1f067fa696c 100644
  
  @unittest.skipUnless(c_functools, 'requires the C _functools module')
 -class TestPartialC(TestPartial, unittest.TestCase):
-+class TestPartialC(TestPartial, CPythonTestCase):
++class TestPartialC(_TestPartial, CPythonTestCase):
      if c_functools:
          module = c_functools
          partial = c_functools.partial
@@ -118,7 +127,7 @@ index 9793df50a3d..1f067fa696c 100644
  
  
 -class TestPartialPy(TestPartial, unittest.TestCase):
-+class TestPartialPy(TestPartial, CPythonTestCase):
++class TestPartialPy(_TestPartial, CPythonTestCase):
      module = py_functools
      partial = py_functools.partial
  
@@ -160,9 +169,12 @@ index 9793df50a3d..1f067fa696c 100644
  
      def check_wrapper(self, wrapper, wrapped,
                        assigned=functools.WRAPPER_ASSIGNMENTS,
-@@ -814,21 +838,22 @@ class TestWraps(TestUpdateWrapper):
+@@ -812,23 +836,24 @@ class TestWraps(TestUpdateWrapper):
+         self.assertEqual(wrapper.dict_attr, f.dict_attr)
  
- class TestReduce:
+ 
+-class TestReduce:
++class _TestReduce:
      def test_reduce(self):
 -        class Squares:
 -            def __init__(self, max):
@@ -267,12 +279,12 @@ index 9793df50a3d..1f067fa696c 100644
  
          from operator import add
          self.assertEqual(self.reduce(add, SequenceClass(5)), 10)
-@@ -892,12 +922,15 @@ class TestReduce:
+@@ -892,16 +922,19 @@ class TestReduce:
  
  
  @unittest.skipUnless(c_functools, 'requires the C _functools module')
 -class TestReduceC(TestReduce, unittest.TestCase):
-+class TestReduceC(TestReduce, CPythonTestCase):
++class TestReduceC(_TestReduce, CPythonTestCase):
      if c_functools:
 -        reduce = c_functools.reduce
 +        if TEST_WITH_TORCHDYNAMO:
@@ -282,10 +294,15 @@ index 9793df50a3d..1f067fa696c 100644
  
  
 -class TestReducePy(TestReduce, unittest.TestCase):
-+class TestReducePy(TestReduce, CPythonTestCase):
++class TestReducePy(_TestReduce, CPythonTestCase):
      reduce = staticmethod(py_functools.reduce)
  
  
+-class TestCmpToKey:
++class _TestCmpToKey:
+ 
+     def test_cmp_to_key(self):
+         def cmp1(x, y):
 @@ -946,9 +979,10 @@ class TestCmpToKey:
          with self.assertRaises(ZeroDivisionError):
              key(3) > key(1)
@@ -305,7 +322,7 @@ index 9793df50a3d..1f067fa696c 100644
  
  @unittest.skipUnless(c_functools, 'requires the C _functools module')
 -class TestCmpToKeyC(TestCmpToKey, unittest.TestCase):
-+class TestCmpToKeyC(TestCmpToKey, CPythonTestCase):
++class TestCmpToKeyC(_TestCmpToKey, CPythonTestCase):
      if c_functools:
 -        cmp_to_key = c_functools.cmp_to_key
 +        if TEST_WITH_TORCHDYNAMO:
@@ -320,7 +337,7 @@ index 9793df50a3d..1f067fa696c 100644
  
  
 -class TestCmpToKeyPy(TestCmpToKey, unittest.TestCase):
-+class TestCmpToKeyPy(TestCmpToKey, CPythonTestCase):
++class TestCmpToKeyPy(_TestCmpToKey, CPythonTestCase):
      cmp_to_key = staticmethod(py_functools.cmp_to_key)
  
  
@@ -721,21 +738,36 @@ index 9793df50a3d..1f067fa696c 100644
  
          self.assertTrue(A < B)
          self.assertFalse(A > B)
-@@ -1339,12 +1383,12 @@ class TestCache:
+@@ -1320,7 +1364,7 @@ class Orderable_LT:
+         return self.value == other.value
+ 
+ 
+-class TestCache:
++class _TestCache:
+     # This tests that the pass-through is working as designed.
+     # The underlying functionality is tested in TestLRU.
+ 
+@@ -1339,17 +1383,17 @@ class TestCache:
              self.module._CacheInfo(hits=0, misses=0, maxsize=None, currsize=0))
  
  
 -class TestCachePy(TestCache, unittest.TestCase):
-+class TestCachePy(TestCache, CPythonTestCase):
++class TestCachePy(_TestCache, CPythonTestCase):
      module = py_functools
  
  
  @unittest.skipUnless(c_functools, 'requires the C _functools module')
 -class TestCacheC(TestCache, unittest.TestCase):
-+class TestCacheC(TestCache, CPythonTestCase):
++class TestCacheC(_TestCache, CPythonTestCase):
      if c_functools:
          module = c_functools
  
+ 
+-class TestLRU:
++class _TestLRUU:
+ 
+     def test_lru(self):
+         def orig(x, y):
 @@ -1640,8 +1684,9 @@ class TestLRU:
          self.assertEqual(cached((False,)), '(0,)')
          self.assertEqual(cached((0.0,)), '(0,)')
@@ -826,7 +858,7 @@ index 9793df50a3d..1f067fa696c 100644
  
  
 -class TestLRUPy(TestLRU, unittest.TestCase):
-+class TestLRUPy(TestLRU, CPythonTestCase):
++class TestLRUPy(_TestLRUU, CPythonTestCase):
      module = py_functools
      cached_func = py_cached_func,
  
@@ -835,7 +867,7 @@ index 9793df50a3d..1f067fa696c 100644
  
  @unittest.skipUnless(c_functools, 'requires the C _functools module')
 -class TestLRUC(TestLRU, unittest.TestCase):
-+class TestLRUC(TestLRU, CPythonTestCase):
++class TestLRUC(_TestLRUU, CPythonTestCase):
      if c_functools:
          module = c_functools
          cached_func = c_cached_func,

@@ -32,6 +32,7 @@ __all__ = [
     "mm",
     "sum",
     "softmax",
+    # pyrefly: ignore [bad-dunder-all]
     "solve",
     "log_softmax",
     "SparseSemiStructuredTensor",

@@ -74,15 +74,12 @@ class MPSBasicTests(TestCase):
             return x.tanh()
 
         result = fn(x)
-        assert torch.allclose(result[0], torch.tensor(-1.0, device="mps")), (
-            "tanh(-100) should be -1"
-        )
-        assert torch.allclose(result[-1], torch.tensor(1.0, device="mps")), (
-            "tanh(100) should be +1"
-        )
-        assert not torch.isnan(result).any(), (
-            "tanh should not produce NaN for large values"
-        )
+        if not torch.allclose(result[0], torch.tensor(-1.0, device="mps")):
+            raise AssertionError("tanh(-100) should be -1")
+        if not torch.allclose(result[-1], torch.tensor(1.0, device="mps")):
+            raise AssertionError("tanh(100) should be +1")
+        if torch.isnan(result).any():
+            raise AssertionError("tanh should not produce NaN for large values")
 
     def test_floor(self):
         self.common(lambda x: x.floor(), (torch.rand(1024),))
@@ -191,6 +188,25 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_sdpa_split_qkv(self):
+        # regression test for metal compiler bug where fused (x / A) % B
+        # produces wrong results, causing incorrect reads from non-contiguous.
+        n_head, n_embd, seq_len = 6, 384, 1024
+        x = torch.randn(16, seq_len, n_embd, device="mps")
+        c_attn = torch.nn.Linear(n_embd, 3 * n_embd).to("mps").eval()
+        qkv = c_attn(x)
+        q, k, v = qkv.split(n_embd, dim=2)
+        q = q.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+        k = k.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+        v = v.view(16, seq_len, n_head, n_embd // n_head).transpose(1, 2)
+
+        def fn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, is_causal=True
+            )
+
+        self.common(fn, (q, k, v), atol=1e-4, rtol=1e-4, check_lowp=False)
+
 
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
@@ -199,7 +215,8 @@ class MPSBasicTestsAOTI(TestCase):
         path = torch._inductor.aoti_compile_and_package(ep)
         m = torch._inductor.aoti_load_package(path)
         res = m(*inp)
-        assert torch.allclose(res, res2)
+        if not torch.allclose(res, res2):
+            raise AssertionError
 
     def test_add_mps(self):
         class M(torch.nn.Module):

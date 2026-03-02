@@ -428,7 +428,7 @@ def register_onednn_fusion_ops():
                         "epilogue_creator": epilogue_creator,
                     }
 
-                    # pyrefly: ignore [unsupported-operation]
+                    # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
                     kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
                     CppGemmTemplate.add_choices(
                         choices,

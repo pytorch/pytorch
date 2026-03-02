@@ -281,7 +281,8 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 x = torch.randn(3)
                 expected = x.sin()
                 torch.ops.mylib.foo(x)
-                assert torch.allclose(x, expected)
+                if not torch.allclose(x, expected):
+                    raise AssertionError
 
                 @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
                 def f(x):
@@ -1750,15 +1751,15 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_scheduling_with_multiple_mutates(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+        with torch.library._scoped_library("mylib_scheduling", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo",
+                "mylib_scheduling::foo",
                 "(Tensor! x, Tensor! y, Tensor z) -> ()",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.impl("mylib_scheduling::foo", "cpu", lib=lib)
             @torch._dynamo.disable
             def foo(x, y, z):
                 pass
@@ -1766,9 +1767,9 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             def func(x, w):
                 a = torch.empty_like(x)  # buf0
                 b = torch.empty_like(x)  # buf1
-                torch.ops.mylib.foo(a, b, x)  # buf2, buf3, buf4
+                torch.ops.mylib_scheduling.foo(a, b, x)  # buf2, buf3, buf4
                 c = torch.mm(a, w)  # buf5
-                torch.ops.mylib.foo(c, b, x)  # buf6, buf7, buf8
+                torch.ops.mylib_scheduling.foo(c, b, x)  # buf6, buf7, buf8
                 return c
 
             input = torch.rand(2, 2)

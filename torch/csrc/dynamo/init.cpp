@@ -255,6 +255,8 @@ void initDynamoBindings(PyObject* torch) {
   m.def(
       "_get_frame_value_stack_with_depth", &_get_frame_value_stack_with_depth);
   m.def("set_bytecode_debugger_callback", &set_bytecode_debugger_callback);
+  m.def("get_bytecode_debugger_callback", &get_bytecode_debugger_callback);
+  m.def("register_breakpoint_code", &register_breakpoint_code);
 
   // NullStackValue - sentinel for NULL stack values
   py::class_<NullStackValue>(m, "NullStackValue")

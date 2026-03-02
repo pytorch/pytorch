@@ -144,6 +144,7 @@ __all__ = [
     "collapse_view",
     "conj",
     "expand_dims",
+    # pyrefly: ignore [bad-dunder-all]
     "slice",
     "split_dim",
     "squeeze",

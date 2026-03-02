@@ -1,3 +1,5 @@
+import contextlib
+import functools
 import itertools
 import logging
 from collections.abc import Callable
@@ -7,6 +9,7 @@ import sympy
 
 import torch
 import torch._inductor.config as config
+from torch._dynamo.utils import counters
 from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
@@ -66,7 +69,14 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
 
-        self.example_inputs = []
+        # Create inputs for tracing and benchmarking:
+        # - trace_inputs: Always use symbolic inputs for tracing so the graph works
+        #   for any size at runtime. This correctly captures shape-dependent operations
+        #   like x * x.shape[0].
+        # - benchmark_inputs: Use input_gen_fns if provided (for range-specific benchmarks)
+        #   or concrete inputs from ir_node_to_tensor with guard_shape=False.
+        trace_inputs = []
+        self.benchmark_inputs = []
         with V.fake_mode:
             for i, inp in enumerate(self.input_nodes):
                 # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
@@ -75,15 +85,22 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
                 inp.data.freeze_layout()  # type: ignore[attr-defined]
 
-                # Use input_gen_fn if provided for this index (e.g., for range-based autotuning)
-                # This ensures the graph is traced with correct target shapes
-                if input_gen_fns is not None and i in input_gen_fns:
-                    self.example_inputs.append(input_gen_fns[i](inp))
-                else:
-                    self.example_inputs.append(ir_node_to_tensor(inp))
+                # Always use symbolic inputs for tracing
+                trace_inputs.append(ir_node_to_tensor(inp))
 
-        self.gm = make_fx_graph(*self.example_inputs)
+                # Use input_gen_fn for benchmarking if provided, otherwise concrete sizes
+                if input_gen_fns is not None and i in input_gen_fns:
+                    self.benchmark_inputs.append(input_gen_fns[i](inp))
+                else:
+                    self.benchmark_inputs.append(
+                        ir_node_to_tensor(inp, replace_symbols_with_hints=True)
+                    )
+
+        # Trace with symbolic inputs for guard detection
+        self.gm = make_fx_graph(*trace_inputs)
         gm_original_output_strides(self.gm)
+        # Store symbolic inputs for sym_input computation
+        self.example_inputs = trace_inputs
 
         self.sym_inputs = get_symbolic_inputs(self.input_nodes)
         self.sym_input_values = self._compute_sym_input_values()
@@ -91,14 +108,16 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         # Cached decomposition info for range-based dispatch (set via cache_decomposition)
         self.decomposition: Callable[..., Any] | None = None
         self.decomposition_kwargs: dict[str, Any] = {}
+        # Config patches to apply during kernel codegen (e.g., coordinate_descent_tuning)
+        self.config_patches: dict[str, Any] = {}
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
 
     def _compute_sym_input_values(self) -> list[int]:
-        """Extract concrete dimension values for sym_inputs from example_inputs.
+        """Extract concrete dimension values for sym_inputs from benchmark_inputs.
 
         The compiled module expects symbolic dimension values as runtime arguments.
-        This maps each symbolic variable to its concrete value from the example tensors.
+        This maps each symbolic variable to its concrete value from the benchmark tensors.
         Used for range based autotuning.
         """
         sym_input_names = OrderedSet(
@@ -107,9 +126,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         # Build mapping: symbolic dimension name -> concrete value
         sym_name_to_value: dict[str, int] = {}
-        for inp_node, example_inp in zip(self.input_nodes, self.example_inputs):
-            if isinstance(example_inp, torch.Tensor):
-                for sym_dim, actual_dim in zip(inp_node.get_size(), example_inp.shape):
+        for inp_node, benchmark_inp in zip(self.input_nodes, self.benchmark_inputs):
+            if isinstance(benchmark_inp, torch.Tensor):
+                for sym_dim, actual_dim in zip(
+                    inp_node.get_size(), benchmark_inp.shape
+                ):
                     if isinstance(sym_dim, sympy.Symbol):
                         sym_name_to_value[sym_dim.name] = int(actual_dim)
                     elif str(sym_dim) in sym_input_names:
@@ -140,9 +161,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         safe_name = self.name.replace("::", "_").replace(".", "_")
 
+        # Symbolic inputs produce code with symbolic sizes resolved at runtime
+        # via sym_input_values. Without symbols (static shapes), compile with
+        # benchmark_inputs whose sizes match the actual benchmark tensors.
+        compile_inputs = (
+            self.example_inputs if self.sym_inputs else self.benchmark_inputs
+        )
+        log.debug("Benchmark compile %s: sym_inputs=%s", self.name, self.sym_inputs)
+
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
-            example_inputs=self.example_inputs,
+            example_inputs=compile_inputs,
             shape_env=V.graph._shape_env,
             cpp_wrapper=V.graph.cpp_wrapper,
             aot_mode=V.graph.aot_mode,
@@ -157,13 +186,16 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
         with V.set_graph_handler(bm_graph_lowering):
-            # Don't bother autotuning on Triton here
-            with config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
-            ):
-                bm_graph_lowering.run(*self.example_inputs)
+            # Apply config_patches during benchmarking (e.g., coordinate_descent_tuning)
+            # Also disable max_autotune to avoid nested autotuning
+            benchmark_config: dict[str, Any] = {
+                "max_autotune": False,
+                "max_autotune_gemm": False,
+                "max_autotune_gemm_backends": "ATEN",
+                **self.config_patches,
+            }
+            with config.patch(benchmark_config):
+                bm_graph_lowering.run(*compile_inputs)
                 return bm_graph_lowering.compile_to_module()
 
     def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
@@ -173,11 +205,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
+
+        def fn() -> Any:
+            return bm_func([*sym_inputs, *args])
+
+        if self._benchmark_with_cudagraphs:
+            return benchmarker.benchmark_gpu_with_cuda_graph(fn)
+
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
+            return do_bench_using_profiling(fn)
         return benchmarker.benchmark(
-            # Shallow clone args since bm_func may clear args
-            lambda: bm_func([*sym_inputs, *args]),
+            fn,
             device=benchmarker.infer_device(*sym_inputs, *args),
         )
 
@@ -206,6 +244,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 gm=self.gm,
                 example_inputs=self.example_inputs,
                 subgraph_name=self.name,
+                config_patches=self.config_patches if self.config_patches else None,
             )
         )
 
@@ -287,6 +326,7 @@ class SubgraphTemplate(KernelTemplate):
         non_tensor_args: list[dict[str, Any]],
         default_impl: Callable[..., Any] | None = None,
         input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
+        config_patches_list: list[dict[str, Any]] | None = None,
     ) -> list[SubgraphChoiceCaller]:
         """
         Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
@@ -301,6 +341,7 @@ class SubgraphTemplate(KernelTemplate):
             non_tensor_args: List of non-tensor kwargs only, one dict per corresponding decomposition.
             default_impl: Default implementation for layout inference
             input_gen_fns: Optional dict mapping input indices to tensor generators
+            config_patches_list: Optional list of config patches per decomposition
 
         Returns:
             List of SubgraphChoiceCaller instances for autotuning
@@ -312,6 +353,10 @@ class SubgraphTemplate(KernelTemplate):
             f"decompositions and non_tensor_args must have same length, "
             f"got {len(decompositions)} decompositions and {len(non_tensor_args)} kwargs"
         )
+
+        # Default to empty config_patches if not provided
+        if config_patches_list is None:
+            config_patches_list = [{} for _ in decompositions]
 
         # Infer layouts and ensure layout consistency for fair autotuning comparison
         layouts = [
@@ -326,9 +371,12 @@ class SubgraphTemplate(KernelTemplate):
         layout = layouts[0]  # All layouts are now validated to be equivalent
 
         choices: list[SubgraphChoiceCaller] = []
-        for decomp, decomp_kwargs in zip(decompositions, non_tensor_args):
+        for decomp, decomp_kwargs, config_patches in zip(
+            decompositions, non_tensor_args, config_patches_list
+        ):
             # Create make_fx_graph function for this decomposition
-            import functools
+            # Uses error_on_new_guards to detect impls that add guards
+            from torch.fx.experimental.symbolic_shapes import _ShapeEnvGuardError
 
             def make_fx_graph(
                 *args: Any,
@@ -336,30 +384,52 @@ class SubgraphTemplate(KernelTemplate):
                 decomp_kwargs: dict[str, Any] = decomp_kwargs,
             ) -> Any:
                 # decomp_kwargs contains all merged parameters: CustomOpConfig params + runtime kwargs
+
                 from torch.fx.experimental.proxy_tensor import make_fx
 
                 from ..decomposition import select_decomp_table
 
                 decomposition_table = select_decomp_table()
+                shape_env = V.fake_mode.shape_env
 
-                return make_fx(
-                    functools.partial(decomp, **decomp_kwargs),
-                    decomposition_table=decomposition_table,
-                )(*args)
+                # Use error_on_new_guards to detect impls that add guards during tracing
+                guard_ctx = (
+                    shape_env.error_on_new_guards()
+                    if shape_env is not None
+                    else contextlib.nullcontext()
+                )
+                with guard_ctx:
+                    return make_fx(
+                        functools.partial(decomp, **decomp_kwargs),
+                        decomposition_table=decomposition_table,
+                        tracing_mode="symbolic",
+                    )(*args)
 
             # Generate descriptive name for this variant
             variant_name = self._generate_variant_name(decomp, decomp_kwargs)
 
-            choice = self.generate(
-                name=f"{name}_{variant_name}",
-                input_nodes=input_nodes,
-                layout=layout,
-                make_fx_graph=make_fx_graph,
-                description=f"CustomOp {decomp.__name__}",
-                input_gen_fns=input_gen_fns,
-            )
+            # Try to create choice; skip if it adds guards
+            try:
+                choice = self.generate(
+                    name=f"{name}_{variant_name}",
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    make_fx_graph=make_fx_graph,
+                    description=f"CustomOp {decomp.__name__}",
+                    input_gen_fns=input_gen_fns,
+                )
+            except _ShapeEnvGuardError:
+                log.info(
+                    "Skipping decomposition %s: adds guards during tracing",
+                    decomp.__name__,
+                )
+                counters["inductor"]["custom_op_decomp_guard_skips"] += 1
+                continue
+
             # Cache decomposition info for range-based dispatch
             choice.cache_decomposition(decomp, decomp_kwargs)
+            # Store config_patches for this choice
+            choice.config_patches = config_patches
             choices.append(choice)
 
         return choices
@@ -368,10 +438,25 @@ class SubgraphTemplate(KernelTemplate):
         self, decomp: Callable[..., Any], kwargs: dict[str, Any]
     ) -> str:
         """Generate a descriptive name for a decomposition variant with its parameters."""
+        import re
+
         base_name = decomp.__name__
         if not kwargs:
             return base_name
-        param_suffix = "_".join(f"{k}_{v}" for k, v in sorted(kwargs.items()))
+
+        def sanitize_value(v: Any) -> str:
+            """Convert a value to a valid Python identifier component."""
+            s = str(v)
+            # Replace invalid characters with underscores
+            s = re.sub(r"[^a-zA-Z0-9_]", "_", s)
+            # Ensure it doesn't start with a digit
+            if s and s[0].isdigit():
+                s = "_" + s
+            return s
+
+        param_suffix = "_".join(
+            f"{k}_{sanitize_value(v)}" for k, v in sorted(kwargs.items())
+        )
         return f"{base_name}_{param_suffix}"
 
     def _validate_non_tensor_kwargs(self, kwargs: dict[str, Any]) -> None:

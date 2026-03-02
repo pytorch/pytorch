@@ -42,6 +42,9 @@ EvalFrameOverride set_eval_frame_override(EvalFrameOverride override);
 void set_bytecode_debugger_callback(py::object callback);
 py::object get_bytecode_debugger_callback();
 
+// Breakpoint code object tracking
+void register_breakpoint_code(py::object code);
+
 // NullStackValue - sentinel class for representing NULL values on Python stack
 class NullStackValue {
  public:

@@ -67,10 +67,15 @@ Use these GitHub MCP tools for triage:
 | `sev*` | Severity labels require human decision |
 | `merge blocking` | Requires human decision |
 | Any label containing "deprecated" | Obsolete |
+| `oncall: releng` | Not a triage redirect target. Use `module: ci` instead |
 
 **If blocked:** When a label is blocked by the hook, add ONLY `triage review` and stop. A human will handle it.
 
 These rules are enforced by a PreToolUse hook that validates all labels against `labels.json`.
+
+### Never Override Human Labels
+
+If a human has already applied labels (especially `ci: sev`, severity labels, or priority labels), do NOT remove or replace them. Your job is to supplement, not override.
 
 ---
 
@@ -107,6 +112,14 @@ Check if the issue body contains links to external files that users would need t
 3. Use the `needs_reproduction` template from `templates.json` to request a self-contained reproduction
 4. Do NOT add `triaged` — wait for the user to provide a reproducible example
 
+### 1.55) Needs Reproduction — Other Cases
+
+Also add `needs reproduction` when:
+- The user reports a hardware-specific issue (e.g., specific GPU model) without a self-contained repro script
+- The user references a specific model/checkpoint/dataset that is not publicly runnable in a few lines
+- The issue describes version-upgrade breakage but only provides a high-level description without a minimal script
+- The repro depends on a specific training setup, distributed environment, or non-trivial infrastructure
+
 ### 1.6) Edge Cases & Numerical Accuracy
 
 If the issue involves extremal values or numerical precision differences:
@@ -117,6 +130,14 @@ If the issue involves extremal values or numerical precision differences:
 - Differences between CPU and GPU results
 - Precision differences between dtypes (e.g., fp32 vs fp16)
 - Fuzzer-generated edge cases
+
+**IMPORTANT — avoid keyword-triggered mislabeling:**
+- Do NOT add `module: NaNs and Infs` just because the word "nan" or "inf" appears in the issue. Only add it when the core bug IS about NaN/Inf propagation or generation.
+  - Example: `torch.isclose(..., equal_nan=True)` failing due to broadcasting → this is a `module: python frontend` bug, NOT `module: NaNs and Infs`
+  - Example: Mixed precision training producing NaN loss → this IS `module: NaNs and Infs`
+- Do NOT add `module: edge cases` just because unusual values are mentioned. Only add it when the issue is fundamentally about behavior at extreme/boundary values.
+  - Example: `torch.istft` giving an unhelpful error message → this is `module: error checking`, NOT `module: edge cases`
+- Do NOT add `module: numerical-stability` for test tolerance failures. If a TEST is failing due to tolerance thresholds, that's `module: tests`, not a numerical stability issue.
 
 **Action:**
 1. Add `module: edge cases` label
@@ -158,6 +179,13 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 | `oncall: profiler` | Profiler issues (CPU, GPU, Kineto) |
 | `oncall: visualization` | TensorBoard integration |
 
+**Common routing mistakes to avoid:**
+- **MPS ≠ Mobile.** MPS (Metal Performance Shaders) is the macOS/Apple Silicon GPU backend. Do NOT route MPS issues to `oncall: mobile`. MPS issues stay in the general queue with `module: mps`.
+- **DTensor → `oncall: distributed`.** DTensor issues should always be routed to `oncall: distributed`, even if they don't mention DDP/FSDP.
+- **ONNX → `module: onnx`.** There is no `oncall: onnx`. Use `module: onnx` and keep in the general queue.
+- **CI/releng → `module: ci`.** Do not use `oncall: releng`. Use `module: ci` for CI infrastructure issues.
+- **torch.compile + distributed.** When `torch.compile` mishandles a distributed op (e.g., `dist.all_reduce`), the issue typically needs BOTH `oncall: pt2` and `oncall: distributed` since the fix may span both codebases.
+
 **Note:** `oncall: cpu inductor` is a sub-queue of PT2. For general triage, just use `oncall: pt2`.
 
 ### 4) Label the issue (if NOT transferred/redirected)
@@ -166,6 +194,22 @@ Only if the issue stays in the general queue:
 - Add 1+ `module: ...` labels based on the affected area
 - If feature request: add `feature` (or `function request` for a new function or new arguments/modes)
 - If small improvement: add `enhancement`
+
+**Commonly missed labels — always check for these:**
+
+| Condition | Label |
+|-----------|-------|
+| Segfault, illegal memory access, SIGSEGV | `module: crash` |
+| Measurable performance regression or slowdown | `module: performance` |
+| Issue on Windows | `module: windows` |
+| Previously working feature now broken | `module: regression` |
+| Broken docs/links that previously worked | `module: docs` + `module: regression` (NOT `enhancement`) |
+| Issue about a test failing (not the underlying functionality) | `module: tests` |
+| Backward pass / gradient computation bug | `module: autograd` (in addition to the op's module label) |
+| `torch.linalg` ops or linear algebra ops (solve, svd, eig, inv, etc.) | `module: linear algebra` |
+| `has workaround` | Only add when the workaround is **non-trivial and non-obvious**. If the issue is "X doesn't work for non-contiguous tensors," calling `.contiguous()` is the tautological inverse of the bug, not a workaround. A real workaround is something like installing a specific package version, adding a synchronization point, inserting `gc.collect()`, or using a different API that isn't obviously implied by the bug description. |
+
+**Label based on the actual bug, not keywords.** Read the issue to understand what is actually broken. A bug about broadcasting that happens to mention "nan" in a parameter name is a frontend bug, not a NaN/Inf bug.
 
 ### 5) High Priority — REQUIRES HUMAN REVIEW
 

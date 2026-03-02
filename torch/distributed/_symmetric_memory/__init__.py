@@ -179,16 +179,20 @@ def _pipelined_multi_all_gather_and_consume(
     backend_stream.wait_stream(torch.cuda.current_stream())
 
     for x, y in zip(shard, ag_out):
-        assert x.is_contiguous(), (
-            "_pipelined_all_gather_and_consume: all tensors "
-            "in `shard` must be contiguous"
-        )
-        assert y.is_contiguous(), (
-            "_pipelined_all_gather_and_consume: all tensors "
-            "in `ag_out` must be contiguous"
-        )
-        assert x.shape[0] * group_size == y.shape[0]
-        assert x.shape[1:] == y.shape[1:]
+        if not x.is_contiguous():
+            raise AssertionError(
+                "_pipelined_all_gather_and_consume: all tensors "
+                "in `shard` must be contiguous"
+            )
+        if not y.is_contiguous():
+            raise AssertionError(
+                "_pipelined_all_gather_and_consume: all tensors "
+                "in `ag_out` must be contiguous"
+            )
+        if x.shape[0] * group_size != y.shape[0]:
+            raise AssertionError
+        if x.shape[1:] != y.shape[1:]:
+            raise AssertionError
 
     def copy_shard(dst: list[torch.Tensor], src: list[torch.Tensor]) -> None:
         for d, s in zip(dst, src):
@@ -347,7 +351,8 @@ def _pipelined_produce_and_all2all(
     backend_stream.wait_stream(torch.cuda.current_stream())
 
     def get_p2p_buf(rank: int, idx: int) -> torch.Tensor:
-        assert idx in (0, 1)
+        if idx not in (0, 1):
+            raise AssertionError
         offset = 0 if idx == 0 else out_chunks[0].numel()
         return symm_mem.get_buffer(
             rank, out_chunks[0].shape, out_chunks[0].dtype, offset
@@ -604,7 +609,8 @@ def _fused_all_gather_matmul_impl(
 
     # Computing block-wise matmul along the first dim of A
     if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
-        assert A_scale is not None
+        if A_scale is None:
+            raise AssertionError
         A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
         A_scale_flat = A_scale_shard.new_empty(
             A_scale_shard.shape[0] * group.size(),
@@ -629,7 +635,8 @@ def _fused_all_gather_matmul_impl(
             return_A,
         )
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
-        assert A_scale is not None
+        if A_scale is None:
+            raise AssertionError
         A_scale_shards = (
             A_scale.movedim(gather_dim, 0).flatten(0, -2).chunk(group.size())
         )
@@ -653,11 +660,13 @@ def _fused_all_gather_matmul_impl(
         )
     else:
         if scale_mode == _ScaleMode.TENSOR_WISE:
-            assert A_scale is not None
+            if A_scale is None:
+                raise AssertionError
             for kwargs in kwargs_list:
                 kwargs["scale_a"] = A_scale
         else:
-            assert scale_mode == _ScaleMode.UNSCALED
+            if scale_mode != _ScaleMode.UNSCALED:
+                raise AssertionError
 
         def default_consumer(shard: torch.Tensor, rank: int) -> None:
             for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
@@ -1049,7 +1058,8 @@ def _fused_all_gather_scaled_matmul_fallback(
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
         A_scale = A_scale.movedim(gather_dim, 0).flatten(0, -2)
     else:
-        assert scale_mode == _ScaleMode.TENSOR_WISE
+        if scale_mode != _ScaleMode.TENSOR_WISE:
+            raise AssertionError
 
     def scaled_matmul(
         A: torch.Tensor,
@@ -1161,7 +1171,8 @@ def _fused_all_gather_scaled_matmul(
             group_name,
             True,
         )
-        assert A is not None
+        if A is None:
+            raise AssertionError
         return A, res
 
 
@@ -1736,7 +1747,8 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
     rank = symm_mem.rank
     world_size = symm_mem.world_size
 
-    assert tensor.shape[0] % world_size == 0
+    if tensor.shape[0] % world_size != 0:
+        raise AssertionError
     a2a_res = torch.empty_like(tensor)
     chunks = a2a_res.chunk(world_size)
 
@@ -1774,7 +1786,8 @@ def _low_contention_reduce_scatter_with_workspace(
     rank = workspace.rank
     world_size = workspace.world_size
 
-    assert tensor.shape[0] % world_size == 0
+    if tensor.shape[0] % world_size != 0:
+        raise AssertionError
     chunks = tensor.chunk(world_size)
 
     _get_backend_stream().wait_stream(torch.cuda.current_stream())
@@ -2136,6 +2149,50 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
         )
 
     return _symm_mem_pools[device]
+
+
+# One-sided communication APIs.
+def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
+    r"""
+    put_signal(src, hdl, peer) -> None
+
+    Put data to a peer's symmetric memory and signal the peer.
+
+    Args:
+        src (torch.Tensor): the source tensor to read data from.
+        hdl (SymmetricMemory): the symmetric memory to put data to.
+        peer (int): the peer to put data to.
+    """
+    backend = get_backend(src.device)
+    # `hdl` is a pybind `_SymmetricMemory` object. Dispatcher expects the
+    # TorchBind custom class type `__torch__.torch.classes.c10d.SymmetricMemory`.
+    # Convert via `.boxed()`.
+    hdl_boxed = hdl.boxed() if hasattr(hdl, "boxed") else hdl
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_put_signal(src, hdl_boxed, peer)
+    # TODO: other backends' dispatch goes here
+    else:
+        raise ValueError(f"put_signal: unsupported backend: {backend}")
+
+
+def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
+    r"""
+    wait_signal(hdl, peer) -> None
+
+    Wait for a signal from a peer.
+
+    Args:
+        hdl (SymmetricMemory): the symmetric memory handle on which to wait for a signal.
+        peer (int): the peer to wait for a signal from.
+    """
+    backend = get_backend(hdl.device)
+    # See note in `put_signal` about `_SymmetricMemory` vs TorchBind type.
+    hdl_boxed = hdl.boxed() if hasattr(hdl, "boxed") else hdl
+    if backend == "NCCL":
+        torch.ops.symm_mem.nccl_wait_signal(hdl_boxed, peer)
+    # TODO: other backends' dispatch goes here
+    else:
+        raise ValueError(f"wait_signal: unsupported backend: {backend}")
 
 
 __all__ = [

@@ -112,21 +112,10 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12_8-py3_10-gcc11-test:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-py3.10-gcc11 ') }}
-    name: linux-jammy-cuda12.8-py3.10-gcc11
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-cuda12_8-py3_10-gcc11-build
-      - target-determination
-      - job-filter
-    with:
-      timeout-minutes: 360
-      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.test-matrix }}
-      tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
-    secrets: inherit
+  # CUDA 12.8 GPU tests moved to periodic.yml to reduce per-commit compute.
+  # CUDA 13.0 (the newer shipping version) remains per-commit for forward-looking coverage.
+  # The 12.8 build job is kept because cross-compile-linux-test depends on it.
+  # See P2188981399 for the full CI workflow analysis.
 
   linux-jammy-cuda13_0-py3_10-gcc11-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11 ') }}
@@ -171,23 +160,7 @@ jobs:
     secrets: inherit
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-jammy-cuda12_8-py3_10-gcc11-no-ops-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-py3.10-gcc11-no-ops ') }}
-    name: linux-jammy-cuda12.8-py3.10-gcc11-no-ops
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-no-ops
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
-    secrets: inherit
-
+  # CUDA 12.8 no-ops build moved to periodic (only 13.0 remains per-commit)
   linux-jammy-cuda13_0-py3_10-gcc11-no-ops-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda13.0-py3.10-gcc11-no-ops ') }}
     name: linux-jammy-cuda13.0-py3.10-gcc11-no-ops
@@ -339,19 +312,6 @@ jobs:
   inductor-build:
     if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' inductor-build ') }}
     name: inductor-build
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-label-type
-      - job-filter
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
-      cuda-arch-list: '8.0'
-    secrets: inherit
-
-  inductor-build-cuda13:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' inductor-build-cuda13 ') }}
-    name: inductor-build-cuda13
     uses: ./.github/workflows/_linux-build.yml
     needs:
       - get-label-type

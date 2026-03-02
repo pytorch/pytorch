@@ -36,7 +36,10 @@ def _validate_module(module: nn.Module, func_name: str) -> None:
 
     Raises ValueError if the module is a container that doesn't implement forward.
     """
-    if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
+    if (
+        isinstance(module, (nn.ModuleList, nn.ModuleDict))
+        and module.__class__.forward is nn.Module.forward
+    ):
         raise ValueError(
             f"{func_name} does not support containers that do not implement forward: {module}"
         )

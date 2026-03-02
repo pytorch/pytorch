@@ -5,6 +5,8 @@ These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
+from __future__ import annotations
+
 import os
 import queue
 import random
@@ -70,32 +72,28 @@ else:
             return not self.manager_dead
 
 
-_worker_info: Optional["WorkerInfo"] = None
+_worker_info: Optional[WorkerInfo] = None
 
 
+@dataclass(frozen=True, slots=True)
 class WorkerInfo:
+    """Information about the current DataLoader worker process or thread.
+
+    Attributes:
+        id: The current worker id (0 to num_workers - 1)
+        num_workers: Total number of workers
+        seed: Random seed set for this worker
+        dataset: Copy of the dataset object in this worker
+        rng: Optional RNG state container. Defaults to None.
+        worker_method: Optional worker method ("multiprocessing" or "thread"). Defaults to "multiprocessing".
+    """
+
     id: int
     num_workers: int
     seed: int
-    dataset: "Dataset"
-    __initialized = False
-
-    def __init__(self, **kwargs) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        self.__keys = tuple(kwargs.keys())
-        self.__initialized = True
-
-    def __setattr__(self, key, val) -> None:
-        if self.__initialized:
-            raise RuntimeError(
-                f"Cannot assign attributes to {self.__class__.__name__} objects"
-            )
-        return super().__setattr__(key, val)
-
-    def __repr__(self) -> str:
-        items = [f"{k}={getattr(self, k)}" for k in self.__keys]
-        return f"{self.__class__.__name__}({', '.join(items)})"
+    dataset: Dataset
+    rng: Optional[_RNG] = None
+    worker_method: Optional[str] = "multiprocessing"
 
 
 def get_worker_info() -> WorkerInfo | None:
@@ -141,6 +139,24 @@ r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 @dataclass(frozen=True)
 class _ResumeIteration:
     seed: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _RNG:
+    """Container for thread-local random number generator state.
+
+    Used by thread workers to maintain separate RNG state per worker thread
+    to avoid race conditions.
+
+    Attributes:
+        random_generator: Python random.Random generator for this thread
+        torch_generator: PyTorch Generator for this thread
+        numpy_generator: NumPy Generator for this thread (None if numpy not available)
+    """
+
+    random_generator: random.Random
+    torch_generator: torch.Generator
+    numpy_generator: Optional[object] = None
 
 
 # The function `_generate_state` is adapted from `numpy.random.SeedSequence`
