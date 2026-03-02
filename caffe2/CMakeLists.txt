@@ -1682,7 +1682,9 @@ if(USE_XPU)
       torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
   target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
-
+  foreach(dep ${Caffe2_XPU_DEPENDENCY_LIBS})
+      message(STATUS "XPU dependency: ${dep}")
+  endforeach()
   # Ensure that torch_cpu is ready before being linked by torch_xpu.
   add_dependencies(torch_xpu torch_cpu)
 

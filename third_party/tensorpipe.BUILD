@@ -91,6 +91,12 @@ header_template_rule(
     },
 )
 
+header_template_rule(
+    name = "tensorpipe_xpu_config_header",
+    src = "tensorpipe/config.h.in",
+    out = "tensorpipe/config.h",
+)
+
 # We explicitly list the CUDA headers & sources, and we consider everything else
 # as CPU (using a catch-all glob). This is both because there's fewer CUDA files
 # (thus making it easier to list them exhaustively) and because it will make it
@@ -129,7 +135,21 @@ TENSORPIPE_CPU_HEADERS = glob(
         "tensorpipe/transport/*.h",
         "tensorpipe/transport/*/*.h",
     ],
-    exclude=TENSORPIPE_CUDA_HEADERS)
+    exclude=TENSORPIPE_CUDA_HEADERS + TENSORPIPE_XPU_HEADERS)
+
+TENSORPIPE_XPU_HEADERS = [
+    "tensorpipe/tensorpipe_xpu.h",
+    "tensorpipe/channel/xpu_basic/*.h",
+    "tensorpipe/common/xpu.h",
+    "tensorpipe/common/xpu_buffer.h",
+    "tensorpipe/common/xpu_loop.h",
+]
+
+TENSORPIPE_XPU_SOURCES = [
+    "tensorpipe/channel/xpu_basic/*.cc",
+    "tensorpipe/common/xpu_buffer.cc",
+    "tensorpipe/common/xpu_loop.cc",
+]
 
 TENSORPIPE_CPU_SOURCES = glob(
     [
@@ -141,7 +161,7 @@ TENSORPIPE_CPU_SOURCES = glob(
         "tensorpipe/transport/*.cc",
         "tensorpipe/transport/*/*.cc",
     ],
-    exclude=TENSORPIPE_CUDA_SOURCES)
+    exclude=TENSORPIPE_CUDA_SOURCES + TENSORPIPE_XPU_SOURCES)
 
 cc_library(
     name = "tensorpipe_cpu",
@@ -174,5 +194,21 @@ cc_library(
     deps = [
         ":tensorpipe_cpu",
         "@cuda",
+    ],
+)
+
+cc_library(
+    name = "tensorpipe_xpu",
+    srcs = glob(TENSORPIPE_XPU_SOURCES),
+    hdrs = glob(TENSORPIPE_XPU_HEADERS) + [":tensorpipe_xpu_config_header"],
+    includes = [
+        ".",
+    ],
+    copts = [
+        "-std=c++17",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":tensorpipe_cpu",
     ],
 )
