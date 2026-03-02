@@ -3075,6 +3075,28 @@ with warnings.catch_warnings(record=True) as w:
                 return
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_mutated_optional_not_supplied(self):
+        # https://github.com/pytorch/pytorch/issues/176078
+        @torch.library.custom_op(
+            "_torch_testing::mutable_optional", mutates_args=("out",), device_types="cpu"
+        )
+        def func(a: Tensor, b: Tensor, out: Optional[Tensor] = None) -> None:
+            if out is not None:
+                out.copy_(a + b)
+
+        a = torch.randn(10)
+        b = torch.randn(10)
+        # Should not raise IndexError when called without the optional argument
+        func(a, b)
+
+        # Also test with the argument supplied
+        out = torch.empty(10)
+        version = out._version
+        func(a, b, out=out)
+        self.assertEqual(out, a + b)
+        self.assertGreater(out._version, version)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_torch_dispatch_rule_subclass(self):
         from torch.testing._internal.two_tensor import TwoTensor
 

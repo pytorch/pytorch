@@ -683,9 +683,11 @@ class CustomOpDef:
                 # Handle the mutated idx the user gave us explicitly
 
                 for idx in mutated_idxs:
-                    increment_version(args[idx])
+                    if idx < len(args):
+                        increment_version(args[idx])
                 for key in mutated_keys:
-                    increment_version(kwargs[key])
+                    if key in kwargs:
+                        increment_version(kwargs[key])
                 # Handle view + mutation that are in the schema
                 return original_kernel.call_boxed(keyset, *args, **kwargs)
 
