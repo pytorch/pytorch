@@ -99,6 +99,10 @@ class ReadItem:
 
     # Size of the hypercube to copy
     lengths: torch.Size
+    
+    # Number of shards for the same unsharded tensor with invalid default value
+    dest_num_shards: int = -1
+    stored_num_shards: int = -1
 
 
 @dataclass(frozen=True)
