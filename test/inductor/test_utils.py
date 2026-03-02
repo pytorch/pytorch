@@ -97,13 +97,9 @@ class TestUtils(TestCase):
         self.assertTrue(expr.is_comparable)
         self.assertEqual(Max(0, expr), 0)
 
-    def testIdentityEvalfPreservesBitPrecision(self):
-        arg = sympify("1/7")
-        prec = 13
-        expected = arg._eval_evalf(prec)
-        actual = Identity(arg)._eval_evalf(prec)
-        self.assertEqual(actual._prec, expected._prec)
-        self.assertEqual(actual, expected)
+    def testIdentityEvalfIntegerOnly(self):
+        self.assertEqual(Identity(sympify("-6"))._eval_evalf(13), sympify("-6"))
+        self.assertIsNone(Identity(sympify("1/7"))._eval_evalf(13))
 
     def test_sympy_str(self):
         self.assertEqual(sympy_str(sympify("a+b+c")), "a + b + c")
