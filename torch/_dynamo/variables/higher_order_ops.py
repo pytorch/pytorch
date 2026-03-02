@@ -5257,6 +5257,14 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         if isinstance(config, NestedCompileRegionOptions):
             body_gmod.meta["nested_region_config"] = config
 
+        from torch._dynamo.invoke_subgraph_cache import (
+            flatten_args_kwargs,
+            is_auto_cacheable,
+        )
+
+        flat = flatten_args_kwargs(tx, fn_args_vt, kwargs)
+        is_auto_cacheable(body_r, flat.flat_vts, tracing_info.has_side_effect)
+
         p_args = (
             p_args[0],
             body_name,
