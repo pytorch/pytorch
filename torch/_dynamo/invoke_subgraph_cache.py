@@ -104,12 +104,15 @@ def get_fn_id(fn_var: Any) -> int | None:
     return None
 
 
-def is_auto_cacheable(body_r: Any, flat_vts: list[tuple[str, Any]]) -> bool:
+def is_auto_cacheable(
+    body_r: Any, flat_vts: list[tuple[str, Any]], has_side_effect: bool
+) -> bool:
     """Best-effort check for whether a traced subgraph result can be
     auto-cached.
 
     It is possible that a subgraph is morally reusable but does not fall
     into the limited support that Dynamo has today. Current limitations:
+      - The subgraph must not have side effects.
       - Output must be a single tensor, or a tuple/list of plain tensors.
       - All flattened inputs must be one of: tensor, symnode, constant,
         unspecialized NN module. Pytree-registered or custom VT types
@@ -117,6 +120,12 @@ def is_auto_cacheable(body_r: Any, flat_vts: list[tuple[str, Any]]) -> bool:
     """
     from torch._dynamo.variables.lists import ListVariable, TupleVariable
     from torch._dynamo.variables.tensor import TensorVariable
+
+    if has_side_effect:
+        hc_log.debug(
+            "auto_guard_cache: not cacheable -- subgraph has side effects",
+        )
+        return False
 
     if isinstance(body_r, TensorVariable):
         pass
