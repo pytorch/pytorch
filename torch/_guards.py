@@ -1154,7 +1154,12 @@ def dataclass_with_cached_hash(
             # The _hash is a cached value that can be nondeterministically computed
             # (e.g., based on id() of objects), so it should not affect pickling.
             fields = dataclasses.fields(self)
-            field_values = tuple(getattr(self, f.name) for f in fields if f.init)
+            from torch._dynamo.source import DefaultsSource
+
+            if isinstance(self, DefaultsSource):
+                field_values = tuple(getattr(self, f.name) for f in fields if f.init)
+            else:
+                field_values = tuple(getattr(self, f.name) for f in fields)
             return (self.__class__, field_values)
 
         new_cls.__hash__ = __hash__
@@ -1225,11 +1230,6 @@ class Source:
     def subguards_allowed(self) -> bool:
         """True if you can guard on attributes of this"""
         return self.guard_source != GuardSource.SYNTHETIC_LOCAL
-
-    def __reduce__(self):
-        fields = dataclasses.fields(self)
-        ctor_args = tuple(getattr(self, f.name) for f in fields if f.init)
-        return (self.__class__, ctor_args)
 
 
 # Subclasses can be found in torch/_dynamo/source.py
