@@ -64,6 +64,52 @@ class TestCustomOpOutLowering(InductorTestCase):
             self.assertIn(".out(", code)
             self.assertNotIn(".default(", code)
 
+    def _register_split_add_ops(self, lib):
+        """Register a split_add op returning two tensors with functional + .out overloads."""
+        lib.define("split_add(Tensor x, float a, float b) -> (Tensor, Tensor)")
+        lib.define(
+            "split_add.out(Tensor x, float a, float b, *, Tensor(a!) out0, Tensor(b!) out1) -> (Tensor(a!), Tensor(b!))",
+            tags=(torch.Tag.out_variant,),
+        )
+
+        def _split_add_impl(x, a, b):
+            return (x + a, x + b)
+
+        def _split_add_out_impl(x, a, b, *, out0, out1):
+            out0.copy_(x + a)
+            out1.copy_(x + b)
+            return (out0, out1)
+
+        lib.impl("split_add", _split_add_impl, "CompositeExplicitAutograd")
+        lib.impl("split_add.out", _split_add_out_impl, "CompositeExplicitAutograd")
+
+        @torch.library.register_fake("mylib::split_add", lib=lib)
+        def _split_add_fake(x, a, b):
+            return (x.new_empty(x.shape), x.new_empty(x.shape))
+
+        return torch.ops.mylib.split_add, torch.ops.mylib.split_add.out
+
+    @parametrize("device", DEVICES)
+    def test_multi_output_lowered_to_out(self, device):
+        """Test a two-output functional op gets lowered to its .out variant."""
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            func_op, out_op = self._register_split_add_ops(lib)
+
+            def f(x):
+                a, b = torch.ops.mylib.split_add(x, 1.0, 2.0)
+                return a + b
+
+            x = torch.randn(4, 4, device=device)
+            eager_out = f(x)
+
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, backend="inductor", fullgraph=True), x
+            )
+            self.assertEqual(compiled_out, eager_out)
+            self.assertIn(".out(", code)
+            self.assertIn("out0=", code)
+            self.assertIn("out1=", code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
