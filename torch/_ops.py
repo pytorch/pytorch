@@ -1214,6 +1214,8 @@ class OpOverloadPacket(Generic[_P, _T]):
         # if there exists other attributes like `__name__` that only exist on self._op and not on the
         # opoverloadpacket.
         # This is ok since we are guaranteed that an overload name for an aten op can't start with '__'
+        if key in ["_qualified_op_name", "_op"]:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
         try:
             if key.startswith("__"):
                 return getattr(self._op, key)
