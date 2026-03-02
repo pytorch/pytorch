@@ -9701,23 +9701,31 @@ class TestAutoFunctionalizeControlFlow(TestCase):
         # Only support input mutation in inference
         cloned_args = [_clone(args) for _ in range(3)]
         with torch.no_grad():
-            exp = _new_fn()(*cloned_args[0])
+            mod0 = _new_fn()
+            exp = mod0(*cloned_args[0])
         backend = AotEagerAndRecordGraphs()
         torch._dynamo.reset()
         with torch.no_grad():
+            mod1 = _new_fn()
             eager_out = torch.compile(
-                _new_fn(), backend=backend, fullgraph=True, dynamic=dynamic
+                mod1, backend=backend, fullgraph=True, dynamic=dynamic
             )(*cloned_args[1])
         torch._dynamo.reset()
         with torch.no_grad():
+            mod2 = _new_fn()
             inductor_out = torch.compile(
-                _new_fn(), backend="inductor", fullgraph=True, dynamic=dynamic
+                mod2, backend="inductor", fullgraph=True, dynamic=dynamic
             )(*cloned_args[2])
 
         self.assertEqual(exp, eager_out)
         self.assertEqual(exp, inductor_out)
         self.assertEqual(cloned_args[0], cloned_args[1])
         self.assertEqual(cloned_args[0], cloned_args[2])
+
+        for k in mod0._buffers:
+            self.assertTrue(k in mod1._buffers and k in mod2._buffers)
+            self.assertEqual(mod0._buffers[k], mod1._buffers[k])
+            self.assertEqual(mod0._buffers[k], mod2._buffers[k])
         return backend.fw_graphs[0]
 
     @requires_cuda
@@ -9918,61 +9926,6 @@ class <lambda>(torch.nn.Module):
     @unittest.skipIf(not SM70OrLater, "triton")
     @parametrize("device", ["cuda", "cpu"])
     @parametrize("dynamic", [True, False])
-    def test_while_loop_auto_functionalize_input_mutation(self, device, dynamic):
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                def cond_fn(x):
-                    return x.sum() > 0
-
-                def body_fn(x):
-                    x.add_(-1)
-                    return (x.clone(),)
-
-                x = x.clone()
-                ret = while_loop(cond_fn, body_fn, (x,))
-                return y + ret[0]
-
-        x, y = (
-            torch.randn(3, 4),
-            torch.randn(3, 4),
-        )
-        fw_gm = self.check(M, (x, y), device, dynamic)
-        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
-            self.assertExpectedInline(
-                normalize_gm(fw_gm.print_readable(print_output=False)),
-                """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]"):
-        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-
-        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
-        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
-        _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, _carried_input0_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
-        getitem: "f32[3, 4]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
-
-        add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, getitem);  arg1_1 = getitem = None
-        return (add,)
-
-    class auto_functionalized_subgraph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[3, 4]"):
-            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
-            gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
-            return gt
-
-    class auto_functionalized_subgraph_1(torch.nn.Module):
-        def forward(self, arg0_1: "f32[3, 4]"):
-            add: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg0_1, -1)
-            clone: "f32[3, 4]" = torch.ops.aten.clone.default(add)
-            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
-            return (clone,)
-""",  # noqa: B950
-            )
-
-    @requires_cuda
-    @unittest.skipIf(not SM70OrLater, "triton")
-    @parametrize("device", ["cuda", "cpu"])
-    @parametrize("dynamic", [True, False])
     def test_while_loop_auto_functionalize_buffer_mutation(self, device, dynamic):
         class M(torch.nn.Module):
             def __init__(self):
@@ -9981,141 +9934,166 @@ class <lambda>(torch.nn.Module):
                     "buf", torch.ones(8, requires_grad=False, device=device)
                 )
 
-            def forward(self, p, x):
+            def forward(self, x):
                 def cond_fn(x):
-                    return x.sum() < 0
+                    return x.sum() > 0
 
                 def body_fn(x):
-                    x.add_(-1)
+                    x_new = x.add(-1)
                     self.buf.add_(-1)
-                    return (x + self.buf.sum(),)
+                    return (x_new + self.buf.sum(),)
 
                 x = x.clone()
                 out = while_loop(cond_fn, body_fn, (x,))
-                return x + self.buf + out[0]
+                return x + self.buf.sum() + out[0]
 
-        p, x = torch.tensor(True), torch.randn(1, requires_grad=True)
-        fw_gm = self.check(M, (p, x), device, dynamic)
+        x = torch.tensor([2.0,1.0], requires_grad=False)
+        fw_gm = self.check(M, (x,), device, dynamic)
         if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[1]", arg1_1: "f32[8]"):
-        clone: "f32[1]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    def forward(self, arg0_1: "f32[2]", arg1_1: "f32[8]"):
+        clone: "f32[2]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
 
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, _carried_input0_base_index = 0, _additional_input0_base_index = 1, _all_bases = [clone, arg1_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
-        getitem: "f32[1]" = auto_functionalized_v2[0]
-        getitem_1: "f32[1]" = auto_functionalized_v2[1]
-        getitem_2: "f32[8]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = clone, _additional_input0_base_index = 0, _all_bases = [arg1_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = _tree_spec_constant0 = None
+        getitem: "f32[2]" = auto_functionalized_v2[0]
+        getitem_1: "f32[8]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
 
-        add: "f32[8]" = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = None
-        add_1: "f32[8]" = torch.ops.aten.add.Tensor(add, getitem);  add = getitem = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_1)
+        add: "f32[2]" = torch.ops.aten.add.Tensor(clone, sum_1);  clone = sum_1 = None
+        add_1: "f32[2]" = torch.ops.aten.add.Tensor(add, getitem);  add = getitem = None
 
-        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, getitem_2);  arg1_1 = getitem_2 = copy_ = None
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
         return (add_1,)
 
     class auto_functionalized_subgraph_0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[1]", arg1_1: "f32[8]"):
+        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[8]"):
             sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
-            lt: "b8[]" = torch.ops.aten.lt.Scalar(sum_1, 0);  sum_1 = None
-            return lt
+            gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+            return gt
 
     class auto_functionalized_subgraph_1(torch.nn.Module):
-        def forward(self, arg0_1: "f32[1]", arg1_1: "f32[8]"):
-            add: "f32[1]" = torch.ops.aten.add.Tensor(arg0_1, -1)
+        def forward(self, arg0_1: "f32[2]", arg1_1: "f32[8]"):
+            add: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, -1);  arg0_1 = None
             add_1: "f32[8]" = torch.ops.aten.add.Tensor(arg1_1, -1)
             sum_1: "f32[]" = torch.ops.aten.sum.default(add_1)
-            add_2: "f32[1]" = torch.ops.aten.add.Tensor(add, sum_1);  sum_1 = None
-            copy_: "f32[1]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
-            copy__1: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, add_1);  arg1_1 = add_1 = copy__1 = None
+            add_2: "f32[2]" = torch.ops.aten.add.Tensor(add, sum_1);  add = sum_1 = None
+            copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, add_1);  arg1_1 = add_1 = copy_ = None
             return (add_2,)
 """,  # noqa: B950
             )
 
     @requires_cuda
     @unittest.skipIf(not SM70OrLater, "triton")
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
     @parametrize("device", ["cuda", "cpu"])
     @parametrize("dynamic", [True, False])
-    def test_while_loop_auto_functionalize_inplace_mutate_out_buffer_as_carry(
-        self, device, dynamic
-    ):
+    def test_while_loop_auto_functionalize_multiple_buffer_mutation(self, device, dynamic):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer(
-                    "buf", torch.ones(1, requires_grad=False, device=device)
-                )
+                self.register_buffer("buf1", torch.ones(4, device=device))
+                self.register_buffer("buf2", torch.zeros(4, device=device))
 
-            def forward(self, p, x):
-                def cond_fn(it, x, out_buf):
-                    return it < x.size(0)
+            def forward(self, x):
+                def cond_fn(x):
+                    return x.sum() > 0
 
-                def body_fn(it, x, out_buf):
-                    out = x.sin()
-                    idx = it.item()
-                    torch._check_is_size(idx, max=x.size(0) - 1)
-                    out_buf[idx].add_(out[idx])
-                    return (it + 1, x + 1, out_buf.clone())
+                def body_fn(x):
+                    self.buf1.add_(x)
+                    self.buf2.add_(self.buf1)
+                    return (x - 1,)
 
-                it = torch.tensor(0, dtype=torch.int64)
-                out_buf = x.clone()
-                x = x.clone()
-                out = while_loop(cond_fn, body_fn, (it, x, out_buf))
-                return x + self.buf + out[0]
+                return while_loop(cond_fn, body_fn, (x,))
 
-        p, x = torch.tensor(True), torch.randn(3, 4)
-        fw_gm = self.check(M, (p, x), device, dynamic)
+        x = torch.tensor([3.0, 2.0, 1.0, 1.0], requires_grad=False)
+        fw_gm = self.check(M, (x,), device, dynamic)
         if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
             self.assertExpectedInline(
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[1]"):
-        _tensor_constant0: "i64[]" = self._tensor_constant0
-        lift_fresh_copy: "i64[]" = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
-
-        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1)
-
-        clone_1: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-
+    def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = lift_fresh_copy, carried_input1 = clone_1, _carried_input2_base_index = 0, _all_bases = [clone], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = lift_fresh_copy = clone = _tree_spec_constant0 = None
-        getitem: "i64[]" = auto_functionalized_v2[0];  auto_functionalized_v2 = None
-
-        add: "f32[3, 4]" = torch.ops.aten.add.Tensor(clone_1, arg1_1);  clone_1 = arg1_1 = None
-        add_1: "f32[3, 4]" = torch.ops.aten.add.Tensor(add, getitem);  add = getitem = None
-        return (add_1,)
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = arg0_1, _additional_input0_base_index = 0, _additional_input1_base_index = 1, _all_bases = [arg1_1, arg2_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = arg0_1 = _tree_spec_constant0 = None
+        getitem: "f32[4]" = auto_functionalized_v2[0]
+        getitem_1: "f32[4]" = auto_functionalized_v2[1]
+        getitem_2: "f32[4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
+        copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        copy__1: "f32[4]" = torch.ops.aten.copy_.default(arg2_1, getitem_2);  arg2_1 = getitem_2 = copy__1 = None
+        return (getitem,)
 
     class auto_functionalized_subgraph_0(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 4]", arg2_1: "f32[3, 4]"):
-            lt: "b8[]" = torch.ops.aten.lt.Scalar(arg0_1, 3);  arg0_1 = None
+        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
+            sum_1: "f32[]" = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+            gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
+            return gt
+
+    class auto_functionalized_subgraph_1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4]", arg2_1: "f32[4]"):
+            add: "f32[4]" = torch.ops.aten.add.Tensor(arg1_1, arg0_1)
+            add_1: "f32[4]" = torch.ops.aten.add.Tensor(arg2_1, add)
+            sub: "f32[4]" = torch.ops.aten.sub.Tensor(arg0_1, 1);  arg0_1 = None
+            copy_: "f32[4]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
+            copy__1: "f32[4]" = torch.ops.aten.copy_.default(arg2_1, add_1);  arg2_1 = add_1 = copy__1 = None
+            return (sub,)
+""",  # noqa: B950
+            )
+
+    @requires_cuda
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @parametrize("device", ["cuda", "cpu"])
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_auto_functionalize_buffer_in_cond(self, device, dynamic):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("counter", torch.tensor(0, device=device))
+
+            def forward(self, x):
+                def cond_fn(x):
+                    self.counter.add_(1)
+                    return self.counter < 3
+
+                def body_fn(x):
+                    return (x + 1,)
+
+                return while_loop(cond_fn, body_fn, (x,))
+
+        x = torch.tensor([0.0, 0.0], requires_grad=False)
+        fw_gm = self.check(M, (x,), device, dynamic)
+        if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
+            self.assertExpectedInline(
+                normalize_gm(fw_gm.print_readable(print_output=False)),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
+        auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
+        auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
+        _tree_spec_constant0 = self._tree_spec_constant0
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.while_loop, cond_fn = auto_functionalized_subgraph_0, body_fn = auto_functionalized_subgraph_1, carried_input0 = arg0_1, _additional_input0_base_index = 0, _all_bases = [arg1_1], _op_schema = _tree_spec_constant0);  auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = arg0_1 = _tree_spec_constant0 = None
+        getitem: "f32[2]" = auto_functionalized_v2[0]
+        getitem_1: "i64[]" = auto_functionalized_v2[1];  auto_functionalized_v2 = None
+        copy_: "i64[]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        return (getitem,)
+
+    class auto_functionalized_subgraph_0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
+            add: "i64[]" = torch.ops.aten.add.Tensor(arg1_1, 1)
+            lt: "b8[]" = torch.ops.aten.lt.Scalar(add, 3)
+            copy_: "i64[]" = torch.ops.aten.copy_.default(arg1_1, add);  arg1_1 = add = copy_ = None
             return lt
 
     class auto_functionalized_subgraph_1(torch.nn.Module):
-        def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 4]", arg2_1: "f32[3, 4]"):
-            sin: "f32[3, 4]" = torch.ops.aten.sin.default(arg1_1)
-            _local_scalar_dense: "Sym(u3)" = torch.ops.aten._local_scalar_dense.default(arg0_1)
-            ge_1: "Sym(u3 >= 0)" = _local_scalar_dense >= 0
-            _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
-            le_1: "Sym(u3 <= 2)" = _local_scalar_dense <= 2
-            _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u3 <= 2 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
-            select: "f32[4]" = torch.ops.aten.select.int(arg2_1, 0, _local_scalar_dense)
-            select_1: "f32[4]" = torch.ops.aten.select.int(sin, 0, _local_scalar_dense);  sin = None
-            add: "f32[4]" = torch.ops.aten.add.Tensor(select, select_1);  select = select_1 = None
-            select_scatter: "f32[3, 4]" = torch.ops.aten.select_scatter.default(arg2_1, add, 0, _local_scalar_dense);  add = _local_scalar_dense = None
-            add_1: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-            add_2: "f32[3, 4]" = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
-            clone: "f32[3, 4]" = torch.ops.aten.clone.default(select_scatter)
-            copy_: "f32[3, 4]" = torch.ops.aten.copy_.default(arg2_1, select_scatter);  arg2_1 = select_scatter = copy_ = None
-            return (add_1, add_2, clone)
+        def forward(self, arg0_1: "f32[2]", arg1_1: "i64[]"):
+            add: "f32[2]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+            return (add,)
 """,  # noqa: B950
             )
 
