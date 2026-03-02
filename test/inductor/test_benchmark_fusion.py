@@ -302,11 +302,22 @@ if HAS_GPU_AND_TRITON:
         def test_equivalent_template_code(self):
             code, code2 = self._equivalent_output_code_impl(256)
             for out_code in [code, code2]:
-                FileCheck().check(get_func_call()).check_count(
-                    "empty_strided", 1, exactly=True
-                ).check("triton_tem_fused_addmm_relu_t_0").check_count(
-                    ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
-                ).check("" if config.cpp_wrapper else "return").run(out_code[0])
+                if torch.version.hip:
+                    # ROCm generates separate kernels for addmm and relu
+                    FileCheck().check(get_func_call()).check_count(
+                        "empty_strided", 1, exactly=True
+                    ).check("triton_tem_fused_addmm_t_0").check(
+                        "triton_poi_fused_addmm_relu_1"
+                    ).check_count(
+                        ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
+                    ).check("" if config.cpp_wrapper else "return").run(out_code[0])
+                else:
+                    # CUDA fuses addmm and relu into a single kernel
+                    FileCheck().check(get_func_call()).check_count(
+                        "empty_strided", 1, exactly=True
+                    ).check("triton_tem_fused_addmm_relu_t_0").check_count(
+                        ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
+                    ).check("" if config.cpp_wrapper else "return").run(out_code[0])
 
         @fresh_cache()
         @config.patch(max_autotune_gemm_backends="ATEN")
