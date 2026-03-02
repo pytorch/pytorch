@@ -3997,7 +3997,6 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
-    @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
             def forward(self, x: typing.Tuple[()], y: typing.Tuple[str, typing.Tuple[()]]):  # noqa: UP006
@@ -4010,8 +4009,8 @@ class TestFX(JitTestCase):
 
         traced(x, y)
 
-        FileCheck().check("typing_Tuple[()]").check(
-            "typing_Tuple[str,typing_Tuple[()]]"
+        FileCheck().check("Tuple[()]").check(
+            "Tuple[str,Tuple[()]]"
         ).run(traced.code)
 
         scripted = torch.jit.script(traced)
@@ -5061,8 +5060,6 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         self.assertTrue(hasattr(reload_gm, "dummy_parameter"))
 
 
-# This is failing on Python 3.12 : https://github.com/pytorch/pytorch/issues/119454
-@unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -5149,14 +5146,14 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_max_pool2d_with_indices": LEN_ERROR,
         "adaptive_max_pool3d_with_indices": LEN_ERROR,
         "instance_norm": CONTROL_FLOW,
-        "adaptive_max_pool1d": PROXY_ITERABLE,
-        "adaptive_max_pool2d": PROXY_ITERABLE,
-        "adaptive_max_pool3d": PROXY_ITERABLE,
-        "fractional_max_pool2d": PROXY_ITERABLE,
-        "fractional_max_pool3d": PROXY_ITERABLE,
-        "max_pool1d": PROXY_ITERABLE,
-        "max_pool2d": PROXY_ITERABLE,
-        "max_pool3d": PROXY_ITERABLE,
+        "adaptive_max_pool1d": PROXY_ITERATED,
+        "adaptive_max_pool2d": PROXY_ITERATED,
+        "adaptive_max_pool3d": PROXY_ITERATED,
+        "fractional_max_pool2d": PROXY_ITERATED,
+        "fractional_max_pool3d": PROXY_ITERATED,
+        "max_pool1d": PROXY_ITERATED,
+        "max_pool2d": PROXY_ITERATED,
+        "max_pool3d": PROXY_ITERATED,
         "lp_pool2d": PROXY_ITERATED,
         "lp_pool3d": PROXY_ITERATED,
         "max_unpool1d": PROXY_ITERATED,

@@ -6,7 +6,7 @@ import operator
 import types
 import typing
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, Optional, Tuple, TYPE_CHECKING, TypeAlias, Union  # noqa: UP035
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -158,6 +158,8 @@ def _type_repr(obj: object) -> str:
     if isinstance(obj, type) and not isinstance(obj, types.GenericAlias):
         if obj.__module__ == "builtins":
             return obj.__qualname__
+        return f"{obj.__module__}.{obj.__qualname__}"
+    if obj is Tuple:  # noqa: UP006
         return f"{obj.__module__}.{obj.__qualname__}"
     if obj is ...:
         return "..."

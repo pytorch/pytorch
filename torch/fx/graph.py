@@ -18,7 +18,14 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
+from typing import (  # noqa: UP035
+    Any,
+    Literal,
+    NamedTuple,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 import torch
 import torch.utils._pytree as pytree
@@ -89,6 +96,7 @@ def _register_custom_builtin(name: str, import_str: str, obj: Any):
 
 _register_custom_builtin("inf", "from math import inf", math.inf)
 _register_custom_builtin("nan", "from math import nan", math.nan)
+_register_custom_builtin("Tuple", "from typing import Tuple", Tuple)  # noqa: UP006
 _register_custom_builtin("NoneType", "NoneType = type(None)", type(None))
 _register_custom_builtin("torch", "import torch", torch)
 _register_custom_builtin("device", "from torch import device", torch.device)
@@ -474,6 +482,8 @@ class CodeGen:
                     args = [type_repr(arg) for arg in o.__args__]
                     return f"{origin_typename}[{','.join(args)}]"
                 else:
+                    if "[()]" in str(o):
+                        return f"{origin_typename}[()]"
                     return origin_typename
 
             # Common case: this is a regular module name like 'foo.bar.baz'
