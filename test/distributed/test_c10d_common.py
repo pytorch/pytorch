@@ -66,21 +66,21 @@ torch.backends.cuda.matmul.allow_tf32 = False
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
-def gpus_for_rank(world_size):
-    """Multigpu tests are designed to simulate the multi nodes with multi
-    GPUs on each node. Nccl backend requires equal #GPUs in each process.
-    On a single node, all visible GPUs are evenly
+def devices_for_rank(world_size):
+    """Tests are designed to simulate multi nodes with multi
+    devices on each node. The backend requires equal #devices in each process.
+    On a single node, all visible devices are evenly
     divided to subsets, each process only uses a subset.
     """
     device_count = torch.accelerator.device_count()
     visible_devices = list(range(device_count))
-    gpus_per_process = device_count // world_size
-    gpus_for_rank = []
+    devices_per_process = device_count // world_size
+    devices = []
     for rank in range(world_size):
-        gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
+        devices.append(
+            visible_devices[rank * devices_per_process : (rank + 1) * devices_per_process]
         )
-    return gpus_for_rank
+    return devices
 
 
 class AbstractTimeoutTest:
@@ -363,7 +363,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
+        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -852,7 +852,7 @@ class CommonDistributedDataParallelTest:
     def _gpu_model_with_ddp_comm_hook(
         self, process_group, hook=None, gradient_as_bucket_view=False, state=None
     ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],
@@ -869,7 +869,7 @@ class CommonDistributedDataParallelTest:
     def _gpu_model_with_builtin_ddp_comm_hook(
         self, process_group, hook=None, gradient_as_bucket_view=False
     ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device_id = devices_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             ModuleForDdpCommHook().to(device_id),
             device_ids=[device_id],
