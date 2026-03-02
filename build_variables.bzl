@@ -112,6 +112,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/standalone/itt_observer.cpp",
     "torch/csrc/profiler/standalone/nvtx_observer.cpp",
     "torch/csrc/profiler/standalone/privateuse1_observer.cpp",
+    "torch/csrc/profiler/standalone/privateuse1_profiler.cpp",
     "torch/csrc/profiler/stubs/base.cpp",
     "torch/csrc/profiler/orchestration/vulkan.cpp",
     "torch/csrc/profiler/perf.cpp",

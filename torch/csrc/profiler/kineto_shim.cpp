@@ -75,9 +75,8 @@ static_assert(
 
 const DeviceAndResource kineto_ids() {
 #ifdef USE_KINETO
-  return {
-      /*device=*/libkineto::processId(),
-      /*resource=*/libkineto::systemThreadId()};
+  return {/*device=*/libkineto::processId(),
+          /*resource=*/libkineto::systemThreadId()};
 #else
   return {};
 #endif // USE_KINETO
