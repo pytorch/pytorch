@@ -10,7 +10,7 @@ from contextlib import nullcontext
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import torch
 import torch._meta_registrations
@@ -352,6 +352,18 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
+@register_decomposition(aten.ldexp)
+@out_wrapper()
+def ldexp(self: Tensor, other: Tensor) -> Tensor:
+    two_dtype = (
+        torch.float32
+        if utils.is_integer_dtype(self.dtype) or utils.is_boolean_dtype(self.dtype)
+        else self.dtype
+    )
+    two_tensor = self.new_full((), 2.0, dtype=two_dtype)
+    return self * torch.pow(two_tensor, other)
+
+
 def apply_loss_reduction(loss: Tensor, reduction: int):
     if reduction == Reduction.MEAN.value:
         return torch.mean(loss)
@@ -382,7 +394,6 @@ def to_real_dtype(dtype: torch.dtype):
 def mse_loss(
     self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
 ) -> Tensor:
-    # pyrefly: ignore [unsupported-operation]
     loss = (self - target) ** 2
     return apply_loss_reduction(loss, reduction)
 
@@ -416,7 +427,7 @@ def smooth_l1_loss(
     beta: float = 1.0,
 ):
     loss = (self - target).abs()
-    # pyrefly: ignore [unsupported-operation]
+
     loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
     return apply_loss_reduction(loss, reduction)
 
@@ -486,7 +497,7 @@ def _nll_loss_backward(
     grad_output: Tensor,
     self: Tensor,
     target: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     reduction: int,
     ignore_index: int,
     total_weight: Tensor,
@@ -518,12 +529,14 @@ def _nll_loss_backward(
 @out_wrapper("grad_input")
 @pw_cast_for_opmath
 def glu_backward(grad_output: Tensor, self: Tensor, dim: int) -> Tensor:
-    assert self.dim() > 0, "glu does not support 0-dimensional tensors"
+    if self.dim() <= 0:
+        raise AssertionError("glu does not support 0-dimensional tensors")
     wrap_dim = utils.canonicalize_dim(self.dim(), dim)
     nIn = self.size(wrap_dim)
-    assert nIn % 2 == 0, (
-        f"Halving dimension must be even, but dimension {wrap_dim} is size {nIn}"
-    )
+    if nIn % 2 != 0:
+        raise AssertionError(
+            f"Halving dimension must be even, but dimension {wrap_dim} is size {nIn}"
+        )
     inputSize = nIn // 2
     firstHalf = self.narrow(wrap_dim, 0, inputSize)
     secondHalf = self.narrow(wrap_dim, inputSize, inputSize)
@@ -541,38 +554,45 @@ def nll_loss_backward(
     grad_output: Tensor,
     self: Tensor,
     target: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     reduction: int,
     ignore_index: int,
     total_weight: Tensor,
 ) -> Tensor:
-    assert 0 <= self.dim() <= 2, "input tensor should be 1D or 2D"
-    assert target.dim() <= 1, (
-        "0D or 1D target tensor expected, multi-target not supported"
-    )
+    if not (0 <= self.dim() <= 2):
+        raise AssertionError(f"input tensor should be 1D or 2D, got {self.dim()}D")
+    if target.dim() > 1:
+        raise AssertionError(
+            f"0D or 1D target tensor expected, multi-target not supported, got {target.dim()}D"
+        )
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    assert no_batch_dim or (self.shape[0] == target.shape[0]), (
-        f"size mismatch (got input: {self.shape}, target: {target.shape})"
-    )
-    assert total_weight.numel() == 1, (
-        "expected total_weight to be a single element tensor, got: ",
-        f"{total_weight.shape} ({total_weight.numel()} elements)",
-    )
+    if not (no_batch_dim or (self.shape[0] == target.shape[0])):
+        raise AssertionError(
+            f"size mismatch (got input: {self.shape}, target: {target.shape})"
+        )
+    if total_weight.numel() != 1:
+        raise AssertionError(
+            f"expected total_weight to be a single element tensor, got: "
+            f"{total_weight.shape} ({total_weight.numel()} elements)"
+        )
 
-    assert weight is None or weight.numel() == self.shape[-1], (
-        "weight tensor should be defined either for all or no classes"
-    )
+    if weight is not None and weight.numel() != self.shape[-1]:
+        raise AssertionError(
+            "weight tensor should be defined either for all or no classes"
+        )
 
     if reduction == Reduction.NONE.value and self.dim() == 2:
-        assert grad_output.dim() == 1 and grad_output.shape[0] == self.shape[0], (
-            f"Expected a tensor of dimension 1 and tensor.size[0] == {self.shape[0]} but "
-            f"got: dimension {grad_output.dim()} and tensor.size[0] == {grad_output.shape[0]}"
-        )
+        if not (grad_output.dim() == 1 and grad_output.shape[0] == self.shape[0]):
+            raise AssertionError(
+                f"Expected a tensor of dimension 1 and tensor.size[0] == {self.shape[0]} but "
+                f"got: dimension {grad_output.dim()} and tensor.size[0] == {grad_output.shape[0]}"
+            )
     else:
-        assert grad_output.dim() <= 1 and grad_output.numel() == 1, (
-            f"Expected a single element grad_output tensor, but got: {grad_output.shape}"
-        )
+        if not (grad_output.dim() <= 1 and grad_output.numel() == 1):
+            raise AssertionError(
+                f"Expected a single element grad_output tensor, but got: {grad_output.shape}"
+            )
 
     return _nll_loss_backward(
         grad_output, self, target, weight, reduction, ignore_index, total_weight
@@ -585,29 +605,35 @@ def nll_loss2d_backward(
     grad_output: Tensor,
     self: Tensor,
     target: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     reduction: int,
     ignore_index: int,
     total_weight: Tensor,
 ) -> Tensor:
-    assert self.dim() == 4, (
-        f"only batches of spatial inputs supported (4D tensors), but got input of dimension: {self.dim()}"
-    )
+    if self.dim() != 4:
+        raise AssertionError(
+            f"only batches of spatial inputs supported (4D tensors), but got input of dimension: {self.dim()}"
+        )
 
-    assert target.dim() == 3, (
-        f"only batches of spatial targets supported (3D tensors) but got targets of dimension: {target.dim()}"
-    )
+    if target.dim() != 3:
+        raise AssertionError(
+            f"only batches of spatial targets supported (3D tensors) but got targets of dimension: {target.dim()}"
+        )
 
-    assert (
+    if not (
         self.shape[0] == target.shape[0]
         and self.shape[2] == target.shape[1]
         and self.shape[3] == target.shape[2]
-    ), f"size mismatch (got input: {self.shape}, target: {target.shape}"
+    ):
+        raise AssertionError(
+            f"size mismatch (got input: {self.shape}, target: {target.shape}"
+        )
 
-    assert total_weight.numel() == 1, (
-        "expected total_weight to be a single element tensor, "
-        f"got: {total_weight.shape} ( {total_weight.numel()}, elements)"
-    )
+    if total_weight.numel() != 1:
+        raise AssertionError(
+            f"expected total_weight to be a single element tensor, "
+            f"got: {total_weight.shape} ( {total_weight.numel()}, elements)"
+        )
 
     return _nll_loss_backward(
         grad_output, self, target, weight, reduction, ignore_index, total_weight
@@ -620,7 +646,7 @@ def nll_loss2d_backward(
 def binary_cross_entropy(
     self: Tensor,
     target: Tensor,
-    weight: Optional[Tensor] = None,
+    weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
     # We cannot currently model this without introducing data-dependent control flow
@@ -643,7 +669,7 @@ def binary_cross_entropy_backward(
     grad_output: Tensor,
     self: Tensor,
     target: Tensor,
-    weight: Optional[Tensor] = None,
+    weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
     EPSILON = 1e-12
@@ -720,8 +746,8 @@ def slice_forward(
     # Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1
     self: Tensor,
     dim: int = 0,
-    start: Optional[int] = None,
-    end: Optional[int] = None,
+    start: int | None = None,
+    end: int | None = None,
     step: int = 1,
 ):
     from torch.fx.experimental.symbolic_shapes import statically_known_true
@@ -771,7 +797,7 @@ def slice_forward(
 
 
 def _normalize_start_end(
-    x: Tensor, dim: int, start: Optional[int], end: Optional[int]
+    x: Tensor, dim: int, start: int | None, end: int | None
 ) -> tuple[int, int]:
     """
     Normalize start and end such that both are in the range
@@ -799,8 +825,8 @@ def slice_scatter(
     input: Tensor,
     src: Tensor,
     dim: int = 0,
-    start: Optional[int] = None,
-    end: Optional[int] = None,
+    start: int | None = None,
+    end: int | None = None,
     step: int = 1,
 ):
     dim = utils.canonicalize_dim(input.ndim, dim)
@@ -814,7 +840,7 @@ def slice_scatter(
     if start == 0 and end == dim_size and step == 1:
         return src.clone()
 
-    indices: list[Optional[Tensor]] = [None] * input.dim()
+    indices: list[Tensor | None] = [None] * input.dim()
     idx = torch.arange(dim_size, device=input.device)
     indices[dim] = (idx - start) // step
 
@@ -1125,7 +1151,7 @@ def unfold_backward(
 @register_decomposition(aten.logit_backward.default)
 @pw_cast_for_opmath
 def logit_backward(
-    grad_output: Tensor, self: Tensor, eps: Optional[float] = None
+    grad_output: Tensor, self: Tensor, eps: float | None = None
 ) -> Tensor:
     if eps is not None:
         lo = eps
@@ -1146,7 +1172,7 @@ def logit_backward(
 @register_decomposition(aten.dropout)
 @aten.dropout.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.dropout.default.py_impl(DispatchKey.Autograd)
-def dropout(input: Tensor, p: float, train: Optional[bool]):
+def dropout(input: Tensor, p: float, train: bool | None):
     if train and p != 0:
         return aten.native_dropout(input, p, train)[0]
     else:
@@ -1155,7 +1181,7 @@ def dropout(input: Tensor, p: float, train: Optional[bool]):
 
 @register_decomposition(aten.native_dropout)
 @out_wrapper("out0", "out1")
-def native_dropout(input: Tensor, p: float, train: Optional[bool]):
+def native_dropout(input: Tensor, p: float, train: bool | None):
     if train and p != 0:
         if p == 1:
             return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
@@ -1179,7 +1205,10 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
     # a contiguous tensor.
     x = x.contiguous()
     if half_to_float:
-        assert x.dtype == torch.half
+        if x.dtype != torch.half:
+            raise AssertionError(
+                f"half_to_float is True but x.dtype is {x.dtype}, expected torch.half"
+            )
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -1204,7 +1233,10 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     # returns a contiguous tensor.
     x = x.contiguous()
     if half_to_float:
-        assert x.dtype == torch.half
+        if x.dtype != torch.half:
+            raise AssertionError(
+                f"half_to_float is True but x.dtype is {x.dtype}, expected torch.half"
+            )
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -1230,7 +1262,8 @@ def embedding(
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
 ) -> Tensor:
-    assert weight.dim() == 2, "'weight' must be 2-D"
+    if weight.dim() != 2:
+        raise AssertionError(f"'weight' must be 2-D, got {weight.dim()}-D")
     # Nb. scale_grad_by_freq is not used in the forward
     if indices.ndim <= 1:
         # We need this one as weight[indices] calls item() in these cases
@@ -1360,7 +1393,7 @@ def _chunk_cat(
     tensors: list[Tensor],
     dim: int,
     num_chunks: int,
-    out: Optional[Tensor] = None,
+    out: Tensor | None = None,
 ) -> Tensor:
     dim = _preprocess_chunk_cat_inputs(tensors, dim, num_chunks)
     padded_tensors = _pad_chunk(tensors, dim, num_chunks)
@@ -1379,8 +1412,8 @@ def split_with_sizes_copy(
     self: Tensor,
     split_sizes: list[int],
     dim: int = 0,
-    out: Optional[list[Tensor]] = None,
-) -> Optional[list[Tensor]]:
+    out: list[Tensor] | None = None,
+) -> list[Tensor] | None:
     splits = aten.split_with_sizes(self, split_sizes, dim=dim)
     if out is None:
         return [s.clone(memory_format=torch.contiguous_format) for s in splits]
@@ -1408,7 +1441,10 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
     if split_size == 0:
-        assert dim_size == 0
+        if dim_size != 0:
+            raise AssertionError(
+                f"split_size is 0 but dim_size is {dim_size}, expected 0"
+            )
         return (self.detach(),)
     chunks = (dim_size + split_size - 1) // split_size
 
@@ -1429,8 +1465,14 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     tensor_indices_or_sections: Tensor,
     dim: int = 0,
 ) -> tuple[Tensor, ...]:
-    assert tensor_indices_or_sections.device.type == "cpu"
-    assert tensor_indices_or_sections.dtype == torch.int64
+    if tensor_indices_or_sections.device.type != "cpu":
+        raise AssertionError(
+            f"tensor_indices_or_sections must be on CPU, got {tensor_indices_or_sections.device}"
+        )
+    if tensor_indices_or_sections.dtype != torch.int64:
+        raise AssertionError(
+            f"tensor_indices_or_sections must be int64, got {tensor_indices_or_sections.dtype}"
+        )
     split_dim = tensor_indices_or_sections.dim()
     torch._check(
         split_dim == 1 or split_dim == 0,
@@ -1439,7 +1481,10 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     )
     if split_dim == 0:
         sections = tensor_indices_or_sections.item()
-        assert isinstance(sections, IntLike)
+        if not isinstance(sections, IntLike):
+            raise AssertionError(
+                f"Expected sections to be IntLike, got {type(sections).__name__}"
+            )
         return self.tensor_split(sections, dim)
     else:
         ctx = nullcontext
@@ -1528,13 +1573,13 @@ def native_group_norm_backward(
     input: Tensor,
     mean: Tensor,
     rstd: Tensor,
-    gamma: Optional[Tensor],
+    gamma: Tensor | None,
     N: int,
     C: int,
     HxW: int,
     group: int,
     output_mask: list[bool],
-) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
     utils.check_same_device(
         grad_output, input, mean, rstd, allow_cpu_scalar_tensors=False
     )
@@ -1563,9 +1608,9 @@ def native_group_norm_backward(
     ds = torch.mul(grad_output, input).view(N, C, HxW).sum(dim=[2])
     db = grad_output.view(N, C, HxW).sum(dim=[2])
 
-    d_input: Optional[Tensor] = None
-    d_gamma: Optional[Tensor] = None
-    d_bias: Optional[Tensor] = None
+    d_input: Tensor | None = None
+    d_gamma: Tensor | None = None
+    d_bias: Tensor | None = None
     if output_mask[0]:
         s = 1.0 / (HxW * cpg)
         if gamma is not None:
@@ -1616,7 +1661,7 @@ def native_group_norm_backward_out(
     input: Tensor,
     mean: Tensor,
     rstd: Tensor,
-    gamma: Optional[Tensor],
+    gamma: Tensor | None,
     N: int,
     C: int,
     HxW: int,
@@ -1626,7 +1671,7 @@ def native_group_norm_backward_out(
     out0: torch.Tensor,
     out1: torch.Tensor,
     out2: torch.Tensor,
-) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
     result = native_group_norm_backward(
         grad_output, input, mean, rstd, gamma, N, C, HxW, group, output_mask
     )
@@ -1639,7 +1684,7 @@ def native_group_norm_backward_out(
     return grad_input
 
 
-def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
+def _maybe_cast(x: Tensor | None, dtype) -> Tensor | None:
     if x is not None:
         return x.to(dtype)
     return x
@@ -1653,10 +1698,10 @@ def native_layer_norm_backward(
     normalized_shape: list[int],
     mean: Tensor,
     rstd: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     output_mask: list[bool],
-) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
     input_shape = input.shape
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
@@ -1666,7 +1711,8 @@ def native_layer_norm_backward(
         else x
         for x in (grad_out, input, weight, bias)
     )
-    assert grad_out_cast is not None
+    if grad_out_cast is None:
+        raise AssertionError("grad_out_cast should not be None")
 
     axis = input_ndim - len(normalized_shape)
     inner_dims = input_shape[axis:]
@@ -1691,7 +1737,8 @@ def native_layer_norm_backward(
         )
     mean = _unsqueeze_to_dim(mean, input_cast.dim())  # type: ignore[union-attr]
     rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
-    assert input_cast is not None
+    if input_cast is None:
+        raise AssertionError("input_cast should not be None")
     x_hat = (input_cast - mean) * rstd
     if weight_cast is not None:
         grad_x_hat = grad_out_cast * weight_cast
@@ -1704,9 +1751,9 @@ def native_layer_norm_backward(
     c3 = torch.mul(x_hat, c2)
 
     inner = a - b - c3
-    d_input: Optional[Tensor] = None
-    d_weight: Optional[Tensor] = None
-    d_bias: Optional[Tensor] = None
+    d_input: Tensor | None = None
+    d_weight: Tensor | None = None
+    d_bias: Tensor | None = None
     if output_mask[0]:
         d_input = (rstd / N) * inner
 
@@ -1737,14 +1784,14 @@ def native_layer_norm_backward_out(
     normalized_shape: list[int],
     mean: Tensor,
     rstd: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     output_mask: list[bool],
     *,
     out0: torch.Tensor,
     out1: torch.Tensor,
     out2: torch.Tensor,
-) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
     result = native_layer_norm_backward(
         grad_out, input, normalized_shape, mean, rstd, weight, bias, output_mask
     )
@@ -1761,8 +1808,8 @@ def native_layer_norm_backward_out(
 def _fused_rms_norm(
     input: Tensor,
     normalized_shape: list[int],
-    weight: Optional[Tensor],
-    eps: Optional[float],
+    weight: Tensor | None,
+    eps: float | None,
 ) -> tuple[Tensor, Tensor]:
     dims_to_reduce: list[int] = []
     for i in range(len(normalized_shape)):
@@ -1818,9 +1865,9 @@ def _fused_rms_norm_backward(
     input: Tensor,
     normalized_shape: list[int],
     rstd: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     output_mask: list[bool],
-) -> tuple[Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor | None, Tensor | None]:
     input_shape = input.shape
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
@@ -1834,7 +1881,8 @@ def _fused_rms_norm_backward(
         if weight is not None
         else None
     )
-    assert grad_out_cast is not None
+    if grad_out_cast is None:
+        raise AssertionError("grad_out_cast should not be None")
 
     axis = input_ndim - len(normalized_shape)
     inner_dims = input_shape[axis:]
@@ -1863,8 +1911,8 @@ def _fused_rms_norm_backward(
     else:
         grad_x_hat = grad_out_cast
 
-    d_input: Optional[Tensor] = None
-    d_weight: Optional[Tensor] = None
+    d_input: Tensor | None = None
+    d_weight: Tensor | None = None
 
     x_hat = input_cast * rstd
 
@@ -1889,15 +1937,15 @@ def _fused_rms_norm_backward(
 
 def native_batch_norm_helper(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
     training: bool,
     momentum: float,
     eps: float,
     functional: bool,
-) -> tuple[Tensor, Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor | None, Tensor | None]:
     reduction_dims = [0] + list(range(2, input.dim()))
     computation_dtype = utils.get_computation_dtype(input.dtype)
     new_running_mean = running_mean
@@ -1929,7 +1977,10 @@ def native_batch_norm_helper(
             if not functional:
                 running_var.copy_(new_running_var)
     else:
-        assert running_mean is not None and running_var is not None
+        if running_mean is None or running_var is None:
+            raise AssertionError(
+                "running_mean and running_var must not be None in eval mode"
+            )
         running_mean = running_mean.to(dtype=computation_dtype, copy=True)
         new_running_mean = running_mean
         running_var = running_var.to(dtype=computation_dtype, copy=True)
@@ -1973,10 +2024,10 @@ def native_batch_norm_helper(
 @out_wrapper("out", "save_mean", "save_invstd")
 def native_batch_norm(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
     training: bool,
     momentum: float,
     eps: float,
@@ -2001,10 +2052,10 @@ def native_batch_norm(
 @aten.native_batch_norm.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def native_batch_norm_decomposition(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
     training: bool,
     momentum: float,
     eps: float,
@@ -2040,7 +2091,7 @@ def unsafe_chunk_py_impl(tensor, chunks, dim=0) -> list[Tensor]:
     split_size = (dim_size + chunks - 1) // chunks
 
     if split_size == 0 and dim_size == 0:
-        split_sizes = [split_size for _ in chunks]
+        split_sizes = [split_size for _ in range(chunks)]
         split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
         return torch.ops.aten.unsafe_split_with_sizes.default(tensor, split_sizes, dim)
     return torch.ops.aten.unsafe_split.Tensor(tensor, split_size, dim)
@@ -2049,8 +2100,8 @@ def unsafe_chunk_py_impl(tensor, chunks, dim=0) -> list[Tensor]:
 @register_decomposition(aten._native_batch_norm_legit_no_training.default)
 def _native_batch_norm_legit_no_training(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     running_mean: Tensor,
     running_var: Tensor,
     momentum: float,
@@ -2071,8 +2122,8 @@ def _native_batch_norm_legit_no_training(
 @register_decomposition(aten._native_batch_norm_legit.default)
 def _native_batch_norm_legit(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     running_mean: Tensor,
     running_var: Tensor,
     training: bool,
@@ -2088,8 +2139,8 @@ def _native_batch_norm_legit(
 @register_decomposition(aten._native_batch_norm_legit.no_stats)
 def _native_batch_norm_legit_no_stats(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     training: bool,
     momentum: float,
     eps: float,
@@ -2103,8 +2154,8 @@ def _native_batch_norm_legit_no_stats(
 @register_decomposition(aten._native_batch_norm_legit_functional.default)
 def _native_batch_norm_legit_functional(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     running_mean: Tensor,
     running_var: Tensor,
     training: bool,
@@ -2120,15 +2171,17 @@ def _native_batch_norm_legit_functional(
     ) = native_batch_norm_helper(
         input, weight, bias, running_mean, running_var, training, momentum, eps, True
     )
-    assert new_running_mean is not None, "new_running_mean should not be None"
-    assert new_running_var is not None, "new_running_var should not be None"
+    if new_running_mean is None:
+        raise AssertionError("new_running_mean should not be None")
+    if new_running_var is None:
+        raise AssertionError("new_running_var should not be None")
     return output, save_mean, save_rstd, new_running_mean, new_running_var
 
 
 def _get_batch_norm_reserve_tensor(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     running_mean: Tensor,
     running_var: Tensor,
     eps: float,
@@ -2157,8 +2210,8 @@ def _get_batch_norm_reserve_tensor(
 @register_decomposition(aten._batch_norm_with_update.default)
 def _batch_norm_with_update(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     running_mean: Tensor,
     running_var: Tensor,
     momentum: float,
@@ -2184,8 +2237,8 @@ def _batch_norm_with_update(
 @register_decomposition(aten._batch_norm_with_update_functional.default)
 def _batch_norm_with_update_functional(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     running_mean: Tensor,
     running_var: Tensor,
     momentum: float,
@@ -2203,16 +2256,18 @@ def _batch_norm_with_update_functional(
     reserve = _get_batch_norm_reserve_tensor(
         input, weight, bias, running_mean, running_var, eps, training=True
     )
-    assert new_rm is not None, "new_running_mean should not be None"
-    assert new_rv is not None, "new_running_var should not be None"
+    if new_rm is None:
+        raise AssertionError("new_running_mean should not be None")
+    if new_rv is None:
+        raise AssertionError("new_running_var should not be None")
     return (output, save_mean, save_rstd, reserve, new_rm, new_rv)
 
 
 @register_decomposition(aten._batch_norm_no_update.default)
 def _batch_norm_no_update(
     input: Tensor,
-    weight: Optional[Tensor],
-    bias: Optional[Tensor],
+    weight: Tensor | None,
+    bias: Tensor | None,
     running_mean: Tensor,
     running_var: Tensor,
     momentum: float,
@@ -2239,7 +2294,10 @@ def _batch_norm_no_update(
 @out_wrapper("out0", "out1")
 @pw_cast_for_opmath
 def _fused_dropout_decomposition(input, p, generator=None):
-    assert generator is None
+    if generator is not None:
+        raise AssertionError(
+            f"generator must be None for _fused_dropout decomposition, got {generator}"
+        )
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
@@ -2248,18 +2306,23 @@ def _fused_dropout_decomposition(input, p, generator=None):
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
-    x: Union[Tensor, NumberType],
+    x: Tensor | NumberType,
     *,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout=None,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     pin_memory: bool = False,
     non_blocking: bool = False,
-    memory_format: Optional[torch.memory_format] = None,
+    memory_format: torch.memory_format | None = None,
 ):
-    assert not layout or layout == torch.strided, "TODO"
-    assert not pin_memory, "TODO"
-    assert isinstance(x, (torch.Tensor, int, float, bool, complex))
+    if layout and layout != torch.strided:
+        raise AssertionError(f"layout must be None or torch.strided, got {layout}")
+    if pin_memory:
+        raise AssertionError(
+            "pin_memory=True is not supported in _to_copy decomposition"
+        )
+    if not isinstance(x, (torch.Tensor, int, float, bool, complex)):
+        raise AssertionError(f"x must be Tensor or scalar, got {type(x).__name__}")
     if device is None and dtype is None and memory_format is None:
         if isinstance(x, torch.Tensor):
             return x.clone()
@@ -2305,9 +2368,9 @@ def nop_decomposition(x):
 def cudnn_batch_norm(
     input: Tensor,
     weight: Tensor,
-    bias: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
+    bias: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
     training: bool,
     exponential_average_factor: float,
     epsilon: float,
@@ -2344,16 +2407,16 @@ def _broadcast_batch_norm_backward(x, broadcast_mask):
 def batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
-    weight: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    save_mean: Optional[Tensor],
-    save_invstd: Optional[Tensor],
+    weight: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    save_mean: Tensor | None,
+    save_invstd: Tensor | None,
     train: bool,
     eps: float,
     output_mask: list[bool],
     reserve: Tensor,
-) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor | None, Tensor | None]:
     return native_batch_norm_backward(
         grad_out,
         input,
@@ -2372,15 +2435,15 @@ def batch_norm_backward(
 def native_batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
-    weight: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    save_mean: Optional[Tensor],
-    save_invstd: Optional[Tensor],
+    weight: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    save_mean: Tensor | None,
+    save_invstd: Tensor | None,
     train: bool,
     eps: float,
     output_mask: list[bool],
-) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor | None, Tensor | None]:
     input_dtype = input.dtype
     if weight is not None:
         weight_dtype = weight.dtype
@@ -2409,17 +2472,22 @@ def native_batch_norm_backward(
     )
     input_shape = input.shape
     input_rank = input.dim()
-    assert input_rank >= 2, "rank of the input must be at least 2"
+    if input_rank < 2:
+        raise AssertionError(f"rank of the input must be at least 2, got {input_rank}")
 
     axis = 1
     num_features = prod(list(input_shape)) / input_shape[axis]
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
-        assert mean is not None and invstd is not None
+        if mean is None or invstd is None:
+            raise AssertionError("mean and invstd must not be None in training mode")
 
     else:
-        assert running_mean_cast is not None and running_var_cast is not None
+        if running_mean_cast is None or running_var_cast is None:
+            raise AssertionError(
+                "running_mean_cast and running_var_cast must not be None in eval mode"
+            )
         mean = running_mean_cast
         invstd = torch.rsqrt(running_var_cast + eps)
 
@@ -2477,11 +2545,11 @@ def native_batch_norm_backward(
 def native_batch_norm_backward_out(
     grad_out: Tensor,
     input: Tensor,
-    weight: Optional[Tensor],
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    save_mean: Optional[Tensor],
-    save_invstd: Optional[Tensor],
+    weight: Tensor | None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    save_mean: Tensor | None,
+    save_invstd: Tensor | None,
     train: bool,
     eps: float,
     output_mask: list[bool],
@@ -2489,7 +2557,7 @@ def native_batch_norm_backward_out(
     out0: torch.Tensor,
     out1: torch.Tensor,
     out2: torch.Tensor,
-) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> tuple[Tensor, Tensor | None, Tensor | None]:
     result = native_batch_norm_backward(
         grad_out,
         input,
@@ -2517,10 +2585,10 @@ def miopen_batch_norm_backward(
     input: Tensor,
     grad_output: Tensor,
     weight: Tensor,
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    save_mean: Optional[Tensor],
-    save_var: Optional[Tensor],
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    save_mean: Tensor | None,
+    save_var: Tensor | None,
     epsilon: float,
 ):
     return aten.native_batch_norm_backward(
@@ -2543,10 +2611,10 @@ def cudnn_batch_norm_backward(
     input: Tensor,
     grad_output: Tensor,
     weight: Tensor,
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    save_mean: Optional[Tensor],
-    save_var: Optional[Tensor],
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    save_mean: Tensor | None,
+    save_var: Tensor | None,
     epsilon: float,
     reserveSpace: Tensor,
 ):
@@ -2642,7 +2710,8 @@ def adaptive_avg_pool2d(input: Tensor, output_size: tuple[int, int]):
             return vals, length
         else:
             # zero-out the things we didn't really want to select
-            assert dim < 0
+            if dim >= 0:
+                raise AssertionError(f"dim should be negative when masking, got {dim}")
             # hack
             mask = range_max >= length.unsqueeze(-1)
             if dim == -2:
@@ -2679,6 +2748,9 @@ def _max_unpoolnd(
     # equal. If this condition is not satisfied, the operation is
     # non-deterministic as one of the different values in `self` 'wins'.
     utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    output_shape = list(self.shape[:-dim]) + list(output_size)
+    if any(s == 0 for s in output_shape):
+        return self.new_zeros(output_shape)
     nc = reduce(operator.mul, self.shape[:-dim])
     hw = reduce(operator.mul, output_size)
     indices_nc_shape = [1] * self.ndim
@@ -2687,7 +2759,7 @@ def _max_unpoolnd(
         indices + aten.arange(nc, device=self.device).view(indices_nc_shape) * hw
     ).reshape(-1)
 
-    output = self.new_zeros(list(self.shape[:-dim]) + list(output_size))
+    output = self.new_zeros(output_shape)
     return aten._unsafe_index_put(
         output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
     ).view(output.shape)
@@ -2939,12 +3011,13 @@ def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
 @out_wrapper()
 def uniform(
     x: Tensor,
-    low: Union[bool, int, float] = 0.0,
-    high: Union[bool, int, float] = 1.0,
-    generator: Optional[torch.Generator] = None,
+    low: bool | int | float = 0.0,
+    high: bool | int | float = 1.0,
+    generator: torch.Generator | None = None,
 ):
     return prims._uniform_helper(
         x.shape,
+        stride=x.stride(),
         low=sym_float(low),
         high=sym_float(high),
         dtype=x.dtype,
@@ -3004,8 +3077,8 @@ def get_scale_value(scales, idx):
 @aten.upsample_nearest3d.vec.py_impl(DispatchKey.Autograd)
 def _upsample_nearest_vec(
     input: Tensor,
-    output_size: Optional[list[int]],
-    scale_factors: Optional[list[float]],
+    output_size: list[int] | None,
+    scale_factors: list[float] | None,
 ) -> Tensor:
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scales = (
@@ -3025,8 +3098,8 @@ def _upsample_nearest_vec(
 @aten._upsample_nearest_exact3d.vec.py_impl(DispatchKey.Autograd)
 def _upsample_nearest_exact_vec(
     input: Tensor,
-    output_size: Optional[list[int]],
-    scale_factors: Optional[list[float]],
+    output_size: list[int] | None,
+    scale_factors: list[float] | None,
 ) -> Tensor:
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scales = (
@@ -3057,7 +3130,13 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
         # Same as Pillow and Scikit-Image/Scipy ndi.zoom
         osize = output_size[d]
         isize = input.shape[-num_spatial_dims + d]
-        scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
+
+        # check for scales[d] > 0 is in compute_scales_value in aten/src/ATen/native/UpSample.h
+        scale = (
+            isize / (isize * scales[d])
+            if scales[d] is not None and scales[d] > 0
+            else isize / osize
+        )
 
         output_indices = torch.arange(osize, dtype=torch.float32, device=input.device)
         input_indices = ((output_indices + offset) * scale).to(torch.int64)
@@ -3074,7 +3153,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
 def upsample_nearest1d(
     input: Tensor,
     output_size: list[int],
-    scales: Optional[float] = None,
+    scales: float | None = None,
 ) -> Tensor:
     return _upsample_nearest(input, output_size, [scales])
 
@@ -3088,7 +3167,7 @@ def upsample_nearest1d(
 def upsample_nearest_exact1d(
     input: Tensor,
     output_size: list[int],
-    scales: Optional[float] = None,
+    scales: float | None = None,
 ) -> Tensor:
     return _upsample_nearest(input, output_size, [scales], exact=True)
 
@@ -3100,8 +3179,8 @@ def upsample_nearest_exact1d(
 def upsample_nearest2d(
     input: Tensor,
     output_size: list[int],
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
 ) -> Tensor:
     return _upsample_nearest(input, output_size, [scales_h, scales_w])
 
@@ -3115,8 +3194,8 @@ def upsample_nearest2d(
 def _upsample_nearest_exact2d(
     input: Tensor,
     output_size: list[int],
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
 ) -> Tensor:
     return _upsample_nearest(input, output_size, [scales_h, scales_w], exact=True)
 
@@ -3128,9 +3207,9 @@ def _upsample_nearest_exact2d(
 def upsample_nearest3d(
     input: Tensor,
     output_size: list[int],
-    scales_d: Optional[float] = None,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales_d: float | None = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
 ) -> Tensor:
     return _upsample_nearest(input, output_size, [scales_d, scales_h, scales_w])
 
@@ -3144,9 +3223,9 @@ def upsample_nearest3d(
 def _upsample_nearest_exact3d(
     input: Tensor,
     output_size: list[int],
-    scales_d: Optional[float] = None,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales_d: float | None = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
 ) -> Tensor:
     return _upsample_nearest(
         input, output_size, [scales_d, scales_h, scales_w], exact=True
@@ -3157,7 +3236,7 @@ def _upsample_nearest_exact3d(
 def _upsample_nearest(
     input: Tensor,
     output_size: list[int],
-    scales: list[Optional[float]],
+    scales: list[float | None],
     exact: bool = False,
 ) -> Tensor:
     spatial_indices = _compute_upsample_nearest_indices(
@@ -3190,7 +3269,10 @@ def gather_params(params, has_biases, has_projections):
     else:
         group_size = 2
 
-    assert len(params) % group_size == 0, len(params)
+    if len(params) % group_size != 0:
+        raise AssertionError(
+            f"len(params)={len(params)} is not divisible by group_size={group_size}"
+        )
     return [
         tuple(params[i : i + group_size]) for i in range(0, len(params), group_size)
     ]
@@ -3208,7 +3290,10 @@ def params_hiddens(params, hiddens, i, bidirectional):
 
 
 def update_hidden_for_packed(cur_hidden, last_batch_size, batch_size, hiddens):
-    assert last_batch_size > batch_size
+    if last_batch_size <= batch_size:
+        raise AssertionError(
+            f"last_batch_size ({last_batch_size}) must be > batch_size ({batch_size})"
+        )
     hiddens.append(cur_hidden.narrow(0, batch_size, last_batch_size - batch_size))
     return cur_hidden.narrow(0, 0, batch_size)
 
@@ -3218,7 +3303,10 @@ def update_hidden_for_packed_reverse(
 ):
     if last_batch_size == batch_size:
         return cur_hidden
-    assert last_batch_size < batch_size
+    if last_batch_size >= batch_size:
+        raise AssertionError(
+            f"last_batch_size ({last_batch_size}) must be < batch_size ({batch_size})"
+        )
     return torch.concat(
         (
             cur_hidden,
@@ -3702,7 +3790,8 @@ def lstm_impl(
     bidirectional,
     batch_first,
 ):
-    assert len(hx) == 2, "lstm expects two hidden states"
+    if len(hx) != 2:
+        raise AssertionError(f"lstm expects two hidden states, got {len(hx)}")
     params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
     hidden = list(zip(hx[0], hx[1]))
     layer_fn = select_one_layer_lstm_function(input, hx, params)
@@ -3736,7 +3825,8 @@ def lstm_data_impl(
     train,
     bidirectional,
 ):
-    assert len(hx) == 2, "lstm expects two hidden states"
+    if len(hx) != 2:
+        raise AssertionError(f"lstm expects two hidden states, got {len(hx)}")
     params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
     hidden = list(zip(hx[0], hx[1]))
     out, final_hiddens = _rnn_helper(
@@ -3877,7 +3967,7 @@ def upsample_linear1d(
     input: Tensor,
     output_size: list[int],
     align_corners: bool,
-    scales_w: Optional[float] = None,
+    scales_w: float | None = None,
 ) -> Tensor:
     return _upsample_linear(input, output_size, align_corners, [scales_w])
 
@@ -3891,8 +3981,8 @@ def upsample_bilinear2d(
     input: Tensor,
     output_size: list[int],
     align_corners: bool,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
 ) -> Tensor:
     return _upsample_linear(input, output_size, align_corners, [scales_h, scales_w])
 
@@ -3905,9 +3995,9 @@ def upsample_trilinear3d(
     input: Tensor,
     output_size: list[int],
     align_corners: bool,
-    scales_d: Optional[float] = None,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales_d: float | None = None,
+    scales_h: float | None = None,
+    scales_w: float | None = None,
 ) -> Tensor:
     return _upsample_linear(
         input, output_size, align_corners, [scales_d, scales_h, scales_w]
@@ -3952,7 +4042,7 @@ def _upsample_linear(
     input: Tensor,
     output_size: list[int],
     align_corners: bool,
-    scales: list[Optional[float]],
+    scales: list[float | None],
 ) -> Tensor:
     # get dimensions of original image
     n_channels = input.shape[1]
@@ -4000,7 +4090,8 @@ def _upsample_linear(
             for v1, v2 in zip(vs[::2], vs[1::2])
         ]
 
-    assert len(vs) == 1
+    if len(vs) != 1:
+        raise AssertionError(f"Expected vs to have exactly 1 element, got {len(vs)}")
     result = vs[0]
 
     # convert output to correct memory format, if necessary
@@ -4010,7 +4101,10 @@ def _upsample_linear(
     if input.device.type == "cuda" and n_channels < 16:
         memory_format = torch.contiguous_format
 
-    assert isinstance(result, torch.Tensor)
+    if not isinstance(result, torch.Tensor):
+        raise AssertionError(
+            f"Expected result to be a Tensor, got {type(result).__name__}"
+        )
 
     result = result.contiguous(memory_format=memory_format)
 
@@ -4099,7 +4193,7 @@ def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
 def _nll_loss_forward(
     self: Tensor,
     target: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     reduction: int,
     ignore_index: int,
 ) -> tuple[Tensor, Tensor]:
@@ -4155,26 +4249,30 @@ def _nll_loss_forward(
 def nll_loss_forward(
     self: Tensor,
     target: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     reduction: int,
     ignore_index: int,
 ) -> tuple[Tensor, Tensor]:
-    assert self.dim() > 0 and self.dim() <= 2, "input tensor should be 1D or 2D"
-    assert target.dim() <= 1, (
-        "0D or 1D target tensor expected, multi-target not supported"
-    )
+    if not (self.dim() > 0 and self.dim() <= 2):
+        raise AssertionError(f"input tensor should be 1D or 2D, got {self.dim()}D")
+    if target.dim() > 1:
+        raise AssertionError(
+            f"0D or 1D target tensor expected, multi-target not supported, got {target.dim()}D"
+        )
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    assert no_batch_dim or (self.shape[0] == target.shape[0]), (
-        f"size mismatch (got input: {self.shape}, target: {target.shape})"
-    )
+    if not (no_batch_dim or (self.shape[0] == target.shape[0])):
+        raise AssertionError(
+            f"size mismatch (got input: {self.shape}, target: {target.shape})"
+        )
 
     n_classes = self.shape[-1]
 
-    assert weight is None or (weight.dim() == 1 and weight.numel() == n_classes), (
-        f"weight tensor should be defined either for all {n_classes} classes or no classes "
-        f"but got weight tensor of shape: {weight.shape}"
-    )
+    if weight is not None and not (weight.dim() == 1 and weight.numel() == n_classes):
+        raise AssertionError(
+            f"weight tensor should be defined either for all {n_classes} classes or no classes "
+            f"but got weight tensor of shape: {weight.shape}"
+        )
 
     return _nll_loss_forward(self, target, weight, reduction, ignore_index)
 
@@ -4184,7 +4282,7 @@ def nll_loss_forward(
 def nll_loss2d_forward(
     self: Tensor,
     target: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     reduction: int,
     ignore_index: int,
 ) -> tuple[Tensor, Tensor]:
@@ -4373,7 +4471,10 @@ def _grid_sampler_2d(
 
     N, C, iH, iW = a.shape
     _, oH, oW, two = grid.shape
-    assert two == 2
+    if two != 2:
+        raise AssertionError(
+            f"grid last dimension must be 2 (for x,y coords), got {two}"
+        )
 
     if _expand_grid:
         # Let's expand grid to [N, C, oH, oW, 2]
@@ -4566,7 +4667,10 @@ def matmul(tensor1, tensor2, *, is_out=False):
 
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
-    assert dim_tensor1 != 0 and dim_tensor2 != 0
+    if dim_tensor1 == 0 or dim_tensor2 == 0:
+        raise AssertionError(
+            f"matmul does not support 0-dimensional tensors, got dims: {dim_tensor1} and {dim_tensor2}"
+        )
     if dim_tensor1 == 1 and dim_tensor2 == 1:
         return torch.dot(tensor1, tensor2)
     elif dim_tensor1 == 2 and dim_tensor2 == 1:
@@ -4690,8 +4794,8 @@ def upsample_bicubic2d_default(
     input: Tensor,
     output_size: tuple[int, int],
     align_corners: bool,
-    scale_h: Optional[float] = None,
-    scale_w: Optional[float] = None,
+    scale_h: float | None = None,
+    scale_w: float | None = None,
 ) -> Tensor:
     # get dimensions of original image
     _, _, in_h, in_w = input.shape
@@ -4752,13 +4856,17 @@ def upsample_bicubic2d_default(
     def get_x_interp(y):
         src_x = tuple(load_bounded(y, x_ofs) for x_ofs in ixs_ofs)
         if input.dtype == torch.uint8:
-            assert weights_precision_x is not None
+            if weights_precision_x is None:
+                raise AssertionError(
+                    "weights_precision_x must not be None for uint8 input"
+                )
             return _sum_tensors_uint8(src_x, weights_x, weights_precision_x)
         return _sum_tensors(c1 * c2 for (c1, c2) in zip(src_x, weights_x))
 
     src_y = tuple(get_x_interp(y_ofs) for y_ofs in iys_ofs)
     if input.dtype == torch.uint8:
-        assert weights_precision_y is not None
+        if weights_precision_y is None:
+            raise AssertionError("weights_precision_y must not be None for uint8 input")
         result = _sum_tensors_uint8(src_y, weights_y, weights_precision_y)
     else:
         result = _sum_tensors(c1 * c2 for (c1, c2) in zip(src_y, weights_y))
@@ -4776,16 +4884,19 @@ def upsample_bicubic2d_default(
 @pw_cast_for_opmath
 def upsample_bicubic2d_vec(
     a: Tensor,
-    output_size: Optional[tuple[int, int]],
+    output_size: tuple[int, int] | None,
     align_corners: bool,
-    scale_factors: Optional[tuple[float, float]] = None,
+    scale_factors: tuple[float, float] | None = None,
 ) -> Tensor:
     torch._check(
         bool(output_size) + bool(scale_factors) == 1,
         lambda: "Must specify exactly one of output_size and scale_factors.",
     )
     if output_size is None:
-        assert scale_factors is not None
+        if scale_factors is None:
+            raise AssertionError(
+                "scale_factors must not be None when output_size is None"
+            )
         output_size = cast(
             tuple[int, int],
             tuple(
@@ -4971,9 +5082,9 @@ def nansum(self, dim=None, keepdim=False, *, dtype=None):
 def arange_default(
     end: NumberType,
     *,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     pin_memory: bool = False,
 ):
     return aten.arange.start_step(
@@ -4986,9 +5097,9 @@ def arange_start(
     start: NumberType,
     end: NumberType,
     *,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     pin_memory: bool = False,
 ):
     return aten.arange.start_step(
@@ -5011,7 +5122,7 @@ def multi_margin_loss(
     target: Tensor,
     p: NumberType = 1,
     margin: NumberType = 1,
-    weight: Optional[Tensor] = None,
+    weight: Tensor | None = None,
     reduction: int = Reduction.MEAN.value,
 ) -> Tensor:
     input = torch.atleast_2d(input)
@@ -5121,8 +5232,8 @@ def scaled_dot_product_flash_attention_for_cpu(
     dropout_p: float = 0.0,
     is_causal: bool = False,
     *,
-    attn_mask: Optional[Tensor] = None,
-    scale: Optional[float] = None,
+    attn_mask: Tensor | None = None,
+    scale: float | None = None,
 ) -> tuple[Tensor, Tensor]:
     torch._check(
         torch.is_floating_point(query),
@@ -5200,7 +5311,6 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
         alpha = int(alpha)
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
-        # pyrefly: ignore [unsupported-operation]
         result = result * alpha
     if beta == 0:
         return result
@@ -5224,8 +5334,8 @@ def sym_numel(t):
 def sum_default(
     self: Tensor,
     *,
-    dtype: Optional[torch.dtype] = None,
-    out: Optional[Tensor] = None,
+    dtype: torch.dtype | None = None,
+    out: Tensor | None = None,
 ) -> Tensor:
     if out is None:
         return aten.sum.dim_IntList(self, [], dtype=dtype)
@@ -5234,7 +5344,7 @@ def sum_default(
 
 
 @register_decomposition([aten.squeeze.default, aten.squeeze.dim])
-def squeeze_default(self: Tensor, dim: Optional[int] = None):
+def squeeze_default(self: Tensor, dim: int | None = None):
     # handle a scalar directly
     if not isinstance(self, torch.Tensor):
         return self
@@ -5260,7 +5370,7 @@ def _weight_norm_interface(v, g, dim=0):
 def isin(elements, test_elements, *, assume_unique=False, invert=False):
     # handle when either elements or test_elements are Scalars (they can't both be)
     if not isinstance(elements, torch.Tensor):
-        elements = torch.tensor(elements, device=test_elements.device)
+        elements = torch.scalar_tensor(elements, device=test_elements.device)
     if not isinstance(test_elements, torch.Tensor):
         if invert:
             return torch.ne(elements, test_elements)
@@ -5279,7 +5389,7 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
 def bernoulli(
     self: torch.Tensor,
     *,
-    generator: Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> torch.Tensor:
     if generator is None:
         raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
@@ -5297,6 +5407,9 @@ def bernoulli(
 def isin_default(elements, test_elements, *, invert=False):
     if elements.numel() == 0:
         return torch.empty_like(elements, dtype=torch.bool)
+    if test_elements.ndim == 0:
+        res = elements == test_elements
+        return ~res if invert else res
     expanded_elem_shape = elements.shape + (1,) * test_elements.ndim
     x = elements.view(expanded_elem_shape)
     dim = tuple(range(-1, -test_elements.ndim - 1, -1))
@@ -5323,7 +5436,7 @@ def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
         mask = torch.empty_like(duplicate_mask)
         mask = mask.index_copy(0, sorted_order, duplicate_mask)
 
-        return mask[0 : elements.numel()]
+        return mask[0 : elements.numel()].reshape(elements.shape)
     else:
         sorted_test_elements, _ = torch.sort(test_elements_flat)
         idx = torch.searchsorted(sorted_test_elements, elements_flat)
@@ -5365,6 +5478,7 @@ register_inplace(aten.index_reduce_, aten.index_reduce)
 register_inplace(aten.__ior__, aten.__or__)
 register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.__ixor__, aten.__xor__)
+register_inplace(aten.ldexp_, aten.ldexp)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.logit_, aten.logit)
 register_inplace(aten.relu_, aten.relu)

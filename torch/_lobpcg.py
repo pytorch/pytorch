@@ -597,10 +597,14 @@ def _lobpcg(
     ortho_bparams: dict[str, bool] | None = None,
 ) -> tuple[Tensor, Tensor]:
     # A must be square:
-    assert A.shape[-2] == A.shape[-1], A.shape
+    if A.shape[-2] != A.shape[-1]:
+        raise AssertionError(f"A must be square, got shape {A.shape}")
     if B is not None:
         # A and B must have the same shapes:
-        assert A.shape == B.shape, (A.shape, B.shape)
+        if A.shape != B.shape:
+            raise AssertionError(
+                f"A and B must have same shape, got {A.shape} vs {B.shape}"
+            )
 
     dtype = _utils.get_floating_dtype(A)
     device = A.device
@@ -664,7 +668,10 @@ def _lobpcg(
             X_ = (
                 torch.randn((m, n), dtype=dtype, device=device) if bX is None else bX[i]
             )
-            assert len(X_.shape) == 2 and X_.shape == (m, n), (X_.shape, (m, n))
+            if not (len(X_.shape) == 2 and X_.shape == (m, n)):
+                raise AssertionError(
+                    f"X_ shape mismatch: got {X_.shape}, expected {(m, n)}"
+                )
             iparams["batch_index"] = i
             worker = LOBPCG(A_, B_, X_, iK, iparams, fparams, bparams, method, tracker)
             worker.run()
@@ -677,7 +684,8 @@ def _lobpcg(
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
     X = torch.randn((m, n), dtype=dtype, device=device) if X is None else X
-    assert len(X.shape) == 2 and X.shape == (m, n), (X.shape, (m, n))
+    if not (len(X.shape) == 2 and X.shape == (m, n)):
+        raise AssertionError(f"X shape mismatch: got {X.shape}, expected {(m, n)}")
 
     worker = LOBPCG(A, B, X, iK, iparams, fparams, bparams, method, tracker)
 
@@ -795,9 +803,10 @@ class LOBPCG:
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert count >= prev_count, (
-            f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
-        )
+        if count < prev_count:
+            raise AssertionError(
+                f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
+            )
         self.ivars["converged_count"] = count
         self.tvars["rerr"] = rerr
         return count
@@ -1022,7 +1031,8 @@ class LOBPCG:
         # the exact zero columns here and then continue with the
         # original algorithm below.
         nz = torch.where(abs(d) != 0.0)
-        assert len(nz) == 1, nz
+        if len(nz) != 1:
+            raise AssertionError(f"expected nz to have length 1, got {nz}")
         if len(nz[0]) < len(d):
             U = U[:, nz[0]]
             if torch.numel(U) == 0:
@@ -1030,7 +1040,10 @@ class LOBPCG:
             UBU = _utils.qform(self.B, U)
             d = UBU.diagonal(0, -2, -1)
             nz = torch.where(abs(d) != 0.0)
-            assert len(nz[0]) == len(d)
+            if len(nz[0]) != len(d):
+                raise AssertionError(
+                    f"expected nz[0] length {len(d)}, got {len(nz[0])}"
+                )
 
         # The original algorithm 4 from [DuerschPhD2015].
         d_col = (d**-0.5).reshape(d.shape[0], 1)
@@ -1039,7 +1052,8 @@ class LOBPCG:
         t = tau * abs(E).max()
         if drop:
             keep = torch.where(E > t)
-            assert len(keep) == 1, keep
+            if len(keep) != 1:
+                raise AssertionError(f"expected keep to have length 1, got {keep}")
             E = E[keep[0]]
             Z = Z[:, keep[0]]
             d_col = d_col[keep[0]]
@@ -1048,7 +1062,6 @@ class LOBPCG:
 
         return torch.matmul(
             U * d_col.mT,
-            # pyrefly: ignore [unsupported-operation]
             Z * E**-0.5,
         )
 
@@ -1140,7 +1153,8 @@ class LOBPCG:
                 # TorchScript needs the class var to be assigned to a local to
                 # do optional type refinement
                 B = self.B
-                assert B is not None
+                if B is None:
+                    raise AssertionError("B must not be None")
                 raise ValueError(
                     "Overdetermined shape of U:"
                     f" #B-cols(={B.shape[-1]}) >= #U-cols(={U.shape[-1]}) + #V-cols(={V.shape[-1]}) must hold"

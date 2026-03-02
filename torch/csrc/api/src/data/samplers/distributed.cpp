@@ -15,10 +15,7 @@ DistributedRandomSampler::DistributedRandomSampler(
     size_t num_replicas,
     size_t rank,
     bool allow_duplicates)
-    : DistributedSampler(size, num_replicas, rank, allow_duplicates),
-      begin_index_(0),
-      end_index_(0),
-      sample_index_(0) {
+    : DistributedSampler(size, num_replicas, rank, allow_duplicates) {
   // shuffle first time.
   DistributedRandomSampler::reset(size_);
 }
@@ -99,10 +96,7 @@ DistributedSequentialSampler::DistributedSequentialSampler(
     size_t num_replicas,
     size_t rank,
     bool allow_duplicates)
-    : DistributedSampler(size, num_replicas, rank, allow_duplicates),
-      begin_index_(0),
-      end_index_(0),
-      sample_index_(0) {
+    : DistributedSampler(size, num_replicas, rank, allow_duplicates) {
   populate_indices();
 }
 

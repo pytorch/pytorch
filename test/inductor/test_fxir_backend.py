@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    patch_custom_fallback_pass,
     requires_gpu,
     TRITON_HAS_CPU,
 )
@@ -257,7 +258,8 @@ class FxirTestCase(InductorTestCase):
 
         def get_offset(node: torch.fx.Node) -> int:
             (input_, shape, stride, offset) = node.args
-            assert isinstance(offset, int)
+            if not isinstance(offset, int):
+                raise AssertionError
             return offset
 
         # Check for 2 views, one of which is offset.
@@ -322,6 +324,26 @@ class FxirTestCase(InductorTestCase):
         # Check for as_strided. We map ReinterpretView to this.
         num_as_strided = self._count_ops(gm, torch.as_strided)
         self.assertEqual(num_as_strided, 1)
+
+    def test_reshape_fallback(self):
+        """
+        Test falling back to aten.reshape. This uses a custom pass to enable more fallbacks.
+        """
+
+        def always_fallback(node: torch.fx.Node) -> bool:
+            return True
+
+        def foo(x):
+            return x.reshape((2, 5))
+
+        args = (torch.randn(10, device=self.device),)
+        with patch_custom_fallback_pass(always_fallback):
+            (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
+        # Check for the reshape.
+        (reshape_node,) = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.reshape.default
+        )
 
     def test_extern_multi_output(self):
         """
@@ -600,6 +622,7 @@ class FxirTestCase(InductorTestCase):
         num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
         self.assertEqual(num_fallback, 1)
 
+    @config.patch("partitioned_scatter_enabled", False)
     def test_index_put_fallback(self):
         """
         Test the deterministic fallback for index_put.
@@ -1215,6 +1238,21 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         }
         args = (torch.randn((12, 14), device=self.device),)
         self.check(TestModule(), args, ds)
+
+    def test_extern_kernel_irnode_kwargs(self):
+        """
+        Test that IR nodes passed as kwargs to extern kernels are properly materialized.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, data, offsets):
+                return torch.segment_reduce(data, "sum", offsets=offsets)
+
+        length = 10
+        data = torch.randn(length, device=self.device)
+        offsets = torch.tensor([0, 3, 7, length], dtype=torch.int64, device=self.device)
+
+        self.check(TestModule(), (data, offsets))
 
 
 class TestReplaceFloorDiv(InductorTestCase):

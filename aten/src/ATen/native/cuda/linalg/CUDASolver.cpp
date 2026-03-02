@@ -4,7 +4,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/macros/Export.h>
 
-#if defined(CUDART_VERSION) || defined(USE_ROCM)
 
 namespace at::cuda::solver {
 
@@ -1210,170 +1209,6 @@ void syevd<c10::complex<double>, double>(
 }
 
 template <>
-void syevj_bufferSize<float>(
-    cusolverDnHandle_t handle,
-    cusolverEigMode_t jobz,
-    cublasFillMode_t uplo,
-    int n,
-    const float* A,
-    int lda,
-    const float* W,
-    int* lwork,
-    syevjInfo_t params) {
-  TORCH_CUSOLVER_CHECK(cusolverDnSsyevj_bufferSize(
-      handle, jobz, uplo, n, A, lda, W, lwork, params));
-}
-
-template <>
-void syevj_bufferSize<double>(
-    cusolverDnHandle_t handle,
-    cusolverEigMode_t jobz,
-    cublasFillMode_t uplo,
-    int n,
-    const double* A,
-    int lda,
-    const double* W,
-    int* lwork,
-    syevjInfo_t params) {
-  TORCH_CUSOLVER_CHECK(cusolverDnDsyevj_bufferSize(
-      handle, jobz, uplo, n, A, lda, W, lwork, params));
-}
-
-template <>
-void syevj_bufferSize<c10::complex<float>, float>(
-    cusolverDnHandle_t handle,
-    cusolverEigMode_t jobz,
-    cublasFillMode_t uplo,
-    int n,
-    const c10::complex<float>* A,
-    int lda,
-    const float* W,
-    int* lwork,
-    syevjInfo_t params) {
-  TORCH_CUSOLVER_CHECK(cusolverDnCheevj_bufferSize(
-      handle,
-      jobz,
-      uplo,
-      n,
-      reinterpret_cast<const cuComplex*>(A),
-      lda,
-      W,
-      lwork,
-      params));
-}
-
-template <>
-void syevj_bufferSize<c10::complex<double>, double>(
-    cusolverDnHandle_t handle,
-    cusolverEigMode_t jobz,
-    cublasFillMode_t uplo,
-    int n,
-    const c10::complex<double>* A,
-    int lda,
-    const double* W,
-    int* lwork,
-    syevjInfo_t params) {
-  TORCH_CUSOLVER_CHECK(cusolverDnZheevj_bufferSize(
-      handle,
-      jobz,
-      uplo,
-      n,
-      reinterpret_cast<const cuDoubleComplex*>(A),
-      lda,
-      W,
-      lwork,
-      params));
-}
-
-template <>
-void syevj<float>(
-    cusolverDnHandle_t handle,
-    cusolverEigMode_t jobz,
-    cublasFillMode_t uplo,
-    int n,
-    float* A,
-    int lda,
-    float* W,
-    float* work,
-    int lwork,
-    int* info,
-    syevjInfo_t params) {
-  TORCH_CUSOLVER_CHECK(cusolverDnSsyevj(
-      handle, jobz, uplo, n, A, lda, W, work, lwork, info, params));
-}
-
-template <>
-void syevj<double>(
-    cusolverDnHandle_t handle,
-    cusolverEigMode_t jobz,
-    cublasFillMode_t uplo,
-    int n,
-    double* A,
-    int lda,
-    double* W,
-    double* work,
-    int lwork,
-    int* info,
-    syevjInfo_t params) {
-  TORCH_CUSOLVER_CHECK(cusolverDnDsyevj(
-      handle, jobz, uplo, n, A, lda, W, work, lwork, info, params));
-}
-
-template <>
-void syevj<c10::complex<float>, float>(
-    cusolverDnHandle_t handle,
-    cusolverEigMode_t jobz,
-    cublasFillMode_t uplo,
-    int n,
-    c10::complex<float>* A,
-    int lda,
-    float* W,
-    c10::complex<float>* work,
-    int lwork,
-    int* info,
-    syevjInfo_t params) {
-  TORCH_CUSOLVER_CHECK(cusolverDnCheevj(
-      handle,
-      jobz,
-      uplo,
-      n,
-      reinterpret_cast<cuComplex*>(A),
-      lda,
-      W,
-      reinterpret_cast<cuComplex*>(work),
-      lwork,
-      info,
-      params));
-}
-
-template <>
-void syevj<c10::complex<double>, double>(
-    cusolverDnHandle_t handle,
-    cusolverEigMode_t jobz,
-    cublasFillMode_t uplo,
-    int n,
-    c10::complex<double>* A,
-    int lda,
-    double* W,
-    c10::complex<double>* work,
-    int lwork,
-    int* info,
-    syevjInfo_t params) {
-  TORCH_CUSOLVER_CHECK(cusolverDnZheevj(
-      handle,
-      jobz,
-      uplo,
-      n,
-      reinterpret_cast<cuDoubleComplex*>(A),
-      lda,
-      W,
-      reinterpret_cast<cuDoubleComplex*>(work),
-      lwork,
-      info,
-      params));
-}
-
-template <>
 void syevjBatched_bufferSize<float>(
     cusolverDnHandle_t handle,
     cusolverEigMode_t jobz,
@@ -2280,9 +2115,8 @@ void xgeev<c10::complex<double>>(
 }
 
 
-
-
 #endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+
 
 #endif // USE_CUSOLVER_64_BIT
 
@@ -2555,5 +2389,3 @@ void xsyevBatched<c10::complex<double>, double>(
 #endif // USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 
 } // namespace at::cuda::solver
-
-#endif // CUDART_VERSION

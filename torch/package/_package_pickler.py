@@ -1,10 +1,8 @@
-# mypy: allow-untyped-defs
-# pyrefly: ignore [missing-module-attribute]
 import sys
-from pickle import (  # type: ignore[attr-defined]
-    _compat_pickle,
-    _extension_registry,
-    _getattribute,
+from pickle import (
+    _compat_pickle,  # pyrefly: ignore [missing-module-attribute]
+    _extension_registry,  # pyrefly: ignore [missing-module-attribute]
+    _getattribute,  # pyrefly: ignore [missing-module-attribute]
     _Pickler,
     EXT1,
     EXT2,
@@ -83,7 +81,10 @@ class PackagePickler(_PyTorchLegacyPickler):
         if self.proto >= 2:  # type: ignore[attr-defined]
             code = _extension_registry.get((module_name, name))
             if code:
-                assert code > 0
+                if code <= 0:
+                    raise AssertionError(
+                        f"expected positive extension code, got {code}"
+                    )
                 if code <= 0xFF:
                     write(EXT1 + pack("<B", code))
                 elif code <= 0xFFFF:

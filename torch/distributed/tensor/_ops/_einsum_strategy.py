@@ -30,8 +30,10 @@ class EinsumDims:
 
         # NOTE: only support at most two inputs, and single output
         # extend to support more inputs if needed in future
-        assert len(input_dims) <= 2, "Only support at most two inputs"
-        assert len(output_dims) == 1, "Only support single output"
+        if len(input_dims) > 2:
+            raise AssertionError("Only support at most two inputs")
+        if len(output_dims) != 1:
+            raise AssertionError("Only support single output")
         output_dim = output_dims[0]
         return input_dims, output_dim
 
@@ -63,9 +65,10 @@ class EinsumDims:
                 if is_batch_dim:
                     batch_dims.append(dim_char)
                 else:
-                    assert len(input_dims) == 2, (
-                        "free dimension only supported for two inputs!"
-                    )
+                    if len(input_dims) != 2:
+                        raise AssertionError(
+                            "free dimension only supported for two inputs!"
+                        )
                     lhs, rhs = input_dims
                     if dim_char in lhs:
                         lhs_out_only_dims.append(dim_char)
@@ -132,6 +135,12 @@ def gen_einsum_strategies(
         strategies_over_one_mesh_dim.append(placement_list)
 
     # split contracting dim
+    # NOTE: This is the only strategy that produces a Partial output, and it
+    # hardcodes Partial("sum"). No strategy accepts Partial as an input
+    # placement, so Partial inputs are always redistributed to Shard or
+    # Replicate. This means Partial("avg") inputs cannot be preserved through
+    # the op. Use gen_single_dim_einsum_strategies with per-input linearity
+    # for proper Partial support.
     for contracting_dim in edims.contracting_dims:
         # Contracting dim can shard on same device axis for both inputs. This
         # results in the output being Partial on that device axis. For example:

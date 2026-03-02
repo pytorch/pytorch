@@ -1,8 +1,13 @@
+import json
 import logging
 import os
+import re
 import textwrap
+import urllib.request
+from pathlib import Path
 from typing import Any
 
+import yaml
 from cli.lib.common.gh_summary import write_gh_step_summary
 from cli.lib.common.git_helper import clone_external_repo
 from cli.lib.common.pip_helper import pip_install_packages
@@ -10,7 +15,34 @@ from cli.lib.common.utils import run_command, temp_environ, working_directory
 from jinja2 import Template
 
 
+VLLM_DEFAULT_RERUN_FAILURES_COUNT = 2
+VLLM_DEFAULT_RERUN_FAILURES_DELAY = 10
+
+
 logger = logging.getLogger(__name__)
+
+_VLLM_TEST_LIBRARY_PATH = Path(__file__).parent / "vllm_test_library.yaml"
+_DISABLED_VLLM_TESTS_PATH = Path(__file__).parent / "disabled_vllm_tests.yaml"
+_DISABLED_VLLM_TESTS_ISSUE = 175899
+
+
+def _load_vllm_test_library_yaml() -> dict[str, Any]:
+    """
+    Load the VLLM test library configuration from YAML file.
+
+    Returns:
+        Dictionary containing the test library configuration.
+    """
+    if not _VLLM_TEST_LIBRARY_PATH.exists():
+        raise FileNotFoundError(
+            f"VLLM test library YAML file not found: {_VLLM_TEST_LIBRARY_PATH}"
+        )
+
+    with open(_VLLM_TEST_LIBRARY_PATH, encoding="utf-8") as f:
+        _vllm_test_library_cache = yaml.safe_load(f)
+
+    return _vllm_test_library_cache
+
 
 _TPL_VLLM_INFO = Template(
     textwrap.dedent("""\
@@ -23,186 +55,18 @@ _TPL_VLLM_INFO = Template(
 )
 
 
-def sample_vllm_test_library():
+def sample_vllm_test_library() -> dict[str, Any]:
     """
-    Simple sample to unblock the vllm ci development, which is mimic to
+    Load the VLLM test library configuration from YAML file.
+
+    This is a simple sample to unblock the vllm ci development, which mimics
     https://github.com/vllm-project/vllm/blob/main/.buildkite/test-pipeline.yaml
-    see run_test_plan for more details
+    See run_test_plan for more details.
+
+    Returns:
+        Dictionary containing test configurations loaded from vllm_test_library.yaml
     """
-    # TODO(elainewy): Read from yaml file to handle the env and tests for vllm
-    return {
-        "vllm_basic_correctness_test": {
-            "title": "Basic Correctness Test",
-            "id": "vllm_basic_correctness_test",
-            "env_vars": {
-                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
-            },
-            "steps": [
-                "pytest -v -s basic_correctness/test_cumem.py",
-                "pytest -v -s basic_correctness/test_basic_correctness.py",
-                "pytest -v -s basic_correctness/test_cpu_offload.py",
-            ],
-        },
-        "vllm_basic_models_test": {
-            "title": "Basic models test",
-            "id": "vllm_basic_models_test",
-            "steps": [
-                "pytest -v -s models/test_transformers.py",
-                "pytest -v -s models/test_registry.py",
-                "pytest -v -s models/test_utils.py",
-                "pytest -v -s models/test_vision.py",
-                "pytest -v -s models/test_initialization.py",
-            ],
-        },
-        "vllm_entrypoints_test": {
-            "title": "Entrypoints Test ",
-            "id": "vllm_entrypoints_test",
-            "env_vars": {
-                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
-            },
-            "steps": [
-                " ".join(
-                    [
-                        "pytest",
-                        "-v",
-                        "-s",
-                        "entrypoints/llm",
-                        "--ignore=entrypoints/llm/test_generate.py",
-                        "--ignore=entrypoints/llm/test_collective_rpc.py",
-                    ]
-                ),
-                "pytest -v -s entrypoints/llm/test_generate.py",
-                "pytest -v -s entrypoints/offline_mode",
-            ],
-        },
-        "vllm_regression_test": {
-            "title": "Regression Test",
-            "id": "vllm_regression_test",
-            "package_install": ["modelscope"],
-            "steps": [
-                "pytest -v -s test_regression.py",
-            ],
-        },
-        "vllm_lora_tp_test_distributed": {
-            "title": "LoRA TP Test (Distributed)",
-            "id": "vllm_lora_tp_test_distributed",
-            "env_vars": {
-                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
-            },
-            "num_gpus": 4,
-            "steps": [
-                "pytest -v -s -x lora/test_chatglm3_tp.py",
-                "pytest -v -s -x lora/test_llama_tp.py",
-                "pytest -v -s -x lora/test_llm_with_multi_loras.py",
-            ],
-        },
-        "vllm_distributed_test_28_failure_test": {
-            "title": "Distributed Tests (2 GPUs) pytorch 2.8 release failure",
-            "id": "vllm_distributed_test_28_failure_test",
-            "env_vars": {
-                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
-            },
-            "num_gpus": 4,
-            "steps": [
-                "pytest -v -s distributed/test_sequence_parallel.py",
-            ],
-        },
-        "vllm_lora_28_failure_test": {
-            "title": "LoRA pytorch 2.8 failure test",
-            "id": "vllm_lora_28_failure_test",
-            "steps": ["pytest -v lora/test_quant_model.py"],
-        },
-        "vllm_multi_model_processor_test": {
-            "title": "Multi-Modal Processor Test",
-            "id": "vllm_multi_model_processor_test",
-            "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
-            "steps": [
-                "pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py",
-            ],
-        },
-        "vllm_multi_model_test_28_failure_test": {
-            "title": "Multi-Model Test (Failed 2.8 release)",
-            "id": "vllm_multi_model_test_28_failure_test",
-            "package_install": ["git+https://github.com/TIGER-AI-Lab/Mantis.git"],
-            "steps": [
-                "pytest -v -s models/multimodal/generation/test_voxtral.py",
-                "pytest -v -s models/multimodal/pooling",
-            ],
-        },
-        "vllm_pytorch_compilation_unit_tests": {
-            "title": "PyTorch Compilation Unit Tests",
-            "id": "vllm_pytorch_compilation_unit_tests",
-            "steps": [
-                "pytest -v -s compile/test_pass_manager.py",
-                "pytest -v -s compile/test_fusion.py",
-                "pytest -v -s compile/test_fusion_attn.py",
-                "pytest -v -s compile/test_silu_mul_quant_fusion.py",
-                "pytest -v -s compile/distributed/test_sequence_parallelism.py",
-                "pytest -v -s compile/distributed/test_async_tp.py",
-                "pytest -v -s compile/distributed/test_fusion_all_reduce.py",
-                "pytest -v -s compile/test_decorator.py",
-            ],
-        },
-        "vllm_language_model_test_extended_generation_28_failure_test": {
-            "title": "Language Models Test (Extended Generation) 2.8 release failure",
-            "id": "vllm_languagde_model_test_extended_generation_28_failure_test",
-            "package_install": [
-                "--no-build-isolation",
-                "git+https://github.com/Dao-AILab/causal-conv1d@v1.5.0.post8",
-            ],
-            "steps": [
-                "pytest -v -s models/language/generation/test_mistral.py",
-            ],
-        },
-        "vllm_distributed_test_2_gpu_28_failure_test": {
-            "title": "Distributed Tests (2 GPUs) pytorch 2.8 release failure",
-            "id": "vllm_distributed_test_2_gpu_28_failure_test",
-            "env_vars": {
-                "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
-            },
-            "num_gpus": 4,
-            "steps": [
-                "pytest -v -s distributed/test_sequence_parallel.py",
-            ],
-        },
-        # TODO(elainewy):need to add g6 with 4 gpus to run this test
-        "vllm_lora_test": {
-            "title": "LoRA Test %N",
-            "id": "lora_test",
-            "parallelism": 4,
-            "steps": [
-                "echo '[checking] list sharded lora tests:'",
-                " ".join(
-                    [
-                        "pytest -q --collect-only lora",
-                        "--shard-id=$$BUILDKITE_PARALLEL_JOB",
-                        "--num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT",
-                        "--ignore=lora/test_chatglm3_tp.py",
-                        "--ignore=lora/test_llama_tp.py",
-                        "--ignore=lora/test_llm_with_multi_loras.py",
-                        "--ignore=lora/test_olmoe_tp.py",
-                        "--ignore=lora/test_deepseekv2_tp.py",
-                        "--ignore=lora/test_gptoss_tp.py",
-                        "--ignore=lora/test_qwen3moe_tp.py",
-                    ]
-                ),
-                "echo '[checking] Done. list lora tests'",
-                " ".join(
-                    [
-                        "pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB",
-                        "--num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT",
-                        "--ignore=lora/test_chatglm3_tp.py",
-                        "--ignore=lora/test_llama_tp.py",
-                        "--ignore=lora/test_llm_with_multi_loras.py",
-                        "--ignore=lora/test_olmoe_tp.py",
-                        "--ignore=lora/test_deepseekv2_tp.py",
-                        "--ignore=lora/test_gptoss_tp.py",
-                        "--ignore=lora/test_qwen3moe_tp.py",
-                    ]
-                ),
-            ],
-        },
-    }
+    return _load_vllm_test_library_yaml()
 
 
 def check_parallelism(tests: Any, title: str, shard_id: int = 0, num_shards: int = 0):
@@ -228,6 +92,92 @@ def check_parallelism(tests: Any, title: str, shard_id: int = 0, num_shards: int
     return True
 
 
+def _load_disabled_vllm_tests_from_yaml() -> list[dict[str, Any]]:
+    if not _DISABLED_VLLM_TESTS_PATH.exists():
+        return []
+    with open(_DISABLED_VLLM_TESTS_PATH, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if not data or "disabled_tests" not in data:
+        return []
+    entries = data["disabled_tests"]
+    if not entries:
+        return []
+    for entry in entries:
+        if "test" not in entry or "issue" not in entry:
+            raise ValueError(
+                f"disabled_vllm_tests.yaml: each entry must have 'test' and 'issue' keys, got {entry}"
+            )
+    return entries
+
+
+def _parse_disabled_tests_from_issue_body(body: str) -> list[dict[str, Any]]:
+    match = re.search(r"```yaml\s*\n(.*?)```", body, re.DOTALL)
+    if not match:
+        return []
+    block = match.group(1)
+    data = yaml.safe_load(block)
+    if not data or "disabled_tests" not in data:
+        return []
+    return data["disabled_tests"] or []
+
+
+def _load_disabled_vllm_tests_from_github() -> list[dict[str, Any]]:
+    if not _DISABLED_VLLM_TESTS_ISSUE:
+        return []
+    url = f"https://api.github.com/repos/pytorch/pytorch/issues/{_DISABLED_VLLM_TESTS_ISSUE}"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"token {token}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            issue = json.loads(resp.read())
+        body = issue.get("body", "") or ""
+        entries = _parse_disabled_tests_from_issue_body(body)
+        # Filter out malformed entries — the issue body is user-editable
+        entries = [e for e in entries if "test" in e]
+        issue_url = issue.get("html_url", url)
+        for entry in entries:
+            entry.setdefault("issue", issue_url)
+        return entries
+    except Exception:
+        logger.warning(
+            "Failed to fetch disabled vLLM tests from GitHub issue #%d",
+            _DISABLED_VLLM_TESTS_ISSUE,
+            exc_info=True,
+        )
+        return []
+
+
+def _load_disabled_vllm_tests() -> list[dict[str, Any]]:
+    yaml_entries = _load_disabled_vllm_tests_from_yaml()
+    github_entries = _load_disabled_vllm_tests_from_github()
+    seen = {e["test"] for e in yaml_entries}
+    merged = list(yaml_entries)
+    for entry in github_entries:
+        if entry["test"] not in seen:
+            seen.add(entry["test"])
+            merged.append(entry)
+    return merged
+
+
+def _build_disabled_test_flags(
+    disabled_tests: list[dict[str, Any]], test_plan: str
+) -> str:
+    flags = []
+    for entry in disabled_tests:
+        configs = entry.get("configs")
+        if configs and test_plan not in configs:
+            continue
+        node_id = entry["test"]
+        if "::" in node_id:
+            flags.append(f"--deselect={node_id}")
+        else:
+            flags.append(f"--ignore={node_id}")
+    return " ".join(flags)
+
+
 def run_test_plan(
     test_plan: str,
     test_target: str,
@@ -251,6 +201,11 @@ def run_test_plan(
     if is_parallel:
         title = title.replace("%N", f"{shard_id}/{num_shards}")
 
+    disabled_tests = _load_disabled_vllm_tests()
+    disabled_flags = _build_disabled_test_flags(disabled_tests, test_plan)
+    if disabled_flags:
+        logger.info("Disabled test flags for %s: %s", test_plan, disabled_flags)
+
     logger.info("Running tests: %s", title)
     if pkgs:
         logger.info("Installing packages: %s", pkgs)
@@ -265,6 +220,35 @@ def run_test_plan(
             if is_parallel:
                 step = replace_buildkite_placeholders(step, shard_id, num_shards)
                 logger.info("Running parallel step: %s", step)
+            if "pytest" in step:
+                # Inject disabled test flags before rerun flags
+                if disabled_flags:
+                    step = step.replace("pytest", f"pytest {disabled_flags}", 1)
+                # Support retry with delay for all pytest commands, pytest-rerunfailures
+                # is already a dependency of vLLM. This is needed as a stop gap to reduce
+                # the number of requests to HF until #172300 can be landed to enable
+                # HF offline mode.
+                # Use a low retry count and a high delay value to lower the risk of
+                # having a retry storm and make thing worse
+                rerun_count = os.getenv(
+                    "VLLM_RERUN_FAILURES_COUNT", VLLM_DEFAULT_RERUN_FAILURES_COUNT
+                )
+                rerun_delay = os.getenv(
+                    "VLLM_RERUN_FAILURES_DELAY", VLLM_DEFAULT_RERUN_FAILURES_DELAY
+                )
+                if rerun_delay:
+                    step = step.replace(
+                        "pytest",
+                        f"pytest --reruns {rerun_count} --reruns-delay {rerun_delay}",
+                        1,
+                    )
+                else:
+                    step = step.replace(
+                        "pytest",
+                        f"pytest --reruns {rerun_count}",
+                        1,
+                    )
+
             code = run_command(cmd=step, check=False, use_shell=True)
             if code != 0:
                 failures.append(step)

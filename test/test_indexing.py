@@ -914,6 +914,11 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(IndexError, "too many indices"):
             windowed_data = t[indices[:31]]
 
+    def test_index_tensor_empty_indices(self, device):
+        t = torch.tensor([1.0], device=device)
+        with self.assertRaisesRegex(IndexError, "at least one index must be provided"):
+            torch.ops.aten.index.Tensor(t, [])
+
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10,), dtype=torch.bool, device=device)
         y = torch.ones(size=(10, 10), device=device)
@@ -1811,7 +1816,7 @@ class TestIndexing(TestCase):
 
     @parametrize("reduce", ["prod", "amin", "amax", "mean"])
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
-    @expectedFailureMPS  # Unimplemented for MPS device
+    @dtypesIfMPS(torch.int32, torch.float32)
     def test_index_reduce(self, device, dtype, reduce):
         size = (3, 4, 5)
         index_dtypes = [torch.int, torch.long]
@@ -1969,7 +1974,8 @@ class TestIndexing(TestCase):
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        assert dim >= 0 and dim < 3
+        if not (dim >= 0 and dim < 3):
+            raise AssertionError(f"dim must be in [0, 3), got {dim}")
         a = [5, 4, 3]
         a[dim] = 2000
         x = torch.zeros(a, device=device)

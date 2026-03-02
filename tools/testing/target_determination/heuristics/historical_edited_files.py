@@ -24,6 +24,7 @@ from tools.testing.test_run import TestRun
 # a correlation dict is built based on what files were edited in commits on main.
 class HistorialEditedFiles(HeuristicInterface):
     def __init__(self, **kwargs: Any) -> None:
+        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:

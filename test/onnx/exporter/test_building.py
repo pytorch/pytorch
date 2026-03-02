@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import numpy as np
+import onnx_ir as ir
 import onnxscript
-from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _building, _tensors

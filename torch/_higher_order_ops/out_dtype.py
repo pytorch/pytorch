@@ -68,6 +68,7 @@ class OutDtypeOperator(HigherOrderOperator):
                 f"out_dtype only allows the following operators: {ALLOWABLE_OPS}."
             )
 
+        # pyrefly: ignore [missing-attribute]
         res = super().__call__(op, output_dtype, *args)
 
         return res

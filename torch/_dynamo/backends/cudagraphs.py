@@ -24,7 +24,7 @@ Key components:
 import functools
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.fx
@@ -103,7 +103,7 @@ def get_device_node_mapping(
 
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
     aot_model: torch.fx.GraphModule, num_fixed: int
-) -> Optional[str]:
+) -> str | None:
     mutation_indices = find_input_mutations(aot_model.graph) - set(range(num_fixed))
     if not mutation_indices:
         return None
@@ -112,7 +112,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
     return get_mutation_stack_trace(placeholders, mutation_indices)
 
 
-def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> Optional[str]:
+def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed: int) -> str | None:
     if not config.cudagraph_backend_support_input_mutation:
         if mut_skip := check_for_mutation_ignore_cuda_graph_managed_tensor(
             aot_model, num_fixed
@@ -136,7 +136,7 @@ def get_device_index(gm: torch.fx.GraphModule) -> int:
     return device.index
 
 
-def get_stack_traces(gm: torch.fx.GraphModule) -> list[Optional[str]]:
+def get_stack_traces(gm: torch.fx.GraphModule) -> list[str | None]:
     output = output_node(gm)
     assert len(output.args) == 1
     args = output.args[0]
@@ -175,7 +175,7 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
             range(fixed),
             device_index=boxed_device_index.value,
             is_backward=False,
-            is_inference=False,  # Q: should forward is_inference here?
+            is_inference=is_inference,
             stack_traces=get_stack_traces(aot_model),
             placeholders=get_placeholder_info(aot_model.graph),
             mutated_input_idxs=find_input_mutations(aot_model.graph),

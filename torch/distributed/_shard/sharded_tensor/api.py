@@ -299,9 +299,7 @@ class ShardedTensor(ShardedTensorBase):
         if self._init_rrefs:
             with _sharded_tensor_lock:
                 global _sharded_tensor_current_id, _sharded_tensor_map
-                # pyrefly: ignore [bad-assignment]
                 self._sharded_tensor_id = _sharded_tensor_current_id
-                # pyrefly: ignore [unsupported-operation]
                 _sharded_tensor_map[self._sharded_tensor_id] = weakref.ref(self)
                 _sharded_tensor_current_id += 1
 
@@ -438,7 +436,8 @@ class ShardedTensor(ShardedTensorBase):
         # collect sizes
         for shard_md in self.metadata().shards_metadata:
             shard_rank = cast(_remote_device, shard_md.placement).rank()
-            assert shard_rank is not None
+            if shard_rank is None:
+                raise AssertionError
 
             shard_placement[shard_md] = (shard_rank, rank_sizes[shard_rank])
             rank_sizes[shard_rank] += shard_size(shard_md)
@@ -446,7 +445,8 @@ class ShardedTensor(ShardedTensorBase):
 
         gather_list: list[torch.Tensor] | None
         if rank == dst:
-            assert out is not None
+            if out is None:
+                raise AssertionError
             if enforce_dtype:
                 # enforce_dtype is deprecated.  Do it for backward compatibility.
                 dtype = out.dtype
@@ -487,7 +487,8 @@ class ShardedTensor(ShardedTensorBase):
             return
         # In _validate_output_tensor_for_gather, we raise if out == None and rank == dst
         out = cast(torch.Tensor, out)
-        assert gather_list is not None
+        if gather_list is None:
+            raise AssertionError
 
         full_size = self.metadata().size
         dims = len(full_size)
@@ -592,12 +593,13 @@ class ShardedTensor(ShardedTensorBase):
 
         if device is not None:
             device = torch.device(device) if isinstance(device, str) else device
-            assert (
+            if not (
                 isinstance(device, torch.device)
                 and device.index == torch.cuda.current_device()
-            ), (
-                """Only device without device id (e.g. "cpu" or "cuda") is expected for ShardedTensor!"""
-            )
+            ):
+                raise AssertionError(
+                    """Only device without device id (e.g. "cpu" or "cuda") is expected for ShardedTensor!"""
+                )
 
         current_device = torch.device(torch.cuda.current_device())
         # returns a copy of ShardedTensor on CUDA current device
@@ -784,22 +786,24 @@ class ShardedTensor(ShardedTensorBase):
         if recalc_metadata:
             # for recalc use cases, we only support rw for now, limit the blast radius
             # will modify here once we support more sharding type
-            assert (
+            if not (
                 len(local_shards) > 0
                 and len(global_sharded_tensor_metadata.shards_metadata) > current_rank
-            ), (
-                f"# for metadata recalculation, local_shards must be larger than 0 "
-                f"actual:{len(local_shards)}, # glb metadata must be greater than any rank id, "
-                f"# metadata:{len(global_sharded_tensor_metadata.shards_metadata)}, rank id:{current_rank}"
-            )
+            ):
+                raise AssertionError(
+                    f"# for metadata recalculation, local_shards must be larger than 0 "
+                    f"actual:{len(local_shards)}, # glb metadata must be greater than any rank id, "
+                    f"# metadata:{len(global_sharded_tensor_metadata.shards_metadata)}, rank id:{current_rank}"
+                )
             local_md = [
                 shard_md
                 for shard_md in global_sharded_tensor_metadata.shards_metadata
                 if shard_md.placement.rank() == current_rank
             ]
-            assert len(local_md) == 1, (
-                f"should has and only has one metadata for local rank, actual:{local_md}"
-            )
+            if len(local_md) != 1:
+                raise AssertionError(
+                    f"should has and only has one metadata for local rank, actual:{local_md}"
+                )
             local_shards[0].metadata = local_md[0]
         tensor_properties = global_sharded_tensor_metadata.tensor_properties
 
@@ -1010,7 +1014,8 @@ class ShardedTensor(ShardedTensorBase):
             shard_meta = shard.metadata
             local_shard_tensor = shard.tensor
             placement = shard_meta.placement
-            assert placement is not None, "Must specify placement for `Shard`!"
+            if placement is None:
+                raise AssertionError("Must specify placement for `Shard`!")
             rank = placement.rank()
             local_device = placement.device()
 

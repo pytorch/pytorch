@@ -14,7 +14,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -83,7 +83,8 @@ class ModelWithIgnoredModules(Model):
     """Adds a variable number of :class:`IgnoredModule` to ``self.layer1``."""
 
     def __init__(self, num_ignored: int) -> None:
-        assert num_ignored >= 0
+        if not (num_ignored >= 0):
+            raise AssertionError(f"Expected num_ignored >= 0, got {num_ignored}")
         super().__init__()
         layer1_modules = (
             [torch.nn.Linear(5, 4), torch.nn.Linear(4, 4)]
@@ -93,7 +94,7 @@ class ModelWithIgnoredModules(Model):
         self.layer1 = torch.nn.Sequential(*layer1_modules)
 
 
-class TestFSDPIgnoredModules(FSDPTest):
+class TestFSDPIgnoredModules(FSDPTestContinuous):
     @property
     def world_size(self):
         return min(torch.accelerator.device_count(), 2)

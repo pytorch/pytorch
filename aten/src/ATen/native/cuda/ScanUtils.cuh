@@ -458,12 +458,7 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   if (self.numel() == self.size(dim)) {
     if constexpr (std::is_same_v<BinaryFunction, std::plus<scalar_t>>) {
       if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms()) && (self.is_floating_point() || self.is_complex())) {
-#if defined(CUDA_VERSION) || defined(USE_ROCM)
         cuda::cub::inclusive_deterministic_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
-#else
-        globalContext().alertNotDeterministic("cumsum_cuda_kernel");
-        cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
-#endif
       } else {
         cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
       }

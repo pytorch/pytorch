@@ -320,8 +320,10 @@ Constants
 ~~~~~~~~~~~~~~~~~~~~~~
 
 ======================================= ===========================================
+``e``                                       Euler's number, the base of natural logarithms (~2.7183). Alias for :attr:`math.e`.
 ``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
 ``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+``pi``                                      The ratio of a circle's circumference to its diameter (~3.1416). Alias for :attr:`math.pi`.
 ======================================= ===========================================
 
 Pointwise Ops
@@ -731,6 +733,7 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+    typename
 
 Symbolic Numbers
 ----------------
@@ -788,7 +791,7 @@ Optimizations
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
+`torch.compile documentation <https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler.html>`__
 
 Operator Tags
 ------------------------------------

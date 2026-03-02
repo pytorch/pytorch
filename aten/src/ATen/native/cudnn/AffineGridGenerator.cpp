@@ -55,8 +55,7 @@ Tensor cudnn_affine_grid_generator_backward(
 
 #include <ATen/TensorUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -122,7 +121,6 @@ Tensor cudnn_affine_grid_generator_backward(
   return grad_theta_t;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED()

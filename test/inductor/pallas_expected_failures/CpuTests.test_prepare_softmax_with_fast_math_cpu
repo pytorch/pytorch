@@ -1,6 +1,0 @@
-FAIL
-           ^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/test/inductor/test_torchinductor.py", line 13982, in test_prepare_softmax_with_fast_math
-    self.assertTrue(same(ref, act, tol=1e-2), f"Ref:\n{ref}\nAct:\n{act}")
-AssertionError: False is not true : Ref:
-(tensor([[3.0000],

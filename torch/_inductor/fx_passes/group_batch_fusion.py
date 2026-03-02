@@ -173,6 +173,7 @@ class PostGradBatchLinearFusion(BatchFusion):
     def _addmm_node_can_be_fused(self, node: torch.fx.Node) -> bool:
         # pyre-fixme[7]: Incompatible return type
         return (
+            # pyrefly: ignore [bad-return]
             node.kwargs.get("beta", DEFAULT_BETA) == DEFAULT_BETA
             and node.kwargs.get("alpha", DEFAULT_ALPHA) == DEFAULT_ALPHA  # type: ignore[return-value]
         )

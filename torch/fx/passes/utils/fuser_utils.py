@@ -1,5 +1,5 @@
 import copy
-from queue import SimpleQueue
+import heapq
 from typing import Optional as _Optional
 
 import torch.fx
@@ -7,42 +7,41 @@ from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.passes.tools_common import (  # noqa: F401
-    legalize_graph,
-    NodeList,
-    NodeSet,
-    stable_topological_sort,
-)
+from torch.fx.passes.tools_common import legalize_graph, NodeList, NodeSet  # noqa: F401
 from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-defined]
 
 
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
-    # sort nodes according to the topological order
+    # Stable topological sort: among nodes with no dependency between them,
+    # preserve their relative order in the input list. This uses a min-heap
+    # keyed by original position instead of a FIFO queue.
     indegree_map = dict.fromkeys(nodes, 0)
-    candidates: SimpleQueue[Node] = SimpleQueue()
+    position = {node: i for i, node in enumerate(nodes)}
+    candidates: list[tuple[int, Node]] = []
 
     for node in nodes:
         for n in node.all_input_nodes:
             if n in indegree_map:
                 indegree_map[node] += 1
         if indegree_map[node] == 0:
-            candidates.put(node)
+            heapq.heappush(candidates, (position[node], node))
 
     sorted_nodes: NodeList = []
-    while not candidates.empty():
-        node = candidates.get()
+    while candidates:
+        _, node = heapq.heappop(candidates)
         sorted_nodes.append(node)
 
         for n in node.users:
             if n in indegree_map:
                 indegree_map[n] -= 1
                 if indegree_map[n] == 0:
-                    candidates.put(n)
+                    heapq.heappush(candidates, (position[n], n))
 
-    assert len(nodes) == len(sorted_nodes), (
-        "topological sorted nodes doesn't have same length as input nodes"
-    )
+    if len(nodes) != len(sorted_nodes):
+        raise AssertionError(
+            "topological sorted nodes doesn't have same length as input nodes"
+        )
 
     return sorted_nodes
 
@@ -131,16 +130,20 @@ def fuse_as_graphmodule(
     # assumption: nodes are already sorted in topo order
 
     for node in nodes:
-        assert node.graph.owning_module is gm, (
-            f"{node} doesn't belong to passed in graph module {gm._get_name()}"
-        )
-        assert not node._erased, f"{node} has been removed from owning graph"
-        assert node in gm.graph._find_nodes_lookup_table, (
-            f"{node} is not found in graph module {gm._get_name()}"
-        )
+        if node.graph.owning_module is not gm:
+            raise AssertionError(
+                f"{node} doesn't belong to passed in graph module {gm._get_name()}"
+            )
+        if node._erased:
+            raise AssertionError(f"{node} has been removed from owning graph")
+        if node not in gm.graph._find_nodes_lookup_table:
+            raise AssertionError(
+                f"{node} is not found in graph module {gm._get_name()}"
+            )
 
     # validates partition doesn't introduce dependency circles in the graph
-    assert validate_partition(nodes), "Invalid partition, found dependency cycles"
+    if not validate_partition(nodes):
+        raise AssertionError("Invalid partition, found dependency cycles")
 
     # if no dict of partition nodes is provided, reconstruct it by nodes list to reduce lookup time
     if partition_lookup_table is None:
@@ -220,41 +223,48 @@ def insert_subgm(
     sub_gm: GraphModule,
     orig_inputs: tuple[Node, ...],
     orig_outputs: tuple[Node, ...],
+    insertion_point: Node | None = None,
 ) -> GraphModule:
     # add sub_gm into gm
     submodule_name = sub_gm.__class__.__name__
     gm.add_submodule(submodule_name, sub_gm)
 
-    def last_node(target_nodes: tuple[Node, ...]) -> Node | None:
+    # Use provided insertion point, or fall back to last output node for backwards compat
+    if insertion_point is None:
         for node in reversed(gm.graph.nodes):
-            if node in target_nodes:
-                return node
-        return None
-
-    last_output_node: Node | None = last_node(orig_outputs)
-    assert last_output_node is not None
+            if node in orig_outputs:
+                insertion_point = node
+                break
+        if insertion_point is None:
+            raise AssertionError(
+                "Cannot determine insertion point: no insertion_point provided and "
+                "orig_outputs is empty. Pass the last partition node as insertion_point."
+            )
 
     # Create a call_module node in main graph.
-    with gm.graph.inserting_after(last_output_node):
+    with gm.graph.inserting_after(insertion_point):
         module_node = gm.graph.call_module(
             submodule_name, args=orig_inputs, kwargs=None
         )
         output_node = sub_gm.graph.output_node()
 
-    next_node = module_node.next
-    with gm.graph.inserting_before(next_node):
-        if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
-            # main_remapping[comp.orig_outputs[0]] = module_node
-            orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
-        else:
-            for i, orig_output in enumerate(orig_outputs):
-                # Use Proxy to record getitem access.
-                proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
-                orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
+    # Replace uses of original outputs with the fused module outputs.
+    # If there are no external outputs, skip replacement (nothing to replace).
+    if orig_outputs:
+        next_node = module_node.next
+        with gm.graph.inserting_before(next_node):
+            if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
+                # main_remapping[comp.orig_outputs[0]] = module_node
+                orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
+            else:
+                for i, orig_output in enumerate(orig_outputs):
+                    # Use Proxy to record getitem access.
+                    proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
+                    orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
 
-            module_node.meta["val"] = tuple(
-                orig_output.meta.get("val", None) for orig_output in orig_outputs
-            )
+                module_node.meta["val"] = tuple(
+                    orig_output.meta.get("val", None) for orig_output in orig_outputs
+                )
     return gm
 
 
@@ -284,11 +294,11 @@ def fuse_by_partitions(
             always_return_tuple=always_return_tuple,
         )
 
-        insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)
+        insert_subgm(gm, sub_gm, orig_inputs, orig_outputs, sorted_nodes[-1])
 
         erase_nodes(gm, sorted_nodes)
 
-    stable_topological_sort(gm)
+    torch.fx.passes.tools_common.stable_topological_sort(gm)
     gm.graph.lint()
 
     return gm

@@ -94,9 +94,7 @@ T sigmoid(T in)  {
 namespace kernel {
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(512, 4)
-#endif
 __global__ void lstm_cell_forward(
             TensorInfo<scalar_t, index_type> input,
             TensorInfo<scalar_t, index_type> hidden,
@@ -181,9 +179,7 @@ __global__ void lstm_cell_forward(
 }
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(512, 4)
-#endif
 __global__ void lstm_cell_backward(
               TensorInfo<scalar_t, index_type> storage,
               TensorInfo<scalar_t, index_type> gradInGates,
@@ -246,9 +242,7 @@ __global__ void lstm_cell_backward(
 }
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(512, 4)
-#endif
 __global__ void gru_cell_forward(
             TensorInfo<scalar_t, index_type> Input,
             TensorInfo<scalar_t, index_type> Hidden,
@@ -316,9 +310,7 @@ __global__ void gru_cell_forward(
 }
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(512, 4)
-#endif
 __global__ void gru_cell_backward(
              TensorInfo<scalar_t, index_type> gradInInput,
              TensorInfo<scalar_t, index_type> gradInHidden,

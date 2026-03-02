@@ -28,7 +28,7 @@ the function call as is in the graph, and only when we Dynamo through the backwa
 compiled autograd do we inline into the function.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -133,17 +133,28 @@ class TransformGetItemToIndex(TorchFunctionMode):
     # scalar and create a view. We do not want that behavior in this case, so we
     # use this torchfunctionmode to override that behavior for score_mod
     # wherever we're running it.
+    #
+    # We also convert integer indices to 0-D tensors so that temp[0] produces
+    # the same backward graph as temp[0 * q_idx] (zeros_and_scatter with atomic_add).
     def __torch_function__(
         self,
         func: OpOverload,
         types: tuple[torch._C._TensorMeta, ...],
         args: tuple[object, ...] = (),
-        kwargs: Optional[dict[str, object]] = None,
+        kwargs: dict[str, object] | None = None,
     ) -> object:
         if func is torch.Tensor.__getitem__:
+            tensor_to_index = args[0]
+            assert isinstance(tensor_to_index, torch.Tensor)
             index_args = pytree.tree_leaves(args[1])
-            if all(isinstance(x, torch.Tensor) for x in index_args):
-                return mod_index(args[0], index_args)
+            if all(isinstance(x, (torch.Tensor, int)) for x in index_args):
+                converted_indices = [
+                    torch.tensor(x, dtype=torch.int64, device=tensor_to_index.device)
+                    if isinstance(x, int)
+                    else x
+                    for x in index_args
+                ]
+                return mod_index(tensor_to_index, converted_indices)
         return func(*args, **(kwargs or {}))
 
 
@@ -157,6 +168,7 @@ class TraceWrapped(HigherOrderOperator):
         super().__init__("trace_wrapped")
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
 
@@ -180,7 +192,7 @@ def _assert_meta(
 def inner_trace(
     mode: ProxyTorchDispatchMode,
     *args: Any,
-    bw_state: Optional[BackwardState] = None,
+    bw_state: BackwardState | None = None,
     **kwargs: Any,
 ) -> Any:
     def self_invoke(*args: Any, **dyn_kwargs: Any) -> Any:

@@ -4,8 +4,6 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 
-import torch
-
 from ..ir import get_free_symbols
 from ..kernel.mm import decompose_k_subgraph_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
@@ -25,15 +23,18 @@ class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     """empty heuristics to skip decompose k on anything not cuda"""
 
 
-# on CUDA, we don't support hip for decompose_k yet
+@register_template_heuristic(
+    decompose_k_subgraph_template.uid,
+    "xpu",
+    op_name="mm",
+)
+# Register on CUDA (both NVIDIA and ROCm/HIP)
+# Runtime enablement is controlled by config.triton.num_decompose_k_splits (0 disables)
 @register_template_heuristic(
     decompose_k_subgraph_template.uid,
     "cuda",
-    register=torch.version.hip is None,
     op_name="mm",
 )
-# TODO(coconutruben): enable decompose k on AMD by removing the register bool
-# and benchmarking it for performance and stability
 # TODO(coconutruben): enable decompose k on other devices (xpu, cpu, mps, mtia)
 # by either adding specific register_template_heuristic tags, or setting the
 # device to None (enabled on all devices)

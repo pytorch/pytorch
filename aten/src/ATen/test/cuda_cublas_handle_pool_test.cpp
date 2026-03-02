@@ -39,7 +39,7 @@ TEST(CUDABlasHandlePoolTest, ConcurrentGetAndClearWorkspaces) {
             error_count++;
           }
         }
-      } catch (const std::exception& e) {
+      } catch (const std::exception&) {
         error_count++;
       }
     });
@@ -53,7 +53,7 @@ TEST(CUDABlasHandlePoolTest, ConcurrentGetAndClearWorkspaces) {
           at::cuda::clearCublasWorkspaces();
           std::this_thread::yield();
         }
-      } catch (const std::exception& e) {
+      } catch (const std::exception&) {
         error_count++;
       }
     });

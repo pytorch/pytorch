@@ -24,6 +24,7 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #endif
 
 namespace at::native { namespace {
@@ -315,7 +316,7 @@ void isin_default_kernel_cpu(
     const Tensor& out) {
   // Since test elements is not an input of the TensorIterator, type promotion
   // must be done manually.
-  ScalarType common_type = at::result_type(elements, test_elements);
+  ScalarType common_type = at::native::result_type(elements, test_elements);
   Tensor promoted_elements = elements.to(common_type);
   Tensor test_elements_flat = test_elements.to(common_type).view(-1);
   auto test_elements_stride = test_elements_flat.stride(0);

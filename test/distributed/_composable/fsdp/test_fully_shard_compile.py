@@ -225,11 +225,15 @@ class TestFullyShardCompile(FSDPTest):
                 and node.args[0].op == "placeholder"
             ):
                 unsharded_param_graph_inputs.add(node.args[0])
-        assert len(unsharded_param_graph_inputs) > 0
-        assert len(unsharded_param_graph_inputs) == len(list(model.parameters())), """\
+        if not (len(unsharded_param_graph_inputs) > 0):
+            raise AssertionError(
+                "Expected unsharded_param_graph_inputs to be non-empty"
+            )
+        if len(unsharded_param_graph_inputs) != len(list(model.parameters())):
+            raise AssertionError("""\
 Expected all model parameters to be wrapped by FSDP2 and
 have their unsharded version as graph input, but it's not true!
-"""
+""")
         no_aliased_unsharded_params_in_graph_inputs = True
         err_msg = ""
         for aliased_graph_inputs in storage_id_to_graph_inputs.values():
@@ -487,7 +491,9 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
         self.skipTestForOldSm()
         with (
             torch._dynamo.config.patch(skip_fsdp_hooks=False),
-            torch._functorch.config.patch(recompute_views=True),
+            torch._functorch.config.patch(
+                recompute_views=True,
+            ),
         ):
             inputs = torch.randn(8, 8)
             model = torch.nn.Linear(8, 8)
@@ -562,15 +568,18 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
                 if fwd_fullgraph:
                     self.assertEqual(len(counters["graph_break"]), 1)
                     self.assertExpectedInline(
-                        next(iter(counters["graph_break"].keys())),
+                        next(iter(counters["graph_break"].keys())).split(
+                            "\n For more details"
+                        )[0],
                         """\
-Unsupported Tensor.backward() call
-  Explanation: Dynamo currently does not support tracing `Tensor.backward()`.
-  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+autograd.grad with compiled autograd
+  Explanation: torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled. These two features have conflicting requirements for how the autograd graph is traced.
+  Hint: Disable compiled autograd by removing the compiled_autograd context manager.
+  Hint: Or move the autograd.grad() call outside the torch.compile region.
+  Hint: Or restructure your code so autograd.grad() and compiled_autograd don't overlap.
 
-  Developer debug context: call_method TensorVariable() backward () {}
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
+  Developer debug context: compiled_autograd is currently enabled
+""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
@@ -593,6 +602,7 @@ Unsupported Tensor.backward() call
                 },
                 inline_inbuilt_nn_modules=True,
                 skip_fsdp_hooks=False,
+                trace_autograd_ops=True,
             ),
             torch._functorch.config.patch(
                 enable_autograd_cache=False,
@@ -919,7 +929,12 @@ Unsupported Tensor.backward() call
                             requires_grad_param_count += 1
                         else:
                             v.requires_grad_(False)
-                assert requires_grad_param_count == n_layers * len(requires_grad_params)
+                expected = n_layers * len(requires_grad_params)
+                if requires_grad_param_count != expected:
+                    raise AssertionError(
+                        f"Expected requires_grad_param_count == {expected}, "
+                        f"got {requires_grad_param_count}"
+                    )
             for _, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(

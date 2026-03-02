@@ -12,7 +12,7 @@ from builtins import (  # noqa: F401
     str as _str,
 )
 from collections.abc import Sequence
-from typing import Any, IO, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, IO, Optional, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import Self
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
@@ -39,6 +39,7 @@ __all__ = ["Number", "Device", "FileLike", "Storage"]
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
 _TensorOrTensors: TypeAlias = Tensor | Sequence[Tensor]  # noqa: PYI047
+_TensorOrOptionalTensors: TypeAlias = Union[Tensor, Sequence[Optional[Tensor]]]  # noqa: PYI047
 _TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
     Tensor,
     Sequence[Tensor],

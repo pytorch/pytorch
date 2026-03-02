@@ -6,7 +6,7 @@ import logging
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -16,6 +16,7 @@ from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
 from torch._inductor import comms
+from torch._inductor.custom_graph_pass import CustomInferenceAwareGraphPass
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
@@ -34,7 +35,6 @@ from ..pattern_matcher import (
     CallFunctionVarArgs,
     filter_nodes,
     fwd_only,
-    gen_register_replacement,
     get_arg_value,
     get_mutation_region_id,
     Ignored,
@@ -63,6 +63,7 @@ from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
 from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
+from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
 
@@ -84,6 +85,30 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
+
+def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
+    """
+    Remove profiler ops (record_function) from the graph.
+    These ops are side-effectful but don't affect computation,
+    and we don't want them to block fusion.
+    """
+    profiler_ops = OrderedSet(
+        [
+            torch.ops.profiler._record_function_enter.default,
+            torch.ops.profiler._record_function_enter_new.default,
+            torch.ops.profiler._record_function_exit._RecordFunction,
+        ]
+    )
+
+    nodes_to_remove = []
+
+    for node in graph.nodes:
+        if node.op == "call_function" and node.target in profiler_ops:
+            nodes_to_remove.append(node)
+
+    for node in reversed(nodes_to_remove):
+        graph.erase_node(node)
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -113,6 +138,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
+        if isinstance(post_grad_custom_pre_pass, CustomInferenceAwareGraphPass):
+            post_grad_custom_pre_pass = functools.partial(
+                post_grad_custom_pre_pass, is_inference=is_inference
+            )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             post_grad_custom_pre_pass
         )
@@ -133,6 +162,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             # Concat linear optimization for WOQ int4
             concat_linear_woq_int4(gm)
 
+    # Remove profiler ops (record_function) to prevent them blocking fusion
+    GraphTransformObserver(gm, "remove_profiler_ops").apply_graph_pass(
+        _remove_profiler_ops
+    )
+
     if config.pattern_matcher:
         lazy_init()
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
@@ -146,6 +180,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
+        if config.partitioned_scatter_enabled:
+            GraphTransformObserver(
+                gm, "partitioned_scatter_optimization"
+            ).apply_graph_pass(partitioned_scatter_optimization_pass)
         for pass_name in config.post_grad_fusion_options:
             # skip all patterns for group batch fusions or quantization patterns
             if pass_name in POST_GRAD_FUSIONS or pass_name in OPTIMUS_EXCLUDE_POST_GRAD:
@@ -184,6 +222,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
+        if isinstance(post_grad_custom_post_pass, CustomInferenceAwareGraphPass):
+            post_grad_custom_post_pass = functools.partial(
+                post_grad_custom_post_pass, is_inference=is_inference
+            )
         GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
             post_grad_custom_post_pass
         )
@@ -295,15 +337,22 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
         overlap_deps = config.aten_distributed_optimizations.insert_overlap_deps
+        fusion_regions = config.aten_distributed_optimizations.enable_fusion_regions
 
-        # by default, insert overlap deps within inductor
+        # by default, insert overlap deps and enable fusion regions within inductor
         with config.patch(
-            "aten_distributed_optimizations.insert_overlap_deps",
-            True if overlap_deps is None else overlap_deps,
+            {
+                "aten_distributed_optimizations.insert_overlap_deps": (
+                    True if overlap_deps is None else overlap_deps
+                ),
+                "aten_distributed_optimizations.enable_fusion_regions": (
+                    True if fusion_regions is None else fusion_regions
+                ),
+            }
         ):
             GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
                 lambda graph: schedule_overlap_bucketing_from_inductor_configs(
-                    graph.owning_module
+                    graph.owning_module,
                 )
             )
 
@@ -682,73 +731,17 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         raise AssertionError("scan is not lowered to while_loop")
 
 
-@functools.cache
-def register_addmm_activation_fusions():
-    def is_valid_addmm_activation_fusion(match: Match) -> bool:
-        # Exclude ROCm
-        if torch.version.hip:
-            return False
-
-        if config.max_autotune or config.max_autotune_gemm:
-            return False
-
-        inp = match.kwargs["inp"].meta["val"]
-
-        if not inp.is_cuda:
-            return False
-
-        output = match.output_node()
-        return not all(
-            is_pointwise_use(use, lambda target: torch.Tag.reduction in target.tags)
-            for use in output.users
-        )
-
-    args = [torch.empty(3), torch.empty(4, 2), torch.empty(2, 3)]
-    beta_alpha_workaround = {"beta": 1.3, "alpha": 1.2}
-
-    def addmm_relu_pattern(inp, m1, m2, beta, alpha):
-        return aten.relu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha))
-
-    def addmm_gelu_pattern(inp, m1, m2, beta, alpha):
-        return aten.gelu(
-            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha), approximate="tanh"
-        )
-
-    def addmm_relu_replacement(inp, m1, m2, beta, alpha):
-        return aten._addmm_activation(inp, m1, m2, beta=beta, alpha=alpha)
-
-    def addmm_gelu_replacement(inp, m1, m2, beta, alpha):
-        return aten._addmm_activation(
-            inp, m1, m2, beta=beta, alpha=alpha, use_gelu=True
-        )
-
-    patterns = (addmm_relu_pattern, addmm_gelu_pattern)
-    replacements = (addmm_relu_replacement, addmm_gelu_replacement)
-    for pattern, replacement in zip(patterns, replacements):
-        key = f"{pattern.__name__}"
-        gen_register_replacement(
-            key,
-            # pyrefly: ignore [bad-argument-type]
-            pattern,
-            # pyrefly: ignore [bad-argument-type]
-            replacement,
-            args,
-            # pyrefly: ignore [bad-argument-type]
-            trace_fn=fwd_only,
-            # pyrefly: ignore [bad-argument-type]
-            pass_dicts=pass_patterns[1],
-            extra_check=is_valid_addmm_activation_fusion,
-            scalar_workaround=beta_alpha_workaround,
-        )
-
-
 @init_once_fakemode
-def lazy_init():
+def lazy_init(input_device: Optional[torch.device] = None):
     if torch._C._has_mkldnn:
         from . import decompose_mem_bound_mm  # noqa: F401
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
+    else:
+        from .quantization import _register_woq_lowerings
+
+        _register_woq_lowerings()
 
     # Put this patterns in post-grad pass rather than joint-graph
     # pass since otherwise there will be perf/peak-memory regression:
@@ -766,8 +759,6 @@ def lazy_init():
         pass_dicts=pass_patterns[1],
         extra_check=prepare_softmax_extra_check,
     )
-
-    register_addmm_activation_fusions()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -1027,6 +1018,9 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
             val1.layout != torch.strided
             or statically_known_true(sym_eq(val1.stride(), val2.stride()))
         )
+        # Check conjugate and negative bits - a clone that resolves these is not a no-op
+        and val1.is_conj() == val2.is_conj()
+        and val1.is_neg() == val2.is_neg()
     )
 
 
@@ -1223,6 +1217,19 @@ def remove_assert_ops(graph: torch.fx.Graph):
         graph.erase_node(node)
 
 
+def apply_pass_to_subgraphs(pass_fn: Callable[[fx.Graph], None], graph: fx.Graph):
+    """Recursively apply a pass function to all subgraphs referenced by get_attr nodes."""
+    gm = graph.owning_module
+    if gm is None:
+        return
+    subgraph_names: OrderedSet[str] = OrderedSet(
+        x.target for x in graph.find_nodes(op="get_attr")
+    )
+    for child_name, child_mod in gm.named_children():
+        if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
+            pass_fn(child_mod.graph)
+
+
 def decompose_triton_kernel_wrapper_functional(graph):
     """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
     mutation node.
@@ -1231,6 +1238,9 @@ def decompose_triton_kernel_wrapper_functional(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
+    # First, recursively process any subgraphs
+    apply_pass_to_subgraphs(decompose_triton_kernel_wrapper_functional, graph)
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -1483,18 +1493,18 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
-    subgraph_names: OrderedSet[str] = OrderedSet(
-        x.target for x in gm.graph.find_nodes(op="get_attr")
-    )
 
-    for child_name, child_mod in gm.named_children():
-        if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
-            view_to_reshape(child_mod)
+    def _view_to_reshape_graph(graph):
+        for nd in graph.find_nodes(
+            op="call_function", target=torch.ops.aten.view.default
+        ):
+            nd.target = torch.ops.aten.reshape.default
 
-    for nd in gm.graph.find_nodes(
-        op="call_function", target=torch.ops.aten.view.default
-    ):
-        nd.target = torch.ops.aten.reshape.default
+    def _recursive_view_to_reshape(graph):
+        apply_pass_to_subgraphs(_recursive_view_to_reshape, graph)
+        _view_to_reshape_graph(graph)
+
+    _recursive_view_to_reshape(gm.graph)
 
 
 def should_prefer_unfused_addmm(match):

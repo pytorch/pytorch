@@ -173,4 +173,5 @@ class TestBuildCmdAndRun(unittest.TestCase):
         mock_gen.assert_called_once_with(params)
         mock_run.assert_called_once()
         _, kwargs = mock_run.call_args
-        assert kwargs.get("cwd") == "vllm"
+        if kwargs.get("cwd") != "vllm":
+            raise AssertionError(f"Expected cwd='vllm', got cwd={kwargs.get('cwd')!r}")

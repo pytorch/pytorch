@@ -21,6 +21,8 @@
 
 namespace torch::inductor {
 
+AOTIModelContainerRunner::AOTIModelContainerRunner() = default;
+
 AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& model_so_path,
     size_t num_models,
@@ -70,7 +72,7 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
 #define TRY_LOAD_SYMBOL(var, name_str)                                               \
   try {                                                                              \
     var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str));                 \
-  } catch (const at::DynamicLibraryError& e) {                                       \
+  } catch (const at::DynamicLibraryError&) {                                         \
     std::cerr                                                                        \
         << "[WARNING] Could not dlsym " << name_str                                  \
         << ". This is okay if you don't need functionality from " << name_str        \
@@ -126,9 +128,13 @@ consider rebuild your model with the latest AOTInductor.");
 }
 
 AOTIModelContainerRunner::~AOTIModelContainerRunner() {
-  AOTIRuntimeError result = delete_func_(container_handle_);
-  TORCH_CHECK(
-      result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
+  // Custom device implementations don't set delete_func_
+  if (delete_func_ != nullptr) {
+    AOTIRuntimeError result = delete_func_(container_handle_);
+    TORCH_CHECK(
+        result == AOTI_RUNTIME_SUCCESS,
+        "AOTInductorModelContainerDelete failed");
+  }
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(

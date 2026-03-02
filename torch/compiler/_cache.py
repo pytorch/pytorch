@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Generator
 from contextlib import contextmanager
 from itertools import chain
-from typing import Any, Optional
+from typing import Any
 
 from torch.utils._appending_byte_serializer import (
     AppendingByteSerializer,
@@ -41,7 +41,8 @@ class CacheArtifact(ABC):
 
     @staticmethod
     def encode(content: Any) -> bytes:
-        assert isinstance(content, bytes), f"Expected bytes, got {type(content)}"
+        if not isinstance(content, bytes):
+            raise AssertionError(f"Expected bytes, got {type(content)}")
         return content
 
     @abstractmethod
@@ -69,9 +70,10 @@ class CacheArtifactFactory:
     @classmethod
     def register(cls, artifact_cls: type[CacheArtifact]) -> type[CacheArtifact]:
         artifact_type_key = artifact_cls.type()
-        assert artifact_cls.type() not in cls._artifact_types, (
-            f"Artifact of type={artifact_type_key} already registered in mega-cache artifact factory"
-        )
+        if artifact_cls.type() in cls._artifact_types:
+            raise AssertionError(
+                f"Artifact of type={artifact_type_key} already registered in mega-cache artifact factory"
+            )
         cls._artifact_types[artifact_type_key] = artifact_cls
         setattr(
             CacheInfo,
@@ -82,9 +84,10 @@ class CacheArtifactFactory:
 
     @classmethod
     def _get_artifact_type(cls, artifact_type_key: str) -> type[CacheArtifact]:
-        assert artifact_type_key in cls._artifact_types, (
-            f"Artifact of type={artifact_type_key} not registered in mega-cache artifact factory"
-        )
+        if artifact_type_key not in cls._artifact_types:
+            raise AssertionError(
+                f"Artifact of type={artifact_type_key} not registered in mega-cache artifact factory"
+            )
         return cls._artifact_types[artifact_type_key]
 
     @classmethod
@@ -251,7 +254,7 @@ class CacheArtifactManager:
         return len(cls._new_cache_artifacts) != 0
 
     @classmethod
-    def serialize(cls) -> Optional[tuple[bytes, CacheInfo]]:
+    def serialize(cls) -> tuple[bytes, CacheInfo] | None:
         """
         Converts the "mega" list into portable format
         """
@@ -277,7 +280,7 @@ class CacheArtifactManager:
         return None
 
     @staticmethod
-    def deserialize(serialized_artifacts: bytes) -> Optional[CacheArtifactsResult]:
+    def deserialize(serialized_artifacts: bytes) -> CacheArtifactsResult | None:
         """
         Converts the portable format back into CacheArtifacts
         """

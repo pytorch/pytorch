@@ -335,7 +335,7 @@ struct PyWarningHandler {
  private:
   InternalHandler internal_handler_;
   at::WarningHandler* prev_handler_;
-  bool in_exception_;
+  bool in_exception_{false};
 };
 
 namespace detail {

@@ -51,40 +51,39 @@ jobs:
         docker-image-name: [
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
-          pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm,
-          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
-          pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11,
-          pytorch-linux-jammy-py3.10-clang12,
-          pytorch-linux-jammy-py3.11-clang12,
-          pytorch-linux-jammy-py3.12-clang12,
-          pytorch-linux-jammy-py3.13-clang12,
-          pytorch-linux-jammy-py3.14-clang12,
+          pytorch-linux-jammy-py3.10-clang15,
+          pytorch-linux-jammy-py3.11-clang15,
+          pytorch-linux-jammy-py3.12-clang15,
+          pytorch-linux-jammy-py3.13-clang15,
+          pytorch-linux-jammy-py3.14-clang15,
+          pytorch-linux-jammy-py3.14t-clang15,
           pytorch-linux-jammy-rocm-n-py3,
           pytorch-linux-noble-rocm-n-py3,
+          pytorch-linux-noble-rocm-nightly-py3,
           pytorch-linux-jammy-rocm-n-py3-benchmarks,
-          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang15,
           pytorch-linux-jammy-py3.10-gcc11,
           pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-py3.12-pallas,
           pytorch-linux-jammy-cuda12.8-py3.12-pallas,
+          pytorch-linux-jammy-tpu-py3.12-pallas,
           pytorch-linux-jammy-xpu-n-1-py3,
           pytorch-linux-noble-xpu-n-py3,
           pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
           pytorch-linux-jammy-py3-clang18-asan,
-          pytorch-linux-jammy-py3-clang12-onnx,
+          pytorch-linux-jammy-py3-clang15-onnx,
           pytorch-linux-jammy-linter,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter,
           # TODO: Re-enable me when docker pin update happens
-          # pytorch-linux-jammy-py3-clang12-executorch,
+          # pytorch-linux-jammy-py3-clang15-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu,
           pytorch-linux-noble-riscv64-py3.12-gcc14
         ]
         include:
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
-            runner: linux.arm64.m7g.4xlarge
-          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-clang21
             runner: linux.arm64.m7g.4xlarge
           - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
             runner: linux.arm64.m7g.4xlarge
@@ -107,6 +106,9 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
 
       - name: Build docker image
         id: build-docker-image

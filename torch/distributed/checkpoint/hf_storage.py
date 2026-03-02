@@ -4,7 +4,7 @@ import json
 import logging
 import queue
 import threading
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
@@ -54,7 +54,7 @@ class HuggingFaceStorageWriter(FileSystemWriter):
     def __init__(
         self,
         path: str,
-        fqn_to_index_mapping: Optional[dict[str, int]] = None,
+        fqn_to_index_mapping: dict[str, int] | None = None,
         thread_count: int = 1,
         save_distributed: bool = False,
         enable_consolidation: bool = False,
@@ -83,10 +83,10 @@ class HuggingFaceStorageWriter(FileSystemWriter):
             serialization_format=SerializationFormat.SAFETENSORS,
             thread_count=thread_count,
         )
-        self.fqn_to_index_mapping: Optional[dict[str, int]] = fqn_to_index_mapping
+        self.fqn_to_index_mapping: dict[str, int] | None = fqn_to_index_mapping
         self.save_distributed: bool = save_distributed
         self.enable_consolidation: bool = enable_consolidation
-        self.consolidated_output_path: Optional[str] = None
+        self.consolidated_output_path: str | None = None
         if self.enable_consolidation:
             self.consolidated_output_path = str(self.path)
             self.path = self.fs.concat_path(self.path, SHARDED_DIR_NAME)
@@ -117,8 +117,8 @@ class HuggingFaceStorageWriter(FileSystemWriter):
 
         # storage_plan is a map from key to file index
         storage_data: dict[str, Any] = plan.storage_data
-        storage_plan: Optional[dict[str, int]] = None
-        shard_index: Optional[int] = None
+        storage_plan: dict[str, int] | None = None
+        shard_index: int | None = None
         if "fqn_to_index_mapping" in storage_data:
             storage_plan = storage_data["fqn_to_index_mapping"]
         if "shard_index" in storage_data:
@@ -176,7 +176,7 @@ class HuggingFaceStorageWriter(FileSystemWriter):
             json.dump(metadata_to_write, metadata_file, indent=2)
 
     def _split_by_storage_plan(
-        self, storage_plan: Optional[dict[str, int]], items: list[WriteItem]
+        self, storage_plan: dict[str, int] | None, items: list[WriteItem]
     ) -> dict[int, list[WriteItem]]:
         # storage_plan is a map from key to index
         if storage_plan is None:

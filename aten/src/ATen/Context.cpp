@@ -85,6 +85,10 @@ std::string precision2str(Float32Precision prec) {
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
 
+#ifdef USE_ROCM
+static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
+#endif
+
 Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the
@@ -228,12 +232,27 @@ bool Context::allowTF32OneDNN() const {
   #endif
 }
 
+#ifdef USE_ROCM
+bool Context::rocmAllowGroupGemmCk() const {
+    const auto allow_group_gemm_ck = c10::utils::check_env(rocm_allow_group_gemm_ck) == true;
+    return allow_group_gemm_ck;
+}
+#endif
+
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
 }
 
 void Context::setSDPUseFlash(bool e) {
   enabled_flashSDP = e;
+}
+
+bool Context::userEnabledFA3SDP() const {
+  return enabled_fa3SDP;
+}
+
+void Context::setSDPUseFA3(bool e) {
+  enabled_fa3SDP = e;
 }
 
 bool Context::userEnabledMemEfficientSDP() const {
@@ -399,7 +418,19 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   it->second = p;
 }
 
+static void _warn_once_magma_deprecation() {
+  TORCH_WARN_ONCE(
+    "The usage of MAGMA backend for linear algebra operations is deprecated "
+    "and will be removed in future releases. cuSOLVER stays as the default backend."
+    "If you see any error messages with cuSOLVER but not MAGMA, please, "
+    "file an issue on GitHub."
+  );
+}
+
 at::LinalgBackend Context::linalgPreferredBackend() const {
+  if (linalg_preferred_backend == at::LinalgBackend::Magma) {
+    _warn_once_magma_deprecation();
+  }
   return linalg_preferred_backend;
 }
 
@@ -416,28 +447,30 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
       "please file an issue on GitHub."
     );
   }
+  if (b == at::LinalgBackend::Magma) {
+    _warn_once_magma_deprecation();
+  }
 }
 
 at::BlasBackend Context::blasPreferredBackend() {
   // Rather than put logic for interpreting what Default means at every
   // call site for blasPreferredBackend(), we set it to an actual value.
   if (blas_preferred_backend == at::BlasBackend::Default) {
+#ifdef USE_ROCM
+    // May change to cuBLASLt in the code below
     blas_preferred_backend = at::BlasBackend::Cublas;
+#else
+    blas_preferred_backend = hasCuBLASLt()
+      ? at::BlasBackend::Cublaslt
+      : at::BlasBackend::Cublas;
+#endif
     // This logic sits in the getter because it needs to validate
     // values set via env vars such as TORCH_BLAS_PREFER_CUBLASLT
     // which initialize the backend without calling the setter
 #ifdef USE_ROCM
     // AMD Instinct targets prefer hipblaslt
     static const bool hipblaslt_preferred = []() {
-      static const std::vector<std::string> archs = {
-          "gfx90a", "gfx942",
-#if ROCM_VERSION >= 60400
-          "gfx1200", "gfx1201",
-#endif
-#if ROCM_VERSION >= 60500
-          "gfx950"
-#endif
-      };
+      const auto& archs = detail::getCUDAHooks().getHipblasltPreferredArchs();
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
         if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           return false;
@@ -459,15 +492,7 @@ at::BlasBackend Context::blasPreferredBackend() {
       {
           return true;
       }
-      static const std::vector<std::string> archs = {
-          "gfx90a", "gfx942",
-#if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
-#endif
-#if ROCM_VERSION >= 70000
-          "gfx950", "gfx1150", "gfx1151"
-#endif
-      };
+      const auto& archs = detail::getCUDAHooks().getHipblasltSupportedArchs();
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
         if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           TORCH_WARN_ONCE(
@@ -733,11 +758,21 @@ bool Context::isXNNPACKAvailable() {
 #endif
 }
 
-void Context::setCheckSparseTensorInvariants(bool e) {
+void Context::setCheckSparseTensorInvariants(std::optional<bool> e = std::nullopt) {
   enable_sparse_tensor_invariant_checks = e;
 }
 
-bool Context::checkSparseTensorInvariants() const {
+std::optional<bool> Context::checkSparseTensorInvariants(bool warn_when_uninitialized) const {
+  if (warn_when_uninitialized && !enable_sparse_tensor_invariant_checks.has_value()) {
+    TORCH_WARN_ONCE(
+        "Sparse invariant checks are implicitly disabled. "
+        "Memory errors (e.g. SEGFAULT) will occur when "
+        "operating on a sparse tensor which violates the "
+        "invariants, but checks incur performance overhead. "
+        "To silence this warning, explicitly opt in or out. "
+        "See `torch.sparse.check_sparse_tensor_invariants.__doc__` "
+        "for guidance. ");
+  }
   return enable_sparse_tensor_invariant_checks;
 }
 

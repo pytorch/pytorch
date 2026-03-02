@@ -8,7 +8,7 @@ from collections.abc import Callable, Hashable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
 from typing import Any, cast, overload, TypeAlias, TypeVar
-from typing_extensions import ParamSpec, Self
+from typing_extensions import deprecated, ParamSpec, Self
 
 import torch
 import torch.utils.hooks as hooks
@@ -60,7 +60,6 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
-        # pyrefly: ignore [unsupported-operation]
         self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
@@ -134,13 +133,11 @@ def _disable_dynamo_if_unsupported(
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                # pyrefly: ignore [unsupported-operation]
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
                 and arg[0].is_cuda
                 or (
                     "state_steps" in kwargs
-                    # pyrefly: ignore [unsupported-operation]
                     and (kwarg := kwargs["state_steps"])
                     and isinstance(kwarg, Sequence)
                     and kwarg[0].is_cuda
@@ -407,7 +404,7 @@ class Optimizer:
         for param_group in param_groups:
             self.add_param_group(cast(dict, param_group))
 
-        # Allows _cuda_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
+        # Allows _accelerator_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
         # which I don't think exists
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
@@ -448,29 +445,36 @@ class Optimizer:
         return format_string
 
     # Currently needed by Adam and AdamW
-    def _cuda_graph_capture_health_check(self) -> None:
+    def _accelerator_graph_capture_health_check(self) -> None:
         # Note [torch.compile x capturable]
         # If we are compiling, we try to take the capturable path automatically by
         # setting the flag to True during tracing. Due to this, we skip all the checks
-        # normally required for determining whether we can use CUDA graphs and
+        # normally required for determining whether we can use CUDA/XPU graphs and
         # shunt the responsibility to torch.inductor. This saves time during tracing
         # since the checks are slow without sacrificing UX since inductor will warn
-        # later if CUDA graphs cannot be enabled, e.g.,
+        # later if CUDA/XPU graphs cannot be enabled, e.g.,
         # https://github.com/pytorch/pytorch/blob/d3ba8901d8640eb16f88b2bfef9df7fa383d4b47/torch/_inductor/compile_fx.py#L390.
         # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
-        if (
-            not torch.compiler.is_compiling()
-            and torch.backends.cuda.is_built()
-            and torch.cuda.is_available()
-        ):
-            capturing = torch.cuda.is_current_stream_capturing()
+        if torch.compiler.is_compiling():
+            return
+
+        # Determine available accelerator device
+        accelerator = None
+        if torch.cuda.is_available():
+            accelerator = (torch.cuda, "CUDA")
+        elif torch.xpu.is_available():
+            accelerator = (torch.xpu, "XPU")
+
+        if accelerator:
+            device_module, device_name = accelerator
+            capturing = device_module.is_current_stream_capturing()
 
             if capturing and not all(
                 group["capturable"] for group in self.param_groups
             ):
                 raise RuntimeError(
-                    "Attempting CUDA graph capture of step() for an instance of "
+                    f"Attempting {device_name} graph capture of step() for an instance of "
                     + self.__class__.__name__
                     + " but param_groups' capturable is False."
                 )
@@ -482,11 +486,16 @@ class Optimizer:
             ):
                 warnings.warn(
                     "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
-                    "but step() is running without CUDA graph capture. If you never intend to graph-capture this "
+                    f"but step() is running without {device_name} graph capture. If you never intend to graph-capture this "
                     "instance, capturable=True can impair performance, and you should set capturable=False.",
                     stacklevel=2,
                 )
                 self._warned_capturable_if_run_uncaptured = True
+
+    # Backward compatibility alias for internal callers still using the old name.
+    _cuda_graph_capture_health_check = deprecated(
+        "Use _accelerator_graph_capture_health_check instead",
+    )(_accelerator_graph_capture_health_check)
 
     def _optimizer_step_code(self) -> None:
         """Entry point for `torch.profile.profiler`.
@@ -629,7 +638,7 @@ class Optimizer:
                 pre-hooks. (default: False)
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -663,7 +672,7 @@ class Optimizer:
                 post-hooks. (default: False)
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -827,7 +836,7 @@ class Optimizer:
                 pre-hooks. (default: False)
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -861,7 +870,7 @@ class Optimizer:
                 post-hooks. (default: False)
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -978,6 +987,7 @@ class Optimizer:
                     for k, v in value.items()
                 }
             elif isinstance(value, Iterable):
+                # pyrefly: ignore [bad-instantiation]
                 return type(value)(
                     # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)

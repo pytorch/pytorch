@@ -31,17 +31,19 @@ _locals = Locals()
 
 
 def use_const_ref_for_mutable_tensors() -> bool:
-    assert _locals.use_const_ref_for_mutable_tensors is not None, (
-        "need to initialize local.use_const_ref_for_mutable_tensors with "
-        "local.parametrize"
-    )
+    if _locals.use_const_ref_for_mutable_tensors is None:
+        raise AssertionError(
+            "need to initialize local.use_const_ref_for_mutable_tensors with "
+            "local.parametrize"
+        )
     return _locals.use_const_ref_for_mutable_tensors
 
 
 def use_ilistref_for_tensor_lists() -> bool:
-    assert _locals.use_ilistref_for_tensor_lists is not None, (
-        "need to initialize local.use_ilistref_for_tensor_lists with local.parametrize"
-    )
+    if _locals.use_ilistref_for_tensor_lists is None:
+        raise AssertionError(
+            "need to initialize local.use_ilistref_for_tensor_lists with local.parametrize"
+        )
     return _locals.use_ilistref_for_tensor_lists
 
 

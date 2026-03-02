@@ -26,7 +26,7 @@ on:
       cuda-arch-list:
         required: false
         type: string
-        default: "5.2"
+        default: "7.5"
         description: |
           List of CUDA architectures CI build should target.
       runner_prefix:
@@ -154,18 +154,17 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+          checkout-mode: treeless
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
         if: inputs.build-environment != 'linux-s390x-binary-manywheel'
 
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
-        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+      - name: Login to ECR
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/ecr-login
         with:
-          role-to-assume: ${{ inputs.aws-role-to-assume }}
-          role-session-name: gha-linux-build
-          aws-region: us-east-1
+          aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
 
       - name: Get workflow job id
         id: get-job-id
@@ -361,7 +360,12 @@ jobs:
           )
 
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
-            docker exec -t "${container_name}" sh -c "python3 -m pip install -r requirements.txt"
+            # sometimes there are intermittent network errors, do a couple of retries
+            docker exec -t "${container_name}" sh -c "python3 -m pip install -r requirements.txt || \
+                (sleep 15 && python3 -m pip install -r requirements.txt) || \
+                (sleep 30 && python3 -m pip install -r requirements.txt) || \
+                (sleep 60 && python3 -m pip install -r requirements.txt) || \
+                (sleep 300 && python3 -m pip install -r requirements.txt)"
           fi
 
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'

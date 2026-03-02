@@ -17,7 +17,7 @@ from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
+from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
@@ -61,7 +61,7 @@ class ModelUnusedInput(nn.Module):
         return torch.concat([x, y, z, learnable_input])
 
 
-class TestFSDPFineTune(FSDPTest):
+class TestFSDPFineTune(FSDPTestContinuous):
     """Tests fine-tuning cases where some parameters are frozen."""
 
     NUM_LINEARS = 6

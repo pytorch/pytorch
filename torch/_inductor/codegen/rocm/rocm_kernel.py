@@ -1,21 +1,13 @@
 # mypy: allow-untyped-defs
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch._inductor.config as config
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.utils import do_bench_using_profiling
 
-from ...ir import (
-    Buffer,
-    ChoiceCaller,
-    IRNode,
-    Layout,
-    PrimitiveInfoType,
-    ShapeAsConstantBuffer,
-    TensorBox,
-)
+from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...virtualized import V
 from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
@@ -79,7 +71,7 @@ class ROCmTemplateKernel(ROCmKernel):
         outputs: list[IRNode],
         size_args: list[str],
         names_str: str = "",
-        input_reorder: Optional[list[int]] = None,
+        input_reorder: list[int] | None = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -236,13 +228,11 @@ class ROCmTemplateCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         make_kernel_render: Callable[
-            [ROCmTemplateBuffer, Optional[Sequence[IRNode]]], str
+            [ROCmTemplateBuffer, Sequence[IRNode] | None], str
         ],
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[
-            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
-        ],  # type: ignore[type-arg]
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
         self.category = category
@@ -276,7 +266,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "ROCm",
@@ -284,14 +274,16 @@ class ROCmTemplateCaller(ChoiceCaller):
             **dict(self.info_kwargs["op"].dict_items()),  # type: ignore[union-attr, index]
         }
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
-        return TensorBox.create(
-            ROCmTemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                workspace_size=self.bmreq.workspace_size,
-                template=self.template,
-            )
+        buffer = ROCmTemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            workspace_size=self.bmreq.workspace_size,
+            template=self.template,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)

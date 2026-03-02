@@ -33,6 +33,7 @@ from collections.abc import (
     MutableSet,
 )
 from datetime import datetime
+from functools import lru_cache
 from io import StringIO
 from typing import (
     Any,
@@ -64,9 +65,6 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
     "inductor_autotune_lookup_table",
@@ -82,11 +80,13 @@ from torch.fx.experimental.symbolic_shapes import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence, ValuesView
+    from pathlib import Path
 
     from torch import SymBool, SymFloat, SymInt
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from torch.fx import GraphModule
     from torch.fx.node import Node
+    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
 
     from .codegen.common import WorkspaceArg
     from .codegen.wrapper import PythonWrapperCodegen
@@ -134,20 +134,50 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
-perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
-GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
+XPU_KERNEL_FORMAT = (
+    "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
+)
+
+GPU_KERNEL_BIN_EXTS = {
+    "cuda": ".cubin",
+    "hip": ".hsaco",
+    "xpu": f".{XPU_KERNEL_FORMAT}",
+}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
 
 TMA_ALIGNMENT = 16
 TMA_DESCRIPTOR_SIZE = 128
+
+# PyTorch dtypes with valid CUtensorMapDataType mappings.
+# Ref: triton/backends/nvidia/include/cuda.h (CUtensorMapDataType enum)
+#      triton/_internal_testing.py (tma_dtypes test list)
+_TMA_SUPPORTED_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [
+        torch.uint8,
+        torch.int8,
+        torch.uint16,
+        torch.int16,
+        torch.uint32,
+        torch.int32,
+        torch.int64,
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2fnuz,
+    ]
+)
 
 ALIGN_BYTES = 64
 assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
@@ -314,19 +344,22 @@ def _do_bench_using_profiling(
 
         may_ban_benchmarking()
 
+    device_type = get_gpu_type()
+    device_type_upper = device_type.upper()
+    device_interface = get_interface_for_device(device_type)
     fn()
-    torch.cuda.synchronize()
-    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+    device_interface.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device=device_type)
 
     # Estimate the runtime of the function
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
+    start_event = device_interface.Event(enable_timing=True)
+    end_event = device_interface.Event(enable_timing=True)
     start_event.record()
     for _ in range(5):
         cache.zero_()
         fn()
     end_event.record()
-    torch.cuda.synchronize()
+    device_interface.synchronize()
     estimate_ms = start_event.elapsed_time(end_event) / 5
 
     # compute number of warmup and repeat
@@ -337,11 +370,10 @@ def _do_bench_using_profiling(
     for _ in range(n_warmup):
         fn()
 
-    torch.cuda.synchronize()
-
+    device_interface.synchronize()
     with torch.profiler.profile(
         activities=[
-            torch.profiler.ProfilerActivity.CUDA,
+            getattr(torch.profiler.ProfilerActivity, device_type_upper),
         ]
     ) as p:
         # Benchmark
@@ -351,7 +383,7 @@ def _do_bench_using_profiling(
             # record time of `fn`
             fn()
         # Record clocks
-        torch.cuda.synchronize()
+        device_interface.synchronize()
 
     log.debug("raw events")
     log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
@@ -360,24 +392,22 @@ def _do_bench_using_profiling(
         [
             event
             for event in p.events()
-            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+            if event.device_type == getattr(DeviceType, device_type_upper)
+            and event.name != "Context Sync"
         ]
     )
-    if len(filtered_events) % n_repeat != 0:
-        raise RuntimeError(
-            "Failed to divide all profiling events into #repeat groups. "
-            "#CUDA events: %d, #repeats: %s",
-            len(filtered_events),
-            n_repeat,
-        )
-    num_event_per_group = len(filtered_events) / n_repeat
+    # Filter out cache.zero_() events by name pattern instead of relying on
+    # positional grouping. cache.zero_() may not always generate an event
+    # making positional assumptions unreliable.
+    # The kernel name contains "FillFunctor" when generated by cache.zero_().
     actual_events = EventList(
-        [
-            event
-            for i, event in enumerate(filtered_events)
-            if i % num_event_per_group != 0
-        ]
+        [event for event in filtered_events if "FillFunctor" not in event.name]
     )
+    if len(actual_events) == 0:
+        raise RuntimeError(
+            f"Failed to capture any events after filtering cache clearing events. "
+            f"{device_type} events: {len(filtered_events)}, repeats: {n_repeat}"
+        )
     actual_events._build_tree()
     actual_events = actual_events.key_averages()
 
@@ -490,6 +520,18 @@ def convert_shape_to_inductor(
     sympy.Expr.
     """
     return [sympy.sympify(i) for i in lst]
+
+
+def convert_symint_to_expr(val: Union[int, torch.SymInt]) -> Union[int, sympy.Expr]:
+    """
+    Convert SymInt to sympy.Expr, leave int as is.
+
+    Unlike sympy.sympify() which converts int to sympy.Integer,
+    this function preserves int as int and only converts SymInt to Expr.
+    """
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    return val
 
 
 def convert_to_symint(i: Union[int, sympy.Expr]) -> Union[int, torch.SymInt]:
@@ -699,11 +741,13 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     return wrapper  # type: ignore[return-value]
 
 
-def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
+def cache_property_on_self(
+    fn: Callable[Concatenate[Any, P], RV],
+) -> CachedMethod[P, RV]:
     """
     Variant of cache_on_self for properties. The only difference is the type signature.
     """
-    # pyrefly: ignore [bad-argument-type]
+
     return cache_on_self(fn)
 
 
@@ -1153,8 +1197,7 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
 
 def is_symbolic(a: Any) -> TypeGuard[Union[torch.SymInt, torch.Tensor]]:
     return isinstance(a, torch.SymInt) or (
-        isinstance(a, torch.Tensor)
-        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
+        isinstance(a, torch.Tensor) and a._has_symbolic_sizes_strides
     )
 
 
@@ -1162,57 +1205,33 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
+# Ops that are fundamentally incompatible with CUDA graph capture
+# (e.g., CPU synchronization, dynamic memory allocation, etc.)
+FORBIDDEN_CUDAGRAPH_OPS = frozenset(
+    [
+        "aten._fused_moving_avg_obs_fq_helper.default",
+        "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "fbgemm.dense_to_jagged.default",
+        "fbgemm.jagged_to_padded_dense.default",
+        "run_and_save_rng_state",
+        "run_with_rng_state",
+        "aten._local_scalar_dense",
+        # Technically, it's not necessary to ban this, because an
+        # assert_scalar with constant arguments can be validly run
+        # with CUDA graphs, but the operator is also pointless with
+        # constant arguments, so might as well ban
+        "aten._assert_scalar",
+    ]
+)
+
+
 def get_first_incompatible_cudagraph_node(
     gm: torch.fx.GraphModule,
 ) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
-    forbidden_set = OrderedSet(
-        [
-            "aten._fused_moving_avg_obs_fq_helper.default",
-            "aten._fused_moving_avg_obs_fq_helper_functional.default",
-            "fbgemm.dense_to_jagged.default",
-            "fbgemm.jagged_to_padded_dense.default",
-            "run_and_save_rng_state",
-            "run_with_rng_state",
-            "aten._local_scalar_dense",
-            # Technically, it's not necessary to ban this, because an
-            # assert_scalar with constant arguments can be validly run
-            # with CUDA graphs, but the operator is also pointless with
-            # constant arguments, so might as well ban
-            "aten._assert_scalar",
-        ]
-    )
-    if torch.are_deterministic_algorithms_enabled():
-        forbidden_set.update(
-            (
-                "aten._unsafe_index_put.default",
-                "aten._unsafe_masked_index_put_accumulate.default",
-                "aten.index_put.default",
-                "aten.index_put_.default",
-                "aten.scatter.src",
-                "aten.scatter.reduce",
-                "aten.scatter.value_reduce",
-                "aten.scatter_add_",
-                "aten.scatter_add.default",
-                "aten.scatter_reduce.two",
-                "aten.scatter_reduce_.two",
-                "aten.scatter_reduce.two_out",
-            )
-        )
-
     for node in gm.graph.nodes:
-        if str(node.target) in forbidden_set:
-            return node
-
-        if (
-            not torch._inductor.config.graph_partition
-            and isinstance(node.target, torch._ops.OpOverload)
-            and torch._C.Tag.cudagraph_unsafe in node.target.tags  # type: ignore[attr-defined]
-        ):
-            # skip cudagraph if a cudagraph_unsafe op is detected.
-            # graph_partition helps by splitting on this cudagraph_unsafe
-            # op and cudagraphifying the subgraphs.
+        if is_cudagraph_unsafe_fx_node(node):
             return node
 
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
@@ -1304,6 +1323,27 @@ def clear_caches() -> None:
 
 
 @contextlib.contextmanager
+def _set_env(key: str, value: str) -> Iterator[None]:
+    """Thread-safe env var set/restore using atomic C-level lookups.
+
+    We avoid mock.patch.dict(os.environ, ...) because it internally calls
+    os.environ.copy(), which iterates all env var keys then fetches values in
+    separate steps. That approach is not atomic and can race with background threads
+    (e.g. Triton async compilation) modifying the environment, causing KeyError,
+    so we use os.environ.get() for individual keys which is an atomic C-level lookup.
+    """
+    old = os.environ.get(key)
+    try:
+        os.environ[key] = value
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = old
+
+
+@contextlib.contextmanager
 def fresh_cache(
     cache_entries: Optional[dict[str, Any]] = None,
     dir: Optional[str] = None,
@@ -1321,14 +1361,12 @@ def fresh_cache(
 
     inductor_cache_dir = normalize_path_separator(tempfile.mkdtemp(dir=dir))
     try:
-        with mock.patch.dict(
-            os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
-        ):
+        with _set_env("TORCHINDUCTOR_CACHE_DIR", inductor_cache_dir):
             log.debug("Using inductor cache dir %s", inductor_cache_dir)
             triton_cache_dir = normalize_path_separator(
                 os.path.join(inductor_cache_dir, "triton")
             )
-            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
+            with _set_env("TRITON_CACHE_DIR", triton_cache_dir):
                 yield
                 if isinstance(cache_entries, dict):
                     assert len(cache_entries) == 0, "expected empty cache_entries dict"
@@ -1553,7 +1591,7 @@ class IndentedBuffer:
     ) -> None:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
-            # pyrefly: ignore [bad-assignment]
+
             for line in other_code._lines:
                 if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
@@ -1663,20 +1701,6 @@ class DelayReplaceLine(DeferredLineBase):
 
     def _new_line(self, line: str) -> DelayReplaceLine:
         return DelayReplaceLine(self.key, self.value_fn, line)
-
-
-class DelayMaybeLine(DeferredLineBase):
-    """At end of codegen return `line if `pred_fn() else None`"""
-
-    def __init__(self, pred_fn: Callable[[], bool], line: str):
-        super().__init__(line)
-        self.pred_fn = pred_fn
-
-    def __call__(self) -> str | None:
-        return self.line if self.pred_fn() else None
-
-    def _new_line(self, line: str) -> DelayMaybeLine:
-        return DelayMaybeLine(self.pred_fn, line)
 
 
 @functools.cache
@@ -1815,18 +1839,18 @@ def can_use_tma(
     *matrices: IRNode, output_layout: Optional[Layout] = None, add_guards: bool = False
 ) -> bool:
     """
-    Return True iff *all* supplied tensors satisfy the CUDA-12.9 TMA constraints
+    Return True iff *all* supplied tensors satisfy the CUDA TMA constraints
     that Triton relies on today.
     * https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__TENSOR__MEMORY.html
 
     A tensor is accepted when:
-      * 2 ≤ rank ≤ 5
-      * dtype ∈ {FP16, BF16, FP8-E4M3FN}
-      * Every logical size ≥ 2
+      * 1 ≤ rank ≤ 5 (cuTensorMapEncodeTiled)
+      * dtype in _TMA_SUPPORTED_DTYPES (CUtensorMapDataType enum)
       * Base pointer 16-byte aligned
+      * Exactly one contiguous ("inner") dim with stride 1
       * All "outer" dims have 16-byte aligned strides
-      * The “inner” dim has stride 1 (contiguous)
-      * For FP8 tensors, inner dim ≥ 32
+      * Inner dim size × itemsize is a multiple of 16
+      * For 1-byte dtypes (e.g. FP8), inner dim ≥ 32
     """
     from torch.utils._triton import has_triton_tma_device
 
@@ -1846,7 +1870,7 @@ def can_use_tma(
         if not _aligned(layout.offset):
             return False
 
-        return _is_tma_compatible(sizes, strides, dtype, allow_float32=True)
+        return _is_tma_compatible(sizes, strides, dtype)
 
     def _is_tma_compatible_matrix(m: IRNode) -> bool:
         sizes = m.get_size()
@@ -1857,39 +1881,37 @@ def can_use_tma(
         if m.get_name() in V.graph.unaligned_buffers:
             return False
 
-        return _is_tma_compatible(sizes, strides, dtype, allow_float32=False)
+        if (m_device := m.get_device()) is not None and m_device.type == "xpu":
+            return _is_tma_compatible_xpu(sizes, strides, dtype)
+
+        return _is_tma_compatible(sizes, strides, dtype)
 
     def _is_tma_compatible(
         sizes: Sequence[sympy.Expr],
         strides: Sequence[_IntLike],
         dtype: torch.dtype,
-        allow_float32: bool,
     ) -> bool:
         rank = len(sizes)
         itemsize = dtype.itemsize
 
-        # 2 ≤ rank ≤ 5
-        if rank < 2 or rank > 5:
+        if rank < 1 or rank > 5:
             return False
 
-        # dtype ∈ {FP16, BF16, FP8-E4M3FN}
-        if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn) and (
-            not allow_float32 or dtype != torch.float32
-        ):
+        if dtype not in _TMA_SUPPORTED_DTYPES:
             return False
 
         if add_guards:
             sizes_i = V.graph.sizevars.guard_int_seq(sizes)
             strides_i = V.graph.sizevars.guard_int_seq(strides)
         else:
-            sizes_i = [V.graph.sizevars.symbolic_hint(s) for s in sizes]
-            strides_i = [V.graph.sizevars.symbolic_hint(st) for st in strides]
+            sizes_i = [
+                V.graph.sizevars.replace_backed_symbols_with_hints(s) for s in sizes
+            ]
+            strides_i = [
+                V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
+            ]
 
-        # Every logical size ≥ 2
-        if any(not V.graph.sizevars.statically_known_geq(s, 2) for s in sizes_i):
-            return False
-
-        # Find the single contiguous (“inner”) dim
+        # Find the single contiguous ("inner") dim
         inner = [
             i
             for i, st in enumerate(strides_i)
@@ -1906,16 +1928,36 @@ def can_use_tma(
             if not _aligned(st * itemsize):
                 return False
 
-        # Inner dim byte width must still be a multiple of 16 B
+        # Inner dim byte width must be a multiple of 16 B
         inner_dim = sizes_i[inner_idx]
         if not _aligned(inner_dim * itemsize):
             return False
 
-        # FP8 special case: inner ≥ 32
-        if dtype == torch.float8_e4m3fn and not V.graph.sizevars.statically_known_geq(
-            inner_dim, 32
-        ):
+        # 1-byte dtypes (FP8 etc.) need inner dim ≥ 32 for tensor core alignment
+        if itemsize == 1 and not V.graph.sizevars.statically_known_geq(inner_dim, 32):
             return False
+
+        return True
+
+    def _is_tma_compatible_xpu(
+        sizes: Sequence[sympy.Expr],
+        strides: Sequence[_IntLike],
+        dtype: torch.dtype,
+    ) -> bool:
+        # Make sure the last dimension is contiguous
+        last_stride = strides[-1]
+        last_stride_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
+            last_stride
+        )
+        if not V.graph.sizevars.statically_known_equals(last_stride_hint, 1):
+            return False
+
+        # Triton's type of index is uint32, so all dimensions must fit in uint32
+        MAX_UINT32 = 2**32 - 1
+        for size in sizes:
+            size_hint = V.graph.sizevars.replace_backed_symbols_with_hints(size)
+            if V.graph.sizevars.statically_known_gt(size_hint, MAX_UINT32):
+                return False
 
         return True
 
@@ -1953,6 +1995,14 @@ def use_triton_blackwell_tma_template(
     return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
 
 
+def use_triton_scaling_template(
+    scale_option_a: ScalingType,
+    scale_option_b: ScalingType,
+    scaling_types: list[ScalingType],
+) -> bool:
+    return scale_option_a in scaling_types and scale_option_b in scaling_types
+
+
 @functools.lru_cache(maxsize=1)
 def ensure_cute_available() -> bool:
     """Check if CuTeDSL is importable; cache the result for reuse.
@@ -1961,7 +2011,36 @@ def ensure_cute_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("cutlass.cute") is not None
+        return importlib.util.find_spec("cutlass") is not None
+    except ImportError:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def ensure_nv_universal_gemm_available() -> bool:
+    """Check if NVIDIA Universal GEMM (cutlass_api) is importable; cache the result for reuse.
+
+    Call ensure_nv_universal_gemm_available.cache_clear() after installing cutlass_api
+    in the same interpreter to retry the import.
+    """
+    try:
+        return importlib.util.find_spec("cutlass_api") is not None
+    except ImportError:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def ensure_nvmatmul_heuristics_available() -> bool:
+    """Check if nvMatmulHeuristics is importable; cache the result for reuse.
+
+    nvMatmulHeuristics provides performance model-based kernel selection
+    for NVIDIA GEMM operations.
+
+    Call ensure_nvmatmul_heuristics_available.cache_clear() after installing
+    nvMatmulHeuristics in the same interpreter to retry the import.
+    """
+    try:
+        return importlib.util.find_spec("nvMatmulHeuristics") is not None
     except ImportError:
         return False
 
@@ -2034,10 +2113,10 @@ def use_blackwell_cutedsl_grouped_mm(
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
 
-    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
         return False
-    from .codegen.cuda.cutlass_utils import try_import_cutlass
+    from .codegen.cutlass.utils import try_import_cutlass
 
     # Do not use cutlass template on ROCm
     if torch.version.hip:
@@ -2064,6 +2143,78 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
+def use_nv_universal_gemm_template(
+    layout: Layout,
+    m: _IntLike,
+    n: _IntLike,
+    k: _IntLike,
+    mat_a: IRNode,
+    mat_b: IRNode,
+    offs: Optional[IRNode] = None,
+    g: Optional[_IntLike] = None,
+) -> bool:
+    """
+    Return True if we can use the NVIDIA Universal GEMM Template.
+
+    Required conditions:
+        1. NVGEMM backend is enabled
+        2. cutlass_api is available
+        3. We are on a NVIDIA GPU
+        4. Max autotune or max autotune gemm is enabled
+        5. Not in AOT Inductor mode (requires runtime JIT compilation)
+        6. Base pointers are 16-byte aligned
+        7. Shape dimensions are not unbacked symbols
+
+    Note:
+        - Shape and stride constraints are handled internally by
+          cutlass_api.get_kernels() which filters incompatible kernels.
+        - GroupedGemm currently only supports TN layout (column-major B).
+          Any other layout will act as a noop and fall back to ATen.
+        - Dynamic shapes are supported as long as they have hints
+          (from example inputs).
+    """
+    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
+    if not ensure_cute_available():
+        return False
+
+    if not ensure_nv_universal_gemm_available():
+        return False
+
+    if not _use_autotune_backend("NVGEMM"):
+        return False
+
+    from .virtualized import V
+
+    if V.aot_compilation:
+        return False
+
+    if layout.device.type != "cuda" or torch.version.hip:
+        return False
+
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+
+    # cutlass_api can't handle unbacked symbols because it needs to evaluate
+    # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
+    # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
+    dims_to_check = [m, n, k]
+    if g is not None:
+        dims_to_check.append(g)
+    if any(has_free_unbacked_symbols(dim) for dim in dims_to_check):
+        return False
+
+    # Base pointer must be 16-byte aligned. cutlass_api can't check this at
+    # compile time because it only sees FakeTensors without real data pointers.
+    tensors_to_check = [mat_a, mat_b]
+    if offs is not None:
+        tensors_to_check.append(offs)
+    if any(t.get_name() in V.graph.unaligned_buffers for t in tensors_to_check):
+        return False
+
+    return True
+
+
 def _use_cutlass_for_op(op_name: str) -> bool:
     """Check if CUTLASS should be used for the given operation."""
     enabled_ops = config.cutlass.cutlass_enabled_ops.upper()
@@ -2084,8 +2235,7 @@ def use_decompose_k_choice(
     decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
 
     return (
-        not torch.version.hip
-        and V.graph.sizevars.statically_known_true(
+        V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
@@ -2256,7 +2406,7 @@ def use_ck_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return (
         _use_autotune_backend("CK")
         and use_ck_template(layout)
-        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+        and V.graph.sizevars.optimization_hint(m * n * k, fallback=-1) > 0
     )
 
 
@@ -2266,7 +2416,7 @@ def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return (
         _use_autotune_backend("CKTILE")
         and use_ck_template(layout)
-        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+        and V.graph.sizevars.optimization_hint(m * n * k, fallback=-1) > 0
     )
 
 
@@ -2326,7 +2476,7 @@ def use_cpp_gemm_template(
         return False
 
     int8_gemm = mat1.get_dtype() in [torch.uint8, torch.int8]
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8, torch.int8]
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1,
         mat2,
@@ -2413,11 +2563,14 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    remove_quote = kwargs.pop("remove_quote", False)
     # pyrefly: ignore [bad-argument-type]
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
         kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+        if remove_quote:
+            kernels = [kernel[3:-3] for kernel in kernels]
     return result, kernels
 
 
@@ -2656,7 +2809,9 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     We don't want to throw errors in this function. First check to see if the device is in device_info.py,
     then fall back to the inaccurate triton estimation.
     """
-    ds_tops = datasheet_tops(dtype, is_tf32=torch.backends.cuda.matmul.allow_tf32)
+    ds_tops = datasheet_tops(
+        dtype, is_tf32=torch.backends.cuda.matmul.fp32_precision == "tf32"
+    )
     if ds_tops is not None:
         return ds_tops
 
@@ -2677,20 +2832,17 @@ def get_device_tflops(dtype: torch.dtype) -> float:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
             return get_max_tensorcore_tflops(dtype, sm_clock)
 
-        if torch.backends.cuda.matmul.allow_tf32:
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
             return get_max_tensorcore_tflops(torch.float32, sm_clock)
         else:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            # pyrefly: ignore  # missing-argument
             return get_max_tensorcore_tflops(dtype)
 
-        if torch.backends.cuda.matmul.allow_tf32:
-            # pyrefly: ignore  # missing-argument
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
             return get_max_tensorcore_tflops(torch.float32)
         else:
-            # pyrefly: ignore  # missing-argument
             return get_max_simd_tflops(torch.float32)
 
 
@@ -2704,13 +2856,13 @@ def get_gpu_dram_gbps() -> int:
 def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
-    # pyrefly: ignore  # missing-attribute
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
 def get_max_numwarps() -> int:
     if torch.cuda.is_available():
         warp_size = torch.cuda.get_device_properties().warp_size
+        # pyrefly: ignore [missing-attribute]
         max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
     else:
         # Defaults
@@ -2815,8 +2967,9 @@ def is_multi_outputs_template(input_buf: Optional[Union[Buffer, Operation]]) -> 
     """
     from . import ir
 
-    return isinstance(input_buf, ir.CppTemplateBuffer) and isinstance(
-        input_buf.layout, ir.MultiOutputLayout
+    return (
+        isinstance(input_buf, ir.TemplateBuffer)
+        and input_buf.is_multi_outputs_template()
     )
 
 
@@ -3053,6 +3206,11 @@ def is_gpu(device: Optional[str]) -> bool:
     return device in GPU_TYPES
 
 
+def is_rocm() -> bool:
+    """Check if we're running on ROCm/HIP platform."""
+    return torch.version.hip is not None
+
+
 def device_need_guard(device: str) -> bool:
     return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
 
@@ -3060,6 +3218,8 @@ def device_need_guard(device: str) -> bool:
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
     if dtype == torch.bfloat16 and torch.cuda.is_available():
         return torch.cuda.get_device_capability() < (9, 0)
+    elif dtype == torch.bfloat16 and torch.xpu.is_available():
+        return True
     else:
         return dtype in (torch.int64, torch.bool)
 
@@ -3114,8 +3274,10 @@ def dump_node_schedule(node_schedule: Sequence[BaseSchedulerNode]) -> None:
     print(f"Node schedule with {len(node_schedule)} nodes")
     for idx, node in enumerate(node_schedule):
         print(f" {idx:3}:")
+        # pyrefly: ignore [unnecessary-comparison]
         if node is EnableReduction:
             print("enable reduction")
+        # pyrefly: ignore [unnecessary-comparison]
         elif node is DisableReduction:
             print("disable reduction")
         elif isinstance(node, SchedulerNode):
@@ -3312,10 +3474,16 @@ def remove_unaligned_input_idxs(
 
 
 def expr_fits_within_32bit(e: sympy.Expr) -> bool:
+    """Check if an expression fits within 32-bit integer range.
+
+    NOTE: This function intentionally does not install guards. Callers are
+    responsible for guarding (e.g. via check_leq) when they decide to use
+    32-bit indexing based on this result.
+    """
     from .virtualized import V
 
     int_max = torch.iinfo(torch.int32).max
-    size_hint = V.graph.sizevars.size_hint
+    guarding_hint_or_throw = V.graph.sizevars.guarding_hint_or_throw
     has_hint = V.graph.sizevars.shape_env.has_hint
 
     if config.assume_32bit_indexing:
@@ -3347,7 +3515,7 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
             return False
 
     # Otherwise, the hint MUST exist and be in range
-    return has_hint(e) and size_hint(e) <= int_max
+    return has_hint(e) and guarding_hint_or_throw(e) <= int_max
 
 
 def set_tracing_context_output_strides(
@@ -3513,6 +3681,8 @@ def get_current_backend(device_type: Optional[str] = None) -> str:
         return "mps"
     elif device_type == "xpu":
         return config.xpu_backend
+    elif device_type == "tpu":
+        return config.tpu_backend
     else:
         return config.cuda_backend
 
@@ -3637,20 +3807,110 @@ def triton_version_uses_attrs_dict() -> bool:
     return get_triton_attrs_descriptor_version() == TritonAttrsDescriptorVersion.V4_DICT
 
 
+def get_op_names(op: torch._ops.OperatorBase) -> tuple[str, str]:
+    op_overload_packet_name: str = op.name()
+    op_overload_name = (
+        f"{op_overload_packet_name}.{op._overloadname}"
+        if isinstance(op, torch._ops.OpOverload)
+        else op_overload_packet_name
+    )
+    return op_overload_packet_name, op_overload_name
+
+
+def _fx_node_is_input_dependent_cudagraph_unsafe(fx_node: torch.fx.Node) -> bool:
+    """
+    Check if an FX node is cudagraph-unsafe based on its input arguments.
+
+    Some ops are only cudagraph-unsafe depending on their inputs (e.g., index_put
+    with boolean indices triggers .nonzero() during capture, but integer indices
+    are safe).
+    """
+    from torch.fx.operator_schemas import normalize_function
+
+    target = fx_node.target
+    if not isinstance(target, torch._ops.OpOverload):
+        return False
+
+    # index_put with boolean indices triggers .nonzero() during capture
+    if target in (
+        torch.ops.aten.index_put.default,
+        torch.ops.aten.index_put_.default,
+        torch.ops.aten._unsafe_index_put.default,
+    ):
+        normalized = normalize_function(
+            target, fx_node.args, fx_node.kwargs, normalize_to_only_use_kwargs=True
+        )
+        if normalized is not None:
+            _, kwargs = normalized
+            indices = kwargs["indices"]
+            for idx in indices:
+                if idx is not None and idx.meta["val"].dtype in (
+                    torch.bool,
+                    torch.uint8,
+                ):
+                    return True
+
+    return False
+
+
+def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
+    """
+    Check if an FX node is cudagraph-unsafe.
+
+    This includes:
+    - Ops in FORBIDDEN_CUDAGRAPH_OPS (CPU sync, dynamic alloc, etc.)
+    - Ops with the cudagraph_unsafe tag
+    - Input-dependent unsafe ops (e.g., index_put with boolean indices)
+    - Ops with sparse tensor outputs
+    """
+    target = fx_node.target
+
+    # Check against the forbidden ops set
+    if str(target) in FORBIDDEN_CUDAGRAPH_OPS:
+        return True
+
+    # Check for cudagraph_unsafe tag
+    if (
+        isinstance(target, torch._ops.OpOverload)
+        and torch._C.Tag.cudagraph_unsafe in target.tags  # type: ignore[attr-defined]
+    ):
+        return True
+
+    # Check for input-dependent unsafety
+    if _fx_node_is_input_dependent_cudagraph_unsafe(fx_node):
+        return True
+
+    # Check for sparse tensor outputs
+    if (val := fx_node.meta.get("val")) is not None:
+        vals = [val] if not isinstance(val, (list, tuple)) else val
+        for v in vals:
+            if isinstance(v, torch.Tensor) and v.is_sparse:
+                return True
+
+    return False
+
+
 def is_cudagraph_unsafe_op(node: Operation) -> bool:
     """
     Returns True if the node is an op that is not cudagraphable.
-    Usually only custom ops have this tag.
+    This includes:
+    - Ops in FORBIDDEN_CUDAGRAPH_OPS (CPU sync, dynamic alloc, etc.)
+    - Ops with the cudagraph_unsafe tag
+    - index_put_ with boolean indices (triggers .nonzero() during capture)
+    - Control flow nodes (Conditional, WhileLoop)
+    - Ops with sparse tensor outputs
     """
     from . import ir
 
-    if not isinstance(node, ir.FallbackKernel):
+    # Control flow nodes are cudagraph-unsafe
+    if isinstance(node, (ir.Conditional, ir.WhileLoop)):
+        return True
+
+    if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
         return False
 
-    if (
-        isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
-    ):
+    fx_node = getattr(node, "fx_node", None)
+    if fx_node is not None and is_cudagraph_unsafe_fx_node(fx_node):
         return True
 
     return False
@@ -3934,31 +4194,6 @@ def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.S
         return free_symbols(x)
 
 
-def maybe_log_cudagraph_partition(
-    msg: str,
-    prefix: Optional[str] = "cudagraph partition due to ",
-    node: Optional[BaseSchedulerNode] = None,
-) -> None:
-    """
-    Cudagraph partition may lead to extra memory overhead so we
-    log partition reasons to help users understand the overhead.
-    """
-    if not config.triton.cudagraphs:
-        return
-
-    warning_msg = f"{prefix}{msg}"
-
-    if (
-        node
-        and (ir_node := node.node)
-        and (fx_node := ir_node.get_origin_node())
-        and (stack_trace := fx_node.meta.get("stack_trace", None))
-    ):
-        warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
-
-    perf_hint_log.warning(warning_msg)
-
-
 def python_subprocess_env() -> dict[str, str]:
     """
     Get a base environment for running Python subprocesses.
@@ -4046,7 +4281,7 @@ def snode_args_kwargs(snode: BaseSchedulerNode) -> tuple[list[Any], dict[str, An
         )
 
     flat_args = [
-        torch._inductor.ir.ir_node_to_tensor(a, guard_shape=False)
+        torch._inductor.ir.ir_node_to_tensor(a, replace_symbols_with_hints=True)
         if _is_tensor_ir(a)
         else a
         for a in flat_args
@@ -4142,3 +4377,170 @@ COLLECTIVE_OPS = OrderedSet(
 def is_collective_op(op_name: str) -> bool:
     """Check if an operation is a collective operation."""
     return op_name in COLLECTIVE_OPS
+
+
+@lru_cache
+def tlx_only_cuda_options() -> list[str]:
+    if config.is_fbcode():
+        try:
+            from torch._inductor.fb.tlx_templates.registry import tlx_only_cuda_options
+
+            return tlx_only_cuda_options
+
+        except ImportError:
+            return []
+
+    else:
+        return []
+
+
+def _round_up(x: int, y: int) -> int:
+    """Round x up to the nearest multiple of y."""
+    return ((x + y - 1) // y) * y
+
+
+def _infer_scale_swizzle_impl(
+    mat_size: tuple[Any, Any],
+    scale_size: tuple[Any, ...],
+    scale_numel: Any,
+    mat_dtype: torch.dtype,
+    scale_dtype: torch.dtype,
+    eq_fn: Callable[[Any, Any], bool],
+) -> tuple[Optional[Any], Optional[Any]]:
+    """
+    Core implementation for scale/swizzle inference.
+    """
+    from torch.nn.functional import ScalingType, SwizzleType
+
+    # Tensor-wise: single scale for entire tensor
+    if eq_fn(scale_numel, 1):
+        return ScalingType.TensorWise, SwizzleType.NO_SWIZZLE
+
+    # Row-wise: one scale per row or column
+    if len(scale_size) >= 2:
+        if (eq_fn(scale_size[0], mat_size[0]) and eq_fn(scale_size[1], 1)) or (
+            eq_fn(scale_size[0], 1) and eq_fn(scale_size[1], mat_size[1])
+        ):
+            return ScalingType.RowWise, SwizzleType.NO_SWIZZLE
+
+        # Block-wise 1x128 / 128x1 (DeepGemm style)
+        if (
+            eq_fn(scale_size[0], mat_size[0])
+            and eq_fn(scale_size[1], ceildiv(mat_size[1], 128))
+        ) or (
+            eq_fn(scale_size[1], mat_size[1])
+            and eq_fn(scale_size[0], ceildiv(mat_size[0], 128))
+        ):
+            return ScalingType.BlockWise1x128, SwizzleType.NO_SWIZZLE
+
+        # Block-wise 128x128
+        if eq_fn(scale_size[0], ceildiv(mat_size[0], 128)) and eq_fn(
+            scale_size[1], ceildiv(mat_size[1], 128)
+        ):
+            return ScalingType.BlockWise128x128, SwizzleType.NO_SWIZZLE
+
+    # Adjust for packed FP4 data (2 values per element)
+    K_multiplier = 2 if mat_dtype == torch.float4_e2m1fn_x2 else 1
+
+    # NVFP4: BlockWise1x16 with float8_e4m3fn scales
+    if mat_dtype == torch.float4_e2m1fn_x2 and scale_dtype == torch.float8_e4m3fn:
+        expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
+            ceildiv(K_multiplier * mat_size[1], 16), 4
+        )
+        expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
+            ceildiv(K_multiplier * mat_size[0], 16), 4
+        )
+        if eq_fn(scale_numel, expected_numel_a) or eq_fn(scale_numel, expected_numel_b):
+            return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
+
+    # MXFP8: BlockWise1x32 with float8_e8m0fnu scales
+    if scale_dtype == torch.float8_e8m0fnu:
+        if not torch.version.hip:
+            # NVIDIA: uses swizzled 32x4x4 layout
+            expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[1], 32), 4
+            )
+            expected_numel_b = _round_up(mat_size[1], 128) * _round_up(
+                ceildiv(K_multiplier * mat_size[0], 32), 4
+            )
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
+        else:
+            # AMD: no swizzle
+            expected_numel_a = ceildiv(mat_size[0], 32) * K_multiplier * mat_size[1]
+            expected_numel_b = ceildiv(K_multiplier * mat_size[1], 32) * mat_size[0]
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE
+
+    return None, None
+
+
+def infer_scale_swizzle(
+    mat: torch.Tensor, scale: torch.Tensor
+) -> tuple[Optional[Any], Optional[Any]]:
+    """
+    Infer the scaling type and swizzle mode from matrix and scale tensor shapes/dtypes.
+
+    This function determines how scale factors are laid out relative to the matrix:
+    - TensorWise: Single scale for entire tensor
+    - RowWise: One scale per row
+    - BlockWise1x128/128x128: Block-scaled with float32 scales
+    - BlockWise1x32: MXFP8 with float8_e8m0fnu scales (swizzled on NVIDIA)
+    - BlockWise1x16: NVFP4 with float8_e4m3fn scales (swizzled)
+
+    Args:
+        mat: The matrix tensor (FP8 or FP4)
+        scale: The scale factor tensor
+
+    Returns:
+        Tuple of (ScalingType, SwizzleType) or (None, None) if unrecognized
+    """
+    return _infer_scale_swizzle_impl(
+        mat_size=(mat.shape[0], mat.shape[1]),
+        scale_size=tuple(scale.shape),
+        scale_numel=scale.numel(),
+        mat_dtype=mat.dtype,
+        scale_dtype=scale.dtype,
+        eq_fn=lambda a, b: a == b,
+    )
+
+
+def infer_scale_swizzle_ir(
+    mat: Buffer,
+    scale: Buffer,
+    transpose: bool = False,
+) -> tuple[Optional[Any], Optional[Any]]:
+    """
+    Infer the scaling type and swizzle mode for IR nodes (used during graph lowering).
+
+    This is the IR-compatible version of infer_scale_swizzle, using symbolic
+    size comparisons via V.graph.sizevars.statically_known_equals.
+    """
+    from torch._inductor.virtualized import V
+
+    mat_size = mat.get_size()
+    scale_size = scale.get_size()
+
+    # Handle transposed matrix
+    if transpose:
+        mat_size = (mat_size[1], mat_size[0])
+
+    # Compute scale numel symbolically
+    scale_numel = functools.reduce(operator.mul, scale_size, 1) if scale_size else 1
+
+    def symbolic_eq(a: Any, b: Any) -> bool:
+        """Compare values using symbolic equality when possible."""
+        return V.graph.sizevars.statically_known_equals(a, b)
+
+    return _infer_scale_swizzle_impl(
+        mat_size=(mat_size[0], mat_size[1]) if len(mat_size) >= 2 else (mat_size[0], 1),
+        scale_size=tuple(scale_size),
+        scale_numel=scale_numel,
+        mat_dtype=mat.dtype,
+        scale_dtype=scale.dtype,
+        eq_fn=symbolic_eq,
+    )

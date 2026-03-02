@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import dataclasses
 import io
 import logging
 import os
@@ -151,7 +152,6 @@ def aoti_compile_and_package(
     return aot_inductor_minifier_wrapper(
         _aoti_compile_and_package_inner,
         exported_program,
-        # pyrefly: ignore [bad-argument-type]
         package_path=package_path,
         inductor_configs=inductor_configs,
     )
@@ -445,3 +445,9 @@ def standalone_compile(
     return standalone_compile(
         gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options, aot=aot
     )
+
+
+@dataclasses.dataclass
+class _CudagraphAnnotation:
+    fwd: Optional[bool]
+    bwd: Optional[bool]

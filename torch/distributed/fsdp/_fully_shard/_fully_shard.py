@@ -5,25 +5,26 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
-from typing import Any, cast, NoReturn, Optional, overload, TYPE_CHECKING, Union
+from typing import Any, cast, NoReturn, overload, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
-from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
+from ._fsdp_common import FSDPMeshInfo
 from ._fsdp_init import (
+    _apply_to_module,
     _get_device_from_mesh,
-    _get_managed_modules,
-    _get_managed_states,
+    _get_mesh_info,
+    _get_modules_and_states,
     _get_post_forward_mesh_info,
-    _init_default_fully_shard_mesh,
-    _move_states_to_device,
+    _init_default_mesh,
+    _init_param_group,
+    _validate_mesh,
+    _validate_module,
 )
-from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
 
     from torch.distributed.tensor import DeviceMesh, Shard
+
+    from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
     "fully_shard",
@@ -55,12 +58,12 @@ def get_cls_to_fsdp_cls() -> dict[type, type]:
 def fully_shard(
     module: nn.Module,
     *,
-    mesh: Optional[DeviceMesh] = ...,
-    reshard_after_forward: Union[bool, int] = ...,
-    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
+    mesh: DeviceMesh | None = ...,
+    reshard_after_forward: bool | int | None = ...,
+    shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
-    ignored_params: Optional[set[nn.Parameter]] = ...,
+    ignored_params: set[nn.Parameter] | None = ...,
 ) -> FSDPModule: ...
 
 
@@ -69,12 +72,12 @@ def fully_shard(
 def fully_shard(
     module: list[nn.Module],
     *,
-    mesh: Optional[DeviceMesh] = ...,
-    reshard_after_forward: Union[bool, int] = ...,
-    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = ...,
+    mesh: DeviceMesh | None = ...,
+    reshard_after_forward: bool | int | None = ...,
+    shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
-    ignored_params: Optional[set[nn.Parameter]] = ...,
+    ignored_params: set[nn.Parameter] | None = ...,
 ) -> list[FSDPModule]: ...
 
 
@@ -87,12 +90,12 @@ def fully_shard(
 def fully_shard(
     module,
     *,
-    mesh: Optional[DeviceMesh] = None,
-    reshard_after_forward: Optional[Union[bool, int]] = None,
-    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
+    mesh: DeviceMesh | None = None,
+    reshard_after_forward: bool | int | None = None,
+    shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
-    ignored_params: Optional[set[nn.Parameter]] = None,
+    ignored_params: set[nn.Parameter] | None = None,
 ):
     """
     Apply fully sharded data parallelism (FSDP) to ``module``, where FSDP
@@ -187,21 +190,10 @@ def fully_shard(
         FSDPModule: The module with FSDP applied (in-place).
     """
     torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
-    if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
-        raise ValueError(
-            f"fully_shard does not support containers that do not implement forward: {module}"
-        )
-    mesh = mesh or _init_default_fully_shard_mesh()
-    if mesh.ndim not in (1, 2):
-        raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
-    elif mesh.ndim == 1:
-        mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
-    else:
-        if mesh.mesh_dim_names is None:
-            raise AssertionError(
-                "Please init the 2D mesh for HSDP with mesh_dim_names specified"
-            )
-        mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+    _validate_module(module, "fully_shard")
+    mesh = mesh or _init_default_mesh()
+    _validate_mesh(mesh)
+    mesh_info = _get_mesh_info(mesh)
     device = _get_device_from_mesh(mesh)
     auto_reshard_after_forward = reshard_after_forward is None
     # If the user does not provide ``reshard_after_forward``, we set it to True.
@@ -210,29 +202,22 @@ def fully_shard(
         reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
         mesh_info,
     )
-
-    arg_module = module
-    modules = (
-        (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
+    arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
+        module, device, ignored_params
     )
-    state = fully_shard.state(modules[0])  # type: ignore[attr-defined] # see [1]
+    state = fully_shard.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy, auto_reshard_after_forward)
-
-    managed_modules = _get_managed_modules(modules, ignored_params)
-    params, buffers = _get_managed_states(managed_modules, ignored_params)
-
-    _move_states_to_device(params, buffers, device)
-    if params:
-        state._fsdp_param_group = FSDPParamGroup(
-            params,
-            modules,
-            mesh_info,
-            post_forward_mesh_info,
-            device,
-            shard_placement_fn,
-            mp_policy,
-            offload_policy,
-        )
+    _init_param_group(
+        state,
+        params,
+        modules,
+        mesh_info,
+        post_forward_mesh_info,
+        device,
+        shard_placement_fn,
+        mp_policy,
+        offload_policy,
+    )
 
     # For Dynamo
     for managed_module in managed_modules:
@@ -240,14 +225,9 @@ def fully_shard(
         managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
-    for module in modules:
-        cls = module.__class__
-        new_cls = cls_to_fsdp_cls.get(cls)
-        if not new_cls:
-            dct = {"__deepcopy__": _unimplemented_deepcopy}
-            new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
-            cls_to_fsdp_cls[cls] = new_cls
-        module.__class__ = new_cls
+    _apply_to_module(
+        modules, cls_to_fsdp_cls, FSDPModule, "FSDP", _unimplemented_deepcopy
+    )
     return arg_module
 
 
@@ -271,14 +251,17 @@ def disable_fsdp_module_new_init() -> Iterator[None]:
 
 
 class FSDPModule:
+    # Index in MRO where the original class is found.
+    # For FSDP: [FSDP<Orig>, FSDPModule, Orig, ...] -> index 2
+    # Subclasses like ReplicateModule override this.
+    _orig_cls_mro_index: int = 2
+
     def __new__(cls, *args, **kwargs):
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
         """
-        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
-        # and index 1 is the `FSDPModule` class itself
-        orig_cls = cls.__mro__[2]
+        orig_cls = cls.__mro__[cls._orig_cls_mro_index]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         if _enable_fsdp_module_new_init:
             self.__init__(*args, **kwargs)
@@ -294,7 +277,7 @@ class FSDPModule:
         if fsdp_param_group := state._fsdp_param_group:
             fsdp_param_group.reshard()
 
-    def unshard(self, async_op: bool = False) -> Optional[UnshardHandle]:
+    def unshard(self, async_op: bool = False) -> UnshardHandle | None:
         """
         Unshards the module's parameters by allocating memory and all-gathering
         the parameters. This method is *not* recursive. The unshard follows the
@@ -401,9 +384,12 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 state._auto_reshard_after_forward = False
                 if fsdp_param_group := state._fsdp_param_group:
+                    if not isinstance(fsdp_param_group.mesh_info, FSDPMeshInfo):
+                        raise AssertionError
                     fsdp_param_group.post_forward_mesh_info = (
                         _get_post_forward_mesh_info(
-                            reshard_after_forward, fsdp_param_group.mesh_info
+                            reshard_after_forward,
+                            fsdp_param_group.mesh_info,
                         )
                     )
 
@@ -500,7 +486,7 @@ class FSDPModule:
         self,
         hook: Callable[[torch.Tensor], None],
         *,
-        stream: Optional[torch.cuda.Stream] = None,
+        stream: torch.cuda.Stream | None = None,
     ):
         """
         Args:
@@ -664,7 +650,7 @@ class UnshardHandle:
 
 
 class _UnshardHandleImpl(UnshardHandle):
-    def __init__(self, fsdp_param_group: Optional[FSDPParamGroup]):
+    def __init__(self, fsdp_param_group: FSDPParamGroup | None):
         self._fsdp_param_group = fsdp_param_group
 
     def wait(self):

@@ -30,7 +30,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_WITH_ROCM
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 
 # Reference method for fake quantize
@@ -567,8 +567,10 @@ class TestFakeQuantizeOps(TestCase):
         X.requires_grad_()
         fq_module = torch.ao.quantization.default_fake_quant().to(device)
         Y_prime = fq_module(X)
-        assert fq_module.scale is not None
-        assert fq_module.zero_point is not None
+        if fq_module.scale is None:
+            raise AssertionError("fq_module.scale should not be None")
+        if fq_module.zero_point is None:
+            raise AssertionError("fq_module.zero_point should not be None")
         Y = _fake_quantize_per_tensor_affine_reference(X, fq_module.scale, fq_module.zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y.cpu().detach().numpy(), Y_prime.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
@@ -919,7 +921,10 @@ class TestFakeQuantizeOps(TestCase):
             Y_prime.backward(dout)
             np.testing.assert_allclose(
                 dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-            assert X.grad.dtype == float_type
+            if X.grad.dtype != float_type:
+                raise AssertionError(
+                    f"Expected X.grad.dtype to be {float_type}, got {X.grad.dtype}"
+                )
 
 
     def test_backward_per_channel_cachemask_cpu(self):
@@ -1080,7 +1085,6 @@ class TestFakeQuantizeOps(TestCase):
                 )
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    @unittest.skipIf(TEST_WITH_ROCM, "Not a suitable test for ROCM")
     @given(dtype=st.sampled_from([torch.float, torch.float64, torch.half, torch.bfloat16]),
            device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_fake_quantize_per_tensor_affine_inf(self, dtype, device) -> None:

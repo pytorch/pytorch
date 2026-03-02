@@ -110,10 +110,6 @@ lennard_jones,pass,0
 
 
 
-llama,pass,0
-
-
-
 maml,pass_due_to_skip,0
 
 
@@ -174,10 +170,6 @@ pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,0
-
-
-
 pytorch_stargan,pass,0
 
 
@@ -219,10 +211,6 @@ speech_transformer,pass,10
 
 
 squeezenet1_1,pass,0
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
 
 
 

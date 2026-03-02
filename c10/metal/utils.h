@@ -189,6 +189,18 @@ inline common_dtype<T, U> floor_divide(T x, U y) {
   return ::metal::floor(x / y);
 }
 
+// Workaround for Metal compiler bug: the compiler produces wrong results
+// when optimizing fused (x / A) % B expressions for integral types.
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && is_scalar_integral_v<U>,
+        bool> = true>
+inline common_dtype<T, U> safe_mod(volatile T x, U y) {
+  return x % y;
+}
+
 // fmod
 template <
     typename T,
@@ -305,6 +317,94 @@ inline common_dtype<T, U> remainder(const T x, const U y) {
   return rc == 0 || (x ^ y) > 0 ? rc : rc + y;
 }
 
+// Based on aten/src/ATen/native/Pow.h
+template <
+    typename T,
+    ::metal::enable_if_t<is_scalar_integral_v<T>, bool> = true>
+inline T powi_impl(T a, T b) {
+  T result = 1;
+  while (b) {
+    if (b & 1) {
+      result *= a;
+    }
+    b /= 2;
+    a *= a;
+  }
+  return result;
+}
+
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_floating_point_v<T> || is_scalar_floating_point_v<U>,
+        bool> = true>
+inline float pow(T a, U b) {
+  return ::metal::precise::pow(static_cast<float>(a), static_cast<float>(b));
+}
+
+// Complex pow - use polar form: a = r*e^(i*theta)
+// a^b = exp(b * log(a)) = exp(b * (log(r) + i*theta))
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<is_complex_v<T> && is_complex_v<U>, bool> = true>
+inline float2 pow(T a, U b) {
+  // Convert a to polar form
+  // Use explicit computation instead of length() due to numerical issues
+  const auto r = ::metal::precise::sqrt(a.x * a.x + a.y * a.y);
+
+  // Special case: if r is 0, return 0
+  if (r == 0.0) {
+    return float2(0.0, 0.0);
+  }
+
+  const auto theta = ::metal::precise::atan2(a.y, a.x);
+  const auto log_r = ::metal::precise::log(r);
+
+  // Calculate a^b = r^b * e^(i*theta*b)
+  // new_r = exp(b.x * log(r) - b.y * theta)
+  // new_theta = b.x * theta + b.y * log(r)
+  const auto new_r = ::metal::precise::exp(b.x * log_r - b.y * theta);
+  const auto new_theta = b.x * theta + b.y * log_r;
+
+  return float2(
+      new_r * ::metal::precise::cos(new_theta),
+      new_r * ::metal::precise::sin(new_theta));
+}
+
+// Integral pow - unsigned types
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T> && !::metal::is_signed_v<T>,
+        bool> = true>
+inline T pow(T a, U b) {
+  return powi_impl(a, T(b));
+}
+
+// Integral pow - signed types
+template <
+    typename T,
+    typename U,
+    ::metal::enable_if_t<
+        is_scalar_integral_v<T>&& ::metal::is_signed_v<T>,
+        bool> = true>
+inline T pow(T a, U b) {
+  if (b < 0) {
+    if (a == 1) {
+      return 1;
+    } else if (a == -1) {
+      auto negative = (-b) % static_cast<T>(2);
+      return negative ? -1 : 1;
+    } else {
+      return 0;
+    }
+  }
+  return powi_impl(a, T(b));
+}
+
 // Based on algorithm described in
 // https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html#1202
 inline float log1p(float x) {
@@ -359,6 +459,48 @@ inline half2 conj(half2 a) {
 template <>
 inline float2 conj(float2 a) {
   return float2(a.x, -a.y);
+}
+
+// The following implementation of hypot provides better numerical stability
+// than the naive implementation. It is based on:
+// https://github.com/pearu/functional_algorithms/blob/7dbbfd7db225b1c202e0e364fc435423ccf52dbe/functional_algorithms/algorithms.py#L168
+//
+// This implementation changes the naive formula for the hypotenuse of a right
+// triangle, `h = sqrt(a^2 + b^2)`, into three alternate forms to be used in
+// different cases. The reason why the naive formula is unstable is because of
+// the square terms. If `a` or `b` are very large or very small floating point
+// numbers, then their squares will resolve to inf or 0.
+//
+// Assume `a >= b >= 0`. We can first change the formula to:
+// `h = a sqrt(1 + (b / a)^2)`
+// `h = a sqrt(1 + r)`
+// where `r = (b / a)^2`. Since `a >= b >= 0`, then `1 >= r >= 0`.
+//
+// Case 1: `a == b`
+//   The formula simplifies to `h = a sqrt(2)`.
+//
+// Case 2: `1 >> r > 0`
+//   Due to floating point error, `sqrt(1 + r)` resolves to 1. So we use the
+//   binomial approximation `sqrt(1 + r) ≈ 1 + r / 2`, and the formula becomes
+//   `h ≈ a + a r / 2`.
+//
+// Case 3: All other cases.
+//   Use `h = a sqrt(1 + r)`.
+inline float hypot(float a_, float b_) {
+  auto a = max(a_, b_);
+  auto b = min(a_, b_);
+
+  auto b_over_a = c10::metal::div(b, a);
+  auto r = c10::metal::mul(b_over_a, b_over_a);
+  auto sqrt_1_plus_r = ::metal::precise::sqrt(1 + r);
+
+  auto h1 = M_SQRT2_F * a;
+  auto h2 = a + a * r / 2;
+  auto h3 = a * sqrt_1_plus_r;
+  bool is_h1 = (a == b);
+  bool is_h2 = ((sqrt_1_plus_r == 1) && (r > 0));
+
+  return ::metal::select(::metal::select(h3, h2, is_h2), h1, is_h1);
 }
 
 #define INSTANTIATE_FOR_ALL_TYPES(MACRO) \

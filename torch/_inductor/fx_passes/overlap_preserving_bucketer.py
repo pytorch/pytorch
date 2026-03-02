@@ -10,18 +10,21 @@ from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
     _schedulable_wait_node,
-    bucket_key,
     BucketMode,
+    get_full_bucket_key,
     has_mergeable_all_gather_convert_dtype,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
 )
+from torch._inductor.fx_passes.fsdp import is_fsdp_all_gather
 from torch._inductor.fx_passes.overlap_scheduling import (
     CollBucket,
     CollectiveInfo,
     get_group_name,
     is_compute_node,
+    log as overlap_scheduling_log,
 )
+from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -135,7 +138,11 @@ class OverlapPreservingBucketer:
         max_bucket_memory_gb: float = 1.0,
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
+        collective_bucketing: bool = True,
         bucket_mode: BucketMode = "custom_ops_multidtype",
+        bucket_exposed_first: bool | None = None,
+        region_of: dict[fx.Node, Any] | None = None,
+        bucket_only_internode_comms: bool = False,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -144,7 +151,11 @@ class OverlapPreservingBucketer:
         self.node_idx = {n: i for i, n in enumerate(scheduled)}
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
+        self.bucket_exposed_first = bucket_exposed_first
+        self.bucket_only_internode_comms = bucket_only_internode_comms
         self.bucket_mode = bucket_mode
+        self.collective_bucketing = collective_bucketing
+        self.region_of: dict[fx.Node, Any] = region_of or {}
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
@@ -266,55 +277,66 @@ class OverlapPreservingBucketer:
 
             self.all_hiding_nodes |= info.hiding_nodes
 
-    def bucket_collectives(self) -> None:
-        # Group collectives by PG first
+    def identify_internode_group_names(self) -> OrderedSet[str]:
+        # Identify internode comm groups.
+        # Temporary uses FSDP pattern as heuristic for outer groups.
+        checked_pgs = OrderedSet()
+        internode_pgs = OrderedSet()
+        for start in self.collective_info:
+            pg = get_group_name(start)
+            if is_all_gather(start) and pg not in checked_pgs:
+                if is_fsdp_all_gather(start):
+                    internode_pgs.add(pg)
+                checked_pgs.add(pg)
+        return internode_pgs
+
+    def _bucket_collectives_impl(self) -> list[CollBucket]:
+        """Find and apply bucket transformations for collectives."""
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        internode_pgs = self.identify_internode_group_names()
+
         for start in self.collective_info:
             pg = get_group_name(start)
             pg_collectives[pg].add(start)
 
         all_buckets: list[CollBucket] = []
         for pg, collectives in pg_collectives.items():
+            if self.bucket_only_internode_comms and pg not in internode_pgs:
+                continue
+
             # Populate node_to_event for this PG's timeline
             self._populate_node_to_event(pg)
 
-            # Group by bucket key within this PG
             grouped_collectives: dict[object, OrderedSet[fx.Node]] = defaultdict(
                 OrderedSet
             )
             for start in collectives:
-                key = bucket_key(start, self.bucket_mode)
-                if key is not None:
+                key = get_full_bucket_key(start, self.bucket_mode)
+                if key[1] is not None:
                     grouped_collectives[key].add(start)
 
-            # Find buckets for this PG
             for key, collective_group in grouped_collectives.items():
                 bucket_log.debug(
                     "bucketing collective group with key %s: %s",
                     key,
                     [n.name for n in collective_group],
                 )
-                buckets = self._find_buckets(collective_group)
+                buckets = self._find_buckets(collective_group, internode_pgs)
                 all_buckets.extend(buckets)
 
-        # Apply bucketing transformations
-        # Dependencies are tracked in aug_graph.extra_deps during bucketing
         for coll_bucket in all_buckets:
             if len(coll_bucket.collectives) <= 1:
                 continue
 
             counters["inductor"]["collective_buckets"] += 1
             self._apply_bucket(coll_bucket)
+        return all_buckets
 
-        # Extract all dependencies from augmented graph
-        # This includes:
-        # - Sequential timeline deps (added during build_timeline)
-        # - Hiding interval deps (added during _add_hiding_interval_constraints)
-        # - All transferred deps from bucketing (transferred during _apply_bucket)
-        additional_deps = self.aug_graph.get_all_extra_deps()
-
-        # Apply topological sort with all dependencies
+    def _apply_deps_and_effect_tokens(self) -> None:
+        """Apply topological sort and effect tokens to preserve overlap."""
         from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+        additional_deps = self.aug_graph.get_all_extra_deps()
 
         for n, deps in additional_deps.items():
             torch._check(
@@ -327,37 +349,159 @@ class OverlapPreservingBucketer:
 
         _stable_topological_sort(self.graph, additional_deps)
 
-        # After topological sort, preserve dependencies using effect tokens
-        # Only preserve edges where NOT both nodes are collective starts or waits
         if self.insert_overlap_deps:
+            # Filter out collective-to-collective deps (handled by NCCL stream ordering)
             filtered_deps: dict[fx.Node, OrderedSet[fx.Node]] = {}
             for node, deps in additional_deps.items():
                 filtered_node_deps: OrderedSet[fx.Node] = OrderedSet()
-
-                # only preserve comm-comptue overlap for now, although we could more
-                # generally constrain
                 for dep in deps:
                     if not (is_collective_or_wait(node) and is_collective_or_wait(dep)):
                         filtered_node_deps.add(dep)
-
                 if filtered_node_deps:
                     filtered_deps[node] = filtered_node_deps
 
-            self._preserve_dependencies_with_tokens(filtered_deps)
+            if filtered_deps:
+                from torch._inductor.fx_passes.control_dependencies import (
+                    preserve_node_ordering,
+                )
 
+                preserve_node_ordering(self.graph, filtered_deps)
+
+    def bucket_collectives(self) -> None:
+        """Run the full bucketing and dep application flow.
+
+        Order is important:
+        1. Bucketing - merge collectives into buckets
+        2. Inline fusions - expand call_module back to original nodes
+        3. Transfer deps - move deps from erased nodes to their replacements
+        4. Add control deps - apply effect tokens and topo sort
+
+        Steps 2-3 MUST happen before step 4, because control deps need to
+        reference the final inlined nodes, not the erased fusion modules.
+        """
+        # Step 1: Bucket collectives
+        all_buckets: list[CollBucket] | None = None
+        if self.collective_bucketing:
+            all_buckets = self._bucket_collectives_impl()
+
+        # Step 2: Inline fusion regions (expand call_module -> original nodes)
+        replaced: dict[fx.Node, fx.Node | None] = {}
+        if self.region_of:
+            from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
+
+            gm = self.graph.owning_module
+            replaced = expand_fusion_regions(gm, self.region_of)
+
+        # Step 3: Transfer deps from erased fusion modules to inlined nodes
+        if replaced:
+            self.aug_graph.transfer_erased_node_deps(replaced)
+
+        # Step 4: Add control deps (MUST be after inline + transfer)
+        self._apply_deps_and_effect_tokens()
         self.graph.lint()
+
+        if (
+            overlap_scheduling_log.isEnabledFor(logging.DEBUG)
+            and all_buckets is not None
+        ):
+            log_strs: list[str] = []
+            stats_num_buckets_per_key = defaultdict(int)
+            stats_num_bucketed_collectives_per_key = defaultdict(int)
+            stats_num_total_collectives_per_key = defaultdict(int)
+
+            def _bucket_key(node):
+                return get_full_bucket_key(node, self.bucket_mode)
+
+            for start, info in self.collective_info.items():
+                stats_num_total_collectives_per_key[_bucket_key(start)] += 1
+
+            for i, bucket in enumerate(all_buckets):
+                bucket_n = len(bucket.collectives)
+                if bucket_n == 0:
+                    continue
+                node = bucket.collectives[0]
+                key = _bucket_key(node)
+                stats_num_buckets_per_key[key] += 1
+                stats_num_bucketed_collectives_per_key[key] += bucket_n
+                log_strs.append(f"bucket[{i}] key:{key} len:{bucket_n}:{bucket}")
+                for coll in bucket.collectives:
+                    info = self.collective_info[coll]
+                    hns = info.hiding_nodes
+                    log_strs.append(f"coll:{coll} hiding_nodes:{hns}")
+
+            bucket_log_strs: list[str] = []
+            for key, num_buckets in stats_num_buckets_per_key.items():
+                num_colls = stats_num_bucketed_collectives_per_key[key]
+                bucket_log_strs.append(
+                    f"bucket key stats {key}: {num_colls} in {num_buckets}"
+                    f" buckets of total:{stats_num_total_collectives_per_key[key]}"
+                )
+            bucket_log_strs.append("")
+            # Add stats to the beginning
+            log_strs[:0] = bucket_log_strs
+            bucket_logs = "\n".join(log_strs)
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "inductor_fx_passes_overlap_bucketing",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: bucket_logs,
+            )
+
+    def _compute_overlap_ratio(self, node: fx.Node) -> float:
+        """
+        Compute what fraction of the collective's time is hidden by compute.
+        Returns 0.0 for fully exposed, 1.0 for fully hidden.
+        """
+        info = self.collective_info[node]
+        if info.estimated_time_ms <= 0:
+            return 0.0
+        hidden_time = info.estimated_time_ms - info.exposed_time_ms
+        return hidden_time / info.estimated_time_ms
+
+    def _should_bucket_exposed_first(
+        self,
+        collective_group: OrderedSet[fx.Node],
+        current_pg: str,
+        internode_pgs: OrderedSet[str],
+    ) -> bool:
+        """Determine whether to bucket exposed collectives first."""
+        if self.bucket_exposed_first is None:
+            return current_pg in internode_pgs
+        return self.bucket_exposed_first
 
     def _find_buckets(
         self,
         collective_group: OrderedSet[fx.Node],
+        internode_pgs: OrderedSet[str],
     ) -> list[CollBucket]:
         """Find valid buckets within a group of similar collectives."""
         max_bucket_bytes = int(self.max_bucket_memory_gb * 1024 * 1024 * 1024)
         buckets = []
         processed: OrderedSet[fx.Node] = OrderedSet()
+        if len(collective_group) == 0:
+            return []
 
-        # Sort collectives by node index for efficient distance checking
-        sorted_collectives = sorted(collective_group, key=lambda n: self.node_idx[n])
+        current_pg = get_group_name(next(iter(collective_group)))
+
+        bucket_exposed_first = self._should_bucket_exposed_first(
+            collective_group, current_pg, internode_pgs
+        )
+        if bucket_exposed_first:
+            # Sort by overlap ratio (ascending) to bucket least hidden collectives first.
+            # Exposed collectives benefit most from bucketing since their latency is on the
+            # critical path. Prioritizing them also preserves hiding relationships for
+            # already-hidden collectives, which have less to gain from bucketing.
+            sorted_collectives = sorted(
+                collective_group,
+                key=lambda n: (self._compute_overlap_ratio(n), self.node_idx[n]),
+            )
+        else:
+            sorted_collectives = sorted(
+                collective_group,
+                key=lambda n: self.node_idx[n],
+            )
 
         for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
@@ -379,6 +523,7 @@ class OverlapPreservingBucketer:
             # Greedy optimization: stop after consecutive failures
             consecutive_failures = 0
             max_consecutive_failures = 20
+            start_node_idx = self.node_idx[start_node]
 
             # Check candidates in sorted order, break when beyond max distance
             for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
@@ -389,6 +534,17 @@ class OverlapPreservingBucketer:
                     break
 
                 if candidate in processed:
+                    continue
+
+                candidate_node_idx = self.node_idx[candidate]
+                if (
+                    bucket_exposed_first
+                    and abs(candidate_node_idx - start_node_idx)
+                    > max_consecutive_failures
+                ):
+                    # Since collectives are sorted by overlap ratio rather than graph
+                    # position, skip candidates too far apart in the graph to avoid
+                    # creating buckets that block future bucketing opportunities.
                     continue
 
                 if self._can_add_to_bucket(bucket_info, candidate):
@@ -871,7 +1027,7 @@ class OverlapPreservingBucketer:
         assert isinstance(new_start, fx.Node)
 
         # Create mapping of all erased nodes to their replacements
-        erased_to_new = {}
+        erased_to_new: dict[fx.Node, fx.Node | None] = {}
         for old_start in old_starts:
             erased_to_new[old_start] = new_start
         for old_wait in old_waits:
@@ -896,17 +1052,49 @@ class OverlapPreservingBucketer:
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
 
-    def _preserve_dependencies_with_tokens(
-        self, additional_deps: dict[fx.Node, OrderedSet[fx.Node]]
-    ) -> None:
-        """
-        Preserve dependencies using effect tokens and with_effects higher-order op.
 
-        Uses the standalone token_dependencies utility for consistent behavior
-        across different overlap scheduling approaches.
-        """
-        from torch._inductor.fx_passes.control_dependencies import (
-            preserve_node_ordering,
-        )
+def finalize_overlap_scheduling(
+    gm: fx.GraphModule,
+    collective_info: dict[fx.Node, CollectiveInfo],
+    scheduled: OrderedSet[fx.Node],
+    *,
+    collective_bucketing: bool = False,
+    insert_overlap_deps: bool = False,
+    max_bucket_memory_gb: float = 2.0,
+    max_coll_distance: int = 1000,
+    region_of: dict[fx.Node, Any] | None = None,
+    bucket_exposed_first: bool | None = None,
+    bucket_only_internode_comms: bool = False,
+) -> None:
+    """
+    Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
 
-        preserve_node_ordering(self.graph, additional_deps)
+    This is the main entry point for post-scheduling graph transformations:
+    1. Bucket collectives (if collective_bucketing=True)
+    2. Inline fusion regions back to original nodes
+    3. Transfer deps from erased nodes to replacements
+    4. Apply topological sort and effect tokens
+
+    Args:
+        gm: The graph module to modify
+        collective_info: Dict mapping collective start nodes to their CollectiveInfo
+        scheduled: Ordered set of scheduled nodes
+        collective_bucketing: Whether to bucket collectives
+        insert_overlap_deps: Whether to insert effect tokens for overlap deps
+        max_bucket_memory_gb: Maximum memory for a bucket in GB
+        max_coll_distance: Maximum distance for bucketing candidates
+        region_of: Optional dict mapping module nodes to FusionRegions
+    """
+    bucketer = OverlapPreservingBucketer(
+        graph=gm.graph,
+        collective_info=collective_info,
+        scheduled=scheduled,
+        max_bucket_memory_gb=max_bucket_memory_gb,
+        max_coll_distance=max_coll_distance,
+        insert_overlap_deps=insert_overlap_deps,
+        collective_bucketing=collective_bucketing,
+        bucket_exposed_first=bucket_exposed_first,
+        bucket_only_internode_comms=bucket_only_internode_comms,
+        region_of=region_of,
+    )
+    bucketer.bucket_collectives()

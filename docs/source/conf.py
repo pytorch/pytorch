@@ -13,10 +13,9 @@
 
 import inspect
 import os
-
-# import sys
 import pkgutil
 import re
+import sys
 from os import path
 
 # source code directory, relative to this file, for sphinx-autobuild
@@ -44,6 +43,10 @@ import pytorch_sphinx_theme2
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
+# Add the source directory to sys.path so that redirects.py can be imported
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+from redirects import redirects  # noqa: F401
+
 
 # -- General configuration ------------------------------------------------
 
@@ -66,6 +69,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
+    "sphinx_reredirects",
 ]
 
 myst_enable_extensions = [
@@ -131,7 +135,6 @@ switcher_version = "main" if not RELEASE else version
 
 html_static_path = ["_static"]
 html_theme_options = {
-    "logo": {"text": "Home"},
     "analytics_id": "GTM-T8XT4PS",
     "canonical_url": "https://docs.pytorch.org/docs/stable/",
     "switcher": {
@@ -147,6 +150,7 @@ html_theme_options = {
         },
     ],
     "show_version_warning_banner": True,
+    "llm_disabled": False,
     "icon_links": [
         {
             "name": "X",
@@ -170,12 +174,16 @@ html_theme_options = {
         },
     ],
     "navbar_align": "left",
-    "navbar_start": ["version-switcher", "navbar-logo"],
+    "navbar_start": ["navbar-logo", "version-switcher"],
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
     "header_links_before_dropdown": 6,
     "navbar_persistent": [],
     "use_edit_page_button": True,
+    # RunLLM Widget Configuration (uncomment and set assistant_id to enable)
+    # Each repository should have its own unique assistant_id from RunLLM
+    "runllm_assistant_id": "834",
+    "runllm_name": "PyTorch Assistant",
     "pytorch_project": "docs",
 }
 
@@ -243,38 +251,8 @@ autosummary_filename_map = {
 }
 
 coverage_ignore_functions = [
-    # torch
-    "typename",
-    # torch.cuda._sanitizer
-    "zip_arguments",
-    "zip_by_key",
-    # torch.distributed.autograd
-    "is_available",
-    # torch.distributed.checkpoint.state_dict
-    "gc_context",
-    # torch.distributed.elastic.events
-    "record_rdzv_event",
-    # torch.distributed.elastic.metrics
-    "initialize_metrics",
-    # torch.distributed.elastic.rendezvous.registry
-    "get_rendezvous_handler",
-    # torch.distributed.launch
-    "launch",
-    "main",
-    "parse_args",
-    # torch.distributed.rpc
-    "is_available",
-    # torch.distributed.run
-    "config_from_args",
-    "determine_local_world_size",
-    "get_args_parser",
-    "get_rdzv_endpoint",
-    "get_use_env",
-    "main",
-    "parse_args",
-    "parse_min_max_nnodes",
-    "run",
-    "run_script_path",
+    "main",  # utility script
+    "run",  # utility script
     # torch.distributions.constraints
     "is_dependent",
     # torch.hub
@@ -654,9 +632,7 @@ coverage_ignore_functions = [
     "probs_to_logits",
     "tril_matrix_to_vec",
     "vec_to_tril_matrix",
-    # torch.fx.annotate
     "annotate",
-    # torch.fx.experimental.accelerator_partitioner
     "check_dependency",
     "combine_two_partitions",
     "get_bfs_level_partition",
@@ -667,181 +643,21 @@ coverage_ignore_functions = [
     "reorganize_partitions",
     "reset_partition_device",
     "set_parents_and_children",
-    # torch.fx.experimental.const_fold
     "get_unique_attr_name_in_module",
     "split_const_subgraphs",
-    # torch.fx.experimental.debug
     "set_trace",
-    # torch.fx.experimental.graph_gradual_typechecker
-    "adaptiveavgpool2d_check",
-    "adaptiveavgpool2d_inference_rule",
-    "add_inference_rule",
-    "all_eq",
-    "bn2d_inference_rule",
-    "broadcast_types",
-    "calculate_out_dimension",
-    "conv2d_inference_rule",
-    "conv_refinement_rule",
-    "conv_rule",
-    "element_wise_eq",
-    "expand_to_tensor_dim",
-    "first_two_eq",
-    "flatten_check",
-    "flatten_inference_rule",
-    "flatten_refinement_rule",
-    "get_attr_inference_rule",
-    "get_greatest_upper_bound",
-    "get_parameter",
-    "linear_check",
-    "linear_inference_rule",
-    "linear_refinement_rule",
-    "maxpool2d_check",
-    "maxpool2d_inference_rule",
-    "register_algebraic_expressions_inference_rule",
-    "register_inference_rule",
-    "register_refinement_rule",
-    "relu_inference_rule",
-    "reshape_inference_rule",
-    "transpose_inference_rule",
-    # torch.fx.experimental.merge_matmul
     "are_nodes_independent",
     "may_depend_on",
     "merge_matmul",
     "split_result_tensors",
-    # torch.fx.experimental.meta_tracer
-    "embedding_override",
-    "functional_relu_override",
-    "gen_constructor_wrapper",
-    "nn_layernorm_override",
-    "proxys_to_metas",
-    "symbolic_trace",
-    "torch_abs_override",
-    "torch_nn_relu_override",
-    "torch_relu_override",
-    "torch_where_override",
-    # torch.fx.experimental.migrate_gradual_types.constraint
-    "is_algebraic_expression",
-    "is_bool_expr",
-    "is_dim",
-    # torch.fx.experimental.migrate_gradual_types.constraint_generator
-    "adaptive_inference_rule",
-    "add_layer_norm_constraints",
-    "add_linear_constraints",
-    "arange_inference_rule",
-    "assert_inference_rule",
-    "batchnorm_inference_rule",
-    "bmm_inference_rule",
-    "broadcasting_inference_rule",
-    "conv2d_inference_rule",
-    "cumsum_inference_rule",
-    "embedding_inference_rule",
-    "embedding_inference_rule_functional",
-    "eq_inference_rule",
-    "equality_inference_rule",
-    "expand_inference_rule",
-    "flatten_inference_rule",
-    "full_inference_rule",
-    "gen_broadcasting_constraints",
-    "gen_embedding_rules",
-    "gen_layer_norm_constraints",
-    "generate_flatten_constraints",
-    "get_attr_inference_rule",
-    "getitem_inference_rule",
-    "gt_inference_rule",
-    "index_select_inference_rule",
-    "layer_norm_functional",
-    "layer_norm_inference_rule",
-    "linear_constraints",
-    "linear_inference_rule",
-    "lt_inference_rule",
-    "masked_fill_inference_rule",
-    "maxpool_inference_rule",
-    "neq_inference_rule",
-    "range_check",
-    "register_inference_rule",
-    "relu_inference_rule",
-    "reshape_inference_rule",
-    "size_inference_rule",
-    "tensor_inference_rule",
-    "torch_dim_inference_rule",
-    "torch_linear_inference_rule",
-    "transpose_inference_rule",
-    "type_inference_rule",
-    "view_inference_rule",
-    # torch.fx.experimental.migrate_gradual_types.constraint_transformation
-    "apply_padding",
-    "broadcast_dim",
-    "calc_last_two_dims",
-    "create_equality_constraints_for_broadcasting",
-    "gen_all_reshape_possibilities",
-    "gen_broadcasting_constraints",
-    "gen_consistency_constraints",
-    "gen_greatest_upper_bound",
-    "gen_lists_of_dims",
-    "generate_all_broadcasting_possibilities_no_padding",
-    "generate_all_int_dyn_dim_possibilities",
-    "generate_binconstraint_d",
-    "generate_binconstraint_t",
-    "generate_broadcasting",
-    "generate_calc_conv",
-    "generate_calc_maxpool",
-    "generate_calc_product",
-    "generate_conj",
-    "generate_d_gub",
-    "generate_disj",
-    "generate_gub",
-    "generate_reshape",
-    "is_dim_div_by_target",
-    "is_target_div_by_dim",
-    "no_broadcast_dim_with_index",
-    "register_transformation_rule",
-    "transform_constraint",
-    "transform_get_item",
-    "transform_get_item_tensor",
-    "transform_index_select",
-    "transform_transpose",
-    "valid_index",
-    "valid_index_tensor",
-    # torch.fx.experimental.migrate_gradual_types.transform_to_z3
-    "evaluate_conditional_with_constraints",
-    # torch.fx.experimental.migrate_gradual_types.util
-    "gen_bvar",
-    "gen_dvar",
-    "gen_nat_constraints",
-    "gen_tensor_dims",
-    "gen_tvar",
-    # torch.fx.experimental.optimization
-    "extract_subgraph",
-    "fuse",
-    "gen_mkl_autotuner",
-    "matches_module_pattern",
-    "modules_to_mkldnn",
-    "optimize_for_inference",
-    "remove_dropout",
-    "replace_node_module",
-    "reset_modules",
-    "use_mkl_length",
-    # torch.fx.experimental.partitioner_utils
-    "get_comm_latency_between",
-    "get_extra_size_of",
-    "get_latency_of_one_partition",
-    "get_latency_of_partitioned_graph",
-    "get_partition_to_latency_mapping",
-    "record_shapeenv_event",
-    "replay_shape_env_events",
-    "shape_env_check_state_equal",
     "sym_sqrt",
-    "reify",
-    # torch.fx.experimental.unification.match
     "edge",
     "match",
     "ordering",
     "supercedes",
-    # torch.fx.experimental.unification.more
     "reify_object",
     "unifiable",
     "unify_object",
-    # torch.fx.experimental.unification.multipledispatch.conflict
     "ambiguities",
     "ambiguous",
     "consistent",
@@ -849,10 +665,8 @@ coverage_ignore_functions = [
     "ordering",
     "super_signature",
     "supercedes",
-    # torch.fx.experimental.unification.multipledispatch.core
     "dispatch",
     "ismethod",
-    # torch.fx.experimental.unification.multipledispatch.dispatcher
     "ambiguity_warn",
     "halt_ordering",
     "restart_ordering",
@@ -861,12 +675,10 @@ coverage_ignore_functions = [
     "variadic_signature_matches",
     "variadic_signature_matches_iter",
     "warning_text",
-    # torch.fx.experimental.unification.multipledispatch.utils
     "expand_tuples",
     "groupby",
     "raises",
     "reverse_dict",
-    # torch.fx.experimental.unification.multipledispatch.variadic
     "isvariadic",
     "freeze",
     "hashable",
@@ -874,10 +686,8 @@ coverage_ignore_functions = [
     "reverse_dict",
     "transitive_get",
     "xfail",
-    # torch.fx.experimental.unification.variable
     "var",
     "vars",
-    # torch.fx.experimental.unify_refinements
     "check_for_type_equality",
     "convert_eq",
     "infer_symbolic_types",
@@ -885,20 +695,16 @@ coverage_ignore_functions = [
     "substitute_all_types",
     "substitute_solution_one_type",
     "unify_eq",
-    # torch.fx.experimental.validator
     "bisect",
     "translation_validation_enabled",
     "translation_validation_timeout",
     "z3op",
     "z3str",
-    # torch.fx.graph_module
     "reduce_graph_module",
     "reduce_package_graph_module",
-    # torch.fx.node
     "has_side_effect",
     "map_aggregate",
     "map_arg",
-    # torch.fx.operator_schemas
     "check_for_mutable_operation",
     "create_type_hint",
     "get_signature_for_torch_op",
@@ -950,7 +756,6 @@ coverage_ignore_functions = [
     "get_node_target",
     "is_node_output_tensor",
     "legalize_graph",
-    "stable_topological_sort",
     # torch.fx.passes.utils.common
     "compare_graphs",
     "lift_subgraph_as_module",
@@ -1829,34 +1634,10 @@ coverage_ignore_classes = [
     "default_debug_observer",
     "default_placeholder_observer",
     "default_reuse_input_observer",
-    # torch.ao.quantization.pt2e.duplicate_dq_pass
-    "DuplicateDQPass",
-    # torch.ao.quantization.pt2e.port_metadata_pass
-    "PortNodeMetaForQDQ",
     # torch.ao.quantization.qconfig
     "QConfigDynamic",
     # torch.ao.quantization.quant_type
     "QuantType",
-    # torch.ao.quantization.quantizer.composable_quantizer
-    "ComposableQuantizer",
-    # torch.ao.quantization.quantizer.embedding_quantizer
-    "EmbeddingQuantizer",
-    # torch.ao.quantization.quantizer.quantizer
-    "DerivedQuantizationSpec",
-    "FixedQParamsQuantizationSpec",
-    "QuantizationAnnotation",
-    "QuantizationSpec",
-    "QuantizationSpecBase",
-    "SharedQuantizationSpec",
-    # torch.ao.quantization.quantizer.x86_inductor_quantizer
-    "X86InductorQuantizer",
-    # torch.ao.quantization.quantizer.xpu_inductor_quantizer
-    "XPUInductorQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer
-    "XNNPACKQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
-    "OperatorConfig",
-    "QuantizationConfig",
     # torch.ao.quantization.stubs
     "DeQuantStub",
     "QuantStub",
@@ -2692,11 +2473,9 @@ autodoc_default_options = {
 
 html_css_files = [
     "css/jit.css",
-    "css/custom.css",
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
-html_js_files = ["js/runllm-widget.js"]
 
 from sphinx.ext.coverage import CoverageBuilder
 

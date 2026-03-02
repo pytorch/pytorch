@@ -41,7 +41,10 @@ def have_compatible_glibc(major, minimum_minor):
 
     # Parse string and check against requested version.
     version = [int(piece) for piece in version_str.split(".")]
-    assert len(version) == 2
+    if len(version) != 2:
+        raise AssertionError(
+            f"Expected version to have 2 components (major.minor), got {len(version)}: {version_str}"
+        )
     if major != version[0]:
         return False
     if minimum_minor > version[1]:

@@ -195,14 +195,10 @@ static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
 
 #if defined(__linux__)
 struct DumpPipe {
-  DumpPipe(int rank) {
-    std::string fileStem =
-        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
-    if (fileStem.empty() ||
-        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
+  DumpPipe(int rank, const std::string& fileStem, int traceBufferSize) {
+    if (fileStem.empty() || traceBufferSize <= 0) {
       return;
     }
-    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_PIPE_FILE is empty");
     std::string filename = c10::str(fileStem, rank, ".pipe");
     TORCH_CHECK(
         unlink(filename.c_str()) != -1 || errno == ENOENT,
@@ -515,6 +511,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
     explicit Options(bool is_high_priority_stream = false);
+    Options(const Options&) = default;
+    Options(Options&&) noexcept = default;
+    Options& operator=(const Options&) = delete;
+    Options& operator=(Options&&) noexcept = delete;
+    ~Options() override = default;
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
@@ -1350,6 +1351,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Size of ring buffer where we store NCCL Traces for debugging.
   int traceBufferSize_;
 
+  // Stores TORCH_NCCL_DEBUG_INFO_PIPE_FILE
+  std::string debugInfoPipeFile_;
+
   // We gate the cudaEventCache so that we can roll it out gradually.
   std::atomic<bool> cudaEventCacheEnabled_;
 
@@ -1391,7 +1395,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
 
   // Add Work Pointer to workVector
-  void workEnqueue(const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>&);
+  void workEnqueue(
+      const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& /*work*/);
 
   // The CUDA streams used by NCCL kernels
   std::unordered_map<std::string, at::cuda::CUDAStream> ncclStreams_;

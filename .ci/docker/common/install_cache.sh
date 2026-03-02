@@ -3,21 +3,23 @@
 set -ex
 
 install_ubuntu() {
-  echo "Preparing to build sccache from source"
-  apt-get update
-  # libssl-dev will not work as it is upgraded to libssl3 in Ubuntu-22.04.
-  # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
-  apt-get install -y cargo
+  echo "Installing pkg-config and libssl-dev"
+  apt-get update && apt-get install -y pkg-config libssl-dev curl
+  echo "Installing rust"
+  curl https://sh.rustup.rs -sSf | sh -s -- -y
   echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.10.0
+  git clone https://github.com/mozilla/sccache -b v0.13.0
   cd sccache
+  echo "Patch dist build on aarch64"
+  sed -i '/all(target_os = "linux", target_arch = "x86_64"),/{ p; s/x86_64/aarch64/; }' src/bin/sccache-dist/main.rs
   echo "Building sccache"
-  cargo build --release
+  . "$HOME/.cargo/env" && cargo build --release --features="dist-client dist-server"
   cp target/release/sccache /opt/cache/bin
+  cp target/release/sccache-dist /opt/cache/bin
   echo "Cleaning up"
   cd ..
-  rm -rf sccache
-  apt-get remove -y cargo rustc
+  rm -rf sccache .cargo
+  apt-get remove -y pkg-config libssl-dev
   apt-get autoclean && apt-get clean
 
   echo "Downloading old sccache binary from S3 repo for PCH builds"
@@ -75,10 +77,15 @@ EOF
   chmod a+x "/opt/cache/bin/$1"
 }
 
-write_sccache_stub cc
-write_sccache_stub c++
-write_sccache_stub gcc
-write_sccache_stub g++
+# Skip all sccache wrapping for theRock nightly: sccache PATH wrappers
+# intercept assembly (.s) compilation and fail because the assembler does not
+# produce the .d dependency file that sccache expects.
+if [ "$ROCM_VERSION" != "nightly" ]; then
+  write_sccache_stub cc
+  write_sccache_stub c++
+  write_sccache_stub gcc
+  write_sccache_stub g++
+fi
 
 # NOTE: See specific ROCM_VERSION case below.
 if [ "x$ROCM_VERSION" = x ]; then
@@ -98,45 +105,45 @@ if [ -n "$CUDA_VERSION" ]; then
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
-  # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
-  # hipcc will call either hcc or clang using an absolute path starting with /opt/rocm,
-  # causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
-  # directly under /opt/rocm while also preserving the original compiler names.
-  # Note symlinks will chain as follows: [hcc or clang++] -> clang -> clang-??
-  # Final link in symlink chain must point back to original directory.
-
-  # Original compiler is moved one directory deeper. Wrapper replaces it.
-  function write_sccache_stub_rocm() {
-    OLDCOMP=$1
-    COMPNAME=$(basename $OLDCOMP)
-    TOPDIR=$(dirname $OLDCOMP)
-    WRAPPED="$TOPDIR/original/$COMPNAME"
-    mv "$OLDCOMP" "$WRAPPED"
-    printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" >"$OLDCOMP"
-    chmod a+x "$OLDCOMP"
-  }
-
-  if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then
-    # ROCm 3.3 or earlier.
-    mkdir /opt/rocm/hcc/bin/original
-    write_sccache_stub_rocm /opt/rocm/hcc/bin/hcc
-    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang
-    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang++
-    # Fix last link in symlink chain, clang points to versioned clang in prior dir
-    pushd /opt/rocm/hcc/bin/original
-    ln -s ../$(readlink clang)
-    popd
-  elif [[ -e "/opt/rocm/llvm/bin/clang" ]]; then
-    # ROCm 3.5 and beyond.
-    mkdir /opt/rocm/llvm/bin/original
-    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang
-    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang++
-    # Fix last link in symlink chain, clang points to versioned clang in prior dir
-    pushd /opt/rocm/llvm/bin/original
-    ln -s ../$(readlink clang)
-    popd
+  # Skip sccache wrapping for theRock nightly - sccache has issues parsing
+  # theRock's complex include paths and causes hipconfig to fail
+  if [ "$ROCM_VERSION" = "nightly" ]; then
+    echo "Skipping sccache wrapping for theRock nightly ROCm"
   else
-    echo "Cannot find ROCm compiler."
-    exit 1
+    source /etc/rocm_env.sh
+
+    # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
+    # hipcc will call either hcc or clang using an absolute path starting with $ROCM_PATH,
+    # causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
+    # directly under $ROCM_PATH while also preserving the original compiler names.
+    # Note symlinks will chain as follows: [hcc or clang++] -> clang -> clang-??
+    # Final link in symlink chain must point back to original directory.
+
+    # Original compiler is moved one directory deeper. Wrapper replaces it.
+    function write_sccache_stub_rocm() {
+      OLDCOMP=$1
+      COMPNAME=$(basename $OLDCOMP)
+      TOPDIR=$(dirname $OLDCOMP)
+      WRAPPED="$TOPDIR/original/$COMPNAME"
+      mv "$OLDCOMP" "$WRAPPED"
+      printf "#!/bin/sh\nexec sccache $WRAPPED \"\$@\"" >"$OLDCOMP"
+      chmod a+x "$OLDCOMP"
+    }
+
+    # ROCm 3.5 and beyond use llvm/bin/clang
+    if [[ -e "${ROCM_PATH}/llvm/bin/clang" ]]; then
+      mkdir ${ROCM_PATH}/llvm/bin/original
+      write_sccache_stub_rocm ${ROCM_PATH}/llvm/bin/clang
+      write_sccache_stub_rocm ${ROCM_PATH}/llvm/bin/clang++
+      # Fix last link in symlink chain for traditional ROCm where clang -> clang-17
+      pushd ${ROCM_PATH}/llvm/bin/original
+      if [[ -L clang ]] && [[ "$(readlink clang)" == clang-* ]]; then
+        ln -s ../$(readlink clang)
+      fi
+      popd
+    else
+      echo "Cannot find ROCm compiler."
+      exit 1
+    fi
   fi
 fi

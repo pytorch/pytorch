@@ -2,10 +2,15 @@
 # implement matrix related ops for distributed tensor
 
 
+import copy
+
 import torch
+from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpSchema,
     OpSpec,
     OpStrategy,
@@ -13,7 +18,10 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
-from torch.distributed.tensor._ops.registration import register_op_strategy
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -21,6 +29,7 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_shardable,
     map_placements_after_broadcast,
     prod,
+    register_op_strategy,
 )
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
@@ -46,11 +55,16 @@ def transpose_strategy(op_schema: OpSchema) -> OpStrategy:
     transpose_strategies = []
     for input_strategy in self_strategy.strategies:
         input_spec = input_strategy.output_spec
-        # follow the input spec but transpose the Shard placements
-        output_placements = [
-            Shard(1 - p.dim) if isinstance(p, Shard) else p
-            for p in input_spec.placements
-        ]
+        ndim = input_spec.ndim
+        # t() on 1D tensor is a no-op, preserve placements
+        # t() on 2D tensor swaps dims 0 and 1
+        if ndim <= 1:
+            output_placements = list(input_spec.placements)
+        else:
+            output_placements = [
+                Shard(1 - p.dim) if isinstance(p, Shard) else p
+                for p in input_spec.placements
+            ]
         transpose_strategy = OpSpec(
             output_specs=DTensorSpec(
                 mesh=input_strategy.mesh,
@@ -253,10 +267,178 @@ def mm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
+from ._einsum_strategy import EinsumDims
+
+
+def gen_single_dim_einsum_strategies(
+    equation: str,
+    *,
+    bias_shape: torch.Size | None = None,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Generate a strategy list for the ops that follow einsum style notation.
+
+    In principle, each mesh dim is independent of other device mesh dim when we
+    generate strategies. So we generate strategy over each device mesh dim and
+    do product combination on all mesh dims. We basically follow the below rule
+    for each device mesh dim:
+
+    1. Shard on contracting dim: When both inputs shard on contracting dim over
+       the same device dim. The result will be Partial over that device dim.
+
+    2. Shard on noncontracting dim:
+        2.1: Shard on batch dim: output, both inputs all should shard on batch
+        dim.
+        2.2: Shard on lhs only dim or rhs only dim: both output and lhs or rhs
+        input should shard on this free dim.
+
+    3. Per-input linearity (Partial): Since matmul is linear in each input
+       independently, one input can remain Partial while others are Replicate,
+       producing a Partial output.
+
+    4. Bias input (optional): If bias_shape is provided, a bias placement
+       is inserted after the output placement. The bias placement is derived from
+       the output placement, accounting for broadcast semantics (based on ndim
+       difference between output and bias). This is used for addmm-like ops
+       (addmm, baddbmm) where bias + mat1 @ mat2.
+    """
+    # parse einop equation and extract dims
+    input_dims, output_dim = EinsumDims.parse_equation(equation)
+    edims = EinsumDims.parse_dims(input_dims, output_dim)
+
+    # Compute broadcast dims map for bias if provided
+    # Maps output dims to bias dims, -1 for broadcast dims (dims that don't exist in bias
+    # or have size 1)
+    broadcast_dims_map: list[int] | None = None
+    if bias_shape is not None:
+        output_ndim = len(output_dim)
+        bias_ndim = len(bias_shape)
+        pad_size = output_ndim - bias_ndim
+        broadcast_dims_map = []
+        for i in range(output_ndim):
+            if i < pad_size:
+                # Padded dimension (not in bias)
+                broadcast_dims_map.append(-1)
+            else:
+                bias_dim_idx = i - pad_size
+                if bias_shape[bias_dim_idx] == 1:
+                    # Size-1 dimension (broadcasts)
+                    broadcast_dims_map.append(-1)
+                else:
+                    broadcast_dims_map.append(bias_dim_idx)
+
+    def _derive_bias_placement(
+        output_placement: Placement | _ShardingPlaceholder,
+    ) -> Placement | _ShardingPlaceholder:
+        """Derive bias placement from output placement, accounting for broadcast."""
+        if broadcast_dims_map is None:
+            return copy.copy(output_placement)
+        if isinstance(output_placement, _ShardingPlaceholder):
+            output_dim_idx = output_placement.dim
+            bias_dim = broadcast_dims_map[output_dim_idx]
+            if bias_dim == -1:
+                # Dim doesn't exist in bias (broadcast), replicate
+                return Replicate()
+            else:
+                return _ShardingPlaceholder(bias_dim)
+        else:
+            # Clone Partial, Replicate, or other placements
+            return copy.copy(output_placement)
+
+    def _maybe_add_bias(
+        placement_list: list[Placement | _ShardingPlaceholder],
+    ) -> list[Placement | _ShardingPlaceholder]:
+        """Insert bias placement after output if bias_shape is provided."""
+        if bias_shape is None:
+            return placement_list
+        output_placement = placement_list[0]
+        bias_placement = _derive_bias_placement(output_placement)
+        return [placement_list[0], bias_placement] + placement_list[1:]
+
+    # generate strategies for each mesh dim and do cartesian product for final strategy. E.g., for a 2D mesh, we can have [P(),R,R]
+    strategies_over_one_mesh_dim: list[list[Placement | _ShardingPlaceholder]] = []
+    placement_list: list[Placement | _ShardingPlaceholder]
+    # split batch dim
+    for batch_dim in edims.batch_dims:
+        output_batch_dim = output_dim.index(batch_dim)
+        placement_list = [_ShardingPlaceholder(output_batch_dim)]
+        for input_dim in input_dims:
+            input_batch_dim = input_dim.index(batch_dim)
+            placement_list.append(_ShardingPlaceholder(input_batch_dim))
+
+        strategies_over_one_mesh_dim.append(_maybe_add_bias(placement_list))
+
+    # split contracting dim
+    for contracting_dim in edims.contracting_dims:
+        # Contracting dim can shard on same device axis for both inputs. This
+        # results in the output being Partial on that device axis. For example:
+        # bmk_{x},k_{x}n -> bmn{Ux} (becomes partial over device axis x)
+        placement_list = [Partial()]
+        for input_dim in input_dims:
+            input_contracting_dim = input_dim.index(contracting_dim)
+            placement_list.append(_ShardingPlaceholder(input_contracting_dim))
+
+        strategies_over_one_mesh_dim.append(_maybe_add_bias(placement_list))
+
+    # split lhs free dim
+    for lhs_dim in edims.lhs_out_only_dims:
+        lhs_free_dim_output = output_dim.index(lhs_dim)
+        lhs_free_dim_input = input_dims[0].index(lhs_dim)
+        # this means split the lhs input and output
+        # i.e. S(0), R -> S(0)
+        lhs_placement_list: list[Placement | _ShardingPlaceholder] = [
+            _ShardingPlaceholder(lhs_free_dim_output),
+            _ShardingPlaceholder(lhs_free_dim_input),
+            Replicate(),
+        ]
+        strategies_over_one_mesh_dim.append(_maybe_add_bias(lhs_placement_list))
+
+    # split rhs free dim
+    for rhs_dim in edims.rhs_out_only_dims:
+        rhs_free_dim_output = output_dim.index(rhs_dim)
+        rhs_free_dim_input = input_dims[1].index(rhs_dim)
+        rhs_placement_list: list[Placement | _ShardingPlaceholder] = [
+            _ShardingPlaceholder(rhs_free_dim_output),
+            Replicate(),
+            _ShardingPlaceholder(rhs_free_dim_input),
+        ]
+        strategies_over_one_mesh_dim.append(_maybe_add_bias(rhs_placement_list))
+
+    # Per-input linearity: matmul is linear in each input independently.
+    # One input Partial, the other Replicate → output Partial.
+    for reduce_op in Partial.LINEAR_REDUCE_OPS:
+        output_placement = Partial(reduce_op)
+        strategies_over_one_mesh_dim.append(
+            _maybe_add_bias([output_placement, Partial(reduce_op), Replicate()])
+        )
+        strategies_over_one_mesh_dim.append(
+            _maybe_add_bias([output_placement, Replicate(), Partial(reduce_op)])
+        )
+
+    return strategies_over_one_mesh_dim
+
+
+@register_single_dim_strategy(aten.mm.default, allow_unbacked_sharding=True)
+def mm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return gen_single_dim_einsum_strategies("mk,kn->mn")
+
+
 @register_op_strategy(aten.addmm.default)
 def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
+
+
+@register_single_dim_strategy(aten.addmm.default, allow_unbacked_sharding=True)
+def addmm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    bias_meta = args_schema[0]
+    if not isinstance(bias_meta, TensorMeta):
+        raise AssertionError
+    return gen_single_dim_einsum_strategies("mk,kn->mn", bias_shape=bias_meta.shape)
 
 
 @register_op_strategy(aten.bmm.default)
@@ -265,10 +447,27 @@ def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
+@register_single_dim_strategy(aten.bmm.default, allow_unbacked_sharding=True)
+def bmm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return gen_single_dim_einsum_strategies("bmk,bkn->bmn")
+
+
 @register_op_strategy(aten.baddbmm.default)
 def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
+
+
+@register_single_dim_strategy(aten.baddbmm.default, allow_unbacked_sharding=True)
+def baddbmm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    bias_meta = args_schema[0]
+    if not isinstance(bias_meta, TensorMeta):
+        raise AssertionError
+    return gen_single_dim_einsum_strategies("bmk,bkn->bmn", bias_shape=bias_meta.shape)
 
 
 @register_op_strategy(aten._scaled_mm.default)
@@ -1030,7 +1229,8 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     def valid_grouped_mm_strides(
-        input_specs: list[DTensorSpec], output_specs: tuple[DTensorSpec | None, ...]
+        input_specs: list[DTensorSpec],
+        output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
     ) -> bool:
         # 1. compute the local-tensor shape/strides given this sharding proposal
         # 2. apply the logic from the groped_mm meta function

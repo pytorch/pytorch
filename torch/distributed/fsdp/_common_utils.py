@@ -65,7 +65,6 @@ class _FSDPDeviceHandle:
         if backend is None:
             try:
                 self.__backend = getattr(torch, device.type)
-                # pyrefly: ignore [read-only]
                 self.__device = device
             except AttributeError as exc:
                 raise AttributeError(
@@ -113,10 +112,10 @@ class _FSDPState(_State):
         self._ignored_params: set[nn.Parameter] = set()
         # Buffer names are cleaned (without wrapper prefixes)
         self._ignored_buffer_names: set[str] = set()
-        self.process_group: Optional[dist.ProcessGroup] = None
+        self.process_group: dist.ProcessGroup | None = None
         self.rank: int = -1
         self.world_size: int = -1
-        self._device_mesh: Optional[DeviceMesh] = None
+        self._device_mesh: DeviceMesh | None = None
         self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self._use_orig_params: bool = False
         self.training_state = TrainingState.IDLE
@@ -124,17 +123,17 @@ class _FSDPState(_State):
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
-        self._is_root: Optional[bool] = None
-        self._handle: Optional[flat_param_file.FlatParamHandle] = None
+        self._is_root: bool | None = None
+        self._handle: flat_param_file.FlatParamHandle | None = None
         self._fully_sharded_module_to_handle: dict[
-            nn.Module, Optional[flat_param_file.FlatParamHandle]
+            nn.Module, flat_param_file.FlatParamHandle | None
         ] = {}
-        self.compute_device: Optional[torch.device] = None
+        self.compute_device: torch.device | None = None
         self._gradient_predivide_factor: int = 0
         self._gradient_postdivide_factor: int = 0
-        self._comm_hook: Optional[Callable] = None
-        self._comm_hook_state: Optional[Any] = None
-        self._unshard_event: Optional[torch.Event] = None
+        self._comm_hook: Callable | None = None
+        self._comm_hook_state: Any | None = None
+        self._unshard_event: torch.Event | None = None
         # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
@@ -142,10 +141,10 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: list[_FSDPState] = []
         self._all_handles: list[flat_param_file.FlatParamHandle] = []
-        self._fsdp_extension: Optional[FSDPExtensions] = None
+        self._fsdp_extension: FSDPExtensions | None = None
 
 
-def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
+def _get_module_fsdp_state(module: nn.Module) -> _FSDPState | None:
     state = _get_module_state(module)
     if state is None or not isinstance(state, _FSDPState):
         return None
@@ -154,7 +153,7 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
 
 def _get_module_fsdp_state_if_fully_sharded_module(
     module: nn.Module,
-) -> Optional[_FSDPState]:
+) -> _FSDPState | None:
     state = _get_module_fsdp_state(module)
     if state is None:
         return None
@@ -371,7 +370,7 @@ def _log_post_backward_hook(
 @no_type_check
 def _get_handle_fqns_from_root(
     state: _FSDPState, handle: "FlatParamHandle"
-) -> Optional[list[str]]:
+) -> list[str] | None:
     if handle is None:
         return None
     param_to_fqn = state._exec_order_data.param_to_fqn
@@ -384,7 +383,7 @@ def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
     return_fn: Callable,
-    filter_fqns: Optional[list[str]] = None,
+    filter_fqns: list[str] | None = None,
     *args,
     **kwargs,
 ):
@@ -400,6 +399,17 @@ def _apply_to_modules(
     to remove the prefix.
     """
 
+    # Precompute the set of all prefixes from filter_fqns so that the
+    # "any FQN starts with new_prefix?" check is O(1) instead of O(N).
+    filter_prefixes: set[str] | None = None
+    if filter_fqns is not None:
+        filter_prefixes = set()
+        for fqn in filter_fqns:
+            i = fqn.find(".")
+            while i != -1:
+                filter_prefixes.add(fqn[: i + 1])
+                i = fqn.find(".", i + 1)
+
     def f(module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
         module_fn(module, prefix, tree_level, *args, **kwargs)
@@ -408,11 +418,8 @@ def _apply_to_modules(
                 continue
             new_prefix = prefix + submodule_name + "."
             new_tree_level = tree_level + 1
-            if filter_fqns is not None:
-                for fqn in filter_fqns:
-                    if fqn.startswith(new_prefix):
-                        break
-                else:
+            if filter_prefixes is not None:
+                if new_prefix not in filter_prefixes:
                     # DMP's named_parameter() will mess up the traversal with
                     # ``named_children`` + `named_parameter(recurse=False)``.
                     # This hack is a must to make the traversal work.

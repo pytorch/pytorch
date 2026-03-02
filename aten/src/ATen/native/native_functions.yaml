@@ -418,11 +418,13 @@
   variants: function
   dispatch:
     CPU, CUDA, MPS, Meta: view_as_real
+    SparseCPU, SparseCUDA, SparseMPS: view_as_real_sparse
 
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
     CPU, CUDA, MPS, Meta: view_as_complex
+    SparseCPU, SparseCUDA, SparseMPS: view_as_complex_sparse
 
 - func: sgn(Tensor self) -> Tensor
   variants: function, method
@@ -1089,11 +1091,13 @@
   variants: function
   dispatch:
     CUDA: _baddbmm_dtype_cuda
+    XPU: _baddbmm_dtype_xpu
 
 - func: baddbmm.dtype_out(Tensor self, Tensor batch1, Tensor batch2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _baddbmm_out_dtype_cuda
+    XPU: _baddbmm_out_dtype_xpu
 
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -1318,7 +1322,7 @@
 - func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: logical_xor_out
+    CPU, CUDA, MTIA: logical_xor_out
     MPS: logical_xor_out_mps
   tags: pointwise
 
@@ -1403,11 +1407,13 @@
   variants: function
   dispatch:
     CUDA: _bmm_dtype_cuda
+    XPU: _bmm_dtype_xpu
 
 - func: bmm.dtype_out(Tensor self, Tensor mat2, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _bmm_out_dtype_cuda
+    XPU: _bmm_out_dtype_xpu
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_check: NoCheck
@@ -2311,6 +2317,7 @@
   dispatch:
     CPU: vdot
     CUDA: vdot_cuda
+    MPS: vdot_mps
 
 - func: vdot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -2596,16 +2603,12 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
-  dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: exp_sparse
   tags: [core, pointwise]
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
-  dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: exp_sparse_
   tags: pointwise
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -2614,7 +2617,6 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, MTIA: exp_out
-    SparseCPU, SparseCUDA, SparseMPS: exp_sparse_out
   tags: pointwise
 
 - func: exp2(Tensor self) -> Tensor
@@ -2875,7 +2877,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: gcd_out
+    CPU, CUDA, MPS: gcd_out
   tags: pointwise
 
 - func: gcd(Tensor self, Tensor other) -> Tensor
@@ -3048,6 +3050,7 @@
     CPU: _fft_c2r_mkl
     CUDA: _fft_c2r_cufft
     MPS: _fft_c2r_mps
+  tags: core
 
 - func: _fft_c2r.out(Tensor self, int[] dim, int normalization, SymInt last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -3481,13 +3484,20 @@
 
 - func: ldexp.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  tags: pointwise
+  dispatch:
+    CompositeExplicitAutograd: ldexp
 
 - func: ldexp_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: function, method
   tags: pointwise
+  dispatch:
+    CompositeExplicitAutograd: ldexp_
 
 - func: ldexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   tags: pointwise
+  dispatch:
+    CompositeExplicitAutograd: ldexp_out
 
 - func: linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -4198,6 +4208,27 @@
     CUDA: miopen_rnn_backward
   autogen: miopen_rnn_backward.out
 
+- func: _use_miopen_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
+  device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also miopen_ctc_loss
+  dispatch:
+    CUDA: _use_miopen_ctc_loss
+
+- func: _use_miopen_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank) -> bool
+  device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also miopen_ctc_loss
+  dispatch:
+    CUDA: _use_miopen_ctc_loss_tensor
+
+- func: miopen_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
+  dispatch:
+    CUDA: miopen_ctc_loss
+  autogen: miopen_ctc_loss.out
+
+- func: miopen_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
+  dispatch:
+    CUDA: miopen_ctc_loss_tensor
+
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   structured_delegate: mm.out
   variants: function, method
@@ -4220,10 +4251,12 @@
 - func: mm.dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor
   dispatch:
     CUDA: _mm_dtype_cuda
+    XPU: _mm_dtype_xpu
 
 - func: mm.dtype_out(Tensor self, Tensor mat2, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CUDA: _mm_dtype_out_cuda
+    XPU: _mm_dtype_out_xpu
 
 - func: _int_mm(Tensor self, Tensor mat2) -> Tensor
   dispatch:
@@ -4998,8 +5031,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: reciprocal_out
-    MPS: reciprocal_out_mps
+    CPU, CUDA, MPS, MTIA: reciprocal_out
   tags: pointwise
 
 - func: neg(Tensor self) -> Tensor
@@ -6537,6 +6569,7 @@
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
+    MPS: _unique_mps
   autogen: _unique.out
 
 - func: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
@@ -7247,10 +7280,12 @@
 - func: addmm.dtype(Tensor self, Tensor mat1, Tensor mat2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   dispatch:
     CUDA: _addmm_dtype_cuda
+    XPU: _addmm_dtype_xpu
 
 - func: addmm.dtype_out(Tensor self, Tensor mat1, Tensor mat2, ScalarType out_dtype, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CUDA: _addmm_dtype_out_cuda
+    XPU: _addmm_dtype_out_xpu
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: addmm.out
@@ -7294,12 +7329,14 @@
   dispatch:
     CUDA: _scaled_mm_cuda_v2
     XPU: _scaled_mm_xpu_v2
+  tags: needs_exact_strides
 
 - func: _scaled_mm_v2.out(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _scaled_mm_cuda_v2_out
     XPU: _scaled_mm_xpu_v2_out
+  tags: needs_exact_strides
 
 
 - func: _scaled_grouped_mm(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? offs=None, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False) -> Tensor
@@ -8385,6 +8422,7 @@
   dispatch:
     CPU: index_reduce_cpu_out
     CUDA: index_reduce_cuda_out
+    MPS: index_reduce_mps_out
 
 - func: index_reduce_(Tensor(a!) self, int dim, Tensor index, Tensor source, str reduce, *, bool include_self=True) -> Tensor(a!)
   structured_delegate: index_reduce.out
@@ -8398,9 +8436,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU: index_fill_
-    CUDA: index_fill_
-    MPS: index_fill_mps_
+    CPU, CUDA, MPS: index_fill_
   autogen: index_fill.int_Scalar_out
 
 - func: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
@@ -8413,8 +8449,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: index_fill_
-    MPS: index_fill_mps_
+    CPU, CUDA, MPS: index_fill_
   autogen: index_fill.int_Tensor_out
 
 - func: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
@@ -8760,14 +8795,14 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA, MPS: __lshift__
+    CPU, CUDA, MPS, MTIA: __lshift__
   tags: pointwise
 
 - func: __lshift__.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA, MPS: __lshift__
+    CPU, CUDA, MPS, MTIA: __lshift__
   tags: pointwise
 
 - func: __ilshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -8839,14 +8874,14 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA, MPS: __rshift__
+    CPU, CUDA, MPS, MTIA: __rshift__
   tags: pointwise
 
 - func: __rshift__.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA, MPS: __rshift__
+    CPU, CUDA, MPS, MTIA: __rshift__
   tags: pointwise
 
 - func: __irshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -9001,6 +9036,7 @@
   tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: cauchy_
+    MPS: cauchy_mps_
   autogen: cauchy, cauchy.out
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
@@ -9009,6 +9045,7 @@
   variants: method
   dispatch:
     CPU, CUDA: log_normal_
+    MPS: log_normal_mps_
   autogen: log_normal, log_normal.out
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -9026,6 +9063,7 @@
   variants: method
   dispatch:
     CPU, CUDA: geometric_
+    MPS: geometric_mps_
 
   # wrappers for TH functions
   autogen: geometric, geometric.out
@@ -9705,11 +9743,11 @@
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA: cholesky_inverse
+    CPU, CUDA, MPS: cholesky_inverse
 
 - func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: cholesky_inverse_out
+    CPU, CUDA, MPS: cholesky_inverse_out
 
 - func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
 
@@ -9778,8 +9816,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lgamma_out
-    MPS: lgamma_out_mps
+    CPU, CUDA, MPS: lgamma_out
   tags: pointwise
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
@@ -9799,8 +9836,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: digamma_out
-    MPS: digamma_out_mps
+    CPU, CUDA, MPS: digamma_out
   tags: pointwise
 
 - func: digamma(Tensor self) -> Tensor
@@ -9814,8 +9850,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: polygamma_out
-    MPS: polygamma_out_mps
+    CPU, CUDA, MPS: polygamma_out
   tags: pointwise
 
 - func: polygamma(int n, Tensor self) -> Tensor
@@ -9936,8 +9971,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: atan2_out
-    MPS: atan2_out_mps
+    CPU, CUDA, MPS: atan2_out
   tags: [core, pointwise]
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
@@ -10501,9 +10535,8 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: pow_Tensor_Scalar_out
+    CPU, CUDA, MPS: pow_Tensor_Scalar_out
     SparseCPU, SparseCUDA, SparseMPS: pow_out_sparse_scalar
-    MPS: pow_tensor_scalar_out_mps
   tags: pointwise
 
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
@@ -11528,6 +11561,15 @@
     CUDA: foreach_tensor_norm_cuda
     MTIA: foreach_tensor_norm_mtia
   autogen: _foreach_norm.Scalar_out
+
+# Like _foreach_norm but returns sum(|x|^ord) without the final root
+- func: _foreach_powsum.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_powsum_slow
+    CUDA: foreach_tensor_powsum_cuda
+  autogen: _foreach_powsum.Scalar_out
 
 - func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -13613,7 +13655,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_erfcx_out
+    CPU, CUDA, MPS: special_erfcx_out
   tags: pointwise
 
 - func: special_erfinv(Tensor self) -> Tensor
@@ -14480,6 +14522,17 @@
     MPS: linalg_vector_norm_out_mps
   tags: reduction
 
+# Computes sum(|x|^ord) - the "power sum" without the final root.
+# This is useful for distributed computing where partial power sums
+# can be reduced across shards before taking the final root.
+- func: linalg__powsum(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg__powsum_slow
+    CPU, CUDA: linalg__powsum
+  tags: reduction
+
 - func: linalg_matrix_norm(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
 
@@ -15139,6 +15192,11 @@
     NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
 
+- func: _scaled_dot_product_flash_attention.quantized(Tensor query, Tensor key, Tensor value, Tensor? q_descale, Tensor? k_descale, Tensor? v_descale, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
+  dispatch:
+    CUDA: _scaled_dot_product_flash_attention_cuda_quantized
+  tags: nondeterministic_seeded
+
 - func: _scaled_dot_product_flash_attention_for_cpu(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, *, Tensor? attn_mask=None, float? scale=None) -> (Tensor output, Tensor logsumexp)
   dispatch:
     CPU: _scaled_dot_product_flash_attention_cpu
@@ -15198,6 +15256,12 @@
   variants: function
   dispatch:
     CUDA: _flash_attention_forward
+  tags: nondeterministic_seeded
+
+- func: _flash_attention_forward.quantized(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, Tensor? q_descale, Tensor? k_descale, Tensor? v_descale, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? seqused_k=None, Tensor? alibi_slopes=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
+  variants: function
+  dispatch:
+    CUDA: _flash_attention_forward_quantized
   tags: nondeterministic_seeded
 
 - func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor rng_state, Tensor unused, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None) -> (Tensor, Tensor, Tensor)

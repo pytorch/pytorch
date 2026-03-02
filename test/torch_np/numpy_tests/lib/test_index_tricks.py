@@ -208,7 +208,8 @@ class TestRavelUnravelIndex(TestCase):
         res = np.ravel_multi_index(
             np.zeros((3, 0), dtype=np.intp), (2, 1, 0), mode=mode
         )
-        assert res.shape == (0,)
+        if res.shape != (0,):
+            raise AssertionError(f"Expected res.shape == (0,), got {res.shape}")
 
         with assert_raises(ValueError):
             np.ravel_multi_index(np.zeros((3, 1), dtype=np.intp), (2, 1, 0), mode=mode)
@@ -216,8 +217,10 @@ class TestRavelUnravelIndex(TestCase):
     def test_empty_array_unravel(self):
         res = np.unravel_index(np.zeros(0, dtype=np.intp), (2, 1, 0))
         # res is a tuple of three empty arrays
-        assert len(res) == 3
-        assert all(a.shape == (0,) for a in res)
+        if len(res) != 3:
+            raise AssertionError(f"Expected len(res) == 3, got {len(res)}")
+        if not all(a.shape == (0,) for a in res):
+            raise AssertionError("Expected all arrays in res to have shape (0,)")
 
         with assert_raises(ValueError):
             np.unravel_index([1], (2, 1, 0))

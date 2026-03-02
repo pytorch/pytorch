@@ -171,10 +171,11 @@ def _local_map_wrapped(
     # process input args
     flat_args, args_spec = pytree.tree_flatten(args)
     if in_placements is not None:
-        assert len(in_placements) == len(flat_args), (
-            f"in_placements length {len(in_placements)} does not match the number "
-            f"of input args {len(flat_args)}!"
-        )
+        if len(in_placements) != len(flat_args):
+            raise AssertionError(
+                f"in_placements length {len(in_placements)} does not match the number "
+                f"of input args {len(flat_args)}!"
+            )
 
     # we assume every DTensor object is placed on the same device mesh
     flat_local_args = []
@@ -192,9 +193,10 @@ def _local_map_wrapped(
 
             if in_placements is not None:
                 spec = in_placements[idx]
-                assert spec is not None, (
-                    f"DTensor input {arg} expects placements but received {spec}!"
-                )
+                if spec is None:
+                    raise AssertionError(
+                        f"DTensor input {arg} expects placements but received {spec}!"
+                    )
 
                 if not isinstance(spec, tuple):
                     spec = tuple(spec)
@@ -214,9 +216,10 @@ def _local_map_wrapped(
 
             if in_grad_placements is not None:
                 spec = in_grad_placements[idx]
-                assert spec is not None, (
-                    f"DTensor input {arg} expects in grad placements but received {spec}!"
-                )
+                if spec is None:
+                    raise AssertionError(
+                        f"DTensor input {arg} expects in grad placements but received {spec}!"
+                    )
                 if not isinstance(spec, tuple):
                     spec = tuple(spec)
                 local_arg = arg.to_local(grad_placements=spec)
@@ -231,10 +234,11 @@ def _local_map_wrapped(
             # Non-Tensor input must have None in `in_placements`
             if in_placements is not None and not isinstance(arg, torch.Tensor):
                 spec = in_placements[idx]
-                assert spec is None, (
-                    f"Non-Tensor input {arg} expects None placements "
-                    f"but received {spec}!"
-                )
+                if spec is not None:
+                    raise AssertionError(
+                        f"Non-Tensor input {arg} expects None placements "
+                        f"but received {spec}!"
+                    )
 
             flat_local_args.append(arg)
 
@@ -251,24 +255,28 @@ def _local_map_wrapped(
         out_placements_tuple = (
             out_placements if isinstance(out_placements, tuple) else (out_placements,)
         )
-        assert len(flat_out) == len(out_placements_tuple), (
-            "local_map requires one PlacementType be provided for each output value,"
-            f" received {len(out_placements_tuple)} out_placements but"
-            f" {len(flat_out)} is expected!"
-        )
+        if len(flat_out) != len(out_placements_tuple):
+            raise AssertionError(
+                "local_map requires one PlacementType be provided for each output value,"
+                f" received {len(out_placements_tuple)} out_placements but"
+                f" {len(flat_out)} is expected!"
+            )
         for out, spec in zip(flat_out, out_placements_tuple):
             if isinstance(out, torch.Tensor):
-                assert not isinstance(out, DTensor), (
-                    f"torch.Tensor output expected but received {type(out)}: {out}"
-                )
+                if isinstance(out, DTensor):
+                    raise AssertionError(
+                        f"torch.Tensor output expected but received {type(out)}: {out}"
+                    )
 
                 flat_dist_out.append(
+                    # pyrefly: ignore [bad-argument-type]
                     DTensor.from_local(out, device_mesh, spec, run_check=False)
                 )
             else:
-                assert spec is None, (
-                    f"Non-tensor output {out} expects None placements but received {spec}!"
-                )
+                if spec is not None:
+                    raise AssertionError(
+                        f"Non-tensor output {out} expects None placements but received {spec}!"
+                    )
 
                 flat_dist_out.append(out)
 

@@ -6,8 +6,7 @@ from torch.distributed.tensor._op_schema import (
     OpStrategy,
     StrategyType,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
-from torch.distributed.tensor._ops.utils import is_tensor_partial
+from torch.distributed.tensor._ops.utils import is_tensor_partial, register_op_strategy
 
 
 aten = torch.ops.aten
@@ -24,7 +23,8 @@ aten = torch.ops.aten
 )
 def random_op_strategy(op_schema: OpSchema) -> StrategyType:
     self_strategy = op_schema.args_schema[0]
-    assert isinstance(self_strategy, OpStrategy)
+    if not isinstance(self_strategy, OpStrategy):
+        raise AssertionError
 
     random_strategy = OpStrategy([])
     for arg_strategy in self_strategy.strategies:

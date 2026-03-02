@@ -2,7 +2,10 @@ import torch
 
 
 def set_fuser(fuser_name, executor_name):
-    assert fuser_name in ["te", "old", "none", "default"]
+    if fuser_name not in ["te", "old", "none", "default"]:
+        raise AssertionError(
+            f"fuser_name must be one of 'te', 'old', 'none', 'default', but got '{fuser_name}'"
+        )
     if fuser_name == "te":
         torch._C._jit_set_profiling_executor(True)
         torch._C._get_graph_executor_optimize(True)

@@ -43,7 +43,7 @@ static std::string declareExternalFunction(const std::string& func_name) {
       "int64_t* extra_args);";
 }
 
-CppPrinter::CppPrinter(std::ostream* os) : IRPrinter(*os), lane_(0) {}
+CppPrinter::CppPrinter(std::ostream* os) : IRPrinter(*os) {}
 
 CppPrinter::~CppPrinter() = default;
 

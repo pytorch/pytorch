@@ -102,7 +102,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
                 cond = cond and (torch.device(kwargs["device"]).type == "xpu")
             if "dtype" in kwargs:
                 cond = cond and (
-                    kwargs["dtype"] in {torch.float32}
+                    kwargs["dtype"] == torch.float32
                 )  # TODO: add complex64
             if cond:
                 with_tf32_disabled(kwargs["self"], lambda: f(**kwargs))
@@ -169,7 +169,8 @@ class TestBasicGEMM(TestCase):
             res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
             res3 = res3_t.to(numpy_dtype).cpu().numpy()
         else:
-            assert activation is None, f"unsupported activation {activation}"
+            if activation is not None:
+                raise AssertionError(f"unsupported activation {activation}")
         res3 = torch.from_numpy(res3).to(dtype)
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
@@ -1197,8 +1198,10 @@ class TestBasicGEMM(TestCase):
         Generates sequences of tuples (x, y) of with size(x) = x_dim and
         size(y) <= y_dim that are compatible wrt. matmul
         """
-        assert x_dim >= 1
-        assert y_dim >= 2
+        if x_dim < 1:
+            raise AssertionError(f"Expected x_dim >= 1, got {x_dim}")
+        if y_dim < 2:
+            raise AssertionError(f"Expected y_dim >= 2, got {y_dim}")
         x = x_dim
         for y in range(1, y_dim + 1):
             for batch, mn in product(
@@ -1276,30 +1279,44 @@ class TestBasicGEMM(TestCase):
 
     def _group_quantize_tensor(self, w, n_bit=4, q_group_size=16):
         # w [k, n] = [32, 48]
-        assert w.dim() == 2
+        if w.dim() != 2:
+            raise AssertionError(f"Expected w.dim() == 2, got {w.dim()}")
         # w [n, k] = [48, 32]
         w = w.transpose(0, 1).contiguous()
-        assert q_group_size > 1
-        assert w.shape[-1] % q_group_size == 0
+        if q_group_size <= 1:
+            raise AssertionError(f"Expected q_group_size > 1, got {q_group_size}")
+        if w.shape[-1] % q_group_size != 0:
+            raise AssertionError(
+                f"Expected w.shape[-1] % q_group_size == 0, "
+                f"got {w.shape[-1]} % {q_group_size} = {w.shape[-1] % q_group_size}"
+            )
 
         # to_quant: [n * k / group_size, group_size]
         to_quant = w.reshape(-1, q_group_size)
-        assert torch.isnan(to_quant).sum() == 0
+        nan_count = torch.isnan(to_quant).sum()
+        if nan_count != 0:
+            raise AssertionError(f"Expected no NaNs in to_quant, got {nan_count}")
 
         max_val = to_quant.amax(dim=1, keepdim=True)
         min_val = to_quant.amin(dim=1, keepdim=True)
         max_int = 2**n_bit - 1
         min_int = 0
         scales = (max_val - min_val).clamp(min=1e-6) / max_int
-        assert torch.isnan(scales).sum() == 0
+        nan_count = torch.isnan(scales).sum()
+        if nan_count != 0:
+            raise AssertionError(f"Expected no NaNs in scales, got {nan_count}")
 
         zeros = min_int - min_val.div(scales).round()
         zeros = torch.clamp(zeros, min_int, max_int)
         zeros = zeros.to(torch.int8)
-        assert torch.isnan(zeros).sum() == 0
+        nan_count = torch.isnan(zeros).sum()
+        if nan_count != 0:
+            raise AssertionError(f"Expected no NaNs in zeros, got {nan_count}")
 
         out = to_quant.div(scales).add(zeros).round().clamp_(min_int, max_int)
-        assert torch.isnan(out).sum() == 0
+        nan_count = torch.isnan(out).sum()
+        if nan_count != 0:
+            raise AssertionError(f"Expected no NaNs in out, got {nan_count}")
 
         # [n, k]
         out = out.to(dtype=torch.int32).reshape(w.shape)
@@ -1494,6 +1511,106 @@ def forward(self, x_1, w_1):
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
+
+    @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("M", [1, 32, 64])
+    @parametrize("N", [1, 32, 64])
+    @parametrize("K", [1, 32, 64])
+    @parametrize("batch_size", [None, 1, 16])
+    def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size):
+        device = "xpu"
+        dtype = input_dtype
+
+        def create_inputs(B=None):
+            if B is None:
+                a = torch.randn(M, K, device=device, dtype=dtype)
+                b = torch.randn(K, N, device=device, dtype=dtype)
+            else:
+                a = torch.randn(B, M, K, device=device, dtype=dtype)
+                b = torch.randn(B, K, N, device=device, dtype=dtype)
+            return a, b
+
+        a, b = create_inputs(batch_size)
+
+        a_fp32, b_fp32 = a.to(torch.float32), b.to(torch.float32)
+
+        output_dtypes = [torch.float32]
+
+        if input_dtype != torch.float32:
+            output_dtypes.append(input_dtype)
+
+        for output_dtype in output_dtypes:
+            # Catch edge case of incompat with bfloat16 and major version < 8
+            if batch_size:
+                out = torch.bmm(a, b, out_dtype=output_dtype)
+                baseline = (
+                    torch.bmm(a_fp32, b_fp32)
+                    if output_dtype == torch.float32
+                    else torch.bmm(a, b)
+                )
+            else:
+                out = torch.mm(a, b, out_dtype=output_dtype)
+                baseline = (
+                    torch.mm(a_fp32, b_fp32)
+                    if output_dtype == torch.float32
+                    else torch.mm(a, b)
+                )
+
+            self.assertEqual(out.dtype, output_dtype)
+            torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
+
+    @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("M", [1, 32, 64])
+    @parametrize("N", [1, 32, 64])
+    @parametrize("K", [1, 32, 64])
+    @parametrize("batch_size", [None, 1, 32])
+    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size):
+        device = "xpu"
+        dtype = input_dtype
+
+        def create_inputs(B=None):
+            if B is None:
+                a = torch.randn(M, K, device=device, dtype=dtype)
+                b = torch.randn(K, N, device=device, dtype=dtype)
+                c = torch.randn(M, N, device=device, dtype=dtype)
+            else:
+                a = torch.randn(B, M, K, device=device, dtype=dtype)
+                b = torch.randn(B, K, N, device=device, dtype=dtype)
+                c = torch.randn(B, M, N, device=device, dtype=dtype)
+
+            return a, b, c
+
+        a, b, c = create_inputs(batch_size)
+
+        a_fp32, b_fp32, c_fp32 = (
+            a.to(torch.float32),
+            b.to(torch.float32),
+            c.to(torch.float32),
+        )
+
+        output_dtypes = [torch.float32]
+
+        if input_dtype != torch.float32:
+            output_dtypes.append(input_dtype)
+
+        for output_dtype in output_dtypes:
+            if batch_size:
+                out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
+                baseline = (
+                    torch.baddbmm(c_fp32, a_fp32, b_fp32)
+                    if output_dtype == torch.float32
+                    else torch.baddbmm(c, a, b)
+                )
+            else:
+                out = torch.addmm(c, a, b, out_dtype=output_dtype)
+                baseline = (
+                    torch.addmm(c_fp32, a_fp32, b_fp32)
+                    if output_dtype == torch.float32
+                    else torch.addmm(c, a, b)
+                )
+
+            self.assertEqual(out.dtype, output_dtype)
+            torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)

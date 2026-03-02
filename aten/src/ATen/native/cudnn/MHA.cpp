@@ -139,8 +139,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 
 #include <iostream>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace fe = cudnn_frontend;
 
@@ -1568,7 +1567,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
     variant_pack[OFFSET] = dropoutoffset.mutable_data_ptr();
   }
   if (attn_bias.has_value()) {
-    TORCH_CHECK("bias not supported with nestedtensor");
+    TORCH_CHECK(false, "bias not supported with nestedtensor");
   }
   auto workspace_size = mha_graph.get_workspace_size();
   auto workspace_ptr =
@@ -1882,6 +1881,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
       mha_graph.execute(handle, variant_pack, workspace_ptr.get()).is_good());
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
+
 #endif

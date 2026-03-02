@@ -77,7 +77,7 @@ class ReturnValueHandler:
 
         tensor_id_to_idx: dict[int, int] = {}
         for dup_idx, lazy_tensor in enumerate(lazy_out_list):
-            uniq_idx = tensor_id_to_idx.get(id(lazy_tensor), None)
+            uniq_idx = tensor_id_to_idx.get(id(lazy_tensor))
             if uniq_idx is not None:
                 self.index[uniq_idx].append(dup_idx)
             else:
@@ -87,7 +87,10 @@ class ReturnValueHandler:
 
     def duplicate_eager_tensors(self, eager_tensor_list):
         duplicated_list = [None] * self.total_count
-        assert len(eager_tensor_list) == len(self.index)
+        if len(eager_tensor_list) != len(self.index):
+            raise AssertionError(
+                f"eager_tensor_list length {len(eager_tensor_list)} != index length {len(self.index)}"
+            )
 
         for uniq_idx, eager_tensor in enumerate(eager_tensor_list):
             for dup_idx in self.index[uniq_idx]:
@@ -189,7 +192,11 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
         graph_input_tensor_ids,
         graph_input_ivalues,
     ) = computation.get_tensors_ts_device_data_node(args_and_out)
-    assert len(graph_input_tensor_ids) == len(graph_input_ivalues)
+    if len(graph_input_tensor_ids) != len(graph_input_ivalues):
+        raise AssertionError(
+            f"graph_input_tensor_ids length {len(graph_input_tensor_ids)} "
+            f"!= graph_input_ivalues length {len(graph_input_ivalues)}"
+        )
     graph_input_matcher = GraphInputMatcher(
         tensor_id_to_arg_idx, graph_input_tensor_ids, graph_input_ivalues
     )
@@ -214,7 +221,10 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
             computation.run_cached_graph(graph_hash, graph_input)
         )
 
-        assert len(res) == len(args_and_out)
+        if len(res) != len(args_and_out):
+            raise AssertionError(
+                f"result length {len(res)} != args_and_out length {len(args_and_out)}"
+            )
         for i, arg in enumerate(args):
             # only copy those tensors that get inplace updated
             if arg is not res[i]:

@@ -572,20 +572,20 @@ DimVector TensorIteratorBase::invert_perm(IntArrayRef input) const {
 }
 
 void TensorIteratorBase::allocate_or_resize_outputs() {
+  // check if permutation is just an inverted order
+  bool inverted = true;
+  for (const auto j : c10::irange(ndim())) {
+    if (perm_[j] != ndim() - j - 1) {
+      inverted = false;
+      break;
+    }
+  }
   for (const auto i : c10::irange(num_outputs_)) {
     auto& op = operands_[i];
     if (!op.tensor_base().defined() || op.will_resize) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       auto element_size = elementSize(op.target_dtype);
       op.stride_bytes = compatible_stride(static_cast<int64_t>(element_size));
-      // check if permutation is just an inverted order
-      bool inverted = true;
-      for (const auto j : c10::irange(ndim())) {
-        if (perm_[j] != ndim() - j - 1) {
-          inverted = false;
-          break;
-        }
-      }
       auto tensor_shape = invert_perm(shape_);
       if (inverted) {
         // can just return contiguous output
@@ -1764,7 +1764,7 @@ void DimCounter::increment(const std::array<int64_t, 2>& step) {
 std::array<int64_t, 2> DimCounter::max_2d_step() const {
   int64_t step0 = std::min(shape[0] - values[0], range.end - offset);
   int64_t step1 = 1;
-  if (step0 == shape[0] && !shape.empty()) {
+  if (!shape.empty() && step0 == shape[0]) {
     step1 = std::min(shape[1] - values[1], (range.end - offset) / shape[0]);
   }
   return {step0, step1};

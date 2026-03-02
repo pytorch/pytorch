@@ -288,9 +288,11 @@ class QFunctional(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert type(mod) is FloatFunctional, (
-            "QFunctional.from_float expects an instance of FloatFunctional"
-        )
+        if type(mod) is not FloatFunctional:
+            raise AssertionError(
+                f"QFunctional.from_float expects an instance of FloatFunctional, "
+                f"got {type(mod).__name__}"
+            )
         scale, zero_point = mod.activation_post_process.calculate_qparams()  # type: ignore[operator]
         new_mod = QFunctional()
         new_mod.scale = float(scale)

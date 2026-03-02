@@ -9,7 +9,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.export.dynamic_shapes import _DimHint, Dim
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.utils import _pytree
 
 

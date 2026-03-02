@@ -9,15 +9,15 @@ from typing import Any, Concatenate, Optional, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
+import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.config import use_experimental_benchmarker
+from torch._dynamo.utils import counters
 from torch.utils._debug_mode import DebugMode
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
 use_experimental_benchmarker = (
-    use_experimental_benchmarker and torch.cuda.is_available()
+    inductor_config.use_experimental_benchmarker and torch.cuda.is_available()
 )
 
 
@@ -25,6 +25,40 @@ MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+
+# Device-type → benchmarking function registry.
+# Keys must match torch.device.type (e.g., "cpu", "cuda", "mps", "xpu", ...).
+# Values are callables with signature:
+#   fn(self: Benchmarker, _callable: Callable[..., Any], *, warmup: int, rep: int, **kwargs) -> Any
+_BENCHMARK_DISPATCH: dict[str, Callable[..., Any]] = {}
+
+
+def register_benchmarker(
+    device_type: str,
+    fn: Callable[..., Any],
+    *,
+    override: bool = False,
+) -> None:
+    """
+    Register a device-type specific benchmarker.
+
+    Args:
+        device_type: torch.device.type string (e.g., "cuda", "cpu", "mps", "xpu").
+        fn: callable(self, _callable, *, warmup, rep, **kwargs) -> Any
+        override: allow overriding an existing registration.
+    """
+    if not isinstance(device_type, str) or not device_type:
+        raise ValueError(
+            "device_type must be a non-empty string matching torch.device.type"
+        )
+    if not callable(fn):
+        raise TypeError("fn must be callable")
+    if not override and device_type in _BENCHMARK_DISPATCH:
+        raise ValueError(
+            f"Benchmarker for device_type '{device_type}' already registered"
+        )
+    _BENCHMARK_DISPATCH[device_type] = fn
 
 
 def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -79,17 +113,20 @@ def may_ban_benchmarking() -> None:
 def time_and_count(
     fn: Callable[Concatenate[Any, P], T],
 ) -> Callable[Concatenate[Any, P], T]:
-    """Wraps `fn` with `dynamo_timed` context, and increments the appropriate dynamo
-    counters. It is expected that `fn` is a method of `Benchmarker` or one of its
-    subclasses; typing limitations prevent us from declaring this directly.
+    """
+    Wraps `fn` to increment the appropriate dynamo counters. It is expected that `fn`
+    is a method of `Benchmarker` or one of its subclasses; typing limitations prevent
+    us from declaring this directly.
+
+    NOTE: If you're tempted to add a dynamo_timed call here, this function can be
+    called enough that the dynamo_timed overhead is not negligible.
     """
 
     @wraps(fn)
     def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> T:
         fn_qual_name = f"{self.__class__.__name__}.{fn.__name__}"
         counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
-        with dynamo_timed(fn_qual_name, log_pt2_compile_event=False):
-            return fn(self, *args, **kwargs)
+        return fn(self, *args, **kwargs)
 
     return wrapper
 
@@ -186,18 +223,34 @@ class Benchmarker:
 
         # No need to wrap if the callable takes no arguments
         if len(fn_args) == 0 and len(fn_kwargs) == 0:
-            _callable = fn
+            # Keep a true zero-arg callable type to satisfy type checkers.
+            def _callable() -> Any:
+                return fn()
         else:
-            _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+            _args = fn_args
+            _kwargs = fn_kwargs
+
+            def _callable() -> Any:
+                return fn(*_args, **_kwargs)
+
+        warmup = kwargs.pop("warmup", inductor_config.inductor_default_autotune_warmup)
+        rep = kwargs.pop("rep", inductor_config.inductor_default_autotune_rep)
 
         # Surfacing all kernels during autotuning is super noisy; filtering these out.
         with DebugMode._benchmarking_inductor():
+            # First, try a registered device-specific benchmarker
+            benchmark_fn: Callable[..., Any] | None = _BENCHMARK_DISPATCH.get(
+                inferred_device.type
+            )
+            if benchmark_fn is not None:
+                return benchmark_fn(self, _callable, warmup=warmup, rep=rep, **kwargs)
+
+            # Backward-compatible default:
+            # - CPU  -> CPU benchmark path
+            # - else -> GPU benchmark path (legacy behavior retained for non-CPU)
             if inferred_device == torch.device("cpu"):
-                return self.benchmark_cpu(_callable, **kwargs)
-            # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
-            # implementation which was written specifically with CUDA devices in mind, we may want to
-            # explore alternate implementations for other device types.
-            return self.benchmark_gpu(_callable, **kwargs)
+                return self.benchmark_cpu(_callable, warmup=warmup, rep=rep, **kwargs)
+            return self.benchmark_gpu(_callable, warmup=warmup, rep=rep, **kwargs)
 
     @time_and_count
     def benchmark_cpu(
@@ -237,6 +290,43 @@ class Benchmarker:
     @time_and_count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
+
+    @time_and_count
+    def benchmark_gpu_with_cuda_graph(
+        self: Self,
+        _callable: Callable[[], Any],
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark a GPU callable using CUDA graph capture and replay.
+
+        This captures the callable into a CUDA graph and benchmarks the graph replay,
+        which eliminates kernel launch overhead for fair comparison between different
+        implementations.
+        """
+        # Warmup
+        _callable()
+        torch.cuda.synchronize()
+
+        # Capture into CUDA graph
+        cuda_graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(cuda_graph, capture_error_mode="thread_local"):
+            _callable()
+        torch.cuda.synchronize()
+
+        return self.benchmark_gpu(cuda_graph.replay, **kwargs)
+
+
+# Make built-in defaults explicit via the registry
+def _default_cpu_bench(self, f, *, warmup, rep, **kw):
+    return self.benchmark_cpu(f, warmup=warmup, rep=rep, **kw)
+
+
+def _default_cuda_bench(self, f, *, warmup, rep, **kw):
+    return self.benchmark_gpu(f, warmup=warmup, rep=rep, **kw)
+
+
+register_benchmarker("cpu", _default_cpu_bench, override=True)
+register_benchmarker("cuda", _default_cuda_bench, override=True)
 
 
 class TritonBenchmarker(Benchmarker):
@@ -392,9 +482,10 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         estimated_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # adjust `benchmark_iters` to fit in the maximum benchmarking duration
-        benchmark_iters = max(
-            min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
-        )
+        if estimated_timing > 0:
+            benchmark_iters = max(
+                min(benchmark_iters, int(max_benchmark_duration // estimated_timing)), 1
+            )
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):

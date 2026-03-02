@@ -2,7 +2,6 @@
 import contextlib
 import logging
 import re
-from typing import Optional
 from unittest.mock import patch
 
 import sympy
@@ -963,8 +962,8 @@ class CppFlexAttentionTemplate(CppTemplate):
     def render(  # type: ignore[override,return]
         self,
         kernel,
-        template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
-        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        template_buffer_node: ir.CppTemplateBuffer | None = None,
+        epilogue_nodes: list[ir.IRNode] | None = None,
         **kwargs,
     ) -> str:
         if epilogue_nodes is not None and epilogue_nodes != []:
@@ -986,7 +985,7 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         num_threads = parallel_num_threads()
         assert isinstance(self.output_node, ir.IRNode)
-        buf_out: ir.IRNode = TensorBox.create(self.output_node)
+        buf_out = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
             buf_out = template_buffer_node
         options = dict(

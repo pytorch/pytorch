@@ -267,8 +267,8 @@ class TestTensorBoardUtils(BaseTestCase):
         total_frame = V_input.shape[1]
         V_input = np.swapaxes(V_input, 0, 1)
         for f in range(total_frame):
-            x = np.reshape(V_input[f], newshape=(-1))
-            y = np.reshape(V_after[f], newshape=(-1))
+            x = np.reshape(V_input[f], -1)
+            y = np.reshape(V_after[f], -1)
             np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
 
 
@@ -559,7 +559,8 @@ def get_expected_file(function_ptr):
 
 def read_expected_content(function_ptr):
     expected_file = get_expected_file(function_ptr)
-    assert os.path.exists(expected_file), expected_file
+    if not os.path.exists(expected_file):
+        raise AssertionError(f"expected file does not exist: {expected_file}")
     with open(expected_file) as f:
         return f.read()
 

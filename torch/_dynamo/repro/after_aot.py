@@ -20,6 +20,7 @@ the Dynamo AOT compilation pipeline, particularly for the Inductor backend.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import functools
 import io
@@ -32,15 +33,18 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, TYPE_CHECKING
 from typing_extensions import Unpack
 
 import sympy
 
 
 try:
+    import triton.language as tl
     from triton.runtime.autotuner import Autotuner, Heuristics
     from triton.runtime.jit import JITFunction
+
+    TritonConstexpr = tl.constexpr
 except ImportError:
 
     class Autotuner:  # type: ignore[no-redef]
@@ -50,6 +54,9 @@ except ImportError:
         pass
 
     class Heuristics:  # type: ignore[no-redef]
+        pass
+
+    class TritonConstexpr:  # type: ignore[no-redef]
         pass
 
 
@@ -103,6 +110,126 @@ log = logging.getLogger(__name__)
 
 
 inductor_config = import_module("torch._inductor.config")
+
+
+def _extract_distributed_info(
+    gm: torch.fx.GraphModule,
+) -> dict[str, dict[str, int]]:
+    """
+    Extract process group information from distributed ops in the graph.
+
+    Returns a dict mapping group names to dicts with 'size' and 'rank' keys.
+    Example: {'tp': {'size': 4, 'rank': 0}, 'dp': {'size': 2, 'rank': 0}}
+    """
+    from torch.fx.operator_schemas import normalize_function
+
+    group_info: dict[str, dict[str, int]] = {}
+
+    for node in gm.graph.nodes:
+        if node.op != "call_function":
+            continue
+        if not isinstance(node.target, OpOverload):
+            continue
+        if node.target.namespace not in {"_c10d_functional", "c10d_functional"}:
+            continue
+
+        opt_args_kwargs = normalize_function(
+            node.target,
+            args=node.args,
+            kwargs=node.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if opt_args_kwargs is None:
+            continue
+        _, kwargs = opt_args_kwargs
+
+        group_name = kwargs.get("group_name")
+        if group_name is None:
+            continue
+
+        if group_name in group_info:
+            continue
+
+        from torch.distributed.distributed_c10d import (
+            _get_group_size_by_name,
+            _resolve_process_group,
+        )
+
+        group_size = _get_group_size_by_name(group_name)
+        pg = _resolve_process_group(group_name)
+        rank = pg.rank()
+        group_info[group_name] = {"size": group_size, "rank": rank}
+
+    return group_info
+
+
+def setup_fake_process_groups(
+    group_info: dict[str, dict[str, int]],
+) -> None:
+    """
+    Set up fake process groups for repro execution.
+
+    Args:
+        group_info: dict mapping group_name -> {'size': group_size, 'rank': rank}
+    """
+    import torch.distributed as dist
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    if not group_info:
+        return
+
+    world_size = max(info["size"] for info in group_info.values())
+
+    global_rank = 0
+    for info in group_info.values():
+        if info["size"] == world_size:
+            global_rank = info["rank"]
+            break
+
+    store = FakeStore()
+    dist.init_process_group(
+        backend="fake",
+        rank=global_rank,
+        world_size=world_size,
+        store=store,
+    )
+
+    default_pg = dist.distributed_c10d._get_default_group()
+    torch._C._distributed_c10d._unregister_all_process_groups()
+
+    for group_name, info in group_info.items():
+        group_size = info["size"]
+        if group_size == world_size:
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, default_pg)
+        else:
+            ranks = list(range(group_size))
+            new_pg = dist.new_group(ranks)
+            # pyrefly: ignore[bad-argument-type]
+            torch._C._distributed_c10d._register_process_group(group_name, new_pg)
+
+
+def generate_standalone_repro(
+    gm: torch.fx.GraphModule,
+    args: Sequence[Any],
+    *,
+    save_path: str | None = None,
+) -> str:
+    """
+    Generate a self-contained repro script from an FX graph.
+    """
+    buf = io.StringIO()
+    save_graph_repro(buf, gm, args, "inductor", save_dir=None)
+    repro = buf.getvalue()
+
+    if save_path is not None:
+        with open(save_path, "w") as f:
+            f.write(repro)
+        log.info("Saved standalone repro to %s", save_path)
+
+    return repro
+
+
 use_buck = is_fbcode()
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -303,12 +430,49 @@ python_binary(
         return ""
 
 
+def generate_custom_triton_kernel(kernel: Any) -> str:
+    res = ""
+    if isinstance(kernel, Autotuner):
+        # pyrefly: ignore [missing-attribute]
+        if isinstance(kernel.fn, Heuristics):
+            res += "ERROR: Repro will not work as intended, "
+            res += "triton.runtime.autotuner.Heuristics is not currently supported\n"
+            return res
+
+        config_strs = []
+        # pyrefly: ignore [missing-attribute]
+        for kernel_config in kernel.configs:
+            config_strs.append(f"""triton.Config(
+                    {str(kernel_config.kwargs)},
+                    num_warps={kernel_config.num_warps},
+                    num_stages={kernel_config.num_stages},
+                )""")
+
+        config_str = ",".join(config_strs)
+        res += textwrap.dedent(f"""
+        @triton.autotune(
+            configs=[
+                {config_str}
+            ],
+            key=[]
+        )
+        """).strip()
+
+    # pyrefly: ignore [missing-attribute]
+    src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
+    res += "\n@triton.jit\n"
+    res += src_code
+    res += "\n"
+
+    return res
+
+
 def generate_compiler_repro_string(
     gm: torch.fx.GraphModule,
     args: Sequence[Any],
     *,
     stable_output: bool = False,
-    save_dir: Optional[str] = None,
+    save_dir: str | None = None,
     stable_hash: bool = False,
     has_distributed_ops: bool = False,
 ) -> str:
@@ -380,86 +544,121 @@ if "__compile_source__" in globals():
     kernel_side_table_prefix = (
         "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
     )
-    # Track which grid entry corresponds to the best config
-    for id in kernel_side_table.id_to_kernel:
-        kernel = kernel_side_table.get_kernel(id)
+
+    def get_fn_name(kernel: Any) -> str:
+        fn_name = (
+            # pyrefly: ignore [missing-attribute]
+            kernel._fn_name if isinstance(kernel, JITFunction) else kernel.fn._fn_name
+        )
+        return fn_name.split(".")[-1]
+
+    def write_kernel_dependencies(
+        kernel: Any,
+        written_constexpr_vars: set[str],
+        written_nested_kernels: set[str],
+    ) -> str:
+        """Write out global tl.constexpr vars and nested kernel dependencies."""
+        result = ""
+        jit_fn = kernel if isinstance(kernel, JITFunction) else kernel.fn
+        if not getattr(jit_fn, "fn", None) or not getattr(jit_fn, "src", None):
+            return result
+
+        fn_globals = getattr(jit_fn.fn, "__globals__", {})
+        src = jit_fn.src
+        full_src = src if src.strip().startswith("def ") else "def " + src
+
+        referenced_names: set[str] = set()
+        called_names: set[str] = set()
+        for node in ast.walk(ast.parse(full_src)):
+            if isinstance(node, ast.Name):
+                referenced_names.add(node.id)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                called_names.add(node.func.id)
+
+        # Write out global tl.constexpr variables
+        for name in referenced_names:
+            if name in written_constexpr_vars:
+                continue
+            val = fn_globals.get(name)
+
+            if isinstance(val, TritonConstexpr) and getattr(val, "value", None):
+                result += f"{name} = tl.constexpr({val.value})\n"
+            elif isinstance(val, (int, float, str, bool)):
+                result += f"{name} = {val!r}\n"
+            else:
+                continue
+            written_constexpr_vars.add(name)
+
+        # Write out nested kernel dependencies
+        for name in called_names:
+            val = fn_globals.get(name)
+            if not isinstance(val, JITFunction) or val is jit_fn:
+                continue
+            nested_fn_name = get_fn_name(val)
+            if nested_fn_name in written_nested_kernels:
+                continue
+            # Mark as written before recursing to prevent cycles
+            written_nested_kernels.add(nested_fn_name)
+            result += write_kernel_dependencies(
+                val, written_constexpr_vars, written_nested_kernels
+            )
+            result += generate_custom_triton_kernel(val)
+
+        return result
+
+    written_nested_kernels: set[str] = set()
+    written_constexpr_vars: set[str] = set()
+
+    model_str += f"{kernel_side_table_prefix}.reset_table()\n"
+
+    for idx in kernel_side_table.id_to_kernel:
+        kernel = kernel_side_table.get_kernel(idx)
 
         try:
-            if isinstance(kernel, Autotuner):
-                # pyrefly: ignore [missing-attribute]
-                if isinstance(kernel.fn, Heuristics):
-                    model_str += "ERROR: Repro will not work as intended, "
-                    model_str += "triton.runtime.autotuner.Heuristics is not currently supported\n"
-                    break
-
-                config_strs = []
-                # pyrefly: ignore [missing-attribute]
-                for kernel_config in kernel.configs:
-                    # pyrefly: ignore [bad-argument-type]
-                    config_strs.append(f"""triton.Config(
-                            {str(kernel_config.kwargs)},
-                            num_warps={kernel_config.num_warps},
-                            num_stages={kernel_config.num_stages},
-                        )""")
-
-                config_str = ",".join(config_strs)
-                model_str += textwrap.dedent(f"""
-                @triton.autotune(
-                    configs=[
-                        {config_str}
-                    ],
-                    key=[]
-                )
-                """).strip()
-
-            model_str += "\n@triton.jit\n"
-            # pyrefly: ignore [missing-attribute]
-            src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
-            fn_name = (
-                # pyrefly: ignore [missing-attribute]
-                kernel._fn_name
-                if isinstance(kernel, JITFunction)
-                # pyrefly: ignore  # missing-attribute
-                else kernel.fn._fn_name
+            model_str += write_kernel_dependencies(
+                kernel, written_constexpr_vars, written_nested_kernels
             )
-            fn_name = fn_name.split(".")[-1]
+            fn_name = get_fn_name(kernel)
 
-            model_str += src_code
-            model_str += "\n"
-            model_str += f"{kernel_side_table_prefix}.add_kernel({fn_name})\n"
+            unique_name = f"{fn_name}_{idx}"
+
+            kernel_code = generate_custom_triton_kernel(kernel)
+            kernel_code = kernel_code.replace(
+                f"def {fn_name}(", f"def {unique_name}(", 1
+            )
+            model_str += kernel_code
+            model_str += f"{kernel_side_table_prefix}.add_kernel({unique_name})\n"
         except AttributeError as e:
             model_str += "ERROR: Repro will not work as intended, "
             model_str += f"User defined triton kernel exception: {e}\n"
 
-    # pyrefly: ignore [unbound-name]
     if len(kernel_side_table.constant_args) > 0:
-        # pyrefly: ignore [unbound-name]
         model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"
 
     model_str += NNModuleToString.convert(gm)
 
     writer = InputWriter(save_dir, stable_hash=stable_hash)
+    # pyrefly: ignore [implicit-any]
     used_syms = {}
 
     # Extract from graph placeholders and their corresponding arguments
     placeholder_targets = fx_placeholder_targets(gm)
     for placeholder, arg in zip(placeholder_targets, args):
-        # pyrefly: ignore [unbound-name]
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
-        # pyrefly: ignore [unbound-name]
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
         elif arg is None:
             writer.const(placeholder)
+        elif isinstance(arg, FakeScriptObject):
+            writer.opaque(placeholder, arg.script_class_name)
         else:
             writer.unsupported(placeholder, arg)
 
         # Extract symbolic variables from the same arguments
-        # pyrefly: ignore [unbound-name]
+
         if (
-            # pyrefly: ignore [unbound-name]
             isinstance(arg, torch.SymInt)
             # By checking sympy.Symbol, we are excluding any symbolic expressions.
             # TODO: we may need to solve expressions to extract symbol definitions.
@@ -467,27 +666,34 @@ if "__compile_source__" in globals():
             and arg.node.hint is not None
         ):
             used_syms[str(arg.node)] = arg.node.hint
-        # pyrefly: ignore [unbound-name]
         elif isinstance(arg, torch.Tensor):
             # Extract symbolic variables from tensor shapes and strides
             for dim in arg.shape:
-                # pyrefly: ignore [unbound-name]
                 if (
-                    # pyrefly: ignore [unbound-name]
                     isinstance(dim, torch.SymInt)
                     and isinstance(dim.node.expr, sympy.Symbol)
                     and dim.node.hint is not None
                 ):
                     used_syms[str(dim.node)] = dim.node.hint
             for stride in arg.stride():
-                # pyrefly: ignore [unbound-name]
                 if (
-                    # pyrefly: ignore [unbound-name]
                     isinstance(stride, torch.SymInt)
                     and isinstance(stride.node.expr, sympy.Symbol)
                     and stride.node.hint is not None
                 ):
                     used_syms[str(stride.node)] = stride.node.hint
+            # Extract symbols from storage nbytes (can be a symbolic expression)
+            storage = arg.untyped_storage()
+            nbytes = storage.nbytes()
+            if isinstance(nbytes, torch.SymInt):
+                expr = nbytes.node.expr
+                shape_env = nbytes.node.shape_env
+                for sym in expr.free_symbols:
+                    sym_name = str(sym)
+                    if sym_name not in used_syms and shape_env is not None:
+                        hint = shape_env.backed_var_to_val.get(sym)
+                        if hint is not None:
+                            used_syms[sym_name] = int(hint)
     # Add symbolic variable definitions to the top of the generated code
     if used_syms:
         hint_lines = "\n".join(
@@ -510,11 +716,11 @@ def save_graph_repro(
     compiler_name: str,
     *,
     stable_output: bool = False,
-    save_dir: Optional[str] = None,
+    save_dir: str | None = None,
     command: str = "run",
-    accuracy: Optional[Union[str, bool]] = None,
-    tracing_mode: Optional[str] = None,
-    check_str: Optional[str] = None,
+    accuracy: str | bool | None = None,
+    tracing_mode: str | None = None,
+    check_str: str | None = None,
     stable_hash: bool = False,
 ) -> None:
     if any(
@@ -529,13 +735,9 @@ def save_graph_repro(
     if save_dir is not None:
         save_dir = normalize_path_separator(save_dir)
 
-    # Check if the graph contains distributed operations
-    has_distributed_ops = any(
-        node.op == "call_function"
-        and isinstance(node.target, OpOverload)
-        and node.target.namespace in {"_c10d_functional", "c10d_functional"}
-        for node in gm.graph.nodes
-    )
+    # Extract distributed info from the graph
+    distributed_info = _extract_distributed_info(gm)
+    has_distributed_ops = len(distributed_info) > 0
 
     fd.write(
         generate_compiler_repro_string(
@@ -561,15 +763,9 @@ def save_graph_repro(
     # Add distributed initialization before run_repro if needed
     if has_distributed_ops:
         fd.write(
-            "    # Initialize FakeProcessGroup for distributed operations\n"
-            "    store = FakeStore()\n"
-            "    dist.init_process_group(\n"
-            '        backend="fake",\n'
-            "        rank=0,\n"
-            "        world_size=2,\n"
-            "        store=store\n"
-            "    )\n"
+            "    from torch._dynamo.repro.after_aot import setup_fake_process_groups\n"
         )
+        fd.write(f"    setup_fake_process_groups({distributed_info!r})\n")
 
     fd.write(
         f"    with torch.no_grad():\n"
@@ -591,7 +787,7 @@ def dump_compiler_graph_state(
     args: Sequence[Any],
     compiler_name: str,
     *,
-    accuracy: Optional[Union[str, bool]] = None,
+    accuracy: str | bool | None = None,
 ) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -636,11 +832,11 @@ def isolate_fails(
     fx_g: torch.fx.GraphModule,
     args: Sequence[Any],
     compiler_name: str,
-    env: Optional[dict[str, Any]] = None,
-    save_dir: Optional[str] = None,
-    accuracy: Optional[Union[bool, str]] = None,
-    tracing_mode: Optional[str] = None,
-    check_str: Optional[str] = None,
+    env: dict[str, Any] | None = None,
+    save_dir: str | None = None,
+    accuracy: bool | str | None = None,
+    tracing_mode: str | None = None,
+    check_str: str | None = None,
 ) -> bool:
     if env is None:
         env = {}
@@ -701,7 +897,7 @@ def isolate_fails(
 
 
 def inductor_fails(
-    fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: Optional[str] = None
+    fx_g: torch.fx.GraphModule, args: Sequence[Any], check_str: str | None = None
 ) -> bool:
     has_cuda = False
     for arg in args:
@@ -741,7 +937,7 @@ def inductor_fails(
 def inductor_accuracy_fails(
     fx_g: torch.fx.GraphModule,
     args: Sequence[Any],
-    check_str: Optional[str] = None,
+    check_str: str | None = None,
     *,
     require_fp64: bool = False,
     ignore_non_fp: bool = False,
@@ -911,7 +1107,7 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         compiled(new_args)  # type: ignore[arg-type]
         assert not new_args
 
-    def compare_tuples(tuple1: tuple[Any], tuple2: tuple[Any]) -> Optional[str]:
+    def compare_tuples(tuple1: tuple[Any], tuple2: tuple[Any]) -> str | None:
         diff_indices = [i for i in range(len(tuple1)) if tuple1[i] != tuple2[i]]
         diff_values = [(tuple1[i], tuple2[i]) for i in diff_indices]
 
@@ -1060,11 +1256,11 @@ def run_repro(
     load_args: Any,
     *,
     command: str = "run",
-    accuracy: Union[bool, str] = "",
-    save_dir: Optional[str] = None,
-    tracing_mode: Optional[str] = None,
-    patch_code: Optional[str] = None,
-    check_str: Optional[str] = None,
+    accuracy: bool | str = "",
+    save_dir: str | None = None,
+    tracing_mode: str | None = None,
+    patch_code: str | None = None,
+    check_str: str | None = None,
     **kwargs: Any,
 ) -> Any:
     for k in kwargs:

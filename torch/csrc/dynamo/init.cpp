@@ -84,12 +84,6 @@ THPObjectPtr _unicode_dispatch(PyObject* str) {
     return THPObjectPtr();
   }
 
-  // Remove this when we're 3.10+
-  if (PyUnicode_READY(str) != 0) {
-    // Returns -1 with an exception set on failure
-    return THPObjectPtr();
-  }
-
   auto length = PyUnicode_GET_LENGTH(str);
 
   switch (PyUnicode_KIND(str)) {
@@ -258,6 +252,17 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_load_precompile_entry", &_load_precompile_entry);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
   m.def("_set_lru_cache", &_set_lru_cache);
+  m.def(
+      "_get_frame_value_stack_with_depth", &_get_frame_value_stack_with_depth);
+  m.def("set_bytecode_debugger_callback", &set_bytecode_debugger_callback);
+  m.def("get_bytecode_debugger_callback", &get_bytecode_debugger_callback);
+  m.def("register_breakpoint_code", &register_breakpoint_code);
+
+  // NullStackValue - sentinel for NULL stack values
+  py::class_<NullStackValue>(m, "NullStackValue")
+      .def("__repr__", [](const NullStackValue&) { return "<NULL>"; });
+  m.attr("NULL_STACK_VALUE") = get_null_stack_value();
+
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   init_THPCaches();
   if (THP_PyOpcode_Caches != nullptr) {
@@ -269,6 +274,13 @@ void initDynamoBindings(PyObject* torch) {
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
   m.def("code_framelocals_names", &code_framelocals_names);
   _register_functions(dynamo);
+
+  py::enum_<EvalFrameOverride>(m, "_EvalFrameOverride")
+      .value("NONE", EvalFrameOverride::NONE)
+      .value("SKIP", EvalFrameOverride::SKIP)
+      .value("ERROR", EvalFrameOverride::ERROR);
+
+  m.def("set_eval_frame_override", &set_eval_frame_override);
 }
 
 } // namespace torch::dynamo

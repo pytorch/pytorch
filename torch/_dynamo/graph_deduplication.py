@@ -11,7 +11,6 @@ import logging
 import operator
 from collections import defaultdict, deque
 from collections.abc import Generator, Iterable
-from typing import Optional
 
 import torch
 import torch.fx
@@ -31,7 +30,7 @@ UsageIndex = tuple[int, int]
 
 log = logging.getLogger(__name__)
 
-last_node_to_additional_deps: Optional[dict[Node, OrderedSet[Node]]] = None
+last_node_to_additional_deps: dict[Node, OrderedSet[Node]] | None = None
 
 
 def apply_graph_deduplication(output_graph) -> dict[str, torch.fx.GraphModule]:  # type: ignore[no-untyped-def]
@@ -456,10 +455,10 @@ def _add_mutation_dependencies(
             for user in mutated_arg.users:
                 if user is node:
                     continue
-                # pyrefly: ignore  # unsupported-operation
+
                 elif user < node:
                     node_to_additional_deps[node].add(user)
-                # pyrefly: ignore  # unsupported-operation
+
                 elif user > node:
                     node_to_additional_deps[user].add(node)
 

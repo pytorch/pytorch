@@ -15,7 +15,7 @@ _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
 
-    # pyrefly: ignore [import-error]
+    # pyrefly: ignore [import-error, missing-import]
     from monkeytype import trace as monkeytype_trace
     from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.db.base import (  # type: ignore[import]

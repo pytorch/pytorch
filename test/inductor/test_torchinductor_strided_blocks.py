@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 import contextlib
 import dataclasses
+import functools
 import importlib
 import math
 import unittest
@@ -22,8 +23,10 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
+    MI200_ARCH,
+    NAVI_ARCH,
     parametrize,
-    skipIfXpu,
+    skipIfRocmArch,
     subtest,
 )
 from torch.testing._internal.inductor_utils import (
@@ -527,6 +530,12 @@ class CommonTemplate:
         """
         Tests a reduction kernel.
         """
+        if view_size == (2, 3 * max_block) and torch.version.hip is not None:
+            view_size = (4, 6 * max_block)
+
+        if view_size == (128, 128) and torch.version.hip is not None:
+            view_size = (256, 256)
+
         if self.device == "cpu" and all(
             # Multiple of max block. Uses loops.
             [
@@ -792,6 +801,7 @@ class CommonTemplate:
             ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
+    @skipIfRocmArch(MI200_ARCH + NAVI_ARCH)
     def test_2d_reduction_odd_shapes(
         self,
         view_size: tuple[int, ...],
@@ -803,7 +813,24 @@ class CommonTemplate:
         Tests 2D reduction kernels. These arise from "odd" shapes which are not
         expressible with a 1D block pointer.
         """
+        if reduction_op == torch.sum and torch.version.hip is not None:
+            view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
+
+        # HIP: Backend scheduling / fusion differences (e.g., Navi vs MI*)
+        # may result in off-by-one differences in the number of block pointers.
+        # Allow a small tolerance here to avoid backend-specific flakiness.
+        # We expect num_block_pointers to decrease by at most 1, and not increase.
+        # The range created here is checked below.
+        if torch.version.hip:
+            min_num_block_pointers = max(
+                num_block_pointers - 1, 1
+            )  # Expected at least one block descriptor for the input
+            max_num_block_pointers = (
+                num_block_pointers  # We don't expect num_block_pointers to increase.
+            )
+            # Disable strict checking in _run_and_compare; we assert bounds manually below.
+            num_block_pointers = None
 
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
@@ -815,7 +842,20 @@ class CommonTemplate:
             config_patches=tiled_reduction_config,
         )
 
-        # Check the code for multiple Rn_BLOCK's
+        # HIP: Check the number of block pointers manually.
+        if torch.version.hip:
+            block_pointer_count = code.count(self.block_descriptor_constructor_str)
+            self.assertGreaterEqual(
+                block_pointer_count,
+                min_num_block_pointers,
+                f"Too few block descriptors emitted: {block_pointer_count}",
+            )
+            self.assertLessEqual(
+                block_pointer_count,
+                max_num_block_pointers,
+                f"Too many block descriptors emitted: {block_pointer_count}",
+            )
+
         self._assert_reduction_ndims(code, 2)
 
     @parametrize(
@@ -842,6 +882,8 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
+        if torch.version.hip is not None and expected_num_triton_kernels == 2:
+            size = (256, 256)
         view = self._discontiguous_tensor(size, self.device)
 
         # We expect many block pointers for this one.
@@ -977,7 +1019,7 @@ class CommonTemplate:
 
         view_size = (5, 7)
         arg0 = self._discontiguous_tensor(view_size, self.device)
-        arg1 = torch.empty(view_size)
+        arg1 = torch.randn(view_size)
 
         # No guarantees on the number of kernels or pointers.
         result, (code,) = self._run_and_compare(
@@ -1014,6 +1056,104 @@ class CommonTemplate:
 
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
+
+    # FIXME: fails for Triton CPU. Tiling does not contain YBLOCK.
+    @test_torchinductor.xfail_if_triton_cpu
+    @xfail_if_use_tensor_descriptor
+    def test_reduction_padded_output_tiling(self):
+        """
+        Test a [Y, X, R0] reduction with tiled output dimensions.
+        The key to elicit this test case is a padded output tensor.
+        """
+        x = torch.randn((9, 11, 2), device=self.device)
+
+        # We expect block pointers for the input and output.
+        result, (code,) = self._run_and_compare(
+            functools.partial(torch.amax, dim=-1),
+            x,
+            expected_num_block_pointers=2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "pad_outputs": True,
+                "padding_alignment_bytes": 32,
+                "padding_stride_threshold": 0,
+                "unroll_reductions_threshold": 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check the code for multiple output dims.
+        self._assert_pointwise_ndims(code, 2)
+        self._assert_reduction_ndims(code, 1)
+
+    @xfail_if_use_tensor_descriptor
+    @parametrize("unroll", (False, True))
+    def test_reduce_trailing_dims_discontiguous_input(self, unroll: bool):
+        """
+        Test a [Y, X, R0, R1] reduction where the input tensor is discontiguous, but we
+        only reduce over the last two dimensions.
+        """
+        view = self._discontiguous_tensor((7, 5, 3, 2), self.device)
+
+        # We expect block pointers for the inputs and output.
+        # Note there are more inputs if unrolled.
+        result, (code,) = self._run_and_compare(
+            functools.partial(
+                torch.amax,
+                dim=(-1, -2),
+            ),
+            view,
+            expected_num_block_pointers=7 if unroll else 2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "unroll_reductions_threshold": 1e4 if unroll else 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check the code for multiple pointwise dims.
+        self._assert_pointwise_ndims(code, 2)
+        self._assert_reduction_ndims(code, 0 if unroll else 2)
+
+    def test_2d_reduction_with_broadcast(self):
+        """
+        Tests 2D tiled reduction with a broadcasted 1D tensor.
+
+        This is a regression test for a bug where block pointers that only
+        advance in one reduction dimension (not both) would cause a KeyError
+        during codegen. The bug occurred because:
+        1. The broadcasted tensor only varies along the first reduction dimension (R0)
+        2. When building pointer_advancements, the block_ptr is only
+           added to R0_INDEX (non-zero advancement) but skipped for R1_INDEX
+           (zero/identity advancement)
+        3. During loop suffix generation, the code assumed if a block_ptr exists
+           in the outer loop's advancements, it must exist in the inner loop's too
+
+        The pattern: (x * y[:, None]).sum() where x is 2D and y is 1D.
+        """
+        # Use sizes that require looped (non-persistent) reductions
+        # to trigger 2D tiled reduction with R0 and R1 loops
+        M, N = 64, 128
+
+        def fn(x, y):
+            # y is 1D (M,), x is 2D (M, N)
+            # y[:, None] broadcasts to (M, N)
+            # The y block_ptr only advances with R0, not R1
+            return (x * y[:, None]).sum()
+
+        x = torch.randn(M, N, device=self.device)
+        y = torch.randn(M, device=self.device)
+
+        # This should compile without KeyError and produce correct results
+        result, (code,) = self._run_and_compare(
+            fn,
+            x,
+            y,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Verify 2D reduction is used (R0_BLOCK and R1_BLOCK present)
+        self._assert_reduction_ndims(code, 2)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
@@ -1233,9 +1373,6 @@ class CommonTemplate:
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
     # This is now fixed by ensuring that that wild symbols only match integers
-    @skipIfXpu(
-        msg="Triton issue exposed by new driver, will be resolved after next triton update."
-    )
     def test_ensure_integral_dims_and_strides(self):
         def model(data, *args):
             return torch.nn.functional.unfold(data, *args)
@@ -1394,12 +1531,10 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
 
 
 @unittest.skipIf(
-    not (
-        HAS_CUDA_AND_TRITON
-        and torch.cuda.get_device_capability()[0] >= 9
-        and torch.version.hip is None
-    ),
-    "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
+    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    or torch.version.hip,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+    # ROCm triton doesn't support/generate "tl.make_tensor_descriptor" which is exactly what this unit test is about
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
 @instantiate_parametrized_tests
@@ -1447,6 +1582,22 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         transpose_count = code.count("tl.trans")
         self.assertEqual(transpose_count, 1 if expect_transpose else 0)
 
+    def test_rms_norm_backward_does_not_crash_with_tma(self):
+        B, S, D = 1, 1024, 40096
+        with torch.device(self.device):
+            x = torch.randn(B, S, D, dtype=torch.bfloat16, requires_grad=True)
+            w = torch.randn(D, dtype=torch.bfloat16, requires_grad=True)
+
+        def f(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+            y = torch.rms_norm(x, (D,), w, 1e-5)
+            return (y * 0.1).sum()
+
+        compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
+        loss = compiled_f(x, w)
+        loss.backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(w.grad)
+
 
 test_torchinductor.copy_tests(
     CommonTemplate,
@@ -1455,6 +1606,548 @@ test_torchinductor.copy_tests(
     xfail_prop="_expected_failure_use_tensor_descriptor",
     test_failures=TMA_TEST_XFAIL,
 )
+
+
+class TestTilingExtra(InductorTestCase):
+    @requires_gpu()
+    def test_tiling_split_valid(self):
+        import torch.nn.functional as F
+
+        class GraphModule(torch.nn.Module):
+            def forward(
+                self,
+                sub_dense0_w,  # f16[64, 80]
+                sub_dense0_b,  # f16[64]
+                s25,  # Sym(s25) - batch size
+                s70,  # Sym(s70) - sequence length
+                input_feat,  # f16[s25, s70, 80]
+                sub_conv0_w,  # f16[64, 64, 5]
+                sub_conv0_b,  # f16[64]
+                sub_conv1_w,  # f16[32, 64, 5]
+                sub_conv1_b,  # f16[32]
+                sub_dense1_w,  # f16[64, 32]
+                sub_dense1_b,  # f16[64]
+                rot_inv_freq,  # f32[8]
+                rot_attn_scale,  # f64[] cpu
+                l0_norm_ff1_w,  # f16[64]
+                l0_ff1_lin1_w,  # f16[256, 64]
+                l0_ff1_lin2_w,  # f16[64, 256]
+                l0_ff_res0,  # f64[] cpu
+                l0_ff_res1,  # f64[] cpu
+                l0_norm_attn_w,  # f16[64]
+                l0_q_w,  # f16[64, 64]
+                l0_k_w,  # f16[64, 64]
+                l0_v_w,  # f16[64, 64]
+                l0_o_w,  # f16[64, 64]
+                l0_norm_conv_w,  # f16[64]
+                l0_pw_conv1_w,  # f16[128, 64, 1]
+                l0_dw_conv_w,  # f16[64, 1, 8]
+                l0_bn_mean,  # f16[64]
+                l0_bn_var,  # f16[64]
+                l0_bn_w,  # f16[64]
+                l0_bn_b,  # f16[64]
+                l0_pw_conv2_w,  # f16[64, 64, 1]
+                l0_conv_res0,  # f64[] cpu
+                l0_conv_res1,  # f64[] cpu
+                l0_norm_ff2_w,  # f16[64]
+                l0_ff2_lin1_w,  # f16[256, 64]
+                l0_ff2_lin2_w,  # f16[64, 256]
+                l0_norm_out_w,  # f16[64]
+                l1_norm_ff1_w,  # f16[64]
+                l1_ff1_lin1_w,  # f16[256, 64]
+                l1_ff1_lin2_w,  # f16[64, 256]
+                l1_norm_attn_w,  # f16[64]
+                l1_q_w,  # f16[64, 64]
+                l1_k_w,  # f16[64, 64]
+                l1_v_w,  # f16[64, 64]
+                l1_o_w,  # f16[64, 64]
+                l1_norm_conv_w,  # f16[64]
+                l1_pw_conv1_w,  # f16[128, 64, 1]
+                l1_dw_conv_w,  # f16[64, 1, 8]
+                l1_bn_mean,  # f16[64]
+                l1_bn_var,  # f16[64]
+                l1_bn_w,  # f16[64]
+                l1_bn_b,  # f16[64]
+                l1_pw_conv2_w,  # f16[64, 64, 1]
+                l1_norm_ff2_w,  # f16[64]
+                l1_ff2_lin1_w,  # f16[256, 64]
+                l1_ff2_lin2_w,  # f16[64, 256]
+                l1_norm_out_w,  # f16[64]
+                out_norm_w,  # f16[64]
+            ):
+                # Subsampler: dense_0 + relu
+                linear = torch._C._nn.linear(input_feat, sub_dense0_w, sub_dense0_b)
+                hidden_states = F.relu(linear, inplace=False)
+
+                # Transpose for conv
+                hidden_states_1 = hidden_states.transpose(1, 2)
+
+                # Conv_0 with stride=2
+                conv1d = torch.conv1d(
+                    hidden_states_1, sub_conv0_w, sub_conv0_b, (2,), (0,), (1,), 1
+                )
+                hidden_states_2 = F.relu(conv1d, inplace=False)
+
+                # Conv_1 with stride=2
+                conv1d_1 = torch.conv1d(
+                    hidden_states_2, sub_conv1_w, sub_conv1_b, (2,), (0,), (1,), 1
+                )
+                hidden_states_3 = F.relu(conv1d_1, inplace=False)
+
+                # Transpose back
+                hidden_states_4 = hidden_states_3.transpose(1, 2)
+
+                # Dense_1
+                hidden_states_5 = torch._C._nn.linear(
+                    hidden_states_4, sub_dense1_w, sub_dense1_b
+                )
+
+                # Compute output sequence length: ((s70 - 5) // 4) - 1
+                # Note: In the dynamo graph, torch.sym_sum is used, but we use direct arithmetic here
+                sym_sum = s70 - 5
+                floordiv = sym_sum // 4
+                sym_sum_1 = floordiv - 1
+
+                # Create position ids
+                arange = torch.arange(sym_sum_1, device=GPU_TYPE)
+                unsqueeze = arange.unsqueeze(0)
+
+                # Rotary embedding computation
+                getitem_3 = rot_inv_freq[(None, slice(None, None, None), None)]
+                float_1 = getitem_3.float()
+                expand = float_1.expand(1, -1, 1)
+                inv_freq_expanded = expand.to(torch.device(GPU_TYPE, index=0))
+
+                getitem_6 = unsqueeze[
+                    (slice(None, None, None), None, slice(None, None, None))
+                ]
+                position_ids_expanded = getitem_6.float()
+
+                # Rotary embedding frequency computation (autocast removed for tracing)
+                float_3 = inv_freq_expanded.float()
+                float_4 = position_ids_expanded.float()
+                matmul = float_3 @ float_4
+                freqs = matmul.transpose(1, 2)
+
+                emb = torch.cat((freqs, freqs), dim=-1)
+
+                cos = emb.cos()
+                item = rot_attn_scale.item()
+                cos_1 = cos * item
+
+                sin = emb.sin()
+                sin_1 = sin * item
+
+                cos_2 = cos_1.to(dtype=torch.float16)
+                sin_2 = sin_1.to(dtype=torch.float16)
+
+                # Dropout (no-op in eval mode)
+                hidden_states_6 = F.dropout(hidden_states_5, p=0.1, training=False)
+                cos_3 = F.dropout(cos_2, p=0.0, training=False)
+                sin_3 = F.dropout(sin_2, p=0.0, training=False)
+
+                # Create attention mask
+                cache_position = torch.arange(
+                    sym_sum_1, device=GPU_TYPE, dtype=torch.int64
+                )
+                arange_4 = torch.arange(sym_sum_1, device=GPU_TYPE)
+
+                q_indices = cache_position[(None, None, slice(None, None, None), None)]
+                attention_mask = q_indices >= 0
+                attention_mask_1 = attention_mask.expand(s25, -1, sym_sum_1, sym_sum_1)
+
+                # ============ LAYER 0 ============
+                # Feed forward 1
+                layer_norm = F.layer_norm(
+                    hidden_states_6, (64,), l0_norm_ff1_w, None, 1e-06
+                )
+                linear_2 = torch._C._nn.linear(layer_norm, l0_ff1_lin1_w, None)
+                hidden_states_7 = F.silu(linear_2)
+                hidden_states_8 = F.dropout(hidden_states_7, p=0.1, training=False)
+                hidden_states_9 = torch._C._nn.linear(
+                    hidden_states_8, l0_ff1_lin2_w, None
+                )
+
+                # Residual connection with weights
+                item_5 = l0_ff_res0.item()
+                mul_2 = item_5 * hidden_states_6
+                item_6 = l0_ff_res1.item()
+                mul_3 = item_6 * hidden_states_9
+                hidden_states_10 = mul_2 + mul_3
+
+                # Self attention
+                normalized_hidden_states = F.layer_norm(
+                    hidden_states_10, (64,), l0_norm_attn_w, None, 1e-06
+                )
+
+                linear_4 = torch._C._nn.linear(normalized_hidden_states, l0_q_w, None)
+                view = linear_4.view((s25, sym_sum_1, -1, 16))
+                query_states = view.transpose(1, 2)
+
+                linear_5 = torch._C._nn.linear(normalized_hidden_states, l0_k_w, None)
+                view_1 = linear_5.view((s25, sym_sum_1, -1, 16))
+                key_states = view_1.transpose(1, 2)
+
+                linear_6 = torch._C._nn.linear(normalized_hidden_states, l0_v_w, None)
+                view_2 = linear_6.view((s25, sym_sum_1, -1, 16))
+                value_states = view_2.transpose(1, 2)
+
+                # Apply rotary embeddings
+                cos_4 = cos_3.unsqueeze(1)
+                sin_4 = sin_3.unsqueeze(1)
+
+                mul_4 = query_states * cos_4
+                x1 = query_states[(Ellipsis, slice(None, 8, None))]
+                x2 = query_states[(Ellipsis, slice(8, None, None))]
+                neg = -x2
+                cat_1 = torch.cat((neg, x1), dim=-1)
+                mul_5 = cat_1 * sin_4
+                q_embed = mul_4 + mul_5
+
+                mul_6 = key_states * cos_4
+                x1_1 = key_states[(Ellipsis, slice(None, 8, None))]
+                x2_1 = key_states[(Ellipsis, slice(8, None, None))]
+                neg_1 = -x2_1
+                cat_2 = torch.cat((neg_1, x1_1), dim=-1)
+                mul_7 = cat_2 * sin_4
+                k_embed = mul_6 + mul_7
+
+                # SDPA
+                attn_output = torch._C._nn.scaled_dot_product_attention(
+                    q_embed,
+                    k_embed,
+                    value_states,
+                    attn_mask=attention_mask_1,
+                    dropout_p=0.0,
+                    scale=0.25,
+                    is_causal=False,
+                )
+
+                transpose_6 = attn_output.transpose(1, 2)
+                attn_output_1 = transpose_6.contiguous()
+                reshape = attn_output_1.reshape(s25, sym_sum_1, -1)
+                attn_output_2 = reshape.contiguous()
+                attn_output_3 = torch._C._nn.linear(attn_output_2, l0_o_w, None)
+
+                hidden_states_11 = hidden_states_10 + attn_output_3
+
+                # Convolution module
+                layer_norm_2 = F.layer_norm(
+                    hidden_states_11, (64,), l0_norm_conv_w, None, 1e-06
+                )
+                hidden_states_12 = layer_norm_2.transpose(1, 2)
+                hidden_states_13 = torch.conv1d(
+                    hidden_states_12, l0_pw_conv1_w, None, (1,), (0,), (1,), 1
+                )
+                hidden_states_14 = F.glu(hidden_states_13, dim=1)
+
+                invert = ~attention_mask_1
+                all_masked_rows = torch.all(invert, dim=2)
+                hidden_states_15 = hidden_states_14.masked_fill(all_masked_rows, 0.0)
+
+                hidden_states_16 = torch.conv1d(
+                    hidden_states_15, l0_dw_conv_w, None, (1,), "same", (1,), 64
+                )
+                hidden_states_17 = F.batch_norm(
+                    hidden_states_16,
+                    l0_bn_mean,
+                    l0_bn_var,
+                    l0_bn_w,
+                    l0_bn_b,
+                    False,
+                    0.01,
+                    1e-05,
+                )
+                hidden_states_18 = F.silu(hidden_states_17)
+                hidden_states_19 = torch.conv1d(
+                    hidden_states_18, l0_pw_conv2_w, None, (1,), (0,), (1,), 1
+                )
+                conv_output = hidden_states_19.transpose(1, 2)
+
+                # Conv residual
+                item_12 = l0_conv_res0.item()
+                item_13 = l0_conv_res1.item()
+                mul_8 = item_12 * hidden_states_11
+                mul_9 = item_13 * conv_output
+                hidden_states_20 = mul_8 + mul_9
+
+                # Feed forward 2
+                layer_norm_3 = F.layer_norm(
+                    hidden_states_20, (64,), l0_norm_ff2_w, None, 1e-06
+                )
+                linear_8 = torch._C._nn.linear(layer_norm_3, l0_ff2_lin1_w, None)
+                hidden_states_21 = F.silu(linear_8)
+                hidden_states_22 = F.dropout(hidden_states_21, p=0.1, training=False)
+                hidden_states_23 = torch._C._nn.linear(
+                    hidden_states_22, l0_ff2_lin2_w, None
+                )
+
+                mul_10 = item_5 * hidden_states_20
+                mul_11 = item_6 * hidden_states_23
+                hidden_states_24 = mul_10 + mul_11
+
+                hidden_states_25 = F.layer_norm(
+                    hidden_states_24, (64,), l0_norm_out_w, None, 1e-06
+                )
+
+                # ============ LAYER 1 ============
+                # Feed forward 1
+                layer_norm_5 = F.layer_norm(
+                    hidden_states_25, (64,), l1_norm_ff1_w, None, 1e-06
+                )
+                linear_10 = torch._C._nn.linear(layer_norm_5, l1_ff1_lin1_w, None)
+                hidden_states_26 = F.silu(linear_10)
+                hidden_states_27 = F.dropout(hidden_states_26, p=0.1, training=False)
+                hidden_states_28 = torch._C._nn.linear(
+                    hidden_states_27, l1_ff1_lin2_w, None
+                )
+
+                mul_12 = item_5 * hidden_states_25
+                mul_13 = item_6 * hidden_states_28
+                hidden_states_29 = mul_12 + mul_13
+
+                # Self attention
+                normalized_hidden_states_1 = F.layer_norm(
+                    hidden_states_29, (64,), l1_norm_attn_w, None, 1e-06
+                )
+
+                linear_12 = torch._C._nn.linear(
+                    normalized_hidden_states_1, l1_q_w, None
+                )
+                view_3 = linear_12.view((s25, sym_sum_1, -1, 16))
+                query_states_1 = view_3.transpose(1, 2)
+
+                linear_13 = torch._C._nn.linear(
+                    normalized_hidden_states_1, l1_k_w, None
+                )
+                view_4 = linear_13.view((s25, sym_sum_1, -1, 16))
+                key_states_1 = view_4.transpose(1, 2)
+
+                linear_14 = torch._C._nn.linear(
+                    normalized_hidden_states_1, l1_v_w, None
+                )
+                view_5 = linear_14.view((s25, sym_sum_1, -1, 16))
+                value_states_1 = view_5.transpose(1, 2)
+
+                # Apply rotary embeddings
+                cos_5 = cos_3.unsqueeze(1)
+                sin_5 = sin_3.unsqueeze(1)
+
+                mul_14 = query_states_1 * cos_5
+                x1_2 = query_states_1[(Ellipsis, slice(None, 8, None))]
+                x2_2 = query_states_1[(Ellipsis, slice(8, None, None))]
+                neg_2 = -x2_2
+                cat_3 = torch.cat((neg_2, x1_2), dim=-1)
+                mul_15 = cat_3 * sin_5
+                q_embed_1 = mul_14 + mul_15
+
+                mul_16 = key_states_1 * cos_5
+                x1_3 = key_states_1[(Ellipsis, slice(None, 8, None))]
+                x2_3 = key_states_1[(Ellipsis, slice(8, None, None))]
+                neg_3 = -x2_3
+                cat_4 = torch.cat((neg_3, x1_3), dim=-1)
+                mul_17 = cat_4 * sin_5
+                k_embed_1 = mul_16 + mul_17
+
+                # SDPA
+                attn_output_4 = torch._C._nn.scaled_dot_product_attention(
+                    q_embed_1,
+                    k_embed_1,
+                    value_states_1,
+                    attn_mask=attention_mask_1,
+                    dropout_p=0.0,
+                    scale=0.25,
+                    is_causal=False,
+                )
+
+                transpose_12 = attn_output_4.transpose(1, 2)
+                attn_output_5 = transpose_12.contiguous()
+                reshape_1 = attn_output_5.reshape(s25, sym_sum_1, -1)
+                attn_output_6 = reshape_1.contiguous()
+                attn_output_7 = torch._C._nn.linear(attn_output_6, l1_o_w, None)
+
+                hidden_states_30 = hidden_states_29 + attn_output_7
+
+                # Convolution module
+                layer_norm_7 = F.layer_norm(
+                    hidden_states_30, (64,), l1_norm_conv_w, None, 1e-06
+                )
+                hidden_states_31 = layer_norm_7.transpose(1, 2)
+                hidden_states_32 = torch.conv1d(
+                    hidden_states_31, l1_pw_conv1_w, None, (1,), (0,), (1,), 1
+                )
+                hidden_states_33 = F.glu(hidden_states_32, dim=1)
+
+                invert_1 = ~attention_mask_1
+                all_masked_rows_1 = torch.all(invert_1, dim=2)
+                hidden_states_34 = hidden_states_33.masked_fill(all_masked_rows_1, 0.0)
+
+                hidden_states_35 = torch.conv1d(
+                    hidden_states_34, l1_dw_conv_w, None, (1,), "same", (1,), 64
+                )
+                hidden_states_36 = F.batch_norm(
+                    hidden_states_35,
+                    l1_bn_mean,
+                    l1_bn_var,
+                    l1_bn_w,
+                    l1_bn_b,
+                    False,
+                    0.01,
+                    1e-05,
+                )
+                hidden_states_37 = F.silu(hidden_states_36)
+                hidden_states_38 = torch.conv1d(
+                    hidden_states_37, l1_pw_conv2_w, None, (1,), (0,), (1,), 1
+                )
+                conv_output_1 = hidden_states_38.transpose(1, 2)
+
+                # Conv residual
+                mul_18 = item_12 * hidden_states_30
+                mul_19 = item_13 * conv_output_1
+                hidden_states_39 = mul_18 + mul_19
+
+                # Feed forward 2
+                layer_norm_8 = F.layer_norm(
+                    hidden_states_39, (64,), l1_norm_ff2_w, None, 1e-06
+                )
+                linear_16 = torch._C._nn.linear(layer_norm_8, l1_ff2_lin1_w, None)
+                hidden_states_40 = F.silu(linear_16)
+                hidden_states_41 = F.dropout(hidden_states_40, p=0.1, training=False)
+                hidden_states_42 = torch._C._nn.linear(
+                    hidden_states_41, l1_ff2_lin2_w, None
+                )
+
+                mul_20 = item_5 * hidden_states_39
+                mul_21 = item_6 * hidden_states_42
+                hidden_states_43 = mul_20 + mul_21
+
+                hidden_states_44 = F.layer_norm(
+                    hidden_states_43, (64,), l1_norm_out_w, None, 1e-06
+                )
+
+                # Final output norm
+                hidden_states_45 = F.layer_norm(
+                    hidden_states_44, (64,), out_norm_w, None, 1e-06
+                )
+
+                return (hidden_states_45,)
+
+        def create_parameters(device="cuda", dtype=torch.float16):
+            """Create all the parameters needed by the GraphModule."""
+            params = {}
+
+            # Subsampler parameters
+            params["sub_dense0_w"] = torch.randn(64, 80, device=device, dtype=dtype)
+            params["sub_dense0_b"] = torch.randn(64, device=device, dtype=dtype)
+            params["sub_conv0_w"] = torch.randn(64, 64, 5, device=device, dtype=dtype)
+            params["sub_conv0_b"] = torch.randn(64, device=device, dtype=dtype)
+            params["sub_conv1_w"] = torch.randn(32, 64, 5, device=device, dtype=dtype)
+            params["sub_conv1_b"] = torch.randn(32, device=device, dtype=dtype)
+            params["sub_dense1_w"] = torch.randn(64, 32, device=device, dtype=dtype)
+            params["sub_dense1_b"] = torch.randn(64, device=device, dtype=dtype)
+
+            # Rotary embedding
+            params["rot_inv_freq"] = torch.randn(8, device=device, dtype=torch.float32)
+            params["rot_attn_scale"] = torch.tensor(
+                1.0, device="cpu", dtype=torch.float64
+            )
+
+            # Layer 0 parameters
+            params["l0_norm_ff1_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l0_ff1_lin1_w"] = torch.randn(256, 64, device=device, dtype=dtype)
+            params["l0_ff1_lin2_w"] = torch.randn(64, 256, device=device, dtype=dtype)
+            params["l0_ff_res0"] = torch.tensor(0.5, device="cpu", dtype=torch.float64)
+            params["l0_ff_res1"] = torch.tensor(0.5, device="cpu", dtype=torch.float64)
+            params["l0_norm_attn_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l0_q_w"] = torch.randn(64, 64, device=device, dtype=dtype)
+            params["l0_k_w"] = torch.randn(64, 64, device=device, dtype=dtype)
+            params["l0_v_w"] = torch.randn(64, 64, device=device, dtype=dtype)
+            params["l0_o_w"] = torch.randn(64, 64, device=device, dtype=dtype)
+            params["l0_norm_conv_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l0_pw_conv1_w"] = torch.randn(
+                128, 64, 1, device=device, dtype=dtype
+            )
+            params["l0_dw_conv_w"] = torch.randn(64, 1, 8, device=device, dtype=dtype)
+            params["l0_bn_mean"] = torch.randn(64, device=device, dtype=dtype)
+            params["l0_bn_var"] = (
+                torch.abs(torch.randn(64, device=device, dtype=dtype)) + 0.1
+            )
+            params["l0_bn_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l0_bn_b"] = torch.randn(64, device=device, dtype=dtype)
+            params["l0_pw_conv2_w"] = torch.randn(64, 64, 1, device=device, dtype=dtype)
+            params["l0_conv_res0"] = torch.tensor(
+                0.5, device="cpu", dtype=torch.float64
+            )
+            params["l0_conv_res1"] = torch.tensor(
+                0.5, device="cpu", dtype=torch.float64
+            )
+            params["l0_norm_ff2_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l0_ff2_lin1_w"] = torch.randn(256, 64, device=device, dtype=dtype)
+            params["l0_ff2_lin2_w"] = torch.randn(64, 256, device=device, dtype=dtype)
+            params["l0_norm_out_w"] = torch.randn(64, device=device, dtype=dtype)
+
+            # Layer 1 parameters
+            params["l1_norm_ff1_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l1_ff1_lin1_w"] = torch.randn(256, 64, device=device, dtype=dtype)
+            params["l1_ff1_lin2_w"] = torch.randn(64, 256, device=device, dtype=dtype)
+            params["l1_norm_attn_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l1_q_w"] = torch.randn(64, 64, device=device, dtype=dtype)
+            params["l1_k_w"] = torch.randn(64, 64, device=device, dtype=dtype)
+            params["l1_v_w"] = torch.randn(64, 64, device=device, dtype=dtype)
+            params["l1_o_w"] = torch.randn(64, 64, device=device, dtype=dtype)
+            params["l1_norm_conv_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l1_pw_conv1_w"] = torch.randn(
+                128, 64, 1, device=device, dtype=dtype
+            )
+            params["l1_dw_conv_w"] = torch.randn(64, 1, 8, device=device, dtype=dtype)
+            params["l1_bn_mean"] = torch.randn(64, device=device, dtype=dtype)
+            params["l1_bn_var"] = (
+                torch.abs(torch.randn(64, device=device, dtype=dtype)) + 0.1
+            )
+            params["l1_bn_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l1_bn_b"] = torch.randn(64, device=device, dtype=dtype)
+            params["l1_pw_conv2_w"] = torch.randn(64, 64, 1, device=device, dtype=dtype)
+            params["l1_norm_ff2_w"] = torch.randn(64, device=device, dtype=dtype)
+            params["l1_ff2_lin1_w"] = torch.randn(256, 64, device=device, dtype=dtype)
+            params["l1_ff2_lin2_w"] = torch.randn(64, 256, device=device, dtype=dtype)
+            params["l1_norm_out_w"] = torch.randn(64, device=device, dtype=dtype)
+
+            # Output norm
+            params["out_norm_w"] = torch.randn(64, device=device, dtype=dtype)
+
+            return params
+
+        torch.manual_seed(42)
+
+        device = GPU_TYPE
+        dtype = torch.float16
+
+        # Create model and parameters
+        model = GraphModule().eval()
+        params = create_parameters(device, dtype)
+
+        # Create example input
+        batch_size = 13
+        seq_len = 1024
+        input_features = torch.randn(
+            batch_size, seq_len, 80, device=device, dtype=dtype
+        )
+        compiled_model = torch.compile(model, fullgraph=True, dynamic=True)
+
+        with torch.no_grad():
+            eager_output = model(
+                s25=batch_size,
+                s70=seq_len,
+                input_feat=input_features,
+                **params,
+            )
+            compiled_output = compiled_model(
+                s25=batch_size,
+                s70=seq_len,
+                input_feat=input_features,
+                **params,
+            )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

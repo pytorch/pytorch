@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import warnings
+from collections.abc import Sequence
 from logging import getLogger
 from typing import Optional
 
@@ -9,7 +10,7 @@ import torch
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
-from torch.distributed.tensor.placement_types import Shard
+from torch.distributed.tensor.placement_types import _StridedShard, Shard
 
 
 logger = getLogger(__name__)
@@ -124,26 +125,24 @@ class _PhiloxState:
         return self._state
 
     @property
-    def offset(self) -> int:
-        return int(self._state[8:].view(dtype=torch.int64).item())
+    def offset(self) -> torch.Tensor:
+        return self._state[8:].view(dtype=torch.int64)
 
     @offset.setter
-    def offset(self, offset: int) -> None:
-        offset_tensor = torch.tensor([offset], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        self._state[8:] = offset_tensor
+    def offset(self, offset: torch.Tensor) -> None:
+        if offset.numel() != 1:
+            raise AssertionError
+        self._state[8:] = offset.view(torch.uint8)
 
     @property
-    def seed(self) -> int:
-        return int(self._state[:8].view(dtype=torch.uint64).item())
+    def seed(self) -> torch.Tensor:
+        return self._state[:8].view(dtype=torch.uint64)
 
     @seed.setter
-    def seed(self, seed: int) -> None:
-        seed_tensor = torch.tensor([seed], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        self._state[:8] = seed_tensor
+    def seed(self, seed: torch.Tensor) -> None:
+        if seed.numel() != 1:
+            raise AssertionError
+        self._state[:8] = seed.view(torch.uint8)
 
 
 class _RNGStateTracker:
@@ -156,7 +155,6 @@ class _RNGStateTracker:
     """
 
     def __init__(self, device: torch.device):
-        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):
@@ -198,7 +196,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         run_state_sync: bool = True,
     ):
         super().__init__(_resolve_device(device_mesh=device_mesh))
-        assert self._device_handle is not None
+        if self._device_handle is None:
+            raise AssertionError
         # DTensor RNG tracker so far only supports CUDA/CUDA-like devices
         if self._device.type == "cpu":
             raise RuntimeError(
@@ -264,12 +263,13 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         if self.distribute_region_enabled:
             if self._device.type == "hpu":
                 self._device_handle.set_rng_ctx("philox")
-            old_offset = state.offset
+            old_offset = state.offset.clone()
             self._set_pre_op_offset(state, spec)
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
             ):
-                assert self._device_handle is not None
+                if self._device_handle is None:
+                    raise AssertionError
                 self._device_handle.set_rng_state(state.state)
                 try:
                     yield  # execute the region code
@@ -339,7 +339,8 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         """
         mesh = spec.mesh
         mesh_coordinate = mesh.get_coordinate()
-        assert mesh_coordinate is not None
+        if mesh_coordinate is None:
+            raise AssertionError
 
         # Compute shard index and total number of shards on each tensor dim
         shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
@@ -367,7 +368,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         state.offset = current_offset + offset_incr
 
     def _set_post_op_offset(
-        self, state: _PhiloxState, spec: DTensorSpec, old_offset: int
+        self, state: _PhiloxState, spec: DTensorSpec, old_offset: torch.Tensor
     ) -> None:
         """Sets the RNG to a synchronized state after running the local random op. Every
         rank should set its RNG offset to `old_offset + DTensor.numel()` where old_offset is
@@ -401,7 +402,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
 def _calc_first_shard_size(spec: DTensorSpec) -> list[int]:
     local_size_on_rank_0 = list(spec.shape)
     for idx, placement in enumerate(spec.placements):
-        if isinstance(placement, Shard):
+        if isinstance(placement, Shard | _StridedShard):
             mesh_dim_size = spec.mesh.size(idx)
             shard_dim = placement.dim
             local_size_on_rank_0[shard_dim], _ = placement._local_shard_size_and_offset(
@@ -413,27 +414,29 @@ def _calc_first_shard_size(spec: DTensorSpec) -> list[int]:
 
 
 def _calc_shard_info(
-    mesh_coordinate: list[int], spec: DTensorSpec
+    mesh_coordinate: Sequence[int], spec: DTensorSpec
 ) -> tuple[list[int], list[int]]:
     mesh = spec.mesh
     # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
     # case. Replace the custom logic with dim_map once we support it.
     dim_map: list[int | list[int]] = [-1] * spec.ndim
     for i, placement in enumerate(spec.placements):
-        if isinstance(placement, Shard):
+        if isinstance(placement, Shard | _StridedShard):
             shard_dim = placement.dim
             if dim_map[shard_dim] == -1:
                 dim_map[shard_dim] = [i]
             else:
                 mesh_dim_list = dim_map[shard_dim]
-                assert isinstance(mesh_dim_list, list)
+                if not isinstance(mesh_dim_list, list):
+                    raise AssertionError
                 mesh_dim_list.append(i)
 
     # Compute shard coordinate:
     # The coordinate on each tensor dim is a tuple (idx, range)
     # If a DTensor is partitioned on its dim i into n shards, and the current rank
     # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
-    assert mesh_coordinate is not None
+    if mesh_coordinate is None:
+        raise AssertionError
     mesh_size = mesh.shape
     shard_idx_by_dim = []
     total_num_shards_by_dim = []  # total number of shards on each tensor dim
@@ -468,7 +471,8 @@ def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int
 def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
     device_type = device_mesh.device_type
     device_handle = _get_device_handle(device_type)
-    assert device_handle is not None
+    if device_handle is None:
+        raise AssertionError
     device_idx = device_mesh.get_rank() % device_handle.device_count()
 
     @maybe_run_for_local_tensor

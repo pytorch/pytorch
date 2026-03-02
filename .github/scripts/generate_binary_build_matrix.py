@@ -28,7 +28,7 @@ CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
     "12.9": "12.9.1",
-    "13.0": "13.0.0",
+    "13.0": "13.0.2",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
@@ -37,7 +37,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.0": "9",
 }
 
-ROCM_ARCHES = ["7.0", "7.1"]
+ROCM_ARCHES = ["7.1", "7.2"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -50,99 +50,59 @@ CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "12.9-aarch64", "13.0-aar
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "12.6": (
-        "cuda-bindings==12.9.4; platform_system == 'Linux' | "
-        "nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' | "
-        "nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' | "
-        "nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.6.3; platform_system == 'Linux' | "  # noqa: B950
+        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
         "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
-        "nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' | "
-        "nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' | "
-        "nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' | "
-        "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' | "
-        "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
-        "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' | "
-        "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' | "
-        "nvidia-cufile-cu12==1.11.1.6; platform_system == 'Linux'"
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "12.8": (
-        "cuda-bindings==12.9.4; platform_system == 'Linux' | "
-        "nvidia-cuda-nvrtc-cu12==12.8.93; platform_system == 'Linux' | "
-        "nvidia-cuda-runtime-cu12==12.8.90; platform_system == 'Linux' | "
-        "nvidia-cuda-cupti-cu12==12.8.90; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
-        "nvidia-cublas-cu12==12.8.4.1; platform_system == 'Linux' | "
-        "nvidia-cufft-cu12==11.3.3.83; platform_system == 'Linux' | "
-        "nvidia-curand-cu12==10.3.9.90; platform_system == 'Linux' | "
-        "nvidia-cusolver-cu12==11.7.3.90; platform_system == 'Linux' | "
-        "nvidia-cusparse-cu12==12.5.8.93; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.8.1; platform_system == 'Linux' | "  # noqa: B950
+        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu12==9.19.0.56; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
-        "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' | "
-        "nvidia-nvjitlink-cu12==12.8.93; platform_system == 'Linux' | "
-        "nvidia-cufile-cu12==1.13.1.3; platform_system == 'Linux'"
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "12.9": (
-        "cuda-bindings==12.9.4; platform_system == 'Linux' | "
-        "nvidia-cuda-nvrtc-cu12==12.9.86; platform_system == 'Linux' | "
-        "nvidia-cuda-runtime-cu12==12.9.79; platform_system == 'Linux' | "
-        "nvidia-cuda-cupti-cu12==12.9.79; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
-        "nvidia-cublas-cu12==12.9.1.4; platform_system == 'Linux' | "
-        "nvidia-cufft-cu12==11.4.1.4; platform_system == 'Linux' | "
-        "nvidia-curand-cu12==10.3.10.19; platform_system == 'Linux' | "
-        "nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | "
-        "nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==12.9.1; platform_system == 'Linux' | "  # noqa: B950
+        "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu12==9.17.1.4; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
-        "nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | "
-        "nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | "
-        "nvidia-cufile-cu12==1.14.1.1; platform_system == 'Linux'"
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "13.0": (
-        "cuda-bindings==13.0.3; platform_system == 'Linux' | "
-        "nvidia-cuda-nvrtc==13.0.88; platform_system == 'Linux' | "
-        "nvidia-cuda-runtime==13.0.96; platform_system == 'Linux' | "
-        "nvidia-cuda-cupti==13.0.85; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu13==9.13.0.50; platform_system == 'Linux' | "
-        "nvidia-cublas==13.1.0.3; platform_system == 'Linux' | "
-        "nvidia-cufft==12.0.0.61; platform_system == 'Linux' | "
-        "nvidia-curand==10.4.0.35; platform_system == 'Linux' | "
-        "nvidia-cusolver==12.0.4.66; platform_system == 'Linux' | "
-        "nvidia-cusparse==12.6.3.3; platform_system == 'Linux' | "
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.0.2; platform_system == 'Linux' | "  # noqa: B950
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.19.0.56; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.28.9; platform_system == 'Linux' | "
-        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux' | "
-        "nvidia-nvtx==13.0.85; platform_system == 'Linux' | "
-        "nvidia-nvjitlink==13.0.88; platform_system == 'Linux' | "
-        "nvidia-cufile==1.15.1.6; platform_system == 'Linux'"
+        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.3.1 | "
-        "intel-cmplr-lib-ur==2025.3.1 | "
-        "intel-cmplr-lic-rt==2025.3.1 | "
-        "intel-sycl-rt==2025.3.1 | "
-        "oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-license==2025.3.0 | "
-        "onemkl-sycl-blas==2025.3.0 | "
-        "onemkl-sycl-dft==2025.3.0 | "
-        "onemkl-sycl-lapack==2025.3.0 | "
-        "onemkl-sycl-rng==2025.3.0 | "
-        "onemkl-sycl-sparse==2025.3.0 | "
-        "dpcpp-cpp-rt==2025.3.1 | "
-        "intel-opencl-rt==2025.3.1 | "
-        "mkl==2025.3.0 | "
-        "intel-openmp==2025.3.1 | "
-        "tbb==2022.3.0 | "
+        "intel-cmplr-lib-rt==2025.3.2 | "
+        "intel-cmplr-lib-ur==2025.3.2 | "
+        "intel-cmplr-lic-rt==2025.3.2 | "
+        "intel-sycl-rt==2025.3.2 | "
+        "oneccl-devel==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "impi-rt==2021.17.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "onemkl-license==2025.3.1 | "
+        "onemkl-sycl-blas==2025.3.1 | "
+        "onemkl-sycl-dft==2025.3.1 | "
+        "onemkl-sycl-lapack==2025.3.1 | "
+        "onemkl-sycl-rng==2025.3.1 | "
+        "onemkl-sycl-sparse==2025.3.1 | "
+        "dpcpp-cpp-rt==2025.3.2 | "
+        "intel-opencl-rt==2025.3.2 | "
+        "mkl==2025.3.1 | "
+        "intel-openmp==2025.3.2 | "
+        "tbb==2022.3.1 | "
         "tcmlib==1.4.1 | "
-        "umf==1.0.2 | "
-        "intel-pti==0.15.0"
+        "umf==1.0.3 | "
+        "intel-pti==0.16.0"
     ),
 }
 
@@ -196,14 +156,13 @@ def get_nccl_wheel_version(arch_version: str) -> str:
 
 
 def read_nccl_pin(arch_version: str) -> str:
-    nccl_pin_path = (
-        REPO_ROOT
-        / ".ci"
-        / "docker"
-        / "ci_commit_pins"
-        / f"nccl-cu{arch_version[:2]}.txt"
-    )
-    return nccl_pin_path.read_text().strip()
+    import sys
+
+    sys.path.append(str(REPO_ROOT / "tools"))
+    # Single source of truth for NCCL version
+    from optional_submodules import read_nccl_pin
+
+    return read_nccl_pin()
 
 
 def validate_nccl_dep_consistency(arch_version: str) -> None:
@@ -213,6 +172,67 @@ def validate_nccl_dep_consistency(arch_version: str) -> None:
         raise RuntimeError(
             f"{arch_version} NCCL release tag version {nccl_release_tag} "
             f"does not correspond to wheel version {wheel_ver}"
+        )
+
+
+def _parse_linux_cudnn_versions() -> dict[str, str]:
+    """Return {cuda_short_version: cudnn_version} from install_cuda.sh."""
+    text = (REPO_ROOT / ".ci" / "docker" / "common" / "install_cuda.sh").read_text()
+    results: dict[str, str] = {}
+    func_re = re.compile(r"^function install_(\d+)\s*\{")
+    cudnn_re = re.compile(r"^\s*CUDNN_VERSION=(\S+)")
+    current_func: str | None = None
+    for line in text.splitlines():
+        m = func_re.match(line)
+        if m:
+            digits = m.group(1)
+            current_func = digits[:-1] + "." + digits[-1]
+            continue
+        if current_func is not None:
+            m = cudnn_re.match(line)
+            if m:
+                results[current_func] = m.group(1)
+                current_func = None
+    return results
+
+
+def _parse_windows_cudnn_versions() -> dict[str, str]:
+    """Return {cuda_short_version: cudnn_version} from cuda_install.bat."""
+    text = (
+        REPO_ROOT / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    ).read_text()
+    results: dict[str, str] = {}
+    label_re = re.compile(r"^:cuda(\d+)\s*$")
+    cudnn_re = re.compile(
+        r"^set CUDNN_FOLDER=cudnn-windows-x86_64-([0-9.]+)_cuda\d+-archive"
+    )
+    current_label: str | None = None
+    for line in text.splitlines():
+        m = label_re.match(line)
+        if m:
+            digits = m.group(1)
+            current_label = digits[:-1] + "." + digits[-1]
+            continue
+        if current_label is not None:
+            m = cudnn_re.match(line)
+            if m:
+                results[current_label] = m.group(1)
+                current_label = None
+    return results
+
+
+def validate_cudnn_version_consistency(arch_version: str) -> None:
+    linux_versions = _parse_linux_cudnn_versions()
+    windows_versions = _parse_windows_cudnn_versions()
+    linux_ver = linux_versions.get(arch_version)
+    windows_ver = windows_versions.get(arch_version)
+    if linux_ver is None or windows_ver is None:
+        return
+    if linux_ver != windows_ver:
+        raise RuntimeError(
+            f"cuDNN version mismatch for CUDA {arch_version}: "
+            f"Linux has {linux_ver} (.ci/docker/common/install_cuda.sh) "
+            f"but Windows has {windows_ver} (.ci/pytorch/windows/internal/cuda_install.bat)"
         )
 
 
@@ -459,9 +479,57 @@ def generate_wheels_matrix(
     return ret
 
 
+def generate_libtorch_extraction_configs(
+    os: str,
+    wheel_configs: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Generate libtorch extraction configs from existing wheel build configs.
+
+    For each unique arch variant in wheel_configs, find the py3.10 config
+    (py3.11 for windows-arm64) and produce a config that the CI template
+    uses to add an extraction job that depends on that wheel's build job.
+    """
+    preferred_python = "3.11" if os == "windows-arm64" else "3.10"
+
+    # Group wheel configs by (gpu_arch_type, gpu_arch_version)
+    arch_to_config: dict[tuple[str, str], dict[str, str]] = {}
+    for config in wheel_configs:
+        key = (config["gpu_arch_type"], config.get("gpu_arch_version", ""))
+        if config.get("python_version") == preferred_python:
+            arch_to_config[key] = config
+
+    ret: list[dict[str, str]] = []
+    for (gpu_arch_type, gpu_arch_version), source_config in arch_to_config.items():
+        # No libtorch for XPU
+        if gpu_arch_type == "xpu":
+            continue
+
+        desired_cuda = source_config["desired_cuda"]
+        libtorch_variant = "shared-with-deps"
+        build_name = f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
+            ".", "_"
+        )
+
+        ret.append(
+            {
+                "source_wheel_build_name": source_config["build_name"],
+                "build_name": build_name,
+                "package_type": "libtorch",
+                "libtorch_variant": libtorch_variant,
+                "libtorch_config": RELEASE,
+                "desired_cuda": desired_cuda,
+                "gpu_arch_type": gpu_arch_type,
+                "gpu_arch_version": gpu_arch_version,
+            }
+        )
+
+    return ret
+
+
 arch_version = ""
 for arch_version in CUDA_ARCHES:
     validate_nccl_dep_consistency(arch_version)
+    validate_cudnn_version_consistency(arch_version)
 del arch_version
 
 

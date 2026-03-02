@@ -10,6 +10,7 @@
 #include <ATen/native/mkldnn/Linear.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/GroupedMMUtils.h>
+#include <ATen/BlasBackend.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -42,6 +43,9 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
 
   TORCH_CHECK(mat.size(1) == vec.size(0) && (mat.size(0) == self.numel() || self.numel() == 1),
     "size mismatch, got input (", self.size(0), "), mat (", mat.size(0), "x", mat.size(1), "), vec (", vec.size(0), ")");
+
+  TORCH_CHECK(self.scalar_type() == mat.scalar_type() && mat.scalar_type() == vec.scalar_type(),
+    "addmv input tensors must have the same dtype, but got ", self.scalar_type(), ", ", mat.scalar_type(), ", and ", vec.scalar_type());
   auto names = at::namedinference::propagate_names_for_addmv(mat, vec, self);
   set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
 }
@@ -123,7 +127,7 @@ Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
   //it's not a hard error, because we allow resizing result, but it becomes a hard error
   //in addmv, because addmv expects self to satisfy proper conditions
   //to avoid this, supply correctly sized self, its contents doesn't matter because beta is 0
-  if (result.dim() > 1 || (result.numel() != self.size(0) || result.numel() !=1)) {
+  if (result.dim() > 1 || (result.numel() != self.size(0) && result.numel() != 1)) {
     Tensor self_addmv = at::empty({self.size(0)}, vec.options());
     return at::addmv_out(result, self_addmv, self, vec, 0, 1);
   }

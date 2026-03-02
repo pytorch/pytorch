@@ -2,7 +2,7 @@
 
 import unittest
 
-from sympy import Symbol, sympify
+from sympy import I, Max, Min, Symbol, sympify
 
 import torch
 from torch._inductor.fx_utils import count_flops_fx, countable_fx
@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.utils._sympy.functions import Identity
 
 
 class TestUtils(TestCase):
@@ -79,6 +80,12 @@ class TestUtils(TestCase):
         self.assertEqual(result.name, "y")
         self.assertEqual(result.is_integer, None)
         self.assertEqual(result.is_nonnegative, None)
+
+    def testSympySubsIdentityNonComparable(self):
+        q0 = Symbol("q0", integer=True, nonnegative=True)
+        expr = Min(2, Max(0, Identity(q0)))
+        result = sympy_subs(expr, {q0: I})
+        self.assertTrue(result.has(I))
 
     def test_sympy_str(self):
         self.assertEqual(sympy_str(sympify("a+b+c")), "a + b + c")

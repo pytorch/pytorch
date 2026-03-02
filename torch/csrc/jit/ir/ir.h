@@ -68,18 +68,10 @@ using ::c10::TypeKind;
 
 using ::c10::fmap;
 
-namespace prim {
-using namespace ::c10::prim;
-}
-namespace attr {
-using namespace ::c10::attr;
-}
-namespace aten {
-using namespace ::c10::aten;
-}
-namespace cuda {
-using namespace ::c10::cuda;
-} // namespace cuda
+namespace prim = ::c10::prim;
+namespace attr = ::c10::attr;
+namespace aten = ::c10::aten;
+namespace cuda = ::c10::cuda;
 
 struct Function;
 struct GraphFunction;
@@ -328,7 +320,7 @@ struct TORCH_API Node {
   // subblocks
   std::vector<Block*> blocks_;
   Graph* graph_;
-  Block* owning_block_;
+  Block* owning_block_{nullptr};
   std::optional<SourceRange> source_range_;
   ScopePtr scope_;
   std::optional<InlinedCallStackPtr> callstack_;
@@ -336,7 +328,7 @@ struct TORCH_API Node {
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
   // change the schema. note: mutable because schema_ is effectively a cache
-  mutable const Operator* op_;
+  mutable const Operator* op_{nullptr};
   topo_position_t topo_position_ = 0;
   // a managing wrapper for Python to allow invalidation
   std::shared_ptr<Wrap<Node>> wrap_;

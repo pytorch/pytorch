@@ -17,7 +17,7 @@ import sys
 import types
 from collections import Counter, deque
 from collections.abc import Callable, Iterable
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
@@ -38,7 +38,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented
+from .exc import unimplemented
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -47,6 +47,7 @@ from .variables.functions import (
     LocalGeneratorObjectVariable,
 )
 from .variables.nn_module import NNModuleVariable
+from .variables.script_object import TorchScriptObjectVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -76,21 +77,21 @@ class PyCodegen:
     def __init__(
         self,
         tx: "InstructionTranslatorBase",
-        root: Optional[torch.nn.Module] = None,
-        graph_output_var: Optional[str] = None,
-        tempvars: Optional[dict[Union[VariableTracker, Source], Any]] = None,
-        overridden_sources: Optional[dict[Source, Source]] = None,
+        root: torch.nn.Module | None = None,
+        graph_output_var: str | None = None,
+        tempvars: dict[VariableTracker | Source, Any] | None = None,
+        overridden_sources: dict[Source, Source] | None = None,
     ) -> None:
         self.root = root
-        self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
-        self.uses: Counter[Union[VariableTracker, Source]] = collections.Counter()
+        self.top_of_stack: VariableTracker | Source | None = None
+        self.uses: Counter[VariableTracker | Source] = collections.Counter()
         self.graph_outputs: dict[int, GraphOutputEntry] = {}
         self._output: list[Instruction] = []
         # This determines which VariableTracker/Source should be stored as
         # locals, and maps the VariableTracker/Source to the local variable
         # name. Note that it could map to None initially, in which case we'll
         # overwrite it to map to real temporary names via `add_cache`.
-        self.tempvars: dict[Union[VariableTracker, Source], Any] = tempvars or {}
+        self.tempvars: dict[VariableTracker | Source, Any] = tempvars or {}
         self.tx = tx
         self.graph_output_var = graph_output_var
         self.code_options = self.tx.output.code_options
@@ -153,7 +154,7 @@ class PyCodegen:
             self.clear_tos()
 
     def __call__(
-        self, value: Union[VariableTracker, Source, None], allow_cache: bool = True
+        self, value: VariableTracker | Source | None, allow_cache: bool = True
     ) -> None:
         """
         Generate code such that top-of-stack (TOS) is set to value.
@@ -245,8 +246,13 @@ class PyCodegen:
         if value.is_realized() and isinstance(
             value, ContextlibContextManagerLocalGeneratorObjectVariable
         ):
-            raise IncorrectUsage(
-                "NYI: Returning a @contextmanager object from a torch.compile function"
+            unimplemented(
+                gb_type="reconstructing @contextmanager object",
+                context=f"object: {value}",
+                explanation="Returning a @contextmanager object from a compiled function is not supported.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
@@ -324,6 +330,7 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
+                TorchScriptObjectVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)
@@ -358,7 +365,7 @@ class PyCodegen:
             self.uses[value] += 1
             try:
                 self.call_reconstruct(value)
-            except NotImplementedError:
+            except NotImplementedError as e:
                 unimplemented(
                     gb_type="Reconstruction failure",
                     context=str(value),
@@ -370,6 +377,7 @@ class PyCodegen:
                         "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have "
                         "reconstruction rules may be fundamentally unreconstructable.",
                     ],
+                    from_exc=e,
                 )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
@@ -392,12 +400,12 @@ class PyCodegen:
         output.append(self.create_load_const(index))
         output.append(self.create_binary_subscr())
 
-    def add_cache(self, value: Union[VariableTracker, Source]) -> None:
+    def add_cache(self, value: VariableTracker | Source) -> None:
         var = self.new_var()
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
 
-    def foreach(self, items: Iterable[Union[VariableTracker, Source]]) -> None:
+    def foreach(self, items: Iterable[VariableTracker | Source]) -> None:
         for i in items:
             self(i)
 
@@ -524,6 +532,22 @@ class PyCodegen:
                 *create_call_function_ex(False, False),
                 create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
+
+    def pop_null(self) -> list[Instruction]:
+        # POP_TOP doesn't work for null, so we pop nulls by pushing in a
+        # nop function, calling it (which consumes the null), and popping the result.
+        assert sys.version_info >= (3, 11)
+        return [
+            self.create_load_const_unchecked(lambda: None),
+            # 3.13 swapped NULL and callable
+            *(
+                (create_instruction("SWAP", arg=2),)
+                if sys.version_info >= (3, 13)
+                else ()
+            ),
+            *create_call_function(0, False),
+            create_instruction("POP_TOP"),
+        ]
 
     def pop_top(self) -> None:
         self.append_output(create_instruction("POP_TOP"))

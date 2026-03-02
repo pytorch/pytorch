@@ -19,11 +19,11 @@ class DynamoExporterHfModelsTest(common_utils.TestCase):
             args,
             kwargs=kwargs,
             dynamo=True,
-            fallback=False,
             verbose=False,
             **options,
         )
-        assert onnx_program is not None
+        if onnx_program is None:
+            raise AssertionError("onnx_program is None")
         return onnx_program
 
     def test_onnx_export_huggingface_llm_models_with_kv_cache(self):

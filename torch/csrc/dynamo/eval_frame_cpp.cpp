@@ -5,11 +5,207 @@
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
+#include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
+#include <torch/csrc/dynamo/stackref_bridge.h>
 #include <torch/csrc/utils/python_compat.h>
+
+#include <algorithm>
+#include <optional>
+#include <unordered_set>
 
 extern "C" {
 extern PyObject* guard_complete_hook;
+}
+
+// Bytecode debugger callback - stored as raw PyObject* to avoid
+// shutdown issues with static py::object destructor running after Python
+// finalizes.
+namespace {
+PyObject* bytecode_debugger_callback_obj = nullptr;
+std::unordered_set<PyCodeObject*> breakpoint_code_objects;
+
+// RAII guard that calls __exit__ on a Python context manager when destroyed.
+struct DebugContextGuard {
+  py::object ctx;
+
+  explicit DebugContextGuard(py::object c) : ctx(std::move(c)) {
+    ctx.attr("__enter__")();
+  }
+
+  ~DebugContextGuard() {
+    // Save any pending Python exception (e.g. KeyboardInterrupt from the
+    // debugger's 'q' command) so calling __exit__ doesn't clobber it.
+    PyObject *exc_type, *exc_value, *exc_tb;
+    PyErr_Fetch(&exc_type, &exc_value, &exc_tb);
+    try {
+      ctx.attr("__exit__")(py::none(), py::none(), py::none());
+    } catch (py::error_already_set& e) {
+      e.restore();
+      PyErr_Clear();
+    }
+    if (exc_type != nullptr) {
+      PyErr_Restore(exc_type, exc_value, exc_tb);
+    }
+  }
+
+  DebugContextGuard(const DebugContextGuard&) = delete;
+  DebugContextGuard& operator=(const DebugContextGuard&) = delete;
+};
+
+} // namespace
+
+void set_bytecode_debugger_callback(py::object callback) {
+  if (callback.is_none()) {
+    Py_XSETREF(bytecode_debugger_callback_obj, nullptr);
+  } else {
+    Py_XSETREF(bytecode_debugger_callback_obj, callback.inc_ref().ptr());
+  }
+}
+
+py::object get_bytecode_debugger_callback() {
+  if (bytecode_debugger_callback_obj == nullptr) {
+    return py::none();
+  }
+  return py::reinterpret_borrow<py::object>(
+      py::handle(bytecode_debugger_callback_obj));
+}
+
+void register_breakpoint_code(py::object code) {
+  breakpoint_code_objects.insert((PyCodeObject*)code.ptr());
+}
+
+// NullStackValue singleton for representing NULL stack values
+NullStackValue& NullStackValue::get_singleton() {
+  static NullStackValue instance;
+  return instance;
+}
+
+py::object get_null_stack_value() {
+  return py::cast(
+      NullStackValue::get_singleton(), py::return_value_policy::reference);
+}
+
+// Caller must provide the expected stack depth because frame->stacktop is -1
+// during INSTRUCTION monitoring callbacks. In CPython 3.12+, the interpreter
+// keeps the stack pointer in a local variable and only saves it to the frame
+// via _PyFrame_SetStackPointer() before certain callbacks (e.g., line tracing).
+// However, INSTRUMENTED_INSTRUCTION calls _Py_call_instrumentation_instruction
+// without saving the stack pointer first, leaving stacktop as -1.
+// See: cpython/Include/internal/pycore_frame.h (_PyFrame_GetStackPointer)
+py::list _get_frame_value_stack_with_depth(
+    const py::handle& frame_obj,
+    int depth) {
+  if (!PyFrame_Check(frame_obj.ptr())) {
+    throw py::type_error("expected a frame object!");
+  }
+
+  py::list result;
+  if (depth <= 0) {
+    return result;
+  }
+
+#if IS_PYTHON_3_11_PLUS
+  PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
+  _PyInterpreterFrame* iframe = frame->f_frame;
+  if (iframe == nullptr) {
+    return result;
+  }
+
+  PyCodeObject* code = F_CODE(iframe);
+  if (code == nullptr) {
+    return result;
+  }
+
+  int nlocalsplus = code->co_nlocalsplus;
+  int stacksize = code->co_stacksize;
+
+  // Clamp depth to valid range
+  if (depth > stacksize) {
+    depth = stacksize;
+  }
+
+  // When stacktop/stackpointer is available, use it as the authoritative
+  // depth. The caller's tracked depth can lag behind (e.g. after a CALL
+  // instruction pops arguments but the effect hasn't been applied to the
+  // Python-side tracker yet).
+#if IS_PYTHON_3_14_PLUS
+  if (iframe->stackpointer != nullptr) {
+    int actual_depth =
+        (int)(iframe->stackpointer - (iframe->localsplus + nlocalsplus));
+    if (actual_depth >= 0) {
+      depth = std::min(actual_depth, depth);
+    }
+  }
+#else
+  bool have_stack_pointer = false;
+  if (iframe->stacktop > 0) {
+    int actual_depth = iframe->stacktop - nlocalsplus;
+    if (actual_depth >= 0) {
+      depth = std::min(actual_depth, depth);
+      have_stack_pointer = true;
+    }
+  }
+#endif
+
+#if IS_PYTHON_3_14_PLUS
+  if (iframe->stackpointer == nullptr) {
+    return result;
+  }
+  _PyStackRef* stack_base = iframe->localsplus + nlocalsplus;
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = THP_PyStackRef_AsPyObjectBorrow(&stack_base[i]);
+    if (obj == nullptr) {
+      result.append(get_null_stack_value());
+    } else {
+      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
+    }
+  }
+#else
+  int stack_start = nlocalsplus;
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = iframe->localsplus[stack_start + i];
+    if (obj == nullptr) {
+      result.append(get_null_stack_value());
+    } else if (!have_stack_pointer && Py_REFCNT(obj) <= 0) {
+      // Without a reliable stack pointer (current frame, stacktop == -1),
+      // the caller's tracked depth may overestimate. Stop at entries that
+      // look like freed objects to avoid dereferencing stale pointers.
+      break;
+    } else {
+      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
+    }
+  }
+#endif
+
+#else
+  // Python 3.10 and earlier - use f_valuestack
+  PyFrameObject* frame = (PyFrameObject*)frame_obj.ptr();
+  if (frame->f_valuestack == nullptr) {
+    return result;
+  }
+
+  PyCodeObject* code = frame->f_code;
+  if (code == nullptr) {
+    return result;
+  }
+
+  int stacksize = code->co_stacksize;
+  if (depth > stacksize) {
+    depth = stacksize;
+  }
+
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = frame->f_valuestack[i];
+    if (obj == nullptr) {
+      result.append(get_null_stack_value());
+    } else {
+      result.append(py::reinterpret_borrow<py::object>(py::handle(obj)));
+    }
+  }
+#endif // IS_PYTHON_3_11_PLUS
+
+  return result;
 }
 
 static constexpr const char* cache_lookup_profiler_str =
@@ -42,9 +238,9 @@ static py::object dynamo_call_callback(
 static py::handle _callback_from_action(
     py::handle callback,
     FrameAction action) {
-  if (action == SKIP) {
+  if (action == FrameAction::SKIP) {
     return Py_None;
-  } else if (action == RUN_ONLY) {
+  } else if (action == FrameAction::RUN_ONLY) {
     return Py_False;
   }
   return callback;
@@ -99,6 +295,18 @@ struct CRecursionLimitRAII {
 };
 
 #endif
+
+EvalFrameOverride eval_frame_override = EvalFrameOverride::NONE;
+
+EvalFrameOverride get_eval_frame_override() {
+  return eval_frame_override;
+}
+
+EvalFrameOverride set_eval_frame_override(EvalFrameOverride override) {
+  EvalFrameOverride prev = eval_frame_override;
+  eval_frame_override = override;
+  return prev;
+}
 
 // frame and callback are borrowed references.
 // Returns new reference.
@@ -171,13 +379,57 @@ PyObject* dynamo__custom_eval_frame(
     }
   };
 
+  static std::optional<py::object> convert_frame_get_fail_callback =
+      std::nullopt;
+
   // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for
   // clearing/popping the frame, meaning that unless we default evaluate the
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
+    // If we're attempting to run dynamo-generated code and eval frame override
+    // is set to SKIP, then we should set the callback to None to skip.
+    // If the override is set to ERROR, then we call
+    // torch._dynamo.convert_frame.get_fail_callback, which patches
+    // convert_frame.compile_frame with a function that errors unconditionally.
+    // This means Dynamo will error if it attempts to trace into the frame
+    // (Python-level skips pre-trace are permissible).
+    if (!recursive_callback.is_none() &&
+        !recursive_callback.is(py::bool_(false))) {
+      if (eval_frame_override == EvalFrameOverride::SKIP) {
+        recursive_callback = py::none();
+      } else if (eval_frame_override == EvalFrameOverride::ERROR) {
+        if (!convert_frame_get_fail_callback) {
+          convert_frame_get_fail_callback =
+              py::module_::import("torch._dynamo.convert_frame")
+                  .attr("get_fail_callback");
+          auto atexit = py::module_::import("atexit");
+          atexit.attr("register")(py::cpp_function(
+              []() { convert_frame_get_fail_callback = std::nullopt; }));
+        }
+        recursive_callback =
+            convert_frame_get_fail_callback.value()(recursive_callback);
+      }
+    }
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
+    // Auto-activate debugger for code objects with breakpoints.
+    // DebugContextGuard calls __enter__ on construction and __exit__ on
+    // destruction, so the debug session is scoped to this eval_custom call.
+    std::optional<DebugContextGuard> debug_guard;
+    if (breakpoint_code_objects.count(cached_code) &&
+        bytecode_debugger_callback_obj == nullptr) {
+      auto ctx = py::module_::import("torch._dynamo.bytecode_debugger")
+                     .attr("_DebugContext")();
+      ctx.attr("_stop_at_new_code") = false;
+      debug_guard.emplace(std::move(ctx));
+    }
+    // Call bytecode debugger callback if set, to allow instruction-level
+    // debugging of the Dynamo-generated code
+    py::object debugger_cb = get_bytecode_debugger_callback();
+    if (!debugger_cb.is_none()) {
+      debugger_cb(py::handle((PyObject*)cached_code));
+    }
     eval_result = dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
     if (!callback.is(recursive_callback)) {
@@ -216,7 +468,7 @@ PyObject* dynamo__custom_eval_frame(
       _callback_from_action(recursive_callback, strategy.recursive_action);
 
   // Skip this frame
-  if (strategy.cur_action == SKIP) {
+  if (strategy.cur_action == FrameAction::SKIP) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
     return eval_result;
@@ -249,8 +501,8 @@ PyObject* dynamo__custom_eval_frame(
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
-  bool run_only =
-      strategy.cur_action == RUN_ONLY || callback.is(py::bool_(false));
+  bool run_only = strategy.cur_action == FrameAction::RUN_ONLY ||
+      callback.is(py::bool_(false));
   if (run_only) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
   }
@@ -335,7 +587,7 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   // recursive frame action
-  if (strategy.recursive_action == DEFAULT) {
+  if (strategy.recursive_action == FrameAction::DEFAULT) {
     // old recursive action overrides new recursive action
     recursive_callback = _callback_from_action(
         recursive_callback, new_strategy.recursive_action);
@@ -343,10 +595,10 @@ PyObject* dynamo__custom_eval_frame(
 
   // possibly apply frame strategy to future frames with same code object
   if (apply_to_code) {
-    if (new_strategy.cur_action != DEFAULT) {
+    if (new_strategy.cur_action != FrameAction::DEFAULT) {
       DEBUG_TRACE("create action: %d\n", new_strategy.cur_action);
     }
-    if (new_strategy.recursive_action != DEFAULT) {
+    if (new_strategy.recursive_action != FrameAction::DEFAULT) {
       DEBUG_TRACE(
           "create recursive action: %d\n", new_strategy.recursive_action);
     }

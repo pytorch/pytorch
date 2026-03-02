@@ -11,7 +11,7 @@ from torch import Tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._ops._embedding_ops import MaskPartial
+from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
 from torch.distributed.tensor._ops._math_ops import (
     _skip_dim,
     Reduction,
@@ -112,12 +112,17 @@ def _propagate_tensor_meta(
     kwargs: dict[str, object],
 ) -> TensorMeta:
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    tensor_meta = DTensor._op_dispatcher.sharding_propagator.propagate_tensor_meta(
+    if op_info.schema is None:
+        raise AssertionError(
+            "op_info.schema should not be None after unwrap_to_op_info"
+        )
+    tensor_meta = DTensor._op_dispatcher.sharding_propagator._propagate_tensor_meta(
         op_info.schema
     )
     if isinstance(tensor_meta, TensorMeta):
         return tensor_meta
     elif isinstance(tensor_meta, tuple):
+        # pyrefly: ignore [bad-return]
         return tensor_meta[0]
     else:
         raise RuntimeError(f"Unexpected tensor meta type: {type(tensor_meta)}.")
@@ -127,7 +132,8 @@ def _propagate_tensor_meta(
 # with all_reduce manually inserted to perform distributed computation.
 def _log_softmax(x, dim, half_to_float, mesh, mesh_dim):
     if half_to_float:
-        assert x.dtype == torch.half
+        if x.dtype != torch.half:
+            raise AssertionError
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -228,7 +234,8 @@ def _nll_loss_forward(
 
     if weight is not None:
         w = _weight_view(weight)
-        assert local_weight is not None
+        if local_weight is None:
+            raise AssertionError
         local_w = _weight_view(local_weight)
         x = x * local_w
     safe_target = torch.where(target != ignore_index, target, 0)
@@ -236,7 +243,7 @@ def _nll_loss_forward(
 
     # The following code block is a distributed version of
     # result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
-    partial_placement = MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
+    partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
     safe_target_partial_ = partial_placement._partition_value(
         safe_target_, mesh, mesh_dim
     )
@@ -304,7 +311,8 @@ def _nll_loss_forward_handler(
             Shard(0) if i == mesh_dim else Replicate() for i in range(spec.mesh.ndim)
         ]
         local_weight = weight.redistribute(spec.mesh, sharded_placements)._local_tensor
-        assert local_weight.shape[0] == x._local_tensor.shape[channel_dim]
+        if local_weight.shape[0] != x._local_tensor.shape[channel_dim]:
+            raise AssertionError
 
     if reduction == Reduction.NONE.value:
         output_placements = target_placements
@@ -375,11 +383,12 @@ def _nll_loss_and_log_softmax_backward(
 
     # The following code block is a distributed version of
     # grad_input = torch.scatter(grad_input, channel_dim, safe_target, -1.0)
-    partial_placement = MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
+    partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=channel_dim)
     safe_target = safe_target.squeeze(channel_dim).flatten()
     masked_safe_target = partial_placement._partition_value(safe_target, mesh, mesh_dim)
     # only update grad_input to -1 if not masked
-    assert partial_placement.mask_buffer.data is not None
+    if partial_placement.mask_buffer.data is None:
+        raise AssertionError
     grad_update = partial_placement.mask_buffer.data.to(grad_input.dtype) - 1.0
     arange_1d = torch.arange(
         masked_safe_target.shape[0], device=masked_safe_target.device

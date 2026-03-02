@@ -8,6 +8,7 @@ import types
 import unittest
 import weakref
 from collections.abc import Iterator
+from typing import NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -21,6 +22,7 @@ from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, CompileId
 from torch._dynamo.package import CompilePackage
+from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
     ExceptionStack,
     InstructionTranslator,
@@ -152,7 +154,7 @@ class SubclassWithMeta(torch.Tensor):
         kwargs_a = pytree.tree_map_only(SubclassWithMeta, lambda x: x.a, kwargs)
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithMeta)
+            assert isinstance(args[0], SubclassWithMeta)  # noqa: S101
             return SubclassWithMeta(out_a, extra=args[0].extra)
         return out_a
 
@@ -162,13 +164,13 @@ class SubclassWithMeta(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert isinstance(meta, dict)
+        assert isinstance(meta, dict)  # noqa: S101
         a = inner_tensors["a"]
         # pull out extra from meta
         extra = meta["extra"]
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            assert outer_size is not None  # noqa: S101
+            assert outer_stride is not None  # noqa: S101
         return SubclassWithMeta(a, extra, outer_size, outer_stride)
 
 
@@ -206,7 +208,7 @@ class SubclassWithCustomMetadataGuard(torch.Tensor):
         )
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithCustomMetadataGuard)
+            assert isinstance(args[0], SubclassWithCustomMetadataGuard)  # noqa: S101
             return SubclassWithCustomMetadataGuard(out_a, extra=args[0].extra)
         return out_a
 
@@ -223,13 +225,13 @@ class SubclassWithCustomMetadataGuard(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert isinstance(meta, dict)
+        assert isinstance(meta, dict)  # noqa: S101
         a = inner_tensors["a"]
         # pull out extra from meta
         extra = meta["extra"]
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            assert outer_size is not None  # noqa: S101
+            assert outer_stride is not None  # noqa: S101
         return SubclassWithCustomMetadataGuard(a, extra, outer_size, outer_stride)
 
 
@@ -267,7 +269,7 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
         )
         out_a = func(*args_a, **kwargs_a)
         if isinstance(out_a, torch.Tensor):
-            assert isinstance(args[0], SubclassWithSubclassInnerTensor)
+            assert isinstance(args[0], SubclassWithSubclassInnerTensor)  # noqa: S101
             return SubclassWithSubclassInnerTensor(out_a, extra=args[0].inner_sub.extra)
         return out_a
 
@@ -276,17 +278,17 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
+        assert meta is None  # noqa: S101
         a = inner_tensors["a"]
         extra = inner_tensors["inner_sub"].extra
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            assert outer_size is not None  # noqa: S101
+            assert outer_stride is not None  # noqa: S101
         return SubclassWithSubclassInnerTensor(a, extra, outer_size, outer_stride)
 
 
 # defines a custom __eq__() / __hash__() to be registered as a pytree constant type
-class CustomConstantType:
+class CustomConstantType(torch._opaque_base.OpaqueBase):
     def __init__(self, a, b):
         self.a = a
         self.b = b
@@ -299,8 +301,16 @@ class CustomConstantType:
         # custom hash ignores b
         return hash(self.a)
 
+    def __repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})"
 
-pytree.register_constant(CustomConstantType)
+    def __fx_repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})", {
+            "CustomConstantType": CustomConstantType
+        }
+
+
+torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
@@ -354,7 +364,8 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         finally:
             sys.settrace(None)
 
-        assert self._frame_state is not None
+        if self._frame_state is None:
+            raise AssertionError("Expected _frame_state to be set after tracing")
 
         # Set f_locals from regenerated kwargs to handle exhausted input iterators
         # NB: This is super janky and might cause unforeseen problems
@@ -548,6 +559,33 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": GlobalModule()}, True)
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
 
+        # Check verbose_code_parts from leaf guards (they include hints)
+        def check_leaf_guards(mgr):
+            for guard in mgr.get_leaf_guards():
+                verbose_parts = guard.verbose_code_parts()
+                verbose_str = " ".join(verbose_parts)
+                if "___check_type_id" in verbose_str and "L['m']" in verbose_str:
+                    self.assertIn(
+                        "HINT: type",
+                        verbose_str,
+                        (
+                            "TYPE_MATCH guard should include 'HINT: type' "
+                            f"annotation.\nGuard: {verbose_str}"
+                        ),
+                    )
+                    self.assertIn(
+                        "GlobalModule",
+                        verbose_str,
+                        (
+                            "TYPE_MATCH guard should include type name "
+                            f"'GlobalModule'.\nGuard: {verbose_str}"
+                        ),
+                    )
+            for child_mgr in mgr.get_child_managers():
+                check_leaf_guards(child_mgr)
+
+        check_leaf_guards(ref.root)
+
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
             @staticmethod
@@ -586,11 +624,11 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                assert meta is None
+                assert meta is None  # noqa: S101
                 a = inner_tensors["a"]
                 if type(a) is torch.Tensor:
-                    assert outer_size is not None
-                    assert outer_stride is not None
+                    assert outer_size is not None  # noqa: S101
+                    assert outer_stride is not None  # noqa: S101
                 return LocalSubclass(a, outer_size, outer_stride)
 
         def fn(x):
@@ -1444,7 +1482,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 return x + 1
 
         def foo(x: torch.Tensor, y: list[MyClass]):
-            assert len(y) == 1
+            assert len(y) == 1  # noqa: S101
             return x + 1
 
         ref, loaded = self._test_serialization(
@@ -1456,7 +1494,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     def test_bound_methods_empty(self):
         def foo(x, y):
-            assert callable(y[0])
+            assert callable(y[0])  # noqa: S101
             return x + 1
 
         ref, loaded = self._test_serialization(
@@ -1695,7 +1733,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         m.forward = forward
 
         def foo(f, x):
-            assert callable(f)
+            assert callable(f)  # noqa: S101
             return f(x)
 
         x = torch.randn(3, 2)
@@ -1749,6 +1787,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), foo(x))
 
+    def test_nested_named_tuple(self):
+        class NestedTuple(NamedTuple):
+            a: int
+            b: int
+            c: torch.Tensor
+
+        def fn(x: NestedTuple):
+            return x.a + x.b + x.c
+
+        x = NestedTuple(1, 2, torch.randn(3, 2))
+
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+
     def test_sdp_backend_serialization(self):
         def fn(x, backend):
             # Use the backend enum in a guard-producing way
@@ -1790,6 +1841,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
             {"x": x, "backend": torch.nn.attention.SDPBackend.CUDNN_ATTENTION},
             False,
         )
+
+    def test_source_serialization(self):
+        # Test that "equal" sources with different hashes serialize to the same result
+        src1 = LocalSource("x")
+        src2 = LocalSource("x")
+
+        # Force different cached hashes to test that serialization excludes _hash
+        object.__setattr__(src1, "_hash", 12345)
+        object.__setattr__(src2, "_hash", 67890)
+
+        self.assertEqual(pickle.dumps(src1), pickle.dumps(src2))
 
 
 class SimpleModule(torch.nn.Module):

@@ -78,8 +78,8 @@ void* get_symbol(const char* name, int version) {
 } // namespace
 
 void* DriverAPI::get_nvml_handle() {
-  static void* nvml_hanle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
-  return nvml_hanle;
+  static void* nvml_handle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
+  return nvml_handle;
 }
 
 C10_EXPORT DriverAPI* DriverAPI::get() {

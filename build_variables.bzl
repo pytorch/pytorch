@@ -504,6 +504,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
     "torch/csrc/distributed/c10d/GroupRegistry.cpp",
+    "torch/csrc/distributed/c10d/NanCheck.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
@@ -641,9 +642,14 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/passes/pass_manager/PassManager.cpp",
     "torch/nativert/kernels/KernelHandlerRegistry.cpp",
     "torch/nativert/kernels/TritonKernel.cpp",
+    "torch/nativert/executor/triton/TritonKernelManager.cpp",
     "torch/nativert/executor/triton/CpuTritonKernelManager.cpp",
     "torch/nativert/executor/AOTInductorDelegateExecutor.cpp",
     "torch/nativert/kernels/ETCallDelegateKernel.cpp",
+]
+
+libtorch_nativert_mtia_sources = [
+    "torch/nativert/executor/triton/fb/MtiaTritonKernelManager.cpp",
 ]
 
 libtorch_nativert_cuda_sources = [
@@ -768,6 +774,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CudaDMAConnectivity.cpp",
     "torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu",
+    "torch/csrc/distributed/c10d/symm_mem/nccl_extension.cu",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cpp",
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp",
@@ -778,7 +785,7 @@ libtorch_nvshmem_sources = [
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu",
-    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu",
+    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -786,6 +793,8 @@ libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + lib
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
     "torch/csrc/cuda/nccl.cpp",
 ] + libtorch_nativert_cuda_sources
+
+libtorch_mtia_sources = libtorch_nativert_mtia_sources
 
 torch_cpp_srcs = [
     "torch/csrc/api/src/cuda.cpp",  # this just forwards stuff, no real CUDA
@@ -876,6 +885,9 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
     "torch/csrc/xpu/XPUPluggableAllocator.cpp",
+    "torch/csrc/xpu/memory_snapshot.cpp",
+    "torch/csrc/xpu/MemPool.cpp",
+    "torch/csrc/xpu/Graph.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
@@ -934,6 +946,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/dynamo/stackref_bridge.c",
     "torch/csrc/functorch/init.cpp",
+    "torch/csrc/fx/graph.cpp",
     "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
@@ -945,7 +958,8 @@ libtorch_python_core_sources = [
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_meta_info.cpp",
     "torch/csrc/inductor/resize_storage_bytes.cpp",
-    "torch/csrc/inductor/static_cuda_launcher.cpp",
+    "torch/csrc/inductor/static_launcher/cuda.cpp",
+    "torch/csrc/inductor/static_launcher/xpu.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
@@ -1460,6 +1474,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/RowwisePrune.cpp",
     "aten/src/ATen/native/SegmentReduce.cpp",
     "aten/src/ATen/native/Scalar.cpp",
+    "aten/src/ATen/native/ScaledBlasUtils.cpp",
     "aten/src/ATen/native/SobolEngineOps.cpp",
     "aten/src/ATen/native/SobolEngineOpsUtils.cpp",
     "aten/src/ATen/native/SoftMax.cpp",

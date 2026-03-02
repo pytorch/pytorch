@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmp5ceezbmm/q4/cq4essz7j5sdbrejxdg4deilacdk3e3hrmbqko357ewdgix5mfzv.py", line 17, in pallas_fused__softmax_backward_data_d51bf2f3_kernel
-    tmp5 = jnp.fma(tmp4, tmp3, tmp2)
-           ^^^^^^^
-AttributeError: module 'jax.numpy' has no attribute 'fma'

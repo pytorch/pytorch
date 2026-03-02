@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <utility>
 
 namespace c10d {
 namespace symmetric_memory {
@@ -45,8 +46,8 @@ class IpcChannel {
 // SymmetricMemory implementation files.
 class StoreExchange {
  public:
-  StoreExchange(const std::string& store_prefix)
-      : store_prefix_(store_prefix) {}
+  StoreExchange(std::string store_prefix)
+      : store_prefix_(std::move(store_prefix)) {}
 
   // Put template function in header file so that compiler can easily access it.
   template <typename T>

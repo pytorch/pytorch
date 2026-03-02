@@ -17,5 +17,4 @@ def is_stdlib_module(module: str) -> bool:
 
 
 def _get_stdlib_modules():
-    assert sys.version_info >= (3, 10)
     return sys.stdlib_module_names

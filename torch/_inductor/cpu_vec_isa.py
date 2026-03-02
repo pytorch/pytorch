@@ -8,7 +8,7 @@ import subprocess
 import sys
 import warnings
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch._inductor import config
@@ -279,7 +279,6 @@ extern "C" __m512i __avx512_vnni_chk_kernel_2(__m512i src, __m512i a, __m512i b)
 """
 
     @functools.cache  # noqa: B019
-    # pyrefly: ignore [bad-override]
     def __bool__(self) -> bool:
         if super().__bool__():
             if config.is_fbcode():
@@ -467,7 +466,7 @@ supported_vec_isa_list = [
 
 
 def get_isa_from_cpu_capability(
-    capability: Union[str, None],
+    capability: str | None,
     vec_isa_list: list[VecISA],
     invalid_vec_isa: InvalidVecISA,
 ):
@@ -482,7 +481,7 @@ def get_isa_from_cpu_capability(
         "avx512": "avx512",
     }
     if capability in capability_to_isa_str:
-        # pyrefly: ignore [index-error]
+        # pyrefly: ignore [bad-index, index-error]
         isa_str = capability_to_isa_str[capability]
         if isa_str == "INVALID_VEC_ISA":
             return invalid_vec_isa

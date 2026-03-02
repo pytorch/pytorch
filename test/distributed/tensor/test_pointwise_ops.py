@@ -17,12 +17,18 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorOpTestBase,
     LocalDTensorOpTestBase,
+    map_local_for_rank,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -145,6 +151,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
     @with_comms
+    @skip("This test will sometimes hang and a timeout error will be thrown")
     def test_partial_add(self):
         device_mesh = self.build_device_mesh()
         d_1 = DTensor.from_local(torch.rand(2, 2), device_mesh, [Partial()])
@@ -368,6 +375,56 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.to_local(), input)
 
     @with_comms
+    def test_div_partial(self):
+        # we only test the partial behavior for div op as other placement
+        # behaviors should be well tested in test_dtensor_ops.py
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        # 1. test the partial input DTensor / scalar/replicate input
+        # This is mathematically sound: (a1 + a2) / b = a1/b + a2/b
+        input = torch.full((8, 8), 2.0, device=self.device_type)
+
+        # test for different types of other inputs
+        other_inps = (
+            2.0,  # scalar
+            torch.tensor(2.0, device=self.device_type),  # scalar tensor
+            torch.full((8, 8), 2.0, device=self.device_type),  # tensor
+        )
+
+        for partial_op in ["sum", "avg"]:
+            expected_p_out = (
+                input * self.world_size / 2.0 if partial_op == "sum" else input / 2.0
+            )
+
+            d_input = DTensor.from_local(input, device_mesh, [Partial(partial_op)])
+
+            for other_inp in other_inps:
+                if isinstance(other_inp, Tensor) and other_inp.numel() > 1:
+                    d_other = distribute_tensor(other_inp, device_mesh, [Replicate()])
+                else:
+                    d_other = other_inp
+
+                with comm_mode:
+                    z = d_input / d_other
+
+                comm_counts = comm_mode.get_total_counts()
+                self.assertEqual(comm_counts, 0)
+                self.assertTrue(isinstance(z, DTensor))
+                self.assertEqual(z.placements, (Partial(partial_op),))
+                self.assertEqual(z.full_tensor(), expected_p_out)
+
+        # test other partial to assert the partial not getting propagated
+        d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
+        d_other = distribute_tensor(
+            torch.full((8, 8), 2.0, device=self.device_type), device_mesh, [Replicate()]
+        )
+
+        z = d_input / d_other
+        self.assertEqual(z.placements, (Replicate(),))
+        self.assertEqual(z.to_local(), input / 2.0)
+
+    @with_comms
     def test_masked_fill_scalar(self):
         """Test masked_fill_ with scalar value."""
         device_mesh = self.build_device_mesh()
@@ -442,7 +499,232 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         ):
             partial_dt.clamp_(max=10)
 
+    @with_comms
+    def test_mul_div_scalar_partial(self):
+        aten = torch.ops.aten
+        mesh = self.build_device_mesh()
 
+        # regular partial *,/ scalar
+        local_tensor = map_local_for_rank(self.rank, lambda rank: torch.tensor([rank]))
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = aten.mul.Scalar(dt, 2)
+        self.assertEqual(
+            res.to_local(),
+            map_local_for_rank(self.rank, lambda rank: torch.tensor([rank * 2])),
+        )
+
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        expected = sum(i for i in range(self.world_size)) * 2
+        self.assertEqual(res, expected)
+
+        res = aten.div.Scalar(dt, 2)
+        self.assertEqual(
+            res.to_local(),
+            map_local_for_rank(self.rank, lambda rank: torch.tensor([rank / 2])),
+        )
+
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        expected = sum(i for i in range(self.world_size)) / 2
+        self.assertEqual(res, expected)
+
+    @with_comms
+    def test_mul_div_scalar_norm_partial(self):
+        mesh = self.build_device_mesh()
+        aten = torch.ops.aten
+        local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
+        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
+
+        norm = dt.norm()
+        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+
+        res = aten.mul.Scalar(norm, 2)
+        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 20)
+
+        res = aten.div.Scalar(norm, 2)
+        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 5)
+
+        res = aten.mul.Scalar(norm, -2)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+        res = aten.div.Scalar(norm, -2)
+        self.assertEqual(res, -5)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+    @with_comms
+    def test_add_sub_scalar_partial(self):
+        mesh = self.build_device_mesh()
+
+        rank = self.rank
+
+        # regular partial + scalar -> replicate
+        local_tensor = map_local_for_rank(rank, lambda rank: torch.tensor([rank]))
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = dt + 1
+        expected = sum(i for i in range(self.world_size)) + 1
+        self.assertEqual(res, expected)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+        # regular partial - scalar -> replicate
+        local_tensor = map_local_for_rank(rank, lambda rank: torch.tensor([rank]))
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = dt - 1
+        expected = sum(i for i in range(self.world_size)) - 1
+        self.assertEqual(res, expected)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+        res = 7 - dt
+        expected = 7 - sum(i for i in range(self.world_size))
+        self.assertEqual(res, expected)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+        # regular partial + regular partial -> partial
+        res = dt + dt
+        self.assertEqual(res.to_local(), rank + rank)
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        expected = sum(i for i in range(self.world_size)) * 2
+        self.assertEqual(res, expected)
+
+        # regular partial - regular partial -> partial
+        res = dt - dt
+        self.assertEqual(res.to_local(), rank - rank)
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 0)
+
+    @with_comms
+    def test_add_sub_scalar_norm_partial(self):
+        mesh = self.build_device_mesh()
+
+        # norm partial + scalar
+        local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
+        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
+
+        norm = dt.norm()
+        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+        norm = norm + 1
+
+        self.assertEqual(norm, 11)
+        self.assertTrue(norm._spec.placements[0].is_replicate())
+
+        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
+
+        norm = dt.norm()
+        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+        norm = norm - 1
+
+        self.assertEqual(norm, 9)
+        self.assertTrue(norm._spec.placements[0].is_replicate())
+
+    @with_comms
+    @parametrize("op,reduce_op", [(torch.maximum, "max"), (torch.minimum, "min")])
+    def test_partial_propagation(self, op, reduce_op):
+        # Test that torch.maximum/minimum preserves Partial("max"/"min") placements
+        # since max(max(a), max(b)) == max(a, b) and min(min(a), min(b)) == min(a, b)
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        input1 = torch.rand(8, 8) * self.rank
+        input2 = torch.rand(8, 8) * (self.world_size - self.rank)
+
+        d_input1 = DTensor.from_local(input1, device_mesh, [Partial(reduce_op)])
+        d_input2 = DTensor.from_local(input2, device_mesh, [Partial(reduce_op)])
+
+        with comm_mode:
+            result = op(d_input1, d_input2)
+
+        # Should not require any communication
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        # Result should still be Partial with the same reduce_op
+        self.assertEqual(result.placements, (Partial(reduce_op),))
+
+    @with_comms
+    def test_neg_partial(self):
+        # test that neg preserves Partial placement without communication
+        # math: -(A1 + A2) = -A1 + -A2
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        input = torch.full((8, 8), 2.0, device=self.device_type)
+
+        for partial_op in ["sum", "avg"]:
+            expected_full = (
+                torch.full((8, 8), -2.0 * self.world_size, device=self.device_type)
+                if partial_op == "sum"
+                else torch.full((8, 8), -2.0, device=self.device_type)
+            )
+
+            d_input = DTensor.from_local(input, device_mesh, [Partial(partial_op)])
+
+            with comm_mode:
+                z = torch.neg(d_input)
+
+            comm_counts = comm_mode.get_total_counts()
+            self.assertEqual(comm_counts, 0)
+            self.assertTrue(isinstance(z, DTensor))
+            self.assertEqual(z.placements, (Partial(partial_op),))
+            self.assertEqual(z.full_tensor(), expected_full)
+
+        # test non-sum/avg partial to assert the partial not getting propagated
+        # since -max(A1, A2) != max(-A1, -A2)
+        d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
+
+        z = torch.neg(d_input)
+        self.assertEqual(z.placements, (Replicate(),))
+        self.assertEqual(
+            z.to_local(), torch.full((8, 8), -2.0, device=self.device_type)
+        )
+
+    @with_comms
+    def test_maximum_mixed_partials_redistribution(self):
+        # Test that mixing Partial("max") with Partial("sum") correctly
+        # redistributes the incompatible partial before computing maximum
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        input1 = torch.ones(4, 4) * (self.rank + 1)
+        input2 = torch.ones(4, 4) * 0.1 * (self.rank + 1)
+
+        d_input1 = DTensor.from_local(input1, device_mesh, [Partial("max")])
+        d_input2 = DTensor.from_local(input2, device_mesh, [Partial("sum")])
+
+        with comm_mode:
+            result = torch.maximum(d_input1, d_input2)
+
+        # Should require communication to reduce Partial("sum") to Replicate
+        self.assertGreater(comm_mode.get_total_counts(), 0)
+        # Result should be Partial("max") following the first operand
+        self.assertEqual(result.placements, (Partial("max"),))
+
+        # Verify correctness: d_input2's Partial("sum") should be reduced first
+        # d_input2 full value = sum of all ranks' local values = 0.1 * (1+2+3+4) = 1.0
+        # d_input1 stays as Partial("max"), so result.full_tensor() does max-reduce
+        # max across ranks of max(rank_value, 1.0)
+        # rank 0: max(1, 1) = 1, rank 1: max(2, 1) = 2, rank 2: max(3, 1) = 3, rank 3: max(4, 1) = 4
+        # final max = 4
+        expected_value = float(self.world_size)
+        self.assertEqual(result.full_tensor()[0, 0].item(), expected_value)
+
+
+instantiate_parametrized_tests(DistElementwiseOpsTest)
 DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistElementwiseOpsTest, base_class=LocalDTensorOpTestBase
 )

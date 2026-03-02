@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import sympy
 
@@ -22,7 +22,6 @@ from .ir import (
     MultiOutputLayout,
     MutationOutput,
     NoneLayout,
-    ShapeAsConstantBuffer,
     TensorBox,
 )
 from .utils import convert_shape_to_inductor, pad_listlike, SUPPORTED_MKLDNN_DEVICES
@@ -118,8 +117,8 @@ def _prepare_convolution_fusion_create(
         bias.realize()
     with V.graph.fake_mode:
         # TODO <Leslie> cleaned up the fake_tensor trace as Linear implementation
-        x_fake = ir_node_to_tensor(x, guard_shape=True)
-        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+        x_fake = ir_node_to_tensor(x)
+        weight_fake = ir_node_to_tensor(weight)
         dims = len(x_fake.size()) - 2
         assert 0 < len(padding) <= dims
         assert 0 < len(dilation) <= dims
@@ -619,8 +618,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     def create(
         cls,
         qx: "TensorBox",
-        x_scale: Union["ShapeAsConstantBuffer", "TensorBox"],
-        x_zero_point: Union["ShapeAsConstantBuffer", "TensorBox"],
+        x_scale: "TensorBox",
+        x_zero_point: "TensorBox",
         qw: "TensorBox",  # qw
         w_scale: "TensorBox",
         w_zero_point,

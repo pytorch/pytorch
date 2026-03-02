@@ -218,17 +218,18 @@ def _sparse_layer_test_helper(
         qmodule_to_check = fqn_to_module(qmodel, fqn_to_check)
 
         # check that the modules were converted as expected
-        assert isinstance(sqmodule_to_check, sqmodule_expected_converted_class), (
-            "Convert failed"
-        )
-        assert isinstance(qmodule_to_check, qmodule_expected_converted_class), (
-            "Mapping failed"
-        )
+        if not isinstance(sqmodule_to_check, sqmodule_expected_converted_class):
+            raise AssertionError("Convert failed")
+        if not isinstance(qmodule_to_check, qmodule_expected_converted_class):
+            raise AssertionError("Mapping failed")
 
         row_block_size, col_block_size = sqmodel.linear._packed_params._weight_bias()[
             2:
         ]
-        assert row_block_size == 1 and col_block_size == 4
+        if row_block_size != 1 or col_block_size != 4:
+            raise AssertionError(
+                f"Expected row_block_size == 1 and col_block_size == 4, got {row_block_size} and {col_block_size}"
+            )
 
         # only run during serialization/deserialization tests
         # makes sure script/save/load doesn't malform the sqmodel

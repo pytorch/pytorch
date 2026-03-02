@@ -4,7 +4,7 @@ from __future__ import annotations
 import itertools
 import logging
 import weakref
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -145,7 +145,7 @@ class ErasedTensor(torch.Tensor):
     def __new__(cls, elem, name, owning_mod):
         return super().__new__(cls, elem.to(device="meta"))
 
-    def __init__(self, elem, name: Optional[str], mod) -> None:
+    def __init__(self, elem, name: str | None, mod) -> None:
         self.erased_name = name
         self.owning_mod_ref = weakref.ref(mod)
 
@@ -220,7 +220,9 @@ def enforce_output_layout(gm: torch.fx.GraphModule):
         for n in out_list:
             if not isinstance(
                 n.meta["val"], torch.Tensor
-            ) or not torch._prims_common.is_non_overlapping_and_dense(n.meta["val"]):
+            ) or not torch._prims_common.is_non_overlapping_and_dense_or_false(
+                n.meta["val"]
+            ):
                 continue
 
             # add a node to enforce eager layout

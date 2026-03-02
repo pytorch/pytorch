@@ -313,12 +313,10 @@ class Linear(WeightedQuantizedModule):
                 [float_mod.__name__ for float_mod in cls._FLOAT_MODULE]
             )
             error_msg = f"nnq.{cls.__name__}.from_float only works for {supported_modules}, but got: {type(mod)}"
-            assert type_before_parametrizations(mod) in cls._FLOAT_MODULE, (
-                error_msg.format()
-            )
-            assert hasattr(mod, "qconfig"), (
-                "Input float module must have qconfig defined"
-            )
+            if type_before_parametrizations(mod) not in cls._FLOAT_MODULE:
+                raise AssertionError(error_msg)
+            if not hasattr(mod, "qconfig"):
+                raise AssertionError("Input float module must have qconfig defined")
             activation_post_process = mod.activation_post_process
             if type_before_parametrizations(mod) == nni.LinearReLU:
                 mod = mod[0]
@@ -334,7 +332,10 @@ class Linear(WeightedQuantizedModule):
             weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()
-        assert dtype == torch.qint8, "Weight observer must have dtype torch.qint8"
+        if dtype != torch.qint8:
+            raise AssertionError(
+                f"Weight observer must have dtype torch.qint8, got {dtype}"
+            )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qlinear = cls(mod.in_features, mod.out_features, dtype=dtype)
         qlinear.set_weight_bias(qweight, mod.bias)

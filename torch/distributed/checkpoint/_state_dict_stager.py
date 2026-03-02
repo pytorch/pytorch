@@ -146,12 +146,13 @@ class StateDictStager:
         # Check if we've already cached this storage
         if storage in self._cached_storage_mapping:
             cached_storage = self._cached_storage_mapping[storage]
-            assert cached_storage.size() == storage.size(), (
-                "For async checkpointing,  We cache storages in DRAM and reuse them."
-                "Cached storage size does not match original storage size."
-                "This should never happen as we track the original storage weakref "
-                "and clean up the cache storage. Please report this to PyTorch Distributed Checkpointing."
-            )
+            if cached_storage.size() != storage.size():
+                raise AssertionError(
+                    "For async checkpointing,  We cache storages in DRAM and reuse them."
+                    "Cached storage size does not match original storage size."
+                    "This should never happen as we track the original storage weakref "
+                    "and clean up the cache storage. Please report this to PyTorch Distributed Checkpointing."
+                )
             # Reuse cached storage but update with new data
             cached_storage.copy_(storage, non_blocking=non_blocking)
             return cached_storage
@@ -265,8 +266,13 @@ class StateDictStager:
         This method clears the internal storage cache, allowing garbage collection
         of cached CPU storages. Any pinned memory associated with cached storages
         will be automatically unpinned through weak reference finalizers.
+
+        It also clears the _deepcopy_dispatch dict to break the reference cycle
+        created by closures that capture self. Without this, it may
+        cause memory leaks.
         """
         self._cached_storage_mapping.clear()
+        self._deepcopy_dispatch.clear()
 
     @torch.no_grad()
     def deepcopy_with_tensor_offload(self, x, memo=None, _nil=[], non_blocking=False):  # noqa: B006

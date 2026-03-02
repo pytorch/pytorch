@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 from unittest.mock import patch
 
 import sympy
@@ -19,7 +19,6 @@ from .ir import (
     Layout,
     MultiTemplateBuffer,
     OperationBuffer,
-    ShapeAsConstantBuffer,
     StorageBox,
     TensorBox,
 )
@@ -100,7 +99,7 @@ def graph_context() -> Generator[None, None, None]:
 
 def maybe_autotune_remote(
     name: str, choices: list[ChoiceCaller], inputs: list[Buffer], layout: Layout
-) -> TensorBox | ShapeAsConstantBuffer | None:
+) -> TensorBox | None:
     """
     Used by an op (like `mm`) to determine if the op should be autotuned
     locally (returns None) or remotely (returns a placeholder Buffer).
@@ -254,7 +253,7 @@ class _SerializedChoice:
         return ktc.choice
 
     @staticmethod
-    def _compute_kwargs(description: str) -> dict[str, Union[int, str, bool]]:
+    def _compute_kwargs(description: str) -> dict[str, int | str | bool]:
         """
         Given a template description turn it into input kwargs.
         """
@@ -263,7 +262,7 @@ class _SerializedChoice:
 
         # TODO: It seems like it would be better if the template could provide
         # this directly instead of having to parse a string.
-        kwargs: dict[str, Union[int, str, bool]] = {}
+        kwargs: dict[str, int | str | bool] = {}
         for cfg in description.split(","):
             key, val = cfg.split("=", 1)
             key, val = key.strip(), val.strip()

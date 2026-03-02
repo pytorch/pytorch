@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import os
 import sys
+import tempfile
 import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch
@@ -15,7 +17,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     runOnRocm,
-    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -273,13 +274,13 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(ref, res)
 
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2331")
-    @skipIfRocm
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
         from torch._inductor.template_heuristics.triton import (
             CUDAConfigHeuristic,
             GemmConfig,
+            ROCmConfigHeuristic,
         )
 
         expected_count = 1 if do_pruning else 2
@@ -292,7 +293,10 @@ class TestTritonHeuristics(TestCase):
         with config.patch(
             {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
         ):
-            config_heuristic = CUDAConfigHeuristic()
+            if torch.version.hip:
+                config_heuristic = ROCmConfigHeuristic()
+            else:
+                config_heuristic = CUDAConfigHeuristic()
             config_heuristic.should_scale_configs = False
             config_heuristic.mm_configs = mm_configs
             configs = list(
@@ -380,6 +384,250 @@ class TestArgumentCloneAndRestore(TestCase):
         self.assertTrue(arg.storage_offset() > 0)
 
         self._do_test(arg)
+
+
+class TestDumpLaunchTensors(TestCase):
+    """Test the _dump_launch_tensors functionality"""
+
+    def setUp(self):
+        super().setUp()
+        # Create a temporary directory for test dumps
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        # Clean up temporary directory
+        import shutil
+
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
+        super().tearDown()
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_dump_launch_tensors(self):
+        """
+        Test that dump_launch_tensors functions correctly:
+        1. Creates the dump directory when torch.compile() runs
+        2. Saves tensor files that can be loaded
+        3. Loads tensors to match the original values
+        4. Properly rotates when max_kernel_dump_occurrences is reached
+        """
+        from torch._inductor.config import triton as inductor_triton_config
+        from torch._inductor.runtime.runtime_utils import cache_dir
+
+        # Clear any existing state
+        inductor_triton_config.debug_dump_kernel_inputs.clear()
+
+        # Define a simple function that will generate Triton kernels
+        def simple_model(x):
+            y = x * 2.0
+            z = y + 1.0
+            return z.sum()
+
+        old_dump_env = os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_TENSORS")
+        os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = "1"
+
+        try:
+            compiled_fn = torch.compile(simple_model)
+
+            # Run the compiled function multiple times to test rotation
+            max_runs = inductor_triton_config.max_kernel_dump_occurrences
+
+            for i in range(max_runs + 2):
+                test_input = torch.randn(100, 100, device=GPU_TYPE) * (i + 1)
+                _ = compiled_fn(test_input)
+
+            # After multiple runs, verify rotation and tensor correctness
+            kernel_bases = {}
+            verified_tensor_load = False
+
+            for root, dirs, files in os.walk(cache_dir()):
+                for d in dirs:
+                    if "_run_" in d:
+                        full_path = os.path.join(root, d)
+                        tensor_files = [
+                            f
+                            for f in os.listdir(full_path)
+                            if f.startswith("tensor_") and f.endswith(".pt")
+                        ]
+                        if not tensor_files:
+                            continue
+
+                        dir_name = os.path.basename(full_path)
+                        base_name = dir_name.rsplit("_run_", 1)[0]
+                        run_idx = int(dir_name.rsplit("_run_", 1)[1])
+
+                        # Track run indices per kernel
+                        if base_name not in kernel_bases:
+                            kernel_bases[base_name] = []
+                        kernel_bases[base_name].append(run_idx)
+
+                        # Verify we can successfully load at least one saved tensor
+                        if not verified_tensor_load:
+                            first_tensor_file = os.path.join(full_path, tensor_files[0])
+                            loaded_tensor = torch.load(first_tensor_file)
+
+                            # Verify it's a valid tensor with expected properties
+                            self.assertIsInstance(loaded_tensor, torch.Tensor)
+                            self.assertEqual(loaded_tensor.device.type, GPU_TYPE)
+                            verified_tensor_load = True
+
+            # Verify rotation constraints
+            if kernel_bases:
+                for base_name, indices in kernel_bases.items():
+                    self.assertLessEqual(
+                        len(indices),
+                        max_runs,
+                        f"Kernel {base_name} has more runs ({len(indices)}) than max ({max_runs})",
+                    )
+
+                    # Verify the indices are within [0, max_runs)
+                    for idx in indices:
+                        self.assertLess(
+                            idx,
+                            max_runs,
+                            f"Run index {idx} exceeds max_runs-1 ({max_runs - 1})",
+                        )
+
+        finally:
+            # Restore environment variable
+            if old_dump_env is None:
+                os.environ.pop("TORCHINDUCTOR_DUMP_LAUNCH_TENSORS", None)
+            else:
+                os.environ["TORCHINDUCTOR_DUMP_LAUNCH_TENSORS"] = old_dump_env
+
+
+class TestRecheckAutotuneCache(TestCase):
+    """Tests for CachingAutotuner.recheck_autotune_cache"""
+
+    @staticmethod
+    def _make_compile_result(cfg):
+        """Create a mock StaticTritonCompileResult with the given config."""
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+
+        result = MagicMock(spec=StaticTritonCompileResult)
+        result.config = cfg
+        return result
+
+    @staticmethod
+    def _make_autotuner_with_results(configs, compile_results):
+        """
+        Create a CachingAutotuner and inject compile_results directly,
+        bypassing actual Triton compilation.
+        """
+        args = TestTritonHeuristics._get_cos_kernel_caching_autotuner_args()
+        args["configs"] = configs
+        autotuner = CachingAutotuner(**args)
+        autotuner.compile_results = compile_results
+        return autotuner
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_recheck_single_config_enters_cache_hit_block(self):
+        """
+        When there is exactly 1 config and the autotune cache returns a hit,
+        recheck_autotune_cache should narrow compile_results to that single
+        matching result (not skip the block due to len(configs) == 1).
+        """
+        cfg = triton_config({"x": 16}, 64)
+        cfg.found_by_coordesc = False
+        compile_result = self._make_compile_result(cfg)
+
+        autotuner = self._make_autotuner_with_results([cfg], [compile_result])
+
+        # Cache returns the same config as the best
+        cached_cfg = triton_config({"x": 16}, 64)
+        cached_cfg.found_by_coordesc = True
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
+            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
+        ):
+            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
+
+        # The compile_results should be narrowed to just the matching one
+        self.assertEqual(len(autotuner.compile_results), 1)
+        self.assertIs(autotuner.compile_results[0], compile_result)
+        # And found_by_coordesc must be propagated
+        self.assertTrue(autotuner.compile_results[0].config.found_by_coordesc)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_recheck_propagates_found_by_coordesc_true(self):
+        """
+        When the cached best config has found_by_coordesc=True,
+        it must be propagated to the compile result's config.
+        """
+        cfg_a = triton_config({"x": 16}, 64)
+        cfg_b = triton_config({"x": 256}, 64)
+        cfg_a.found_by_coordesc = False
+        cfg_b.found_by_coordesc = False
+        result_a = self._make_compile_result(cfg_a)
+        result_b = self._make_compile_result(cfg_b)
+
+        autotuner = self._make_autotuner_with_results(
+            [cfg_a, cfg_b], [result_a, result_b]
+        )
+
+        # Cache says cfg_b is the best, found via coordesc
+        cached_cfg = triton_config({"x": 256}, 64)
+        cached_cfg.found_by_coordesc = True
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
+            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
+        ):
+            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
+
+        self.assertEqual(len(autotuner.compile_results), 1)
+        self.assertIs(autotuner.compile_results[0], result_b)
+        # The flag must be propagated from the cached config
+        self.assertTrue(autotuner.compile_results[0].config.found_by_coordesc)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_recheck_propagates_found_by_coordesc_false(self):
+        """
+        When the cached best config has found_by_coordesc=False, it must be
+        propagated so that coordinate descent can still run if enabled.
+        """
+        cfg = triton_config({"x": 16}, 64)
+        cfg.found_by_coordesc = True
+        compile_result = self._make_compile_result(cfg)
+
+        autotuner = self._make_autotuner_with_results([cfg], [compile_result])
+
+        cached_cfg = triton_config({"x": 16}, 64)
+        cached_cfg.found_by_coordesc = False
+
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
+            return_value=([cached_cfg], None, {"autotune_cache_state": "hit"}),
+        ):
+            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
+
+        self.assertEqual(len(autotuner.compile_results), 1)
+        self.assertFalse(autotuner.compile_results[0].config.found_by_coordesc)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_recheck_no_cache_hit_leaves_results_unchanged(self):
+        """
+        When there's no autotune cache hit, compile_results should not change.
+        """
+        cfg_a = triton_config({"x": 16}, 64)
+        cfg_b = triton_config({"x": 256}, 64)
+        result_a = self._make_compile_result(cfg_a)
+        result_b = self._make_compile_result(cfg_b)
+
+        autotuner = self._make_autotuner_with_results(
+            [cfg_a, cfg_b], [result_a, result_b]
+        )
+
+        # Cache returns no hit (empty list)
+        with patch(
+            "torch._inductor.runtime.triton_heuristics.check_autotune_cache",
+            return_value=([], None, {"autotune_cache_state": "miss"}),
+        ):
+            autotuner.recheck_autotune_cache(reload_kernel_from_src=MagicMock())
+
+        # Nothing should change
+        self.assertEqual(len(autotuner.compile_results), 2)
 
 
 if __name__ == "__main__":

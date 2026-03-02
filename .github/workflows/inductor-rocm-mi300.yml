@@ -1,12 +1,12 @@
 name: inductor-rocm-mi300
 
 on:
+  schedule:
+    - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
   push:
     branches:
-      - main
       - release/*
     tags:
-      - ciflow/inductor-rocm/*
       - ciflow/inductor-rocm-mi300/*
   workflow_dispatch:
 

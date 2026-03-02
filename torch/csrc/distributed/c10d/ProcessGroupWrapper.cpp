@@ -350,9 +350,9 @@ std::ostream& operator<<(
         ", TensorShape=[",
         c10::Join(", ", size_strs),
         "], TensorDtypes=",
-        (dtype_strs),
+        dtype_strs,
         ", TensorDeviceTypes=",
-        (device_type_strs),
+        device_type_strs,
         ")");
   } else {
     collectiveInfo = c10::str(
@@ -558,12 +558,62 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
   return backend_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
 }
 
+c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter_tensor_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const ReduceScatterOptions& opts) {
+  // NOTE: We don't enforce shape checking for reduce_scatter_tensor_coalesced
+  // because the implementation itself does not enforce it we have tests that
+  // use inconsistent shapes, see python implementation in distributed_c10d for
+  // details.
+  runCollectiveChecks(OpType::REDUCE_SCATTER_TENSOR_COALESCED, {});
+  return backend_->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
+}
+
 void ProcessGroupWrapper::startCoalescing() {
   return backend_->startCoalescing();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::endCoalescing() {
   return backend_->endCoalescing();
+}
+
+bool ProcessGroupWrapper::supportsSplitting() const {
+  return backend_->supportsSplitting();
+}
+
+bool ProcessGroupWrapper::supportsCoalescing() const {
+  return backend_->supportsCoalescing();
+}
+
+bool ProcessGroupWrapper::supportsTimeEstimation() const {
+  return backend_->supportsTimeEstimation();
+}
+
+c10::intrusive_ptr<Backend::Options> ProcessGroupWrapper::getBackendOptions() {
+  return backend_->getBackendOptions();
+}
+
+std::shared_ptr<c10::Allocator> ProcessGroupWrapper::getMemAllocator() {
+  return backend_->getMemAllocator();
+}
+
+at::Tensor ProcessGroupWrapper::allocateTensor(
+    long size,
+    at::TensorOptions options) {
+  return backend_->allocateTensor(size, options);
+}
+
+bool ProcessGroupWrapper::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+  return backend_->supportsTensorAlloc(deviceIdx);
+}
+
+ErrorType ProcessGroupWrapper::getError() {
+  return backend_->getError();
+}
+
+void ProcessGroupWrapper::eagerConnectSingleDevice(at::Device device) {
+  backend_->eagerConnectSingleDevice(device);
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupWrapper::getWrappedPg() const {

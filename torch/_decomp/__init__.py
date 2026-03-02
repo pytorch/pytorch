@@ -68,7 +68,7 @@ def _add_op_to_registry(registry, op, fn):
     If op is OpOverload, it will be added to the registry directly.
     If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
     """
-    overloads: list[Union[torch._ops.OperatorBase]] = []
+    overloads: list[torch._ops.OperatorBase] = []
     if isinstance(op, HigherOrderOperator):
         # There's no concept of overloads for HigherOrderOperator
         registry[op] = fn
@@ -76,7 +76,8 @@ def _add_op_to_registry(registry, op, fn):
     elif isinstance(op, OpOverload):
         overloads.append(op)
     else:
-        assert isinstance(op, OpOverloadPacket)
+        if not isinstance(op, OpOverloadPacket):
+            raise AssertionError(f"expected OpOverloadPacket, got {type(op)}")
         for ol in op.overloads():
             overloads.append(getattr(op, ol))
 
@@ -109,7 +110,10 @@ def _convert_out_params(f):
             out_kwargs = tuple(kwargs.pop(o, None) for o in out_names)
             # Either all of the out kwargs are set or none of them
             is_none = out_kwargs[0] is None
-            assert all((o is None) == is_none for o in out_kwargs)
+            if not all((o is None) == is_none for o in out_kwargs):
+                raise AssertionError(
+                    f"all out kwargs must be set or none of them, got {out_kwargs}"
+                )
             return f(*args, **kwargs, out=None if is_none else out_kwargs)
 
         out_params = [
@@ -200,7 +204,10 @@ def register_decomposition(
     things
     """
 
-    assert type in {"post_autograd", "pre_autograd", "meta"}
+    if type not in {"post_autograd", "pre_autograd", "meta"}:
+        raise AssertionError(
+            f"type must be one of post_autograd, pre_autograd, or meta, got {type}"
+        )
 
     def decomposition_decorator(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         orig_fn = fn
@@ -222,7 +229,7 @@ def register_decomposition(
 
 
 def get_decompositions(
-    aten_ops: Sequence[Union[torch._ops.OperatorBase, OpOverloadPacket]],
+    aten_ops: Sequence[torch._ops.OperatorBase | OpOverloadPacket],
     type: str = "post_autograd",
 ) -> dict[torch._ops.OperatorBase, Callable]:
     """
@@ -236,7 +243,10 @@ def get_decompositions(
     they know how to implement, and we provide decompositions for everything
     not in this set.
     """
-    assert type in {"post_autograd", "pre_autograd", "meta"}
+    if type not in {"post_autograd", "pre_autograd", "meta"}:
+        raise AssertionError(
+            f"type must be one of post_autograd, pre_autograd, or meta, got {type}"
+        )
 
     registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
@@ -256,7 +266,7 @@ def get_decompositions(
 
 def remove_decompositions(
     decompositions: dict[torch._ops.OperatorBase, Callable],
-    aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
+    aten_ops: Sequence[OpOverload | OpOverloadPacket],
 ) -> None:
     """
     Given a dictionary of decompositions obtained from get_decompositions(), removes

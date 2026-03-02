@@ -26,12 +26,7 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import (
-    parametrize,
-    skipIfRocm,
-    skipIfWindows,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
@@ -83,6 +78,9 @@ if HAS_GPU:
     STRING_CONSTANT_C: tl.constexpr = tl.constexpr("CONSTANT_C")
     BOOL_CONSTANT_C: tl.constexpr = tl.constexpr(True)
     FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
+    # Compute at module level to avoid dynamo tracing issue with
+    # torch.backends.cuda.matmul.fp32_precision getter
+    USE_TF32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     if hasattr(triton, "constexpr_function"):
 
@@ -112,6 +110,44 @@ class KernelTests(torch._inductor.test_case.TestCase):
         f(t1)
         # No need to assert anything, the goal is to make sure dynamo does
         # not crash
+
+    @requires_gpu
+    def test_triton_kernel_ill_formed(self):
+        @triton.jit
+        def ill_formed_kernel(kernel):
+            off_n = tl.program_id(0)
+            seq_len_a = 5
+            if off_n < seq_len_a:
+                out_row_idx = off_n + seq_len_a
+            else:
+                out_row_idx = (off_n + seq_len_a).to(tl.int64)
+            tl.store(kernel, out_row_idx)
+
+        @torch.compile(backend="inductor")
+        def f(x):
+            grid = (x.numel(),)
+            ill_formed_kernel[grid](kernel=x)
+
+        catch_error = False
+        try:
+            t1 = torch.rand(5, device=GPU_TYPE)
+            f(t1)
+        except torch._inductor.exc.InductorError as e:
+            if isinstance(e.inner_exception, triton.compiler.errors.CompilationError):
+                catch_error = True
+            if (
+                isinstance(
+                    e.inner_exception,
+                    torch._inductor.compile_worker.subproc_pool.SubprocException,
+                )
+                and "triton.compiler.errors.CompilationError"
+                in e.inner_exception.details
+            ):
+                catch_error = True
+        finally:
+            # we assert user custom Triton kernel compile error can be captured
+            # after torch.compile
+            self.assertTrue(catch_error)
 
     @requires_gpu
     def test_triton_kernel_higher_order_func(self):
@@ -166,13 +202,13 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     def test_triton_kernel_functionalize(self):
-        from functorch import make_fx
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI,
             FunctionalTensorMode,
             PythonFunctionalizeAPI,
         )
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         kernel_side_table.reset_table()
 
@@ -287,6 +323,90 @@ def forward(self, x_1, output_1):
             self.assertFalse(
                 torch._functionalize_are_all_mutations_hidden_from_autograd(x_func.elem)
             )
+
+    @requires_gpu
+    def test_triton_kernel_clone_wekdeps(self):
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.compile_fx import compile_fx_inner
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        TENSOR_SIZE = 30_000_000
+        BLOCK_SIZE = 1024
+
+        @triton.jit
+        def dual_output_kernel_with_inline_asm(
+            in_ptr0,
+            out_ptr0,
+            out_ptr1,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            result = x.to(tl.float32)
+            tl.store(out_ptr0 + offsets, result, mask=mask)
+            tl.store(out_ptr1 + offsets, result + x, mask=mask)
+
+        kernel_side_table.reset_table()
+
+        def f(x: torch.Tensor):
+            full_default = torch.full(
+                (TENSOR_SIZE,), 0.0, device=x.device, dtype=x.dtype
+            )
+            running_sum = torch.empty_like(x)
+            running_sum.fill_(0.0)
+
+            for _ in range(7):
+                n_elements = full_default.numel()
+                grid = (triton.cdiv(n_elements, BLOCK_SIZE), 1, 1)
+                out = triton_kernel_wrapper_functional(
+                    kernel_idx=kernel_side_table.add_kernel(
+                        dual_output_kernel_with_inline_asm
+                    ),
+                    constant_args_idx=kernel_side_table.add_constant_args(
+                        {"n_elements": n_elements, "BLOCK_SIZE": BLOCK_SIZE}
+                    ),
+                    grid=[grid],
+                    tma_descriptor_metadata={},
+                    kwargs={
+                        "in_ptr0": x,
+                        "out_ptr0": full_default,
+                        "out_ptr1": full_default,
+                    },
+                    tensors_to_clone=["out_ptr0", "out_ptr1"],
+                )
+                dk_output = out["out_ptr0"]
+                dv_output = out["out_ptr1"]
+                running_sum = running_sum + dk_output + dv_output
+
+            return (running_sum,)
+
+        t = torch.rand(TENSOR_SIZE, device=GPU_TYPE)
+
+        class NoFusionChoices(InductorChoices):
+            def can_fuse(self, scheduler, node1, node2, shared_data_score) -> bool:
+                return False
+
+        gm = make_fx(f, tracing_mode="fake")(t)
+
+        with V.set_choices_handler(NoFusionChoices()):
+            log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
+            with ctx():
+                compiled_gm = compile_fx_inner(gm, [t])
+                compiled_result = compiled_gm([t])[0]
+
+            output_code = log_stream.getvalue()
+
+        FileCheck().check("del buf3").check(
+            "dual_output_kernel_with_inline_asm_0.run(x_1, buf0,"
+        ).run(output_code)
+
+        eager_result = f(t.clone())[0]
+        self.assertEqual(eager_result, compiled_result)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
@@ -750,7 +870,8 @@ def forward(self, x_1, output_1):
         prev_c = CONSTANT_C
         # If the behavior of triton kernels change, this test will fail
         CONSTANT_C = tl.constexpr(10)
-        assert CONSTANT_C != prev_c
+        if CONSTANT_C == prev_c:
+            raise AssertionError
 
         t = torch.randn(5, device=GPU_TYPE)
         torch_result = call_triton(t)
@@ -915,7 +1036,7 @@ def forward(self, x_1, output_1):
             functools.partial(call_triton_add, grid_type=2, num=200, autotuned=True),
             functools.partial(call_triton_add, grid_type=3, autotuned=True),
         ]
-        from functorch import make_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         tracing_mode = "symbolic" if dynamic else "fake"
 
@@ -2013,12 +2134,27 @@ def forward(self, arg0_1, arg1_1):
 
         expected_out = a + b
         eager_out = f(a, b)
-        compiled_out = torch.compile(
-            f,
-            fullgraph=True,
-            backend=backend,
-            dynamic=dynamic,
-        )(a, b)
+
+        if backend == "inductor":
+            log_stream, ctx = logs_to_string("torch._inductor.debug", "ir_post_fusion")
+            with ctx():
+                compiled_out = torch.compile(
+                    f,
+                    fullgraph=True,
+                    backend=backend,
+                    dynamic=dynamic,
+                )(a, b)
+
+            FileCheck().check("op4.unmet_dependencies").check(
+                "WeakDep(name='buf3', mutating_buf='buf4', is_fake=False)"
+            ).run(log_stream.getvalue())
+        else:
+            compiled_out = torch.compile(
+                f,
+                fullgraph=True,
+                backend=backend,
+                dynamic=dynamic,
+            )(a, b)
 
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
@@ -2557,15 +2693,21 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
-    @skipIfRocm
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     def test_kernel_inline_asm(self, quotes):
-        kernel = (
-            kernel_inline_asm_single_quotes
-            if quotes == "single"
-            else kernel_inline_asm_double_quotes
-        )
+        if torch.version.cuda:
+            kernel = (
+                kernel_inline_asm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_double_quotes
+            )
+        else:
+            kernel = (
+                kernel_inline_asm_rocm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_rocm_double_quotes
+            )
 
         # https://github.com/pytorch/pytorch/issues/155006
         def fn(inp):
@@ -2657,6 +2799,41 @@ if HAS_GPU:
 
 class MutationTests(torch._inductor.test_case.TestCase):
     # Tests injected below
+
+    # Regression test for #169782
+    @make_mutation_test
+    def test_with_none_arg():
+        @triton.jit
+        def add_kernel_with_none_arg(
+            in_ptr0,
+            optional_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            if optional_ptr is not None:
+                y = tl.load(optional_ptr + offsets, mask=mask)
+                x = x + y
+            tl.store(out_ptr + offsets, x, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_kernel_with_none_arg,
+            {
+                "in_ptr0": t,
+                "optional_ptr": None,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            {},
+            ["out_ptr"],
+        )
 
     @make_mutation_test
     def test_out_of_order_kernel():
@@ -3208,6 +3385,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["O_ptr"],
         )
 
+    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
     @make_mutation_test
     def test_for_loop_arg_2():
         @triton.jit
@@ -3268,6 +3446,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["o_ptr"],
         )
 
+    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
     @make_mutation_test
     def test_while_loop():
         @triton.jit
@@ -3698,8 +3877,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-                capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
 
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
             return output
 
         def f(x, y):
@@ -4013,7 +4192,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         result = f(x, x)
         self.assertEqual(result, x + x)
 
-        from functorch import make_fx
+        from torch.fx.experimental.proxy_tensor import make_fx
 
         gm = make_fx(f, tracing_mode=tracing_mode)(x, x)
         self.assertEqual(gm(x, x), x + x)
@@ -4100,7 +4279,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         def foo(x, w):
             M, K = x.shape
             KB, N = w.shape
-            assert K == KB, f"incompatible dimensions {K}, {KB}"
+            assert K == KB, f"incompatible dimensions {K}, {KB}"  # noqa: S101
 
             z = torch.empty((M, N), device=x.device, dtype=x.dtype)
 
@@ -4122,7 +4301,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                 w.stride(1),
                 z.stride(0),
                 z.stride(1),
-                ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+                ALLOW_TF32=USE_TF32,
             )
             return z
 
@@ -4192,7 +4371,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
         # should always pass
-        assert add(x, y).mean() == 2, "Problem with add kernel"
+        if add(x, y).mean() != 2:
+            raise AssertionError("Problem with add kernel")
 
         # assert that the user_defined_* flags are properly set on the kernel before compilation
         self.assertEqual(isinstance(add_kernel, Autotuner), True)

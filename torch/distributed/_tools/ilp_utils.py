@@ -128,7 +128,7 @@ def aggregate_stats(
 
     for mod in model.modules():
         if mod_mem_stat := mod_mem_stats.get(mod):
-            if tradeoff_stats := mod_sac_tradeoff_stats.get(mod_mem_stat.mod_fqn, None):
+            if tradeoff_stats := mod_sac_tradeoff_stats.get(mod_mem_stat.mod_fqn):
                 sac_runtime = tradeoff_stats.sac_runtime
                 sac_memory = tradeoff_stats.sac_memory
                 n_segments = tradeoff_stats.n_segments
@@ -211,7 +211,8 @@ def parse_module_info(module_info: ModuleInfo) -> Graph:
     mod_stats = module_info["mod_stats"]
     fw_pre_order = module_info["mod_order"]["fw_pre_order"]
     # assertion and number of nodes
-    assert len(mod_stats) == len(fw_pre_order)
+    if len(mod_stats) != len(fw_pre_order):
+        raise AssertionError
     n_nodes = len(mod_stats)
 
     # create graph

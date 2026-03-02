@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,3
-
-
-
 BERT_pytorch,pass,6
 
 
@@ -26,7 +22,7 @@ alexnet,pass,6
 
 
 
-basic_gnn_edgecnn,pass,20
+basic_gnn_edgecnn,fail_accuracy,20
 
 
 
@@ -46,7 +42,7 @@ dcgan,pass,6
 
 
 
-demucs,pass,4
+demucs,fail_accuracy,9
 
 
 
@@ -70,7 +66,7 @@ fastNLP_Bert,pass,10
 
 
 
-functorch_dp_cifar10,fail_accuracy,7
+functorch_dp_cifar10,pass,7
 
 
 
@@ -82,11 +78,11 @@ lennard_jones,pass,7
 
 
 
-llava,model_fail_to_load,0
+llava,eager_fail_to_run,0
 
 
 
-maml_omniglot,pass,7
+maml_omniglot,fail_accuracy,7
 
 
 
@@ -94,7 +90,7 @@ microbench_unbacked_tolist_sum,pass,9
 
 
 
-mnasnet1_0,pass,7
+mnasnet1_0,pass,0
 
 
 
@@ -134,7 +130,6 @@ phlippe_resnet,pass,6
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,6
 
 
 
@@ -146,7 +141,7 @@ pytorch_unet,pass_due_to_skip,7
 
 
 
-resnet152,pass,0
+resnet152,eager_two_runs_differ,0
 
 
 
@@ -182,15 +177,11 @@ squeezenet1_1,pass,6
 
 
 
-stable_diffusion_text_encoder,pass,5
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
-
-
-
 torch_multimodal_clip,pass,7
+
+
+
+torchrec_dlrm,pass,6
 
 
 
@@ -198,11 +189,11 @@ tts_angular,pass,9
 
 
 
-vgg16,pass,0
+vgg16,pass,6
 
 
 
-vision_maskrcnn,fail_accuracy,37
+vision_maskrcnn,fail_to_run,37
 
 
 

@@ -8,7 +8,6 @@ import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Optional
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 
@@ -68,6 +67,7 @@ BACKENDS: dict[str, list[Subsystem]] = {
         ConfigChange("inductor", "emulate_precision_casts", True),
         ConfigChange("inductor", "layout_optimization", False),
         ConfigChange("inductor", "comprehensive_padding", False),
+        BisectSubsystem("cudagraphs"),  # cudagraph wrapping of compiled graphs
         BisectSubsystem("lowerings"),  # lowering aten operators to inductor
     ],  # TODO - add more - fusions ?
 }
@@ -82,7 +82,7 @@ def reset_counters() -> None:
 
 
 @functools.cache
-def get_env_val(env_str: str) -> Optional[str]:
+def get_env_val(env_str: str) -> str | None:
     return os.environ.get(env_str, None)
 
 
@@ -96,9 +96,9 @@ class BisectionResult:
     """
 
     backend: str
-    subsystem: Optional[str] = None
-    bisect_number: Optional[int] = None
-    debug_info: Optional[str] = None
+    subsystem: str | None = None
+    bisect_number: int | None = None
+    debug_info: str | None = None
 
 
 class CompilerBisector:
@@ -113,14 +113,24 @@ class CompilerBisector:
     The idiomatic way to run it is with `do_bisect`. You can also use it by setting the env flags
     `TORCH_BISECT_BACKEND`, `TORCH_BISECT_SUBSYSTEM` and `TORCH_BISECT_MAX`.
 
-    It also supports a CLI interface, although this is less well tested.
+    It also supports a CLI interface:
 
-    You must run python compiler_bisector.py [start | good | bad | end]
+        python -m torch._inductor.compiler_bisector start
+        python -m torch._inductor.compiler_bisector good
+        python -m torch._inductor.compiler_bisector bad
+        python -m torch._inductor.compiler_bisector end
+
+    Or use `run` to automatically bisect by running a command repeatedly:
+
+        python -m torch._inductor.compiler_bisector run <command>
+
+    The command's exit code determines the result: 0 = good, non-zero = bad.
+    The TORCH_COMPILE_BACKEND env var is set to the backend being tested.
     """
 
     bisection_enabled: bool = False
 
-    in_process_cache: Optional[str] = None
+    in_process_cache: str | None = None
 
     @classmethod
     def get_dir(cls) -> str:
@@ -183,7 +193,7 @@ class CompilerBisector:
         cls.write_lines_to_file(file_path, lines)
 
     @classmethod
-    def get_backend(cls) -> Optional[str]:
+    def get_backend(cls) -> str | None:
         """
         Returns the active backend, if any
         """
@@ -198,7 +208,7 @@ class CompilerBisector:
         return None
 
     @classmethod
-    def get_subsystem(cls) -> Optional[str]:
+    def get_subsystem(cls) -> str | None:
         """
         Returns the active subsystem, if any
         """
@@ -219,7 +229,7 @@ class CompilerBisector:
         return next(obj for obj in BACKENDS[backend_name] if obj.name == subsystem_name)
 
     @classmethod
-    def get_run_state(cls, backend_name: str, subsystem_name: str) -> Optional[str]:
+    def get_run_state(cls, backend_name: str, subsystem_name: str) -> str | None:
         """
         Returns the current stage of bisecting, if Any
         """
@@ -272,7 +282,7 @@ class CompilerBisector:
         cls.write_lines_to_file(file_path, lines)
 
     @classmethod
-    def get_config_change(cls, config_name: str) -> Optional[dict[str, object]]:
+    def get_config_change(cls, config_name: str) -> dict[str, object] | None:
         backend = cls.get_backend()
         subsystem = cls.get_subsystem()
 
@@ -315,7 +325,7 @@ class CompilerBisector:
         cls,
         backend: str,
         subsystem: str,
-        debug_info: Optional[Callable[[], str]] = None,
+        debug_info: Callable[[], str] | None = None,
     ) -> bool:
         if not cls.bisection_enabled:
             return False
@@ -364,7 +374,7 @@ class CompilerBisector:
     @classmethod
     def advance_subsystem(
         cls, curr_backend: str, curr_subsystem: Subsystem
-    ) -> Optional[Subsystem]:
+    ) -> Subsystem | None:
         """
         Tries to move to the next subsystem within the current system.
         """
@@ -392,7 +402,7 @@ class CompilerBisector:
             return None
 
     @classmethod
-    def advance_backend(cls, curr_backend: str) -> Optional[str]:
+    def advance_backend(cls, curr_backend: str) -> str | None:
         """
         Tries Move to the next backend.
         """
@@ -487,7 +497,7 @@ class CompilerBisector:
     @classmethod
     def do_bisect(
         cls, fn: Callable[[], bool], cli_interface: bool = False
-    ) -> Optional[BisectionResult]:
+    ) -> BisectionResult | None:
         """
         Run fn repeatedly attempting to bisect torch.compile. fn should return True on success and False on failure.
         """
@@ -503,7 +513,9 @@ class CompilerBisector:
             bisection_enabled_orig = cls.bisection_enabled
             cls.delete_bisect_status()
             cls.bisection_enabled = True
-            cls.in_process_cache = tempfile.mkdtemp()
+            # Only create temp dir if not already set (CLI run mode pre-sets it)
+            if not cls.in_process_cache:
+                cls.in_process_cache = tempfile.mkdtemp()
 
             def cleanup() -> None:
                 cls.bisection_enabled = bisection_enabled_orig
@@ -601,9 +613,68 @@ class CompilerBisector:
                 sys.exit(0)
 
 
+HELP_TEXT = """\
+Usage: python -m torch._inductor.compiler_bisector <command>
+
+Commands:
+  start       Start a new bisection session (manual mode)
+  good        Mark the current state as good (no issue)
+  bad         Mark the current state as bad (issue present)
+  end         End the bisection session and clean up
+  run <cmd>   Automatically bisect by running a command repeatedly
+              Exit code 0 = good, non-zero = bad
+
+Example - using 'run' for automatic bisection:
+
+  1. Create a test script (e.g., test_bug.py):
+
+      import os, sys, torch
+
+      def main():
+          torch._dynamo.reset()
+          # Use the backend the bisector is testing
+          backend = os.environ.get("TORCH_COMPILE_BACKEND", "inductor")
+
+          @torch.compile(backend=backend)
+          def fn(x):
+              return x.sin()  # or your failing operation
+
+          x = torch.randn(10)
+          compiled = fn(x)
+          expected = x.sin()  # eager reference
+
+          if torch.allclose(compiled, expected, rtol=1e-4, atol=1e-4):
+              return 0  # PASS
+          else:
+              print(f"FAIL: got {compiled}, expected {expected}")
+              return 1  # FAIL
+
+      if __name__ == "__main__":
+          sys.exit(main())
+
+  2. Run the bisector:
+
+      python -m torch._inductor.compiler_bisector run python test_bug.py
+
+  3. The bisector will:
+      - Test backends (eager, aot_eager, inductor) to find which fails
+      - Test subsystems within that backend (passes, lowerings, etc.)
+      - Binary search to find the exact operation causing the issue
+
+  Output:
+      Disabling lowerings fixed the issue.
+      Binary search completed for inductor - lowerings. The bisect number is 42.
+      Bisection complete: BisectionResult(backend='inductor', subsystem='lowerings', ...)
+
+Environment variables set for your test script:
+  TORCH_COMPILE_BACKEND  - The backend being tested (use this in torch.compile)
+"""
+
+
 def command_line_usage() -> None:
+    """Entry point for the compiler bisector command-line interface."""
     if len(sys.argv) < 2:
-        print("Usage: python bisect_update.py <start|end|good|bad>")
+        print(HELP_TEXT)
         sys.exit(1)
 
     bisection_manager = CompilerBisector()
@@ -618,8 +689,58 @@ def command_line_usage() -> None:
         bisection_manager.initialize_system()
         sys.exit(0)
 
+    if command == "run":
+        if len(sys.argv) < 3:
+            print(
+                "Usage: python -m torch._inductor.compiler_bisector run <command> [args...]"
+            )
+            sys.exit(1)
+
+        import subprocess
+
+        run_cmd = sys.argv[2:]
+
+        def test_function() -> bool:
+            # Pass bisection state to subprocess via environment variables
+            env = os.environ.copy()
+            backend = bisection_manager.get_backend()
+            subsystem = bisection_manager.get_subsystem()
+
+            if backend:
+                # For test script to select the right backend
+                env["TORCH_COMPILE_BACKEND"] = backend
+                # For bisector in subprocess to know which backend we're testing
+                env["TORCH_BISECT_BACKEND"] = backend
+
+            if subsystem:
+                assert backend is not None  # subsystem requires a backend
+                env["TORCH_BISECT_SUBSYSTEM"] = subsystem
+                # Get run_state to determine TORCH_BISECT_MAX
+                run_state = bisection_manager.get_run_state(backend, subsystem)
+                if run_state == "test_disable":
+                    # -1 means always disable (counter > -1 is always True)
+                    env["TORCH_BISECT_MAX"] = "-1"
+                # For find_max_bounds and bisect, let the subprocess use file-based
+                # mechanisms. The subprocess reads run_state and bisect_range from
+                # files, and writes the actual count during find_max_bounds.
+
+            result = subprocess.run(run_cmd, env=env)
+            return result.returncode == 0
+
+        bisection_manager.delete_bisect_status()
+        bisection_manager.bisection_enabled = True
+        # Use shared cache_dir instead of temp dir so subprocesses can access files
+        CompilerBisector.in_process_cache = cache_dir()
+        result = bisection_manager.do_bisect(test_function, cli_interface=False)
+        if result:
+            print(f"\nBisection complete: {result}")
+        else:
+            print("\nBisection complete: no issue found")
+        sys.exit(0)
+
     if command not in ["good", "bad"]:
-        print("Invalid command. Must be 'good', 'bad', 'start', or 'end'.")
+        print(f"Invalid command: {command}")
+        print("Must be 'good', 'bad', 'start', 'end', or 'run'.")
         sys.exit(1)
 
     def test_function() -> bool:

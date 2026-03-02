@@ -84,6 +84,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
                 f"we require that the subgraph be a torch.fx.GraphModule (or "
                 f"a function we know doesn't have free variables)."
             )
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, *operands, **kwargs)
 
     def _call_Autograd(self, subgraph, *operands, **kwargs):
@@ -98,12 +99,16 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
         mode = _get_current_dispatch_mode()
-        assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+        if mode is not None:
+            raise AssertionError("Mode should never be enabled for CPU/CUDA key")
         return subgraph(*operands)
 
     def _call_ProxyTorchDispatchMode(self, proxy_mode, subgraph, *operands, **kwargs):
         traced_graph = reenter_make_fx(subgraph)(*operands)
-        assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+        if not isinstance(proxy_mode.tracer, torch.fx.Tracer):
+            raise AssertionError(
+                f"expected proxy_mode.tracer to be torch.fx.Tracer, got {type(proxy_mode.tracer)}"
+            )
         qualname = proxy_mode.tracer.get_fresh_qualname("subgraph")
         proxy_mode.tracer.root.register_module(qualname, traced_graph)
 
