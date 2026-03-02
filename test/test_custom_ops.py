@@ -2868,6 +2868,111 @@ class TestCustomOpAPI(TestCase):
         expected = 6 * x  # f''(2.0) = 12.0
         self.assertEqual(result, expected)
 
+    @requires_compile
+    def test_register_autograd_with_compile_and_grad(self):
+        """Test torch.compile(fullgraph=True) with torch.func.grad on a custom op."""
+
+        @torch.library.custom_op(
+            "_torch_testing::sin_compile_grad", mutates_args=()
+        )
+        def numpy_sin(x: torch.Tensor) -> torch.Tensor:
+            x_np = x.cpu().numpy()
+            y_np = np.sin(x_np)
+            return torch.from_numpy(y_np).to(device=x.device)
+
+        @numpy_sin.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * x.cos()
+
+        numpy_sin.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return torch.func.grad(lambda x: numpy_sin(x).sum())(x)
+
+        grad_x = fn(x)
+        expected = x.cos()
+        self.assertEqual(grad_x, expected)
+
+    @requires_compile
+    def test_register_autograd_with_compile_and_grad_grad(self):
+        """Test torch.compile(fullgraph=True) with grad(grad()) on a custom op."""
+
+        @torch.library.custom_op(
+            "_torch_testing::cube_compile_grad_grad", mutates_args=()
+        )
+        def cube(x: torch.Tensor) -> torch.Tensor:
+            return x**3
+
+        @cube.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * 3 * x**2
+
+        cube.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.tensor(2.0)
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def fn(x):
+            return torch.func.grad(torch.func.grad(cube))(x)
+
+        result = fn(x)
+        expected = 6 * x  # f''(x) = 6x, f''(2.0) = 12.0
+        self.assertEqual(result, expected)
+
+    @requires_compile
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_register_autograd_with_compile_reduce_overhead_and_grad(self):
+        """Test torch.compile with reduce-overhead and torch.func.grad on a custom op."""
+
+        @torch.library.custom_op(
+            "_torch_testing::sin_reduce_overhead_grad", mutates_args=()
+        )
+        def cuda_sin(x: torch.Tensor) -> torch.Tensor:
+            return x.sin()
+
+        @cuda_sin.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        def setup_context(ctx, inputs, output):
+            (x,) = inputs
+            ctx.save_for_backward(x)
+
+        def backward(ctx, grad):
+            (x,) = ctx.saved_tensors
+            return grad * x.cos()
+
+        cuda_sin.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, device="cuda", requires_grad=True)
+
+        @torch.compile(fullgraph=True, mode="reduce-overhead")
+        def fn(x):
+            return torch.func.grad(lambda x: cuda_sin(x).sum())(x)
+
+        grad_x = fn(x)
+        expected = x.cos()
+        self.assertEqual(grad_x, expected)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema_error(self):
         with self.assertRaisesRegex(ValueError, "the op mutates {'x'}"):
