@@ -1212,6 +1212,26 @@ static PyObject* THPModule_deterministicAlgorithmsWarnOnly(
   Py_RETURN_FALSE;
 }
 
+static PyObject* THPModule_maxSegmentLengthPerCta(
+    PyObject* _unused,
+    PyObject* noargs) {
+  return THPUtils_packInt32(at::globalContext().maxSegmentLengthPerCta());
+}
+
+static PyObject* THPModule_setMaxSegmentLengthPerCta(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "_set_max_segment_length_per_cta expects an int, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setMaxSegmentLengthPerCta(THPUtils_unpackInt(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setDeterministicFillUninitializedMemory(
     PyObject* _unused,
     PyObject* arg) {
@@ -1924,6 +1944,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_deterministic_fill_uninitialized_memory",
      THPModule_setDeterministicFillUninitializedMemory,
+     METH_O,
+     nullptr},
+    {"_get_max_segment_length_per_cta",
+     THPModule_maxSegmentLengthPerCta,
+     METH_NOARGS,
+     nullptr},
+    {"_set_max_segment_length_per_cta",
+     THPModule_setMaxSegmentLengthPerCta,
      METH_O,
      nullptr},
     {"_get_nnpack_enabled", THPModule_userEnabledNNPACK, METH_NOARGS, nullptr},

@@ -154,6 +154,30 @@ void Context::setDeterministicFillUninitializedMemory(bool b) {
   _deterministic_fill_uninitialized_memory = b;
 }
 
+int32_t Context::maxSegmentLengthPerCta() const {
+  // Priority 1: CLI parameter (highest priority)
+  if (_max_segment_length_per_cta >= 0) {
+    return _max_segment_length_per_cta;
+  }
+  
+#ifdef __facebook__
+  // Priority 2: JustKnob (fallback if CLI not set)
+  static facebook::jk::IntegerKnob max_segment_length_knob(
+      "fbgemm_gpu/features:max_segment_length_per_cta");
+  int64_t knob_value = max_segment_length_knob();
+  if (knob_value >= 0) {
+    return static_cast<int32_t>(knob_value);
+  }
+#endif
+  
+  // Priority 3: Return -1 to indicate "use default" (4096 or 1024 based on GPU)
+  return -1;
+}
+
+void Context::setMaxSegmentLengthPerCta(int32_t length) {
+  _max_segment_length_per_cta = length;
+}
+
 void Context::alertNotDeterministic(std::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
     if (globalContext().deterministicAlgorithmsWarnOnly()) {
