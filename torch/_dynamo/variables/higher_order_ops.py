@@ -5107,11 +5107,14 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     _ALLOW_FALLBACK_TO_EAGER = False
     supports_input_mutation = True
     supports_aliasing = False
-    allow_side_effects = True
     # invoke_subgraph is NOT desugared in AOTAutograd, so the HOP input/output
     # shouldn't alias. For checkpoint HOP, we inline it so we don't need
     # alias analysis as functionalization would just work on the flat graph.
     filter_aliased_intermediates = True
+
+    @property
+    def allow_side_effects(self) -> bool:  # pyrefly: ignore[bad-override]
+        return torch._dynamo.config.allow_side_effects_under_nested_compile_region
 
     # pyrefly: ignore[bad-override]
     def install_subgraph_in_output_graph(
