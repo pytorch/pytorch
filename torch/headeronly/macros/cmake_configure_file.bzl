@@ -24,6 +24,7 @@ def _cmake_configure_file_impl(ctx):
             ctx.file.src.path,
             ctx.outputs.out.path,
         ],
+        mnemonic = "CmakeConfigureFile",
     )
     return [
         # create a provider which says that this
