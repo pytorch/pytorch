@@ -2134,6 +2134,27 @@ static Tensor _matmul_impl(
     auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
     const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 
+    // Optimization for asymmetric broadcasting: when one tensor has significantly
+    // more batch dimensions than the other and the output is narrow (few columns),
+    // einsum is faster because it avoids creating huge expanded intermediate tensors.
+    // See https://github.com/pytorch/pytorch/issues/110858
+    const int64_t batch_prod_1 = batch_tensor1.empty() ? 1LL : c10::multiply_integers(batch_tensor1);
+    const int64_t batch_prod_2 = batch_tensor2.empty() ? 1LL : c10::multiply_integers(batch_tensor2);
+    const int64_t min_batch_prod = std::max(std::min(batch_prod_1, batch_prod_2), int64_t{1});
+    const int64_t expansion_ratio = expand_batch_product / min_batch_prod;
+
+    // Use einsum when there's significant asymmetric expansion AND narrow output.
+    // Heuristic based on benchmarks: einsum wins when expansion_ratio > threshold
+    // AND output columns (p) is small.
+    const bool use_einsum = !has_out && (
+        (expansion_ratio > 100 && p <= 4) ||
+        (expansion_ratio > 50 && p <= 2) ||
+        (expansion_ratio > 1000 && p <= 8)
+    );
+    if (use_einsum) {
+      return at::einsum("...ij,...jk->...ik", {tensor1, tensor2}, c10::nullopt);
+    }
+
     // flatten expanded batches
     const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
                                                              ret.append({n, m1});

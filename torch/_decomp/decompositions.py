@@ -4748,9 +4748,30 @@ def matmul(tensor1, tensor2, *, is_out=False):
             torch.broadcast_shapes(batch_tensor1, batch_tensor2)
         )
 
-        tensor1_expand_size = expand_batch_portion + [n, m1]
-
+        # Optimization for asymmetric broadcasting: when one tensor has significantly
+        # more batch dimensions than the other and the output is narrow (few columns),
+        # einsum is faster because it avoids creating huge expanded intermediate tensors.
+        # See https://github.com/pytorch/pytorch/issues/110858
+        batch_prod_1 = prod(batch_tensor1) if batch_tensor1 else 1
+        batch_prod_2 = prod(batch_tensor2) if batch_tensor2 else 1
         expand_batch_product = prod(expand_batch_portion)
+
+        # Compute expansion ratio: how much the smaller batch needs to expand
+        min_batch_prod = max(min(batch_prod_1, batch_prod_2), 1)
+        expansion_ratio = expand_batch_product // min_batch_prod
+
+        # Use einsum when there's significant asymmetric expansion AND narrow output.
+        # Heuristic based on benchmarks: einsum wins when expansion_ratio > threshold
+        # AND output columns (p) is small.
+        use_einsum = (
+            (expansion_ratio > 100 and p <= 4)
+            or (expansion_ratio > 50 and p <= 2)
+            or (expansion_ratio > 1000 and p <= 8)
+        )
+        if use_einsum:
+            return torch.einsum("...ij,...jk->...ik", tensor1, tensor2)
+
+        tensor1_expand_size = expand_batch_portion + [n, m1]
 
         # HACK: We need reshape with symint support
         tensor1_expanded = tensor1.expand(tensor1_expand_size).reshape(
