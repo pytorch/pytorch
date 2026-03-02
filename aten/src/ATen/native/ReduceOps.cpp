@@ -117,6 +117,7 @@
 #include <ATen/ops/var_mean.h>
 #include <ATen/ops/var_mean_native.h>
 #include <ATen/ops/var_native.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #endif
@@ -645,7 +646,12 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
   // O(n) implementation. The derivative of this implementation is _not_
   // the second derivative of cumprod. As such, we fallback to a less efficient
   // O(n^2) implementation when at::GradMode::is_enabled().
-  if (!at::GradMode::is_enabled() && !are_inputs_tensors_sublcass) {
+  //
+  // NOTE: We use at::where instead of masked_scatter_/masked_select to make
+  // this path composite compliant for tensor subclasses (e.g., FakeTensors
+  // used by torch.compile). masked_select has dynamic output shape which
+  // causes issues with tracing. See https://github.com/pytorch/pytorch/issues/136263
+  if (!at::GradMode::is_enabled()) {
     // n.b. This could probably be implemented much faster with a kernel
 
     // From here on we need to use some mask gymnastics to
@@ -669,9 +675,11 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // case k < z1
     // select everything before the first zero [0, z1)
     auto mask = cumsum == 0;
-    // equiv to grad_input[mask] = deriv[grad]
-    grad_input.masked_scatter_(mask,
-        reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input_conj).masked_select(mask));
+    // Compute gradient for positions before the first zero
+    // Using at::where instead of masked_scatter_ for composite compliance
+    auto grad_before_first_zero = reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input_conj);
+    grad_input = at::where(mask, grad_before_first_zero, grad_input);
+
     // select everything from the first zero to the second zero [z1, z2)
     mask = cumsum == 1;
 
@@ -693,13 +701,21 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // dy_j / dx_z1 = sum(cumprod(input[z1+1:z2] * grad[z1+1:z2])) * prod(output[z1-1])
     // relu_() necessary as gather does not support negative indices
     // finally, we do grad_input[z1] = dy_j / dx_z1
-    grad_input.masked_scatter_(first_zero_mask,
-                               input_conj.masked_fill(~mask, 1.).cumprod(dim)
-                                    .mul_(grad.masked_fill(cumsum != 1, 0.))
-                                    .sum(dim, /*keepdim*/true)
-                                    .mul_(at::gather(output_conj, dim, (first_zero_index - 1).relu_())
-                                          .masked_fill_(first_zero_index == 0, 1.))
-                                    .masked_select(first_zero_mask));
+    // Using at::where instead of masked_scatter_ for composite compliance
+    auto grad_at_first_zero = input_conj.masked_fill(~mask, 1.).cumprod(dim);
+    const auto grad_masked = grad.masked_fill(cumsum != 1, 0.);
+    const auto output_before_zero = at::gather(output_conj, dim, (first_zero_index - 1).relu_())
+                                      .masked_fill_(first_zero_index == 0, 1.);
+    if (!are_inputs_tensors_sublcass) {
+      grad_at_first_zero = grad_at_first_zero.mul_(grad_masked)
+                             .sum(dim, /*keepdim*/true)
+                             .mul_(output_before_zero);
+    } else {
+      grad_at_first_zero = grad_at_first_zero.mul(grad_masked)
+                             .sum(dim, /*keepdim*/true)
+                             .mul(output_before_zero);
+    }
+    grad_input = at::where(first_zero_mask, grad_at_first_zero, grad_input);
     return grad_input;
   } else { // GradMode::enabled()
     /*
