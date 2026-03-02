@@ -169,12 +169,19 @@ inline C10_HOST_DEVICE float fp8e4m3fn_to_fp32_value(uint8_t input) {
  */
 inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
   /*
-   * Binary representation of 480.0f, which is the first value
-   * not representable in fp8e4m3fn range:
-   * 0 1111 111 - fp8e4m3fn
-   * 0 10000111 11100000000000000000000 - fp32
+   * Representation of +inf in fp32 format, which is the last
+   * non-NaN fp32 value:
+   * 0 11111111 00000000000000000000000 - fp32
    */
-  constexpr uint32_t fp8_max = UINT32_C(1087) << 20;
+  constexpr uint32_t fp32_inf = UINT32_C(255) << 23;
+
+  /*
+   * Representation of 448.0f in fp32 format, which is the last
+   * non-NaN fp8e4m3fn value:
+   * 0 1111 110 - fp8e4m3fn
+   * 0 10000111 11000000000000000000000 - fp32
+   */
+  constexpr uint32_t fp8_max = UINT32_C(0x21F) << 21;
 
   /*
    * A mask for converting fp32 numbers lower than fp8e4m3fn normal range
@@ -193,7 +200,7 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
    *      +---+----------------------------------+
    *      | S |0000000 00000000 00000000 00000000|
    *      +---+----------------------------------+
-   * Bits  31                 0-31
+   * Bits  31                30-0
    */
   const uint32_t sign = f_bits & UINT32_C(0x80000000);
 
@@ -202,29 +209,30 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
    */
   f_bits ^= sign;
 
-  if (f_bits >= fp8_max) {
+  if (f_bits >= fp32_inf) {
     // NaN - all exponent and mantissa bits set to 1
-    result = 0x7f;
+    result = 0x7F;
+  } else if (f_bits >= fp8_max) {
+    // Input number is 448 or larger and thus needs to be clamped
+    // Largest fp8e4m3fn normal number is 448
+    result = 0x7E;
+  } else if (f_bits < (UINT32_C(121) << 23)) {
+    // Input number is smaller than 2^(-6), which is the smallest
+    // fp8e4m3fn normal number
+    f_bits = fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
+    result = static_cast<uint8_t>(f_bits - denorm_mask);
   } else {
-    if (f_bits < (UINT32_C(121) << 23)) {
-      // Input number is smaller than 2^(-6), which is the smallest
-      // fp8e4m3fn normal number
-      f_bits =
-          fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
-      result = static_cast<uint8_t>(f_bits - denorm_mask);
-    } else {
-      // resulting mantissa is odd
-      uint8_t mant_odd = (f_bits >> 20) & 1;
+    // resulting mantissa is odd
+    uint8_t mant_odd = (f_bits >> 20) & 1;
 
-      // update exponent, rounding bias part 1
-      f_bits += ((uint32_t)(7 - 127) << 23) + 0x7FFFF;
+    // update exponent, rounding bias part 1
+    f_bits += ((uint32_t)(7 - 127) << 23) + 0x7FFFF;
 
-      // rounding bias part 2
-      f_bits += mant_odd;
+    // rounding bias part 2
+    f_bits += mant_odd;
 
-      // take the bits!
-      result = static_cast<uint8_t>(f_bits >> 20);
-    }
+    // take the bits!
+    result = static_cast<uint8_t>(f_bits >> 20);
   }
 
   result |= static_cast<uint8_t>(sign >> 24);
