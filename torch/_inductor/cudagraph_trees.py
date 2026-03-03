@@ -465,6 +465,7 @@ def cudagraphify_impl(
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_T = TypeVar("_T")
 
 
 def protect_pool_inputs_for_partitioned_call(
@@ -2284,8 +2285,6 @@ class CUDAGraphTreeManager:
 
         if not pool_ptrs:
             return
-
-        _T = TypeVar("_T")
 
         def _maybe_clone(x: _T) -> _T:
             if (
