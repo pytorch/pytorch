@@ -949,6 +949,7 @@ def index_select_single_dim_strategy(
         raise AssertionError(f"Expected TensorMeta, got {type(values_meta)}")
     if not isinstance(dim, int):
         raise AssertionError(f"Expected int, got {type(dim)}")
+    dim = normalize_dim(dim, len(values_meta.shape))
 
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
 
