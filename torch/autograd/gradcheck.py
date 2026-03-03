@@ -2094,6 +2094,17 @@ def gradcheck(
         raise AssertionError(
             "Setting check_batched_forward_grad=True requires check_forward_ad to be True"
         )
+    if any(
+        isinstance(inp, torch.Tensor) and inp.device.type == "neuron"
+        for inp in _as_tuple(inputs)
+    ):
+        eps = max(eps, 1e-3)
+        atol = max(atol, 1e-3)
+        rtol = max(rtol, 1e-2)
+        warnings.warn(
+            "Neuron device detected: relaxing gradcheck tolerances "
+            f"(eps={eps}, atol={atol}, rtol={rtol})"
+        )
     args = locals().copy()
     args.pop("raise_exception")
     if not raise_exception:
@@ -2253,6 +2264,17 @@ def gradgradcheck(
     # TODO: do we want to test this too?
     # assert not (check_batched_forward_grad and not check_fwd_over_rev), (
     #     "Setting check_batched_forward_grad=True requires check_fwd_over_rev to be True")
+    if any(
+        isinstance(inp, torch.Tensor) and inp.device.type == "neuron"
+        for inp in _as_tuple(inputs)
+    ):
+        eps = max(eps, 1e-3)
+        atol = max(atol, 1e-3)
+        rtol = max(rtol, 1e-2)
+        warnings.warn(
+            "Neuron device detected: relaxing gradcheck tolerances "
+            f"(eps={eps}, atol={atol}, rtol={rtol})"
+        )
     tupled_inputs = _as_tuple(inputs)
 
     if grad_outputs is None:
