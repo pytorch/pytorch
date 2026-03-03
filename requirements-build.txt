@@ -1,5 +1,6 @@
 # Build System requirements
 setuptools>=70.1.0,<82
+scikit-build-core
 cmake>=3.27
 ninja
 numpy
