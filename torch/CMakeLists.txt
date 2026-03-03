@@ -512,6 +512,9 @@ add_custom_target(
   WORKING_DIRECTORY ${TORCH_ROOT}
 )
 add_dependencies(torch_python gen_torch_version)
+# version.py is gitignored (generated), so scikit-build-core won't include it
+# via Python package collection. Install it explicitly via cmake instead.
+install(FILES "${TORCH_SRC_DIR}/version.py" DESTINATION ".")
 
 # Skip building this library under MacOS, since it is currently failing to build on Mac
 # Github issue #61930
