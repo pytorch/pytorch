@@ -813,19 +813,19 @@ namespace {
 // to the native cholesky_solve method in cuSOLVER is slow
 // with batched inputs.
 template <bool use_dedicated_kernel_unconditionally = false>
-inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
-  const Tensor& self,
+inline void _cholesky_solve_helper_cuda_cusolver_algo_selector(
+  Tensor& self,
   const Tensor& A,
   bool upper) {
   if constexpr (use_dedicated_kernel_unconditionally) {
-    return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+    _cholesky_solve_helper_cuda_cusolver(self, A, upper);
   } else {
     // TODO: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
     // TODO: Non-batched potrs is too slow in the batched setting compared to two triangular solves.
     // Non-batched input -> non-batched potrs.
     // Batched input -> two triangular solves.
     if (batchCount(self) == 1) {
-      return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+      _cholesky_solve_helper_cuda_cusolver(self, A, upper);
     } else {
       const auto L = upper
         ? c10::MaybeOwned<Tensor>::owned(A.mH())
@@ -834,22 +834,21 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
       // because it handles memory layout optimization and conj/neg flags.
       // IMPORTANT NOTE: `self` and `A` are not processed for kernel calls yet!
       // Step 1: Solve for Y: L Y = B or U^H Y = B.
-      auto X = at::linalg_solve_triangular(*L, self, /*upper=*/false);
+      at::linalg_solve_triangular_out(self, *L, self, /*upper=*/false);
       // Step 2: Solve for X: L^H X = Y or U X = Y.
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(X), L->mH(), X, /*upper=*/true);
-      return X;
+      at::linalg_solve_triangular_out(self, L->mH(), self, /*upper=*/true);
     }
   }
 }
 
-inline Tensor _cholesky_solve_helper_cuda_cusolver_dispatcher(
-    const Tensor& self,
+inline void _cholesky_solve_helper_cuda_cusolver_dispatcher(
+    Tensor& self,
     const Tensor& A,
     bool upper) {
   // For now, unconditional dispatch to the dedicated cholesky solve
   // kernel in cuSOLVER is slow for batched inputs.
   // TODO: switch once resolved.
-  return _cholesky_solve_helper_cuda_cusolver_algo_selector<
+  _cholesky_solve_helper_cuda_cusolver_algo_selector<
     /*use_dedicated_kernel_unconditionally=*/false
   >(self, A, upper);
 }
@@ -860,13 +859,18 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
 #if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-      return _cholesky_solve_helper_cuda_cusolver_dispatcher(self, A, upper);
+    case at::LinalgBackend::Cusolver: {
+      at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
+      _cholesky_solve_helper_cuda_cusolver_dispatcher(self_working_copy, A, upper);
+      return self_working_copy;
+    }
     case at::LinalgBackend::Magma:
       return _cholesky_solve_helper_cuda_magma(self, A, upper);
     default:
       if (!use_magma_) {
-        return _cholesky_solve_helper_cuda_cusolver_dispatcher(self, A, upper);
+        at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
+        _cholesky_solve_helper_cuda_cusolver_dispatcher(self_working_copy, A, upper);
+        return self_working_copy;
       } else {
         return _cholesky_solve_helper_cuda_magma(self, A, upper);
       }
@@ -887,63 +891,16 @@ REGISTER_CUDA_DISPATCH(cholesky_stub, &cholesky_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-namespace {
-  // At the time of writing, the unconditional dispatch
-  // to the native cholesky_inverse method in cuSOLVER is slow
-  // with batched inputs.
-  template <bool use_dedicated_kernel_unconditionally = false>
-  inline Tensor& _cholesky_inverse_helper_cuda_cusolver_algo_selector(
-    Tensor& result,
-    Tensor& infos,
-    bool upper) {
-    if constexpr (use_dedicated_kernel_unconditionally) {
-      return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
-    } else {
-      // TODO: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
-      // TODO: Non-batched potrs is too slow in the batched setting compared to two triangular solves.
-      // Non-batched input -> non-batched potrs.
-      // Batched input -> two triangular solves.
-      if (batchCount(result) == 1) {
-        return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
-      } else {
-        at::Tensor input_working_copy = cloneBatchedColumnMajor(result);
-        result.fill_(0);
-        result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
-        const auto L = upper
-          ? c10::MaybeOwned<Tensor>::owned(input_working_copy.mH())
-          : c10::MaybeOwned<Tensor>::borrowed(input_working_copy);
-        // NOTE: we tolerate redispatch with at::triangular_solve_triangular
-        // because it handles memory layout optimization and conj/neg flags.
-        // IMPORTANT NOTE: `self` and `A` are not processed for kernel calls yet!
-        // Step 1: Solve for Y: L Y = B or U^H Y = B.
-        auto X = at::linalg_solve_triangular(*L, result, /*upper=*/false);
-        // Step 2: Solve for X: L^H X = Y or U X = Y.
-        at::linalg_solve_triangular_out(result, L->mH(), X, /*upper=*/true);
-        return result;
-      }
-    }
-  }
-
-  inline Tensor& _cholesky_inverse_helper_cuda_cusolver_dispatcher(
-      Tensor& result,
-      Tensor& infos,
-      bool upper) {
-    // For now, unconditional dispatch to the dedicated cholesky inverse
-    // kernel in cuSOLVER is slow for batched inputs.
-    // TODO: switch once resolved.
-    return _cholesky_inverse_helper_cuda_cusolver_algo_selector<
-      /*use_dedicated_kernel_unconditionally=*/false
-    >(result, infos, upper);
-  }
-
-} // namespace (anonymous)
-
-Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) {
+Tensor& cholesky_inverse_kernel_impl(Tensor &result, [[maybe_unused]] Tensor& infos, bool upper) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
-  // the content of result is overwritten by 'apply_cholesky_inverse'
+  // the content of result is overwritten
   _warn_once_magma_deprecation("linalg.cholesky_inverse");
-  return _cholesky_inverse_helper_cuda_cusolver_dispatcher(result, infos, upper);
+  at::Tensor A = cloneBatchedColumnMajor(result);
+  result.fill_(0);
+  result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+  _cholesky_solve_helper_cuda_cusolver_dispatcher(result, A, upper);
+  return result;
 }
 
 REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
