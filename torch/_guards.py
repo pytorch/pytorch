@@ -1149,7 +1149,7 @@ def dataclass_with_cached_hash(
                 object.__setattr__(self, "_hash", old_hash(self))
             return self._hash
 
-        def __reduce__(self):
+        def __reduce__(self) -> tuple[type, tuple[Any, ...]]:
             # Exclude _hash (cached, possibly nondeterministic) and init=False
             # fields from pickling. Only init=True fields should be passed to
             # __init__ during unpickling; init=False fields are recomputed in
