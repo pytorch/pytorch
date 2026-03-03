@@ -38,6 +38,47 @@ from typing_extensions import (
 )
 
 
+# In scikit-build-core editable installs (redirect mode with rebuild=true),
+# the meta path finder triggers a cmake rebuild for every import of a
+# wheel-only file (e.g. torch/version.py which is cmake-generated).
+# rebuild() sets SKBUILD_EDITABLE_SKIP only in the subprocess env, so every
+# wheel-file import in the same process starts a fresh cmake cycle (cascade).
+# Also, pytest --capture=sys replaces sys.stderr with a capture object that
+# lacks fileno(), crashing the subprocess.run(stdout=sys.stderr) call.
+# Patch rebuild() to: (1) restore real stderr for the subprocess, and
+# (2) propagate SKBUILD_EDITABLE_SKIP to the current process env so
+# subsequent wheel-file imports skip the rebuild.
+def _patch_skbuild_editable_rebuild() -> None:
+    _MARKER = "SKBUILD_EDITABLE_SKIP"
+    for _finder in sys.meta_path:
+        if (
+            type(_finder).__name__ == "ScikitBuildRedirectingFinder"
+            and getattr(_finder, "path", None)
+        ):
+            _orig = _finder.rebuild
+            _path = _finder.path
+
+            def _rebuild_once(_orig=_orig, _path=_path) -> None:
+                _real_stderr = getattr(sys, "__stderr__", None)
+                _saved_stderr = sys.stderr
+                if _real_stderr is not None:
+                    sys.stderr = _real_stderr
+                try:
+                    _orig()
+                finally:
+                    sys.stderr = _saved_stderr
+                os.environ[_MARKER] = os.pathsep.join(
+                    filter(None, [os.environ.get(_MARKER, ""), _path])
+                )
+
+            _finder.rebuild = _rebuild_once
+            break
+
+
+_patch_skbuild_editable_rebuild()
+del _patch_skbuild_editable_rebuild
+
+
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
