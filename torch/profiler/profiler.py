@@ -115,11 +115,11 @@ class _KinetoProfile:
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
             or (when available) ProfilerActivity.XPU.
 
-            Each item can be a bare ``ProfilerActivity`` enum (collects all default
+            Each item can be a ``ProfilerActivity`` enum (collects all default
             activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
             to a list of individual libkineto activity type names to collect, e.g.
             ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
-            The same activity group must not appear both as a bare enum and as a dict key.
+            The same activity group must not appear both as an enum and as a dict key.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -178,7 +178,7 @@ class _KinetoProfile:
                 if isinstance(item, ProfilerActivity):
                     if item in self.activity_filters:
                         raise ValueError(
-                            f"Activity {item} appears both as a bare enum and "
+                            f"Activity {item} appears both as an enum and "
                             f"as a dict key — use one or the other"
                         )
                     self.activities.add(item)
@@ -186,7 +186,7 @@ class _KinetoProfile:
                     for key, val in item.items():
                         if key in self.activities:
                             raise ValueError(
-                                f"Activity {key} appears both as a bare enum "
+                                f"Activity {key} appears both as an enum "
                                 f"and as a dict key — use one or the other"
                             )
                         if key in self.activity_filters:
@@ -652,11 +652,11 @@ class profile(_KinetoProfile):
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
             or (when available) ProfilerActivity.XPU.
 
-            Each item can be a bare ``ProfilerActivity`` enum (collects all default
+            Each item can be a ``ProfilerActivity`` enum (collects all default
             activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
             to a list of individual libkineto activity type names to collect, e.g.
             ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
-            The same activity group must not appear both as a bare enum and as a dict key.
+            The same activity group must not appear both as an enum and as a dict key.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable that is called at each step when ``schedule``
@@ -802,7 +802,7 @@ class profile(_KinetoProfile):
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        # Extract bare activities for the use_cuda deprecation check.
+        # Extract activities for the use_cuda deprecation check.
         if activities is not None:
             activities_set: set[ProfilerActivity] = set()
             for item in activities:

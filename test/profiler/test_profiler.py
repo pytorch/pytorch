@@ -2763,7 +2763,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_mixed_syntax(self):
-        """Bare and dict entries can coexist for different activity groups."""
+        """Enum and dict entries can coexist for different activity groups."""
         activities = [ProfilerActivity.CPU, {ProfilerActivity.CUDA: ["GPU_MEMCPY"]}]
         with profile(activities=activities) as p:
             with record_function("test_annotation"):
@@ -2773,7 +2773,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_duplicate_raises(self):
-        """Same activity as both bare and dict key raises ValueError."""
+        """Same activity as both enum and dict key raises ValueError."""
         with self.assertRaises(ValueError):
             with profile(
                 activities=[
