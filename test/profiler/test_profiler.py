@@ -2732,6 +2732,67 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 x = torch.randn(10, 10)
                 y = torch.mm(x, x)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_backward_compat(self):
+        """Plain activities=[CPU] still works unchanged."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        events = p.events()
+        self.assertGreater(len(events), 0)
+        has_overhead = any("Lazy Function Loading" in e.name for e in events)
+        self.assertTrue(has_overhead)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_dict_syntax(self):
+        """Dict syntax collects only the requested activity types."""
+        with profile(
+            activities=[{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}],
+        ) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        events = p.events()
+        self.assertGreater(len(events), 0)
+        has_overhead = any(
+            "Lazy Function Loading" in e.name for e in events
+        )  # Lazy Function Loading is an OVERHEAD event
+        self.assertFalse(has_overhead)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_mixed_syntax(self):
+        """Bare and dict entries can coexist for different activity groups."""
+        activities = [ProfilerActivity.CPU, {ProfilerActivity.CUDA: ["GPU_MEMCPY"]}]
+        with profile(activities=activities) as p:
+            with record_function("test_annotation"):
+                x = torch.randn(10, 10).to("cuda")
+                y = torch.mm(x, x)
+        self.assertGreater(len(p.events()), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_duplicate_raises(self):
+        """Same activity as both bare and dict key raises ValueError."""
+        with self.assertRaises(ValueError):
+            with profile(
+                activities=[
+                    ProfilerActivity.CPU,
+                    {ProfilerActivity.CPU: ["CPU_OP"]},
+                ],
+            ) as p:
+                pass
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_invalid_type_name(self):
+        """Invalid activity type name raises RuntimeError."""
+        with self.assertRaises(RuntimeError):
+            with profile(
+                activities=[{ProfilerActivity.CPU: ["NONEXISTENT_TYPE"]}],
+            ) as p:
+                x = torch.randn(10, 10)
+                y = torch.mm(x, x)
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:

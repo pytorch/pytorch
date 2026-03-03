@@ -152,7 +152,8 @@ class _KinetoProfile:
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity] | None = None,
+        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        | None = None,
         record_shapes: bool = False,
         profile_memory: bool = False,
         with_stack: bool = False,
@@ -164,7 +165,36 @@ class _KinetoProfile:
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        self.activities = set(activities) if activities else supported_activities()
+        self.activities: set[ProfilerActivity] = set()
+        self.activity_filters: dict[ProfilerActivity, set[str]] = {}
+        if activities is not None:
+            for item in activities:
+                if isinstance(item, ProfilerActivity):
+                    if item in self.activity_filters:
+                        raise ValueError(
+                            f"Activity {item} appears both as a bare enum and "
+                            f"as a dict key — use one or the other"
+                        )
+                    self.activities.add(item)
+                elif isinstance(item, dict):
+                    for key, val in item.items():
+                        if key in self.activities:
+                            raise ValueError(
+                                f"Activity {key} appears both as a bare enum "
+                                f"and as a dict key — use one or the other"
+                            )
+                        if key in self.activity_filters:
+                            raise ValueError(
+                                f"Activity {key} specified more than once as a dict key"
+                            )
+                        self.activities.add(key)
+                        self.activity_filters[key] = set(val)
+                else:
+                    raise TypeError(
+                        f"Expected ProfilerActivity or dict, got {type(item)}"
+                    )
+        else:
+            self.activities = supported_activities()
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
@@ -224,6 +254,9 @@ class _KinetoProfile:
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
                 post_processing_timeout_s=self.post_processing_timeout_s,
+                activity_filters=self.activity_filters
+                if self.activity_filters
+                else None,
             )
         if (self.profiler is not None) and (not self.acc_events):
             _warn_once(
@@ -740,7 +773,8 @@ class profile(_KinetoProfile):
     def __init__(
         self,
         *,
-        activities: Iterable[ProfilerActivity] | None = None,
+        activities: Iterable[ProfilerActivity | dict[ProfilerActivity, list[str]]]
+        | None = None,
         schedule: Callable[[int], ProfilerAction] | None = None,
         on_trace_ready: Callable[..., Any] | None = None,
         record_shapes: bool = False,
@@ -756,7 +790,16 @@ class profile(_KinetoProfile):
         custom_trace_id_callback: Callable[[], str] | None = None,
         post_processing_timeout_s: float | None = None,
     ) -> None:
-        activities_set = set(activities) if activities else supported_activities()
+        # Extract bare activities for the use_cuda deprecation check.
+        if activities is not None:
+            activities_set: set[ProfilerActivity] = set()
+            for item in activities:
+                if isinstance(item, ProfilerActivity):
+                    activities_set.add(item)
+                elif isinstance(item, dict):
+                    activities_set.update(item.keys())
+        else:
+            activities_set = supported_activities()
         if use_cuda is not None:
             warn(
                 "`use_cuda` is deprecated, use `activities` argument instead",
