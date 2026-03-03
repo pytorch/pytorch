@@ -536,6 +536,7 @@ class TestNNInit(TestCase):
 
 
 class TestNNInitDeviceType(TestCase):
+    @torch._dynamo.disable
     def _is_trunc_normal(self, tensor, mean, std, a, b):
         z_samples = (tensor.view(-1) - mean) / std
         z_samples = z_samples.tolist()
@@ -545,7 +546,6 @@ class TestNNInitDeviceType(TestCase):
         return p_value > 0.0001
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     @parametrize_test("dims", [1, 2, 4])
     @parametrize_test(
         "dtype",
@@ -580,7 +580,6 @@ class TestNNInitDeviceType(TestCase):
     # Reduced-precision KS test uses fixed wide params to avoid random
     # intervals too narrow for the type's representable value count.
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     @parametrize_test(
         "dtype",
         [torch.float16, torch.bfloat16],
@@ -606,7 +605,6 @@ class TestNNInitDeviceType(TestCase):
 
     # Test that trunc_normal_ behaves well for narrow interval compared to std.
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
-    @skipIfTorchDynamo("scipy.kstest is failing under dynamo")
     @parametrize_test(
         "dtype",
         [torch.float32, torch.float64, torch.float16, torch.bfloat16],
