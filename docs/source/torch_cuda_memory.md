@@ -6,7 +6,7 @@ To debug CUDA memory use, PyTorch provides a way to generate memory snapshots th
 at any point in time, and optionally record the history of allocation events that led up to that snapshot.
 
 The generated snapshots can then be drag and dropped onto the interactiver viewer hosted at [pytorch.org/memory_viz](https://pytorch.org/memory_viz) which
-can be used to explore the snapshot.
+can be used to explore the snapshot. Browsers like Chrome will crash on pickle files larger than 1GB, in which case use [SnapViewer](https://github.com/Da1sypetals/SnapViewer) to render the trace. It also allows you to search the trace for patterns.
 
 ```{note}
 The memory profiler and visualizer described in this document only have visibility into the CUDA memory that is
