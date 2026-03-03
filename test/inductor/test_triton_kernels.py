@@ -5128,22 +5128,23 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
 
-@triton.jit
-def custom_store(ptr, val, mask):
-    tl.store(ptr, val, mask)
+if HAS_CUDA_AND_TRITON:
+    @triton.jit
+    def custom_store(ptr, val, mask):
+        tl.store(ptr, val, mask)
 
 
-@triton.jit
-def add_kernel_with_custom_store(
-    in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr
-):
-    pid = tl.program_id(0)
-    offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    mask = offs < n_elements
-    x = tl.load(in_ptr0 + offs, mask=mask)
-    y = tl.load(in_ptr1 + offs, mask=mask)
-    tl.store(out_ptr + offs, x + y, mask=mask)
-    custom_store(out_ptr + offs, x + y, mask=mask)
+    @triton.jit
+    def add_kernel_with_custom_store(
+        in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(0)
+        offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offs < n_elements
+        x = tl.load(in_ptr0 + offs, mask=mask)
+        y = tl.load(in_ptr1 + offs, mask=mask)
+        tl.store(out_ptr + offs, x + y, mask=mask)
+        custom_store(out_ptr + offs, x + y, mask=mask)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
