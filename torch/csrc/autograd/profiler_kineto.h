@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include <map>
+
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/profiler/events.h>
 #include <torch/csrc/profiler/stubs/base.h>
@@ -179,9 +181,12 @@ TORCH_API void enableProfilerWithEventPostProcess(
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
+using ActivityFilter =
+    std::map<torch::profiler::impl::ActivityType, std::set<std::string>>;
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
-    const std::set<torch::profiler::impl::ActivityType>& activities);
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    const ActivityFilter& activity_filter = {});
 
 TORCH_API void toggleCollectionDynamic(
     const bool enable,

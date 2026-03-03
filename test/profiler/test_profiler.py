@@ -2699,6 +2699,39 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 y = torch.randn(10, 10)
                 z = torch.mm(x, y)
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_low_level_no_filter(self):
+        """Low-level profiler with no activity_filters works unchanged."""
+        with _profile(use_kineto=True, use_cpu=True) as p:
+            x = torch.randn(10, 10)
+            y = torch.mm(x, x)
+        self.assertGreater(len(p.function_events), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_low_level_with_filter(self):
+        """Low-level profiler with activity_filters restricts collection."""
+        with _profile(
+            use_kineto=True,
+            use_cpu=True,
+            activity_filters={ProfilerActivity.CPU: {"CPU_OP"}},
+        ) as p:
+            with torch.autograd.profiler.record_function("my_annotation"):
+                x = torch.randn(10, 10)
+                y = torch.mm(x, x)
+        self.assertGreater(len(p.function_events), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_low_level_invalid_name(self):
+        """Low-level profiler raises on invalid activity type name."""
+        with self.assertRaises(RuntimeError):
+            with _profile(
+                use_kineto=True,
+                use_cpu=True,
+                activity_filters={ProfilerActivity.CPU: {"NONEXISTENT_TYPE"}},
+            ) as p:
+                x = torch.randn(10, 10)
+                y = torch.mm(x, x)
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:
