@@ -4571,6 +4571,37 @@ if HAS_CUDA_AND_TRITON:
             compiled_out = compiled_f(p, a)
             self.assertEqual(eager_out, compiled_out)
 
+        def test_graph_partition_while_loop_nested_inputs(self):
+            from torch._higher_order_ops.while_loop import while_loop
+
+            w = torch.randn(16, 16, device="cuda")
+            b = torch.randn(16, device="cuda")
+
+            def f(x):
+                y = x @ w
+
+                def cond_fn(i, carry):
+                    return i < 3
+
+                def body_fn(i, carry):
+                    return i + 1, carry + b
+
+                _, y = while_loop(
+                    cond_fn,
+                    body_fn,
+                    (torch.tensor(0, device="cuda"), y),
+                )
+                return y
+
+            x = torch.randn(4, 16, device="cuda")
+            eager_out = f(x)
+
+            compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            for _ in range(3):
+                compiled_out = compiled_f(x)
+
+            self.assertEqual(eager_out, compiled_out)
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
         def test_graph_partition_unbacked_symint_multi_output_layout(self):
