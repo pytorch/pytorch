@@ -14603,6 +14603,29 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
         x = torch.zeros(4, 4)
         f(x)
 
+    def test_tensor_default_device(self, device):
+        def fn():
+            t1 = torch.tensor([1.0, 2.0])
+            t2 = torch.as_tensor([1.0, 2.0])
+            t3 = torch.scalar_tensor(1.0)
+            t4 = torch.asarray([1.0, 2.0])
+            return t1, t2, t3, t4
+
+        old_device = torch.get_default_device()
+        try:
+            torch.set_default_device(device)
+            expected = fn()
+
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+            actual = opt_fn()
+        finally:
+            torch.set_default_device(old_device)
+
+        for a, e in zip(actual, expected):
+            self.assertEqual(a.device, e.device)
+            self.assertEqual(a.device.type, torch.device(device).type)
+            self.assertTrue(torch.allclose(a, e))
+
     def test_dynamic_float_scalar_tensor_coersion(self):
         # Minified version of https://github.com/pytorch/pytorch/issues/158376#issuecomment-3079591367
         class Foo:

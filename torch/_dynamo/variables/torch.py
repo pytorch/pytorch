@@ -358,6 +358,10 @@ def get_overridable_functions() -> set[Callable[..., Any]]:
         torch.zeros_like,
         torch.empty,
         torch.full,
+        torch.tensor,
+        torch.as_tensor,
+        torch.scalar_tensor,
+        torch.asarray,
     }
     funcs.update(more)
     return funcs
