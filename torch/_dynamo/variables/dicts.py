@@ -632,7 +632,9 @@ class ConstDictVariable(VariableTracker):
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
-            self.install_dict_keys_match_guard()
+            # No dict guard needed here - we already guard on args[0], and
+            # lazy dict guarding will insert len/dict_keys_match guards
+            # elsewhere if needed.
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
                     tx,
