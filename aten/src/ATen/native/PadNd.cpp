@@ -108,8 +108,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
 }
 
 Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
-  const auto in_shape = self.sym_sizes();
-  const auto self_ndim = static_cast<int64_t>(in_shape.size());
+  const auto self_ndim = static_cast<int64_t>(self.sym_sizes().size());
 
   // number of dimensions that are padded
   const auto ndim_padded = padding.size() / 2;
@@ -125,64 +124,102 @@ Tensor _pad_circular_symint(const Tensor &self, c10::SymIntArrayRef padding) {
               " respectively but got ",
               padding.size());
 
+  // Validate wrapping constraint on original sizes before any narrowing.
+  {
+    const auto orig_shape = self.sym_sizes();
+    for (const auto i : c10::irange(ndim_padded)) {
+      const auto& pad_l = padding[2 * (ndim_padded - i - 1) + 0];
+      const auto& pad_r = padding[2 * (ndim_padded - i - 1) + 1];
+      const auto& size = orig_shape[ndim_nonpadded + i];
+      TORCH_CHECK(
+          pad_l <= size && pad_r <= size,
+          "Padding value causes wrapping around more than once.");
+      TORCH_CHECK(
+          size + pad_l + pad_r >= 0,
+          "Negative padding value is resulting in an empty dimension");
+    }
+  }
+
+  // Negative padding means trimming. Handle it upfront by narrowing the input
+  // so that the rest of the function only deals with non-negative padding.
+  // Necessary since negative padding on one side reduces
+  // the effective input size, so positive padding on the other side may need
+  // to wrap around more than once.
+  Tensor input = self;
+  c10::SymDimVector adj_padding(padding.begin(), padding.end());
+  for (const auto i : c10::irange(ndim_padded)) {
+    const auto dim = ndim_nonpadded + i;
+    const auto pad_idx = 2 * (ndim_padded - i - 1);
+    if (adj_padding[pad_idx] < 0) {
+      input = input.slice_symint(dim, -adj_padding[pad_idx], input.sym_size(dim));
+      adj_padding[pad_idx] = 0;
+    }
+    if (adj_padding[pad_idx + 1] < 0) {
+      input = input.slice_symint(dim, 0, input.sym_size(dim) + adj_padding[pad_idx + 1]);
+      adj_padding[pad_idx + 1] = 0;
+    }
+  }
+
+  const auto in_shape = input.sym_sizes();
+
   c10::SymDimVector out_shape(in_shape.size());
   for (const auto i: c10::irange(ndim_nonpadded)) {
     out_shape[i] = in_shape[i];
   }
 
-  // Get shape of padded tensor
   for (const auto i : c10::irange(ndim_padded)) {
-    const auto& pad_l = padding[2 * (ndim_padded - i - 1) + 0];
-    const auto& pad_r = padding[2 * (ndim_padded - i - 1) + 1];
+    const auto& pad_l = adj_padding[2 * (ndim_padded - i - 1) + 0];
+    const auto& pad_r = adj_padding[2 * (ndim_padded - i - 1) + 1];
     const auto& size = in_shape[ndim_nonpadded + i];
     out_shape[ndim_nonpadded + i] = size + pad_l + pad_r;
-
-    TORCH_CHECK(
-        pad_l <= size && pad_r <= size,
-        "Padding value causes wrapping around more than once.");
-    TORCH_CHECK(
-        out_shape[ndim_nonpadded + i] >= 0,
-        "Negative padding value is resulting in an empty dimension");
   }
 
-  auto out = self.new_empty_symint(out_shape, self.options());
+  auto out = input.new_empty_symint(out_shape, input.options());
 
-  // Put original array into the padded array
+  // Copy the (possibly narrowed) input into the center of the output
   Tensor out_slice = out;
-  Tensor in_slice = self;
-  const SymInt zero = 0;
   for (const auto i : c10::irange(ndim_padded)) {
     const auto dim = ndim_padded - i + ndim_nonpadded - 1;
-    const auto& pad_l = padding[2*i + 0];
-    const auto& pad_r = padding[2*i + 1];
-    out_slice = out_slice.slice_symint(dim, std::max(pad_l, zero), out_shape[dim] - std::max(pad_r, zero));
-    in_slice = in_slice.slice_symint(dim, std::max(-pad_l, zero), in_shape[dim] - std::max(-pad_r, zero));
+    const auto& pad_l = adj_padding[2*i + 0];
+    const auto& pad_r = adj_padding[2*i + 1];
+    out_slice = out_slice.slice_symint(dim, pad_l, out_shape[dim] - pad_r);
   }
-  out_slice.copy_(in_slice);
+  out_slice.copy_(input);
 
-  // The following steps first pad the beginning of the tensor (left side),
-  // and then pad the end of the tensor (right side).
+  // Circularly fill the padding regions by copying from the center.
   // Note: Corners will be written more than once when ndim_padded > 1.
   //
-  // Only in cases where padding values are > 0 are when additional copying
-  // is required.
+  // When pad exceeds the center size (possible when negative padding on one
+  // side shrinks the effective input), we copy center_size elements at a time.
   for (const auto i : c10::irange(ndim_padded)) {
     const auto dim = ndim_padded - i + ndim_nonpadded - 1;
-    const auto& pad_l = padding[2*i + 0];
-    const auto& pad_r = padding[2*i + 1];
+    const auto& pad_l = adj_padding[2*i + 0];
+    const auto& pad_r = adj_padding[2*i + 1];
+    const auto center_size = out_shape[dim] - pad_l - pad_r;
 
     if (pad_l > 0) {
-      out_slice = out.slice_symint(dim, 0, pad_l);
-      in_slice = out.slice_symint(dim,
-                           out_shape[dim] - pad_l - std::max(pad_r, zero),
-                           out_shape[dim] - std::max(pad_r, zero));
-      out_slice.copy_(in_slice);
+      SymInt copied = 0;
+      while (copied < pad_l) {
+        auto to_copy = std::min(pad_l - copied, center_size);
+        auto dst = out.slice_symint(dim, pad_l - copied - to_copy, pad_l - copied);
+        auto src = out.slice_symint(dim,
+                             out_shape[dim] - pad_r - to_copy,
+                             out_shape[dim] - pad_r);
+        dst.copy_(src);
+        copied = copied + to_copy;
+      }
     }
 
     if (pad_r > 0) {
-      out_slice = out.slice_symint(dim, out_shape[dim] - pad_r, out_shape[dim]);
-      in_slice = out.slice_symint(dim, std::max(pad_l, zero), std::max(pad_l, zero) + pad_r);
-      out_slice.copy_(in_slice);
+      const auto pad_start = out_shape[dim] - pad_r;
+      SymInt copied = 0;
+      while (copied < pad_r) {
+        auto to_copy = std::min(pad_r - copied, center_size);
+        auto dst = out.slice_symint(dim, pad_start + copied, pad_start + copied + to_copy);
+        auto src = out.slice_symint(dim, pad_l, pad_l + to_copy);
+        dst.copy_(src);
+        copied = copied + to_copy;
+      }
     }
   }
 
