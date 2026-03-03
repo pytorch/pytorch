@@ -48,34 +48,29 @@ namespace {
 void invalid_scaling_config(
     const at::Tensor& mat_a,
     const at::Tensor& mat_b,
-    const at::Tensor& scale_a,
-    const at::Tensor& scale_b) {
-  TORCH_CHECK_VALUE(
-    false,
-    "Invalid scaling configuration.\n"
-    "- For TensorWise scaling, a and b should be float8, scales should be float and singletons.\n"
-    "- For RowWise scaling, a and b should be float8, scales should be float, scale_a should be (",
-    mat_a.size(0),
-    ", 1) and scale_b should be (1, ",
-    mat_b.size(1),
-    "), and both should be contiguous.\n"
-    "Got mat_a.dtype()=",
-    mat_a.scalar_type(),
-    ", scale_a[0].dtype()=",
-    scale_a[0].scalar_type(),
-    ", scale_a[0].size()=",
-    scale_a[0].sizes(),
-    ", scale_a[0].stride()=",
-    scale_a[0].strides(),
-    ", ",
-    "mat_b.dtype()=",
-    mat_b.scalar_type(),
-    ", scale_b[0].dtype()=",
-    scale_b[0].scalar_type(),
-    ", scale_b[0].size()=",
-    scale_b[0].sizes(),
-    " and scale_b[0].stride()=",
-    scale_b[0].strides());
+    const std::optional<at::Tensor>& scale_a,
+    const std::optional<at::Tensor>& scale_b) {
+  std::stringstream exception_ss;
+  exception_ss << "Invalid scaling configuration.\n";
+  exception_ss << "- For TensorWise scaling, a and b should be float8, scales should be float and singletons.\n";
+  exception_ss << "- For RowWise scaling, a and b should be float8, scales should be float, scale_a should be (";
+  exception_ss << mat_a.size(0) << ", 1) and scale_b should be (1, " << mat_b.size(1) << "), and both should be contiguous.\n";
+  exception_ss << "Got mat_a.dtype()=" << mat_a.scalar_type();
+  if (scale_a.has_value()) {
+    exception_ss << ", scale_a.dtype()=" << scale_a.value().scalar_type() << ", scale_a.size()=" << scale_a.value().sizes() << ", scale_a.stride()=" << scale_a.value().strides();
+  }
+  else {
+    exception_ss << ", scale_a=None";
+  }
+  exception_ss << ", mat_b.dtype()=" << mat_b.scalar_type();
+  if (scale_b.has_value()) {
+    exception_ss << ", scale_b.dtype()=" << scale_b.value().scalar_type() << ", scale_b.size()=" << scale_b.value().sizes() << " and scale_b.stride()=" << scale_b.value().strides();
+  }
+  else {
+    exception_ss << " and scale_b=None";
+  }
+
+  TORCH_CHECK_VALUE(false, exception_ss.str());
 }
 
 /*
@@ -135,7 +130,7 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
 } // namespace
 
 static Tensor&
-_scaled_mm_out_cpu_emulated(const Tensor& mat_a, const Tensor& mat_b,
+_scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
           const Tensor& scale_a,
           const Tensor& scale_b,
           const std::optional<at::Tensor>& bias,
@@ -144,11 +139,11 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat_a, const Tensor& mat_b,
           bool use_fast_accum,
           const scaled::ScaledGemmImplementation gemm_impl,
           Tensor& out) {
-  TORCH_CHECK(mat_a.dim() == 2, "mat_a must be a matrix");
-  TORCH_CHECK(mat_b.dim() == 2, "mat_b must be a matrix");
+  TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
+  TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
-      mat_a.sizes()[1] == mat_b.sizes()[0], "mat_a and mat_b shapes cannot be multiplied (",
-      mat_a.sizes()[0], "x", mat_a.sizes()[1], " and ", mat_b.sizes()[0], "x", mat_b.sizes()[1], ")");
+      mat1.sizes()[1] == mat2.sizes()[0], "mat_a and mat_b shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   TORCH_CHECK_VALUE(gemm_impl == scaled::ScaledGemmImplementation::TENSORWISE_TENSORWISE ||
     gemm_impl == scaled::ScaledGemmImplementation::ROWWISE_ROWWISE, "Unsupported scaling implementation");
@@ -157,10 +152,10 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat_a, const Tensor& mat_b,
     // Restrictions:
     // A, B are FP8, scales are fp32
     TORCH_CHECK_VALUE(
-    isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
-    "mat_a and mat_b must be fp8 types, got: ",
-    mat_a.scalar_type(),
-    mat_b.scalar_type());
+    isFloat8Type(mat1.scalar_type()) && isFloat8Type(mat2.scalar_type()),
+    "mat1 and mat2 must be fp8 types, got: ",
+    mat1.scalar_type(),
+    mat2.scalar_type());
     TORCH_CHECK_VALUE(
         scale_a.numel() == 1 && scale_a.scalar_type() == kFloat,
         "scale_a must have 1 Float element");
@@ -172,27 +167,27 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat_a, const Tensor& mat_b,
     // Restrictions:
     // A, B are FP8, scales are fp32, shape M/N for A/B
     TORCH_CHECK_VALUE(
-        isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
-        "mat_a and mat_b must be fp8 types, got: ",
-        mat_a.scalar_type(),
-        mat_b.scalar_type());
+        isFloat8Type(mat1.scalar_type()) && isFloat8Type(mat2.scalar_type()),
+        "mat1 and mat_b must be fp8 types, got: ",
+        mat1.scalar_type(),
+        mat2.scalar_type());
     TORCH_CHECK_VALUE(
-        scale_a.size(0) == mat_a.size(0) && scale_a.size(1) == 1,
+        scale_a.size(0) == mat1.size(0) && scale_a.size(1) == 1,
         "scale_a must have shape [",
-        mat_a.size(0),
+        mat1.size(0),
         ", 1], got [",
         scale_a.sizes(),
         "]");
     TORCH_CHECK_VALUE(
-        scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat,
+        scale_a.numel() == mat1.size(0) && scale_a.scalar_type() == kFloat,
         "scale_a must have ",
-        mat_a.size(0),
+        mat1.size(0),
         " Float elements, got ",
         scale_a.numel());
     TORCH_CHECK_VALUE(
-        scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat,
+        scale_b.numel() == mat2.size(1) && scale_b.scalar_type() == kFloat,
         "scale_b must have ",
-        mat_b.size(1),
+        mat2.size(1),
         " Float elements, got ",
         scale_b.numel());
 
@@ -210,18 +205,18 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat_a, const Tensor& mat_b,
       !scale_result ||
           (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
       "scale_result must be a float scalar");
-  TORCH_CHECK(!bias || bias->numel() == mat_b.sizes()[1], "Bias must be size ", mat_b.sizes()[1],
+  TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
        " but got ", bias->numel());
 
   // Check types
-  TORCH_CHECK(isFloat8Type(mat_a.scalar_type()), "Expected mat_a to be Float8 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK(isFloat8Type(mat_b.scalar_type()), "Expected mat_b to be Float8 matrix got ", mat_b.scalar_type());
+  TORCH_CHECK(isFloat8Type(mat1.scalar_type()), "Expected mat1 to be Float8 matrix got ", mat1.scalar_type());
+  TORCH_CHECK(isFloat8Type(mat2.scalar_type()), "Expected mat2 to be Float8 matrix got ", mat2.scalar_type());
 
-  auto mat_a_cont = mat_a.contiguous();
-  auto mat_b_cont = mat_b.contiguous();
-  IntArrayRef mat_a_sizes = mat_a_cont.sizes();
-  IntArrayRef mat_b_sizes = mat_b_cont.sizes();
-  at::native::resize_output(out, {mat_a_sizes[0], mat_b_sizes[1]});
+  auto mat1_cont = mat1.contiguous();
+  auto mat2_cont = mat2.contiguous();
+  IntArrayRef mat1_sizes = mat1_cont.sizes();
+  IntArrayRef mat2_sizes = mat2_cont.sizes();
+  at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
 
   float output_scale = 1.0f;
   if (scale_result.has_value() &&
@@ -233,12 +228,12 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat_a, const Tensor& mat_b,
   at::Tensor fp32_mat_a;
   at::Tensor fp32_mat_b;
   if (gemm_impl == scaled::ScaledGemmImplementation::TENSORWISE_TENSORWISE) {
-    fp32_mat_a = at::mul(mat_a_cont.to(kFloat), scale_a.item<float>());
-    fp32_mat_b = at::mul(mat_b_cont.to(kFloat), scale_b.item<float>());
+    fp32_mat_a = at::mul(mat1_cont.to(kFloat), scale_a.item<float>());
+    fp32_mat_b = at::mul(mat2_cont.to(kFloat), scale_b.item<float>());
   }
   else {
-    fp32_mat_a = at::mul(mat_a_cont.to(kFloat), scale_a);
-    fp32_mat_b = at::mul(mat_b_cont.to(kFloat), scale_b);
+    fp32_mat_a = at::mul(mat1_cont.to(kFloat), scale_a);
+    fp32_mat_b = at::mul(mat2_cont.to(kFloat), scale_b);
   }
 
   auto out_tmp = at::matmul(fp32_mat_a, fp32_mat_b);
@@ -255,7 +250,7 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat_a, const Tensor& mat_b,
 }
 
 Tensor&
-_scaled_mm_out_cpu(const Tensor& mat_a, const Tensor& mat_b,
+_scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           const Tensor& scale_a,
           const Tensor& scale_b,
           const std::optional<at::Tensor>& bias,
@@ -269,8 +264,8 @@ _scaled_mm_out_cpu(const Tensor& mat_a, const Tensor& mat_b,
     if ((!mixed_dtype && cpuinfo_has_x86_amx_int8()) ||
         (mixed_dtype && cpuinfo_has_x86_amx_fp16())) {
       return mkldnn_scaled_mm(
-          mat_a,
-          mat_b,
+          mat1,
+          mat2,
           scale_a,
           scale_b,
           bias,
@@ -291,8 +286,8 @@ _scaled_mm_out_cpu(const Tensor& mat_a, const Tensor& mat_b,
             std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
             std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
         },
-        mat_a,
-        mat_b,
+        mat1,
+        mat2,
         scale_a,
         scale_b);
 
@@ -305,7 +300,7 @@ _scaled_mm_out_cpu(const Tensor& mat_a, const Tensor& mat_b,
       gemm_impl = scaled::ScaledGemmImplementation::ROWWISE_ROWWISE;
     }
 
-  return _scaled_mm_out_cpu_emulated(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, gemm_impl, out);
+  return _scaled_mm_out_cpu_emulated(mat1, mat2, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, gemm_impl, out);
   }
 }
 
@@ -422,11 +417,12 @@ Tensor& _scaled_mm_cpu_v2_out(
   auto scale_recipe_b_enum = convert_int_to_enum<ScalingType>(scale_recipe_b);
   auto swizzle_b_enum = convert_int_to_enum<SwizzleType>(swizzle_b);
 
-  // CPU does not support swizzle, so return false.
-  TORCH_CHECK_VALUE(
+  if (!swizzle_a_enum.empty() && !swizzle_b_enum.empty()) {
+    TORCH_CHECK_VALUE(
       swizzle_a_enum[0] == at::blas::SwizzleType::NO_SWIZZLE &&
           swizzle_b_enum[0] == at::blas::SwizzleType::NO_SWIZZLE,
       "CPU does not support swizzle.");
+  }
 
   // at this point we can start working out what we want to be doing
   // Try to do as few steps as possible.
@@ -454,7 +450,10 @@ Tensor& _scaled_mm_cpu_v2_out(
   }
 
   if (!found_impl) {
-    invalid_scaling_config(mat_a, mat_b, scale_a[0], scale_b[0]);
+    const std::optional<at::Tensor> scale_a_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};
+    const std::optional<at::Tensor> scale_b_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};
+
+    invalid_scaling_config(mat_a, mat_b, scale_a_opt, scale_b_opt);
   }
 
   at::native::resize_output(out, {mat_a.size(0), mat_b.size(1)});
@@ -469,7 +468,7 @@ Tensor& _scaled_mm_cpu_v2_out(
       scale_a[0],
       scale_b[0],
       bias,
-      std::nullopt,
+      std::nullopt,  // scale-result
       out_dtype_,
       use_fast_accum,
       gemm_impl,
