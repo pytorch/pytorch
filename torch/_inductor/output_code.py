@@ -381,6 +381,13 @@ def cudagraph_partition_post_compile(
 
     compiled_graph.recursively_apply_fns(cudagraphify_fns)
 
+    if len(compiled_graph.partition_maps) > 1:
+        from .cudagraph_trees import protect_pool_inputs_for_partitioned_call
+
+        compiled_graph.current_callable = protect_pool_inputs_for_partitioned_call(
+            compiled_graph.current_callable, device_index
+        )
+
 
 def maybe_realign_inputs(
     ran_cudagraphs: BoxedBool,

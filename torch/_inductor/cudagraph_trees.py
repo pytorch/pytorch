@@ -462,6 +462,38 @@ def cudagraphify_impl(
     return deferred_cudagraphify
 
 
+def protect_pool_inputs_for_partitioned_call(
+    callable: Callable[..., Any], device_index: int
+) -> Callable[..., Any]:
+    """Wrap a partitioned callable to clone top-level pool-referencing inputs.
+
+    When a compiled function is split into multiple CUDA-graph partitions,
+    the first partition's ``dealloc_current_path_weakrefs`` frees *all* pool
+    storage from the previous generation — including storage that later
+    partitions' inputs still reference.  ``_protect_inputs_from_dealloc``
+    inside ``_run`` only sees *one* partition's inputs, so cross-partition
+    references are left dangling.
+
+    This wrapper runs before any partition and clones every top-level input
+    whose storage lives in the pool, so that the subsequent dealloc cannot
+    invalidate another partition's pending inputs.
+    """
+
+    def protected(inputs: list[InputType]) -> OutputType:
+        container = get_container(device_index)
+        manager = container.tree_manager
+        if (
+            manager is not None
+            and manager.current_node is not None
+            and (manager.in_recording or manager.in_warmup)
+            and manager.can_start_new_generation()
+        ):
+            manager._protect_inputs_from_dealloc(inputs)
+        return callable(inputs)
+
+    return protected
+
+
 @contextlib.contextmanager
 def dynamo_timed_cudagraph(
     name: str,
@@ -2224,11 +2256,55 @@ class CUDAGraphTreeManager:
             > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
         )
 
+    def _protect_inputs_from_dealloc(
+        self, new_inputs: list[InputType]
+    ) -> None:
+        """Clone input tensors whose storage lives in the CUDA graph pool.
+
+        When outputs from a previous run are fed back as inputs (e.g. the
+        standard RL loop ``state = compiled_step(state)``), their storage
+        is inside the CUDA graph pool.  ``dealloc_current_path_weakrefs``
+        frees that storage and marks it with an access-error, so any
+        subsequent read from those tensors would raise.
+
+        Cloning affected inputs into fresh storage before the dealloc
+        preserves their data while still allowing the pool memory to be
+        reclaimed.
+        """
+        if self.current_node is None:
+            return
+
+        pool_ptrs: OrderedSet[int] = OrderedSet()
+        for storage_ref in self.current_node.path_live_weakrefs():
+            pool_ptrs.add(storage_ref.data_ptr())
+
+        if not pool_ptrs:
+            return
+
+        def _maybe_clone(x: Any) -> Any:
+            if (
+                isinstance(x, torch.Tensor)
+                and x.untyped_storage().data_ptr() in pool_ptrs
+            ):
+                return x.clone()
+            return x
+
+        for i, inp in enumerate(new_inputs):
+            new_inputs[i] = pytree.tree_map(_maybe_clone, inp)
+
     def _run(self, new_inputs: list[InputType], function_id: FunctionID) -> OutputType:
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
         # so we check up front
+
+        # When starting a new generation, try_end_curr_recording /
+        # try_end_curr_warmup will call dealloc_current_path_weakrefs which
+        # frees pool storage.  If any new_inputs reference that storage
+        # (output→input feedback), clone them first.
+        if (self.in_recording or self.in_warmup) and self.can_start_new_generation():
+            self._protect_inputs_from_dealloc(new_inputs)
+
         if self.in_recording:
             self.try_end_curr_recording(function_id)
 

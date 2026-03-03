@@ -4799,6 +4799,20 @@ if HAS_CUDA_AND_TRITON:
             compiled_out = compiled_f(p, a)
             self.assertEqual(eager_out, compiled_out)
 
+        def test_output_fed_back_as_input(self):
+            """Output→input feedback: the standard RL/simulation loop pattern."""
+
+            @torch.compile(mode="reduce-overhead")
+            def step(x):
+                return x * 0.99 + 0.01
+
+            x = torch.randn(100, device="cuda")
+            for _ in range(5):
+                torch.compiler.cudagraph_mark_step_begin()
+                x = step(x)
+
+            torch.cuda.synchronize()
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
         def test_graph_partition_unbacked_symint_multi_output_layout(self):
