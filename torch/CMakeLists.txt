@@ -473,6 +473,9 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
   target_link_libraries(_C PRIVATE torch_python)
   set_target_properties(_C PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/torch"
+    # libtorch_python.so is installed to lib/ relative to _C, so use
+    # $ORIGIN/lib as the install RPATH (the global default is just $ORIGIN).
+    INSTALL_RPATH "${_rpath_portable_origin}/lib"
   )
   if(NOT WIN32)
     set_target_properties(_C PROPERTIES

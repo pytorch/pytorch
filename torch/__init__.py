@@ -374,6 +374,20 @@ def _load_global_deps() -> None:
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
 
+    # In scikit-build-core editable installs with redirect mode, native libs are
+    # installed to the dist package location rather than relative to __file__.
+    if not os.path.exists(global_deps_lib_path):
+        try:
+            from importlib.metadata import distribution
+
+            installed = distribution("torch").locate_file(
+                os.path.join("torch", "lib", lib_name)
+            )
+            if installed.exists():
+                global_deps_lib_path = str(installed)
+        except Exception:
+            pass
+
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
         # Workaround slim-wheel CUDA dependency bugs in cusparse and cudnn by preloading nvjitlink
@@ -400,6 +414,27 @@ def _load_global_deps() -> None:
         _preload_cuda_deps(err)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
+
+# In scikit-build-core editable installs with redirect mode, C extensions are
+# installed to the dist package directory (site-packages/torch/) rather than
+# the source tree. Extend __path__ to include that directory so that
+# submodule lookups (e.g. torch._C) find the C extension rather than the
+# torch/_C/ stub directory.
+_source_dir = os.path.dirname(os.path.abspath(__file__))
+if not any(
+    os.path.exists(os.path.join(_source_dir, f"_C{_s}"))
+    for _s in importlib.machinery.EXTENSION_SUFFIXES
+):
+    try:
+        from importlib.metadata import distribution as _dist
+
+        _pkg_dir = str(_dist("torch").locate_file("torch"))
+        if _pkg_dir != _source_dir and _pkg_dir not in __path__:
+            __path__.append(_pkg_dir)  # type: ignore[attr-defined]
+        del _pkg_dir
+    except Exception:
+        pass
+del _source_dir
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
     platform.system() != "Windows"
