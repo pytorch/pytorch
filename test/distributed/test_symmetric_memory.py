@@ -1533,6 +1533,11 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_mempool_tensor_factory(self):
         self._init_process()
+
+        # Need this all_reduce to initialize the process-group communicator.
+        # Otherwise, first-use one-shot symmetric-memory collectives can flake.
+        dist.all_reduce(torch.ones(1, device=self.device))
+
         group_name = dist.group.WORLD.group_name
 
         dtype = torch.float
