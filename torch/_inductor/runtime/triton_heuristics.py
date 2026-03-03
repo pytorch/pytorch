@@ -2918,7 +2918,7 @@ def pointwise(
                     )
             if torch.xpu.is_available():
                 configs.extend(
-                    [  # intel-xpu-backend-for-triton #5133
+                    [  # intel-xpu-backend-for-triton #5124
                         triton_config_with_settings(size_hints, 32),
                     ]
                 )
