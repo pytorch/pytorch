@@ -11,6 +11,7 @@
 #include <optional>
 
 #include <algorithm>
+#include <array>
 #include <bitset>
 #include <cctype>
 #include <cmath>
@@ -184,7 +185,7 @@ auto powWrapper(T a, U b) {
   return pow(a, b);
 }
 
-static const std::vector<OperatorGeneratorArgs> opGenArgs{
+static constexpr auto opGenArgs = std::to_array<OperatorGeneratorArgs>({
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
         [](Stack& stack) {
@@ -1377,12 +1378,12 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
                                 } else {
                                   return static_cast<char>(::toupper(c));
                                 }
-                              }))};
-
+                              }))});
+template <std::size_t N>
 static std::vector<std::optional<Operator>> createOperators(
-    const std::vector<OperatorGeneratorArgs>& args) {
+    const std::array<OperatorGeneratorArgs, N>& args) {
   std::vector<std::optional<Operator>> result;
-  result.reserve(args.size());
+  result.reserve(N);
   for (const auto& arg : args) {
     if (arg.schema_str) {
       if (arg.isOperationCreator) {
@@ -1674,14 +1675,14 @@ void dictConstructFromList(Stack& stack) {
           dictCopy,                                                            \
           aliasAnalysisFromSchema())
 
-static const std::vector<OperatorGeneratorArgs> dict_ops{
+static constexpr auto dict_ops = std::to_array<OperatorGeneratorArgs>({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
     CREATE_DICT_OPS("bool"),
     CREATE_DICT_OPS("float"),
     CREATE_DICT_OPS("complex"),
     CREATE_DICT_OPS("Tensor"),
-};
+});
 RegisterOperators reg_dict_ops(createOperators(dict_ops));
 
 constexpr c10::AliasAnalysisKind aliasAnalysisFromSchema() {
@@ -1736,7 +1737,7 @@ int64_t stringFindImpl(
 
 // String Ops
 // Implementations located in torch/csrc/jit/runtime/register_prim_ops.cpp
-static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
+static constexpr auto stringOpGenArgs = std::to_array<OperatorGeneratorArgs>({
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
             "aten::slice.str(str string, int? start=None, int? end=None, int step=1) -> str"),
@@ -2370,11 +2371,11 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           push(stack, ss.str());
         },
         aliasAnalysisFromSchema()),
-};
+});
 
 RegisterOperators regStrOps(createOperators(stringOpGenArgs));
 
-static const std::vector<OperatorGeneratorArgs> opGenArgs1{
+static constexpr auto opGenArgs1 = std::to_array<OperatorGeneratorArgs>({
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::rangelist(int n) -> int[]"),
         [](Stack& stack) {
@@ -2812,7 +2813,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
           push(stack, std::move(val));
         },
-        aliasAnalysisFromSchema())};
+        aliasAnalysisFromSchema())});
 
 RegisterOperators reg1(createOperators(opGenArgs1));
 
@@ -2821,7 +2822,7 @@ void hashValue(Stack& stack) {
   push(stack, value.hash());
 }
 
-static const std::vector<OperatorGeneratorArgs> opGenArgs2{
+static constexpr auto opGenArgs2 = std::to_array<OperatorGeneratorArgs>({
     // registered as Any[] so that heterogeneous tuples can be called with len()
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::len.any(Any[] a) -> int"),
@@ -3471,7 +3472,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
     DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, float, at::Tensor, double),
     DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, int, at::Tensor, int),
     DEFINE_COMPLEX_OP_WITH_TENSOR_ARG(Tensor, bool, at::Tensor, bool),
-};
+});
 
 RegisterOperators reg2(createOperators(opGenArgs2));
 
