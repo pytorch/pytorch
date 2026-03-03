@@ -113,7 +113,13 @@ for %%v in (%DESIRED_PYTHON_PREFIX%) do (
         set "MAGMA_HOME=%cd%\magma_%CUDA_PREFIX%_%BUILD_TYPE%"
     )
     echo "Calling arch build script"
-    call %CUDA_PREFIX%.bat
+    if "%CUDA_VERSION%" == "cpu" (
+        call cpu.bat
+    ) else if "%CUDA_VERSION%" == "xpu" (
+        call xpu.bat
+    ) else (
+        call cuda.bat %CUDA_VERSION%
+    )
     if ERRORLEVEL 1 exit /b 1
     @endlocal
 )

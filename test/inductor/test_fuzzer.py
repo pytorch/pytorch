@@ -150,7 +150,7 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(len(new_results), 1)
         self.assertEqual(
             set(key_1.keys()),
-            {j for i in new_results.keys() for j in i}
+            {j for i in new_results.keys() for j in i}  # noqa: SIM118
             - set(MODULE_DEFAULTS["torch._inductor.config"].keys()),
         )
 
@@ -160,14 +160,11 @@ class TestConfigFuzzer(TestCase):
     )
     def test_config_fuzzer_dynamo_bisect(self):
         # these values just chosen randomly, change to different ones if necessary
-        key_1 = {"dead_code_elimination": False, "specialize_int": True}
+        key_1 = {"specialize_int": True}
 
         def create_key_1():
             def myfn():
-                if (
-                    not dynamo_config.dead_code_elimination
-                    and dynamo_config.specialize_int
-                ):
+                if dynamo_config.specialize_int:
                     return False
                 return True
 
@@ -184,7 +181,7 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(len(new_results), 1)
         self.assertEqual(
             set(key_1.keys()),
-            {j for i in new_results.keys() for j in i}
+            {j for i in new_results for j in i}  # noqa: SIM118
             - set(MODULE_DEFAULTS["torch._dynamo.config"].keys()),
         )
 

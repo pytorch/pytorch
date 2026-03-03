@@ -107,14 +107,13 @@ class AbstractTimeoutTest:
             c2p.append(e)
 
     def _init_methods(self):
-        f = tempfile.NamedTemporaryFile(delete=False)
-        if sys.platform == "win32":
-            yield "file:///{}".format(f.name.replace("\\", "/"))
+        with tempfile.NamedTemporaryFile(delete=False) as f:
             f.close()
-        else:
-            yield f"file://{f.name}"
-            f.close()
-            yield f"tcp://127.0.0.1:{common.find_free_port():d}"
+            if sys.platform == "win32":
+                yield "file:///{}".format(f.name.replace("\\", "/"))
+            else:
+                yield f"file://{f.name}"
+                yield f"tcp://127.0.0.1:{common.find_free_port():d}"
 
     def _test_default_store_timeout(self, backend):
         for init_method in self._init_methods():
@@ -140,7 +139,8 @@ class AbstractTimeoutTest:
 class TimeoutTest(TestCase):
     @retry_on_connect_failures
     def test_store_based_barrier(self):
-        f = tempfile.NamedTemporaryFile(delete=False)
+        f = tempfile.NamedTemporaryFile(delete=False)  # noqa: SIM115
+        f.close()
         port = common.find_free_port()
 
         def thread_work(timeout, init_type, world_size, rank, error_list):
@@ -994,6 +994,29 @@ class CommonDistributedDataParallelTest:
 
         self._test_not_nan(model, x)
 
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_buffer_sync_multi_forward_with_batchnorm(self):
+        pg = self._get_process_group()
+
+        model = nn.Sequential(
+            nn.Linear(10, 10),
+            nn.BatchNorm1d(10),
+        ).to(device=self.rank)
+
+        model = DistributedDataParallel(
+            model,
+            device_ids=[self.rank],
+            process_group=pg,
+            broadcast_buffers=True,
+        )
+
+        x = torch.randn(4, 10, device=self.rank)
+
+        model.zero_grad()
+        out1 = model(x)
+        out2 = model(x)
+        (out1.mean() + out2.mean()).backward()
+
     @dataclass
     class CustomOutput:
         o1: Optional[torch.Tensor]
@@ -1154,7 +1177,11 @@ class AbstractCommTest:
             ranks=ranks,
             backend="gloo",
         )
-        assert dist.get_world_size(process_group) == dist.get_world_size(verify_pg)
+        if dist.get_world_size(process_group) != dist.get_world_size(verify_pg):
+            raise AssertionError(
+                f"World sizes mismatch: {dist.get_world_size(process_group)} "
+                f"vs {dist.get_world_size(verify_pg)}"
+            )
 
         initial_num = (
             self._verify_sequence_number_across_pg(
@@ -2073,16 +2100,16 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
         # multi tensor collectives
-        if collective == dist.barrier:
+        if collective is dist.barrier:
             collective()
         elif collective in (dist.all_gather, dist.gather):
             collective([tensor], tensor, *args)
-        elif collective == dist.scatter:
+        elif collective is dist.scatter:
             collective(tensor, [tensor], *args)
         elif collective in (dist.reduce_scatter, dist.all_to_all):
             # gloo does not support reduce_scatter or all_to_all
             if backend != "gloo":
-                if collective == dist.reduce_scatter:
+                if collective is dist.reduce_scatter:
                     collective(tensor, [tensor], *args)
                 else:
                     collective([tensor], [tensor], *args)
@@ -2268,8 +2295,9 @@ class LocalRankTest(MultiProcessTestCase):
 
 if __name__ == "__main__":
     if device_type != "cpu":
-        assert not torch.get_device_module()._initialized, (
-            f"test_distributed must not have initialized {device_type} context on main process"
-        )
+        if torch.get_device_module()._initialized:
+            raise AssertionError(
+                f"test_distributed must not have initialized {device_type} context on main process"
+            )
 
     run_tests()

@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 
 
 @dataclass
 class MaskBuffer:
-    data: Optional[torch.Tensor] = None
+    data: torch.Tensor | None = None
     # refcount allows shared usage of the MaskBuffer, as long as all users have the same data
     refcount: int = 0
 
@@ -16,7 +15,8 @@ class MaskBuffer:
         if self.refcount == 0:
             self.data = mask
         else:
-            assert self.data is not None
+            if self.data is None:
+                raise AssertionError
             if not torch.equal(self.data, mask):
                 raise RuntimeError(
                     "MaskBuffer has been materialized with conflicting data"

@@ -26,7 +26,7 @@ These schema definitions enable the DTensor system to:
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Optional, Union
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -36,7 +36,7 @@ from torch._C import (
 )
 from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import Placement
 
 
@@ -60,18 +60,19 @@ except ImportError:
 ArgsType = tuple[object, ...]
 KwargsType = dict[str, object]
 
-PlacementList = list[Optional[Placement]]
+PlacementList = list[Placement | None]
 
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type should
 # be the same set of possibilities.
-OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
+OutputSpecType = DTensorSpec | Sequence[DTensorSpec | None] | None
 
 
 def _rebuild_tensor_from_dtensor_meta(arg) -> object:
     """
     This is used to propagate tensor metadata, must be under fake mode
     """
-    assert arg.tensor_meta is not None, "DTensorSpec does not contain tensor_meta."
+    if arg.tensor_meta is None:
+        raise AssertionError("DTensorSpec does not contain tensor_meta.")
     return torch.empty_strided(
         arg.tensor_meta.shape,
         arg.tensor_meta.stride,
@@ -109,8 +110,9 @@ class OpSpec:
 
     # output_specs and input_specs are related: for this op, given these input_specs,
     # this is the way the output would look
-    output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
-    input_specs: Optional[Sequence[DTensorSpec]] = None
+    # Note: output_specs can be None for ops that don't return tensors (e.g., _linalg_check_errors)
+    output_specs: DTensorSpec | tuple[DTensorSpec | None, ...] | None
+    input_specs: Sequence[DTensorSpec] | None = None
 
     """
     redistribute_cost tells how expensive it is to redistribute a given input into the
@@ -138,7 +140,7 @@ class OpSpec:
             K,    # cost of redistributing tensor_a from 'Shard(0)'
         ],
     """
-    redistribute_cost: Optional[list[list[float]]] = None
+    redistribute_cost: list[list[float]] | None = None
 
     @cached_property
     def output_spec(self) -> DTensorSpec:
@@ -159,19 +161,29 @@ class OpSpec:
             return self.output_specs.mesh
         elif isinstance(self.output_specs, tuple):
             out_spec = self.output_specs[0]
-            assert isinstance(out_spec, DTensorSpec)
+            if not isinstance(out_spec, DTensorSpec):
+                raise AssertionError
             return out_spec.mesh
+        elif self.output_specs is None:
+            # For no-output ops, get mesh from input_specs
+            if self.input_specs is None or len(self.input_specs) <= 0:
+                raise AssertionError(
+                    "Cannot determine mesh: output_specs is None and input_specs is empty"
+                )
+            return self.input_specs[0].mesh
         else:
             raise ValueError(
                 f"function output_spec expects a single DTensorSpec or a tuple of DTensorSpec but got: {self.output_specs}"
             )
 
     def input_spec(self, index: int = 0) -> DTensorSpec:
-        assert self.input_specs is not None, "input_specs of OpSpec is None!"
-        assert len(self.input_specs) > index, (
-            f"Invalid index {index} for input_specs of length "
-            f"{len(self.input_specs)}: {self.input_specs}"
-        )
+        if self.input_specs is None:
+            raise AssertionError("input_specs of OpSpec is None!")
+        if len(self.input_specs) <= index:
+            raise AssertionError(
+                f"Invalid index {index} for input_specs of length "
+                f"{len(self.input_specs)}: {self.input_specs}"
+            )
         return self.input_specs[index]
 
     def __str__(self) -> str:
@@ -181,6 +193,24 @@ class OpSpec:
             input_specs_str = ""
         output_spec_str = _pretty_print_spec(self.output_specs)
         return f"{input_specs_str}{output_spec_str}"
+
+    def __hash__(self) -> int:
+        if self.output_specs is None:
+            output_hash = hash(None)
+        elif isinstance(self.output_specs, DTensorSpec):
+            output_hash = hash(self.output_specs)
+        else:
+            output_hash = hash(tuple(self.output_specs))
+        input_hash = hash(tuple(self.input_specs)) if self.input_specs else 0
+        return hash((output_hash, input_hash))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, OpSpec):
+            return False
+        return (
+            self.output_specs == other.output_specs
+            and self.input_specs == other.input_specs
+        )
 
 
 class StrategyType:
@@ -205,7 +235,7 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.mesh_shape
-        return f"OpStragety[{strategy_list_str}] @ mesh: {mesh_shape}"
+        return f"OpStrategy[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -228,6 +258,19 @@ class OpStrategy(StrategyType):
     @property
     def shape(self):
         return self.strategies[0].output_spec.shape
+
+    @property
+    def tensor_meta(self) -> TensorMeta:
+        # TODO upstream this assert to DTensorSpec itself and fill any missing TensorMetas
+        if self.strategies[0].output_spec.tensor_meta is None:
+            raise AssertionError
+        return self.strategies[0].output_spec.tensor_meta
+
+    def __hash__(self) -> int:
+        return hash(tuple(self.strategies))
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, OpStrategy) and self.strategies == other.strategies
 
 
 class TupleStrategy(StrategyType):
@@ -266,7 +309,8 @@ class TupleStrategy(StrategyType):
 
     def child_mesh(self, index: int) -> DeviceMesh:
         op_strategy = self.children[index]
-        assert isinstance(op_strategy, OpStrategy)
+        if not isinstance(op_strategy, OpStrategy):
+            raise AssertionError
         return op_strategy.mesh
 
     def __str__(self) -> str:
@@ -274,6 +318,12 @@ class TupleStrategy(StrategyType):
             [f"{str(strat)}" for idx, strat in enumerate(self.children)]
         )
         return f"TupleStrategy({child_strategies_str})"
+
+    def __hash__(self) -> int:
+        return hash(tuple(self.children))
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, TupleStrategy) and self.children == other.children
 
 
 try:
@@ -301,7 +351,7 @@ class RuntimeSchemaInfo:
     # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop
-    static_kwargkey: Optional[list[str]] = None
+    static_kwargkey: list[str] | None = None
     # each op can decide if it wants to use pytree flatten/unflatten during operator
     # eager execution, by default we don't need to do flatten/unflatten, only if the
     # op indicate it needs to, this is to accelerate eager performance.
@@ -331,9 +381,9 @@ class OpSchema:
     args_schema: ArgsType
     kwargs_schema: KwargsType
 
-    schema_info: Optional[RuntimeSchemaInfo] = None
+    schema_info: RuntimeSchemaInfo | None = None
 
-    _comparison_key: Optional[tuple[object, ...]] = None
+    _comparison_key: tuple[object, ...] | None = None
 
     @property
     def args_spec(self) -> tuple[DTensorSpec, ...]:
@@ -361,6 +411,52 @@ class OpSchema:
         )
         return tuple(item for item in args if isinstance(item, OpStrategy))
 
+    @property
+    def kwargs_strategy(self) -> tuple[OpStrategy, ...]:
+        # returns OpStrategy items from kwargs_schema.
+        kwargs_vals = (
+            tree_leaves(self.kwargs_schema)
+            if self.schema_info is not None and self.schema_info.needs_pytree
+            else self.kwargs_schema.values()
+        )
+        return tuple(item for item in kwargs_vals if isinstance(item, OpStrategy))
+
+    @property
+    def args_meta(self) -> tuple[TensorMeta | Any, ...]:
+        # Used for calling single_dim strategy functions, which aren't allowed to see DTensorSpecs/Meshes
+        # like args_spec, but has OpStrategy replaced with corresponding TensorMeta,
+        # and TupleStrategy replaced with tuple of TensorMeta
+        # preserves the original pytree structure
+        # example:
+        # args_schema = (OpStrategy1, TupleStrategy([OpStrategy2, OpStrategy3]), OpStrategy4)
+        # args_meta: (TensorMeta1, (TensorMeta2, TensorMeta3), TensorMeta4)
+
+        def convert_to_meta(item):
+            if isinstance(item, OpStrategy):
+                return item.tensor_meta
+            elif isinstance(item, TupleStrategy):
+                return tuple(convert_to_meta(child) for child in item.children)
+            else:
+                return item
+
+        return tuple(convert_to_meta(arg) for arg in self.args_schema)
+
+    @property
+    def kwargs_meta(self) -> dict[str, object]:
+        # like args_meta, but for kwargs
+
+        def convert_to_meta(item):
+            if isinstance(item, OpStrategy):
+                return item.tensor_meta
+            elif isinstance(item, TupleStrategy):
+                return tuple(convert_to_meta(child) for child in item.children)
+            else:
+                return item
+
+        return {
+            key: convert_to_meta(value) for key, value in self.kwargs_schema.items()
+        }
+
     def __repr__(self) -> str:
         args_schema = ", ".join([str(arg_schema) for arg_schema in self.args_schema])
         return (
@@ -378,12 +474,14 @@ class OpSchema:
                 args_schema.append(str(arg))
                 device_mesh = arg.mesh
             elif isinstance(arg, OpStrategy):
-                assert len(arg.strategies) == 1
+                if len(arg.strategies) != 1:
+                    raise AssertionError
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 device_mesh = arg.mesh
             elif isinstance(arg, TupleStrategy):
                 first_op_strategy = arg.children[0]
-                assert isinstance(first_op_strategy, OpStrategy)
+                if not isinstance(first_op_strategy, OpStrategy):
+                    raise AssertionError
                 device_mesh = first_op_strategy.mesh
                 args_schema.append(str(arg))
             else:
@@ -423,7 +521,9 @@ class OpSchema:
         return_types = self.op._schema.returns
         # all dispatch ops only return Tensor or Tuple[Tensor] for tensor like
         # return types, so this check is enough for tensor like types
-        return isinstance(return_types[0].type, torch.TensorType)
+        return len(return_types) > 0 and isinstance(
+            return_types[0].type, torch.TensorType
+        )
 
     def get_mesh_from_args(self, validate: bool = True) -> DeviceMesh:
         """
@@ -438,18 +538,23 @@ class OpSchema:
             - for foreach like ops we need to check "zipped" inputs are on the same mesh
               for each index.
         """
-        first_arg = self.args_schema[0]
-        if isinstance(first_arg, (DTensorSpec, OpStrategy)):
-            mesh = first_arg.mesh
-        elif isinstance(first_arg, (list, tuple, TupleStrategy)):
-            first_elem = (
-                first_arg.children[0]
-                if isinstance(first_arg, TupleStrategy)
-                else first_arg[0]
-            )
-            assert isinstance(first_elem, (DTensorSpec, OpStrategy))
-            mesh = first_elem.mesh
-        else:
+        mesh = None
+        # Scan all args to find the first DTensorSpec/OpStrategy (not just the first arg)
+        for arg in self.args_schema:
+            if isinstance(arg, (DTensorSpec, OpStrategy)):
+                mesh = arg.mesh
+                break
+            elif isinstance(arg, (list, tuple, TupleStrategy)):
+                # Scan all elements in the list/tuple, not just the first one,
+                # to handle cases like List[Optional[Tensor]] where first elem may be None
+                elems = arg.children if isinstance(arg, TupleStrategy) else arg
+                for elem in elems:
+                    if isinstance(elem, (DTensorSpec, OpStrategy)):
+                        mesh = elem.mesh
+                        break
+                if mesh is not None:
+                    break
+        if mesh is None:
             raise ValueError(f"Cannot find device mesh from args for op : {self.op}.")
 
         if validate:
@@ -560,7 +665,7 @@ class OutputSharding:
     # specifies the output sharding pattern
     output_spec: OutputSpecType
     # schema for redistribution if needed
-    redistribute_schema: Optional[OpSchema] = None
+    redistribute_schema: OpSchema | None = None
     # flag indicating if inputs need redistribution
     needs_redistribute: bool = False
     # flag to use values from `redistribute_schema`
@@ -592,11 +697,17 @@ class OpInfo:
     compute_mesh: DeviceMesh
 
     # compete runtime operator infos
-    schema: OpSchema
+    # NOTE: schema can be None due to C++ fast path optimization. When the C++
+    # dispatch layer (dispatchDTensorOp in python_variable.cpp) finds a cached
+    # sharding decision, it skips creating the full OpSchema to reduce CPU overhead.
+    # In this case, OpInfo is created with create_schema=False, setting schema to None.
+    # The operator information is still available through output_sharding.redistribute_schema
+    # when redistribution is needed.
+    schema: OpSchema | None
     flat_args_schema: list[object]
     local_args: Sequence[object]
     local_kwargs: dict[str, object]
-    args_tree_spec: Optional[TreeSpec] = None
+    args_tree_spec: TreeSpec | None = None
 
     # the output sharding info
-    output_sharding: Optional[OutputSharding] = None
+    output_sharding: OutputSharding | None = None

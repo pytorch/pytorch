@@ -2,7 +2,7 @@
 import warnings
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -183,7 +183,8 @@ class Join:
 
     def _set_joinable_configs(self) -> None:
         r"""Set the :class:`_JoinConfig` of each participating :class:`Joinable`."""
-        assert len(self._joinables) > 0
+        if len(self._joinables) <= 0:
+            raise AssertionError
         is_first_joinable = True
         for joinable in self._joinables:
             joinable._join_config = _JoinConfig(
@@ -228,9 +229,9 @@ class Join:
 
     def __exit__(
         self,
-        type: Optional[type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType],
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
     ):
         r"""
         Repeatedly runs the main hooks until all processes join; then, runs the post-hooks.
@@ -320,10 +321,11 @@ class Join:
             manager that the process has not yet joined if ``joinable`` is the
             first one passed into the context manager; ``None`` otherwise.
         """
-        assert hasattr(joinable, "_join_config"), (
-            f"Check that the {type(joinable)} constructor calls the "
-            "``Joinable`` constructor"
-        )
+        if not hasattr(joinable, "_join_config"):
+            raise AssertionError(
+                f"Check that the {type(joinable)} constructor calls the "
+                "``Joinable`` constructor"
+            )
 
         join_config = joinable._join_config
         # First joinable is responsible for the collective communications

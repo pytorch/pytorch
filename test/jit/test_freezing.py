@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.jit._recursive import wrap_cpp_module
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, tf32_on_and_off
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import (
@@ -32,8 +32,6 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
 
 
 def removeExceptions(graph):
@@ -2966,6 +2964,7 @@ class TestFrozenOptimizations(JitTestCase):
             inp = torch.rand([4, 3, 4, 4])
             self.assertEqual(frozen(inp), mod(inp))
 
+    @tf32_on_and_off(0.005)
     @unittest.skipIf(not (TEST_CUDNN or TEST_WITH_ROCM), "requires CUDNN")
     def test_freeze_conv_relu_fusion(self):
         with set_default_dtype(torch.float):
@@ -3321,7 +3320,7 @@ class TestFrozenOptimizations(JitTestCase):
             scripted = torch.jit.freeze(torch.jit.script(mod))
             optimized = torch.jit.optimize_for_inference(scripted)
             inp = torch.rand([1, 8, 8, 8])
-            # a1 cant be inplaced for first use, can for second
+            # a1 can't be inplaced for first use, can for second
             FileCheck().check("ScalarMul(").check("ScalarMul_").run(optimized.graph)
             self.assertEqual(optimized(inp), mod(inp))
 
@@ -3413,7 +3412,7 @@ class TestMKLDNNReinplacing(JitTestCase):
 
             def forward(self, x):
                 # x can't be inplaced because its a return value,
-                # check that the inplacing pass doesnt try to inplace
+                # check that the inplacing pass doesn't try to inplace
                 # self.tensor because its always alive
                 return x * self.tensor, x
 

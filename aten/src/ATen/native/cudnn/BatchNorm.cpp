@@ -87,8 +87,7 @@ size_t _get_cudnn_batch_norm_reserve_space_size(
 #include <ATen/ops/empty_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -442,7 +441,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
       grad_input_t, grad_weight_t, grad_bias_t};
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif

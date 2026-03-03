@@ -1,10 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import itertools
-import sys
-import unittest
 
-from torch._dynamo.variables.distributed import PlacementClassVariable
+import torch
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Partial,
@@ -25,7 +23,7 @@ class PlacementTypesTestCase(TestCase):
 
         ident_tests = (
             (shard, True, False, False),
-            (strided_shard, True, False, False),
+            (strided_shard, False, False, False),
             (partial_sum, False, True, False),
             (partial_max, False, True, False),
             (replicate, False, False, True),
@@ -40,8 +38,11 @@ class PlacementTypesTestCase(TestCase):
 
     def test_equality(self):
         equivalence_classes = (
-            (Shard(3), _StridedShard(dim=3, split_factor=7)),
-            (Shard(4), _StridedShard(dim=4, split_factor=9)),
+            (Shard(3),),
+            (Shard(4),),
+            (_StridedShard(dim=3, split_factor=1),),
+            (_StridedShard(dim=3, split_factor=2),),
+            (_StridedShard(dim=4, split_factor=9),),
             (Replicate(),),
             (Partial("sum"),),
             (Partial("max"),),
@@ -60,27 +61,87 @@ class PlacementTypesTestCase(TestCase):
                 for lhs, rhs in itertools.product(eq_class, other_class):
                     self.assertNotEqual(lhs, rhs)
 
-        # Testing this case doesn't seem to fit neatly into the above equivalence class
-        # framework.
-        self.assertNotEqual(
-            _StridedShard(dim=3, split_factor=1), _StridedShard(dim=3, split_factor=2)
-        )
-
-    @unittest.skipIf(
-        sys.version_info < (3, 10), "kw_only is only available in python >= 3.10"
-    )
     def test_strided_shard_kwonly_argument(self):
         with self.assertRaises(TypeError):
             _StridedShard(3, 4)
         _StridedShard(3, split_factor=4)
 
-    def test_strided_shard_isinstance_shard(self):
-        assert isinstance(_StridedShard(dim=3, split_factor=7), Shard)
+    def test_select_split_tensor_matches_split_tensor(self):
+        """
+        Test that _select_split_tensor produces the same result as indexing
+        into _split_tensor. This validates that any alternative implementation
+        (e.g., the narrow-based SymInt path) matches the canonical _split_tensor.
+        """
+        # Test various tensor sizes and num_chunks combinations
+        test_cases = [
+            # (dim_size, num_chunks) - covers even splits, uneven splits, edge cases
+            (16, 4),  # even split
+            (17, 4),  # uneven split, last chunk smaller
+            (15, 4),  # uneven split
+            (7, 4),  # fewer elements than chunks would like
+            (3, 4),  # very few elements
+            (1, 4),  # single element
+            (8, 1),  # single chunk
+            (8, 8),  # one element per chunk
+            (8, 16),  # more chunks than elements
+        ]
 
-    def test_dynamo_can_identify_placement_classes(self):
-        for cls in (Replicate, Shard, _StridedShard, Partial):
-            self.assertTrue(
-                PlacementClassVariable.is_placement_type(cls), msg=f"failed on {cls}"
+        for dim in [0, 1]:
+            shard = Shard(dim)
+            for dim_size, num_chunks in test_cases:
+                # Create a tensor with distinct values for easy debugging
+                if dim == 0:
+                    tensor = torch.arange(dim_size * 4).reshape(dim_size, 4)
+                else:
+                    tensor = torch.arange(4 * dim_size).reshape(4, dim_size)
+
+                # Get ground truth from _split_tensor
+                shards, _ = shard._split_tensor(
+                    tensor, num_chunks, with_padding=False, contiguous=False
+                )
+
+                # Compare _select_split_tensor against _split_tensor for each index
+                for idx in range(num_chunks):
+                    selected = shard._select_split_tensor(
+                        tensor,
+                        num_chunks,
+                        idx,
+                        with_padding=False,
+                        contiguous=False,
+                        clone=False,
+                    )
+                    self.assertEqual(
+                        selected,
+                        shards[idx],
+                        msg=f"Mismatch for dim={dim}, dim_size={dim_size}, "
+                        f"num_chunks={num_chunks}, idx={idx}",
+                    )
+
+    def test_select_split_tensor_symint_with_padding_raises(self):
+        """
+        Test that _select_split_tensor raises GuardOnDataDependentSymNode when
+        called with a SymInt index and with_padding=True.
+
+        This is expected because with_padding=True requires indexing into a
+        Python list with the SymInt, which is not supported.
+        """
+        from torch.fx.experimental.symbolic_shapes import (
+            GuardOnDataDependentSymNode,
+            ShapeEnv,
+        )
+
+        shape_env = ShapeEnv()
+        symint_index = shape_env.create_unbacked_symint()
+
+        shard = Shard(0)
+        tensor = torch.arange(16).reshape(4, 4)
+
+        with self.assertRaises(GuardOnDataDependentSymNode):
+            shard._select_split_tensor(
+                tensor,
+                num_chunks=4,
+                index=symint_index,
+                with_padding=True,
             )
 
 

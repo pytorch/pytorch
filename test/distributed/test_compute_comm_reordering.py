@@ -29,6 +29,10 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
 )
 from torch.testing._internal.common_fsdp import get_devtype
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -57,12 +61,18 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
         if isinstance(snode.node, ir._CollectiveKernel)
         and snode.node.op_overload == torch.ops._c10d_functional.all_reduce_.default
     ]
-    assert len(all_reduce_snodes) == 1
+    if len(all_reduce_snodes) != 1:
+        raise AssertionError(
+            f"Expected exactly 1 all_reduce_snode, got {len(all_reduce_snodes)}"
+        )
     all_reduce_snode = all_reduce_snodes[0]
     all_reduce_dep_snodes = [
         name_to_snode[node.name] for node in all_reduce_snode.node.inputs
     ]
-    assert len(all_reduce_dep_snodes) == 1
+    if len(all_reduce_dep_snodes) != 1:
+        raise AssertionError(
+            f"Expected exactly 1 all_reduce_dep_snode, got {len(all_reduce_dep_snodes)}"
+        )
     all_reduce_dep_snode = all_reduce_dep_snodes[0]
 
     grouped_snode = scheduler.GroupedSchedulerNode.create(
@@ -82,6 +92,7 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
     torch._inductor.config.triton.native_matmul,
     "native matmul is fused with surrounding ops",
 )
+@instantiate_parametrized_tests
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
@@ -382,7 +393,8 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         "_pre_fusion_custom_pass",
         create_grouped_node_for_allreduce_and_its_deps,
     )
-    def test_grouped_scheduler_node(self):
+    @parametrize("combo_kernels", (False, True))
+    def test_grouped_scheduler_node(self, combo_kernels):
         def func(a, *, tag, ranks, group_size):
             add = a + a
             div = add / a
@@ -394,26 +406,29 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             mm = torch.matmul(mul, ar)
             return (mm,)
 
-        with _dynamo_dist_per_rank_init(
-            self.rank,
-            self.world_size,
-            self.backend(device_type),
-            fake_pg=not at_least_x_gpu(2),
-        ):
-            inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
-            compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-            # Expectations:
-            # 1. `add = a + a` and `div = add / a` are still fused, which means fusion
-            #    still happens among nodes within a GroupedSchedulerNode.
-            # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
-            #    GroupedSchedulerNode and thus are prevented from being fused with any outside ops.
-            FileCheck().check("triton_poi_fused_add_all_reduce_div_0.").check(
-                "_c10d_functional.all_reduce_."
-            ).check("triton_poi_fused_mul_1.").run(code)
-            out = compiled(inputs, **self.get_world_trs())
-            correct = func(inputs, **self.get_world_trs())
-            self.assertTrue(same(out, correct))
+        with torch._inductor.config.patch(combo_kernels=combo_kernels):
+            with _dynamo_dist_per_rank_init(
+                self.rank,
+                self.world_size,
+                self.backend(device_type),
+                fake_pg=not at_least_x_gpu(2),
+            ):
+                inputs = (
+                    torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
+                )
+                compiled = torch.compile(func)
+                code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+                # Expectations:
+                # 1. `add = a + a` and `div = add / a` are still fused, which means fusion
+                #    still happens among nodes within a GroupedSchedulerNode.
+                # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
+                #    GroupedSchedulerNode and thus are prevented from being fused with any outside ops.
+                FileCheck().check("triton_poi_fused_add_all_reduce_div_0.").check(
+                    "_c10d_functional.all_reduce_."
+                ).check("triton_poi_fused_mul_1.").run(code)
+                out = compiled(inputs, **self.get_world_trs())
+                correct = func(inputs, **self.get_world_trs())
+                self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(force_disable_caches=True)
@@ -471,14 +486,32 @@ graph():
             fn(g1, g2, g3)
 
     def test_nccl_heuristics(self):
-        assert len(baseLat) == len(NCCL_ALGO)
-        assert all(len(x) == len(NCCL_PROTO) for x in baseLat)
+        if len(baseLat) != len(NCCL_ALGO):
+            raise AssertionError(
+                f"Expected len(baseLat) == len(NCCL_ALGO), got {len(baseLat)} vs {len(NCCL_ALGO)}"
+            )
+        if not all(len(x) == len(NCCL_PROTO) for x in baseLat):
+            raise AssertionError(
+                "Expected all elements in baseLat to have len(NCCL_PROTO)"
+            )
 
-        assert len(hwLat) == len(NCCL_HW)
-        assert all(len(x) == len(NCCL_ALGO) for x in hwLat)
-        assert all(len(y) == len(NCCL_PROTO) for x in hwLat for y in x)
+        if len(hwLat) != len(NCCL_HW):
+            raise AssertionError(
+                f"Expected len(hwLat) == len(NCCL_HW), got {len(hwLat)} vs {len(NCCL_HW)}"
+            )
+        if not all(len(x) == len(NCCL_ALGO) for x in hwLat):
+            raise AssertionError(
+                "Expected all elements in hwLat to have len(NCCL_ALGO)"
+            )
+        if not all(len(y) == len(NCCL_PROTO) for x in hwLat for y in x):
+            raise AssertionError(
+                "Expected all nested elements in hwLat to have len(NCCL_PROTO)"
+            )
 
-        assert len(llMaxBws) == len(NVIDIA_GPU_TYPE)
+        if len(llMaxBws) != len(NVIDIA_GPU_TYPE):
+            raise AssertionError(
+                f"Expected len(llMaxBws) == len(NVIDIA_GPU_TYPE), got {len(llMaxBws)} vs {len(NVIDIA_GPU_TYPE)}"
+            )
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/native/cuda/reduction_template.cuh>
-
+#include <c10/util/Exception.h>
 #include <sstream>
 #include <fstream>
 #include <cstdio>
@@ -177,8 +177,7 @@ const std::string jit_common_types = R"ESCAPE(
   #define __forceinline__ inline __attribute__((always_inline))
   #endif
   #else
-  //TODO use _assert_fail, because assert is disabled in non-debug builds
-  #define ERROR_UNSUPPORTED_CAST assert(false);
+  #define ERROR_UNSUPPORTED_CAST __trap();
   #define CUDA_OR_ROCM_NUM_THREADS 128
   #define MAX_DIMS 25
   #endif
@@ -192,6 +191,8 @@ const std::string jit_common_types = R"ESCAPE(
   typedef signed char int8_t;
   typedef unsigned char uint8_t;  // NOTE: this MUST be "unsigned char"! "char" is equivalent to "signed char"
   typedef short int16_t;
+  typedef unsigned short uint16_t;
+  typedef unsigned long long uint64_t;
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
@@ -222,6 +223,20 @@ const std::string jit_common_types = R"ESCAPE(
   _(void, QUInt8) /* 13 */                        \
   _(void, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                             \
+  _(void, QUInt4x2) /* 16 */                             \
+  _(void, QUInt2x4) /* 17 */                             \
+  _(void, Bits1x8) /* 18 */                              \
+  _(void, Bits2x4) /* 19 */                              \
+  _(void, Bits4x2) /* 20 */                              \
+  _(void, Bits8) /* 21 */                                \
+  _(void, Bits16) /* 22 */                               \
+  _(void, Float8_e5m2) /* 23 */                          \
+  _(void, Float8_e4m3fn) /* 24 */                        \
+  _(void, Float8_e5m2fnuz) /* 25 */                      \
+  _(void, Float8_e4m3fnuz) /* 26 */                      \
+  _(uint16_t, UInt16) /* 27 */                           \
+  _(uint32_t, UInt32) /* 28 */                           \
+  _(uint64_t, UInt64) /* 29 */
 
   #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_QINT(_)       \
   _(uint8_t, Byte)                                                 \
@@ -236,7 +251,10 @@ const std::string jit_common_types = R"ESCAPE(
   _(std::complex<float>, ComplexFloat)                             \
   _(std::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
-  _(at::BFloat16, BFloat16)
+  _(at::BFloat16, BFloat16)                                        \
+  _(uint16_t, UInt16)                                              \
+  _(uint32_t, UInt32)                                              \
+  _(uint64_t, UInt64)
 
 
   enum class ScalarType : int8_t {
@@ -1057,14 +1075,14 @@ std::string generate_code(
     // TODO these arrays are potentially of the different types, use function
     // traits to determine the types
     declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
-                        << "[" << std::to_string(thread_work_size) << "];\n";
+                        << '[' << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
 
   std::stringstream declare_store_arrays;
   for (int i = 0; i < nOutputs; i++) {
     declare_store_arrays << result_type << " out" << std::to_string(i)
-                        << "[" << std::to_string(thread_work_size) << "];\n";
+                        << '[' << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_store_arrays", declare_store_arrays.str());
 
@@ -1217,7 +1235,7 @@ std::string generate_code(
   for (const auto i : c10::irange(nInputs)){
     auto i_string = std::to_string(i);
     vector_inputs << "auto * input" << i_string <<
-        " = reinterpret_cast<const scalar_t*>(data[" << i_string << "+" << nOutputs << "])" <<
+        " = reinterpret_cast<const scalar_t*>(data[" << i_string << '+' << nOutputs << "])" <<
         " + block_work_size * idx;\n";
   }
   env.s("vector_inputs", vector_inputs.str());
@@ -1543,32 +1561,32 @@ NvrtcFunction jit_pwise_function(
 
     // Constructs file path by appending constructed cubin name to cache path
     std::stringstream ss;
-    ss << *cache_dir << "/";
+    ss << *cache_dir << '/';
     ss << kernel_name;
 #ifdef USE_ROCM
     ss << "_arch" << prop->gcnArchName;
 #else
-    ss << "_arch" << cuda_major << "." << cuda_minor;
+    ss << "_arch" << cuda_major << '.' << cuda_minor;
 #endif
-    ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
+    ss << "_nvrtc" << nvrtc_major << '.' << nvrtc_minor;
     ss << (compile_to_sass ? "_sass" : "_ptx");
-    ss << "_" << code.length();
-    ss << "_" << hash_code;
+    ss << '_' << code.length();
+    ss << '_' << hash_code;
     file_path = ss.str();
 
-    std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
-    if (readin.fail()) {
+    std::ifstream read_stream{file_path, std::ios::in | std::ifstream::binary};
+    if (read_stream.fail()) {
       // NOTE: this does not warn because the file might not exist
       // TODO: consider if this should explicitly check for the file's existence or not to throw
       //   an informative warning
-      readin.close();
+      read_stream.close();
     } else {
       // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
-      std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+      std::vector<char> buffer(std::istreambuf_iterator<char>(read_stream), {});
       AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
       AT_CUDA_DRIVER_CHECK(
         nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-      readin.close();
+      read_stream.close();
       return compiled_kernel_;
     }
   }
@@ -1615,7 +1633,7 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
     std::string log(logsize, '\0');
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, &log[0]));
-    throw std::runtime_error(code + log);
+    TORCH_CHECK(false, code + log);
   }
 
   size_t ptx_size = 0;

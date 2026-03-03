@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
 from collections.abc import Callable
-from typing import Union
 from typing_extensions import TypeVarTuple
 
 import torch
@@ -25,9 +24,10 @@ from .utils import (
     create_bw_fn,
     fill_none_with_masks,
     filter_with_masks,
+    first_slice_copy,
     materialize_as_graph,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
     split_into_chunks,
 )
 
@@ -37,6 +37,7 @@ class MapImpl(HigherOrderOperator):
         super().__init__("map_impl")
 
     def __call__(self, *args, **kwargs):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
 
@@ -45,20 +46,21 @@ map_impl = MapImpl()
 
 def map(
     f: Callable[[pytree.PyTree, tuple[pytree.PyTree, ...]], pytree.PyTree],
-    xs: Union[pytree.PyTree, torch.Tensor],
+    xs: pytree.PyTree | torch.Tensor,
     *args: TypeVarTuple,
 ):
     r"""
-    Performs a map of f with xs. Intuitively, you can think of the semantic being:
+    Performs a map of f with xs. Intuitively, you can think of the semantic being::
 
-    out = []
-    for idx in len(xs.size(0)):
-        xs_sliced = xs.select(0, idx)
-        out.append(f(xs_sliced, *args))
-    torch.stack(out)
+        out = []
+        for idx in len(xs.size(0)):
+            xs_sliced = xs.select(0, idx)
+            out.append(f(xs_sliced, *args))
+        torch.stack(out)
 
     .. warning::
-        `torch._higher_order_ops.map` is a prototype feature in PyTorch. It currently
+
+        ``torch._higher_order_ops.map`` is a prototype feature in PyTorch. It currently
         does not support autograd and you may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
@@ -76,10 +78,11 @@ def map(
     Return:
         the stacked output for each step of f
 
-    Example:
+    Example::
 
         def f(xs):
             return xs[0] + xs[1] + const1 + const2
+
 
         xs = [torch.randn(2, 3), torch.randn(2, 3)]
         const1 = torch.randn(2, 3)
@@ -135,7 +138,7 @@ class MapAutogradOp(torch.autograd.Function):
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
-        save_tensors_and_symints_for_backward(ctx, flat_args)
+        save_values_for_backward(ctx, flat_args)
         with torch._C._AutoDispatchBelowAutograd():
             return (
                 *map_impl(f, flat_args[:num_mapped_args], flat_args[num_mapped_args:]),
@@ -143,7 +146,7 @@ class MapAutogradOp(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        fw_args = saved_tensors_and_symints(ctx)
+        fw_args = saved_values(ctx)
         num_mapped_args = ctx._num_mapped_args
         num_pos_args = ctx._num_pos_args
         num_grads = len(flat_grads)
@@ -181,9 +184,17 @@ class MapAutogradOp(torch.autograd.Function):
 
         def construct_args_single_step_bw():
             unwrapped_mapped_xs = pytree.tree_map(_from_fun, fw_mapped_args)
-            example_xs = _unstack_pytree(unwrapped_mapped_xs)[0]
+            # Use first_slice_copy instead of _unstack_pytree to avoid
+            # iterating over batch dim, which would guard on symbolic sizes.
+            example_xs = [
+                first_slice_copy(x).requires_grad_(x.requires_grad)
+                for x in unwrapped_mapped_xs
+            ]
             unwrapped_grads = pytree.tree_map(_from_fun, flat_grads)
-            example_grads = _unstack_pytree(unwrapped_grads)[0]
+            example_grads = [
+                first_slice_copy(x).requires_grad_(x.requires_grad)
+                for x in unwrapped_grads
+            ]
             example_pos_args = [
                 _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
                 for arg in pos_args
@@ -209,9 +220,34 @@ class MapAutogradOp(torch.autograd.Function):
         return None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
 
+def _broadcast_to_batch(output, batch_size):
+    """Expand each tensor in output pytree to include batch dimension.
+
+    Note: Although outputs are flattened in the compiled path (via torch.compile),
+    users may call map_impl directly with pytree outputs, so we support pytrees
+    for backward compatibility.
+    """
+
+    def expand_with_batch(t):
+        if isinstance(t, torch.Tensor):
+            # Use contiguous_format to match torch.stack behavior
+            return (
+                t.unsqueeze(0)
+                .expand(batch_size, *t.shape)
+                .clone(memory_format=torch.contiguous_format)
+            )
+        return t
+
+    return pytree.tree_map(expand_with_batch, output)
+
+
 def trace_map(proxy_mode, func_overload, f, xs, pos_args):
+    from torch._higher_order_ops.utils import first_slice_copy
+
     with disable_proxy_modes_tracing():
-        example_input = _unstack_pytree(xs)[0]
+        # Use first_slice_copy instead of _unstack_pytree to avoid
+        # iterating over batch dim, which would guard on symbolic sizes.
+        example_input = pytree.tree_map(first_slice_copy, xs)
 
         body_graph = f
 
@@ -253,20 +289,38 @@ def map_proxy_torch_dispatch_mode(mode, f, xs, args):
 
 @map_impl.py_impl(FakeTensorMode)
 def map_fake_tensor_mode(mode, f, xs, args):
+    from torch._higher_order_ops.utils import first_slice_copy
+
     with mode:
-        return map_dense(f, xs, args)
+        # Use first_slice_copy instead of _unstack_pytree to avoid
+        # iterating over batch dim, which would guard on symbolic sizes.
+        first_row = pytree.tree_map(first_slice_copy, xs)
+        example_output = f(*first_row, *args)
+
+        flat_xs, _ = pytree.tree_flatten(xs)
+        batch_size = flat_xs[0].shape[0]
+
+        return _broadcast_to_batch(example_output, batch_size)
 
 
 @map_impl.py_functionalize_impl
 def map_functionalize(ctx, f, xs, pos_args):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
+    from torch._higher_order_ops.utils import (
+        _check_alias_and_mutation,
+        first_slice_copy,
+    )
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
     wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
 
     with ctx.redispatch_to_next():
-        example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
+        # Use first_slice_copy instead of _unstack_pytree to avoid
+        # iterating over batch dim, which would guard on symbolic sizes.
+        example_inputs = (
+            *pytree.tree_map(first_slice_copy, unwrapped_xs),
+            *unwrapped_args,
+        )
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         _check_alias_and_mutation(f, example_inputs, "map", pre_dispatch)
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)

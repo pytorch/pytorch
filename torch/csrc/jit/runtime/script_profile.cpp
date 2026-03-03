@@ -7,7 +7,6 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch::jit {
 

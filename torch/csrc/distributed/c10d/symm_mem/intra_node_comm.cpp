@@ -20,7 +20,7 @@ static int intraNodeCommIdx = 0;
  * Query the nvlink connection among devices.
  */
 static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
-#if !defined(USE_RCOM)
+#if !defined(USE_ROCM)
   auto connectivity = detect_dma_connectivity(c10::DeviceType::CUDA, "nvlink");
   NvlMesh nvlMesh = {};
   for (size_t srcRank = 0; srcRank < kMaxDevices; ++srcRank) {
@@ -121,7 +121,7 @@ static std::vector<T> storeAllGather(
   std::vector<std::string> peerKeys;
   for (size_t r = 0; r < worldSize; ++r) {
     std::ostringstream oss;
-    oss << prefix << "-" << r;
+    oss << prefix << '-' << r;
     peerKeys.push_back(oss.str());
   }
 
@@ -187,7 +187,7 @@ bool IntraNodeComm::rendezvous() {
     if (strcmp(info.hostname, peerDevInfos.front().hostname) != 0) {
       LOG(WARNING) << "Aborting IntraNodeComm::rendezvous because some "
                       "participants are not on the same host ("
-                   << info.hostname << ", " << devInfo.hostname << ")";
+                   << info.hostname << ", " << devInfo.hostname << ')';
       return false;
     }
     rankToDeviceIdx.emplace_back(info.deviceIdx);

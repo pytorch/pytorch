@@ -1,9 +1,6 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 
-#include <ATen/FunctionalInverses.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>

@@ -21,7 +21,7 @@ if [[ ! -d "$TORCH_MODPATH" ]] ; then
 else
     export XDOCTEST_GLOBAL_EXEC="from torch import nn\nimport torch.nn.functional as F\nimport torch"
     export XDOCTEST_OPTIONS="+IGNORE_WHITESPACE"
-    # Note: google wont catch numpy style docstrings (a few exist) but it also wont fail
+    # Note: google won't catch numpy style docstrings (a few exist) but it also won't fail
     # on things not intended to be doctests.
     export XDOCTEST_STYLE="google"
     xdoctest torch "$TORCH_MODPATH" --style="$XDOCTEST_STYLE" --global-exec "$XDOCTEST_GLOBAL_EXEC" --options="$XDOCTEST_OPTIONS"

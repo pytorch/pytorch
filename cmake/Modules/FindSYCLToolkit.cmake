@@ -1,7 +1,7 @@
 # This will define the following variables:
 # SYCL_FOUND               : True if the system has the SYCL library.
 # SYCL_INCLUDE_DIR         : Include directories needed to use SYCL.
-# SYCL_LIBRARY_DIR         ：The path to the SYCL library.
+# SYCL_LIBRARY_DIR         : The path to the SYCL library.
 # SYCL_LIBRARY             : SYCL library fullname.
 # SYCL_COMPILER_VERSION    : SYCL compiler version.
 

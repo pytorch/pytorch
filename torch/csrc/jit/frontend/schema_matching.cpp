@@ -4,7 +4,6 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -364,7 +363,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
   }
 
   auto err = [&]() -> std::ostream& {
-    *failure_messages << "\n" << schema << ":\n";
+    *failure_messages << '\n' << schema << ":\n";
     return *failure_messages;
   };
 
@@ -751,7 +750,7 @@ Value* emitBuiltinCall(
     } else {
       error << "Here are some suggestions: \n";
       for (const auto& sym : close_symbols) {
-        error << "\t" << sym.toQualString() << "\n";
+        error << '\t' << sym.toQualString() << '\n';
       }
       error << "\nThe original call is";
     }

@@ -12,10 +12,11 @@ import json
 import os
 import signal
 import socket
+import tempfile
 import time
 import uuid
 from string import Template
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic import events
@@ -152,16 +153,16 @@ class LocalElasticAgent(SimpleElasticAgent):
         logs_specs: LogsSpecs,
         start_method="spawn",
         exit_barrier_timeout: float = 300,
-        log_line_prefix_template: Optional[str] = None,
+        log_line_prefix_template: str | None = None,
     ):
         super().__init__(spec, exit_barrier_timeout)
         self._start_method = start_method
-        self._pcontext: Optional[PContext] = None
+        self._pcontext: PContext | None = None
         self._rdzv_handler = spec.rdzv_handler
         self._log_line_prefix_template = log_line_prefix_template
-        self._worker_watchdog: Optional[timer.FileTimerServer] = None
+        self._worker_watchdog: timer.FileTimerServer | None = None
         self._logs_specs = logs_specs
-        self._health_check_server: Optional[HealthCheckServer] = None
+        self._health_check_server: HealthCheckServer | None = None
 
     def _setup_local_watchdog(self, envs: dict[int, dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
@@ -170,7 +171,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         watchdog_file_path = os.getenv(watchdog_file_env_name)
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
             if watchdog_file_path is None:
-                watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
+                watchdog_file_path = os.path.join(
+                    tempfile.gettempdir(), "watchdog_timer_" + str(uuid.uuid4())
+                )
             logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
             if not envs:
                 logger.warning(
@@ -244,7 +247,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _log_watchdog_event(
         self,
         name: str,
-        request: Optional[timer.FileTimerRequest],
+        request: timer.FileTimerRequest | None,
     ) -> None:
         wg = self._worker_group
         spec = wg.spec
@@ -289,7 +292,8 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _start_workers(self, worker_group: WorkerGroup) -> dict[int, Any]:
         spec = worker_group.spec
         store = worker_group.store
-        assert store is not None
+        if store is None:
+            raise AssertionError
         restart_count = spec.max_restarts - self._remaining_restarts
 
         use_agent_store: bool = spec.rdzv_handler.use_agent_store
@@ -297,7 +301,7 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         args: dict[int, tuple] = {}
         envs: dict[int, dict[str, str]] = {}
-        log_line_prefixes: Optional[dict[int, str]] = (
+        log_line_prefixes: dict[int, str] | None = (
             {} if self._log_line_prefix_template else None
         )
         for worker in worker_group.workers:
@@ -345,8 +349,10 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._setup_local_watchdog(envs=envs)
         self._setup_healthcheck()
 
-        assert spec.entrypoint is not None
-        assert self._logs_specs is not None
+        if spec.entrypoint is None:
+            raise AssertionError
+        if self._logs_specs is None:
+            raise AssertionError
         self._pcontext = start_processes(
             name=spec.role,
             entrypoint=spec.entrypoint,
@@ -418,7 +424,8 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
         role = worker_group.spec.role
         worker_pids = {w.id for w in worker_group.workers}
-        assert self._pcontext is not None
+        if self._pcontext is None:
+            raise AssertionError
         pc_pids = set(self._pcontext.pids().values())
         if worker_pids != pc_pids:
             logger.error(

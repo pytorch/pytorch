@@ -390,6 +390,13 @@ class TestShapeOps(TestCase):
                     op(X, min_val, max_val, out=Y_out)
                     self.assertEqual(Y_expected, torch.isnan(Y_out))
 
+    def test_clamp_scalar_nan_bounds(self, device):
+        x = torch.ones(3, device=device)
+        y = torch.clamp(x, None, float("nan"))
+        self.assertTrue(torch.isnan(y).all())
+        y = torch.clamp(x, float("nan"), None)
+        self.assertTrue(torch.isnan(y).all())
+
     def test_clamp_raises_arg_errors(self, device):
         X = torch.randn(100, dtype=torch.float, device=device)
         error_msg = "At least one of 'min' or 'max' must not be None"
@@ -842,6 +849,16 @@ class TestShapeOps(TestCase):
             x.unfold(0, -1, 1)
         with self.assertRaisesRegex(RuntimeError, "step is -1 but must be > 0"):
             x.unfold(0, 1, -1)
+
+    def test_unfold_backward_errors(self, device):
+        grad_in = torch.randn(2, 3, device=device)
+        input_sizes = [6]
+
+        with self.assertRaisesRegex(ValueError, "step is 0 but must be > 0"):
+            torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, 3, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "size is -1 but must be >= 0"):
+            torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, -1, 1)
 
 
 instantiate_device_type_tests(TestShapeOps, globals())

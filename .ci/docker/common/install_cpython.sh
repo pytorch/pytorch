@@ -8,6 +8,11 @@ GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 # Python versions to be installed in /opt/$VERSION_NO
 CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.9.0 3.10.1 3.11.0 3.12.0 3.13.0 3.13.0t 3.14.0 3.14.0t"}
 
+# Function to retry functions that sometimes timeout or have flaky failures
+retry () {
+    $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+}
+
 function check_var {
     if [ -z "$1" ]; then
         echo "required variable not defined"
@@ -67,7 +72,7 @@ function do_cpython_build {
     fi
     # install setuptools since python 3.12 is required to use distutils
     # packaging is needed to create symlink since wheel no longer provides needed information
-    ${prefix}/bin/pip install packaging==25.0 wheel==0.45.1 setuptools==80.9.0
+    retry ${prefix}/bin/pip install packaging==25.0 wheel==0.45.1 setuptools==80.9.0
     local abi_tag=$(${prefix}/bin/python -c "from packaging.tags import interpreter_name, interpreter_version; import sysconfig ; from sysconfig import get_config_var; print('{0}{1}-{0}{1}{2}'.format(interpreter_name(), interpreter_version(), 't' if sysconfig.get_config_var('Py_GIL_DISABLED') else ''))")
     ln -sf ${prefix} /opt/python/${abi_tag}
 }
@@ -83,7 +88,7 @@ function build_cpython {
         py_suffix=${py_ver::-1}
         py_folder=$py_suffix
     fi
-    wget -q $PYTHON_DOWNLOAD_URL/$py_folder/Python-$py_suffix.tgz -O Python-$py_ver.tgz
+    retry wget -q $PYTHON_DOWNLOAD_URL/$py_folder/Python-$py_suffix.tgz -O Python-$py_ver.tgz
     do_cpython_build $py_ver Python-$py_suffix
 
     rm -f Python-$py_ver.tgz
@@ -91,7 +96,7 @@ function build_cpython {
 
 function build_cpythons {
     check_var $GET_PIP_URL
-    curl -sLO $GET_PIP_URL
+    retry curl -sLO $GET_PIP_URL
     for py_ver in $@; do
         build_cpython $py_ver
     done

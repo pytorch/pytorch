@@ -249,6 +249,8 @@ def object_annotation(obj):
         if len(filename) > FRAME_FILENAME_LIMIT:
             filename = "..." + filename[-(FRAME_FILENAME_LIMIT - 3):]
         return f"frame\n{filename}:{obj.f_lineno}"
+    elif is_cuda_tensor(obj):
+        return f"object\n{type(obj).__module__}.{type(obj).__name__} ({obj.shape})"
     else:
         return f"object\n{type(obj).__module__}.{type(obj).__name__}"
 
@@ -465,7 +467,6 @@ def to_html(nodes):
         if n.context is None:
             continue
         s = _listener_template.format(id=str(i + 1), stack=escape(f'{n.label}:\n{n.context}'))
-        # pyrefly: ignore [bad-argument-type]
         listeners.append(s)
     dot = to_dot(nodes)
     return _template.replace('$DOT', repr(dot)).replace('$LISTENERS', '\n'.join(listeners))

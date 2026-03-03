@@ -52,6 +52,7 @@ ENV INSTALLED_VISION ${VISION}
 
 # Install rocm
 ARG ROCM_VERSION
+ENV ROCM_VERSION=${ROCM_VERSION}
 RUN mkdir ci_commit_pins
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
@@ -60,17 +61,16 @@ RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh common_utils.sh
 RUN rm -r ci_commit_pins
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
+RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_magma.sh ${ROCM_VERSION}; fi
 RUN rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
-RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
-ENV ROCM_PATH /opt/rocm
-ENV PATH /opt/rocm/bin:$PATH
-ENV PATH /opt/rocm/hcc/bin:$PATH
-ENV PATH /opt/rocm/hip/bin:$PATH
-ENV PATH /opt/rocm/opencl/bin:$PATH
-ENV PATH /opt/rocm/llvm/bin:$PATH
-ENV MAGMA_HOME /opt/rocm/magma
+RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
+ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
+RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_drm.sh /usr ; fi && rm install_rocm_drm.sh
+
+# ROCm environment variables are set in /etc/rocm_env.sh by install_rocm.sh
+# and sourced via /etc/bash.bashrc for interactive shells.
+# CI scripts should source /etc/rocm_env.sh directly.
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 
@@ -78,17 +78,6 @@ ENV LC_ALL C.UTF-8
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
-
-# (optional) Install UCC
-ARG UCX_COMMIT
-ARG UCC_COMMIT
-ENV UCX_COMMIT $UCX_COMMIT
-ENV UCC_COMMIT $UCC_COMMIT
-ENV UCX_HOME /usr
-ENV UCC_HOME /usr
-ADD ./common/install_ucc.sh install_ucc.sh
-RUN if [ -n "${UCX_COMMIT}" ] && [ -n "${UCC_COMMIT}" ]; then bash ./install_ucc.sh; fi
-RUN rm install_ucc.sh
 
 COPY ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl

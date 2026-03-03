@@ -1,13 +1,11 @@
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
 
-#include <ATen/core/functional.h> //fmap
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <stdexcept>
 
 namespace torch::jit::fuser {
 

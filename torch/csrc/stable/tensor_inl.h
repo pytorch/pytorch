@@ -7,12 +7,14 @@
 
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/tensor_struct.h>
+#include <torch/headeronly/core/Layout.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
+using torch::headeronly::Layout;
 using torch::headeronly::ScalarType;
 
 inline ScalarType Tensor::scalar_type() const {
@@ -32,5 +34,44 @@ inline Device Tensor::device() const {
       torch::stable::detail::from(device_type));
   return Device(extension_device_type, static_cast<DeviceIndex>(device_index));
 }
+
+inline Layout Tensor::layout() const {
+  int32_t layout;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_get_layout(ath_.get(), &layout));
+  return torch::stable::detail::to<Layout>(torch::stable::detail::from(layout));
+}
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// The following data ptr cast methods mirror the methods defined in
+// aten/src/ATen/templates/TensorMethods.cpp
+#define DEFINE_DATA_PTR_CAST(T, name, PRED)               \
+  template <>                                             \
+  inline T* Tensor::mutable_data_ptr() const {            \
+    auto stype = scalar_type();                           \
+    STD_TORCH_CHECK(                                      \
+        PRED(stype, torch::headeronly::ScalarType::name), \
+        "expected scalar type " #name " but found ",      \
+        torch::headeronly::toString(stype));              \
+    return static_cast<T*>(mutable_data_ptr());           \
+  }                                                       \
+  template <>                                             \
+  inline const T* Tensor::const_data_ptr() const {        \
+    auto stype = scalar_type();                           \
+    STD_TORCH_CHECK(                                      \
+        PRED(stype, torch::headeronly::ScalarType::name), \
+        "expected scalar type " #name " but found ",      \
+        torch::headeronly::toString(stype));              \
+    return static_cast<const T*>(const_data_ptr());       \
+  }
+
+#define _PRED(S1, S2) S1 == S2
+#define DEFINE_CAST(T, name) DEFINE_DATA_PTR_CAST(T, name, _PRED)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)
+DEFINE_CAST(uint16_t, UInt16)
+DEFINE_CAST(uint32_t, UInt32)
+DEFINE_CAST(uint64_t, UInt64)
+#undef DEFINE_CAST
+#undef _PRED
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

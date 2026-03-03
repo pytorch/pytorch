@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the RAdam algorithm."""
 
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -32,13 +32,13 @@ class RAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
+        lr: float | Tensor = 1e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
         decoupled_weight_decay: bool = False,
         *,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
@@ -132,7 +132,7 @@ class RAdam(Optimizer):  # noqa: D101
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -323,7 +323,6 @@ def _single_tensor_radam(
         rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
 
         def _compute_rect():
-            # pyrefly: ignore [unsupported-operation]
             return (
                 (rho_t - 4)
                 * (rho_t - 2)
@@ -338,7 +337,6 @@ def _single_tensor_radam(
             else:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
 
-            # pyrefly: ignore [unsupported-operation]
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
         # Compute the variance rectification term and update parameters accordingly
@@ -438,9 +436,9 @@ def _multi_tensor_radam(
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
         # compute the length of the approximated SMA
-        bias_correction1: Union[tuple[Tensor, ...], list[Tensor]]
-        bias_correction2: Union[tuple[Tensor, ...], list[Tensor]]
-        rho_t_list: Union[tuple[Tensor, ...], list[Tensor]]
+        bias_correction1: tuple[Tensor, ...] | list[Tensor]
+        bias_correction2: tuple[Tensor, ...] | list[Tensor]
+        rho_t_list: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             bias_correction1 = torch._foreach_pow(beta2, grouped_state_steps)
             torch._foreach_neg_(bias_correction1)
@@ -575,7 +573,7 @@ def radam(
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     decoupled_weight_decay: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     differentiable: bool = False,
     capturable: bool = False,
     has_complex: bool = False,

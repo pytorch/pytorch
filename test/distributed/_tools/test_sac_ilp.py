@@ -13,22 +13,32 @@ from torch.distributed._tools.ilp_utils import (
 from torch.distributed._tools.mem_tracker import _ModState, MemTracker
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.distributed._tools.sac_estimator import SACEstimator, SACStats
-from torch.distributed._tools.sac_ilp import (
-    get_optimal_checkpointing_policy_per_module,
-    sac_milp,
-)
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     MI300_ARCH,
+    MI350_ARCH,
     run_tests,
     skipIfRocmArch,
-    skipIfTorchDynamo,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
 )
+
+
+# sac_ilp depends on the pulp package which may not be installed
+# See: https://github.com/pytorch/pytorch/issues/162453
+HAS_PULP = True
+try:
+    from torch.distributed._tools.sac_ilp import (
+        get_optimal_checkpointing_policy_per_module,
+        sac_milp,
+    )
+except ImportError:
+    HAS_PULP = False
+    get_optimal_checkpointing_policy_per_module = None  # type: ignore[assignment, misc]
+    sac_milp = None  # type: ignore[assignment]
 
 
 class TestSACILP(TestCase):
@@ -75,7 +85,8 @@ class TestSACILP(TestCase):
                 optimizer.zero_grad()
                 if iter_idx == 0:
                     mt.reset_mod_stats()
-        assert last_snapshot is not None
+        if last_snapshot is None:
+            raise AssertionError("Expected last_snapshot to not be None")
         for mod_stats in mem_tracker.memory_tracking.values():
             # postprocessing due to the fact that for ModTracker, the post backward hook
             # is not being called for modules whose inputs don't require gradients
@@ -134,9 +145,9 @@ class TestSACILP(TestCase):
             )
         return mod_info
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @skipIfRocmArch(MI300_ARCH)
+    @unittest.skipIf(not HAS_PULP, "pulp package not installed")
+    @skipIfRocmArch(MI300_ARCH + MI350_ARCH)
     def test_sac_ilp_case1(self):
         """
         This is a case where the memory budget is either binding or too tight,
@@ -177,8 +188,8 @@ class TestSACILP(TestCase):
             (recomputation_time / compute_time) / (6.97 / 97.97), 1, delta=0.25
         )
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_sac_ilp_case2(self):
         """
         This is a case where the memory budget is not binding, meaning that no
@@ -193,8 +204,8 @@ class TestSACILP(TestCase):
         self.assertEqual(recomputation_time, 0)
         self.assertGreater(peak_mem, 1)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_sac_ilp_case3(self):
         """
         This is a case where the memory budget is too tight, meaning that even with
@@ -236,8 +247,8 @@ class TestOptimalCheckpointingPolicy(TestCase):
             force_store_random=False,
         )
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @unittest.skipIf(not HAS_PULP, "pulp package not installed")
     def test_get_optimial_checkpointing_policy_per_module(self):
         for memory_budget, optimal_soln in [
             (0, [1, 0, 0, 0, 1, 0, 0, 0]),

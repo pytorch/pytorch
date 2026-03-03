@@ -443,12 +443,7 @@ int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Ten
   return static_cast<int64_t>(backend);
 }
 
-REGISTER_ARCH_DISPATCH(_fused_sdp_choice_stub, DEFAULT, &_fused_sdp_choice_cpp)
-REGISTER_AVX2_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_AVX512_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_VSX_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_ZVECTOR_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_SVE256_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+REGISTER_ALL_CPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 REGISTER_HPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_meta)
 
 int64_t _fused_sdp_choice_meta(
@@ -614,8 +609,8 @@ at::Tensor preprocess_mask(
 // This causes the kernel to maybe alias query, key, value
 // So instead we pad the head_dimensions to be a multiple of 8 in the composite
 // region
-template <int alignment_size, bool slice>
-at::Tensor pad_last_dim(const at::Tensor& attn_bias) {
+template <bool slice>
+at::Tensor pad_last_dim(const at::Tensor& attn_bias, int alignment_size) {
   auto last_dim_size = attn_bias.sym_size(-1);
   if (last_dim_size % alignment_size == 0) {
     return attn_bias;
@@ -726,6 +721,22 @@ Tensor scaled_dot_product_attention(
     bool enable_gqa) {
   using sdp::SDPBackend;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+  // NB: This op is CompositeImplicitAutograd — autograd traces through the
+  // implementation rather than using an explicit backward formula. We must
+  // return early here because the scale computation (1/sqrt(head_dim)) is
+  // undefined when head_dim is 0, and backends don't uniformly handle
+  // zero-element tensors. We use the sum()*0 trick (same pattern as
+  // _batch_norm_impl_index in Normalization.cpp) to make the output depend
+  // on all inputs so that backward() produces correctly-shaped zero
+  // gradients instead of None.
+  if (TORCH_GUARD_OR_FALSE(query_.sym_numel().sym_eq(0)) ||
+      TORCH_GUARD_OR_FALSE(key.sym_numel().sym_eq(0)) ||
+      TORCH_GUARD_OR_FALSE(value.sym_numel().sym_eq(0))) {
+    auto output_shape = query_.sym_sizes().vec();
+    output_shape[output_shape.size() - 1] = value.sym_size(-1);
+    auto out = at::zeros_symint(output_shape, query_.options());
+    return out + (query_.sum() + key.sum() + value.sum()) * 0;
+  }
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
@@ -743,11 +754,13 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::flash_attention: {
-      if(query_device_type == DeviceType::CUDA){
+      if(query_device_type == DeviceType::CUDA ||
+         query_device_type == DeviceType::XPU) {
         c10::SymInt og_size = query_.sym_size(-1);
-        Tensor query_padded = pad_last_dim<8, false>(query_);
-        Tensor key_padded = pad_last_dim<8, false>(key);
-        Tensor value_padded = pad_last_dim<8, false>(value);
+        int alignment_size = (query_device_type == DeviceType::XPU) ? 64 : 8;
+        Tensor query_padded = pad_last_dim<false>(query_, alignment_size);
+        Tensor key_padded = pad_last_dim<false>(key, alignment_size);
+        Tensor value_padded = pad_last_dim<false>(value, alignment_size);
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
@@ -774,6 +787,18 @@ Tensor scaled_dot_product_attention(
     }
     case SDPBackend::math: {
 #ifdef USE_MPS
+      TORCH_CHECK_NOT_IMPLEMENTED(
+        c10::isFloatingType(query_.scalar_type()),
+        "scaled_dot_product_attention for MPS does not support dtype ",
+        query_.scalar_type());
+      TORCH_CHECK_NOT_IMPLEMENTED(
+        c10::isFloatingType(key.scalar_type()),
+        "scaled_dot_product_attention for MPS does not support dtype ",
+        key.scalar_type());
+      TORCH_CHECK_NOT_IMPLEMENTED(
+        c10::isFloatingType(value.scalar_type()),
+        "scaled_dot_product_attention for MPS does not support dtype ",
+        value.scalar_type());
       const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
       const auto all_contiguous = query_.is_contiguous_or_false() && key.is_contiguous_or_false() && value.is_contiguous_or_false();

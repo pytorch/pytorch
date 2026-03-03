@@ -1,6 +1,6 @@
 import math
 from collections.abc import Iterable, Sequence
-from typing import Literal, NamedTuple, Optional, Union
+from typing import Literal, NamedTuple
 
 import torch
 import torch._prims as prims
@@ -35,7 +35,7 @@ __all__ = [
     "ifftshift",
 ]
 
-NormType = Union[None, Literal["forward", "backward", "ortho"]]
+NormType = None | Literal["forward", "backward", "ortho"]
 _NORM_VALUES = {None, "forward", "backward", "ortho"}
 aten = torch._ops.ops.aten
 
@@ -95,7 +95,10 @@ def _resize_fft_input(
     Fixes the shape of x such that x.size(dims[i]) == sizes[i],
     either by zero-padding, or by slicing x starting from 0.
     """
-    assert len(dims) == len(sizes)
+    if len(dims) != len(sizes):
+        raise AssertionError(
+            f"dims and sizes must have the same length, got {len(dims)} and {len(sizes)}"
+        )
     must_copy = False
     x_sizes = x.shape
     pad_amount = [0] * len(x_sizes) * 2
@@ -118,7 +121,7 @@ def _resize_fft_input(
 def _fft_c2r(
     func_name: str,
     input: TensorLikeType,
-    n: Optional[int],
+    n: int | None,
     dim: int,
     norm: NormType,
     forward: bool,
@@ -145,7 +148,7 @@ def _fft_c2r(
 def _fft_r2c(
     func_name: str,
     input: TensorLikeType,
-    n: Optional[int],
+    n: int | None,
     dim: int,
     norm: NormType,
     forward: bool,
@@ -174,7 +177,7 @@ def _fft_r2c(
 def _fft_c2c(
     func_name: str,
     input: TensorLikeType,
-    n: Optional[int],
+    n: int | None,
     dim: int,
     norm: NormType,
     forward: bool,
@@ -201,7 +204,7 @@ def _fft_c2c(
 @out_wrapper()
 def fft(
     input: TensorLikeType,
-    n: Optional[int] = None,
+    n: int | None = None,
     dim: int = -1,
     norm: NormType = None,
 ) -> TensorLikeType:
@@ -215,7 +218,7 @@ def fft(
 @out_wrapper()
 def ifft(
     input: TensorLikeType,
-    n: Optional[int] = None,
+    n: int | None = None,
     dim: int = -1,
     norm: NormType = None,
 ) -> TensorLikeType:
@@ -229,7 +232,7 @@ def ifft(
 @out_wrapper()
 def rfft(
     input: TensorLikeType,
-    n: Optional[int] = None,
+    n: int | None = None,
     dim: int = -1,
     norm: NormType = None,
 ) -> TensorLikeType:
@@ -240,7 +243,7 @@ def rfft(
 @out_wrapper()
 def irfft(
     input: TensorLikeType,
-    n: Optional[int] = None,
+    n: int | None = None,
     dim: int = -1,
     norm: NormType = None,
 ) -> TensorLikeType:
@@ -251,7 +254,7 @@ def irfft(
 @out_wrapper()
 def hfft(
     input: TensorLikeType,
-    n: Optional[int] = None,
+    n: int | None = None,
     dim: int = -1,
     norm: NormType = None,
 ) -> TensorLikeType:
@@ -262,7 +265,7 @@ def hfft(
 @out_wrapper()
 def ihfft(
     input: TensorLikeType,
-    n: Optional[int] = None,
+    n: int | None = None,
     dim: int = -1,
     norm: NormType = None,
 ) -> TensorLikeType:
@@ -275,7 +278,7 @@ class _ShapeAndDims(NamedTuple):
 
 
 def _canonicalize_fft_shape_and_dim_args(
-    input: TensorLikeType, shape: Optional[ShapeType], dim: Optional[DimsType]
+    input: TensorLikeType, shape: ShapeType | None, dim: DimsType | None
 ) -> _ShapeAndDims:
     """Convert the shape and dim arguments into a canonical form where neither are optional"""
     input_dim = input.ndim
@@ -362,8 +365,8 @@ def _fftn_c2c(
 @out_wrapper()
 def fftn(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = None,
+    s: ShapeType | None = None,
+    dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
@@ -375,8 +378,8 @@ def fftn(
 @out_wrapper()
 def ifftn(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = None,
+    s: ShapeType | None = None,
+    dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
@@ -388,8 +391,8 @@ def ifftn(
 @out_wrapper()
 def rfftn(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = None,
+    s: ShapeType | None = None,
+    dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     torch._check(
@@ -407,8 +410,8 @@ def rfftn(
 @out_wrapper()
 def ihfftn(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = None,
+    s: ShapeType | None = None,
+    dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     torch._check(
@@ -440,8 +443,8 @@ class _CanonicalizeC2rReturn(NamedTuple):
 def _canonicalize_fft_c2r_shape_and_dim_args(
     fname: str,
     input: TensorLikeType,
-    s: Optional[ShapeType],
-    dim: Optional[DimsType],
+    s: ShapeType | None,
+    dim: DimsType | None,
 ) -> _CanonicalizeC2rReturn:
     """Canonicalize shape and dim arguments for n-dimensional c2r transforms,
     as well as calculating the last_dim_size which is shape[dim[-1]] for the output"""
@@ -469,8 +472,8 @@ def _canonicalize_fft_c2r_shape_and_dim_args(
 @out_wrapper()
 def irfftn(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = None,
+    s: ShapeType | None = None,
+    dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     shape, dim, last_dim_size = _canonicalize_fft_c2r_shape_and_dim_args(
@@ -486,8 +489,8 @@ def irfftn(
 @out_wrapper()
 def hfftn(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = None,
+    s: ShapeType | None = None,
+    dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     shape, dim, last_dim_size = _canonicalize_fft_c2r_shape_and_dim_args(
@@ -507,8 +510,8 @@ def hfftn(
 @out_wrapper()
 def fft2(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = (-2, -1),
+    s: ShapeType | None = None,
+    dim: DimsType | None = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return torch.fft.fftn(input, s=s, dim=dim, norm=norm)
@@ -518,8 +521,8 @@ def fft2(
 @out_wrapper()
 def ifft2(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = (-2, -1),
+    s: ShapeType | None = None,
+    dim: DimsType | None = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return torch.fft.ifftn(input, s=s, dim=dim, norm=norm)
@@ -529,8 +532,8 @@ def ifft2(
 @out_wrapper()
 def rfft2(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = (-2, -1),
+    s: ShapeType | None = None,
+    dim: DimsType | None = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return torch.fft.rfftn(input, s=s, dim=dim, norm=norm)
@@ -540,8 +543,8 @@ def rfft2(
 @out_wrapper()
 def irfft2(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = (-2, -1),
+    s: ShapeType | None = None,
+    dim: DimsType | None = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return torch.fft.irfftn(input, s=s, dim=dim, norm=norm)
@@ -551,8 +554,8 @@ def irfft2(
 @out_wrapper()
 def hfft2(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = (-2, -1),
+    s: ShapeType | None = None,
+    dim: DimsType | None = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return torch.fft.hfftn(input, s=s, dim=dim, norm=norm)
@@ -562,14 +565,14 @@ def hfft2(
 @out_wrapper()
 def ihfft2(
     input: TensorLikeType,
-    s: Optional[ShapeType] = None,
-    dim: Optional[DimsType] = (-2, -1),
+    s: ShapeType | None = None,
+    dim: DimsType | None = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return torch.fft.ihfftn(input, s=s, dim=dim, norm=norm)
 
 
-def _default_alldims(dim: Optional[DimsType], x: TensorLikeType) -> list[int]:
+def _default_alldims(dim: DimsType | None, x: TensorLikeType) -> list[int]:
     """Convert Optional[DimsType] to a simple list, defaulting to all dimensions"""
     if dim is None:
         return list(range(x.ndim))
@@ -580,14 +583,14 @@ def _default_alldims(dim: Optional[DimsType], x: TensorLikeType) -> list[int]:
 
 
 @register_decomposition(aten.fft_fftshift)
-def fftshift(input: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
+def fftshift(input: TensorLikeType, dim: DimsType | None = None) -> TensorLikeType:
     dims = _default_alldims(dim, input)
     shift = [input.shape[d] // 2 for d in dims]
     return torch.roll(input, shift, dims)
 
 
 @register_decomposition(aten.fft_ifftshift)
-def ifftshift(input: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
+def ifftshift(input: TensorLikeType, dim: DimsType | None = None) -> TensorLikeType:
     dims = _default_alldims(dim, input)
     shift = [(input.shape[d] + 1) // 2 for d in dims]
     return torch.roll(input, shift, dims)

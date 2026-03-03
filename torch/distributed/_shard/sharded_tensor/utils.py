@@ -3,7 +3,7 @@ import collections.abc
 import copy
 import itertools
 from collections.abc import Sequence
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed import distributed_c10d as c10d, rpc
@@ -56,7 +56,7 @@ def _validate_output_tensor_for_gather(
     my_rank: int,
     dst_rank: int,
     size: torch.Size,
-    dst_tensor: Optional[torch.Tensor],
+    dst_tensor: torch.Tensor | None,
 ) -> None:
     if dst_rank == my_rank:
         if dst_tensor is None:
@@ -79,7 +79,6 @@ def _flatten_tensor_size(size) -> torch.Size:
     Checks if tensor size is valid, then flatten/return a torch.Size object.
     """
     if len(size) == 1 and isinstance(size[0], collections.abc.Sequence):
-        # pyrefly: ignore [not-iterable]
         dims = list(*size)
     else:
         dims = list(size)
@@ -93,7 +92,8 @@ def _flatten_tensor_size(size) -> torch.Size:
 
 def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
     if is_local:
-        assert isinstance(ranks, int)
+        if not isinstance(ranks, int):
+            raise AssertionError
         if expected != actual:
             raise ValueError(
                 f"Local shards' tensor {prop_name} property need to be the same on rank:{ranks}! "
@@ -102,7 +102,8 @@ def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
             )
     else:
         # compare failure check across ranks, ranks list should have two rank
-        assert len(ranks) == 2
+        if len(ranks) != 2:
+            raise AssertionError
         if expected != actual:
             raise ValueError(
                 f"ShardedTensor {prop_name} property does not match from different ranks! "
@@ -117,7 +118,8 @@ def build_metadata_from_local_shards(
     current_rank: int,
     pg: c10d.ProcessGroup,
 ) -> ShardedTensorMetadata:
-    assert len(local_shards) > 0, "must have local shards!"
+    if len(local_shards) <= 0:
+        raise AssertionError("must have local shards!")
     local_shard_metadatas: list[ShardMetadata] = []
 
     first_shard_dtype = local_shards[0].tensor.dtype
@@ -203,7 +205,7 @@ def build_metadata_from_local_shards(
 
 
 def build_global_metadata(
-    gathered_metadatas: Sequence[Optional[ShardedTensorMetadata]],
+    gathered_metadatas: Sequence[ShardedTensorMetadata | None],
     recalc_metadata: bool = False,
 ):
     global_sharded_tensor_metadata = None

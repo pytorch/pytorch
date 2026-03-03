@@ -1,7 +1,7 @@
 import math
 from collections.abc import Callable, Sequence
 from itertools import chain
-from typing import Any, cast, NamedTuple, Optional, Union
+from typing import Any, cast, NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -15,15 +15,14 @@ from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
-    compiled_autograd_enabled,
 )
 from ._fsdp_param import FSDPParam, ShardedState
 
 
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
-    all_gather_event: Optional[torch.Event]
-    all_gather_work: Optional[dist.distributed_c10d.Work]
+    all_gather_event: torch.Event | None
+    all_gather_work: dist.distributed_c10d.Work | None
     # For each parameter, the all-gather input dtype for each input
     param_all_gather_input_dtypes: list[list[torch.dtype]]
     # For each parameter, the all-gather input numel for each input
@@ -51,7 +50,7 @@ lib.define(
 class DefaultAllocMixin:
     def allocate(
         self,
-        size: Sequence[Union[int, torch.SymInt]],
+        size: Sequence[int | torch.SymInt],
         *,
         dtype: torch.dtype,
         device: torch.device,
@@ -66,7 +65,7 @@ class ProcessGroupAllocMixin:
 
     def allocate(
         self,
-        size: Sequence[Union[int, torch.SymInt]],
+        size: Sequence[int | torch.SymInt],
         *,
         dtype: torch.dtype,
         device: torch.device,
@@ -85,7 +84,7 @@ class DefaultAllGather(DefaultAllocMixin, AllGather):
         input_tensor: torch.Tensor,
         group: dist.ProcessGroup,
         async_op: bool = False,
-    ) -> Optional[dist.Work]:
+    ) -> dist.Work | None:
         return dist.all_gather_into_tensor(
             output_tensor,
             input_tensor,
@@ -104,7 +103,7 @@ class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
         input_tensor: torch.Tensor,
         group: dist.ProcessGroup,
         async_op: bool = False,
-    ) -> Optional[dist.Work]:
+    ) -> dist.Work | None:
         return dist.all_gather_into_tensor(
             output_tensor,
             input_tensor,
@@ -203,7 +202,8 @@ lib.define(
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: list[int],
-    dim: int,
+    dim: int = 0,
+    *,
     out: list[torch.Tensor],
 ) -> None:
     torch.split_with_sizes_copy(
@@ -241,7 +241,7 @@ def foreach_all_gather(
     all_gather_stream: torch.Stream,
     device: torch.device,
     all_gather_comm: AllGather,
-) -> Optional[AllGatherResult]:
+) -> AllGatherResult | None:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
     with device_handle.stream(all_gather_copy_in_stream):
@@ -293,9 +293,6 @@ def foreach_all_gather(
 def _get_param_all_gather_inputs(
     fsdp_params: list[FSDPParam],
 ) -> list[list[torch.Tensor]]:
-    if compiled_autograd_enabled():
-        return [fsdp_param.all_gather_inputs for fsdp_param in fsdp_params]
-
     # Intentionally try to run a fast-path that bypasses abstractions for the
     # common FSDP case of bf16/fp32 mixed precision in order to use foreach
     # copy for lower CPU overhead and more efficient copying in eager
@@ -370,16 +367,13 @@ def foreach_all_gather_copy_out(
     ):
         # NOTE: Under compile, make sure we always recreate all_gather_outputs
         # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
-        force_recreate = compiled_autograd_enabled()
         fsdp_param.init_all_gather_outputs(
             all_gather_input_numels,
             all_gather_input_dtypes,
             world_size,
             device,
-            force_recreate=force_recreate,
         )
-        if not force_recreate:
-            fsdp_param.alloc_all_gather_outputs()
+        fsdp_param.alloc_all_gather_outputs()
         param_all_gather_outputs = fsdp_param.all_gather_outputs
         if fsdp_param.fsdp_placement.dim != 0:
             # Copy to a temporary and then chunk-cat into the final all-gather
@@ -397,13 +391,7 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
 
     # only avoid VC bump if we are not in inference mode
-    if torch._dynamo.is_compiling():
-        # For torch.compile, we turn off inference_mode for fake tensor
-        # propagation, and therefore graph break on is_inference. For `compile`,
-        # we don't care about VCs, so just skip the optimization.
-        non_inference_outs = []
-    else:
-        non_inference_outs = [o for o in out if not o.is_inference()]
+    non_inference_outs = [o for o in out if not o.is_inference()]
 
     if len(non_inference_outs) > 0:
         with torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs)):
@@ -450,23 +438,23 @@ def foreach_reduce(
     reduce_scatter_group: dist.ProcessGroup,
     reduce_scatter_stream: torch.Stream,
     reduce_scatter_comm: ReduceScatter,
-    orig_dtype: Optional[torch.dtype],
-    reduce_dtype: Optional[torch.dtype],
+    orig_dtype: torch.dtype | None,
+    reduce_dtype: torch.dtype | None,
     device: torch.device,
-    gradient_divide_factor: Optional[float],
-    all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
+    gradient_divide_factor: float | None,
+    all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
-    partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
-    all_reduce_hook: Optional[Callable[[torch.Tensor], None]],
+    partial_reduce_output: torch.Tensor | None,  # only used for HSDP
+    all_reduce_hook: Callable[[torch.Tensor], None] | None,
     force_sum_reduction_for_comms: bool = False,
 ) -> tuple[
     torch.Tensor,
     torch.Event,
     torch.Event,
-    Optional[torch.Tensor],
-    Optional[torch.Event],
-    Optional[torch.Tensor],
+    torch.Tensor | None,
+    torch.Event | None,
+    torch.Tensor | None,
 ]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
@@ -547,8 +535,12 @@ def foreach_reduce(
                 op=reduce_scatter_op,
             )
         else:
-            # For single GPU, just copy the input to output (no actual reduce-scatter needed)
-            reduce_output.copy_(reduce_scatter_input)
+            # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
+            # account for a possible gradient_divide_factor.
+            if gradient_divide_factor is not None:
+                reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
+            else:
+                reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP or DDP/replicate
@@ -636,12 +628,11 @@ def foreach_reduce(
                     new_sharded_grad
                 )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
-            if not compiled_autograd_enabled():
-                for hook in (
-                    getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
-                    or {}
-                ).values():
-                    hook(fsdp_param.sharded_param)
+            for hook in (
+                getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
+                or {}
+            ).values():
+                hook(fsdp_param.sharded_param)
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
         post_reduce_event = post_reduce_stream.record_event()
@@ -694,17 +685,17 @@ def _get_all_gather_input_metadatas(
 
 
 def _get_gradient_divide_factors(
-    reduce_scatter_group: Optional[dist.ProcessGroup],
-    all_reduce_group: Optional[dist.ProcessGroup],
+    reduce_scatter_group: dist.ProcessGroup | None,
+    all_reduce_group: dist.ProcessGroup | None,
     reduce_dtype: torch.dtype,
     device_type: str = "",
-    factor: Optional[float] = None,
+    factor: float | None = None,
     force_sum_reduction_for_comms: bool = False,
 ) -> tuple[
-    Optional[float],
-    Optional[float],
-    Union[dist.ReduceOp, dist.ReduceOp.RedOpType],
-    Union[dist.ReduceOp, dist.ReduceOp.RedOpType],
+    float | None,
+    float | None,
+    dist.ReduceOp | dist.ReduceOp.RedOpType,
+    dist.ReduceOp | dist.ReduceOp.RedOpType,
 ]:
     # MTIA appears to only support SUM reduction, hence we force it implicitly
     if device_type == "mtia":
@@ -721,21 +712,22 @@ def _get_gradient_divide_factors(
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()
 
-    if factor is None:
-        factor = float(data_parallel_size)
-
     if not overflow_risk and not force_sum_reduction_for_comms:
-        if factor == data_parallel_size:
+        if factor is None:
             # Warning: NCCL ReduceOp.AVG may produce incorrect results with
             # world size 1.
             if data_parallel_size == 1:
                 return None, None, ReduceOp.SUM, ReduceOp.SUM
             return None, None, ReduceOp.AVG, ReduceOp.AVG
+        if reduce_scatter_group is not None and factor == reduce_scatter_group.size():
+            reduce_scatter_op = ReduceOp.AVG
         else:
             reduce_scatter_op = torch.distributed._make_nccl_premul_sum(1 / factor)
-            return None, None, reduce_scatter_op, ReduceOp.SUM
+        return None, None, reduce_scatter_op, ReduceOp.SUM
 
-    pre_factor: Optional[float]
+    if factor is None:
+        factor = float(data_parallel_size)
+    pre_factor: float | None
     if overflow_risk:
         # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
         # overflow/underflow. For N data parallel workers, each worker computes
@@ -752,6 +744,6 @@ def _get_gradient_divide_factors(
     return pre_factor, post_factor, ReduceOp.SUM, ReduceOp.SUM
 
 
-def _div_if_needed(tensor: torch.Tensor, div_factor: Optional[float]) -> None:
+def _div_if_needed(tensor: torch.Tensor, div_factor: float | None) -> None:
     if div_factor is not None and div_factor != 1:
         tensor.div_(div_factor)

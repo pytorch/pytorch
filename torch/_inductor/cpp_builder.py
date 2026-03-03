@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from ctypes import cdll, wintypes
 from ctypes.util import find_library
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -481,6 +481,7 @@ def _is_msvc_cl(cpp_compiler: str) -> bool:
     except FileNotFoundError:
         return False
 
+    # pyrefly: ignore [unreachable]
     return False
 
 
@@ -525,6 +526,7 @@ def _is_intel_compiler(cpp_compiler: str) -> bool:
         # --version args not support.
         return False
 
+    # pyrefly: ignore [unreachable]
     return False
 
 
@@ -652,13 +654,13 @@ class BuildOptionsBase:
     def __init__(
         self,
         compiler: str = "",
-        definitions: Optional[list[str]] = None,
-        include_dirs: Optional[list[str]] = None,
-        cflags: Optional[list[str]] = None,
-        ldflags: Optional[list[str]] = None,
-        libraries_dirs: Optional[list[str]] = None,
-        libraries: Optional[list[str]] = None,
-        passthrough_args: Optional[list[str]] = None,
+        definitions: list[str] | None = None,
+        include_dirs: list[str] | None = None,
+        cflags: list[str] | None = None,
+        ldflags: list[str] | None = None,
+        libraries_dirs: list[str] | None = None,
+        libraries: list[str] | None = None,
+        passthrough_args: list[str] | None = None,
         aot_mode: bool = False,
         use_relative_path: bool = False,
         compile_only: bool = False,
@@ -677,7 +679,7 @@ class BuildOptionsBase:
 
         # Optionally, the path to a precompiled header which should be included on the
         # build command line.
-        self.precompiled_header: Optional[str] = None
+        self.precompiled_header: str | None = None
 
         self._aot_mode: bool = aot_mode
         self._use_relative_path: bool = use_relative_path
@@ -1621,7 +1623,7 @@ def _set_gpu_runtime_env() -> None:
 
 
 @functools.lru_cache(8)
-def _find_libcudart_static(path: str) -> Optional[Path]:
+def _find_libcudart_static(path: str) -> Path | None:
     lib_dirs = list(Path(path).rglob("libcudart_static.a"))
     if lib_dirs:
         return lib_dirs[0].resolve().parent
@@ -1636,7 +1638,7 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
     # 2. Linux machines may have CUDA installed under either lib64/ or lib/
     for i, path in enumerate(lpaths):
         if "CUDA_HOME" in os.environ and path.startswith(os.environ["CUDA_HOME"]):
-            lib_dir: Optional[Path] = _find_libcudart_static(path)
+            lib_dir: Path | None = _find_libcudart_static(path)
             if lib_dir is None:
                 continue
             lpaths[i] = str(lib_dir)
@@ -1904,7 +1906,7 @@ class CppBuilder:
     def __init__(
         self,
         name: str,
-        sources: Union[str, list[str]],
+        sources: str | list[str],
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
     ) -> None:
@@ -2211,7 +2213,9 @@ class CppBuilder:
             )
 
         if device_type == "cuda" and torch.version.hip is None:
-            from torch._inductor.codecache import _nvcc_arch_as_compile_option
+            from torch._inductor.codegen.cuda.compile_utils import (
+                _nvcc_arch_as_compile_option,
+            )
 
             current_arch = _nvcc_arch_as_compile_option()
             contents += textwrap.dedent(
@@ -2273,6 +2277,52 @@ class CppBuilder:
                     # --- Add to a list for linking later ---
                     set(KERNEL_TARGETS ${{KERNEL_TARGETS}} build_kernel_object_${{KERNEL_NAME}} PARENT_SCOPE)
                     set(KERNEL_OBJECT_FILES ${{KERNEL_OBJECT_FILES}} ${{OBJECT_FILE}} PARENT_SCOPE)
+                endfunction()
+
+                """
+            )
+        elif device_type == "xpu":
+            contents += textwrap.dedent(
+                """
+                find_program(OBJCOPY_EXECUTABLE objcopy)
+                if(NOT OBJCOPY_EXECUTABLE)
+                    message(FATAL_ERROR "objcopy not found. Cannot embed spv as object file")
+                endif()
+
+                set(KERNEL_TARGETS "")
+                set(KERNEL_OBJECT_FILES "")
+                # Function to embed a single kernel
+                function(embed_gpu_kernel KERNEL_NAME SPV_FILE)
+                    set(OBJECT_BASENAME ${KERNEL_NAME}.spv.o)
+                    set(OBJECT_FILE ${CMAKE_CURRENT_BINARY_DIR}/${OBJECT_BASENAME})
+
+                    # --- Define UNIQUE C symbol names ---
+                    set(SYMBOL_START __${KERNEL_NAME}_start)
+                    set(SYMBOL_END __${KERNEL_NAME}_end)
+                    set(SYMBOL_SIZE __${KERNEL_NAME}_size)
+                    string(REGEX REPLACE "[^a-zA-Z0-9]" "_" MANGLED_BASENAME ${SPV_FILE})
+                    set(OBJCOPY_START_SYM _binary_${MANGLED_BASENAME}_start)
+                    set(OBJCOPY_END_SYM _binary_${MANGLED_BASENAME}_end)
+                    set(OBJCOPY_SIZE_SYM _binary_${MANGLED_BASENAME}_size)
+
+                    # --- SPV_FILE to Object File (.o) Command ---
+                    add_custom_command(
+                        OUTPUT ${OBJECT_FILE}
+                        COMMAND ${CMAKE_LINKER} -r -b binary -z noexecstack -o ${OBJECT_FILE} ${SPV_FILE}
+                        COMMAND ${OBJCOPY_EXECUTABLE} --rename-section .data=.rodata,alloc,load,readonly,data,contents
+                                ${OBJECT_FILE}
+                        COMMAND ${OBJCOPY_EXECUTABLE}
+                                --redefine-sym ${OBJCOPY_START_SYM}=${SYMBOL_START}
+                                --redefine-sym ${OBJCOPY_END_SYM}=${SYMBOL_END}
+                                --redefine-sym ${OBJCOPY_SIZE_SYM}=${SYMBOL_SIZE}
+                                ${OBJECT_FILE}
+                        DEPENDS ${SPV_FILE}
+                    )
+                    add_custom_target(build_kernel_object_${KERNEL_NAME} DEPENDS ${OBJECT_FILE})
+
+                    # --- Add to a list for linking later ---
+                    set(KERNEL_TARGETS ${KERNEL_TARGETS} build_kernel_object_${KERNEL_NAME} PARENT_SCOPE)
+                    set(KERNEL_OBJECT_FILES ${KERNEL_OBJECT_FILES} ${OBJECT_FILE} PARENT_SCOPE)
                 endfunction()
 
                 """

@@ -9,11 +9,8 @@
 
 #include <ATen/Operators.h>
 #include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/functorch/BatchedFallback.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/util/SmallBuffer.h>
 #include <ATen/InferSize.h>
 
 namespace at::functorch {

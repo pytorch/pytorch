@@ -1,6 +1,6 @@
 .. meta::
    :description: A guide to torch.cuda, a PyTorch module to run CUDA operations
-   :keywords: memory management, PYTORCH_CUDA_ALLOC_CONF, optimize PyTorch, CUDA
+   :keywords: memory management, PYTORCH_ALLOC_CONF, optimize PyTorch, CUDA
 
 .. _cuda-semantics:
 
@@ -254,7 +254,7 @@ To toggle the reduced precision reduction flags in C++, one can do
 
 .. _fp16accumulation:
 
-Full FP16 Accmumulation in FP16 GEMMs
+Full FP16 Accumulation in FP16 GEMMs
 -------------------------------------
 
 Certain GPUs have increased performance when doing _all_ FP16 GEMM accumulation
@@ -488,7 +488,7 @@ underlying allocation patterns produced by your code.
 
 .. _cuda-memory-envvars:
 
-Optimizing memory usage  with ``PYTORCH_CUDA_ALLOC_CONF``
+Optimizing memory usage  with ``PYTORCH_ALLOC_CONF``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Use of a caching allocator can interfere with memory checking tools such as
@@ -496,8 +496,9 @@ Use of a caching allocator can interfere with memory checking tools such as
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
 The behavior of the caching allocator can be controlled via the environment variable
-``PYTORCH_CUDA_ALLOC_CONF``.
-The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
+``PYTORCH_ALLOC_CONF``. ``PYTORCH_CUDA_ALLOC_CONF`` is its alias and is provided only
+for backward compatibility.
+The format is ``PYTORCH_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
 * ``backend`` allows selecting the underlying allocator implementation.
@@ -507,6 +508,9 @@ Available options:
   ``cudaMallocAsync`` requires CUDA 11.4 or newer. The default is ``native``.
   ``backend`` applies to all devices used by the process, and can't be
   specified on a per-device basis.
+* ``large_segment_size_mb`` the native allocator uses small and large blocks
+  to manage allocated memory. This setting is used to configure the size of
+  the large block. The default value is 20 MB.
 * ``max_split_size_mb`` prevents the native allocator
   from splitting blocks larger than this size (in MB). This can reduce
   fragmentation and may allow some borderline workloads to complete without
@@ -699,7 +703,7 @@ Mixing different CUDA system allocators in the same program
 -----------------------------------------------------------
 Depending on your use case, :meth:`~torch.cuda.change_current_allocator` may not be what you
 want to use, since it swaps the CUDA allocator for the entire program (similar to
-``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
+``PYTORCH_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
 have caching mechanism, you will lose all the benefits of PyTorch's CUDACachingAllocator. Instead,
 you can selectively mark a region of PyTorch code to use a custom allocator using
 :class:`torch.cuda.MemPool`. This will let you use multiple CUDA system allocators in the same
@@ -1329,6 +1333,8 @@ and you suspect its runtime is at least somewhat CPU-limited.
     https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#creating-a-graph-using-stream-capture
 .. _cudaGraphLaunch:
     https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
+.. _conditional nodes:
+    https://developer.nvidia.com/blog/dynamic-control-flow-in-cuda-graphs-with-conditional-nodes/
 
 PyTorch API
 ^^^^^^^^^^^
@@ -1417,6 +1423,9 @@ Violating any of these will likely cause a runtime error:
   Avoid using :meth:`Generator.get_state<torch.get_state>` and :meth:`Generator.set_state<torch.set_state>` during capture;
   instead, utilize :meth:`Generator.graphsafe_set_state<torch.Generator.graphsafe_set_state>` and :meth:`Generator.graphsafe_get_state<torch.Generator.graphsafe_get_state>`
   for managing generator states safely within the graph context. This ensures proper RNG operation and generator management within CUDA graphs.
+* Dynamic control flow (based on CPU or GPU data) is prohibited, unless it is based on GPU data and implemented via higher order operator
+  torch.cond(). See :ref:`Data Dependent Control Flow<graph-data-dependent-control-flow>`.
+
 
 
 Violating any of these will likely cause silent numerical errors or undefined behavior:
@@ -1425,7 +1434,6 @@ Violating any of these will likely cause silent numerical errors or undefined be
 * No non-captured CUDA work may run in this process (on any thread) while capture is underway.
 * CPU work is not captured. If the captured ops include CPU work, that work will be elided during replay.
 * Every replay reads from and writes to the same (virtual) memory addresses.
-* Dynamic control flow (based on CPU or GPU data) is prohibited.
 * Dynamic shapes are prohibited. The graph assumes every tensor in the captured op sequence
   has the same size and layout in every replay.
 * Using multiple streams in a capture is allowed, but there are :ref:`restrictions<multistream-capture>`.
@@ -1744,3 +1752,46 @@ If, in the live workload, your callables will run in an order that occasionally 
 or if they'll run concurrently, passing them as a tuple to a single invocation of
 :func:`~torch.cuda.make_graphed_callables` is not allowed. Instead, you must call
 :func:`~torch.cuda.make_graphed_callables` separately for each one.
+
+.. _graph-data-dependent-control-flow:
+
+Data Dependent Control Flow
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Data-dependent control flow can with cuda graphs if the control flow
+is implemented using torch.cond(). If your function uses this
+function, compiling it with the "cudagraphs" backend will enable
+control flow in the resulting cuda graph via `conditional nodes`_.
+
+Doing cuda graph capture of eager mode code using torch.cond() will
+also work.
+
+Support for inductor backend to torch.compile is not available yet,
+but there is no fundamental blocker.
+
+An example of using the cudagraphs backend to torch.compile on code
+using torch.cond is demonstrated below::
+
+    import torch
+
+    def true_fn(x):
+        return x.sin()
+
+    def false_fn(x):
+        return x.cos()
+
+    x = torch.randn(4, device="cuda", requires_grad=False)
+    pred = torch.tensor(False, device="cuda", requires_grad=False)
+    def foo(pred, x):
+        with torch.inference_mode():
+            return torch.cond(pred, true_fn, false_fn, [x])
+
+    # First call will run eager for warmup, second call will do graph
+    # capture followed by graph replay, third call and beyond will do
+    # just graph replay.
+    compiled_foo = torch.compile(foo, backend="cudagraphs")
+    for i in range(3):
+        y = compiled_foo(pred, x)
+
+    # will output x.sin()
+    y = compiled_foo(~pred, x)

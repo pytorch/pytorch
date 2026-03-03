@@ -1,6 +1,6 @@
 #include <ATen/native/quantized/AffineQuantizerBase.h>
 #include <c10/util/irange.h>
-#include <climits>
+#include <limits>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>

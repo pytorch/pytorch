@@ -76,7 +76,8 @@ def _create_rearrange_callable(
         if isinstance(dimension, list):
             for identifier in dimension:
                 # non-unitary anon axes are not allowed in rearrange & unitary anon axes are represented as empty lists
-                assert isinstance(identifier, str)
+                if not isinstance(identifier, str):
+                    raise AssertionError(f"Expected str, got {type(identifier)}")
                 identifier_dim_map[identifier] = (first_class_dims[dims_i],)
                 dims_i += 1
             if not dimension:

@@ -9,6 +9,7 @@ from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import ensure_cute_available
+from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -59,7 +60,7 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         A, B, offsets = self._get_inputs(group_size, M_hint, K, N, device, dtype)
 
         def grouped_gemm_fn(A_packed, B_batched, offs):
-            return torch._grouped_mm(A_packed, B_batched, offs=offs)
+            return F.grouped_mm(A_packed, B_batched, offs=offs)
 
         # Eager execution
         c_eager = grouped_gemm_fn(A, B, offsets)
@@ -115,18 +116,21 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         elif layout_A == "view":
             A_storage = torch.randn(sum_M * K, device=device, dtype=dtype)
             A = A_storage.view(sum_M, K)
-            assert A._base is not None
-            assert A.shape == (sum_M, K)
+            if A._base is None:
+                raise AssertionError
+            if A.shape != (sum_M, K):
+                raise AssertionError
 
         B = torch.randn((G, K, N), dtype=dtype, device=device) * 0.01
 
         if layout_B == "broadcasted":
             # Broadcast B across groups (zero stride along G)
             B = B[0].expand(G, K, N)
-            assert B.stride(0) == 0
+            if B.stride(0) != 0:
+                raise AssertionError
 
         def grouped_gemm_fn(A_packed, B_batched, offs):
-            return torch._grouped_mm(A_packed, B_batched, offs=offs)
+            return F.grouped_mm(A_packed, B_batched, offs=offs)
 
         # --- eager ---
         c_eager = grouped_gemm_fn(A, B, offsets)

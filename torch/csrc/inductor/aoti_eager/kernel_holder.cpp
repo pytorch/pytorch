@@ -1,12 +1,9 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
 
-#include <ATen/ATen.h>
-
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
-#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
@@ -16,11 +13,8 @@
 #ifdef USE_XPU
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_xpu.h>
 #endif
-#include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
 namespace torch::inductor {
 
@@ -170,7 +164,7 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
       device_(c10::dispatchKeyToDeviceType(dispatch_key_), 0),
       pyinterpreter_(getPyInterpreter()) {
   auto device_name = c10::DeviceTypeName(device_.type());
-  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
+  auto& registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
           device_.type() == c10::DeviceType::XPU ||
@@ -411,7 +405,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
 std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
     load_aoti_model_runner(const std::string& so_path) {
   auto device_name = c10::DeviceTypeName(device_.type());
-  auto registered_aoti_runner = getAOTIModelRunnerRegistry();
+  auto& registered_aoti_runner = getAOTIModelRunnerRegistry();
   TORCH_CHECK(
       device_.type() == c10::DeviceType::CUDA ||
           device_.type() == c10::DeviceType::XPU ||
@@ -437,6 +431,13 @@ std::shared_ptr<AOTIModelContainerRunner> AOTIPythonKernelHolder::
   } else if (device_.type() == c10::DeviceType::CPU) {
     return std::make_shared<AOTIModelContainerRunnerCpu>(so_path);
   } else {
+    TORCH_CHECK(
+        registered_aoti_runner.find(device_name) !=
+            registered_aoti_runner.end(),
+        "AOTI eager mode: no runner registered for device ",
+        device_name,
+        ". External device backends must register an AOTI model runner factory "
+        "using RegisterAOTIModelRunner before using AOTI eager mode.");
     auto aoti_model_runer_fn = registered_aoti_runner[device_name];
     return aoti_model_runer_fn(
         so_path, 1, device_name, "", /*run_single_threaded=*/false);

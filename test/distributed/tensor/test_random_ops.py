@@ -6,8 +6,8 @@ import itertools
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
+from torch.distributed._local_tensor import LocalTensor, maybe_run_for_local_tensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.distributed_c10d import broadcast_object_list
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -26,6 +26,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import ColwiseParallel, parallelize_module
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     skip_if_lt_x_gpu,
     skip_unless_torch_gpu,
@@ -34,9 +35,12 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils._typing_utils import not_none
 
 
-def get_generator_seed_for_device_type(device_type: str) -> int:
-    device_module = torch.get_device_module(device_type)
-    return device_module.get_rng_state()[:8].view(torch.int64).item()
+def get_generator_seed_for_device_type(device_type: str):
+    from torch.distributed._local_tensor import (
+        get_generator_seed_for_device_type as _get_seed,
+    )
+
+    return _get_seed(device_type)
 
 
 class DistTensorRandomInitTest(DTensorTestBase):
@@ -134,9 +138,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
             torch.empty(*size, device="meta"), device_mesh, [Replicate()]
         )
 
-        # the tensor slice on the current rank
-        self_slice = slice(1024 * self.rank, 1024 * self.rank + 1024)
-
         # Test 1: enable the distribute region for RNG (by default)
         self.assertTrue(meta_dtensor.is_meta)
         # Tensor meta init
@@ -150,16 +151,23 @@ class DistTensorRandomInitTest(DTensorTestBase):
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
-        # compare with local tensors from other ranks
-        for other_rank in range(self.world_size):
-            # the RNG result on each rank are the same because they're replicated
-            if self.rank != other_rank:
-                # other rank should have an identical local tensor
-                other_slice = slice(1024 * other_rank, 1024 * other_rank + 1024)
-                self.assertEqual(
-                    gathered_local_tensors[self_slice, :],
-                    gathered_local_tensors[other_slice, :],
-                )
+        @maybe_run_for_local_tensor
+        def compute_rankwise_if_local_tensor(gathered_local_tensors, rank):
+            # the tensor slice on the current rank
+            self_slice = slice(1024 * rank, 1024 * rank + 1024)
+
+            # compare with local tensors from other ranks
+            for other_rank in range(self.world_size):
+                # the RNG result on each rank are the same because they're replicated
+                if rank != other_rank:
+                    # other rank should have an identical local tensor
+                    other_slice = slice(1024 * other_rank, 1024 * other_rank + 1024)
+                    self.assertEqual(
+                        gathered_local_tensors[self_slice, :],
+                        gathered_local_tensors[other_slice, :],
+                    )
+
+        compute_rankwise_if_local_tensor(gathered_local_tensors.wait(), self.rank)
 
         # Test 2: disable the distribute region for RNG
         self.assertTrue(meta_dtensor.is_meta)
@@ -175,15 +183,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
-        # compare with local tensors from other ranks
-        for other_rank in range(self.world_size):
-            # the RNG result on each rank are the same even without the help of DTensor's RNG infra,
-            # since the default RNG is the same across ranks.
-            if self.rank != other_rank:
-                other_slice = slice(1024 * other_rank, 1024 * other_rank + 1024)
-                self.assertEqual(
-                    local_tensor[self_slice, :], local_tensor[other_slice, :]
-                )
+        compute_rankwise_if_local_tensor(local_tensor.wait(), self.rank)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -212,11 +212,15 @@ class DistTensorRandomInitTest(DTensorTestBase):
             and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
-        assert isinstance(model.weight, DTensor)
+        if not isinstance(model.weight, DTensor):
+            raise AssertionError(
+                f"Expected model.weight to be DTensor, got {type(model.weight)}"
+            )
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        assert WORLD is not None
+        if WORLD is None:
+            raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
         weight_gather = funcol.all_gather_tensor(
             weight_local,
@@ -224,13 +228,17 @@ class DistTensorRandomInitTest(DTensorTestBase):
             group=WORLD,
         )
 
-        # verify the weights are initialized differently on all ranks
-        for other_rank in range(self.world_size):
-            if self.rank != other_rank:
-                self.assertNotEqual(
-                    weight_local,
-                    weight_gather[other_rank : other_rank + 1, :],
-                )
+        @maybe_run_for_local_tensor
+        def compute_rankwise_if_local_tensor(weight_local, weight_gather, rank):
+            # verify the weights are initialized differently on all ranks
+            for other_rank in range(self.world_size):
+                if rank != other_rank:
+                    self.assertNotEqual(
+                        weight_local,
+                        weight_gather[other_rank : other_rank + 1, :],
+                    )
+
+        compute_rankwise_if_local_tensor(weight_local, weight_gather.wait(), self.rank)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -265,11 +273,15 @@ class DistTensorRandomInitTest(DTensorTestBase):
             and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
-        assert isinstance(model.weight, DTensor)
+        if not isinstance(model.weight, DTensor):
+            raise AssertionError(
+                f"Expected model.weight to be DTensor, got {type(model.weight)}"
+            )
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        assert WORLD is not None
+        if WORLD is None:
+            raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
         weight_gather = funcol.all_gather_tensor(
             weight_local,
@@ -277,13 +289,53 @@ class DistTensorRandomInitTest(DTensorTestBase):
             group=WORLD,
         )
 
-        # verify the weights are initialized differently on all ranks
-        for other_rank in range(self.world_size):
-            if self.rank != other_rank:
-                self.assertNotEqual(
-                    weight_local,
-                    weight_gather[other_rank : other_rank + 1, :],
-                )
+        @maybe_run_for_local_tensor
+        def compute_rankwise_if_local_tensor(weight_local, weight_gather, rank):
+            # verify the weights are initialized differently on all ranks
+            for other_rank in range(self.world_size):
+                if rank != other_rank:
+                    self.assertNotEqual(
+                        weight_local,
+                        weight_gather[other_rank : other_rank + 1, :],
+                    )
+
+        compute_rankwise_if_local_tensor(weight_local, weight_gather.wait(), self.rank)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor_init_helper_tensor_meta_strides(self):
+        """Test that DTensorSpec.tensor_meta has correct strides in _distribute_region."""
+        import torch.distributed.tensor._random as random_module
+
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        captured_specs = []
+
+        class SpecCapturingTracker:
+            """Wrapper to intercept _distribute_region and capture DTensorSpec."""
+
+            def __init__(self, tracker):
+                self._tracker = tracker
+
+            def _distribute_region(self, spec):
+                captured_specs.append(spec.tensor_meta)
+                return self._tracker._distribute_region(spec)
+
+        # Initialize the RNG tracker
+        torch.manual_seed(42)
+        torch.distributed.tensor.randn(
+            (8, 8), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+
+        # Wrap tracker to capture specs
+        random_module._rng_tracker = SpecCapturingTracker(random_module._rng_tracker)
+
+        torch.distributed.tensor.randn(
+            (8, 8), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+
+        self.assertEqual(len(captured_specs), 1)
+        self.assertEqual(captured_specs[0].shape, torch.Size([8, 8]))
+        self.assertEqual(captured_specs[0].stride, (8, 1))
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
@@ -291,9 +343,14 @@ class DistTensorRandomOpTest(DTensorTestBase):
     @skip_unless_torch_gpu
     def test_rng_tracker_init(self):
         torch.manual_seed(self.rank)
-        object_list = [torch.initial_seed()]
-        broadcast_object_list(object_list)
-        seed_from_rank_0 = int(object_list[0])
+        seed_local = (
+            torch.zeros_like(torch.empty(1), device=self.device_type)
+            + torch.initial_seed()
+        )
+        torch.distributed.broadcast(seed_local, src=0)
+        # if local tensor, it should automatically reconcile after the broadcast
+        # since all virtual ranks should have rank 0's initial_seed()
+        seed_from_rank_0 = seed_local
 
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         # seed synchronization now does NOT happen after the first `distribute_tensor`
@@ -344,15 +401,19 @@ class DistTensorRandomOpTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_manual_seed_submesh(self):
-        # the current rank is not a part of the mesh
-        single_rank_device_mesh = DeviceMesh(
-            self.device_type, [(self.rank + 1) % self.world_size]
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "manual_seed requires the current rank to be a part of the device mesh",
-        ):
-            manual_seed(self.rank, single_rank_device_mesh)
+        @maybe_run_for_local_tensor
+        def compute_rankwise_if_local_tensor(rank):
+            # the current rank is not a part of the mesh
+            single_rank_device_mesh = DeviceMesh(
+                self.device_type, [(rank + 1) % self.world_size], _rank=rank
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "manual_seed requires the current rank to be a part of the device mesh",
+            ):
+                manual_seed(rank, single_rank_device_mesh)
+
+        compute_rankwise_if_local_tensor(self.rank)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -383,7 +444,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        assert WORLD is not None
+        if WORLD is None:
+            raise AssertionError("Expected WORLD to not be None")
         tensor_gather = funcol.all_gather_tensor(
             spmd_dtensor.to_local(),
             gather_dim=0,
@@ -394,7 +456,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         for other_rank in range(self.world_size):
             if self.rank != other_rank:
                 self.assertNotEqual(
-                    spmd_dtensor.to_local(),
+                    spmd_dtensor,
                     tensor_gather[2 * other_rank : 2 * (other_rank + 1), :],
                 )
 
@@ -428,16 +490,20 @@ class DistTensorRandomOpTest(DTensorTestBase):
             dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
 
-        # compare with local tensors from other ranks
-        self_slice = slice(4 * self.rank, 4 * self.rank + 4)
-        for other_rank in range(self.world_size):
-            if self.rank != other_rank:
-                # other rank should have an identical local tensor
-                other_slice = slice(4 * other_rank, 4 * other_rank + 4)
-                self.assertEqual(
-                    local_tensor[self_slice, :],
-                    local_tensor[other_slice, :],
-                )
+        @maybe_run_for_local_tensor
+        def compute_rankwise_if_local_tensor(local_tensor, rank):
+            # compare with local tensors from other ranks
+            self_slice = slice(4 * rank, 4 * rank + 4)
+            for other_rank in range(self.world_size):
+                if rank != other_rank:
+                    # other rank should have an identical local tensor
+                    other_slice = slice(4 * other_rank, 4 * other_rank + 4)
+                    self.assertEqual(
+                        local_tensor[self_slice, :],
+                        local_tensor[other_slice, :],
+                    )
+
+        compute_rankwise_if_local_tensor(local_tensor, self.rank)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -454,16 +520,20 @@ class DistTensorRandomOpTest(DTensorTestBase):
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
-            # compare with local tensors from other ranks
-            self_slice = slice(4 * self.rank, 4 * self.rank + 4)
-            for other_rank in range(self.world_size):
-                if self.rank != other_rank:
-                    # other rank should have a different local tensor for shard placement
-                    other_slice = slice(4 * other_rank, 4 * other_rank + 4)
-                    self.assertNotEqual(
-                        local_tensor[self_slice, :],
-                        local_tensor[other_slice, :],
-                    )
+            @maybe_run_for_local_tensor
+            def compute_rankwise_if_local_tensor(local_tensor, rank):
+                # compare with local tensors from other ranks
+                self_slice = slice(4 * rank, 4 * rank + 4)
+                for other_rank in range(self.world_size):
+                    if rank != other_rank:
+                        # other rank should have an identical local tensor for replicate placement
+                        other_slice = slice(4 * other_rank, 4 * other_rank + 4)
+                        self.assertNotEqual(
+                            local_tensor[self_slice, :],
+                            local_tensor[other_slice, :],
+                        )
+
+            compute_rankwise_if_local_tensor(local_tensor, self.rank)
 
             # we should set manual seed to the same value on all SPMD ranks
             torch.manual_seed(0)
@@ -472,16 +542,20 @@ class DistTensorRandomOpTest(DTensorTestBase):
                 dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
             )
 
-            # compare with local tensors from other ranks
-            self_slice = slice(4 * self.rank, 4 * self.rank + 4)
-            for other_rank in range(self.world_size):
-                if self.rank != other_rank:
-                    # other rank should have an identical local tensor for replicate placement
-                    other_slice = slice(4 * other_rank, 4 * other_rank + 4)
-                    self.assertEqual(
-                        local_tensor[self_slice, :],
-                        local_tensor[other_slice, :],
-                    )
+            @maybe_run_for_local_tensor
+            def compute_rankwise_if_local_tensor(local_tensor, rank):
+                # compare with local tensors from other ranks
+                self_slice = slice(4 * rank, 4 * rank + 4)
+                for other_rank in range(self.world_size):
+                    if rank != other_rank:
+                        # other rank should have an identical local tensor for replicate placement
+                        other_slice = slice(4 * other_rank, 4 * other_rank + 4)
+                        self.assertEqual(
+                            local_tensor[self_slice, :],
+                            local_tensor[other_slice, :],
+                        )
+
+            compute_rankwise_if_local_tensor(local_tensor, self.rank)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -517,7 +591,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
         ]
 
         coordinate = device_mesh.get_coordinate()
-        assert coordinate is not None
+        if coordinate is None:
+            raise AssertionError("Expected coordinate to not be None")
 
         for placements, shard_index in zip(placements_list, shard_index_list):
             dtensor = dtensor.redistribute(device_mesh, placements)
@@ -539,7 +614,12 @@ class DistTensorRandomOpTest(DTensorTestBase):
             shard_linear_idx = random._rng_tracker._calc_shard_linear_idx(
                 shard_coord, shard_size
             )
-            self.assertEqual(shard_linear_idx, shard_index[self.rank])
+
+            @maybe_run_for_local_tensor
+            def check_shard_index(shard_linear_idx, rank):
+                self.assertEqual(shard_linear_idx, shard_index[rank])
+
+            check_shard_index(shard_linear_idx, self.rank)
 
             # compute local size and offset
             _, local_shard_offset = compute_local_shape_and_global_offset(
@@ -578,16 +658,263 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # allgather the local tensors
             full_tensor = dtensor.full_tensor()
 
-            # compare local tensor with each other shard
-            for other_local_shard in local_shard_comb:
-                other_local_shard_offset, _ = zip(*other_local_shard)
-                slice_idx = [
-                    slice(offset, offset + size) for offset, size in other_local_shard
-                ]
-                if local_shard_offset == other_local_shard_offset:
-                    self.assertEqual(full_tensor[tuple(slice_idx)], local_tensor)
-                else:
-                    self.assertNotEqual(full_tensor[tuple(slice_idx)], local_tensor)
+            full_tensor = (
+                full_tensor.reconcile()
+                if isinstance(full_tensor, LocalTensor)
+                else full_tensor
+            )
+
+            @maybe_run_for_local_tensor
+            def blockwise_iter_if_localtensor(local_tensor, local_shard_offset):
+                # compare local tensor with each other shard
+                for other_local_shard in local_shard_comb:
+                    other_local_shard_offset, _ = zip(*other_local_shard)
+                    slice_idx = [
+                        slice(offset, offset + size)
+                        for offset, size in other_local_shard
+                    ]
+                    if local_shard_offset == other_local_shard_offset:
+                        self.assertEqual(full_tensor[tuple(slice_idx)], local_tensor)
+                    else:
+                        self.assertNotEqual(full_tensor[tuple(slice_idx)], local_tensor)
+
+            blockwise_iter_if_localtensor(local_tensor, local_shard_offset)
+
+    def test_philox_state_seed_roundtrip(self):
+        """
+        Test that _PhiloxState seed can be read and re-set without error.
+
+        This test addresses the issue where reading a seed value from the state
+        (which uses uint64 view) and then re-setting it would fail with:
+        OverflowError: can't convert negative int to unsigned
+
+        The fix ensures the seed getter returns a tensor, preventing any
+        int conversion issues when the high bit is set.
+        """
+        from torch.distributed.tensor._random import _PhiloxState
+
+        state = torch.zeros(16, dtype=torch.uint8, device="cpu")
+        philox = _PhiloxState(state)
+        # Create a seed with the sign bit set (valid uint64, negative as int64)
+        test_seed = torch.tensor([2**63 + 42], dtype=torch.uint64)
+        philox.seed = test_seed
+        philox.seed = philox.seed.clone()
+
+
+class DistTensorRandomOpCompileTest(DTensorTestBase):
+    def _run_with_seed(self, fn, create_input, num_runs):
+        """Run fn num_runs times after resetting RNG, returning results and states."""
+        torch.manual_seed(0)
+        results = []
+        rng_states = [torch.cuda.get_rng_state()]
+        for _ in range(num_runs):
+            x = create_input()
+            result = fn(x)
+            results.append(result.to_local().clone())
+            rng_states.append(torch.cuda.get_rng_state())
+        # verify RNG state advances after each call
+        for i in range(len(rng_states) - 1):
+            self.assertFalse(
+                torch.equal(rng_states[i], rng_states[i + 1]),
+                f"RNG state did not change between call {i} and {i + 1}",
+            )
+        return results, rng_states
+
+    def _run_eager_and_compiled(self, fn, create_input, num_runs):
+        """Run fn both eagerly and compiled with aot_eager, returning results
+        and RNG states. Verifies the graph contains run_dtensor_rng_op."""
+        from torch._dynamo.testing import AotEagerAndRecordGraphs
+
+        eager_results, eager_rng_states = self._run_with_seed(
+            fn, create_input, num_runs
+        )
+        backend = AotEagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        compiled_results, compiled_rng_states = self._run_with_seed(
+            compiled_fn, create_input, num_runs
+        )
+        self.assertIn("run_dtensor_rng_op", backend.fw_graphs[0].code)
+        return eager_results, eager_rng_states, compiled_results, compiled_rng_states
+
+    def _assert_eager_compiled_match(
+        self, eager_results, eager_rng_states, compiled_results, compiled_rng_states
+    ):
+        """Assert per-iteration results and RNG states match between eager and compiled."""
+        for i in range(len(eager_results)):
+            self.assertEqual(eager_results[i], compiled_results[i])
+            self.assertEqual(
+                eager_rng_states[i + 1],
+                compiled_rng_states[i + 1],
+                f"RNG state mismatch between eager and compiled after call {i}",
+            )
+
+    def _assert_replicate_cross_rank_equal(self, results, device_mesh):
+        """Assert all ranks produced identical results (for Replicate placement)."""
+        for i in range(len(results)):
+            local_result = results[i]
+            gathered = funcol.all_gather_tensor(
+                local_result, gather_dim=0, group=(device_mesh, 0)
+            ).wait()
+            local_size = local_result.shape[0]
+            for other_rank in range(self.world_size):
+                if self.rank != other_rank:
+                    self_slice = slice(
+                        self.rank * local_size, (self.rank + 1) * local_size
+                    )
+                    other_slice = slice(
+                        other_rank * local_size, (other_rank + 1) * local_size
+                    )
+                    self.assertEqual(
+                        gathered[self_slice],
+                        gathered[other_slice],
+                    )
+
+    def _test_compile_random_op(
+        self, fn, device_mesh, create_input=None, num_runs=3, placements=None
+    ):
+        """Run fn eager and compiled num_runs times, assert i-th results match
+        and graph contains run_dtensor_rng_op. Tests both aot_eager and inductor
+        backends."""
+        if placements is None:
+            placements = [Shard(0)]
+
+        if create_input is None:
+
+            def create_input():
+                return torch.distributed.tensor.ones(
+                    (8, 8), device_mesh=device_mesh, placements=placements
+                )
+
+        # Test with aot_eager backend (also verifies graph contents)
+        eager_results, eager_rng_states, compiled_results, compiled_rng_states = (
+            self._run_eager_and_compiled(fn, create_input, num_runs)
+        )
+        self._assert_eager_compiled_match(
+            eager_results, eager_rng_states, compiled_results, compiled_rng_states
+        )
+        if all(isinstance(p, Replicate) for p in placements):
+            self._assert_replicate_cross_rank_equal(compiled_results, device_mesh)
+
+        # Test with inductor backend
+        torch._dynamo.reset()
+        inductor_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        inductor_results, inductor_rng_states = self._run_with_seed(
+            inductor_fn, create_input, num_runs
+        )
+        self._assert_eager_compiled_match(
+            eager_results, eager_rng_states, inductor_results, inductor_rng_states
+        )
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_native_dropout(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.nn.functional.dropout(x, p=0.5, training=True)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_normal_(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return x.normal_()
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_rand_like(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.rand_like(x)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_randn_like(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.randn_like(x)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_randint_like(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.randint_like(x, 0, 10)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_uniform_(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return x.uniform_(0.0, 1.0)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_bernoulli(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.bernoulli(x)
+
+        for placements in ([Shard(0)], [Replicate()]):
+
+            def create_input(placements=placements):
+                return distribute_tensor(
+                    torch.full((8, 8), 0.5, device=self.device_type),
+                    device_mesh,
+                    placements,
+                )
+
+            self._test_compile_random_op(
+                fn, device_mesh, create_input=create_input, placements=placements
+            )
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_bernoulli_float(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return x.bernoulli_(0.5)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_multiple_random_ops(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            x = x.uniform_(0, 1)
+            x = torch.nn.functional.dropout(x, p=0.5)
+            return x
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
@@ -629,11 +956,15 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
             and isinstance(random._rng_tracker, OffsetBasedRNGTracker)
         )
         self.assertEqual(model.weight.device, device)
-        assert isinstance(model.weight, DTensor)
+        if not isinstance(model.weight, DTensor):
+            raise AssertionError(
+                f"Expected model.weight to be DTensor, got {type(model.weight)}"
+            )
 
         # gather all the shards to compare initialization results
         WORLD = torch.distributed.group.WORLD
-        assert WORLD is not None
+        if WORLD is None:
+            raise AssertionError("Expected WORLD to not be None")
         weight_local = model.weight.to_local()
         weight_gather = funcol.all_gather_tensor(
             weight_local,
@@ -641,22 +972,46 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
             group=WORLD,
         )
 
-        # verify the weights are initialized differently on all ranks
-        shard_dim_0_len = self.world_size // 4
-        for other_rank in range(self.world_size):
-            other_rank_dim_0_start = other_rank * shard_dim_0_len
-            other_rank_dim_0_end = other_rank_dim_0_start + shard_dim_0_len
-            if self.rank % 4 != other_rank % 4:
-                self.assertNotEqual(
-                    weight_local,
-                    weight_gather[other_rank_dim_0_start:other_rank_dim_0_end, :],
-                )
-            else:
-                self.assertEqual(
-                    weight_local,
-                    weight_gather[other_rank_dim_0_start:other_rank_dim_0_end, :],
-                )
+        weight_gather = weight_gather.wait()
 
+        weight_gather = (
+            weight_gather.reconcile()
+            if isinstance(weight_gather, LocalTensor)
+            else weight_gather
+        )
+
+        @maybe_run_for_local_tensor
+        def compute_rankwise_if_local_tensor(weight_local, rank):
+            # verify the weights are initialized differently on all ranks
+            shard_dim_0_len = self.world_size // 4
+            for other_rank in range(self.world_size):
+                other_rank_dim_0_start = other_rank * shard_dim_0_len
+                other_rank_dim_0_end = other_rank_dim_0_start + shard_dim_0_len
+                if rank % 4 != other_rank % 4:
+                    self.assertNotEqual(
+                        weight_local,
+                        weight_gather[other_rank_dim_0_start:other_rank_dim_0_end, :],
+                    )
+                else:
+                    self.assertEqual(
+                        weight_local,
+                        weight_gather[other_rank_dim_0_start:other_rank_dim_0_end, :],
+                    )
+
+        compute_rankwise_if_local_tensor(weight_local, self.rank)
+
+
+DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
+    DistTensorRandomInitTest,
+)
+
+DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
+    DistTensorRandomOpTest,
+)
+
+DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
+    DistTensorRandomOpsTest3D,
+)
 
 if __name__ == "__main__":
     run_tests()

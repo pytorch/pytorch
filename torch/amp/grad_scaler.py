@@ -5,7 +5,7 @@ import inspect
 import warnings
 from collections import abc, defaultdict
 from enum import Enum
-from typing import Any, cast, Optional, overload, TYPE_CHECKING, Union
+from typing import Any, cast, overload, TYPE_CHECKING
 
 import torch
 
@@ -140,18 +140,20 @@ class GradScaler:
                 self._enabled = False
 
         if self._enabled:
-            assert growth_factor > 1.0, "The growth factor must be > 1.0."
-            assert backoff_factor < 1.0, "The backoff factor must be < 1.0."
+            if growth_factor <= 1.0:
+                raise AssertionError("The growth factor must be > 1.0.")
+            if backoff_factor >= 1.0:
+                raise AssertionError("The backoff factor must be < 1.0.")
 
             self._init_scale = init_scale
             # self._scale will be lazily initialized during the first call to scale()
-            self._scale: Optional[torch.Tensor] = None
+            self._scale: torch.Tensor | None = None
             self._growth_factor = growth_factor
             self._backoff_factor = backoff_factor
             self._growth_interval = growth_interval
             self._init_growth_tracker = 0
             # self._growth_tracker will be lazily initialized during the first call to scale()
-            self._growth_tracker: Optional[torch.Tensor] = None
+            self._growth_tracker: torch.Tensor | None = None
             self._per_optimizer_states: dict[int, dict[str, Any]] = defaultdict(
                 _refresh_per_optimizer_state
             )
@@ -160,16 +162,17 @@ class GradScaler:
         self, funcname: str
     ) -> tuple[torch.Tensor, torch.Tensor]:
         fix = "This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration."
-        assert self._scale is not None, (
-            f"Attempted {funcname} but _scale is None.  " + fix
-        )
-        assert self._growth_tracker is not None, (
-            f"Attempted {funcname} but _growth_tracker is None.  " + fix
-        )
+        if self._scale is None:
+            raise AssertionError(f"Attempted {funcname} but _scale is None.  " + fix)
+        if self._growth_tracker is None:
+            raise AssertionError(
+                f"Attempted {funcname} but _growth_tracker is None.  " + fix
+            )
         return (self._scale, self._growth_tracker)
 
     def _lazy_init_scale_growth_tracker(self, dev: torch.device) -> None:
-        assert self._growth_tracker is None, "_growth_tracker initialized before _scale"
+        if self._growth_tracker is not None:
+            raise AssertionError("_growth_tracker initialized before _scale")
         self._scale = torch.full((), self._init_scale, dtype=torch.float32, device=dev)
         self._growth_tracker = torch.full(
             (), self._init_growth_tracker, dtype=torch.int32, device=dev
@@ -189,8 +192,8 @@ class GradScaler:
 
     def scale(
         self,
-        outputs: Union[torch.Tensor, Iterable[torch.Tensor]],
-    ) -> Union[torch.Tensor, Iterable[torch.Tensor]]:
+        outputs: torch.Tensor | Iterable[torch.Tensor],
+    ) -> torch.Tensor | Iterable[torch.Tensor]:
         """
         Multiplies ('scales') a tensor or list of tensors by the scale factor.
 
@@ -207,21 +210,29 @@ class GradScaler:
         if isinstance(outputs, torch.Tensor):
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
-            assert self._scale is not None
-            return outputs * self._scale.to(device=outputs.device, non_blocking=True)
+            # _scale is now guaranteed to be set
+            scale = self._scale
+            if scale is None:
+                raise AssertionError("_scale should not be None after lazy init")
+            return outputs * scale.to(device=outputs.device, non_blocking=True)
 
         # Invoke the more complex machinery only if we're treating multiple outputs.
         stash: list[
             _MultiDeviceReplicator
         ] = []  # holds a reference that can be overwritten by apply_scale
 
-        def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
+        def apply_scale(val: torch.Tensor | Iterable[torch.Tensor]):
             if isinstance(val, torch.Tensor):
                 if len(stash) == 0:
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
-                    assert self._scale is not None
-                    stash.append(_MultiDeviceReplicator(self._scale))
+                    # _scale is now guaranteed to be set
+                    scale = self._scale
+                    if scale is None:
+                        raise AssertionError(
+                            "_scale should not be None after lazy init"
+                        )
+                    stash.append(_MultiDeviceReplicator(scale))
                 return val * stash[0].get(val.device)
             if isinstance(val, abc.Iterable):
                 iterable = map(apply_scale, val)
@@ -254,7 +265,10 @@ class GradScaler:
         with torch.no_grad():
             for group in optimizer.param_groups:
                 for param in group["params"]:
-                    assert isinstance(param, torch.Tensor)
+                    if not isinstance(param, torch.Tensor):
+                        raise AssertionError(
+                            f"expected param to be torch.Tensor, got {type(param).__name__}"
+                        )
                     if param.grad is None:
                         continue
                     if (not allow_fp16) and param.grad.dtype == torch.float16:
@@ -332,7 +346,8 @@ class GradScaler:
             raise RuntimeError("unscale_() is being called after step().")
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
-        assert self._scale is not None
+        if self._scale is None:
+            raise AssertionError("_scale is None in unscale_")
         inv_scale = (
             self._scale.double().reciprocal().float()
             if self._scale.device != torch.device("mps:0")
@@ -351,15 +366,15 @@ class GradScaler:
         optimizer_state: dict[str, Any],
         *args: Any,
         **kwargs: Any,
-    ) -> Optional[float]:
-        retval: Optional[float] = None
+    ) -> float | None:
+        retval: float | None = None
         if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
             retval = optimizer.step(*args, **kwargs)
         return retval
 
     def step(
         self, optimizer: torch.optim.Optimizer, *args: Any, **kwargs: Any
-    ) -> Optional[float]:
+    ) -> float | None:
         """Invoke ``unscale_(optimizer)`` followed by parameter update, if gradients are not infs/NaN.
 
         :meth:`step` carries out the following two operations:
@@ -398,7 +413,7 @@ class GradScaler:
                 "step() has already been called since the last update()."
             )
 
-        retval: Optional[float] = None
+        retval: float | None = None
 
         if getattr(optimizer, "_step_supports_amp_scaling", False):
             # This optimizer has customized scale-handling logic, so we can call optimizer.step() directly.
@@ -429,7 +444,8 @@ class GradScaler:
                 if optimizer_state["stage"] is OptState.READY:
                     self._check_inf_per_device(optimizer)
                 scaler = self._get_scale_async()
-                assert scaler is not None
+                if scaler is None:
+                    raise AssertionError("_get_scale_async returned None")
                 found_inf = cast(
                     torch.Tensor,
                     sum(
@@ -456,9 +472,8 @@ class GradScaler:
         if optimizer_state["stage"] is OptState.READY:
             self.unscale_(optimizer)
 
-        assert len(optimizer_state["found_inf_per_device"]) > 0, (
-            "No inf checks were recorded for this optimizer."
-        )
+        if len(optimizer_state["found_inf_per_device"]) == 0:
+            raise AssertionError("No inf checks were recorded for this optimizer.")
 
         retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
 
@@ -466,7 +481,7 @@ class GradScaler:
 
         return retval
 
-    def update(self, new_scale: Optional[Union[float, torch.Tensor]] = None) -> None:
+    def update(self, new_scale: float | torch.Tensor | None = None) -> None:
         """Update the scale factor.
 
         If any optimizer steps were skipped the scale is multiplied by ``backoff_factor``
@@ -497,7 +512,8 @@ class GradScaler:
         _scale, _growth_tracker = self._check_scale_growth_tracker("update")
 
         if new_scale is not None:
-            assert self._scale is not None
+            if self._scale is None:
+                raise AssertionError("_scale is None in update")
             # Accept a new user-defined scale.
             if isinstance(new_scale, float):
                 self._scale.fill_(new_scale)
@@ -506,9 +522,12 @@ class GradScaler:
                     "new_scale should be a float or a 1-element torch.cuda.FloatTensor or "
                     "torch.FloatTensor with requires_grad=False."
                 )
-                assert new_scale.device.type == self._device, reason
-                assert new_scale.numel() == 1, reason
-                assert new_scale.requires_grad is False, reason
+                if new_scale.device.type != self._device:
+                    raise AssertionError(reason)
+                if new_scale.numel() != 1:
+                    raise AssertionError(reason)
+                if new_scale.requires_grad is True:
+                    raise AssertionError(reason)
                 self._scale.copy_(new_scale)
         else:
             # Consume shared inf/nan data collected from optimizers to update the scale.
@@ -519,7 +538,8 @@ class GradScaler:
                 for found_inf in state["found_inf_per_device"].values()
             ]
 
-            assert len(found_infs) > 0, "No inf checks were recorded prior to update."
+            if len(found_infs) == 0:
+                raise AssertionError("No inf checks were recorded prior to update.")
 
             found_inf_combined = found_infs[0]
             if len(found_infs) > 1:
@@ -538,7 +558,7 @@ class GradScaler:
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)
 
-    def _get_scale_async(self) -> Optional[torch.Tensor]:
+    def _get_scale_async(self) -> torch.Tensor | None:
         return self._scale
 
     def get_scale(self) -> float:
@@ -661,10 +681,11 @@ class GradScaler:
     def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         if self._enabled:
-            assert len(self._per_optimizer_states) == 0, (
-                "A GradScaler instance may only be pickled at the beginning "
-                "of an iteration, or at the end after scaler.update()."
-            )
+            if len(self._per_optimizer_states) != 0:
+                raise AssertionError(
+                    "A GradScaler instance may only be pickled at the beginning "
+                    "of an iteration, or at the end after scaler.update()."
+                )
             # Pickling _scale and _growth_tracker Tensors directly triggers
             # "warnings.warn("pickle support for Storage will be removed in 1.5..."
             # so instead, we set the unpickled instance up to reinitialize them lazily.

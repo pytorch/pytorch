@@ -23,7 +23,6 @@
 #include <ATen/ops/reflection_pad3d_backward_native.h>
 #endif
 
-#include <thrust/pair.h>
 
 namespace at::native {
 namespace {
@@ -31,7 +30,7 @@ namespace {
 using at::cuda::detail::canUse32BitIndexMath;
 
 __device__
-inline thrust::pair<int64_t, int64_t> get_index_mapping1d(
+inline std::pair<int64_t, int64_t> get_index_mapping1d(
     int64_t input_w, int64_t output_w,
     int64_t output_x,
     int64_t pad_l) {
@@ -50,13 +49,13 @@ inline thrust::pair<int64_t, int64_t> get_index_mapping1d(
                     + 2 * pad_l + input_w - 1
                     - o_start_x + i_start_x;
 
-  return thrust::make_pair<int64_t, int64_t>(
+  return std::make_pair<int64_t, int64_t>(
     input_offset + input_x, output_offset + output_x);
 }
 
 
 __device__
-inline thrust::pair<int64_t, int64_t>  get_index_mapping2d(
+inline std::pair<int64_t, int64_t>  get_index_mapping2d(
     int64_t input_dim_x, int64_t input_dim_y,
     int64_t output_dim_x, int64_t output_dim_y,
     int64_t pad_l, int64_t pad_t,
@@ -87,7 +86,7 @@ inline thrust::pair<int64_t, int64_t>  get_index_mapping2d(
                  + 2 * pad_t + input_dim_y - 1
                  - o_start_y + i_start_y;
 
-  return thrust::make_pair<int64_t, int64_t>(
+  return std::make_pair<int64_t, int64_t>(
     input_offset + input_y * input_dim_x + input_x,
     output_offset + output_y * output_dim_x + output_x);
 }
@@ -273,7 +272,7 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
         const int64_t dist_cols = ::abs(inp_col - (input_dim_x - 1));
 
         // we were dist_rows after, now we want to be dist_rows before
-        // we were dist_cols before, now we wnat to be dist_cols after
+        // we were dist_cols before, now we want to be dist_cols after
         const int64_t reflect_tr_out_row = (corner_tr_out_row - dist_rows);
         const int64_t reflect_tr_out_col = (corner_tr_out_col + dist_cols);
         const int64_t reflect_tr_out =

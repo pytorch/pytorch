@@ -2,7 +2,6 @@
 
 #include <c10/cuda/CUDADeviceAssertionHost.h>
 #include <c10/util/Exception.h>
-#include <cuda_runtime.h>
 
 #include <string>
 

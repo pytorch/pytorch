@@ -499,7 +499,7 @@ Partition on Domain / Things to Test
 - Reset for each epoch is correctly resetting the values
 
 Partition on Output
-- the calcuation of the ratio is occurring correctly
+- the calculation of the ratio is occurring correctly
 
 """
 
@@ -918,7 +918,7 @@ class TestFxModelReportClass(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_prepare_model_callibration(self):
         """
-        Tests model_report.prepare_detailed_calibration that prepares the model for callibration
+        Tests model_report.prepare_detailed_calibration that prepares the model for calibration
         Specifically looks at:
         - Whether observers are properly inserted into regular nn.Module
         - Whether the target and the arguments of the observers are proper
@@ -1150,7 +1150,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         """
         Tests for generation of qconfigs by ModelReport API
         - Tests that qconfigmapping is generated
-        - Tests that mappings include information for for relavent modules
+        - Tests that mappings include information for for relevant modules
         """
         with override_quantized_engine('fbgemm'):
             # set the backend for this test
@@ -1209,7 +1209,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         """
         Tests for generation of qconfigs by ModelReport API
         - Tests that equalization config generated when input-weight equalization detector used
-        - Tests that mappings include information for for relavent modules
+        - Tests that mappings include information for for relevant modules
         """
         with override_quantized_engine('fbgemm'):
             # set the backend for this test
@@ -1305,7 +1305,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             return (torch.arange(27).reshape((1, 3, 3, 3)),)
 
     def _get_prepped_for_calibration_model(self, model, detector_set, fused=False):
-        r"""Returns a model that has been prepared for callibration and corresponding model_report"""
+        r"""Returns a model that has been prepared for calibration and corresponding model_report"""
 
         # pass in necessary inputs to helper
         example_input = model.get_example_inputs()[0]
@@ -1530,7 +1530,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
 
 
     def _get_prepped_for_calibration_model(self, model, detector_set, use_outlier_data=False):
-        r"""Returns a model that has been prepared for callibration and corresponding model_report"""
+        r"""Returns a model that has been prepared for calibration and corresponding model_report"""
         # call the general helper function to calibrate
         example_input = model.get_example_inputs()[0]
 
@@ -1675,7 +1675,10 @@ class TestFxDetectOutliers(QuantizationTestCase):
                 # everything should be an outlier because we said that the max should be equal to the min for all of them
                 # however we will just test and say most should be in case we have several 0 channel values
                 outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
-                assert sum(outlier_info) >= len(outlier_info) / 2
+                if not sum(outlier_info) >= len(outlier_info) / 2:
+                    raise AssertionError(
+                        f"Expected at least half of channels to be outliers, got {sum(outlier_info)} out of {len(outlier_info)}"
+                    )
 
                 # ensure that the number of ratios and batches counted is the same as the number of params
                 self.assertEqual(len(module_dict[OutlierDetector.COMP_METRIC_KEY]), param_size)
@@ -1735,7 +1738,11 @@ class TestFxDetectOutliers(QuantizationTestCase):
                 # because we ran 30 times, we should have at least a couple be significant
                 # could be less because some channels could possibly be all 0
                 sufficient_batches_info = module_dict[OutlierDetector.IS_SUFFICIENT_BATCHES_KEY]
-                assert sum(sufficient_batches_info) >= len(sufficient_batches_info) / 2
+                if not sum(sufficient_batches_info) >= len(sufficient_batches_info) / 2:
+                    raise AssertionError(
+                        f"Expected at least half of channels to have sufficient batches, "
+                        f"got {sum(sufficient_batches_info)} out of {len(sufficient_batches_info)}"
+                    )
 
                 # half of them should be outliers, because we set a really high value every 2 channels
                 outlier_info = module_dict[OutlierDetector.OUTLIER_KEY]
@@ -1751,7 +1758,10 @@ class TestFxDetectOutliers(QuantizationTestCase):
                     # check that the non-zero channel count, at least 2 should be there
                     # for the first module
                     counts_info = module_dict[OutlierDetector.CONSTANT_COUNTS_KEY]
-                    assert sum(counts_info) >= 2
+                    if not sum(counts_info) >= 2:
+                        raise AssertionError(
+                            f"Expected at least 2 non-zero channel counts, got {sum(counts_info)}"
+                        )
 
                     # half of the recorded max values should be what we set
                     matched_max = sum(val == 3.28e8 for val in module_dict[OutlierDetector.MAX_VALS_KEY])
@@ -1762,7 +1772,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
 
     def _callibrate_and_generate_visualizer(self, model, prepared_for_callibrate_model, mod_report):
         r"""
-        Callibrates the passed in model, generates report, and returns the visualizer
+        Calibrates the passed in model, generates report, and returns the visualizer
         """
         # now we actually calibrate the model
         example_input = model.get_example_inputs()[0]
@@ -1937,7 +1947,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
             self.assertEqual(channel_info_features, 1)
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
-    r"""Returns a model that has been prepared for callibration and corresponding model_report"""
+    r"""Returns a model that has been prepared for calibration and corresponding model_report"""
     # set the backend for this test
     torch.backends.quantized.engine = "fbgemm"
 

@@ -11,7 +11,7 @@ import torch
 from torch._subclasses.meta_utils import assert_metadata_eq
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, onlyCUDA, toleranceOverride, tol, skipMeta)
+    instantiate_device_type_tests, onlyCPU, onlyOn, toleranceOverride, tol, skipMeta)
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
@@ -24,6 +24,9 @@ if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 class TestModule(TestCase):
     _do_cuda_memory_leak_check = True
@@ -145,7 +148,7 @@ class TestModule(TestCase):
                 m.train(training)
                 self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @modules(module_db)
     def test_multiple_device_transfer(self, device, dtype, module_info, training):
         module_cls = module_info.module_cls
@@ -178,11 +181,11 @@ class TestModule(TestCase):
                 self._assert_module_parameters_and_buffer_are(m, "cpu", dtype)
 
                 # === Move back to GPU and forward pass ===
-                m.cuda()
+                m.to(device_type)
                 m(*input_device_args, **input_device_kwargs)
                 self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
-                if torch.cuda.device_count() >= 2:
+                if torch.accelerator.device_count() >= 2:
                     # === test cross-GPU transfer works
                     def _to_device1(objs):
                         if isinstance(objs, (tuple, list)):
@@ -190,16 +193,16 @@ class TestModule(TestCase):
                         elif isinstance(objs, dict):
                             return {name: _to_device1(item) for name, item in objs.items()}
                         elif isinstance(objs, torch.Tensor):
-                            return objs.cuda(1)
+                            return objs.to(1)
                         else:
                             return objs
                     input_device_1_args = _to_device1(input_device_args)
                     input_device_1_kwargs = _to_device1(input_device_kwargs)
 
-                    m.cuda(1)
-                    with torch.cuda.device(1):
+                    m.to(1)
+                    with torch.accelerator.device_index(1):
                         m(*input_device_1_args, **input_device_1_kwargs)
-                    self._assert_module_parameters_and_buffer_are(m, torch.device("cuda:1"), dtype)
+                    self._assert_module_parameters_and_buffer_are(m, torch.device(f"{device_type}:1"), dtype)
 
     @modules(module_db)
     def test_repr(self, device, dtype, module_info, training):
@@ -445,9 +448,11 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True, training=training)
+        if "xpu" in device and module_info.name == "nn.MultiheadAttention":
+            self.skipTest("GradcheckError issue in MultiheadAttention, https://github.com/intel/torch-xpu-ops/issues/2356")
         # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
         gradcheck_nondet_tol = 0.0
-        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled):
+        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled) or device_type == "xpu":
             gradcheck_nondet_tol = module_info.gradcheck_nondet_tol
 
         for module_input in module_inputs:
@@ -534,7 +539,7 @@ class TestModule(TestCase):
     def test_gradgrad(self, device, dtype, module_info, training):
         self._test_gradients_helper(device, dtype, module_info, training, gradgradcheck)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @with_tf32_off  # Turn off TF32 to compute at full precision https://github.com/pytorch/pytorch/issues/86798
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
@@ -884,8 +889,8 @@ class TestModule(TestCase):
     def test_to(self, device, dtype, module_info, training, swap, set_grad):
         module_cls = module_info.module_cls
         devices = ['cpu']
-        if torch.cuda.is_available():
-            devices += ['cuda']
+        if torch.cuda.is_available() or torch.xpu.is_available():
+            devices += [device_type]
         dtypes = module_info.dtypes
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
@@ -1007,7 +1012,7 @@ class TestModule(TestCase):
                 self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
 
 
-instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
+instantiate_device_type_tests(TestModule, globals(), allow_mps=True, allow_xpu=True)
 
 if __name__ == '__main__':
     run_tests()

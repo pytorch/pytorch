@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import platform
 import uuid
@@ -6,6 +8,7 @@ import warnings
 import weakref
 from collections import defaultdict
 from typing import *  # noqa: F403
+from typing_extensions import Self
 import enum
 from weakref import ReferenceType
 
@@ -38,11 +41,11 @@ __all__ = [
 
 _DEFAULT_DETERMINISM_MODE = "default"
 
-_checkpoint_debug_enabled: Optional[bool] = None
+_checkpoint_debug_enabled: bool | None = None
 
 
 @contextlib.contextmanager
-def set_checkpoint_debug_enabled(enabled: Optional[bool]):
+def set_checkpoint_debug_enabled(enabled: bool | None):
     """
     Context manager that sets whether checkpoint should print additional debug
     information when running. See the ``debug`` flag for
@@ -106,7 +109,7 @@ class DefaultDeviceType:
     to save and restore for recomputation.
     """
 
-    _default_device_type = "cuda"
+    _default_device_type: str | None = None
 
     @staticmethod
     def set_device_type(device: str = "cuda") -> None:
@@ -126,6 +129,9 @@ class DefaultDeviceType:
         Returns:
             str: The current default device type.
         """
+        if not DefaultDeviceType._default_device_type:
+            DefaultDeviceType._default_device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+
         return DefaultDeviceType._default_device_type
 
 
@@ -346,7 +352,7 @@ def noop_context_fn():
 def checkpoint(
     function,
     *args,
-    use_reentrant: Optional[bool] = None,
+    use_reentrant: bool | None = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
@@ -356,11 +362,14 @@ def checkpoint(
     r"""Checkpoint a model or part of the model.
 
     Activation checkpointing is a technique that trades compute for memory.
-    Instead of keeping tensors needed for backward alive until they are used in
-    gradient computation during backward, forward computation in checkpointed
-    regions omits saving tensors for backward and recomputes them during the
-    backward pass. Activation checkpointing can be applied to any part of a
-    model.
+    By default, tensors computed during the forward pass are kept alive until
+    they are used in gradient computations in the backward pass. To reduce this
+    memory usage, tensors produced in the passed :attr:`function` are not kept
+    alive until the backward pass. Instead, any passed tensors in :attr:`args`
+    are kept alive, and the unsaved tensors are recomputed by re-invoking
+    :attr:`function` in the backward pass as needed for gradient computation.
+    Activation checkpointing can be applied to any part of a model -- this is
+    sometimes described as "checkpointing" that part of the model.
 
     There are currently two checkpointing implementations available, determined
     by the :attr:`use_reentrant` parameter. It is recommended that you use
@@ -742,7 +751,7 @@ def _internal_assert(cond) -> None:
 #    by holder=None. We skip over them. We still save x at (4) (since its holder
 #    is still alive.)
 
-_enable_checkpoint_early_stop: Optional[bool] = None
+_enable_checkpoint_early_stop: bool | None = None
 
 
 @contextlib.contextmanager
@@ -782,7 +791,7 @@ class _Handle:
 
 class _Holder:
     def __init__(self) -> None:
-        self.handles: Dict[int, Optional[_Handle]] = {}
+        self.handles: dict[int, _Handle | None] = {}
 
 
 class _NoopSaveInputs(torch.autograd.Function):
@@ -1010,7 +1019,6 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
             def logging_mode():
                 with LoggingTensorMode(), \
                      capture_logs(True, python_tb=True, script_tb=True, cpp_tb=cpp_tb) as logs_and_tb:
-                    # pyrefly: ignore [bad-assignment]
                     self.logs, self.tbs = logs_and_tb
                     yield logs_and_tb
             return logging_mode()
@@ -1073,7 +1081,7 @@ class _StopRecomputationError(Exception):
 
 
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
-    def __init__(self, target_frame_ref: ReferenceType, gid: Union["GraphExecGroup", int]) -> None:
+    def __init__(self, target_frame_ref: ReferenceType, gid: GraphExecGroup | int) -> None:
         def pack_hook(x):
             x = x.detach() if x.requires_grad else x
             target_frame = target_frame_ref()
@@ -1147,7 +1155,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
         def unpack_hook(holder):
             # First check if we're inside a GraphExecGroup context
-            gid: Union[GraphExecGroup, None, int] = GraphExecGroup._get_current_group()
+            gid: GraphExecGroup | None | int = GraphExecGroup._get_current_group()
             if gid is None:
                 # Fallback to using the current graph task id
                 gid = torch._C._current_graph_task_id()
@@ -1210,8 +1218,8 @@ def _is_compiling(func, args, kwargs):
 class _VersionWrapper:
     # Check that cached tensors are not mutated.
     def __init__(self, val) -> None:
-        self.val: Union[torch.Tensor, Any] = val
-        self.version: Optional[int] = val._version if isinstance(val, torch.Tensor) else None
+        self.val: torch.Tensor | Any = val
+        self.version: int | None = val._version if isinstance(val, torch.Tensor) else None
 
     def get_val(self, allow_cache_entry_mutation):
         if self.version is not None and not allow_cache_entry_mutation:
@@ -1278,6 +1286,8 @@ class CheckpointPolicy(enum.Enum):
       pass and will not be recomputed during the backward pass
     - ``{MUST,PREFER}_RECOMPUTE``: The operation's output will not be saved during the
       forward pass and will be recomputed during the backward pass
+    - ``{MUST,PREFER}_CPU_OFFLOAD``: The operation's output will be saved during the
+      forward pass, offloaded to CPU, and reloaded to GPU during the backward pass
 
     Use ``MUST_*`` over ``PREFER_*`` to indicate that the policy should not be overridden
     by other subsystems like `torch.compile`.
@@ -1295,6 +1305,8 @@ class CheckpointPolicy(enum.Enum):
     PREFER_SAVE = 1
     MUST_RECOMPUTE = 2
     PREFER_RECOMPUTE = 3
+    MUST_CPU_OFFLOAD = 4
+    PREFER_CPU_OFFLOAD = 5
 
 
 def _policy_from_bool(b):
@@ -1313,6 +1325,10 @@ SAC_IGNORED_OPS = {
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
     # Used together with _CachedTorchDispatchMode to implement SAC.
     def __init__(self, policy_fn, storage) -> None:
         self.policy_fn = policy_fn
@@ -1349,6 +1365,10 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         return out
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
     # Used together with _CachedTorchDispatchMode to implement SAC.
     def __init__(self, policy_fn, storage, allow_cache_entry_mutation) -> None:
         self.policy_fn = policy_fn
@@ -1555,6 +1575,18 @@ def _checkpoint_without_reentrant_generator(
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
+    from torch.overrides import _get_current_function_mode_stack
+    from torch.utils._device import DeviceContext
+
+    # recompute_fn should respect the device context of the original forward
+    device_ctx = next(
+        filter(
+            lambda mode: isinstance(mode, DeviceContext),
+            reversed(_get_current_function_mode_stack()),
+        ),
+        contextlib.nullcontext(),
+    )
+
     def recompute_fn(*inputs) -> None:
         kwargs, *args = inputs
         # This will be called later during recomputation. This wrapping enables
@@ -1573,7 +1605,7 @@ def _checkpoint_without_reentrant_generator(
             device_autocast_ctx = torch.amp.autocast(
                 device_type=device_type, **device_autocast_kwargs
             ) if torch.amp.is_autocast_available(device_type) else contextlib.nullcontext()
-            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context:  # type: ignore[attr-defined]
+            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context, device_ctx:  # type: ignore[attr-defined]
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(
@@ -1622,7 +1654,7 @@ class GraphExecGroup:
         is a no-op otherwise.
     """
 
-    def __enter__(self) -> "GraphExecGroup":
+    def __enter__(self) -> Self:
         if torch._C._get_graph_exec_group() is not None:
             raise RuntimeError(
                 "GraphExecGroup contexts cannot be nested. "
@@ -1635,7 +1667,7 @@ class GraphExecGroup:
         torch._C._set_graph_exec_group(None)
 
     @classmethod
-    def _get_current_group(cls) -> Optional["GraphExecGroup"]:
+    def _get_current_group(cls) -> GraphExecGroup | None:
         # Private API to be used by utils like AC
         return torch._C._get_graph_exec_group()
 

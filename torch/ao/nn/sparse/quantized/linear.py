@@ -36,7 +36,11 @@ class LinearPackedParams(torch.nn.Module):
         row_block_size: int | None,
         col_block_size: int | None,
     ) -> None:
-        assert row_block_size is not None and col_block_size is not None
+        if row_block_size is None or col_block_size is None:
+            raise AssertionError(
+                "row_block_size and col_block_size must not be None, got "
+                f"row_block_size={row_block_size}, col_block_size={col_block_size}"
+            )
         self._packed_params = torch.ops.sparse.qlinear_prepack(
             weight, bias, row_block_size, col_block_size
         )
@@ -67,7 +71,8 @@ class LinearPackedParams(torch.nn.Module):
         error_msgs,
     ):
         version = local_metadata.get("version", None)
-        assert version <= self._version
+        if version is not None and version > self._version:
+            raise AssertionError(f"version {version} > self._version {self._version}")
 
         self.dtype = state_dict.pop(prefix + "dtype")
         weight, bias, row_block_size, col_block_size = state_dict.pop(
@@ -184,7 +189,8 @@ class Linear(torch.nn.Module):
         state_dict.pop(prefix + "op_type")
 
         version = local_metadata.get("version", None)
-        assert version <= self._version
+        if version is not None and version > self._version:
+            raise AssertionError(f"version {version} > self._version {self._version}")
 
         super()._load_from_state_dict(
             state_dict,
@@ -212,7 +218,11 @@ class Linear(torch.nn.Module):
         row_block_size: int | None,
         col_block_size: int | None,
     ) -> None:
-        assert row_block_size is not None and col_block_size is not None
+        if row_block_size is None or col_block_size is None:
+            raise AssertionError(
+                "row_block_size and col_block_size must not be None, "
+                f"got row_block_size={row_block_size}, col_block_size={col_block_size}"
+            )
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
 
     @classmethod
@@ -223,19 +233,30 @@ class Linear(torch.nn.Module):
 
         TODO(zaf): Need to add the sparse params to the qconfig
         """
-        assert type(mod) is cls._FLOAT_MODULE, (
-            cls._get_name() + ".from_float only works for " + cls._FLOAT_MODULE.__name__
-        )
-        assert hasattr(mod, "sparse_params"), (
-            "Expecting the Linear to have `sparse_params`. Make sure you have provided arguments "
-            'in the `sparsifier.squash_mask(params_to_save=("sparse_block_shape",))` method.'
-        )
+        if type(mod) is not cls._FLOAT_MODULE:
+            raise AssertionError(
+                cls._get_name()
+                + ".from_float only works for "
+                + cls._FLOAT_MODULE.__name__
+            )
+        if not hasattr(mod, "sparse_params"):
+            raise AssertionError(
+                "Expecting the Linear to have `sparse_params`. Make sure you have provided arguments "
+                'in the `sparsifier.squash_mask(params_to_save=("sparse_block_shape",))` method.'
+            )
         sparse_block_shape = mod.sparse_params.get("sparse_block_shape", None)  # type: ignore[operator, union-attr]
-        assert isinstance(sparse_block_shape, (tuple, list))
-        assert len(sparse_block_shape) == 2
+        if not isinstance(sparse_block_shape, (tuple, list)):
+            raise AssertionError(
+                f"sparse_block_shape must be tuple or list, got {type(sparse_block_shape)}"
+            )
+        if len(sparse_block_shape) != 2:
+            raise AssertionError(
+                f"sparse_block_shape must have length 2, got {len(sparse_block_shape)}"
+            )
         # TODO: Need to add options to qconfig to avoid the calibration.
         # TODO: Add calibration for the sparsity
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
         activation_post_process = mod.activation_post_process
         weight_post_process = mod.qconfig.weight()  # type: ignore[operator, union-attr]
 
@@ -246,12 +267,17 @@ class Linear(torch.nn.Module):
         weight_post_process(weight)
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()  # type: ignore[operator, union-attr]
-        assert dtype == torch.qint8, "Weight observer must have dtype torch.qint8"
+        if dtype != torch.qint8:
+            raise AssertionError(
+                f"Weight observer must have dtype torch.qint8, got {dtype}"
+            )
         w_sc, w_zp = weight_post_process.calculate_qparams()
         if isinstance(w_zp, torch.Tensor):
-            assert not torch.any(w_zp.bool()), "All weight zero points must map to 0"
+            if torch.any(w_zp.bool()):
+                raise AssertionError("All weight zero points must map to 0")
         else:
-            assert w_zp == 0, "Weight zero point must map to 0"
+            if w_zp != 0:
+                raise AssertionError(f"Weight zero point must map to 0, got {w_zp}")
         qweight = _quantize_weight(weight.float(), weight_post_process)
 
         row_block_size = mod.sparse_params["sparse_block_shape"][0]  # type: ignore[index]

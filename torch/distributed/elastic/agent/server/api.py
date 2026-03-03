@@ -19,7 +19,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
@@ -89,24 +89,26 @@ class WorkerSpec:
     role: str
     local_world_size: int
     rdzv_handler: rdzv.RendezvousHandler
-    fn: Optional[Callable] = None
+    fn: Callable | None = None
     # TODO @kiuk - make entrypoint a required field
-    entrypoint: Union[Callable, str, None] = None
+    entrypoint: Callable | str | None = None
     args: tuple = ()
     max_restarts: int = 3
     monitor_interval: float = 0.1
-    master_port: Optional[int] = None
-    master_addr: Optional[str] = None
-    local_addr: Optional[str] = None
+    master_port: int | None = None
+    master_addr: str | None = None
+    local_addr: str | None = None
     event_log_handler: str = "null"
-    numa_options: Optional[NumaOptions] = None
-    duplicate_stdout_filters: Optional[list[str]] = None
-    duplicate_stderr_filters: Optional[list[str]] = None
+    numa_options: NumaOptions | None = None
+    duplicate_stdout_filters: list[str] | None = None
+    duplicate_stderr_filters: list[str] | None = None
     virtual_local_rank: bool = False
 
     def __post_init__(self):
-        assert self.local_world_size > 0
-        assert self.monitor_interval > 0
+        if self.local_world_size <= 0:
+            raise AssertionError
+        if self.monitor_interval <= 0:
+            raise AssertionError
 
         if self.fn:
             warnings.warn(
@@ -116,7 +118,8 @@ class WorkerSpec:
                 category=DeprecationWarning,
             )
             self.entrypoint = self.fn
-        assert self.entrypoint
+        if not self.entrypoint:
+            raise AssertionError
 
     def get_entrypoint_name(self):
         """Get the entry point name.
@@ -127,7 +130,8 @@ class WorkerSpec:
         if isinstance(self.entrypoint, str):
             return os.path.basename(self.entrypoint)
         else:
-            assert self.entrypoint is not None
+            if self.entrypoint is None:
+                raise AssertionError
             return self.entrypoint.__qualname__
 
 
@@ -807,11 +811,11 @@ class SimpleElasticAgent(ElasticAgent):
         self,
         state: str,
         source: EventSource,
-        worker: Optional[Worker] = None,
-        raw_error: Optional[str] = None,
-        duration_ms: Optional[float] = None,
-        exit_code: Optional[int] = None,
-        worker_pid: Optional[int] = None,
+        worker: Worker | None = None,
+        raw_error: str | None = None,
+        duration_ms: float | None = None,
+        exit_code: int | None = None,
+        worker_pid: int | None = None,
     ) -> Event:
         wg = self._worker_group
         spec = wg.spec
@@ -904,7 +908,8 @@ class SimpleElasticAgent(ElasticAgent):
         rdzv_handler = spec.rdzv_handler
 
         while True:
-            assert self._worker_group.state != WorkerState.INIT
+            if self._worker_group.state == WorkerState.INIT:
+                raise AssertionError
             time.sleep(monitor_interval)
             run_result = self._monitor_workers(self._worker_group)
             state = run_result.state

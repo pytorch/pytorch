@@ -628,6 +628,55 @@ def add(x, y):
         compiled_fn(*args)
         self._save_and_reload(expected_backends=1, expected_dynamo=1)
 
+    @parametrize("device", ("cpu", "cuda", "xpu"))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_automatic_dynamo_graph_breaks_from_print_model_as_fn(self, device):
+        if device == "cuda" and not HAS_CUDA_AND_TRITON:
+            raise unittest.SkipTest("Requires CUDA/Triton")
+        if device == "xpu" and not HAS_XPU_AND_TRITON:
+            raise unittest.SkipTest("Requires XPU/Triton")
+
+        def guard_filter_fn(guards):
+            return [
+                guard.guard_type not in ("CLOSURE_MATCH", "FUNCTION_MATCH")
+                for guard in guards
+            ]
+
+        class TempNN(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.nn.functional.relu(x)
+                x *= x
+                x /= 2
+                print(x.sum().item())
+                x += 1
+                return x
+
+        # Saving
+        x = torch.rand(10, device=device)
+        model = TempNN()
+        model(x)
+        compiled_fn = torch.compile(
+            model,
+            backend="inductor",
+            options=dict(guard_filter_fn=guard_filter_fn),
+        )
+
+        compiled_fn(x)
+        total_frames = torch._dynamo.convert_frame.FRAME_COUNTER
+        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+
+        del compiled_fn
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            compiled_fn = torch.compile(
+                model, backend="inductor", options=dict(guard_filter_fn=guard_filter_fn)
+            )
+            compiled_fn(x)
+            self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

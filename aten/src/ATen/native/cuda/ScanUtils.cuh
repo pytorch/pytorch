@@ -267,15 +267,15 @@ void scan_dim_with_indices(const TensorBase& self, const TensorBase& values, con
  * outer dimensions, which contains several "inner rows").
  * Each thread processes a single inner row at a time.
  */
-template<typename scalar_t, class BinaryOp>
+template<typename scalar_t, typename index_t, class BinaryOp>
 __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src_,
                                               const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size,
                                               const scalar_t init, BinaryOp binary_op)
 {
   for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
-      const scalar_t *src = src_ + orow * row_size * num_irows + irow;
-      scalar_t *tgt = tgt_ + orow * row_size * num_irows + irow;
+      const scalar_t *src = src_ + static_cast<index_t>(orow) * row_size * num_irows + irow;
+      scalar_t *tgt = tgt_ + (index_t) orow * row_size * num_irows + irow;
       scalar_t acc = init;
 
       for (uint32_t col = 0; col < row_size; ++col) {
@@ -409,10 +409,15 @@ __host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_irows, "num_irows");
   check_fits_in_unsigned(num_orows, "num_orows");
   check_fits_in_unsigned(row_size, "row_size");
-
-  tensor_kernel_scan_outer_dim<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  if (static_cast<size_t>(num_irows) * num_orows * row_size <= UINT_MAX) {
+  tensor_kernel_scan_outer_dim<scalar_t, uint32_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
     num_orows, num_irows, row_size, init, binary_op);
+  } else  {
+  tensor_kernel_scan_outer_dim<scalar_t, size_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+    result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
+    num_orows, num_irows, row_size, init, binary_op);
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -453,12 +458,7 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   if (self.numel() == self.size(dim)) {
     if constexpr (std::is_same_v<BinaryFunction, std::plus<scalar_t>>) {
       if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms()) && (self.is_floating_point() || self.is_complex())) {
-#if defined(CUDA_VERSION) || defined(USE_ROCM)
         cuda::cub::inclusive_deterministic_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
-#else
-        globalContext().alertNotDeterministic("cumsum_cuda_kernel");
-        cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
-#endif
       } else {
         cuda::cub::inclusive_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
       }

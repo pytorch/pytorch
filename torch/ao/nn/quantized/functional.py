@@ -576,7 +576,8 @@ def leaky_relu(
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
     if scale is not None and zero_point is not None:
-        assert not inplace, "Cannot rescale with `inplace`"
+        if inplace:
+            raise AssertionError("Cannot rescale with `inplace`")
         output = torch._empty_affine_quantized(
             input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype
         )

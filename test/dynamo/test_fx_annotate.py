@@ -223,7 +223,6 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
             """\
 ('placeholder', 'getitem', {'compile_inductor': 0})
 ('placeholder', 'detach_3', {'compile_inductor': 0})
-('call_function', 'zeros', {'compile_inductor': 0})
 ('call_function', 'detach', {'compile_inductor': 0})
 ('call_function', 'detach_2', {'compile_inductor': 0})
 ('get_attr', 'fw_graph0', {'compile_inductor': 0})
@@ -299,6 +298,36 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         x = torch.randn(10, requires_grad=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_annotation_on_runtime_asserts(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.fx.traceback.annotate({"moo": 0}):
+                    x = torch.cat([x, x])
+                    b = y.item()
+                    torch._check(b >= x.shape[0])
+                    return x * b
+
+        backend = AotEagerAndRecordGraphs()
+
+        inputs = (torch.randn(3), torch.tensor(6))
+        model = M()
+        torch._dynamo.mark_dynamic(inputs[0], 0)
+        torch.compile(model, fullgraph=True, backend=backend)(*inputs)
+        dynamo_metadata = fx_traceback._get_custom_metadata(backend.graphs[0])
+        self.assertExpectedInline(
+            str(dynamo_metadata),
+            """\
+('placeholder', 's77', {'moo': 0})
+('placeholder', 'l_x_', {'moo': 0})
+('placeholder', 'l_y_', {'moo': 0})
+('call_function', 'x', {'moo': 0})
+('call_method', 'item', {'moo': 0})
+('call_function', 'mul_1', {'moo': 0})
+('call_function', 'ge', {'moo': 0})
+('call_function', '_check', {'moo': 0})
+('call_function', 'mul', {'moo': 0})""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":

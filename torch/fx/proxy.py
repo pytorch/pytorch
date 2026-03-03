@@ -12,12 +12,14 @@ import traceback
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._C import _fx_map_aggregate as map_aggregate, _fx_map_arg as map_arg
+from torch._C import _fx_map_arg as map_arg
+from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import getArtifactLogger
+from torch.utils._pytree import tree_map_
 from torch.utils._traceback import CapturedTraceback
 
 from ._compatibility import compatibility
@@ -42,6 +44,51 @@ __all__ = [
 
 log = logging.getLogger(__name__)
 annotation_log = getArtifactLogger(__name__, "annotation")
+
+
+def _is_arbitrary_callable(obj: object) -> bool:
+    """
+    Returns True if obj is an arbitrary callable (function, lambda, method, etc.)
+    that requires special tracing to handle. These cannot be symbolically traced
+    using the standard Proxy mechanism.
+    """
+    import functools
+    import types
+
+    return isinstance(
+        obj,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            types.BuiltinMethodType,
+            functools.partial,
+        ),
+    )
+
+
+def _find_arbitrary_callable(
+    args: tuple[object, ...], kwargs: dict[str, object]
+) -> object:
+    """
+    Recursively searches args and kwargs for any arbitrary callable.
+    Returns the first arbitrary callable found, or None if none exist.
+    """
+    found = None
+
+    _T = TypeVar("_T")
+
+    def check(obj: _T) -> _T:
+        nonlocal found
+        if found is not None:
+            return obj
+        if _is_arbitrary_callable(obj):
+            found = obj
+        return obj
+
+    tree_map_(check, args)
+    tree_map_(check, kwargs)
+    return found
 
 
 @compatibility(is_backward_compatible=False)
@@ -197,19 +244,12 @@ class TracerBase:
                 if field in current_meta:
                     node.meta[field] = copy.copy(current_meta[field])
 
-            # Here we decrement to account for the sequence_nr having
-            # just been incremented while tracing this lowered aten op.
-            new_seq_nr = torch.autograd._get_sequence_nr() - 1
-            # The sequence_nr increments every time a new autograd Node
-            # is created. During the FWD pass we store the sequence_nr
-            # corresponding to the last autograd Node created on this fx
-            # node's meta.  A single aten op can create multiple autograd
-            # nodes as is the case with in-place foreach ops. During the
-            # BWD pass we retrieve the sequence_nr stored on the current
-            # executing autograd Node. See NOTE [ Sequence Number ].
-            if current_meta.get("in_grad_fn", 0) > 0:
-                annotation_log.debug("seq_nr from current_meta")
-                new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
+            new_seq_nr = _get_seq_nr(node.name)
+            if new_seq_nr is not None:
+                annotation_log.debug(
+                    "Assigning new_seq_nr %s to %s", new_seq_nr, node.name
+                )
+                node.meta["seq_nr"] = new_seq_nr
 
             # See Note [Functionalization View Replay Annotation]
             # Overriding some node meta with the original node meta of the
@@ -217,16 +257,10 @@ class TracerBase:
             replay_node: Node = fx_traceback.get_current_replay_node()
             if replay_node is not None:
                 node.meta["is_functional_regenerated"] = True
-                if "seq_nr" in replay_node.meta:
-                    annotation_log.debug("seq_nr from replay_node")
-                    new_seq_nr = replay_node.meta["seq_nr"]
                 if "custom" in replay_node.meta:
                     node.meta["custom"] = replay_node.meta.get("custom")
                 if "stack_trace" in replay_node.meta:
                     node.stack_trace = replay_node.meta.get("stack_trace")
-
-            annotation_log.debug("Assigning new_seq_nr %s to %s", new_seq_nr, node.name)
-            node.meta["seq_nr"] = new_seq_nr
 
         elif self.module_stack:
             node.meta["nn_module_stack"] = copy.copy(self.module_stack)
@@ -307,8 +341,10 @@ class TracerBase:
 
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
-        assert isinstance(args_, tuple)
-        assert isinstance(kwargs_, dict)
+        if not isinstance(args_, tuple):
+            raise AssertionError(f"Expected args_ to be tuple, got {type(args_)}")
+        if not isinstance(kwargs_, dict):
+            raise AssertionError(f"Expected kwargs_ to be dict, got {type(kwargs_)}")
 
         node = self.create_node(kind, target, args_, kwargs_, name, type_expr)
 
@@ -413,6 +449,9 @@ class TracerBase:
         elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return a
 
+        elif is_opaque_value_type(type(a)):
+            return a
+
         elif is_dataclass(a):
             kwargs = {
                 field.name: self.create_arg(getattr(a, field.name))
@@ -463,6 +502,60 @@ class TracerBase:
         return Attribute(obj, "keys")()
 
 
+def _get_seq_nr(node_name: str = ""):
+    """
+    Returns the seq_nr node meta for the current proxy node that we're creating.
+    The seq_nr number in node meta is related to but not the same as the "sequence number"
+    in autograd.
+    We use the seq_nr to correlate forward and backward nodes in the traced FX graphs
+    (e.g. in copy_fwd_metadata_to_bw_nodes).
+    The corresponding forward and backward FX graph nodes should have the same seq_nr.
+
+    The ordering of the seq_nr in the graph does not indicate when the node is executed.
+    For example, the nodes in the invoke_subgraph HOP's subgraph may be called multiple
+    times by different HOP nodes, but these nodes only have a single seq_nr, which may be
+    smaller, the same, or larger than the calling HOP.
+
+    `node_name` is the name of the node that we're creating. It is used for logging only.
+    """
+    current_meta: dict[str, Any] = fx_traceback.get_current_meta()
+    new_seq_nr = None
+    # The sequence_nr increments every time a new autograd Node
+    # is created. During the FWD pass we store the sequence_nr
+    # corresponding to the last autograd Node created on this fx
+    # node's meta.  A single aten op can create multiple autograd
+    # nodes as is the case with in-place foreach ops. During the
+    # BWD pass we retrieve the sequence_nr stored on the current
+    # executing autograd Node. See NOTE [ Sequence Number ].
+    if current_meta.get("in_grad_fn", 0) > 0:
+        # This branch is used to get seq_nr for backward nodes
+        annotation_log.debug("%s: seq_nr from current_meta grad_fn_seq_nr", node_name)
+        new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
+
+    elif torch.fx.traceback._is_preserving_node_seq_nr():
+        # Special case where we preserve seq_nr from currently tracing node
+        # Used to preserve seq_nr when re-tracing subgraphs in HOP
+        annotation_log.debug("%s: seq_nr from current_meta seq_nr", node_name)
+        new_seq_nr = current_meta.get("seq_nr")
+    else:
+        # Here we decrement to account for the sequence_nr having
+        # just been incremented while tracing this lowered aten op.
+        # This branch is used to get seq_nr for forward nodes
+        new_seq_nr = torch.autograd._get_sequence_nr() - 1
+
+    if not torch.fx.traceback._is_preserving_node_seq_nr():
+        # See Note [Functionalization View Replay Annotation]
+        # Overriding some node meta with the original node meta of the
+        # regenerated node.
+        replay_node: Node = fx_traceback.get_current_replay_node()
+        if replay_node is not None:
+            if "seq_nr" in replay_node.meta:
+                annotation_log.debug("%s: seq_nr from replay_node", node_name)
+                new_seq_nr = replay_node.meta["seq_nr"]
+
+    return new_seq_nr
+
+
 # used in Proxy object when just appending to the graph while not tracing.
 @compatibility(is_backward_compatible=True)
 class GraphAppendingTracer(TracerBase):
@@ -476,7 +569,8 @@ class GraphAppendingTracer(TracerBase):
 
 @compatibility(is_backward_compatible=False)
 def assert_fn(x):
-    assert x
+    if not x:
+        raise AssertionError("Assertion failed")
 
 
 @compatibility(is_backward_compatible=True)
@@ -552,8 +646,10 @@ class Proxy:
                 )
                 new_obj = copy.copy(v)
             new_dict[k] = new_obj
-        assert "node" in new_dict
-        assert "tracer" in new_dict
+        if "node" not in new_dict:
+            raise AssertionError("'node' not in new_dict during proxy unpickling")
+        if "tracer" not in new_dict:
+            raise AssertionError("'tracer' not in new_dict during proxy unpickling")
         new_proxy = Proxy(new_dict["node"], new_dict["tracer"])
         for k, v in new_dict.items():
             new_proxy.__dict__[k] = v
@@ -570,9 +666,11 @@ class Proxy:
 
     def __iter__(self) -> Iterator["Proxy"]:
         frame = inspect.currentframe()
-        assert frame is not None
+        if frame is None:
+            raise AssertionError("inspect.currentframe() returned None")
         calling_frame = frame.f_back
-        assert calling_frame is not None
+        if calling_frame is None:
+            raise AssertionError("frame.f_back is None")
         inst_list = list(dis.get_instructions(calling_frame.f_code))
         if sys.version_info >= (3, 11):
             from bisect import bisect_left
@@ -596,9 +694,11 @@ class Proxy:
             # check if this boolean is used in an assertion, bytecode pattern for assertions
             # is pretty stable for Python 3.7--3.9
             frame = inspect.currentframe()
-            assert frame is not None
+            if frame is None:
+                raise AssertionError("inspect.currentframe() returned None")
             calling_frame = frame.f_back
-            assert calling_frame is not None
+            if calling_frame is None:
+                raise AssertionError("frame.f_back is None")
             insts = list(dis.get_instructions(calling_frame.f_code))
             if sys.version_info >= (3, 11):
                 from bisect import bisect_left
@@ -610,7 +710,8 @@ class Proxy:
 
             if inst.opname == "POP_JUMP_IF_TRUE":
                 first = insts[cur + 1]
-                assert inst.arg is not None
+                if inst.arg is None:
+                    raise AssertionError("inst.arg is None for POP_JUMP_IF_TRUE")
                 last = insts[inst.arg // 2 - 1]
                 starts_with_assert = (
                     first.opname == "LOAD_GLOBAL"
@@ -645,8 +746,8 @@ class Proxy:
             if isinstance(a, cls):
                 tracers[a.tracer] = None
 
-        map_aggregate(args, find_tracer)
-        map_aggregate(kwargs, find_tracer)
+        tree_map_(find_tracer, args)
+        tree_map_(find_tracer, kwargs)
 
         if len(tracers) > 1:
             raise RuntimeError(
@@ -664,8 +765,14 @@ class Proxy:
             )
         else:
             if isinstance(orig_method, torch._ops.HigherOrderOperator):
-                # TODO: Define how to symbolically trace HigherOrderOperators
-                raise RuntimeError("Unable to symbolically trace HigherOrderOperators")
+                bad_callable = _find_arbitrary_callable(args, kwargs)
+                if bad_callable is not None:
+                    raise RuntimeError(
+                        f"Unable to symbolically trace the HigherOrderOperator "
+                        f"{orig_method._name} because it received an arbitrary "
+                        f"callable argument {bad_callable}. Use make_fx or dynamo "
+                        f"tracing instead."
+                    )
             return tracer.create_proxy(
                 "call_function",
                 orig_method,
@@ -701,9 +808,10 @@ class MetaProxy(Proxy):
                 meta_proxy = arg
                 break
 
-        assert meta_proxy is not None, (
-            "No MetaProxy found in arguments, but one is expected."
-        )
+        if meta_proxy is None:
+            raise AssertionError(
+                "No MetaProxy found in arguments, but one is expected."
+            )
 
         proxy = super().__torch_function__(orig_method, types, args, kwargs)
         with meta_proxy.fake_mode:
@@ -749,7 +857,8 @@ class ParameterProxy(Proxy):
 
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
-        assert isinstance(param, torch.nn.Parameter)
+        if not isinstance(param, torch.nn.Parameter):
+            raise AssertionError(f"Expected Parameter, got {type(param)}")
         self.param = param
         self.name = name
 

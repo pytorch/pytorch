@@ -246,7 +246,7 @@ class UvTcpServer : public UvTcpSocket {
               uv_err_name(uv_res),
               uv_strerror(uv_res)));
       res->cacheSocketPort();
-    } catch (std::exception& ex) {
+    } catch (std::exception&) {
       res->close();
       throw;
     }
@@ -322,7 +322,7 @@ class UvTcpServer : public UvTcpSocket {
               uv_err_name(uv_res),
               uv_strerror(uv_res)));
       res->cacheSocketPort();
-    } catch (std::exception& ex) {
+    } catch (std::exception&) {
       res->close();
       throw;
     }
@@ -683,6 +683,12 @@ class LibUVStoreDaemon : public BackgroundThread {
       const std::string& queueName,
       const c10::intrusive_ptr<UvHandle>& client);
   int64_t queueLen(const std::string& queueName);
+  std::vector<std::string> listKeys();
+
+  bool barrier(
+      const std::string& key,
+      int64_t worldSize,
+      const c10::intrusive_ptr<UvHandle>& client);
 
   void registerClient(const c10::intrusive_ptr<UvHandle>& client);
   void unregisterClient(const c10::intrusive_ptr<UvHandle>& client);
@@ -820,6 +826,14 @@ class UvClient : public UvTcpSocket {
             break;
           case QueryType::QUEUE_LEN:
             if (!parse_queue_len_command())
+              return;
+            break;
+          case QueryType::LIST_KEYS:
+            if (!parse_list_keys_command())
+              return;
+            break;
+          case QueryType::BARRIER:
+            if (!parse_barrier_command())
               return;
             break;
           default:
@@ -1161,6 +1175,43 @@ class UvClient : public UvTcpSocket {
     StreamWriter sw(iptr());
     sw.write_value<int64_t>(store->queueLen(key));
     sw.send();
+    return true;
+  }
+
+  bool parse_list_keys_command() {
+    C10D_TRACE("list_keys address:{}", this->address());
+
+    auto keys = store->listKeys();
+    StreamWriter sw(iptr());
+    sw.write_value<int64_t>(static_cast<int64_t>(keys.size()));
+    for (const auto& key : keys) {
+      sw.write_string(key);
+    }
+    sw.send();
+    return true;
+  }
+
+  bool parse_barrier_command() {
+    std::string key;
+    if (!stream.read_key(key))
+      return false;
+
+    int64_t worldSize = 0;
+    if (!stream.read_value(worldSize))
+      return false;
+
+    C10D_TRACE(
+        "barrier key:{} worldSize:{} address:{}",
+        key,
+        worldSize,
+        this->address());
+
+    if (store->barrier(key, worldSize, iptr())) {
+      StreamWriter sw(iptr());
+      sw.write1(static_cast<uint8_t>(WaitResponseType::STOP_WAITING));
+      sw.send();
+    }
+
     return true;
   }
 
@@ -1542,6 +1593,43 @@ int64_t LibUVStoreDaemon::queueLen(const std::string& key) {
   }
   return static_cast<int64_t>(it->second.size());
 }
+
+std::vector<std::string> LibUVStoreDaemon::listKeys() {
+  std::vector<std::string> keys;
+  keys.reserve(tcpStore_.size());
+  for (const auto& kv : tcpStore_) {
+    keys.push_back(kv.first);
+  }
+  return keys;
+}
+
+bool LibUVStoreDaemon::barrier(
+    const std::string& key,
+    int64_t worldSize,
+    const c10::intrusive_ptr<UvHandle>& client) {
+  // Atomically increment the barrier counter
+  auto it = tcpStore_.find(key);
+  int64_t count = 1;
+  if (it != tcpStore_.end()) {
+    auto buf = reinterpret_cast<const char*>(it->second.data());
+    auto len = it->second.size();
+    count = std::stoll(std::string(buf, len)) + 1;
+  }
+  auto countStr = std::to_string(count);
+  tcpStore_[key] = std::vector<uint8_t>(countStr.begin(), countStr.end());
+
+  if (count >= worldSize) {
+    // Wake up all previously waiting clients
+    wakeupWaitingClients(key);
+    return true; // Caller should send STOP_WAITING to this client
+  } else {
+    // Register this client to wait for remaining workers
+    waitingSockets_[key].push_back(client);
+    keysAwaited_[client] = 1;
+    return false;
+  }
+}
+
 #endif
 
 std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(

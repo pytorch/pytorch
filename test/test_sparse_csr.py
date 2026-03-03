@@ -9,14 +9,15 @@ import unittest
 import functools
 from contextlib import redirect_stderr
 from torch.testing import make_tensor, FileCheck
-from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16, PLATFORM_SUPPORTS_BF16_ATOMICS, PLATFORM_SUPPORTS_HALF_ATOMICS)
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
      run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
-     skipIfRocmVersionLessThan, IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
+     IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
+     precisionOverride, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -87,7 +88,7 @@ def _test_addmm_addmv(
     """
     dtype = t.dtype
     numpy_dtype = dtype
-    if dtype in {torch.bfloat16}:
+    if dtype == torch.bfloat16:
         numpy_dtype = torch.float
     if dtype.is_complex:
         alpha = 0.9 + 0.3j if alpha is None else alpha
@@ -102,7 +103,8 @@ def _test_addmm_addmv(
         elif layout == torch.sparse_csc:
             return mat.to_sparse_csc()
         else:
-            assert mat.layout == layout
+            if mat.layout != layout:
+                raise AssertionError(f"expected layout {layout}, got {mat.layout}")
             return mat
 
     if mode == "all_sparse":
@@ -424,7 +426,8 @@ class TestSparseCompressed(TestCase):
                         batchsize = size[:batch_ndim]
                         basesize = size[batch_ndim:batch_ndim + base_ndim]
                         densesize = size[batch_ndim + base_ndim:]
-                        assert len(densesize) == dense_ndim
+                        if len(densesize) != dense_ndim:
+                            raise AssertionError(f"expected len(densesize) == {dense_ndim}, got {len(densesize)}")
                         printed.append(f"########## {dtype}/{index_dtype}/size={batchsize}+{basesize}+{densesize} ##########")
                         x = torch.sparse_compressed_tensor(compressed_indices,
                                                            plain_indices,
@@ -487,7 +490,8 @@ class TestSparseCompressed(TestCase):
 
             b = self.genSparseCompressedTensor(shape1, nnz, dtype=dtype, layout=layout, device=device,
                                                index_dtype=index_dtype, blocksize=blocksize)
-            assert a._nnz() != b._nnz(), (a._nnz(), b._nnz())
+            if a._nnz() == b._nnz():
+                raise AssertionError(f"expected nnz to differ: {(a._nnz(), b._nnz())}")
             with self.assertRaisesRegex(RuntimeError,
                                         "only sparse compressed tensors with the same number of specified elements are supported."):
                 a.copy_(b)
@@ -575,9 +579,11 @@ class TestSparseCompressed(TestCase):
 
         for sample, sparse_sample in samples:
             expected = op(sample.input, *sample.args, **sample.kwargs)
-            assert torch.is_tensor(expected)
+            if not torch.is_tensor(expected):
+                raise AssertionError(f"expected tensor, got {type(expected)}")
             output = op(sparse_sample.input, *sparse_sample.args, **sparse_sample.kwargs)
-            assert torch.is_tensor(output)
+            if not torch.is_tensor(output):
+                raise AssertionError(f"expected tensor, got {type(output)}")
             strided_output = output.to_dense()
             if require_mask and sample.kwargs.get('mask') is not None:
                 output_mask = torch.masked._output_mask(op.op, sample.input, *sample.args, **sample.kwargs)
@@ -997,7 +1003,7 @@ class TestSparseCompressed(TestCase):
             elif layout in {torch.sparse_csc, torch.sparse_bsc}:
                 n_batchdim = sparse.ccol_indices().ndim - 1
             else:
-                assert 0  # unreachable
+                raise AssertionError(f"unreachable: layout={layout}")
             self.assertEqual(sparse, dense)
             for dim in range(sparse.ndim):
                 if sparse.shape[dim] == 0:
@@ -1467,12 +1473,9 @@ class TestSparseCSR(TestCase):
     @skipCUDAIfNoSparseGeneric
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if SM53OrLater else [],
-                  *[torch.bfloat16] if SM80OrLater else []))
+                  *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
+                  *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
     def test_csr_matvec(self, device, dtype):
-
-        if TEST_WITH_ROCM and (dtype == torch.half or dtype == torch.bfloat16):
-            self.skipTest("ROCm doesn't work with half dtypes correctly.")
 
         side = 100
         for index_dtype in [torch.int32, torch.int64]:
@@ -1532,7 +1535,6 @@ class TestSparseCSR(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNoSparseGeneric
-    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_bmm(self, device, dtype):
         def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
@@ -1599,8 +1601,8 @@ class TestSparseCSR(TestCase):
     @skipIfTorchDynamo("raises 'sparse matrix length is ambiguous; use getnnz()'")
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if SM53OrLater else [],
-                  *[torch.bfloat16] if SM80OrLater else []))
+                  *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
+                  *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5,
                         torch.float16: 1e-3, torch.bfloat16: 1e-3})
@@ -1619,7 +1621,8 @@ class TestSparseCSR(TestCase):
             def wrapper(c, a, b, alpha=None, beta=None, out=None):
                 if out is not None:
                     # the ref takes no out kwarg
-                    assert isinstance(out, torch.Tensor)
+                    if not isinstance(out, torch.Tensor):
+                        raise AssertionError(f"expected Tensor, got {type(out)}")
                     # transpose inplace to propagate out to checking context
                     out.transpose_(-2, -1)
                     return f(tt(c), tt(b), tt(a), alpha=alpha, beta=beta, out=out)
@@ -1740,7 +1743,7 @@ class TestSparseCSR(TestCase):
         mat[mat.real < 0] = 0
         sparse_mat = mat.to_sparse_csr()
         mvec = torch.randn((mat.size(1),), dtype=dtype, device=device)
-        avec = torch.randn((mat.size(0),), dtype=torch.float64, device=device)
+        avec = torch.randn((mat.size(0),), dtype=dtype, device=device)
         ref_output = torch.addmv(avec, mat, mvec)
         output = torch.addmv(avec, sparse_mat, mvec)
         self.assertEqual(ref_output, output)
@@ -1820,7 +1823,6 @@ class TestSparseCSR(TestCase):
                 run_test(a, b, upper, unitriangular, transpose, op_out)
 
     @skipCPUIfNoMklSparse
-    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz0=None, nnz1=None):
@@ -1921,8 +1923,8 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
-                  *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
+                  *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
+                  *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
@@ -1940,8 +1942,8 @@ class TestSparseCSR(TestCase):
 
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
-                  *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
+                  *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
+                  *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else []))
     @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
@@ -1970,13 +1972,12 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
     @skipCPUIfNoMklSparse
-    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if (SM80OrLater and not TEST_WITH_ROCM) else [],
-                                      *[torch.half] if (SM53OrLater and not TEST_WITH_ROCM) else [],
+                                      *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else [],
+                                      *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
@@ -2051,8 +2052,8 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
-                                      *[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
+                                      *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16_ATOMICS else [],
+                                      *[torch.half] if PLATFORM_SUPPORTS_HALF_ATOMICS else [],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
@@ -2332,7 +2333,6 @@ class TestSparseCSR(TestCase):
             run_test(index_dtype)
 
     @skipCPUIfNoMklSparse
-    @skipCUDAIfRocm(msg="needs HIPSPARSE_GENERIC_SPSV or SPSM")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -2487,7 +2487,6 @@ class TestSparseCSR(TestCase):
 
     @skipCUDAIfRocm
     @onlyCUDA
-    @skipCUDAIf(True, "Causes CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -2497,7 +2496,8 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.shape, c.shape)
 
         for m, n, k in itertools.product([0, 5], repeat=3):
-            c = torch.empty(m, n, dtype=dtype, device=device, layout=torch.sparse_csr)
+            with torch.sparse.check_sparse_tensor_invariants(enable=False):
+                c = torch.empty(m, n, dtype=dtype, device=device, layout=torch.sparse_csr)
             a = make_tensor((m, k), dtype=dtype, device=device)
             b = make_tensor((k, n), dtype=dtype, device=device)
             run_test(c, a, b)
@@ -2695,7 +2695,8 @@ class TestSparseCSR(TestCase):
             self.skipTest("Skipped! Out not supported")
 
         for sample in samples:
-            assert torch.is_tensor(sample.input)
+            if not torch.is_tensor(sample.input):
+                raise AssertionError(f"expected tensor, got {type(sample.input)}")
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
@@ -2719,7 +2720,8 @@ class TestSparseCSR(TestCase):
             self.skipTest("Skipped! Inplace variant not supported!")
 
         for sample in samples:
-            assert torch.is_tensor(sample.input)
+            if not torch.is_tensor(sample.input):
+                raise AssertionError(f"expected tensor, got {type(sample.input)}")
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
@@ -3529,7 +3531,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_softmax(self, device, dtype):
         from functools import partial
@@ -3564,7 +3566,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf((not TEST_WITH_TORCHINDUCTOR) or (IS_FBCODE and IS_REMOTE_GPU),
                      "Skipped for internal with remote GPUs")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
@@ -3688,7 +3690,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("block_size", [16, 32, 64])
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     @precisionOverride({torch.float16: 1e-3})
     def test_triton_scaled_dot_product_attention(self, device, dtype, block_size):
@@ -3736,7 +3738,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("block_size", [16, 32, 64])
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_sampled_addmm(self, device, dtype, block_size):
         from functools import partial
@@ -3804,7 +3806,7 @@ class TestSparseCompressedTritonKernels(TestCase):
 
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_scatter_mm(self, device, dtype):
         from torch.sparse._triton_ops import scatter_mm
@@ -3849,7 +3851,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("blocksize", [2, '2x3', 16, '16x32', 32, 64])
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_bsr_scatter_mm(self, device, dtype, blocksize):
         import triton
@@ -3892,7 +3894,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                         result = bsr_scatter_mm(bsr, dense, indices_data=indices_data)
                     except triton.compiler.OutOfResources:
                         # ensure that there was at least one successful test:
-                        assert SPLIT_N < SPLIT_N_list[0]
+                        if SPLIT_N >= SPLIT_N_list[0]:
+                            raise AssertionError(f"expected SPLIT_N < {SPLIT_N_list[0]}, got {SPLIT_N}") from None
                         break
 
                     self.assertEqual(result, expected)
@@ -3985,7 +3988,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @parametrize("out_dtype", ['unspecified', 'int32'])
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float, torch.int8)
     @precisionOverride({torch.float16: 6e-1})
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_kernel(self, op, device, dtype, blocksize, out_dtype):
@@ -4008,8 +4011,10 @@ class TestSparseCompressedTritonKernels(TestCase):
                          _int_bsr_dense_addmm=_int_bsr_dense_addmm)[op]
 
         def reference(input, mat1, mat2, beta=1, alpha=1, left_alpha=None, right_alpha=None, op=op):
-            assert mat1.layout is torch.strided
-            assert mat2.layout is torch.strided
+            if mat1.layout is not torch.strided:
+                raise AssertionError(f"expected strided layout, got {mat1.layout}")
+            if mat2.layout is not torch.strided:
+                raise AssertionError(f"expected strided layout, got {mat2.layout}")
             if dtype is torch.int8:
                 if op == '_int_bsr_dense_addmm':
                     mat12 = torch._int_mm(mat1, mat2)
@@ -4066,11 +4071,11 @@ class TestSparseCompressedTritonKernels(TestCase):
         else:
             BM, BK = (blocksize,) * 2
 
-        if op in {"bsr_dense_linear"} and BM != BK:
+        if op == "bsr_dense_linear" and BM != BK:
             # todo: eliminate this skip
             self.skipTest(f"{op} does not support non-square blocks")
 
-        if op in {"bsr_dense_linear"} and dtype is torch.int8:
+        if op == "bsr_dense_linear" and dtype is torch.int8:
             # todo: eliminate this skip
             self.skipTest(f"{op} does not support int8")
 
@@ -4110,7 +4115,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                 meta = get_meta(op, key, version=(0, dtype, 0.5))
                 if meta is None:
                     optimize_bsr_dense_addmm(M, K, N, BM, BK, beta=beta, alpha=alpha, dtype=dtype, sparsity=0.5)
-                    assert meta is not None
+                    if meta is None:
+                        raise AssertionError("expected meta to be not None after optimization")
                     dump()  # this will update torch/sparse/_triton_ops_meta.py
 
             expected = reference(input, mat1, mat2, beta=beta, alpha=alpha, left_alpha=left_alpha, right_alpha=right_alpha)
@@ -4159,7 +4165,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @onlyCUDA
     @parametrize("out_dtype", ['unspecified', 'int32'])
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
+    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [], torch.float, torch.int8)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     def test_triton_tune(self, op, device, dtype, out_dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm, _int_bsr_dense_addmm

@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
 from collections.abc import Iterable
-from typing import Union
 
 import torch
 from torch import Tensor
 
-from . import _lazy_call, _lazy_init, current_device, device_count
+from . import _lazy_call, _lazy_init, current_device, device_count, is_initialized
 
 
-def get_rng_state(device: Union[int, str, torch.device] = "xpu") -> Tensor:
+def get_rng_state(device: int | str | torch.device = "xpu") -> Tensor:
     r"""Return the random number generator state of the specified GPU as a ByteTensor.
 
     Args:
@@ -36,9 +35,7 @@ def get_rng_state_all() -> list[Tensor]:
     return results
 
 
-def set_rng_state(
-    new_state: Tensor, device: Union[int, str, torch.device] = "xpu"
-) -> None:
+def set_rng_state(new_state: Tensor, device: int | str | torch.device = "xpu") -> None:
     r"""Set the random number generator state of the specified GPU.
 
     Args:
@@ -46,8 +43,10 @@ def set_rng_state(
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``'xpu'`` (i.e., ``torch.device('xpu')``, the current XPU device).
     """
-    with torch._C._DisableFuncTorch():
-        new_state_copy = new_state.clone(memory_format=torch.contiguous_format)
+    if not is_initialized():
+        with torch._C._DisableFuncTorch():
+            new_state = new_state.clone(memory_format=torch.contiguous_format)
+
     if isinstance(device, str):
         device = torch.device(device)
     elif isinstance(device, int):
@@ -58,7 +57,7 @@ def set_rng_state(
         if idx is None:
             idx = current_device()
         default_generator = torch.xpu.default_generators[idx]
-        default_generator.set_state(new_state_copy)
+        default_generator.set_state(new_state)
 
     _lazy_call(cb)
 

@@ -9,7 +9,9 @@ import types
 import unittest
 import weakref
 from collections import defaultdict, namedtuple, OrderedDict, UserDict
-from typing import Any
+from collections.abc import Callable
+from functools import partial
+from typing import Any, NamedTuple
 
 import torch
 import torch._dynamo.test_case
@@ -17,6 +19,7 @@ import torch._dynamo.testing
 import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch.testing._internal.common_utils import (
@@ -79,15 +82,15 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
             def forward(self, x):
                 val = x.sin()
-                if TensorDim.DDP in {"ddp"}:
+                if TensorDim.DDP == "ddp":
                     val += x.cos()
-                if "ddp" in {TensorDim.DDP}:
+                if "ddp" == TensorDim.DDP:
                     val += x.cos()
                 return val
 
         inp = torch.randn(4, 4)
         mod = Foo()
-        opt_f = torch.compile(mod)
+        opt_f = torch.compile(mod, backend="eager", fullgraph=True)
         self.assertEqual(mod(inp), opt_f(inp))
 
     def test_dict_subclass_local_with_non_dict_method(self):
@@ -141,7 +144,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             for value in sd.values():
                 x = x * value
-            for key in sd.keys():
+            for key in sd:
                 x = x * key
             for k, v in sd.items():
                 x = x * k
@@ -187,7 +190,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             for value in sd.values():
                 x = x * value
             sd[6] = 14
-            for key in sd.keys():
+            for key in sd:
                 x = x * key
             for k, v in sd.items():
                 x = x * k
@@ -442,7 +445,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         args1 = {"a": torch.randn(10), "b": torch.randn(10)}
         args2 = dict(args1)
-        assert fn(args1) is args1
+        if fn(args1) is not args1:
+            raise AssertionError("Expected fn(args1) to be args1")
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertIs(opt_fn(args2), args2)
@@ -516,7 +520,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         args1 = {namedtuple: None, 3: torch.randn(3)}
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         self.assertEqual(fn(args1), opt_fn(args1))
         self.assertEqual(cnts.frame_count, 1)
         # Test a failing namedtuple guard
@@ -536,7 +540,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         args1[3] = z
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         self.assertEqual(fn(args1, x), opt_fn(args1, x))
         self.assertEqual(cnts.frame_count, 1)
 
@@ -703,7 +707,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             def fn(x):
                 c = CustomDict()
                 c["key"] = x
-                assert "key" in c
+                assert "key" in c  # noqa: S101
                 return c["key"] + 1
 
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1060,8 +1064,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
             a = {"one": torch.ones(1)}
             return a | b
 
-        from torch._dynamo.exc import Unsupported
-
         for arg in args:
             with self.assertRaisesRegex(Unsupported, "Observed exception"):
                 _ = fn(arg)
@@ -1201,6 +1203,290 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
+
+    def test_dict_union_result_type(self):
+        def_dict = defaultdict(int, {1: 1, 2: 2})
+        ord_dict = OrderedDict({3: 3, 4: 4})
+        base_dict = {5: 5, 6: 6}
+
+        exp_def = def_dict | ord_dict
+        self.assertIsInstance(exp_def, defaultdict)
+
+        exp_def_2 = def_dict | base_dict
+        self.assertIsInstance(exp_def_2, defaultdict)
+
+        exp_def_3 = base_dict | def_dict
+        self.assertIsInstance(exp_def_3, defaultdict)
+
+        exp_ord = ord_dict | def_dict
+        self.assertIsInstance(exp_ord, OrderedDict)
+
+        exp_ord_2 = base_dict | ord_dict
+        self.assertIsInstance(exp_ord_2, OrderedDict)
+
+        exp_base = base_dict | base_dict
+        self.assertIsInstance(exp_base, dict)
+
+    def test_range_as_dict_key(self):
+        def fn(x):
+            d = {range(5): x * 2, range(10, 15): x * 3}
+            return d[range(0, 5, 1)] + d[range(10, 15)]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_tuple_as_dict_key(self):
+        def fn(x):
+            d = {(1, 2): x * 2, (3, 4, 5): x * 3}
+            return d[(1, 2)] + d[(3, 4, 5)]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_enum_as_dict_key(self):
+        class Color(enum.Enum):
+            RED = 1
+            GREEN = 2
+            BLUE = 3
+
+        def fn(x):
+            d = {Color.RED: x * 2, Color.GREEN: x * 3, Color.BLUE: x * 4}
+            return d[Color.RED] + d[Color.GREEN] + d[Color.BLUE]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_intenum_as_dict_key(self):
+        class Priority(enum.IntEnum):
+            LOW = 1
+            MEDIUM = 2
+            HIGH = 3
+
+        def fn(x):
+            d = {Priority.LOW: x * 2, Priority.MEDIUM: x * 3, Priority.HIGH: x * 4}
+            return d[Priority.LOW] + d[Priority.MEDIUM] + d[Priority.HIGH]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_frozenset_as_dict_key(self):
+        def fn(x):
+            d = {frozenset([1, 2]): x * 2, frozenset([3, 4, 5]): x * 3}
+            return d[frozenset([1, 2])] + d[frozenset([3, 4, 5])]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_typing_union_as_dict_key(self):
+        from typing import Union
+
+        def fn(x):
+            d = {Union[int, str]: x * 2, Union[float, bool]: x * 3}
+            return d[Union[int, str]] + d[Union[float, bool]]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_numpy_dtype_as_dict_key(self):
+        import numpy as np
+
+        def fn(x):
+            d = {np.float32: x * 2, np.int64: x * 3, np.bool_: x * 4}
+            return d[np.float32] + d[np.int64] + d[np.bool_]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_method_wrapper_as_dict_key(self):
+        add_method = list.__add__
+        mul_method = list.__mul__
+
+        def fn(x):
+            # Method wrappers are the type of bound methods on built-in types
+            d = {add_method: x * 2, mul_method: x * 3}
+            return d[add_method] + d[mul_method]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_torch_builtin_function_as_dict_key(self):
+        def fn(x, y):
+            # Using torch built-in functions as dictionary keys
+            d = {torch.add: x * 2, torch.mul: y * 3, torch.sub: x + y}
+            return d[torch.add] + d[torch.mul] + d[torch.sub]
+
+        x = torch.randn(4)
+        y = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, y), opt_fn(x, y))
+
+    def test_frozen_dataclass_as_dict_key(self):
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class Point:
+            x: int
+            y: int
+
+        def fn(tensor):
+            p1 = Point(1, 2)
+            p2 = Point(3, 4)
+            d = {p1: tensor * 2, p2: tensor * 3}
+            return d[Point(1, 2)] + d[Point(3, 4)]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_list_as_dict_key_raises_typeerror(self):
+        def fn(x):
+            d = {[1, 2, 3]: x * 2}
+            return d[[1, 2, 3]]
+
+        x = torch.randn(4)
+
+        # First check that eager execution raises TypeError
+        with self.assertRaises(TypeError):
+            fn(x)
+
+        # Also check that compiled version raises TypeError
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Observed exception"):
+            opt_fn(x)
+
+    def test_property_backed_by_dunder_dict(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            return obj.x
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), opt_fn(obj))
+
+    def test_property_backed_by_dunder_dict_mutated(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+            @x.setter
+            def x(self, value):
+                self.__dict__["x"] = value
+
+        def fn(obj):
+            a = obj.x
+            obj.x = a + 1
+            return obj.x
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(Obj(3)), opt_fn(obj))
+
+    def test_property_backed_by_dunder_dict_pending_side_effects(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            a = obj.__dict__["x"]
+            obj.__dict__["x"] = a + 1
+            return obj.__dict__["x"]
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(Obj(3)), opt_fn(obj))
+
+    def test_dunder_dict_getitem_guard_recompiles(self):
+        class Obj:
+            def __init__(self):
+                self.__dict__["x"] = 3
+
+            @property
+            def x(self):
+                return 999
+
+        def fn(obj, t):
+            return t + obj.__dict__["x"]
+
+        obj = Obj()
+        t = torch.tensor(0.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(obj, t), torch.tensor(3.0))
+        self.assertEqual(cnt.frame_count, 1)
+
+        obj.__dict__["x"] = 5
+        self.assertEqual(opt_fn(obj, t), torch.tensor(5.0))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_dunder_dict_get_with_property(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            return obj.__dict__.get("x")
+
+        obj = Obj(3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), opt_fn(obj))
+
+    def test_dunder_dict_getitem_tensor(self):
+        class Obj:
+            def __init__(self, x):
+                self.__dict__["x"] = x
+
+            @property
+            def x(self):
+                return self.__dict__["x"]
+
+        def fn(obj):
+            return obj.x + 1
+
+        obj = Obj(torch.tensor(3.0))
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(obj), opt_fn(obj))
+
+    def test_get_default_nowrap_functions_as_dict_key(self):
+        def fn(x):
+            # Get the set of default nowrap functions
+            nowrap_funcs = torch.overrides.get_default_nowrap_functions()
+            # Use the set as a dict key and search for Tensor.grad.__get__ in it
+            d = {frozenset(nowrap_funcs): x * 2}
+            # Check if Tensor.grad.__get__ is in the set
+            if torch.Tensor.grad.__get__ in nowrap_funcs:
+                return d[frozenset(nowrap_funcs)] + x
+            return x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(DictTests)
@@ -1361,11 +1647,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
     # ==, !=, |
 
     def setUp(self):
+        self._prev_trace_unittest = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
         super().setUp()
 
     def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = False
+        torch._dynamo.config.enable_trace_unittest = self._prev_trace_unittest
         return super().tearDown()
 
     def assertEqual(self, x, y):
@@ -1704,6 +1991,95 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         it = d.__iter__()
         self.assertEqual(next(it), 1)
 
+    def test_functools_partial_key(self):
+        def gn(x, y):
+            return x + y
+
+        def fn(x):
+            new_dict = {}
+            new_gn1 = partial(gn, x=1)
+            new_dict[new_gn1] = 5
+            return x * new_dict[new_gn1]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_namedtuple_functools(self):
+        class Container(NamedTuple):
+            partial_fn: Callable
+            const: int
+
+        def gn(x, y):
+            return x + y
+
+        def fn(x):
+            new_dict = {}
+
+            new_gn = partial(gn, x=1)
+            key = Container(new_gn, 4)
+            new_dict[key] = 5
+            # Make another key that should hash to the same value
+            key1 = Container(new_gn, 4)
+            return x * new_dict[key1]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_custom_object_as_dict_key(self):
+        """Test that custom objects with __hash__ as dict keys are properly handled.
+
+        This test verifies that when using custom objects with overridden __hash__
+        and __eq__ as dictionary keys, two instances with the same hash and equality
+        should be recognized as the same key.
+        """
+
+        class CustomKey:
+            def __init__(self, value, name):
+                self.value = value
+                self.name = name
+
+        def fn(x):
+            d = {}
+            # Create first instance
+            key1 = CustomKey(42, "test")
+            d[key1] = x * 2
+
+            # Create second instance with same values - should hash to same value
+            key2 = CustomKey(42, "test")
+            d[key2] = x * 3  # This should overwrite the first value
+
+            return d[key1] * d[key2]
+
+        x = torch.randn(4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTrue(same(opt_fn(x), fn(x)))
+
+    def test_user_defined_object(self):
+        class A:
+            def __init__(self):
+                self.x = {}
+                REF[self] = {}
+
+        REF = {}
+
+        def f(a, x):
+            REF[a]["foo"] = x
+            return x + 1
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        self.assertTrue(same(f(A(), x), opt_f(A(), x)))
+
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
@@ -1780,11 +2156,12 @@ class OrderedDictMethodsTests(DictMethodsTests):
 
 class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        self._prev_trace_unittest = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
         super().setUp()
 
     def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = False
+        torch._dynamo.config.enable_trace_unittest = self._prev_trace_unittest
         return super().tearDown()
 
     def assertEqual(self, x, y):
@@ -1808,6 +2185,130 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         p = self.thetype({"a": 1, "b": 2, "c": 3})
         p.move_to_end("a")
         self.assertEqual(list(p.keys()), list("bc"))
+
+
+class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
+    """Tests for DunderDictVariable (object.__dict__ handling in Dynamo)"""
+
+    def test_dunder_dict_items_includes_mutations(self):
+        """Test that __dict__.items() includes both original and mutated keys"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            items = dict(obj.__dict__.items())
+            return items
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, {"a": 1, "b": 2, "c": 3})
+
+    def test_dunder_dict_keys_includes_mutations(self):
+        """Test that __dict__.keys() includes both original and mutated keys"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            obj.d = 4
+            keys = sorted(obj.__dict__.keys())
+            return keys
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, ["a", "b", "c", "d"])
+
+    def test_dunder_dict_values_includes_mutations(self):
+        """Test that __dict__.values() includes both original and mutated values"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            values = sorted(obj.__dict__.values())
+            return values
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, [1, 2, 3])
+
+    def test_dunder_dict_comprehension_with_mutations(self):
+        """Test dict comprehension over __dict__ with mutations (scheduler use case)"""
+
+        class SimpleScheduler:
+            def __init__(self):
+                self.base_lrs = [0.1]
+                self.last_epoch = 0
+
+            def state_dict(self):
+                state = dict(self.__dict__.items())
+                return state
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(scheduler):
+            scheduler.last_epoch = 5
+            scheduler.new_attr = "test"
+            return scheduler.state_dict()
+
+        scheduler = SimpleScheduler()
+        result = fn(scheduler)
+        self.assertEqual(result["base_lrs"], [0.1])
+        self.assertEqual(result["last_epoch"], 5)
+        self.assertEqual(result["new_attr"], "test")
+
+    def test_dunder_dict_multiple_mutations(self):
+        """Test __dict__ operations with multiple mutations"""
+
+        class MyClass:
+            def __init__(self):
+                self.x = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.y = 2
+            obj.z = 3
+            obj.y = 20
+            items = dict(obj.__dict__.items())
+            keys = set(obj.__dict__.keys())
+            return items, keys
+
+        obj = MyClass()
+        items, keys = fn(obj)
+        self.assertEqual(items, {"x": 1, "y": 20, "z": 3})
+        self.assertEqual(keys, {"x", "y", "z"})
+
+    def test_dunder_dict_items_iteration(self):
+        """Test iterating over __dict__.items() with mutations"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            result = []
+            for k, v in obj.__dict__.items():
+                result.append((k, v))
+            return sorted(result)
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, [("a", 1), ("b", 2), ("c", 3)])
 
 
 if __name__ == "__main__":

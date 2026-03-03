@@ -30,6 +30,7 @@
 #include <ATen/DynamicLibrary.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/MemPool.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -194,14 +195,10 @@ static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
 
 #if defined(__linux__)
 struct DumpPipe {
-  DumpPipe(int rank) {
-    std::string fileStem =
-        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
-    if (fileStem.empty() ||
-        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
+  DumpPipe(int rank, const std::string& fileStem, int traceBufferSize) {
+    if (fileStem.empty() || traceBufferSize <= 0) {
       return;
     }
-    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_PIPE_FILE is empty");
     std::string filename = c10::str(fileStem, rank, ".pipe");
     TORCH_CHECK(
         unlink(filename.c_str()) != -1 || errno == ENOENT,
@@ -514,6 +511,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
     explicit Options(bool is_high_priority_stream = false);
+    Options(const Options&) = default;
+    Options(Options&&) noexcept = default;
+    Options& operator=(const Options&) = delete;
+    Options& operator=(Options&&) noexcept = delete;
+    ~Options() override = default;
 
     // return intrusive_ptr of the object
     static c10::intrusive_ptr<Options> create(
@@ -1023,11 +1025,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
-  void registerMemPool(c10::cuda::MemPool* pool, bool symm = false);
+  void registerMemPool(at::cuda::MemPool* pool, bool symm = false);
 
   // Performs NCCL user buffer de-registration for all buffers in
   // the given MemPool
-  void deregisterMemPool(c10::cuda::MemPool* pool);
+  void deregisterMemPool(at::cuda::MemPool* pool);
 
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and
@@ -1349,6 +1351,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Size of ring buffer where we store NCCL Traces for debugging.
   int traceBufferSize_;
 
+  // Stores TORCH_NCCL_DEBUG_INFO_PIPE_FILE
+  std::string debugInfoPipeFile_;
+
   // We gate the cudaEventCache so that we can roll it out gradually.
   std::atomic<bool> cudaEventCacheEnabled_;
 
@@ -1390,7 +1395,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
 
   // Add Work Pointer to workVector
-  void workEnqueue(const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>&);
+  void workEnqueue(
+      const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& /*work*/);
 
   // The CUDA streams used by NCCL kernels
   std::unordered_map<std::string, at::cuda::CUDAStream> ncclStreams_;
@@ -1491,7 +1497,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::optional<bool> useNonblocking_{std::nullopt};
 
   // Communication-optimized memory pool associated with this PG
-  std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
+  std::unique_ptr<at::cuda::MemPool> memPool_ = nullptr;
 };
 
 // Reset the flighrecorder recordings for the current rank.

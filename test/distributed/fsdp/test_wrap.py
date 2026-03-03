@@ -41,7 +41,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     DummyProcessGroup,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -127,7 +127,7 @@ class WrapMethod(Enum):
     WRAP_API = auto()
 
 
-class TestFSDPWrap(FSDPTest):
+class TestFSDPWrap(FSDPTestContinuous):
     """
     Tests main API for wrapping FSDP, which is to pass auto_wrap_policy into
     FSDP constructor.
@@ -428,7 +428,8 @@ class TestAutoWrap(TestCase):
             with enable_wrap(wrapper_cls=FSDP, process_group=self.process_group):
                 layer = wrap(nn.Linear(5, 5))
         else:
-            assert wrap_method == WrapMethod.FSDP_CTOR
+            if wrap_method != WrapMethod.FSDP_CTOR:
+                raise AssertionError(f"Unexpected wrap_method: {wrap_method}")
             layer = FSDP(
                 nn.Linear(5, 5),
                 process_group=self.process_group,
@@ -761,13 +762,14 @@ class TestAutoWrap(TestCase):
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(find_free_port())
 
-        file_name = tempfile.NamedTemporaryFile(delete=False).name
-        torch.distributed.init_process_group(
-            backend=backend,
-            init_method=f"{FILE_SCHEMA}_{file_name}",
-            rank=0,
-            world_size=1,
-        )
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            file_name = f.name
+            torch.distributed.init_process_group(
+                backend=backend,
+                init_method=f"{FILE_SCHEMA}_{file_name}",
+                rank=0,
+                world_size=1,
+            )
 
         # NOTE: We move model to GPU after init with FSDP to simulate real use
         # cases where full model cannot be loaded onto GPU, but their shards can.
@@ -816,7 +818,7 @@ class TestAutoWrap(TestCase):
             with enable_wrap(wrapper_cls=FSDP, **fsdp_kwargs):
                 model = wrap(sequential)
         else:
-            assert 0, f"Unsupported wrap method: {wrap_method}"
+            raise AssertionError(f"Unsupported wrap method: {wrap_method}")
         # All non-ignored modules should be wrapped with FSDP
         self.assertTrue(isinstance(model, FSDP))
         self.assertTrue(isinstance(model.module[0], FSDP))
@@ -845,7 +847,7 @@ class TestAutoWrap(TestCase):
             with enable_wrap(wrapper_cls=FSDP, **fsdp_kwargs):
                 model = wrap(sequential)
         else:
-            assert 0, f"Unsupported wrap method: {wrap_method}"
+            raise AssertionError(f"Unsupported wrap method: {wrap_method}")
         # Since the 2nd linear (`sequential[1]`) is ignored, the wrapping
         # policy does not exceed the parameter threshold before the inner
         # sequential (`sequential[2]`) anymore; hence, it flattens

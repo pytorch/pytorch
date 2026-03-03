@@ -6,7 +6,6 @@ import warnings
 import numpy as np
 
 import torch
-from torch._library.autograd import autograd_fallback_mode
 from torch.library import _scoped_library
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -14,6 +13,16 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+
+
+@contextlib.contextmanager
+def autograd_fallback_mode(mode):
+    prev = torch._C._get_autograd_fallback_mode()
+    try:
+        torch._C._set_autograd_fallback_mode(mode)
+        yield
+    finally:
+        torch._C._set_autograd_fallback_mode(prev)
 
 
 class TestAutogradFallback(TestCase):
@@ -87,7 +96,8 @@ class TestAutogradFallback(TestCase):
             return self.assertWarnsRegex(
                 UserWarning, "an autograd kernel was not registered"
             )
-        assert mode == "nothing"
+        if mode != "nothing":
+            raise AssertionError(f"mode should be 'nothing', got {mode!r}")
         if mode_nothing_raises:
             return self.assertRaisesRegex(RuntimeError, "does not require grad")
         return contextlib.nullcontext()

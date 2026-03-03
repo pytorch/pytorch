@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 
-#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>

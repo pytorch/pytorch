@@ -2,7 +2,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
@@ -162,10 +162,11 @@ class FSDPMemTracker(MemTracker):
     def __init__(
         self,
         mod: torch.nn.Module,
-        optm: Optional[torch.optim.Optimizer] = None,
+        optm: torch.optim.Optimizer | None = None,
     ) -> None:
         super().__init__()
-        assert isinstance(mod, FSDPModule), "FSDPMemTracker only supports FSDP modules"
+        if not isinstance(mod, FSDPModule):
+            raise AssertionError("FSDPMemTracker only supports FSDP modules")
         self._root_mod = mod
         self._optm = optm
         self._fsdp_mod_to_saved_methods: WeakIdKeyDictionary = WeakIdKeyDictionary()
@@ -212,7 +213,8 @@ class FSDPMemTracker(MemTracker):
         ) -> tuple[tuple[Unpack[_Ts]], dict[str, Any]]:
             self._fsdp_state = _FSDPState.PRE_FW
             mod_fqn = self._mod_tracker.get_known_fqn(fsdp_mod)
-            assert mod_fqn is not None
+            if mod_fqn is None:
+                raise AssertionError
             if fsdp_mod not in self.memory_tracking:
                 mod_stat = _FSDPModMemStats(mod_fqn)
                 self.memory_tracking[fsdp_mod] = mod_stat
@@ -373,7 +375,7 @@ class FSDPMemTracker(MemTracker):
         # get the unique _MultiHandlers/RemoveHandlers and store in dictionary
         # the _MultiHandlers object will only need to be grabbed once.
         unique_handlers: dict[RemovableHandle, bool] = {}
-        # pyrefly: ignore  # missing-attribute
+
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
@@ -383,16 +385,15 @@ class FSDPMemTracker(MemTracker):
                     if not unique_handlers.get(fsdp_state._post_forward_hook_handle):
                         unique_handlers[fsdp_state._post_forward_hook_handle] = True
         # call remove on the handles once
-        for f_hook_handle in unique_handlers.keys():
+        for f_hook_handle in unique_handlers:
             f_hook_handle.remove()
-        # pyrefly: ignore  # missing-attribute
+
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
                 if fsdp_param_group := fsdp_state._fsdp_param_group:
                     self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
                     fsdp_state._pre_forward_hook_handle = (
-                        # pyrefly: ignore [missing-attribute]
                         module.register_forward_pre_hook(
                             self._fsdp_state_pre_forward(
                                 module, fsdp_state._pre_forward
@@ -401,7 +402,7 @@ class FSDPMemTracker(MemTracker):
                             with_kwargs=True,
                         )
                     )
-                    # pyrefly: ignore [missing-attribute]
+
                     fsdp_state._post_forward_hook_handle = module.register_forward_hook(
                         self._fsdp_state_post_forward(module, fsdp_state._post_forward),
                         prepend=False,
@@ -420,7 +421,6 @@ class FSDPMemTracker(MemTracker):
                         )
                     )
 
-        # pyrefly: ignore [missing-attribute]
         for buffer in self._root_mod.buffers():
             self._update_and_maybe_create_winfos(
                 buffer,
@@ -495,7 +495,7 @@ class FSDPMemTracker(MemTracker):
         tree_map_only(torch.Tensor, _track_inputs, inputs)
 
     def track_external(
-        self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
+        self, *external: nn.Module | optim.Optimizer | torch.Tensor
     ) -> None:
         """This is no-op for ``FSDPMemTracker``"""
 

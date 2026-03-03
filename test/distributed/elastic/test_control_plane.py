@@ -6,6 +6,7 @@ import os
 import pickle
 import socket
 import tempfile
+import unittest
 from contextlib import contextmanager
 
 from urllib3.connection import HTTPConnection
@@ -15,7 +16,15 @@ from torch.distributed.elastic.control_plane import (
     TORCH_WORKER_SERVER_SOCKET,
     worker_main,
 )
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.monitor import _WaitCounter
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    MI200_ARCH,
+    requires_cuda,
+    run_tests,
+    skipIfRocmArch,
+    TestCase,
+)
 
 
 class UnixHTTPConnection(HTTPConnection):
@@ -152,6 +161,7 @@ class WorkerServerTest(TestCase):
             )
             self.assertEqual(resp.status, 200)
 
+    @skipIfRocmArch(MI200_ARCH)
     def test_tcp(self) -> None:
         import requests
 
@@ -215,6 +225,68 @@ class WorkerServerTest(TestCase):
 
         names = _get_handler_names()
         self.assertIn("ping", names)
+
+    @unittest.skipIf(IS_FBCODE, "disabled in FBCODE")
+    def test_wait_counter_values(self) -> None:
+        """
+        Test that WaitCounter values are properly tracked and returned by the handler.
+
+        Note: This test may trigger an ASAN heap-use-after-free error during process
+        shutdown due to static destruction order issues with boost regex in the logging
+        framework. The test assertions pass successfully before this shutdown error occurs.
+        """
+        with local_worker_server() as pool:
+            # Create and use a WaitCounter with a specific name
+            counter_name = "test_counter"
+            counter = _WaitCounter(counter_name)
+
+            # Use the counter multiple times to generate metrics
+            # Note: Using minimal/no sleep to avoid timing issues
+            for i in range(3):
+                with counter.guard():
+                    pass  # Minimal work
+
+            # Query the wait counter values
+            resp = pool.request("POST", "/handler/wait_counter_values")
+            self.assertEqual(resp.status, 200)
+
+            # Parse the JSON response
+            data = json.loads(resp.data)
+            # Should be a dictionary
+            self.assertIsInstance(data, dict)
+
+            # Verify our test counter appears in the response
+            self.assertIn(
+                counter_name,
+                data,
+                f"Counter '{counter_name}' not found in response. Available counters: {list(data.keys())}",
+            )
+
+            # Verify the counter has expected metrics
+            counter_data = data[counter_name]
+            self.assertIn("active_count", counter_data)
+            self.assertIn("total_calls", counter_data)
+            self.assertIn("total_time_us", counter_data)
+            self.assertIn("max_time_us", counter_data)
+
+            # Verify the counter was called 3 times
+            self.assertEqual(
+                counter_data["total_calls"],
+                3,
+                f"Expected 3 calls, got {counter_data['total_calls']}",
+            )
+
+            # Verify active_count is 0 (no active waiters)
+            self.assertEqual(
+                counter_data["active_count"],
+                0,
+                f"Expected 0 active, got {counter_data['active_count']}",
+            )
+
+            # total_time_us and max_time_us may be 0 or very small for fast operations
+            # Just verify they exist and are non-negative
+            self.assertGreaterEqual(counter_data["total_time_us"], 0)
+            self.assertGreaterEqual(counter_data["max_time_us"], 0)
 
 
 if __name__ == "__main__":

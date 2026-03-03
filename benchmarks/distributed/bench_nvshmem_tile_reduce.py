@@ -68,7 +68,6 @@ class NVSHMEMTileReduceBenchmark(MultiProcContinuousTest):
         """
         self._init_device()
         group_name = dist.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
 

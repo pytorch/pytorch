@@ -2,7 +2,7 @@ import logging
 import warnings
 from collections.abc import Callable, Collection, Mapping
 from copy import deepcopy
-from typing import Any, Optional, overload, Union
+from typing import Any, overload
 
 import torch
 import torch.nn as nn
@@ -62,10 +62,10 @@ class _NamedOptimizer(optim.Optimizer):
 
     def __init__(
         self,
-        named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
+        named_parameters: Mapping[str, torch.Tensor | ShardedTensor],
         optimizer_class: optim.Optimizer,
-        param_groups: Optional[Collection[Mapping[str, Any]]] = None,
-        module: Optional[nn.Module] = None,
+        param_groups: Collection[Mapping[str, Any]] | None = None,
+        module: nn.Module | None = None,
         *args: tuple[Any, ...],
         **kwargs: dict[str, Any],
     ) -> None:
@@ -106,8 +106,10 @@ class _NamedOptimizer(optim.Optimizer):
     def _param_groups_check(self) -> None:
         if self.param_groups is not None:
             for param_group in self.param_groups:
-                assert isinstance(param_group, dict), "param group must be a dict"
-                assert "params" in param_group, "param group must contain key params"
+                if not isinstance(param_group, dict):
+                    raise AssertionError("param group must be a dict")
+                if "params" not in param_group:
+                    raise AssertionError("param group must contain key params")
                 params = param_group["params"]
                 if isinstance(params, torch.Tensor):
                     params = [params]
@@ -152,7 +154,7 @@ class _NamedOptimizer(optim.Optimizer):
     @overload
     def step(self, closure: Callable[[], float]) -> float: ...
 
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:
         """
         Perform a single optimization step.
 
@@ -218,7 +220,8 @@ class _NamedOptimizer(optim.Optimizer):
 
                 src_state_val = state[param_key][state_key]
                 if isinstance(state_val, ShardedTensor):
-                    assert isinstance(src_state_val, ShardedTensor)
+                    if not isinstance(src_state_val, ShardedTensor):
+                        raise AssertionError
                     num_shards = len(state_val.local_shards())
                     num_new_shards = len(src_state_val.local_shards())
                     if num_shards != num_new_shards:
@@ -230,7 +233,8 @@ class _NamedOptimizer(optim.Optimizer):
                     ):
                         shard.tensor.detach().copy_(src_shard.tensor)
                 elif isinstance(state_val, torch.Tensor):
-                    assert isinstance(src_state_val, torch.Tensor)
+                    if not isinstance(src_state_val, torch.Tensor):
+                        raise AssertionError
                     state_val.detach().copy_(src_state_val)
                 else:
                     new_state[idx][state_key] = deepcopy(src_state_val)
@@ -275,7 +279,8 @@ class _NamedOptimizer(optim.Optimizer):
 
         Warning: This API is still in development and subject to change.
         """
-        assert isinstance(param_group, dict), "param group must be a dict"
+        if not isinstance(param_group, dict):
+            raise AssertionError("param group must be a dict")
 
         params = param_group["params"]
         if isinstance(params, torch.Tensor):

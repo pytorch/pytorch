@@ -1,7 +1,5 @@
 #include <ATen/core/DeprecatedTypeProperties.h>
 
-#include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/core/UnsafeFromTH.h>
 
 namespace at {
