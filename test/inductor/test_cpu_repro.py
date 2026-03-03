@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     MI200_ARCH,
     parametrize,
+    skipIfRocm,
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
@@ -5121,6 +5122,7 @@ class CPUReproTests(TestCase):
                     "at::vec::VectorizedN<double,2>::loadu", 2, exactly=True
                 ).run(code)
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     def test_convert_fp32_to_double_vec(self):
         def fn(x):
             return x.to(torch.double)

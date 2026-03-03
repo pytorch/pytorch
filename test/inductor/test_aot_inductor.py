@@ -257,6 +257,7 @@ class AOTInductorTestsTemplate:
         "toolchain doesn't support ptx to fatbin",
     )
     @skipIfMPS
+    @skipIfRocm(msg="Fails with Triton 3.7")
     # Skip embed_kernel_binary == True for now as it shows random
     # failure on CI
     @common_utils.parametrize("embed_kernel_binary", [False])
@@ -3506,6 +3507,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm(msg="Fails with Triton 3.7")
     @skipIfRocmArch(NAVI_ARCH)  # regression on ROCm 7.2
     def test_repeated_calling(self):
         if self.device != "cuda":
