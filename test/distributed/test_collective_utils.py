@@ -54,7 +54,8 @@ class TestCollectiveUtils(MultiProcessTestCase):
         func.return_value = pg.rank()
 
         res = broadcast(data_or_fn=func, rank=0, pg=pg)
-        assert res == 0, f"Expect res to be 0 (got {res})"
+        if res != 0:
+            raise AssertionError(f"Expect res to be 0 (got {res})")
 
         if pg.rank() == 0:
             func.assert_called_once()
@@ -64,7 +65,8 @@ class TestCollectiveUtils(MultiProcessTestCase):
         func.reset_mock()
 
         res = broadcast(data_or_fn=func, rank=1, pg=pg)
-        assert res == 1, f"Expect res to be 1 (got {res})"
+        if res != 1:
+            raise AssertionError(f"Expect res to be 1 (got {res})")
 
         if pg.rank() == 1:
             func.assert_called_once()
@@ -108,9 +110,10 @@ class TestCollectiveUtils(MultiProcessTestCase):
 
         res = all_gather(data_or_fn=func, pg=pg)
         func.assert_called_once()
-        assert res == list(range(self.world_size)), (
-            f"Expect res to be list of 0 through {self.world_size} (got {res})"
-        )
+        if res != list(range(self.world_size)):
+            raise AssertionError(
+                f"Expect res to be list of 0 through {self.world_size} (got {res})"
+            )
 
     def test_all_gather_result_no_pg(self) -> None:
         """

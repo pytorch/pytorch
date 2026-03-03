@@ -1,14 +1,15 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import gzip
 import json
 import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, Optional
+from typing import Any, TYPE_CHECKING
 from typing_extensions import deprecated, Self
 from warnings import warn
 
@@ -26,6 +27,10 @@ from torch._environment import is_fbcode
 from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 
 __all__ = [
@@ -774,8 +779,7 @@ class profile(_KinetoProfile):
             with_modules=with_modules,
             experimental_config=experimental_config,
             execution_trace_observer=execution_trace_observer
-            if execution_trace_observer
-            else ExecutionTraceObserver.build_execution_trace_obs_from_env(),
+            or ExecutionTraceObserver.build_execution_trace_obs_from_env(),
             acc_events=acc_events,
             custom_trace_id_callback=custom_trace_id_callback,
             post_processing_timeout_s=post_processing_timeout_s,
@@ -966,7 +970,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         self.unregister_callback()
 
     @staticmethod
-    def build_execution_trace_obs_from_env() -> Optional["ExecutionTraceObserver"]:
+    def build_execution_trace_obs_from_env() -> ExecutionTraceObserver | None:
         """
         Returns an ExecutionTraceObserver instance if the environment variable
         ENABLE_PYTORCH_EXECUTION_TRACE is set to 1, otherwise returns None.

@@ -44,7 +44,6 @@ class _IncompatibleKeys(
     __slots__ = ()
 
     def __repr__(self) -> str:
-        # pyrefly: ignore [missing-attribute]
         if not self.missing_keys and not self.unexpected_keys:
             return "<All keys matched successfully>"
         return super().__repr__()
@@ -94,7 +93,7 @@ class _WrappedHook:
     def __getstate__(self) -> dict:
         result = {"hook": self.hook, "with_module": self.with_module}
         if self.with_module:
-            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
+            # pyrefly: ignore [bad-typed-dict-key]
             result["module"] = self.module()
 
         return result

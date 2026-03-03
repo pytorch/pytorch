@@ -9,10 +9,12 @@ from typing import cast, Optional
 
 import torch
 from torch._guards import detect_fake_mode
+from torch._logging import LazyString
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._decompositions import DecompShardingStrategy
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -35,6 +37,7 @@ from torch.distributed.tensor._utils import (
     try_find_mesh_from_args,
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.utils._pytree import tree_map
 
 
 aten = torch.ops.aten
@@ -98,12 +101,13 @@ def _validate_tensor_meta_count(
     else:
         actual_outputs = len(tensor_meta)
 
-    assert actual_outputs == expected_outputs, (
-        f"Tensor meta count mismatch for {op_schema.op}: "
-        f"expected {expected_outputs} tensor output(s) based on op schema, "
-        f"but _propagate_tensor_meta returned {actual_outputs}. "
-        f"This usually indicates a bug in fake tensor propagation for this op."
-    )
+    if actual_outputs != expected_outputs:
+        raise AssertionError(
+            f"Tensor meta count mismatch for {op_schema.op}: "
+            f"expected {expected_outputs} tensor output(s) based on op schema, "
+            f"but _propagate_tensor_meta returned {actual_outputs}. "
+            f"This usually indicates a bug in fake tensor propagation for this op."
+        )
 
 
 class LocalLRUCache(threading.local):
@@ -136,6 +140,99 @@ class LocalLRUCache(threading.local):
         return self.cache.cache_clear()
 
 
+def _format_unbacked_hinting_log(
+    op_schema: OpSchema,
+    strategies: list[OpSpec],
+    strategy_index: int,
+    replacements: dict,
+) -> str:
+    """Format log message for unbacked hinting strategy selection (only called if debug logging enabled)."""
+    args_spec = tuple(str(spec) for spec in op_schema.args_schema)
+    strat = strategies[strategy_index]
+    if strat.input_specs is None:
+        placements_in = None
+    else:
+        placements_in = tuple(
+            spec.format_shard_order_str(spec.placements, spec.shard_order)
+            for spec in strat.input_specs
+        )
+    placements_out = tree_map(
+        lambda spec: spec.format_shard_order_str(spec.placements, spec.shard_order),
+        strat.output_specs,
+        is_leaf=lambda x: isinstance(x, DTensorSpec),
+    )
+    return (
+        f"Selected strategy {placements_in} -> {placements_out} "
+        f"for {op_schema.op} with input {args_spec}, using unbacked hints: {replacements}"
+    )
+
+
+def _select_min_redistribute_cost(
+    costs: list[torch.types.FloatLikeType],
+    strategies: list[OpSpec],
+    op_schema: OpSchema | None = None,
+) -> int:
+    """
+    Given a list of costs and corresponding op strategies, selects the minimum cost strategy, returning the index.
+    If unbacked symbols are involved, replaces them with known upper-bound values, falling back to hardcoded values.
+    """
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        is_concrete_float,
+    )
+    from torch.utils._sympy.interp import sympy_interp
+    from torch.utils._sympy.numbers import int_oo
+    from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+    int_fallback = 8192
+    free_unbacked = list(set(chain(*[free_unbacked_symbols(cost) for cost in costs])))
+
+    # Easy path: no unbacked shapes involved, choose min cost strategy.
+    # Doing the hard path for backed could also make sense?
+    if all(is_concrete_float(c) for c in costs) or not free_unbacked:
+        return costs.index(min(costs))
+
+    # Figure out heuristic hints for unbacked shapes.
+    # If available, use shape upper bound. If not, fallback to some integer (inductor size-hinting style).
+    shape_env = next(iter(x for x in costs if not is_concrete_float(x))).node.shape_env  # type: ignore[arg-type]
+    replacements = {}
+    for sym in free_unbacked:
+        # TODO(laithsakka): unify with optimization_hint API
+        if (hint := shape_env.var_to_hint_override.get(sym)) is not None:
+            replacements[sym] = hint
+        elif (upper := shape_env.bound_sympy(sym).upper) is not int_oo:
+            replacements[sym] = upper
+        else:
+            replacements[sym] = int_fallback
+
+    # Use replacements for redistribute cost hints
+    proxy_costs = [
+        float(cost)
+        if is_concrete_float(cost)
+        else sympy_interp(
+            PythonReferenceAnalysis,
+            replacements,
+            cost.node.expr.xreplace(replacements),  # type: ignore[arg-type]
+        )
+        for cost in costs
+    ]
+    min_cost = min(proxy_costs)
+    strategy_index = proxy_costs.index(min_cost)
+
+    if op_schema:
+        log.debug(
+            "%s",
+            LazyString(
+                _format_unbacked_hinting_log,
+                op_schema,
+                strategies,
+                strategy_index,
+                replacements,
+            ),
+        )
+    return strategy_index
+
+
 def _select_min_cost_strategy(
     strategy: OpStrategy, op_schema: OpSchema | None = None
 ) -> OpSpec:
@@ -150,9 +247,8 @@ def _select_min_cost_strategy(
     negative_cost_index: int = -1
     zero_cost_index: int = -1
     for strategy_idx, op_spec in enumerate(strategy.strategies):
-        assert op_spec.redistribute_cost is not None, (
-            "must set redistribute cost each OpSpec!"
-        )
+        if op_spec.redistribute_cost is None:
+            raise AssertionError("must set redistribute cost each OpSpec!")
         redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
         op_spec_costs.append(redistribute_cost)
 
@@ -197,8 +293,9 @@ def _select_min_cost_strategy(
         selected_strategy_index = zero_cost_index
     else:
         # default to choosing minimal redistribute cost
-        min_cost = min(op_spec_costs)
-        selected_strategy_index = op_spec_costs.index(min_cost)
+        selected_strategy_index = _select_min_redistribute_cost(
+            op_spec_costs, strategy.strategies, op_schema
+        )
 
     return strategy.strategies[selected_strategy_index]
 
@@ -229,6 +326,7 @@ class ShardingPropagator:
         self.propagate_op_sharding = LocalLRUCache(
             self.propagate_op_sharding_non_cached
         )
+        self.decomp_strategy = DecompShardingStrategy(self)
         # op map to save indices of shape (and stride) args which may need to be
         # modified in sharding prop
         self.op_to_shape_and_stride_idx: dict[OpOverload, int | tuple[int, int]] = {
@@ -240,8 +338,10 @@ class ShardingPropagator:
             aten.new_empty_strided.default: (1, 2),
             # view ops
             aten.expand.default: 1,
+            aten.expand_copy.default: 1,
             aten.reshape.default: 1,
             aten.view.default: 1,
+            aten.view_copy.default: 1,
             aten._unsafe_view.default: 1,
             aten.select_backward.default: 1,
             aten.slice_backward.default: 1,
@@ -454,7 +554,8 @@ class ShardingPropagator:
                             and i in (0, 1, 2)
                             and output_tensor_meta_i is None
                         ):
-                            assert isinstance(output_specs, list)
+                            if not isinstance(output_specs, list):
+                                raise AssertionError
                             new_specs.append(None)
                             continue
                         else:
@@ -471,7 +572,8 @@ class ShardingPropagator:
 
             return tuple(new_specs)
         else:
-            assert output_specs is None
+            if output_specs is not None:
+                raise AssertionError
             return output_specs
 
     def _wrap_with_op_strategy(self, op_schema: OpSchema) -> OpSchema:
@@ -518,10 +620,11 @@ class ShardingPropagator:
 
         # NOTE: schema should always be populated when calling this function,
         # as it's only called after unwrap_to_op_info (create_schema=True).
-        assert op_info.schema is not None, (
-            "op_info.schema should not be None in propagate. "
-            "This function should only be called after unwrap_to_op_info."
-        )
+        if op_info.schema is None:
+            raise AssertionError(
+                "op_info.schema should not be None in propagate. "
+                "This function should only be called after unwrap_to_op_info."
+            )
 
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
@@ -573,7 +676,8 @@ class ShardingPropagator:
 
             if single_dim_strategy_info is not None:
                 mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
-                assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
+                if not isinstance(mesh, DeviceMesh):
+                    raise AssertionError("Expected to find a valid mesh")
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
@@ -583,27 +687,20 @@ class ShardingPropagator:
                     op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
                 )
             else:
-                assert op_strategy_func is not None
+                if op_strategy_func is None:
+                    raise AssertionError
                 op_strategy = op_strategy_func(strategy_schema)
 
         else:
             # try operator decomposition path
-            from torch.distributed.tensor._decompositions import DecompShardingStrategy
 
-            # If the op has a CIA decomposition, we prioritize it over the decomposition flow,
-            # allowing decomposed ops to individually enter DTensor dispatch.
-            # TODO(pianpwk): maybe switch this back; the decomp flow could incur fewer comms.
             op_strategy = None
-            has_cia = torch._C._dispatch_has_kernel_for_dispatch_key(
-                op_schema.op.name(),
-                torch._C.DispatchKey.CompositeImplicitAutograd,
-            )
-            if not has_cia and DecompShardingStrategy.has_decomp(op_schema.op):
+            if DecompShardingStrategy.has_decomp(op_schema.op):
                 # Ensure schema_info is registered for proper cache key computation
-                DecompShardingStrategy.ensure_schema_info(op_schema.op, self)
+                self.decomp_strategy.ensure_schema_info(op_schema.op)
                 try:
-                    op_strategy = DecompShardingStrategy.propagate_strategy(
-                        op_schema, self
+                    op_strategy = self.decomp_strategy.propagate_strategy(
+                        op_schema,
                     )
                 except Exception as e:
                     decomp_exception = e
@@ -623,7 +720,8 @@ class ShardingPropagator:
                 # is a DTensorSpec, we use output_specs as the spec for each DTensor
                 # input arg.
                 if output_strategy.input_specs is None:
-                    assert isinstance(output_strategy.output_specs, DTensorSpec)
+                    if not isinstance(output_strategy.output_specs, DTensorSpec):
+                        raise AssertionError
 
                 for idx, input_spec in enumerate(op_schema.args_spec):
                     desired_spec = (
@@ -649,7 +747,8 @@ class ShardingPropagator:
                 # shape and stride args need to be modified for
                 # view ops and new factory ops, potentially
                 if op_schema.op in self.op_to_shape_and_stride_idx:
-                    assert isinstance(output_strategy.output_spec, DTensorSpec)
+                    if not isinstance(output_strategy.output_spec, DTensorSpec):
+                        raise AssertionError
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
                     if any(
@@ -657,7 +756,8 @@ class ShardingPropagator:
                         for p in output_strategy.output_spec.placements
                     ):
                         schema = suggestion_schema or op_schema
-                        assert isinstance(out_tensor_meta, TensorMeta)
+                        if not isinstance(out_tensor_meta, TensorMeta):
+                            raise AssertionError
                         suggestion_schema = self._adjust_shape_and_stride_args(
                             out_tensor_meta, schema, output_strategy.output_spec
                         )
@@ -701,7 +801,8 @@ class ShardingPropagator:
                 selected_strategies: list[OpSpec] = []
                 out_spec_list: list[DTensorSpec] = []
                 for strategy in op_strategy.children:
-                    assert isinstance(strategy, OpStrategy)
+                    if not isinstance(strategy, OpStrategy):
+                        raise AssertionError
                     selected_strategy = _select_min_cost_strategy(strategy)
                     selected_strategies.append(selected_strategy)
                     out_spec_list.append(selected_strategy.output_spec)

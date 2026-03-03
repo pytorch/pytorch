@@ -60,6 +60,7 @@ class TestLibtorchAgnostic(TestCase):
     - libtorch_agn_2_9: Extension built with TORCH_TARGET_VERSION=2.9.0
     - libtorch_agn_2_10: Extension built with TORCH_TARGET_VERSION=2.10.0
     - libtorch_agn_2_11: Extension built with TORCH_TARGET_VERSION=2.11.0
+    - libtorch_agn_2_12: Extension built with TORCH_TARGET_VERSION=2.12.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -104,6 +105,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.11 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 12):
+            try:
+                import libtorch_agn_2_12  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_12_extension"
+                )
+        else:
+            print(f"Skipping 2.12 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -1787,6 +1798,57 @@ except RuntimeError as e:
             curr_mem = torch.cuda.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
+    @skipIfTorchVersionLessThan(2, 12)
+    @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+    def test_my_from_blob_with_lambda_deleter(self, device):
+        """Test for from_blob with capturing-lambda deleter (2.12 feature)."""
+        import libtorch_agn_2_12 as libtorch_agnostic
+
+        from_blob_fn = libtorch_agnostic.ops.my_from_blob_with_lambda_deleter
+        get_count = libtorch_agnostic.ops.get_lambda_deleter_call_count
+        reset_count = libtorch_agnostic.ops.reset_lambda_deleter_call_count
+
+        is_cuda = torch.device(device).type == "cuda"
+        if is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+
+        def inner():
+            reset_count()
+            self.assertEqual(get_count(), 0)
+
+            # We need an original tensor to create the tensor with from_blob.
+            original = torch.rand(2, 3, device=device, dtype=torch.float32)
+            blob_tensor = from_blob_fn(
+                original.data_ptr(),
+                original.size(),
+                original.stride(),
+                device,
+                torch.float32,
+            )
+
+            self.assertEqual(blob_tensor, original)
+            self.assertEqual(blob_tensor.data_ptr(), original.data_ptr())
+
+            self.assertEqual(get_count(), 0)
+
+            del blob_tensor
+            gc.collect()
+
+            # Ensure the deleter was called. The original tensor still exists
+            # and can be used.
+            self.assertEqual(get_count(), 1)
+            original += 1
+            # original goes out of scope here and its cuda memory should be
+            # freed.
+
+        inner()
+
+        if is_cuda:
+            # original tensor is out of scope, all the memory should be freed
+            torch.cuda.synchronize(device)
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
     @onlyCUDA
     @skipIfTorchVersionLessThan(2, 11)
     def test_my_from_blob_with_cuda_deleter_no_leak(self, device):
@@ -1799,6 +1861,30 @@ except RuntimeError as e:
 
         for _ in range(10):
             tensor = libtorch_agnostic.ops.my_from_blob_with_cuda_deleter(numel, device)
+            # Verify tensor was created correctly
+            self.assertEqual(tensor.numel(), numel)
+            self.assertEqual(tensor.device, torch.device(device))
+            del tensor
+            gc.collect()
+            torch.cuda.synchronize(device)
+
+            curr_mem = torch.cuda.memory_allocated(device)
+            self.assertEqual(curr_mem, init_mem)
+
+    @onlyCUDA
+    @skipIfTorchVersionLessThan(2, 12)
+    def test_my_from_blob_with_cuda_lambda_deleter_no_leak(self, device):
+        """Test that from_blob lambda deleter properly frees cudaMalloc'd memory."""
+        import libtorch_agn_2_12 as libtorch_agnostic
+
+        from_blob_fn = libtorch_agnostic.ops.my_from_blob_with_cuda_lambda_deleter
+
+        torch.cuda.synchronize(device)
+        init_mem = torch.cuda.memory_allocated(device)
+        numel = 1024 * 1024  # 4 MB per tensor
+
+        for _ in range(10):
+            tensor = from_blob_fn(numel, device)
             # Verify tensor was created correctly
             self.assertEqual(tensor.numel(), numel)
             self.assertEqual(tensor.device, torch.device(device))

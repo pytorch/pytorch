@@ -8,7 +8,7 @@ from typing import cast, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
@@ -333,7 +333,11 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.amax.out: "max",
     aten.amin.default: "min",
     aten.amin.out: "min",
-    # argmax and argmin is using custom hanndler leveraging linear reduction of max and min
+}
+
+# argmax/argmin return indices which cannot be combined with P(max/min).
+# They need special handling that forces redistribution on reduction dims.
+ARGMAX_ARGMIN_OPS = {
     aten.argmax.default: "max",
     aten.argmin.default: "min",
 }
@@ -361,6 +365,39 @@ def linear_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
         reduce_dims,
         keep_dim=keep_dim,
         reduction_linear=True,
+        reduction_op=reduction_op,
+    )
+
+
+@register_op_strategy(list(ARGMAX_ARGMIN_OPS.keys()), schema_info=RuntimeSchemaInfo(1))
+def argmax_argmin_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Strategy for argmax/argmin. These return indices, not values, so they cannot
+    use P(max/min) output placements. The indices are local to each shard and
+    cannot be meaningfully combined across ranks with a max/min reduction.
+    Force redistribution on reduction dimensions by using reduction_linear=False.
+    """
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+
+    dims = None
+    if len(op_schema.args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
+
+    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+    keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
+    reduction_op = ARGMAX_ARGMIN_OPS[op_schema.op]
+    return common_reduction_strategy(
+        input_strategy,
+        reduce_dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,  # Force redistribution - indices can't use P(max/min)
+        # reduction_op is effectively unused here: reduction_linear=False
+        # forces all reduction-dim Shard placements to Replicate before
+        # map_placements_after_reduction, so no Shard-on-reduction-dim
+        # remains to convert to Partial. Passed for consistency.
         reduction_op=reduction_op,
     )
 
@@ -421,7 +458,8 @@ def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
     elif norm_type in (float("-inf"), "-inf"):
         return "min"
     else:
-        assert isinstance(norm_type, (int, float))
+        if not isinstance(norm_type, (int, float)):
+            raise AssertionError
         return NormReduction(norm_type)
 
 
@@ -1058,11 +1096,46 @@ def _common_norm_forward_strategy(
                 generate_redistribute_costs(bias_strategy, bias_target_spec)
             )
 
-        # the output spec is the same as input spec
-        output_target_spec = input_target_spec
+        # Build per-output specs with correct tensor_meta.
+        # out: same shape as input, contiguous strides
+        # mean/rstd: shape = input_shape[:axis], contiguous strides
+        input_tm = input_src_spec.tensor_meta
+        if input_tm is None:
+            raise AssertionError("input_src_spec.tensor_meta is None")
+        input_shape = input_tm.shape
+        out_placements = input_target_spec.placements
+
+        out_strides = torch._prims_common.make_contiguous_strides_for(input_shape)
+        out_spec = DTensorSpec(
+            mesh=mesh,
+            placements=out_placements,
+            tensor_meta=TensorMeta(
+                shape=input_shape,
+                stride=out_strides,
+                dtype=input_tm.dtype,
+            ),
+        )
+
+        stat_shape = torch.Size(input_shape[:axis])
+        stat_strides = torch._prims_common.make_contiguous_strides_for(stat_shape)
+        stat_spec = DTensorSpec(
+            mesh=mesh,
+            placements=out_placements,
+            tensor_meta=TensorMeta(
+                shape=stat_shape,
+                stride=stat_strides,
+                dtype=input_tm.dtype,
+            ),
+        )
+
+        if rms_norm:
+            output_specs = (out_spec, stat_spec)
+        else:
+            output_specs = (out_spec, stat_spec, stat_spec)
+
         output_strategy.strategies.append(
             OpSpec(
-                output_specs=output_target_spec,
+                output_specs=output_specs,
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
             )
