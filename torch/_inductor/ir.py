@@ -7355,14 +7355,14 @@ class UserDefinedTritonKernel(ExternKernel):
         self, wrapper: PythonWrapperCodegen, epilogue_fusion: tuple[ComputedBuffer, str]
     ) -> None:
         """
-        epilogue_fusion: Optional[(fused epilogue node, modified kerel src code)]
+        epilogue_fusion: (fused epilogue node, modified kerel src code)
         """
         return self._codegen(wrapper, epilogue_fusion)
 
     def _codegen(
         self,
         wrapper: PythonWrapperCodegen,
-        epilogue_fusion: Optional[tuple[ComputedBuffer, str]],
+        epilogue_fusion: tuple[ComputedBuffer, str] | None,
     ) -> None:
         """Overrides the parent member.
         See https://github.com/pytorch/pytorch/issues/151692"""

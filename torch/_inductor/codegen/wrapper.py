@@ -308,7 +308,7 @@ def user_defined_kernel_grid_fn_code(
 
 
 def user_defined_triton_kernel_transitive_closure_source_code(
-    kernel, epilogue_fusion: Optional[tuple[ir.ComputedBuffer, str]] = None
+    kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
 ) -> str:
     """
     Given a triton kernel function pointer collect the transitive closure of
@@ -2467,7 +2467,7 @@ class PythonWrapperCodegen(CodeGen):
         restore_value_args,
         reset_to_zero_args,
         grids: list[list[int | sympy.Expr]],
-        epilogue_fusion: Optional[tuple[ir.ComputedBuffer, str]],
+        epilogue_fusion: tuple[ir.ComputedBuffer, str] | None,
     ):
         from ..runtime.triton_heuristics import (
             config_to_dict,

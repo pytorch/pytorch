@@ -5129,10 +5129,10 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
 
 
 if HAS_CUDA_AND_TRITON:
+
     @triton.jit
     def custom_store(ptr, val, mask):
         tl.store(ptr, val, mask)
-
 
     @triton.jit
     def add_kernel_with_custom_store(
