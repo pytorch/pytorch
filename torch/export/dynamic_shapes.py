@@ -741,6 +741,22 @@ def _combine_args(f, args, kwargs, preserve_order: bool = False) -> dict[str, An
     if not preserve_order:
         return combined_args
 
+    positional_only = sum(
+        1
+        for p in signature.parameters.values()
+        if p.default == inspect.Parameter.empty
+        and p.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    )
+    if len(args) < positional_only:
+        raise ValueError(
+            f"There are {positional_only} mandatory positional arguments "
+            f"and they must be given as positional arguments "
+            f"but there only {len(args)} are given that way."
+        )
+
     var_position_parameters = [
         name
         for name, p in signature.parameters.items()

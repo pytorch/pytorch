@@ -18462,20 +18462,18 @@ def forward(self, x, y):
 
         kwargs = dict(x=torch.randn((5, 6)), y=torch.randn((1, 6)))
         model = Model()
-        expected = model(**kwargs)
-        ep = torch.export.export(
-            model,
-            (),
-            kwargs=kwargs,
-            dynamic_shapes={
-                "x": {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
-                "kwargs": {"y": {1: torch.export.Dim.DYNAMIC}},
-            },
-        )
-        # ep.module()(**kwargs): raises NameError: name 'L' is not defined
-        self.assertEqual(kwargs["x"] + kwargs["y"], expected)
-        inputs = [n.name for n in ep.graph.nodes if n.op == "placeholder"]
-        self.assertEqual(["x", "y"], inputs)
+        with self.assertRaisesRegex(
+            ValueError, "There are 1 mandatory positional arguments"
+        ):
+            torch.export.export(
+                model,
+                (),
+                kwargs=kwargs,
+                dynamic_shapes={
+                    "x": {0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},
+                    "kwargs": {"y": {1: torch.export.Dim.DYNAMIC}},
+                },
+            )
 
     def test_mixed_named_and_unnamed_kwargs_with_args(self):
         class Model(torch.nn.Module):
