@@ -6736,6 +6736,58 @@ def forward(self, primals_1, tangents_1):
         finally:
             handle.destroy()
 
+    def test_static_input_indices_with_effect_tokens(self):
+        """Test that static_input_indices are correctly offset when effect tokens are prepended."""
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op(
+            "test::effectful_static_idx_op", mutates_args=()
+        )
+        def effectful_static_idx_op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @effectful_static_idx_op.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_static_idx_op, EffectType.ORDERED)
+
+        try:
+            fw_metadata = None
+
+            def capture_metadata_backend(graph_module, example_inputs):
+                nonlocal fw_metadata
+                fw_metadata = graph_module.meta.get("fw_metadata", None)
+                return graph_module.forward
+
+            model = torch.nn.Linear(3, 2)
+
+            @torch.compile(backend=capture_metadata_backend)
+            def fn(x, weight, bias):
+                y = x @ weight.t() + bias
+                torch.ops.test.effectful_static_idx_op(y)
+                return y
+
+            x = torch.randn(4, 3)
+            fn(x, model.weight, model.bias)
+
+            self.assertIsNotNone(fw_metadata)
+            # weight and bias are static inputs (params). When effect tokens are
+            # prepended, their indices should be offset by the number of tokens.
+            # Without the fix, indices would point to wrong inputs.
+            num_tokens = len(fw_metadata.tokens)
+            self.assertGreater(num_tokens, 0, "expected effect tokens to be present")
+            for idx in fw_metadata.static_input_indices:
+                self.assertGreaterEqual(
+                    idx,
+                    num_tokens,
+                    f"static_input_indices {fw_metadata.static_input_indices} "
+                    f"should all be >= num_tokens ({num_tokens})",
+                )
+        finally:
+            handle.destroy()
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
