@@ -194,7 +194,8 @@ def is_tensor_shardable(
     """
     from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
-    assert allow_unbacked_sharding in [None, True, False]
+    if allow_unbacked_sharding not in [None, True, False]:
+        raise AssertionError
     guard_fn = {
         None: bool,
         True: guard_or_false,
@@ -306,7 +307,8 @@ def map_placements_after_broadcast(
         elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
-            assert isinstance(placement, Shard | _StridedShard)
+            if not isinstance(placement, Shard | _StridedShard):
+                raise AssertionError
             shard_dim = normalize_dim(placement.dim, len(shape))
             new_shard_dim = broadcast_dims_map[shard_dim]
             if new_shard_dim != -1:
@@ -439,6 +441,28 @@ def expand_to_full_mesh_op_strategy(
                 spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
             else:
                 spec_list.append(None)
+
+        # Skip strategy combinations that would create mixed partial types
+        # (except sum+avg which commute with each other).
+        # We check (type, reduce_op) pairs rather than just reduce_op because
+        # Partial subclasses like _MaskPartial have different reduction semantics
+        # even when they share the same reduce_op string.
+        has_mixed_partial = False
+        for spec in spec_list:
+            if spec is not None:
+                partial_kinds = {
+                    (type(p), p.reduce_op)
+                    for p in spec.placements
+                    if isinstance(p, Partial)
+                }
+                if len(partial_kinds) > 1:
+                    reduce_ops = {ro for _, ro in partial_kinds}
+                    types = {t for t, _ in partial_kinds}
+                    if not (len(types) == 1 and reduce_ops == {"sum", "avg"}):
+                        has_mixed_partial = True
+                        break
+        if has_mixed_partial:
+            continue
 
         input_specs: list[DTensorSpec] = [
             s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)

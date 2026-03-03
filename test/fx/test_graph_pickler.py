@@ -15,6 +15,7 @@ import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
+from torch.fx import symbolic_trace
 from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._import_utils import import_dill
 
@@ -679,6 +680,33 @@ class TestDillSerializationFeatures(TestCase):
             self.assertIn("nested_closure", node.meta)
             self.assertEqual(node.meta["nested_closure"](3), 3 + 5 + 20)
 
+    def test_node_with_slice(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def foo(x):
+            return x[0 : x.shape[0]]
+
+        gm = torch.fx.symbolic_trace(foo)
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    getattr_1 = x.shape
+    getitem = getattr_1[0];  getattr_1 = None
+    getitem_1 = x[slice(0, getitem, None)];  x = getitem = None
+    return getitem_1""",
+        )
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+        deserialized.recompile()
+
+        self.assertEqual(gm.code, deserialized.code)
+
     def test_lambda_with_default_arguments(self):
         """
         Test that lambdas with default arguments can be serialized. Standard
@@ -829,6 +857,20 @@ class TestNodeMetadataKeyFilter(TestCase):
             self.assertIn("source_fn_stack", pickle_data.meta)
             self.assertIn("nn_module_stack", pickle_data.meta)
             self.assertIn("custom_key", pickle_data.meta)
+
+
+class TestNodeStateSerialization(TestCase):
+    def test_type_entry_preserved_in_getstate(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.neg(x)
+                return y + 1
+
+        gm = symbolic_trace(M())
+        node = next(n for n in gm.graph.nodes if n.op == "call_function")
+        node.type = torch.Tensor
+        state = node.__getstate__()
+        self.assertIs(state["type"], torch.Tensor)
 
 
 if __name__ == "__main__":

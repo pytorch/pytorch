@@ -1089,6 +1089,13 @@ if(USE_ROCM)
       )
     endif()
 
+    # ROCM-SMI needed to support symmetric memory
+    if(USE_DISTRIBUTED AND UNIX)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
+        rocm_smi64
+      )
+    endif()
+
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
     # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.

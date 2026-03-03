@@ -6,9 +6,9 @@ import functools
 import itertools
 import logging
 import re
+import sys
 from collections import defaultdict
-from math import inf
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 
@@ -268,7 +268,7 @@ class HalideOverrides(OpOverrides):
     def to_dtype(
         x,
         dtype: torch.dtype,
-        src_dtype: Optional[torch.dtype] = None,
+        src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ):
         if dtype == torch.bool:
@@ -618,11 +618,11 @@ class HalideCSEVariable(CSEVariable):
         self,
         name,
         bounds: ValueRanges[Any],
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
         shape: BlockShapeType = None,
     ) -> None:
         super().__init__(name, bounds, dtype, shape=shape)
-        self.used_dims: Optional[list[sympy.Symbol]] = None
+        self.used_dims: list[sympy.Symbol] | None = None
 
     def update_on_args(self, name, args, kwargs):
         used = OrderedSet(self.used_dims or ())
@@ -653,7 +653,7 @@ class HalideCSEVariable(CSEVariable):
 
 @dataclasses.dataclass
 class DimensionInfo:
-    expr: Optional[sympy.Expr]
+    expr: sympy.Expr | None
     size: sympy.Expr
     stride: sympy.Expr
 
@@ -685,32 +685,27 @@ class DimensionInfo:
 
 
 def eq(left, right):
-    if V.graph.sizevars.statically_known_equals(left, right):
-        return True
-    try:
-        a = V.graph.sizevars.size_hint_or_throw(left)
-        b = V.graph.sizevars.size_hint_or_throw(right)
-    except TypeError:  # unbacked symints
-        return False
-    if a == b:
-        V.graph.sizevars.check_equals(left, right)
-    return a == b
+    return V.graph.sizevars.guard_or_false(sympy.Eq(left, right))
 
 
 def lt(left, right):
-    if V.graph.sizevars.statically_known_lt(left, right):
+    """Compare sizes: only use on inputs known to be >= 0."""
+    if V.graph.sizevars.guard_or_false(sympy.Lt(left, right)):
         return True
-    try:
-        a = V.graph.sizevars.size_hint_or_throw(left)
-        b = V.graph.sizevars.size_hint_or_throw(right)
-    except TypeError:  # unbacked symints
-        gcd = sympy.gcd(left, right)
-        if gcd == left:
-            return left != right
-        return False
-    if a < b:
-        V.graph.sizevars.check_lt(left, right)
-    return a < b
+
+    # GCD fallback: if gcd(left, right) == left then left divides right,
+    # so left <= right.  Combined with left != right this gives left < right.
+    #
+    # TODO: This is NOT always sound for unbacked symints.
+    # e.g. lt(u0, 10*u0): gcd=u0, gcd==left, u0 != 10*u0 → returns True,
+    # but if u0=0 then 0 < 0 is False.  The >= 0 checks mitigate the
+    # negative case but the zero case remains.
+    # TODO shall we add a runtime assertion at least.
+    gcd = sympy.gcd(left, right)
+    if gcd == left:
+        return left != right
+
+    return False
 
 
 class HalideKernel(SIMDKernel):
@@ -767,7 +762,9 @@ class HalideKernel(SIMDKernel):
         assert not (
             self.index_replacements or self.halide_vars or self.reduction_renames
         )
-        size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)  # type: ignore[arg-type]
+        size_hint = functools.partial(
+            V.graph.sizevars.optimization_hint, fallback=sys.maxsize
+        )
         # pyrefly: ignore [bad-assignment]
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
         all_used_symbols = OrderedSet[Any]()
@@ -790,7 +787,8 @@ class HalideKernel(SIMDKernel):
                     node.root.lookup(
                         node.divisor * divisor,
                         V.graph.sizevars.evaluate_min(
-                            modulus, FloorDiv(node.length, divisor)
+                            modulus,
+                            FloorDiv(node.length, divisor),
                         ),
                     ).symbol()
                 )
@@ -847,7 +845,8 @@ class HalideKernel(SIMDKernel):
                 handled_count += len(sizes_to_add)
                 assert sizes_to_add, nodes
                 end = divisor * functools.reduce(
-                    V.graph.sizevars.evaluate_max, sizes_to_add
+                    lambda a, b: V.graph.sizevars.evaluate_max(a, b),
+                    sizes_to_add,
                 )
                 sizes_to_add.extend(
                     [
@@ -1040,7 +1039,11 @@ class HalideKernel(SIMDKernel):
             dims.append(expr_to_dimension(expr, syms))
         for sym, expr in split_expr.items():
             dims.append(expr_to_dimension(expr, [sym]))
-        dims.sort(key=lambda d: V.graph.sizevars.size_hint(d.stride, fallback=inf))  # type: ignore[arg-type]
+        dims.sort(
+            key=lambda d: V.graph.sizevars.optimization_hint(
+                d.stride, fallback=sys.maxsize
+            )
+        )  # type: ignore[arg-type]
 
         if not dims:  # scalar load/store
             if self.has_indirect_indexing:
@@ -1227,8 +1230,8 @@ class HalideKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         """Codegen a reduction operation"""
         assert self.inside_reduction
         assert not self._load_mask
@@ -1451,7 +1454,7 @@ class HalideKernel(SIMDKernel):
                 assert "in_ptr" in arg.name
                 return 0
 
-        result: list[tuple[Optional[str], KernelArgType]] = []
+        result: list[tuple[str | None, KernelArgType]] = []
         _, a, b, _ = self.args.python_argdefs()
         for call_str, arg in sorted(zip(a, b), key=arg_order):
             result.append((call_str, arg))
@@ -1612,14 +1615,14 @@ class HalideKernel(SIMDKernel):
             # This causes crashes if our estimate is greater than the vector length
             # https://github.com/halide/Halide/issues/3103
             if isinstance(arg, SizeArg):
-                hint = V.graph.sizevars.size_hint(arg.expr, fallback=1)
+                hint = V.graph.sizevars.optimization_hint(arg.expr, fallback=1)
                 code.writeline(f"{arg.name}.set_estimate({hint})")
             else:
                 dims = self.buffer_dimensions[arg.name]
                 range_hints = []
                 for i, dim in enumerate(dims):
                     hint = self._autoscheduler_workarounds(
-                        V.graph.sizevars.size_hint(dim.size, fallback=1), dims
+                        V.graph.sizevars.optimization_hint(dim.size, fallback=1), dims
                     )
                     # pyrefly: ignore [bad-argument-type]
                     range_hints.append(f"hl.Range(0, {hint})")

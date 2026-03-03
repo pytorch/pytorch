@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch.utils._contextlib import (
@@ -412,7 +412,7 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
 
     """
 
-    def __init__(self, tensors: Union[torch.Tensor, tuple[torch.Tensor, ...]]) -> None:
+    def __init__(self, tensors: torch.Tensor | tuple[torch.Tensor, ...]) -> None:
         self.tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tensors
         if not isinstance(self.tensors, tuple):
             raise AssertionError("Expected tensors to be a tuple")

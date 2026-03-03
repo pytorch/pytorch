@@ -1435,7 +1435,8 @@ graph():
         class CacheModule(BaseModule):
             def __init__(self, cache: torch.Tensor):
                 super().__init__()
-                assert cache.ndim == 3
+                if cache.ndim != 3:
+                    raise AssertionError(f"Expected cache.ndim == 3, got {cache.ndim}")
                 self.cache = torch.nn.Parameter(cache, requires_grad=False)
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -4090,7 +4091,7 @@ def forward(self, causal_mask, fill_value):
 
         class Bar(torch.nn.Module):
             def forward(self, x):
-                assert x.shape[0] <= 32
+                assert x.shape[0] <= 32  # noqa: S101
                 return x + 2
 
         # static specialization
@@ -4172,7 +4173,7 @@ def forward(self, causal_mask, fill_value):
         class Foo(torch.nn.Module):
             def forward(self, xs):
                 x, y = xs["data"][0]
-                assert y.shape[0] <= 32
+                assert y.shape[0] <= 32  # noqa: S101
                 return x[6:], y + 2
 
         x, y = torch.randn(8), torch.randn(8)
@@ -4213,8 +4214,8 @@ def forward(self, causal_mask, fill_value):
         # multiple conflicts
         class Moo(torch.nn.Module):
             def forward(self, x, y):
-                assert x.shape[0] <= 32
-                assert y.shape[0] >= 128
+                assert x.shape[0] <= 32  # noqa: S101
+                assert y.shape[0] >= 128  # noqa: S101
                 return x + 2, y + 2
 
         inps = (torch.randn(16), torch.randn(256))
@@ -4301,11 +4302,17 @@ def forward(self, causal_mask, fill_value):
             for node in graph.nodes:
                 # check node.users
                 for user in node.users.keys():
-                    assert _tuple_contains(user.args, node)
+                    if not _tuple_contains(user.args, node):
+                        raise AssertionError(
+                            f"node {node} not found in user {user}'s args"
+                        )
                 # check node.args
                 for arg in node.args:
                     if isinstance(arg, torch.fx.Node):
-                        assert _tuple_contains(arg.users, node)
+                        if not _tuple_contains(arg.users, node):
+                            raise AssertionError(
+                                f"node {node} not found in arg {arg}'s users"
+                            )
 
         # check set grad enabled
         class SetGradCase(torch.nn.Module):
@@ -5819,7 +5826,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         inp = (torch.randn(4), torch.randn(4))
         dynamic_shapes = ((torch.export.Dim.DYNAMIC,), (torch.export.Dim.DYNAMIC,))
         ep = export(m, inp, dynamic_shapes=dynamic_shapes)
-        assert len(ep.range_constraints) == 1
+        if len(ep.range_constraints) != 1:
+            raise AssertionError(
+                f"Expected 1 range constraint, got {len(ep.range_constraints)}"
+            )
         vr = next(iter(ep.range_constraints.values()))
         self.assertEqual(vr.lower, 3)
 
@@ -6891,8 +6901,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
                 # x: [s0, s1], y: [s0 + 1, 4]
-                assert y.shape[1] == 4
-                assert x.shape[0] == y.shape[0] - 1
+                assert y.shape[1] == 4  # noqa: S101
+                assert x.shape[0] == y.shape[0] - 1  # noqa: S101
                 return x * 2, y * 2
 
         # duck sizing would make all static based on these sample inputs
@@ -7206,16 +7216,16 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # Output: a 3-tuple of indices
         @torch.library.custom_op("demo::indices3d", mutates_args=())
         def indices3d(t: torch.Tensor, x: torch.Tensor) -> tuple[int, int, int]:
-            assert t.ndim == 3
-            assert x.ndim == 1 and x.shape[0] == 3
+            assert t.ndim == 3  # noqa: S101
+            assert x.ndim == 1 and x.shape[0] == 3  # noqa: S101
             return tuple(x[i].item() for i in range(3))
 
         # The meta-kernel for this op constrains the indices in x
         # to be within bounds of t via torch._checks.
         @torch.library.register_fake("demo::indices3d")
         def _(t, x):
-            assert t.ndim == 3
-            assert x.ndim == 1 and x.shape[0] == 3
+            assert t.ndim == 3  # noqa: S101
+            assert x.ndim == 1 and x.shape[0] == 3  # noqa: S101
             sizes = tuple(torch.library.get_ctx().new_dynamic_size() for i in range(3))
             for i, size in enumerate(sizes):
                 torch._check(size >= 0)
@@ -10550,6 +10560,37 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         )
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
 
+    def test_where_broadcast_preserves_symint(self):
+        import torch.fx.experimental._config as config
+        from torch._dynamo.source import ConstantSource
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        with config.patch(backed_size_oblivious=True):
+            shape_env = ShapeEnv(specialize_zero_one=False)
+            mode = FakeTensorMode(shape_env=shape_env)
+            with mode:
+                s0 = shape_env.create_symintnode(
+                    shape_env.create_symbol(
+                        val=1,
+                        source=ConstantSource("s0"),
+                        dynamic_dim=DimDynamic.DYNAMIC,
+                        do_not_specialize_zero_one=True,
+                    ),
+                    hint=1,
+                )
+                t = torch.empty((s0, 8), device="meta")
+                cond = torch.empty((s0, 8), device="meta", dtype=torch.bool)
+                fill = torch.empty((1,), device="meta")
+
+                result = torch.ops.aten.where.self(cond, fill, t)
+
+            self.assertIsInstance(
+                result.shape[0],
+                torch.SymInt,
+                f"where output dim 0 should be symbolic but got {result.shape[0]}",
+            )
+
     def test_nonzero_2(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -11789,8 +11830,10 @@ graph():
         ep = export(n0, inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_mutating_buf_4(self):
         class N3(torch.nn.Module):
@@ -11847,8 +11890,10 @@ graph():
         ep = export(N0(), inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_mutating_buf_6(self):
         class N5(torch.nn.Module):
@@ -11937,8 +11982,10 @@ graph():
         ep = export(N0(), inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_mutating_buf_9(self):
         class N8(torch.nn.Module):
@@ -12082,8 +12129,10 @@ graph():
         ep = export(N0(), inp)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_preserving_4(self):
         # {0: [1, 2, 3], 1: [2], 2: [], 3: []}
@@ -12132,8 +12181,10 @@ graph():
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_mutating_buf_preserving_4(self):
         # {0: [2, 3], 1: [2], 2: [3], 3: []}
@@ -12194,8 +12245,10 @@ graph():
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_mutating_buf_preserving_4_1(self):
         # {0: [2], 1: [3], 2: [3], 3: []}
@@ -12255,8 +12308,10 @@ graph():
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_mutating_buf_preserving_5(self):
         # {0: [1, 2, 3], 1: [3, 4], 2: [3, 4], 3: [4], 4: []}
@@ -12336,8 +12391,10 @@ graph():
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_mutating_buf_preserving_7(self):
         # {0: [3, 4, 5, 6], 1: [2, 3, 4, 5, 6], 2: [3, 4, 5], 3: [5, 6], 4: [6], 5: [6], 6: []}
@@ -12461,8 +12518,10 @@ graph():
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_mutating_buf_preserving_10(self):
         class N9(torch.nn.Module):
@@ -12654,8 +12713,10 @@ graph():
         )
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_random_dag_const_preserving_3(self):
         class N2(torch.nn.Module):
@@ -12698,8 +12759,10 @@ graph():
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_none_buffers(self):
         mod = torch.nn.InstanceNorm1d(1)
@@ -12787,8 +12850,8 @@ graph():
     def test_symint_input_specialization(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
-                assert x == 3
-                assert y.shape[0] == 4
+                assert x == 3  # noqa: S101
+                assert y.shape[0] == 4  # noqa: S101
                 return x * y
 
         inp = (3, torch.randn(4, 4))
@@ -12845,8 +12908,8 @@ graph():
         # While tracing the range was found to be a subset of the original range
         class M(torch.nn.Module):
             def forward(self, x, y):
-                assert x > 3
-                assert x <= 5
+                assert x > 3  # noqa: S101
+                assert x <= 5  # noqa: S101
                 return x * y
 
         inp = (4, torch.randn(4, 4))
@@ -12863,8 +12926,8 @@ graph():
         # While tracing the range was found to be bigger than the original range
         class M(torch.nn.Module):
             def forward(self, x, y):
-                assert x > 1
-                assert x < 20
+                assert x > 1  # noqa: S101
+                assert x < 20  # noqa: S101
                 return x * y
 
         inp = (4, torch.randn(4, 4))
@@ -12881,8 +12944,8 @@ graph():
         # While tracing the range was found to be outside of the original range
         class M(torch.nn.Module):
             def forward(self, x, y):
-                assert x > 10
-                assert x < 20
+                assert x > 10  # noqa: S101
+                assert x < 20  # noqa: S101
                 return x * y
 
         inp = (14, torch.randn(4, 4))
@@ -12999,8 +13062,10 @@ graph():
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
-        assert torch.allclose(epm(*inp), eager)
-        assert torch.allclose(ufm(*inp), eager)
+        if not torch.allclose(epm(*inp), eager):
+            raise AssertionError("epm output does not match eager output")
+        if not torch.allclose(ufm(*inp), eager):
+            raise AssertionError("ufm output does not match eager output")
 
     def test_unflatten_no_unroll(self):
         inp = (torch.ones(1),)
@@ -13989,7 +14054,7 @@ def forward(self, x, b_t, y):
         class Model(torch.nn.Module):
             def forward(self, x):
                 y = x + 1
-                assert y.max().item() > 0
+                assert y.max().item() > 0  # noqa: S101
                 return y
 
         model = Model()
@@ -16831,9 +16896,9 @@ def forward(self, x):
             )
 
         def dense_hop(fn, x, schema):
-            assert isinstance(schema, pytree.TreeSpec)
+            assert isinstance(schema, pytree.TreeSpec)  # noqa: S101
             schema = pytree.tree_unflatten([], schema)
-            assert (
+            assert (  # noqa: S101
                 isinstance(schema, torch.FunctionSchema)
                 and schema == torch.ops.aten.sin.default._schema
             )
@@ -18132,7 +18197,8 @@ class TestExportCustomClass(TorchTestCase):
 
         constants = lift_constants_pass(ep.graph_module, ep.graph_signature, {})
         for k, v in constants.items():
-            assert k not in ep.constants
+            if k in ep.constants:
+                raise AssertionError(f"Key {k} already exists in ep.constants")
             ep._constants[k] = v
         serialized_vals = serialize(ep)
         deserialized_ep = deserialize(serialized_vals)

@@ -115,13 +115,16 @@ function EventSelector(outer, events, stack_info, memory_view) {
   return es;
 }
 
-function formatSize(num) {
+function formatSize(num, showBytes = true) {
   const orig = num;
   // https://stackoverflow.com/questions/1094841/get-human-readable-version-of-file-size
   const units = ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi'];
   for (const unit of units) {
     if (Math.abs(num) < 1024.0) {
-      return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
+      if (showBytes) {
+        return `${num.toFixed(1)}${unit}B (${orig} bytes)`;
+      }
+      return `${num.toFixed(1)}${unit}B`;
     }
     num /= 1024.0;
   }
@@ -1177,7 +1180,8 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  const yaxis = axisLeft(yscale).tickFormat(d3.format('.3s'));
+  // Use formatSize with showBytes=false for clean axis labels
+  const yaxis = axisLeft(yscale).tickFormat(d => formatSize(d, false));
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')

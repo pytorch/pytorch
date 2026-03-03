@@ -75,7 +75,7 @@ void boxed_sgd_out_of_place(StableIValue* stack, uint64_t num_args, uint64_t num
     torch::stable::detail::to<double>(stack[3]),
     torch::stable::detail::to<bool>(stack[4]));
 
-  stack[0] = from(res);
+  stack[0] = torch::stable::detail::from(res);
 }
 
 STABLE_TORCH_LIBRARY(STABLE_LIB_NAME, m) {

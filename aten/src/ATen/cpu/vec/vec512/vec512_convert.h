@@ -215,6 +215,24 @@ struct VecConvert<
 };
 
 template <typename dst_t>
+struct VecRoundConvert<
+    dst_t,
+    1,
+    float,
+    2,
+    typename std::enable_if_t<is_8bit_integer_v<dst_t>, void>> {
+  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 2>& src) {
+    at::vec::Vectorized<dst_t> vec1 =
+        round_convert_float_to_int8<dst_t>(src[0]);
+    at::vec::Vectorized<dst_t> vec2 =
+        round_convert_float_to_int8<dst_t>(src[1]);
+    __m128i vec2_lo = _mm512_castsi512_si128(vec2);
+    __m512i out = _mm512_inserti32x4(vec1, vec2_lo, 1);
+    return VectorizedN<dst_t, 1>(at::vec::Vectorized<dst_t>(out));
+  }
+};
+
+template <typename dst_t>
 struct VecConvert<
     dst_t,
     1,
@@ -242,6 +260,18 @@ struct VecConvert<
     typename std::enable_if_t<is_8bit_integer_v<dst_t>, void>> {
   static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 1>& src) {
     return convert_float_to_int8<dst_t>(src[0]);
+  }
+};
+
+template <typename dst_t>
+struct VecRoundConvert<
+    dst_t,
+    1,
+    float,
+    1,
+    typename std::enable_if_t<is_8bit_integer_v<dst_t>, void>> {
+  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 1>& src) {
+    return round_convert_float_to_int8<dst_t>(src[0]);
   }
 };
 

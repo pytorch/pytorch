@@ -6,6 +6,7 @@ from unittest.mock import patch
 import torch
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
+from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
 from torch._inductor.scheduler import MixOrderReduction
@@ -24,6 +25,7 @@ class TestBase(TestCase):
     def setUp(self):
         super().setUp()
         metrics.reset()
+        torch._dynamo.utils.clear_compilation_metrics()
 
     def check_numeric(self, f, args, tol=1e-3):
         ref = f(*args)
@@ -80,7 +82,7 @@ class MixOrderReductionTest(TestBase):
                 if len(shape) == 3:
                     return reduction_fn(x, dim=(0, 1))
                 else:
-                    assert len(shape) == 2
+                    assert len(shape) == 2  # noqa: S101
                     return reduction_fn(x, dim=0)
 
             if swap:
@@ -700,6 +702,56 @@ class MixOrderReductionTest(TestBase):
             inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True}),
         ):
             self.assertTrue(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
+
+    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
+    def test_no_recompile(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x0 = torch.randn(2048, 1024, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x0, (0,))
+        opt_f = torch.compile(f)
+
+        ref = f(x0)
+        act = opt_f(x0)
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
+        opt_f(torch.randn(4096, 1024, device=GPU_TYPE))
+        opt_f(torch.randn(512, 1024, device=GPU_TYPE))
+
+        compile_metrics = torch._dynamo.utils._compilation_metrics
+        self.assertEqual(len(compile_metrics), 1, "Don't recompile")
+
+    def test_additive_num_splits(self):
+        """
+        When the `num_splits` is an additive expression, a pair of
+        parenthesis is required.
+        """
+        torch.set_float32_matmul_precision("high")
+        linear1 = nn.Linear(1000, 1000).to(GPU_TYPE)
+        norm = nn.LayerNorm(1000).to(GPU_TYPE)
+
+        def model(x):
+            return norm(linear1(x[:, :-1].reshape(-1, 1000)))
+
+        compiled_model = torch.compile(model)
+        x = torch.randn(32, 200, 1000, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 1)
+        compiled_model(x).sum().backward()
+
+        act = linear1.weight.grad, linear1.bias.grad
+
+        linear1.zero_grad()
+        norm.zero_grad()
+        model(x).sum().backward()
+        ref = linear1.weight.grad, linear1.bias.grad
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
 
 
 @inductor_config.patch(

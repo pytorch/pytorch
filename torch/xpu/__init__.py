@@ -7,16 +7,22 @@ This package is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports XPU.
 """
 
+from __future__ import annotations
+
 import threading
 import traceback
-from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, NewType, Optional
+from typing import Any, NewType, TYPE_CHECKING
 
 import torch
 import torch._C
 from torch._utils import _dummy_type, _LazySeedTracker
-from torch.types import Device
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch.types import Device
 
 from ._utils import _get_device_index
 from .graphs import (
@@ -266,8 +272,33 @@ def get_device_capability(device: Device = None) -> dict[str, Any]:
 
 def get_device_properties(
     device: Device = None,
-) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
-    r"""Get the properties of a device.
+) -> _XpuDeviceProperties:
+    r"""Get the properties of a device. Returns _XpuDeviceProperties containing the following device properties:
+
+    - ``name`` (str): device name.
+    - ``platform_name`` (str): SYCL platform name.
+    - ``vendor`` (str): device vendor.
+    - ``device_id`` (int): device identifier (product ID).
+    - ``driver_version`` (str): driver version.
+    - ``version`` (str): runtime version.
+    - ``max_compute_units`` (int): number of parallel compute units.
+    - ``gpu_eu_count`` (int): number of EUs (Execution Unit).
+    - ``max_work_group_size``: (int): maximum number of work-items permitted in a work-group.
+    - ``max_num_sub_groups`` (int): maximum number of sub-groups supported in a work-group.
+    - ``sub_group_sizes``: (list[int]): a list of supported sub-group sizes.
+    - ``local_mem_size`` (int): device local memory capacity that can be allocated per work-group in bytes.
+    - ``has_fp16`` (bool): whether float16 dtype is supported.
+    - ``has_fp64`` (bool): whether float64 dtype is supported.
+    - ``has_atomic64`` (bool): whether 64-bit atomic operations are supported.
+    - ``has_bfloat16_conversions`` (bool): whether bfloat16 conversions are supported.
+    - ``has_subgroup_matrix_multiply_accumulate`` (bool): whether DPAS (Dot Product Accumulate Systolic) is supported.
+    - ``has_subgroup_matrix_multiply_accumulate_tensor_float32`` (bool): whether DPAS with tf32 inputs is supported.
+    - ``has_subgroup_2d_block_io`` (bool): whether 2D block I/O for efficient matrix multiplication is supported.
+    - ``total_memory`` (int): device global memory in bytes.
+    - ``gpu_subslice_count`` (int): number of subslice.
+    - ``architecture`` (int): device architecture identifier (experimental).
+    - ``type`` (str): device type, e.g. 'cpu', 'gpu', accelerator', 'host', 'unknown'.
+    - ``uuid`` (Any): device UUID (Universal Unique ID), 16 bytes.
 
     Args:
         device (torch.device or int or str): device for which to return the
@@ -328,9 +359,9 @@ class StreamContext:
     .. note:: Streams are per-device.
     """
 
-    cur_stream: Optional["torch.xpu.Stream"]
+    cur_stream: torch.xpu.Stream | None
 
-    def __init__(self, stream: Optional["torch.xpu.Stream"]) -> None:
+    def __init__(self, stream: torch.xpu.Stream | None) -> None:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
@@ -359,7 +390,7 @@ class StreamContext:
         torch.xpu.set_stream(self.src_prev_stream)
 
 
-def stream(stream: Optional["torch.xpu.Stream"]) -> StreamContext:
+def stream(stream: torch.xpu.Stream | None) -> StreamContext:
     r"""Wrap around the Context-manager StreamContext that selects a given stream.
 
     Arguments:

@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -50,7 +50,7 @@ invoke_subgraph_counter = 0
 # InvokeSubgraphAutogradOp.
 @dataclass
 class OutputMetadata:
-    num_fw_outs: Optional[int] = None
+    num_fw_outs: int | None = None
     indexes_with_symint: set[int] = field(default_factory=set)
     indexes_with_no_grad: set[int] = field(default_factory=set)
 
@@ -61,8 +61,8 @@ class OutputMetadata:
 class NestedCompileRegionOptions:
     # A Callable that takes (gm, example_inputs, decompositions=None, **kwargs) as inputs.
     # Returns AOTCompiledArtifact
-    fw_compiler: Optional[Callable] = None
-    bw_compiler: Optional[Callable] = None
+    fw_compiler: Callable | None = None
+    bw_compiler: Callable | None = None
 
     # Note: [InvokeSubgraphHOP Partitioner]
     # If not None, add "partitioner" to HOP node meta.
@@ -70,11 +70,11 @@ class NestedCompileRegionOptions:
     # If str, the options are "default_partition" and "min_cut_rematerialization_partition".
     # The HOP joint graph will be partitioned using the corresponding functions in
     # torch/_functorch/partitioners.py
-    partitioner: Optional[Callable | str] = None
+    partitioner: Callable | str | None = None
 
     # If it's None, we'll inherit the parent call's decompositions.
     # Otherwise, the nested region will use this decompositions.
-    decompositions: Optional[dict[str, Any]] = None
+    decompositions: dict[str, Any] | None = None
 
 
 def _extract_nested_region_config(fn):
@@ -115,8 +115,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
         self,
-        subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
-        identifier: Optional[str],
+        subgraph: GraphModule | FunctionalizeCtxWrapper,
+        identifier: str | None,
         *operands,
     ):
         if identifier is not None and not isinstance(identifier, str):
@@ -174,7 +174,7 @@ invoke_subgraph = InvokeSubgraphHOP()
 
 
 def invoke_subgraph_infer(
-    subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
+    subgraph: GraphModule | FunctionalizeCtxWrapper,
     *operands,
 ):
     """Inference-only entrypoint for invoke_subgraph that auto-generates identifier.
@@ -264,7 +264,7 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
     return func(*args, **kwargs)
 
 
-def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] = None):
+def mark_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
@@ -897,6 +897,8 @@ def _(subgraph, identifier, *operands):
     from torch._dynamo.utils import dynamo_timed
 
     with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
+        if getattr(subgraph, "_boxed_call", False):
+            return subgraph(list(operands))
         return subgraph(*operands)
 
 

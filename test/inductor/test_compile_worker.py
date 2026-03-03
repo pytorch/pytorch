@@ -163,6 +163,75 @@ class TestTimer(TestCase):
         t.quit()
 
 
+class TestSetTritonLibdevicePath(TestCase):
+    @config.patch({"compile_threads": 1, "eager_numerics.use_pytorch_libdevice": True})
+    def test_libdevice_path_no_subprocess(self):
+        """Test libdevice path is set with compile_threads=1 (no subprocess)."""
+        self._test_libdevice_path_with_compilation()
+
+    @config.patch("eager_numerics.use_pytorch_libdevice", True)
+    def test_libdevice_path_default_threads(self):
+        """Test libdevice path is set with default compile_threads (subprocess)."""
+        self._test_libdevice_path_with_compilation()
+
+    @config.patch(
+        {
+            "eager_numerics.use_pytorch_libdevice": True,
+            "eager_numerics.division_rounding": True,
+            "emulate_precision_casts": True,
+            "compile_threads": 1,
+        }
+    )
+    def test_pow_bitwise_precision(self):
+        """Test that compiled pow matches eager bitwise with system libdevice."""
+        import torch
+        from torch.utils.cpp_extension import CUDA_HOME
+
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        if CUDA_HOME is None:
+            self.skipTest("CUDA_HOME not set")
+        expected = os.path.join(CUDA_HOME, "nvvm", "libdevice", "libdevice.10.bc")
+        if not os.path.isfile(expected):
+            self.skipTest(f"libdevice not found at {expected}")
+
+        torch._dynamo.reset()
+        torch.manual_seed(42)
+        base = torch.randn(1000, device="cuda", dtype=torch.float32).abs() + 1e-6
+        exp = torch.randn(1000, device="cuda", dtype=torch.float32)
+
+        eager_result = torch.pow(base, exp)
+        compiled_result = torch.compile(torch.pow)(base, exp)
+        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+
+    def _test_libdevice_path_with_compilation(self):
+        import torch
+        from torch.utils.cpp_extension import CUDA_HOME
+
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+        if CUDA_HOME is None:
+            self.skipTest("CUDA_HOME not set")
+
+        expected = os.path.join(CUDA_HOME, "nvvm", "libdevice", "libdevice.10.bc")
+        if not os.path.isfile(expected):
+            self.skipTest(f"libdevice not found at {expected}")
+
+        # Compile a simple function that uses pow (which uses libdevice)
+        @torch.compile
+        def fn(x):
+            return torch.pow(x, 2.0)
+
+        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        fn(x)
+
+        # Verify libdevice path was set
+        from triton import knobs
+
+        self.assertEqual(knobs.nvidia.libdevice_path, expected)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

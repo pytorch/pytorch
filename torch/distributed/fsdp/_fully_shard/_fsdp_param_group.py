@@ -1,15 +1,15 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import logging
-from collections.abc import Callable
-from typing import Any, cast, NamedTuple
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
-from torch.distributed.tensor import Shard
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
@@ -28,15 +28,20 @@ from ._fsdp_collectives import (
     ReduceScatter,
 )
 from ._fsdp_common import (
-    compiled_autograd_enabled,
+    _dynamo_disable,
     DataParallelMeshInfo,
     DDPMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
     is_bw,
+    ShardPlacementFnResult,
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -131,7 +136,7 @@ class FSDPParamGroup:
         mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None,
+        shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -153,7 +158,6 @@ class FSDPParamGroup:
         ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
-        # pyrefly: ignore [read-only]
         self.device = device
         self.device_handle = _get_device_handle(device.type)
         self.mp_policy = mp_policy
@@ -442,8 +446,7 @@ class FSDPParamGroup:
     def pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        if not compiled_autograd_enabled():
-            logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
+        logger.debug("%s", self._with_fqn("FSDP::pre_forward"))
         with record_function(self._with_fqn("FSDP::pre_forward")):
             self._training_state = TrainingState.FORWARD
             self.unshard(self.unshard_async_op)
@@ -452,16 +455,11 @@ class FSDPParamGroup:
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
-        if not compiled_autograd_enabled():
-            logger.debug("%s", self._with_fqn("FSDP::post_forward"))
+        logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
-            if not compiled_autograd_enabled():
-                # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
-                # it shouldn't change post_forward_order
-                if not is_bw():
-                    self.reshard()
-                    self._record_post_forward()
-            else:
+            # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
+            # it shouldn't change post_forward_order
+            if not is_bw():
                 self.reshard()
                 self._record_post_forward()
             self._training_state = TrainingState.IDLE
@@ -474,30 +472,23 @@ class FSDPParamGroup:
         self.comm_ctx.post_forward_order.append(self)
         self._post_forward_indices.append(post_forward_index)
 
+    @_dynamo_disable
     def pre_backward(self, default_prefetch: bool, *unused: Any):
-        if (
-            compiled_autograd_enabled()
-            and self._training_state == TrainingState.PRE_BACKWARD
-        ):
-            # Traceable FSDP2 cannot trigger the param group's `post_backward` immediately after param usage;
-            # instead it relies on this to trigger the previously unexecuted `post_backward`.
-            self.post_backward()
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
-        if not compiled_autograd_enabled():
-            logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
+        logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
-            if default_prefetch and not compiled_autograd_enabled():
+            if default_prefetch:
                 self._backward_prefetch()
 
+    @_dynamo_disable
     def post_backward(self, *unused: Any):
         # This method should be idempotent and safe to call even when this
         # FSDP parameter group was not used in backward (should be a no-op)
-        if not compiled_autograd_enabled():
-            logger.debug("%s", self._with_fqn("FSDP::post_backward"))
+        logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:
@@ -648,7 +639,7 @@ class FSDPParamGroup:
 
     @staticmethod
     def _prefetch_unshard(
-        target_fsdp_param_group: "FSDPParamGroup", pass_type: str
+        target_fsdp_param_group: FSDPParamGroup, pass_type: str
     ) -> None:
         if pass_type == "backward":
             training_state = TrainingState.PRE_BACKWARD
@@ -708,10 +699,6 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        # Traceable FSDP2 relies on `root_post_backward_callback` to call each
-        # `FSDPParamGroup.post_backward`
-        if (not torch._dynamo.config.skip_fsdp_hooks) or compiled_autograd_enabled():
-            return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
         args_list, args_spec = tree_flatten(args)
@@ -875,29 +862,13 @@ def _get_param_module_infos(
 
 class RegisterPostBackwardFunction(torch.autograd.Function):
     @staticmethod
-    def _assert_not_tracing_fsdp():
-        if compiled_autograd_enabled():
-            # TODO: Find a way to print the offending FSDP2 module.
-            msg = """\
-When Traceable FSDP2 is enabled, we should not be calling into `RegisterPostBackwardFunction`.
-Instead, we rely on the param group's next `pre_backward` hook to trigger its previously unexecuted
-`post_backward`, and we rely on FSDPState's `root_post_backward_callback` to trigger the resharding
-of any leftover unsharded param groups.
-If you are here, it means the forward part of this FSDP2 instance is not compiled, and you must also
-compile the forward part if you want to use Traceable FSDP2."""
-            torch._dynamo.comptime.comptime.print(msg)
-            raise RuntimeError(msg)
-
-    @staticmethod
     # pyrefly: ignore [bad-override]
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
-        RegisterPostBackwardFunction._assert_not_tracing_fsdp()
         ctx.param_group = param_group
         return inputs
 
     @staticmethod
     def backward(ctx, *grads: torch.Tensor):
-        RegisterPostBackwardFunction._assert_not_tracing_fsdp()
         ctx.param_group.post_backward()
         return (None,) + grads

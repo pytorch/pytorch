@@ -673,8 +673,14 @@ class TestFP8Matmul(TestCase):
 
         if torch.cuda.is_available():
             for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
-                # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
-                layouts_supported = (x_cm, y_cm) == (True, False) or torch.cuda.get_device_properties(0).major == 10
+                # SM 10 and 11 support all permutations, SM 12 TT and TN, SM 9 only TN
+                major, minor = torch.cuda.get_device_capability(0)
+                if major in (10, 11):
+                    layouts_supported = True
+                elif major == 12 and (minor == 1 or _get_torch_cuda_version() >= (13, 1)):
+                    layouts_supported = x_cm
+                else:
+                    layouts_supported = (x_cm, y_cm) == (True, False)
                 with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
                     self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
 
@@ -2107,6 +2113,101 @@ class TestFP8Matmul(TestCase):
             sqnr = compute_error(C_ref, C)
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
+    def test_passed_swizzle_arrays(self, device) -> None:
+        # Ensure that incorrectly-sized swizzle arrays are caught
+        M, N, K = 128, 128, 128
+
+        # MXFP8: swizzle=[SWIZZLE_32_4_4]
+        x = torch.randn(M, K, device=device).to(torch.float8_e4m3fn)
+        w = torch.randn(N, K, device=device).to(torch.float8_e4m3fn)
+
+        x_scale = torch.full((M, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
+        w_scale = torch.full((N, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
+
+        # No swizzle passed - must fail on swizzle_a
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_a must have 1 values, got 0",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                x_scale,
+                ScalingType.BlockWise1x32,
+                w_scale,
+                ScalingType.BlockWise1x32,
+            )
+
+        # swizzle_a passed, not b, must fail on swizzle_b
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_b must have 1 values, got 0",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                x_scale,
+                ScalingType.BlockWise1x32,
+                w_scale,
+                ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            )
+
+        # NVFP4 two-level: swizzle=[SWIZZLE_32_4_4, NO_SWIZZLE]
+        x = _bfloat16_to_float4_e2m1fn_x2(x.to(torch.bfloat16))
+        w = _bfloat16_to_float4_e2m1fn_x2(w.to(torch.bfloat16))
+
+        x_scale = torch.full((M, K // 16), 1., dtype=torch.float8_e4m3fn, device=device)
+        w_scale = torch.full((N, K // 16), 1., dtype=torch.float8_e4m3fn, device=device)
+
+        global_scale = torch.full((1, ), 1., dtype=torch.float, device=device)
+
+        # No swizzles passed - must fail on swizzle_a
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_a must have 2 values, got 0",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                [x_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [w_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+            )
+
+        # Not enough swizzles passed - must fail on swizzle_a
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_a must have 2 values, got 1",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                [x_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [w_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                swizzle_a=[SwizzleType.SWIZZLE_32_4_4, ],
+            )
+
+        # Not enough swizzles passed to b - must fail on swizzle_b
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_b must have 2 values, got 1",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                [x_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [w_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                swizzle_a=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+                swizzle_b=[SwizzleType.SWIZZLE_32_4_4, ],
+            )
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)

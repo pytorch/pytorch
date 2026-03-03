@@ -198,6 +198,7 @@ if(HIP_FOUND)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
+    find_package_and_print_version(rocm_smi REQUIRED)
   endif()
 
   # Optional components.

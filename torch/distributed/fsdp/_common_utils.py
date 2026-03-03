@@ -65,7 +65,6 @@ class _FSDPDeviceHandle:
         if backend is None:
             try:
                 self.__backend = getattr(torch, device.type)
-                # pyrefly: ignore [read-only]
                 self.__device = device
             except AttributeError as exc:
                 raise AttributeError(
