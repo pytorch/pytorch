@@ -1273,7 +1273,9 @@ def handle_effect_tokens_fn(
         args_descs = [*additional_fwd_token_inputs_descs, *args_descs]
 
         if num_tokens > 0:
-            meta.static_input_indices = [idx + num_tokens for idx in meta.static_input_indices]
+            meta.static_input_indices = [
+                idx + num_tokens for idx in meta.static_input_indices
+            ]
     return inner_fn, args, args_descs
 
 
