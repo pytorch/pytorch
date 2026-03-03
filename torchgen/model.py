@@ -397,6 +397,9 @@ class ScalarType(Enum):
     Float8_e4m3fn = auto()
     Float8_e4m3fnuz = auto()
     Float8_e8m0fnu = auto()
+    UInt16 = auto()
+    UInt32 = auto()
+    UInt64 = auto()
 
     def __str__(self) -> str:
         return self.name

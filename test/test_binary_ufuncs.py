@@ -3843,6 +3843,39 @@ class TestBinaryUfuncs(TestCase):
             lambda: torch.add(m1, m1, out=m2),
         )
 
+    @onlyCPU
+    @dtypes(*_unsigned_int_types)
+    def test_add_sub_mul_unsigned_int(self, device, dtype):
+        a = torch.tensor([10, 20, 30], dtype=dtype, device=device)
+        b = torch.tensor([1, 2, 3], dtype=dtype, device=device)
+
+        self.assertEqual(a + b, torch.tensor([11, 22, 33], dtype=dtype, device=device))
+        self.assertEqual(a - b, torch.tensor([9, 18, 27], dtype=dtype, device=device))
+        self.assertEqual(a * b, torch.tensor([10, 40, 90], dtype=dtype, device=device))
+
+        # in-place
+        c = a.clone()
+        c.add_(b)
+        self.assertEqual(c, torch.tensor([11, 22, 33], dtype=dtype, device=device))
+
+        c = a.clone()
+        c.sub_(b)
+        self.assertEqual(c, torch.tensor([9, 18, 27], dtype=dtype, device=device))
+
+        c = a.clone()
+        c.mul_(b)
+        self.assertEqual(c, torch.tensor([10, 40, 90], dtype=dtype, device=device))
+
+        # alpha parameter for add/sub
+        self.assertEqual(
+            torch.add(a, b, alpha=2),
+            torch.tensor([12, 24, 36], dtype=dtype, device=device),
+        )
+        self.assertEqual(
+            torch.sub(a, b, alpha=2),
+            torch.tensor([8, 16, 24], dtype=dtype, device=device),
+        )
+
     @onlyOn(["cuda", "xpu"])
     def test_addsub_half_tensor(self, device):
         x = torch.tensor([60000.0], dtype=torch.half, device=device)
