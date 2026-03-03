@@ -920,11 +920,11 @@ class LSTM(RNNBase):
           a concatenation of the forward and reverse hidden states at each time step in the sequence.
         * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{out})` containing the
-          final hidden state for each element in the sequence. When ``bidirectional=True``,
+          final hidden state for each element in the batch. When ``bidirectional=True``,
           `h_n` will contain a concatenation of the final forward and reverse hidden states, respectively.
         * **c_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
-          final cell state for each element in the sequence. When ``bidirectional=True``,
+          final cell state for each element in the batch. When ``bidirectional=True``,
           `c_n` will contain a concatenation of the final forward and reverse cell states, respectively.
 
     Attributes:
