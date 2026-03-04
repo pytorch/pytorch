@@ -46,7 +46,7 @@ enum class CuBLASReductionOption : uint8_t {
   DisallowReducedPrecisionDisallowSplitK = 2,
 };
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
-enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL, MATH_SDP };
+enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
 // DEFAULT is an internal-only sentinel meaning "use legacy backend default
 // unless a parent setting overrides it". NONE means "explicitly set to
 // inherit/no-op".
@@ -552,7 +552,6 @@ class TORCH_API Context {
        float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
            ? Float32Precision::NONE
            : Float32Precision::TF32},
-      {{Float32Backend::CUDA, Float32Op::MATH_SDP}, Float32Precision::NONE},
   };
 
   Allocator* prev_allocator_ptr_{nullptr};
@@ -722,36 +721,6 @@ struct TORCH_API NoTF32Guard {
   static bool should_disable_tf32();
 
  private:
-  bool changed = false;
-};
-
-template <Float32Backend target_backend, Float32Op target_op>
-struct Fp32PrecisonGuard {
-  Fp32PrecisonGuard(const Float32Precision new_precision) {
-    if (new_precision == Float32Precision::NONE) {
-      return;
-    }
-    saved_precision =
-        globalContext().float32Precision(target_backend, target_op);
-    changed = (new_precision != saved_precision);
-    if (changed) {
-      globalContext().setFloat32Precision(
-          target_backend, target_op, new_precision);
-    }
-  }
-  Fp32PrecisonGuard(Fp32PrecisonGuard&& other) = delete;
-  Fp32PrecisonGuard(const Fp32PrecisonGuard&) = delete;
-  Fp32PrecisonGuard& operator=(const Fp32PrecisonGuard&) = delete;
-  Fp32PrecisonGuard& operator=(Fp32PrecisonGuard&&) = delete;
-  ~Fp32PrecisonGuard() {
-    if (changed) {
-      globalContext().setFloat32Precision(
-          target_backend, target_op, saved_precision);
-    }
-  }
-
- private:
-  Float32Precision saved_precision;
   bool changed = false;
 };
 
