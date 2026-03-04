@@ -171,8 +171,7 @@ struct BatchNormGraphCache {
 
   template <typename U>
   void update(const KeyType& key, U&& results) {
-    engine_cache.erase(key);
-    engine_cache.emplace(key, std::forward<U>(results));
+    engine_cache.insert_or_assign(key, std::forward<U>(results));
   }
 };
 
@@ -303,15 +302,14 @@ void raw_cudnn_batchnorm_forward_out_v8(
             running_mean_fe, running_var_fe, momentum_fe);
       }
 
-      auto [Y_temp, mean_temp, inv_var_temp, next_mean_temp, next_var_temp] =
+      std::tie(
+          Y_fe,
+          saved_mean_fe,
+          saved_inv_var_fe,
+          next_running_mean_fe,
+          next_running_var_fe) =
           batchnorm_graph->batchnorm(
               X_fe, scale_fe, bias_fe, batchnorm_options);
-
-      Y_fe = Y_temp;
-      saved_mean_fe = mean_temp;
-      saved_inv_var_fe = inv_var_temp;
-      next_running_mean_fe = next_mean_temp;
-      next_running_var_fe = next_var_temp;
 
       Y_fe->set_output(true);
       saved_mean_fe->set_output(true).set_data_type(get_fe_dtype(*save_mean));
