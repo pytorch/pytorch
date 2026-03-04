@@ -1686,11 +1686,11 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             conf.num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Defaults for AMD triton backend kern args if not set
-            matrix_instr_nonkdim = getattr(conf, "matrix_instr_nonkdim", 16)
-            waves_per_eu = getattr(conf, "waves_per_eu", 0)
+            matrix_instr_nonkdim: int = getattr(conf, "matrix_instr_nonkdim", 16)
+            waves_per_eu: int = getattr(conf, "waves_per_eu", 0)
             # Use explicit kpack if set, otherwise determine optimal value based on
             # architecture and BLOCK_K
-            kpack = getattr(conf, "kpack", get_default_kpack(conf.block_k))
+            kpack: int = getattr(conf, "kpack", get_default_kpack(conf.block_k))
 
             if matrix_instr_nonkdim != 0 and (
                 conf.block_m % matrix_instr_nonkdim != 0
@@ -2714,7 +2714,8 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
 
 
 @register_template_heuristic(
-    blackwell_ws_persistent_device_tma_mm_template.uid,  # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
+    # regular Blackwell MM template + scaling epilogue from ScaledMMConfigMixin
+    blackwell_ws_persistent_device_tma_mm_template.uid,
     "cuda",
     register=torch.version.hip is None,
     op_name="scaled_mm",
