@@ -17,18 +17,24 @@ void initExportBindings(PyObject* module) {
 
   exportModule.def(
       "deserialize_exported_program", [](const std::string& serialized) {
-        auto parsed = nlohmann::json::parse(serialized);
-
-        // Query the current Python schema version as target
+        // Query the current Python schema version as target (cached)
         // TODO: expose schema_version in generated_serialization_types.h and
         // access it here directly.
-        py::module_ schema_module =
-            py::module_::import("torch._export.serde.schema");
-        py::tuple schema_version_tuple = schema_module.attr("SCHEMA_VERSION");
-        int target_version = schema_version_tuple[0].cast<int>();
+        static int target_version = []() {
+          py::module_ schema_module =
+              py::module_::import("torch._export.serde.schema");
+          py::tuple v = schema_module.attr("SCHEMA_VERSION");
+          return v[0].cast<int>();
+        }();
 
-        auto upgraded = upgrade(parsed, target_version);
-        return upgraded.get<ExportedProgram>();
+        ExportedProgram result;
+        {
+          py::gil_scoped_release release;
+          auto parsed = nlohmann::json::parse(serialized);
+          auto upgraded = upgrade(parsed, target_version);
+          result = upgraded.get<ExportedProgram>();
+        }
+        return result;
       });
 
   exportModule.def("serialize_exported_program", [](const ExportedProgram& ep) {
@@ -50,8 +56,13 @@ void initExportBindings(PyObject* module) {
 
   exportModule.def(
       "deserialize_payload_config", [](const std::string& json_str) {
-        auto parsed = nlohmann::json::parse(json_str);
-        return parsed.get<PayloadConfig>();
+        PayloadConfig result;
+        {
+          py::gil_scoped_release release;
+          auto parsed = nlohmann::json::parse(json_str);
+          result = parsed.get<PayloadConfig>();
+        }
+        return result;
       });
 
   for (const auto& entry : torch::_export::archive_spec::kAllConstants) {
