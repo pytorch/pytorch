@@ -19,6 +19,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
 
+#include <mutex>
+
 namespace c10d {
 namespace symmetric_memory {
 
@@ -30,6 +32,7 @@ struct NCCLAllocation {
   void* ptr;
   size_t buffer_size;
   int device_idx;
+  std::mutex mutex;
   // Map of group name to peer alloc info
   std::unordered_map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos_;
 
@@ -347,18 +350,21 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // TODO: we might need to use a roundup or mempool for mem allocation.
     void* ptr;
     C10D_NCCL_CHECK(ncclMemAlloc(&ptr, size), "ncclMemAlloc");
-    // TODO: thread safety
-    allocations_.try_emplace(
-        ptr, std::make_unique<NCCLAllocation>(ptr, size, device_idx));
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      allocations_.try_emplace(
+          ptr, std::make_unique<NCCLAllocation>(ptr, size, device_idx));
+    }
     return ptr;
   }
 
   void free(void* ptr) override {
-    // TODO: thread safety
+    std::lock_guard<std::mutex> lock(mutex_);
     allocations_.erase(ptr);
   };
 
   size_t get_alloc_size(void* ptr) override {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = allocations_.find(ptr);
     if (it == allocations_.end()) {
       TORCH_CHECK(
@@ -371,31 +377,39 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       void* ptr,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
-    // Then search allocation covering the ptr, get the base address
-    auto alloc_it = std::find_if(
-        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
-          auto& allocation = pair.second;
-          auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-          auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
-          return ptr_int >= base_ptr &&
-              ptr_int < base_ptr + allocation->buffer_size;
-        });
-    TORCH_CHECK(
-        alloc_it != allocations_.end(),
-        "Pointer not within any SymmetricMemory allocation, "
-        "is the tensor allocated from SymmetricMemory?");
 
-    auto& allocation = alloc_it->second;
+    // Find the allocation covering the ptr under the allocator lock.
+    // We grab a raw pointer to the NCCLAllocation so we can release the
+    // allocator lock before doing expensive per-allocation work.
+    NCCLAllocation* allocation;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto alloc_it = std::find_if(
+          allocations_.begin(), allocations_.end(), [&](const auto& pair) {
+            auto& alloc = pair.second;
+            auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+            auto base_ptr = reinterpret_cast<uintptr_t>(alloc->ptr);
+            return ptr_int >= base_ptr &&
+                ptr_int < base_ptr + alloc->buffer_size;
+          });
+      TORCH_CHECK(
+          alloc_it != allocations_.end(),
+          "Pointer not within any SymmetricMemory allocation, "
+          "is the tensor allocated from SymmetricMemory?");
+      allocation = alloc_it->second.get();
+    }
 
-    // Get or create peer alloc info for the group
+    // Get or create peer alloc info for the group under the per-allocation
+    // lock. This serializes concurrent rendezvous on the same allocation
+    // for different groups (e.g., forward vs backward).
+    std::lock_guard<std::mutex> alloc_lock(allocation->mutex);
     auto& peer_alloc_infos = allocation->peer_alloc_infos_;
     auto pai_it = peer_alloc_infos.find(*group_name);
     if (pai_it == peer_alloc_infos.end()) {
-      // Never rendezvoused with this group before, create a new peer alloc info
       pai_it = peer_alloc_infos.emplace_hint(
           pai_it,
           *group_name,
-          c10::make_intrusive<NCCLPeerAllocInfo>(allocation.get(), *group_name));
+          c10::make_intrusive<NCCLPeerAllocInfo>(allocation, *group_name));
     }
 
     auto& pai = pai_it->second;
@@ -416,6 +430,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
+  std::mutex mutex_;
   std::unordered_map<void*, std::unique_ptr<NCCLAllocation>> allocations_;
 };
 
