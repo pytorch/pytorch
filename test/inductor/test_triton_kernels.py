@@ -5080,6 +5080,10 @@ class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
 
     @requires_cuda_and_triton
     def test_no_fusion_for_atomic_store(self):
+        # on ROCm we skip this because `tl.atomic_xchg` fails to compile in ROCm
+        if torch.version.cuda is None:
+            return
+
         @triton.jit
         def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
             pid = tl.program_id(0)
