@@ -81,10 +81,3 @@ install(FILES "${TORCH_SRC_DIR}/tools/dynamo/gb_id_mapping.py"
   DESTINATION "tools/dynamo"
   OPTIONAL
 )
-
-# --- torchgen package data ---
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/torchgen/packaged/"
-  DESTINATION "${SKBUILD_PLATLIB_DIR}/torchgen/packaged"
-  PATTERN "*.pyc" EXCLUDE
-  PATTERN "*.pyo" EXCLUDE
-)
