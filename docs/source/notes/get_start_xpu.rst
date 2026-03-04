@@ -4,7 +4,8 @@ Getting Started on Intel GPU
 Hardware Prerequisite
 ---------------------
 
-For Intel Data Center GPU
+Intel Data Center GPU
+^^^^^^^^^^^^^^^^^^^^^
 
 .. list-table::
    :widths: 50 50 50 50
@@ -19,7 +20,8 @@ For Intel Data Center GPU
      - yes
      - yes
 
-For Intel Client GPU
+Intel Client GPU
+^^^^^^^^^^^^^^^^
 
 +---------------------------------------+-----------------------------------------------------------------------------------------------------+
 | Supported OS                          | Validated Hardware                                                                                  |
@@ -142,7 +144,7 @@ Here are a few inference workflow examples.
 
 
 Inference with FP32
-"""""""""""""""""""
+~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -162,7 +164,7 @@ Inference with FP32
     print("Execution finished")
 
 Inference with AMP
-""""""""""""""""""
+~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -186,7 +188,7 @@ Inference with AMP
     print("Execution finished")
 
 Inference with ``torch.compile``
-""""""""""""""""""""""""""""""""
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -227,7 +229,7 @@ Training Examples
 Here is a few training workflow examples.
 
 Train with FP32
-"""""""""""""""
+~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -284,7 +286,7 @@ Train with FP32
     print("Execution finished")
 
 Train with AMP
-""""""""""""""
+~~~~~~~~~~~~~~
 
 .. note::
    Training with ``GradScaler`` requires hardware support for ``FP64``. ``FP64`` is not natively supported by the Intel® Arc™ A-Series Graphics. If you run your workloads on Intel® Arc™ A-Series Graphics, please disable ``GradScaler``.
@@ -352,7 +354,7 @@ Train with AMP
     print("Execution finished")
 
 Train with ``torch.compile``
-""""""""""""""""""""""""""""
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
