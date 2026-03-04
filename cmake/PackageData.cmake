@@ -81,17 +81,3 @@ install(FILES "${TORCH_SRC_DIR}/tools/dynamo/gb_id_mapping.py"
   DESTINATION "tools/dynamo"
   OPTIONAL
 )
-
-# Generate combined license file for wheel dist-info.
-# Replicates what setup.py's concat_license_files() did: concatenate LICENSE
-# (BSD-3-Clause) with third_party/LICENSES_BUNDLED.txt so the wheel's
-# dist-info/licenses/LICENSE contains all bundled third-party licenses
-# (required by test_distinfo_license). Written to the cmake binary dir;
-# pyproject.toml's wheel.license-files picks it up from build/combined_license/.
-install(CODE "
-  file(READ \"${PROJECT_SOURCE_DIR}/LICENSE\" _license_main)
-  file(READ \"${PROJECT_SOURCE_DIR}/third_party/LICENSES_BUNDLED.txt\" _license_bundled)
-  file(MAKE_DIRECTORY \"${CMAKE_BINARY_DIR}/combined_license\")
-  file(WRITE \"${CMAKE_BINARY_DIR}/combined_license/LICENSE\"
-    \"\${_license_main}\n\${_license_bundled}\")
-")

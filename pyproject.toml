@@ -76,10 +76,6 @@ regex = "^(?P<value>.+)$"
 install-dir = "torch"
 # Python packages to include in the wheel.
 packages = ["torch", "torchgen", "functorch"]
-# Use the cmake-generated combined license file (LICENSE + LICENSES_BUNDLED.txt)
-# so that dist-info/licenses/LICENSE contains all bundled third-party licenses.
-# The file is written to build/combined_license/ during cmake install.
-license-files = ["build/combined_license/LICENSE"]
 
 [tool.scikit-build.editable]
 # Editable installs use redirect mode: Python files are found in the source
