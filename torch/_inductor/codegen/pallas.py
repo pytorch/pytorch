@@ -5,7 +5,7 @@ import hashlib
 import itertools
 import math
 import typing_extensions
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy  # noqa: TC002
 
@@ -1263,9 +1263,10 @@ class PallasKernel(SIMDKernel):
             nd = len(buf_size)
             if nd < 2:
                 continue
-            strides = [self._safe_int(s) for s in actual_strides]
-            if any(s is None for s in strides):
+            strides_or_none = [self._safe_int(s) for s in actual_strides]
+            if any(s is None for s in strides_or_none):
                 continue
+            strides: list[int] = cast(list[int], strides_or_none)
 
             # Get reduction stride coefficients by zeroing pw_vars.
             r_only = load_index
