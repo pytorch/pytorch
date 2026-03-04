@@ -15,8 +15,10 @@ if not TEST_CUDA:
 
 
 def _warmup_op(op, n=3):
-    for _ in range(n):
-        op()
+    s = torch.cuda.Stream()
+    with torch.cuda.stream(s):
+        for _ in range(n):
+            op()
 
 
 class TestCUDAGraphDebugInputs(TestCase):
