@@ -19,6 +19,7 @@ MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble] + (
     [torch.bfloat16] if MACOS_VERSION < 14.0 else []
 )
 MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
+MPS_HALF_DTYPES = [torch.float16] + ([torch.bfloat16] if MACOS_VERSION >= 14.0 else [])
 
 importlib.import_module("filelock")
 
@@ -99,6 +100,39 @@ class MPSBasicTests(TestCase):
             return rc
 
         self.common(foo, (torch.rand(1024),))
+
+    @parametrize("dtype", MPS_HALF_DTYPES)
+    def test_half_constant(self, dtype):
+        def fn(x):
+            return x + 1.0
+
+        self.common(
+            fn,
+            (make_tensor(1024, dtype=dtype, device=self.device),),
+            check_lowp=False,
+        )
+
+    @parametrize("dtype", MPS_HALF_DTYPES)
+    def test_half_masked(self, dtype):
+        def fn(x):
+            return x.sum()
+
+        self.common(
+            fn,
+            (make_tensor(1024, dtype=dtype, device=self.device),),
+            check_lowp=False,
+        )
+
+    @parametrize("dtype", MPS_HALF_DTYPES)
+    def test_half_where(self, dtype):
+        def fn(x):
+            return torch.where(x > 0.5, x, x.new_zeros(()))
+
+        self.common(
+            fn,
+            (make_tensor(1024, dtype=dtype, device=self.device),),
+            check_lowp=False,
+        )
 
     @parametrize("dtype", MPS_DTYPES)
     def test_cast(self, dtype):
