@@ -26,6 +26,15 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
+def _is_aten_graph(gm: torch.fx.GraphModule) -> bool:
+    for node in gm.graph.nodes:
+        if node.op == "call_function" and not isinstance(
+            node.target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        ):
+            return False
+    return True
+
+
 class WhileLoopOp(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("while_loop")
@@ -69,6 +78,21 @@ class WhileLoopOp(HigherOrderOperator):
             if isinstance(body_fn, torch.fx.GraphModule)
             else materialize_as_graph(body_fn, all_inputs)
         )
+
+        # cond_gm = materialize_as_graph(cond_fn, all_inputs)
+        # body_gm = materialize_as_graph(body_fn, all_inputs)
+
+        # another try is to skip materialization if the function is already a aten op graph module
+        # def _maybe_materialize(fn, all_inputs):
+        #     if not isinstance(fn, torch.fx.GraphModule):
+        #         return materialize_as_graph(fn, all_inputs)
+        #     if _is_aten_graph(fn):
+        #         return fn
+        #     # return _retrace_as_aten(fn)
+        #     return materialize_as_graph(fn, all_inputs)
+
+        # cond_gm = _maybe_materialize(cond_fn, all_inputs)
+        # body_gm = _maybe_materialize(body_fn, all_inputs)
 
         def _find_example_value(n, real_inp):
             if "val" in n.meta:
