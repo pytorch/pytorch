@@ -7562,11 +7562,60 @@ def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=args)
 
+    # only run these complex edge cases for forward testing, no backward tests,
+    # because gradient accumulation on expanded or empty tensors fails
+    if not requires_grad:
+        # size 1D tensors do not trigger overlap
+        yield SampleInput(make_arg((3, 1)))
+        yield SampleInput(make_arg((1, 3)))
+        yield SampleInput(make_arg((5, 3, 1)))
+        yield SampleInput(make_arg((5, 1, 3)))
+
+        # empty tensors do not trigger overlap
+        yield SampleInput(make_arg((3, 0)))
+        yield SampleInput(make_arg((0, 3)))
+        yield SampleInput(make_arg((5, 0, 3)))
+
 def error_inputs_tril_triu(opinfo, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # error inputs for input.ndim <= 2
-    yield ErrorInput(SampleInput(make_arg((4,))), error_regex="input tensor must have at least 2 dimensions")
+    yield ErrorInput(SampleInput(make_arg((4,))),
+                     error_type=RuntimeError,
+                     error_regex="input tensor must have at least 2 dimensions")
+
+    # skips the overlap tests for python references
+    if kwargs.get('is_ref', False):
+        return
+
+    err_msg = (
+        "unsupported operation: more than one element of the written-to"
+        " tensor refers to a single memory location"
+    )
+
+    # scalar broadcasted to matrix
+    x = make_arg(()).expand(3, 3)
+    yield ErrorInput(SampleInput(x, kwargs={'out': x}),
+                     error_type=RuntimeError,
+                     error_regex=err_msg)
+
+    # row vector broadcasted to matrix
+    row_bcast = make_arg((1, 3)).expand(3, 3)
+    yield ErrorInput(SampleInput(row_bcast, kwargs={'out': row_bcast}),
+                     error_type=RuntimeError,
+                     error_regex=err_msg)
+
+    # column vector broadcasted to matrix
+    col_bcast = make_arg((3, 1)).expand(3, 3)
+    yield ErrorInput(SampleInput(col_bcast, kwargs={'out': col_bcast}),
+                     error_type=RuntimeError,
+                     error_regex=err_msg)
+
+    # batched row broadcast
+    batched_row_bcast = make_arg((5, 1, 3)).expand(5, 3, 3)
+    yield ErrorInput(SampleInput(batched_row_bcast, kwargs={'out': batched_row_bcast}),
+                     error_type=RuntimeError,
+                     error_regex=err_msg)
 
 def sample_inputs_trilu_indices(op_info, device, dtype, requires_grad, **kwargs):
     # (row, col, offset)
@@ -24082,10 +24131,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.triu",
         torch_opinfo_name="triu",
+        error_inputs_func=partial(error_inputs_tril_triu, is_ref=True),
     ),
     PythonRefInfo(
         "_refs.tril",
         torch_opinfo_name="tril",
+        error_inputs_func=partial(error_inputs_tril_triu, is_ref=True),
     ),
     PythonRefInfo(
         "_refs.triu_indices",

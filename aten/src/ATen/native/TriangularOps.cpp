@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/native/TriangularOpsUtils.h>
@@ -143,6 +144,15 @@ void compute_triu_tril(const Tensor& self, int64_t k, const Tensor &result) {
   }
 
   bool inplace_op = self.is_same(result);
+
+  if (inplace_op) {
+    // dropping batch dimension and create a temporary 2D tensor
+    Tensor single_matrix = result.as_strided(
+        {result.size(-2), result.size(-1)},
+        {result.stride(-2), result.stride(-1)});
+
+    at::assert_no_internal_overlap(single_matrix);
+  }
 
   bool inplace_update = false;
   Tensor self_c;
