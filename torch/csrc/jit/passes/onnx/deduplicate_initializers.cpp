@@ -45,7 +45,6 @@ struct HashValue {
         first_elem_double,
         first_elem_int64,
         first_elem_uint64,
-        t.scalar_type(),
         t.sizes(),
         t.strides());
   }
