@@ -81,6 +81,7 @@ jobs:
           allowed_bots: "*"
           use_bedrock: "true"
           claude_args: "--model global.anthropic.claude-opus-4-6-v1 --allowedTools Skill"
+          prompt: "When asked to review a PR, always use the /pr-review skill."
           settings: '{"alwaysThinkingEnabled": true}'
 
       - name: Upload usage metrics
