@@ -388,7 +388,11 @@ def generate_random_lengths_in_chunks(
     # must be a multiple of `chunk_size`. Besides, the lengths of all the documents
     # sum up to `total_length`.
     num_chunks = total_length // chunk_size
-    assert total_length % chunk_size == 0 and num_chunks >= num_documents
+    if not (total_length % chunk_size == 0 and num_chunks >= num_documents):
+        raise AssertionError(
+            f"total_length % chunk_size == {total_length % chunk_size} (expected 0), "
+            f"num_chunks={num_chunks} vs num_documents={num_documents}"
+        )
 
     num_chunks_per_document = [1] * num_documents
     remaining_chunks = num_chunks - num_documents
@@ -589,17 +593,20 @@ class CPFlexAttentionTest(DTensorTestBase):
         if lb_type == "None":
             load_balancer = None  # no load-balance
         elif lb_type == "_HeadTailLoadBalancer":
-            assert isinstance(seq_length, int)
+            if not isinstance(seq_length, int):
+                raise AssertionError(f"Expected int, got {type(seq_length)}")
             load_balancer = _HeadTailLoadBalancer(
                 seq_length, self.world_size, torch.device(self.device_type)
             )
         elif lb_type == "_PerDocumentHeadTailLoadBalancer":
-            assert isinstance(document_lengths, list)
+            if not isinstance(document_lengths, list):
+                raise AssertionError(f"Expected list, got {type(document_lengths)}")
             load_balancer = _PerDocumentHeadTailLoadBalancer(
                 document_lengths, self.world_size, torch.device(self.device_type)
             )
         elif lb_type == "_PTRRLoadBalancer":
-            assert isinstance(block_mask, BlockMask)
+            if not isinstance(block_mask, BlockMask):
+                raise AssertionError(f"Expected BlockMask, got {type(block_mask)}")
             load_balancer = _PTRRLoadBalancer(
                 block_mask,
                 self.world_size,

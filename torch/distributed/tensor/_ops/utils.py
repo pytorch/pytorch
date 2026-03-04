@@ -194,7 +194,8 @@ def is_tensor_shardable(
     """
     from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
 
-    assert allow_unbacked_sharding in [None, True, False]
+    if allow_unbacked_sharding not in [None, True, False]:
+        raise AssertionError
     guard_fn = {
         None: bool,
         True: guard_or_false,
@@ -306,7 +307,8 @@ def map_placements_after_broadcast(
         elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
-            assert isinstance(placement, Shard | _StridedShard)
+            if not isinstance(placement, Shard | _StridedShard):
+                raise AssertionError
             shard_dim = normalize_dim(placement.dim, len(shape))
             new_shard_dim = broadcast_dims_map[shard_dim]
             if new_shard_dim != -1:

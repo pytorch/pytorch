@@ -23,7 +23,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 import torch._logging.structured as structured
@@ -95,7 +95,7 @@ class SymNode:
         expr,
         shape_env,
         pytype,
-        hint: Optional[Union[int, float, bool]],
+        hint: int | float | bool | None,
         constant=None,
         fx_node=None,
         optimized_summation=False,
@@ -104,6 +104,8 @@ class SymNode:
         self.shape_env = shape_env
         self.pytype = pytype
         self._optimized_summation = optimized_summation
+        self._expr_ver = -1
+        self._expr_cache = None
 
         # What's the difference between hint and constant?
         #
@@ -165,7 +167,7 @@ class SymNode:
         else:
             hint = compute_hint()
         self._hint = hint
-        self.constant: Optional[Union[int, float, bool]] = constant
+        self.constant: int | float | bool | None = constant
 
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
@@ -196,7 +198,17 @@ class SymNode:
 
     @property
     def expr(self):
-        return self.shape_env.replace(self._expr)
+        if isinstance(self._expr, int) or self._expr.is_number:
+            return self._expr
+        ver = self.shape_env._replacements_version_counter
+        if ver == 0:
+            return self._expr
+        if self._expr_cache is not None and ver == self._expr_ver:
+            return self._expr_cache
+        result = self.shape_env.replace(self._expr)
+        self._expr_ver = ver
+        self._expr_cache = result
+        return result
 
     @property
     def hint(self):
@@ -1351,7 +1363,7 @@ def _make_node_magic(method, func):
                 else:
                     arguments = [self]
 
-                def get_id(sym_node) -> Optional[int]:
+                def get_id(sym_node) -> int | None:
                     # We don't want to return an ID if the input is a constant
                     import sympy
 
@@ -1740,7 +1752,7 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
-    def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+    def get_constant(x: SymInt | int | SymFloat | float | SymBool | bool):
         if isinstance(x, (int, float, bool)):
             return x
         if isinstance(x, SymInt):

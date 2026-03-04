@@ -52,7 +52,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #ifdef USE_NVSHMEM
-#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
 #endif
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
@@ -2107,9 +2107,17 @@ communication mechanism.
           py::arg("rank"),
           py::arg("world_size"));
 
+  // Use OpaqueBase as the metaclass to allow isinstance(fake_obj, ProcessGroup)
+  // to work.
+  py::object opaque_base_module = py::module_::import("torch._opaque_base");
+  py::object opaque_base = opaque_base_module.attr("OpaqueBaseMeta");
+
   auto processGroup =
       intrusive_ptr_no_gil_destructor_trampoline_class_<
-          ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(module, "ProcessGroup",
+          ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(
+          module,
+          "ProcessGroup",
+          py::metaclass(opaque_base),
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 
@@ -3707,6 +3715,9 @@ Returns:
       .value("_REDUCE_SCATTER_BASE", ::c10d::OpType::_REDUCE_SCATTER_BASE)
       .value("COALESCED", ::c10d::OpType::COALESCED)
       .value("_ALLREDUCE_SPARSE", ::c10d::OpType::_ALLREDUCE_SPARSE)
+      .value(
+          "REDUCE_SCATTER_TENSOR_COALESCED",
+          ::c10d::OpType::REDUCE_SCATTER_TENSOR_COALESCED)
       .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
 
   py::enum_<::c10d::WorkResult>(module, "WorkResult")

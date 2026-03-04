@@ -325,6 +325,16 @@
     {
       "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
       "Context": "var_getattr {self} {name}",
+      "Explanation": "Dynamo could not trace through the custom `__getattribute__` method on this `nn.Module`.",
+      "Hints": [
+        "Simplify your `__getattribute__` implementation, ",
+        "or replace it with a targeted `@property`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
+      "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo does not support checking key existence on `nn.Module` instances that have a custom `__getattribute__` method defined.",
       "Hints": [
         "Avoid defining `__getattribute__` in your module.",
@@ -2508,6 +2518,17 @@
       "Context": "example_value type: {typestr(example_value)}; op: {proxy.node.op}; target: {proxy.node.target}",
       "Explanation": "torch.* ops that return a non-Tensor cannot be traced into the Dynamo FX graph output",
       "Hints": []
+    }
+  ],
+  "GB2520": [
+    {
+      "Gb_type": "assume_constant_result argument conversion failed",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Cannot convert argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result. The variable tracker does not support constant conversion.",
+      "Hints": [
+        "Remove torch._dynamo.assume_constant_result from this function",
+        "Ensure all arguments passed to the function can be converted to constants"
+      ]
     }
   ],
   "GB0209": [

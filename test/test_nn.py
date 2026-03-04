@@ -5457,6 +5457,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # just run a single backward, as gradcheck/gradgradcheck is expensive here
             output.sum().backward()
 
+    # test for issue reported in https://github.com/pytorch/pytorch/issues/173799
+    def test_pdist_inf_nan_propagation(self):
+        x = torch.empty((2, 2), dtype=torch.float64).fill_(float("inf"))
+        for device in device_():
+            result = F.pdist(x.to(device), p=0.0)
+            self.assertTrue(torch.isnan(result).item(), "Expected NaN in pdist output")
+
     def test_cosine_embedding_loss_with_diff_type(self):
         for device in device_():
             input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)

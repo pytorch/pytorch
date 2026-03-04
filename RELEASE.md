@@ -51,6 +51,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
+| 2.11 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.17.1.4), CUDA 13.0 (CUDNN 9.17.1.4) | -- | ROCm 7.2 |
 | 2.10 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.15.1.9) | ROCm 7.1 |
 | 2.9 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.13.0.50) | ROCm 6.4 |
 | 2.8 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 12.9 (CUDNN 9.10.2.21) | ROCm 6.4 |
@@ -67,19 +68,19 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ### PyTorch CUDA Support Matrix
 
-For Release 2.9 and 2.10 PyTorch Supports following CUDA Architectures:
+For Release 2.11 PyTorch Supports following CUDA Architectures:
 
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |
 | 12.6.3 | Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0) | |
-| 12.8.1 | Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)  | |
-| 13.0.0 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
+| 12.8.1 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)  | |
+| 13.0.2 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
 
 | CUDA | architectures supported for Linux aarch64 builds |
 | --- | --- |
 | 12.6.3 | Ampere(8.0), Hopper(9.0) |
 | 12.8.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 12.0)  |
-| 13.0.0 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
+| 13.0.2 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
 
 ## Release Cadence
 

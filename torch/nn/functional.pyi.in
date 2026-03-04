@@ -729,6 +729,8 @@ def scaled_mm(
     output_dtype: _dtype = ...,
     contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
+    *,
+    out: Tensor | None = None,
 ) -> Tensor: ...
 
 __all__ += ["scaled_mm"]

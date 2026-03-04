@@ -1,7 +1,7 @@
 import dataclasses
 import itertools
 from collections.abc import Iterable
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -17,8 +17,8 @@ class SubclassCreationMeta:
     class_type: Any
     attrs: dict[str, "SubclassCreationMeta"]
     metadata: Any
-    outer_size: Iterable[Union[None, int, torch.SymInt]]
-    outer_stride: Iterable[Union[None, int, torch.SymInt]]
+    outer_size: Iterable[None | int | torch.SymInt]
+    outer_stride: Iterable[None | int | torch.SymInt]
 
 
 class UnwrapTensorSubclass(torch.nn.Module):

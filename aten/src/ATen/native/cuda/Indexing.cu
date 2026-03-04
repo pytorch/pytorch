@@ -1795,36 +1795,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
   return masked_fill__cuda(self, mask, value.item());
 }
 
-namespace {
-
-// ForwardIt: only legacy random access iterator is supported.
-template<class ForwardIt, class T, bool is_lower = true>
-static __host__ __device__ __forceinline__
-ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
-    ForwardIt it;
-    typename std::iterator_traits<ForwardIt>::difference_type count, step;
-    // NOTE: std::distance(first, last) compiles but produces wrong results here,
-    // so only legacy random access iterators are safe in this code.
-    count = last - first;
-
-    while (count > 0) {
-      it = first;
-      step = count / 2;
-      // avoiding std::advance(it, step),
-      // although it does work unlike std::distance
-      it += step;
-      if (is_lower ? *it < value : value >= *it) {
-        first = ++it;
-        count -= step + 1;
-      }
-      else {
-        count = step;
-      }
-    }
-    return first;
-}
-
-}
 
 Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
   const auto ndim = self.dim();
@@ -1916,12 +1886,12 @@ Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& i
               [ptr_intrsc_counts_nneg_index, ptr_sorted_dim_indices, nnz] GPU_LAMBDA (
                 index_t idx_val, index_t idx_idx
               ) -> index_t {
-                auto* lb = find_bound<const index_t*, index_t, true>(
+                auto* lb = at::cuda::detail::find_bound<const index_t*, index_t, true>(
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
                   idx_val
                 );
-                auto* ub = find_bound<const index_t*, index_t, false>(
+                auto* ub = at::cuda::detail::find_bound<const index_t*, index_t, false>(
                   ptr_sorted_dim_indices,
                   ptr_sorted_dim_indices + nnz,
                   idx_val

@@ -28,7 +28,8 @@ except unittest.SkipTest:
 
 
 def filesize(filename: Path):
-    assert filename.exists(), f"{filename} is missing"
+    if not filename.exists():
+        raise AssertionError(f"{filename} is missing")
     return os.stat(filename).st_size
 
 
@@ -70,7 +71,8 @@ class TestDebugTrace(test_torchinductor.TestCase):
                 break
         self.assertTrue(m, "debug trace file path not found in logs")
         # For type checking, have to ensure it's not none.
-        assert m is not None
+        if m is None:
+            raise AssertionError
         filename = Path(m.group(1))
         self.assertTrue(filename.is_dir())
         self.assertGreater(filesize(filename / "fx_graph_readable.py"), 512)
@@ -87,6 +89,8 @@ op0: SchedulerNode(ComputedBuffer)
 op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
 op0.unmet_dependencies = []
 op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+op0.min_input_distance = 0
+op0.max_input_distance = 0
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -114,6 +118,8 @@ op1: SchedulerNode(ComputedBuffer)
 op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
 op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
 op1.met_dependencies = []
+op1.min_input_distance = 1
+op1.max_input_distance = 1
 op1.outputs = [
     buf1: ComputedBuffer
     buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -141,6 +147,8 @@ op2: ExternKernelSchedulerNode(ExternKernelOut)
 op2.writes = [StarDep(name='buf2', mode=None)]
 op2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
 op2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
+op2.min_input_distance = 2
+op2.max_input_distance = 2
 op2.outputs = [
     buf2: ExternKernelOut
     buf2.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -158,6 +166,8 @@ op0_op1: FusedSchedulerNode(SchedulerNode,SchedulerNode)
 op0_op1.writes = [MemoryDep('buf0', c0, {c0: 256}), MemoryDep('buf1', c0, {c0: 256})]
 op0_op1.unmet_dependencies = []
 op0_op1.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+op0_op1.min_input_distance = 0
+op0_op1.max_input_distance = 1
 op0_op1.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -171,6 +181,8 @@ op0: SchedulerNode(ComputedBuffer)
 op0.writes = [MemoryDep('buf0', c0, {c0: 256})]
 op0.unmet_dependencies = []
 op0.met_dependencies = [MemoryDep('arg0_1', c0, {c0: 256})]
+op0.min_input_distance = 0
+op0.max_input_distance = 0
 op0.outputs = [
     buf0: ComputedBuffer
     buf0.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -197,6 +209,8 @@ op1: SchedulerNode(ComputedBuffer)
 op1.writes = [MemoryDep('buf1', c0, {c0: 256})]
 op1.unmet_dependencies = [MemoryDep('buf0', c0, {c0: 256})]
 op1.met_dependencies = []
+op1.min_input_distance = 1
+op1.max_input_distance = 1
 op1.outputs = [
     buf1: ComputedBuffer
     buf1.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])
@@ -224,6 +238,8 @@ op2: ExternKernelSchedulerNode(ExternKernelOut)
 op2.writes = [StarDep(name='buf2', mode=None)]
 op2.unmet_dependencies = [StarDep(name='buf1', mode=None)]
 op2.met_dependencies = [StarDep(name='arg1_1', mode=None)]
+op2.min_input_distance = 2
+op2.max_input_distance = 2
 op2.outputs = [
     buf2: ExternKernelOut
     buf2.layout = FixedLayout('cpu', torch.float32, size=[16, 16], stride=[16, 1])

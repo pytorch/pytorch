@@ -413,11 +413,19 @@ class AsyncTPTest(MultiProcContinuousTest):
             A_shard, Bs, gather_dim=gather_dim, group_name=group.group_name
         )
 
-        assert torch.allclose(ag_output_0, ag_output_1)
-        assert ag_output_0.stride() == ag_output_1.stride()
+        if not torch.allclose(ag_output_0, ag_output_1):
+            raise AssertionError("Expected ag_output_0 to be close to ag_output_1")
+        if not (ag_output_0.stride() == ag_output_1.stride()):
+            raise AssertionError(
+                f"Expected strides to match: {ag_output_0.stride()} vs {ag_output_1.stride()}"
+            )
         for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
-            assert torch.allclose(mm_output_0, mm_output_1)
-            assert mm_output_0.stride(), mm_output_1.stride()
+            if not torch.allclose(mm_output_0, mm_output_1):
+                raise AssertionError("Expected mm_output_0 to be close to mm_output_1")
+            if not mm_output_0.stride():
+                raise AssertionError(
+                    f"Expected mm_output_0.stride() to be truthy, got {mm_output_0.stride()}"
+                )
 
     @skip_if_rocm_multiprocess  # this requires async_input_mm support
     @skipIf(
@@ -635,8 +643,12 @@ class AsyncTPTest(MultiProcContinuousTest):
             A, B, "avg", scatter_dim=scatter_dim, group_name=group.group_name
         )
 
-        assert torch.allclose(output_0, output_1)
-        assert output_0.stride() == output_1.stride()
+        if not torch.allclose(output_0, output_1):
+            raise AssertionError("Expected output_0 to be close to output_1")
+        if not (output_0.stride() == output_1.stride()):
+            raise AssertionError(
+                f"Expected strides to match: {output_0.stride()} vs {output_1.stride()}"
+            )
 
     @skip_if_rocm_multiprocess  # AsyncTP support changed _fused_scaled_matmul_reduce_scatter_fallback API, need more changes
     @skip_if_lt_x_gpu(2)
@@ -690,7 +702,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                     )
                 )
 
-        assert outputs[0].stride() == outputs[1].stride()
+        if not (outputs[0].stride() == outputs[1].stride()):
+            raise AssertionError(
+                f"Expected strides to match: {outputs[0].stride()} vs {outputs[1].stride()}"
+            )
         self.assertEqual(outputs[0], outputs[1])
 
     @skipIf(

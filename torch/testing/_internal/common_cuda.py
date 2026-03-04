@@ -44,6 +44,15 @@ IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_ca
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
 
+@contextlib.contextmanager
+def blas_library_context(backend):
+    prev_backend = torch.backends.cuda.preferred_blas_library()
+    torch.backends.cuda.preferred_blas_library(backend)
+    try:
+        yield
+    finally:
+        torch.backends.cuda.preferred_blas_library(prev_backend)
+
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():
         return False
@@ -68,6 +77,12 @@ def evaluate_platform_supports_flash_attention():
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
     return False
+
+def evaluate_platform_supports_ck_sdpa():
+    if TEST_WITH_ROCM:
+        return torch.backends.cuda.is_ck_sdpa_available()
+    else:
+        return False
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
@@ -131,6 +146,8 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_support
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
+PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
+
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
@@ -174,7 +191,16 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
         return built_with_mslk and IS_SM100
     return False
 
+def evaluate_platform_supports_mxfp4_gemm():
+    if torch.cuda.is_available():
+        built_with_mslk = "USE_MSLK" in torch.__config__.show()
+        return bool(torch.version.hip) or built_with_mslk
+
+    return False
+
+
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
+PLATFORM_SUPPORTS_MXFP4_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp4_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())

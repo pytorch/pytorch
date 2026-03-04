@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, TYPE_CHECKING  # noqa: UP035
+from typing import Sequence, TYPE_CHECKING  # noqa: UP035
 
 from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
     opset20 as op20,
@@ -39,8 +39,8 @@ def aten_gelu_opset20(
 def aten_group_norm(
     input: TFloat,
     num_groups: int,
-    weight: Optional[TFloat] = None,
-    bias: Optional[TFloat] = None,
+    weight: TFloat | None = None,
+    bias: TFloat | None = None,
     eps: float = 1e-05,
     cudnn_enabled: bool = True,
 ) -> TFloat:
@@ -60,8 +60,8 @@ def aten_group_norm(
 def aten_rms_norm(
     input: TFloat,
     normalized_shape: Sequence[int],
-    weight: Optional[TFloat] = None,
-    eps: Optional[float] = None,
+    weight: TFloat | None = None,
+    eps: float | None = None,
 ) -> TFloat:
     """rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor"""
 
@@ -92,10 +92,10 @@ def aten_scaled_dot_product_attention_23(
     query: TFloat,
     key: TFloat,
     value: TFloat,
-    attn_mask: Optional[TFloat] = None,
+    attn_mask: TFloat | None = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
-    scale: Optional[float] = None,
+    scale: float | None = None,
     enable_gqa: bool = False,
 ) -> TFloat:
     """scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None, bool enable_gqa=False) -> Tensor

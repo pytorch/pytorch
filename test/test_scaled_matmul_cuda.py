@@ -26,6 +26,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
+    PLATFORM_SUPPORTS_MXFP4_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
     SM100OrLater,
     SM120OrLater,
@@ -218,6 +219,7 @@ def scaled_mm_wrap(
     use_fast_accum=False,
     bias=None,
     wrap_v2=wrap,
+    out=None,
 ):
     if not wrap_v2:
         return torch._scaled_mm(
@@ -249,6 +251,7 @@ def scaled_mm_wrap(
             bias=bias,
             output_dtype=out_dtype,
             use_fast_accum=use_fast_accum,
+            out=out,
         )
         return out
 
@@ -706,6 +709,23 @@ class TestFP8Matmul(TestCase):
         out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    def test_float8_out_argument(self, device) -> None:
+        if not _device_supports_scaled_mm_fp8(device):
+            raise unittest.SkipTest(f8_msg)
+        size = (16, 16)
+        x = torch.full(size, .5, device=device, dtype=e4m3_type)
+        # hipblaslt does not yet support mixed e4m3_type input
+        y_type = e4m3_type if torch.version.hip else e5m2_type
+        y = torch.full(size, .5, device=device, dtype=y_type).t()
+
+        out = torch.empty(size, device=device, dtype=torch.bfloat16)
+
+        scale_one = torch.tensor(1.0, device=device)
+        out_fp8 = scaled_mm_wrap(x, y, scale_a=scale_one, scale_b=scale_one, out=out)
+
+        if out_fp8.data_ptr() != out.data_ptr():
+            raise AssertionError("out_fp8 and out must have the same data pointers")
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
@@ -716,8 +736,11 @@ class TestFP8Matmul(TestCase):
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format):
         torch.manual_seed(42)
 
-        if format == "mxfp4" and SM120OrLater:
+        if (format == "mxfp4") and SM120OrLater and (not PLATFORM_SUPPORTS_MXFP4_GEMM):
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+
+        if (format == "mxfp4") and (not PLATFORM_SUPPORTS_MXFP4_GEMM):
+            raise unittest.SkipTest("MXFP4 not supported on this platform - build with MSLK support")
 
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
         input_group_end_offsets = generate_jagged_offs(
@@ -786,8 +809,10 @@ class TestFP8Matmul(TestCase):
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format):
         torch.manual_seed(42)
 
-        if format == "mxfp4" and SM120OrLater:
+        if (format == "mxfp4") and SM120OrLater:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if (format == "mxfp4") and (not PLATFORM_SUPPORTS_MXFP4_GEMM):
+            raise unittest.SkipTest("MXFP4 not supported on this platform - build with MSLK support")
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
@@ -1894,7 +1919,7 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
-        if recipe == "mxfp4" and SM120OrLater:
+        if (recipe == "mxfp4") and SM120OrLater or (not PLATFORM_SUPPORTS_MXFP4_GEMM):
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
         device = "cuda"
@@ -2113,6 +2138,101 @@ class TestFP8Matmul(TestCase):
             sqnr = compute_error(C_ref, C)
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
+    def test_passed_swizzle_arrays(self, device) -> None:
+        # Ensure that incorrectly-sized swizzle arrays are caught
+        M, N, K = 128, 128, 128
+
+        # MXFP8: swizzle=[SWIZZLE_32_4_4]
+        x = torch.randn(M, K, device=device).to(torch.float8_e4m3fn)
+        w = torch.randn(N, K, device=device).to(torch.float8_e4m3fn)
+
+        x_scale = torch.full((M, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
+        w_scale = torch.full((N, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
+
+        # No swizzle passed - must fail on swizzle_a
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_a must have 1 values, got 0",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                x_scale,
+                ScalingType.BlockWise1x32,
+                w_scale,
+                ScalingType.BlockWise1x32,
+            )
+
+        # swizzle_a passed, not b, must fail on swizzle_b
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_b must have 1 values, got 0",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                x_scale,
+                ScalingType.BlockWise1x32,
+                w_scale,
+                ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            )
+
+        # NVFP4 two-level: swizzle=[SWIZZLE_32_4_4, NO_SWIZZLE]
+        x = _bfloat16_to_float4_e2m1fn_x2(x.to(torch.bfloat16))
+        w = _bfloat16_to_float4_e2m1fn_x2(w.to(torch.bfloat16))
+
+        x_scale = torch.full((M, K // 16), 1., dtype=torch.float8_e4m3fn, device=device)
+        w_scale = torch.full((N, K // 16), 1., dtype=torch.float8_e4m3fn, device=device)
+
+        global_scale = torch.full((1, ), 1., dtype=torch.float, device=device)
+
+        # No swizzles passed - must fail on swizzle_a
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_a must have 2 values, got 0",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                [x_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [w_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+            )
+
+        # Not enough swizzles passed - must fail on swizzle_a
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_a must have 2 values, got 1",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                [x_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [w_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                swizzle_a=[SwizzleType.SWIZZLE_32_4_4, ],
+            )
+
+        # Not enough swizzles passed to b - must fail on swizzle_b
+        with self.assertRaisesRegex(
+            ValueError,
+            "swizzle_b must have 2 values, got 1",
+        ):
+            _ = torch.nn.functional.scaled_mm(
+                x,
+                w.t(),
+                [x_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [w_scale, global_scale],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                swizzle_a=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+                swizzle_b=[SwizzleType.SWIZZLE_32_4_4, ],
+            )
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)

@@ -443,12 +443,7 @@ int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Ten
   return static_cast<int64_t>(backend);
 }
 
-REGISTER_ARCH_DISPATCH(_fused_sdp_choice_stub, DEFAULT, &_fused_sdp_choice_cpp)
-REGISTER_AVX2_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_AVX512_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_VSX_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_ZVECTOR_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_SVE256_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+REGISTER_ALL_CPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 REGISTER_HPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_meta)
 
 int64_t _fused_sdp_choice_meta(
@@ -734,7 +729,9 @@ Tensor scaled_dot_product_attention(
   // _batch_norm_impl_index in Normalization.cpp) to make the output depend
   // on all inputs so that backward() produces correctly-shaped zero
   // gradients instead of None.
-  if (query_.sym_numel() == 0 || key.sym_numel() == 0 || value.sym_numel() == 0) {
+  if (TORCH_GUARD_OR_FALSE(query_.sym_numel().sym_eq(0)) ||
+      TORCH_GUARD_OR_FALSE(key.sym_numel().sym_eq(0)) ||
+      TORCH_GUARD_OR_FALSE(value.sym_numel().sym_eq(0))) {
     auto output_shape = query_.sym_sizes().vec();
     output_shape[output_shape.size() - 1] = value.sym_size(-1);
     auto out = at::zeros_symint(output_shape, query_.options());

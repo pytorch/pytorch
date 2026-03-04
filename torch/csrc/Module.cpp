@@ -76,6 +76,7 @@
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
+#include <torch/csrc/fx/graph.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
@@ -2269,6 +2270,7 @@ PyObject* initModule() {
   THPEvent_init(module);
   NodeBase_init(module);
   NodeIter_init(module);
+  Namespace_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -2737,6 +2739,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_rocm_fa_preferred_backend", []() {
     return at::globalContext().getROCmFAPreferredBackend();
+  });
+
+  py_module.def("_is_ck_sdpa_available", []() {
+#ifdef USE_ROCM
+    return at::globalContext().ckSupported() && at::globalContext().hasCKSDPA();
+#else
+    return false;
+#endif
   });
 
   py_module.def(
