@@ -205,6 +205,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     def create(
         proxy: Proxy, value: Any, ctor_args_kwargs: Any = None, **options: Any
     ) -> "TorchScriptObjectVariable":
+        from .torch_comm import TorchCommsObjectVariable
+
+        if TorchCommsObjectVariable.is_matching_value(value):
+            return TorchCommsObjectVariable(proxy, value, ctor_args_kwargs, **options)
         return TorchScriptObjectVariable(proxy, value, ctor_args_kwargs, **options)
 
     def __init__(

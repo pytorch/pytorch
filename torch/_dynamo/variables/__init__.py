@@ -156,6 +156,7 @@ from .tensor import (
     UntypedStorageVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
+from .torch_comm import TorchCommsObjectVariable
 from .user_defined import (
     FrozenDataClassVariable,
     InspectVariable,
@@ -248,4 +249,5 @@ __all__ = [
     "WithEnterFunctionVariable",
     "WithExitFunctionVariable",
     "MappingProxyVariable",
+    "TorchCommsObjectVariable",
 ]
