@@ -1329,6 +1329,96 @@ class TestSortAndSelect(TestCase):
         finally:
             torch.set_num_threads(prev_num_threads)
 
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @slowTest
+    def test_topk_large_k(self, device, dtype):
+        """Test topk with k > 2^32 (integer overflow bug fix).
+
+        Tests both random and edge case (all identical values) inputs.
+        The edge case will force billions of elements to enter the same radix bin.
+        Requires GPU with sufficient memory; skips if memory is insufficient.
+        """
+        extra = random.randint(500, 2000)
+        n = 2**32 + extra
+        k = random.randint(2**32 + 100, n - 100)
+        largest = random.choice([True, False])
+
+
+        # check correctness chunkwise later to avoid OOM
+        chunk_size = 100_000_000
+        num_chunks = (k + chunk_size - 1) // chunk_size
+
+        # pre-allocate GPU tensors
+        try:
+            data = torch.empty((1, n), device=device, dtype=dtype)
+            gpu_values = torch.empty((1, k), device=device, dtype=dtype)
+            gpu_indices = torch.empty((1, k), device=device, dtype=torch.long)
+            gpu_chunk_values = torch.empty(chunk_size, device=device, dtype=dtype)
+        except RuntimeError as e:
+            self.skipTest(f"Insufficient memory for GPU tensors in large k topk test: {e}")
+
+        # pre-allocate CPU tensors
+        try:
+            cpu_indices_copy = torch.empty(k, dtype=torch.long, device='cpu')
+        except RuntimeError as e:
+            self.skipTest(f"Insufficient memory for CPU tensors in large k topk test: {e}")
+
+        # run tests for both random and identical values
+        for test_case in ["random", "identical"]:
+            random_constant = random.random()
+            if test_case == "random":
+                data.random_()
+            else:
+                data.fill_(random_constant)
+
+            # run topk
+            try:
+                torch.topk(data, k, dim=1, largest=largest, sorted=False, out=(gpu_values, gpu_indices))
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    self.skipTest(f"Insufficient memory for topk with k={k:,} test: {e}")
+                raise
+
+            indices = gpu_indices
+            values = gpu_values
+
+            # all indices must be in valid range
+            self.assertGreaterEqual(indices.min().item(), 0)
+            self.assertLess(indices.max().item(), n)
+
+            # all indices must be unique
+            total_unique = None
+            try:
+                cpu_indices_copy.copy_(indices.squeeze(0))
+                total_unique = torch.unique(cpu_indices_copy).numel()
+            except RuntimeError as e:
+                # skip uniqueness check in case torch.unique on CPU causes OOM
+                if "out of memory" not in str(e).lower():
+                    raise
+
+            if total_unique is not None:
+                self.assertEqual(total_unique, k, f"Duplicates found in topk test: {k - total_unique}")
+            
+            # for random case, values must match at returned indices (use pre-allocated tensor)
+            if test_case == "random":
+                for i in range(num_chunks):
+                    start = i * chunk_size
+                    end = min((i + 1) * chunk_size, k)
+                    chunk_size_actual = end - start
+
+                    chunk_indices = indices[0, start:end]
+                    chunk_values = values[0, start:end]
+
+                    actual_values = torch.index_select(data[0], 0, chunk_indices, out=gpu_chunk_values[:chunk_size_actual])
+                    self.assertTrue(
+                        torch.equal(chunk_values, actual_values),
+                        f"Value mismatch in chunk {i+1}"
+                    )
+
+            # for identical case, all values must equal to constant
+            if test_case == "identical":
+                self.assertTrue((values == random_constant).all().item(), "Values not equal to random constant")
 
 instantiate_device_type_tests(TestSortAndSelect, globals())
 
