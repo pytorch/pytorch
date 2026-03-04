@@ -15,7 +15,6 @@ import torch.utils._pytree as pytree
 from torch._export.serde import schema
 from torch._export.serde.serialize import (
     _dataclass_to_dict,
-    _dict_to_dataclass,
     deserialize_device,
     deserialize_scalar_type,
     deserialize_size,
@@ -853,7 +852,7 @@ def _load_payload_config(
     """
     Load and parse a payload config from the archive.
     """
-    return torch._C._export.deserialize_payload_config(
+    return torch._C._export.deserialize_payload_config(  # type: ignore[attr-defined]
         archive_reader.read_string(config_file)
     )
 
@@ -1010,7 +1009,7 @@ def _load_exported_programs(
         constants = _load_constants(archive_reader, model_name)
 
         ep = ExportedProgramDeserializer(expected_opset_version).deserialize(
-            serialized_exported_program,
+            serialized_exported_program,  # type: ignore[arg-type]
             state_dict,
             constants,
             serialized_sample_inputs,

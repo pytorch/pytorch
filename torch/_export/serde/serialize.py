@@ -125,9 +125,18 @@ def _init_cpp_schema_types() -> None:
     except AttributeError:
         return
     for py_type in (
-        TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument,
-        OptionalTensorArgument, CustomObjArgument, TokenArgument,
-        GraphArgument, Argument, ExportedProgram, InputSpec, OutputSpec,
+        TensorArgument,
+        SymIntArgument,
+        SymFloatArgument,
+        SymBoolArgument,
+        OptionalTensorArgument,
+        CustomObjArgument,
+        TokenArgument,
+        GraphArgument,
+        Argument,
+        ExportedProgram,
+        InputSpec,
+        OutputSpec,
     ):
         cpp_type = getattr(cpp, f"Cpp{py_type.__name__}", None)
         if cpp_type is not None:
@@ -3357,7 +3366,9 @@ class GraphModuleDeserializer(metaclass=Final):
         deserialized_metadata: dict[str, Any],
     ):
         for idx, arg in enumerate(args):
-            if _schema_isinstance(arg, (TensorArgument, SymIntArgument, SymFloatArgument)):
+            if _schema_isinstance(
+                arg, (TensorArgument, SymIntArgument, SymFloatArgument)
+            ):
                 self.generate_getitem(
                     meta_val, fx_node, arg, idx, deserialized_metadata
                 )
@@ -3420,7 +3431,9 @@ class GraphModuleDeserializer(metaclass=Final):
                 raise AssertionError(
                     f"expected list, got {type(serialized_node.outputs[0].value).__name__}"
                 )
-            if not _schema_isinstance(serialized_node.outputs[0].value[0], TensorArgument):
+            if not _schema_isinstance(
+                serialized_node.outputs[0].value[0], TensorArgument
+            ):
                 raise AssertionError(
                     f"expected TensorArgument, got {type(serialized_node.outputs[0].value[0]).__name__}"
                 )
@@ -3939,7 +3952,9 @@ def _canonicalize_graph(
                 return None
             if _schema_isinstance(a, TensorArgument):
                 return a.name
-            elif _schema_isinstance(a, (SymIntArgument, SymBoolArgument, SymFloatArgument)):
+            elif _schema_isinstance(
+                a, (SymIntArgument, SymBoolArgument, SymFloatArgument)
+            ):
                 if a.type == "as_name":
                     return a.as_name
                 elif a.type in ("as_int", "as_bool", "as_float"):

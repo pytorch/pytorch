@@ -302,15 +302,29 @@ class {name} {{
 
         def pybind_property(field_name, cpp_type):
             type_name = fields[field_name]["type"]
+            getter = f"s.get_{field_name}()"
+            prop = f'    .def_property_readonly("{field_name}"'
             if type_name in cpp_enum_defs:
-                return f'    .def_property_readonly("{field_name}", [](const {name}& s) {{ return static_cast<int64_t>(s.get_{field_name}()); }})'
+                return (
+                    f"{prop}, [](const {name}& s) {{"
+                    f" return static_cast<int64_t>({getter}); }})"
+                )
             if cpp_type == "F64":
-                return f'    .def_property_readonly("{field_name}", [](const {name}& s) {{ return s.get_{field_name}().get(); }})'
+                return f"{prop}, [](const {name}& s) {{ return {getter}.get(); }})"
             if cpp_type.startswith("std::optional<") and cpp_type.endswith("F64>"):
-                return f'    .def_property_readonly("{field_name}", [](const {name}& s) -> std::optional<double> {{ const auto& v = s.get_{field_name}(); if (!v) return std::nullopt; return v->get(); }})'
+                return (
+                    f"{prop}, [](const {name}& s)"
+                    f" -> std::optional<double> {{"
+                    f" const auto& v = {getter};"
+                    f" if (!v) return std::nullopt;"
+                    f" return v->get(); }})"
+                )
             if cpp_type.startswith("ForwardRef<"):
-                return f'    .def_property_readonly("{field_name}", [](const {name}& s) -> const auto& {{ return *s.get_{field_name}(); }})'
-            return f'    .def_property_readonly("{field_name}", &{name}::get_{field_name})'
+                return (
+                    f"{prop}, [](const {name}& s)"
+                    f" -> const auto& {{ return *{getter}; }})"
+                )
+            return f"{prop}, &{name}::get_{field_name})"
 
         props = "\n".join(
             pybind_property(n, f["cpp_type"]) for n, f in cpp_fields.items()
@@ -409,52 +423,61 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
 
         # pybind11 for union: .type returns tag string, .value returns active variant
         type_cases = "\n".join(
-            f'      case {name}::Tag::{n.upper()}: return "{n}";'
-            for n in cpp_fields
+            f'      case {name}::Tag::{n.upper()}: return "{n}";' for n in cpp_fields
         )
 
         def _union_variant_accessor(variant_name, cpp_type):
+            getter = f"u.get_{variant_name}()"
+            prop = f'    .def_property_readonly("{variant_name}"'
             if cpp_type == "F64":
-                return f'    .def_property_readonly("{variant_name}", [](const {name}& u) {{ return u.get_{variant_name}().get(); }})'
+                return f"{prop}, [](const {name}& u) {{ return {getter}.get(); }})"
             if cpp_type == "std::vector<F64>":
                 return (
-                    f'    .def_property_readonly("{variant_name}", [](const {name}& u) {{\n'
-                    f'      const auto& v = u.get_{variant_name}();\n'
-                    f'      std::vector<double> out; out.reserve(v.size());\n'
-                    f'      for (const auto& f : v) out.push_back(f.get());\n'
-                    f'      return out;\n'
-                    f'    }})'
+                    f"{prop}, [](const {name}& u) {{\n"
+                    f"      const auto& v = {getter};\n"
+                    f"      std::vector<double> out;"
+                    f" out.reserve(v.size());\n"
+                    f"      for (const auto& f : v)"
+                    f" out.push_back(f.get());\n"
+                    f"      return out;\n"
+                    f"    }})"
                 )
             if cpp_type == "int64_t" and fields[variant_name]["type"] in cpp_enum_defs:
-                return f'    .def_property_readonly("{variant_name}", [](const {name}& u) {{ return static_cast<int64_t>(u.get_{variant_name}()); }})'
-            if cpp_type.startswith("ForwardRef<"):
-                return f'    .def_property_readonly("{variant_name}", [](const {name}& u) -> const auto& {{ return *u.get_{variant_name}(); }})'
-            return f'    .def_property_readonly("{variant_name}", &{name}::get_{variant_name})'
-
-        def _union_value_case(variant_name, cpp_type):
-            tag = f'{name}::Tag::{variant_name.upper()}'
-            if cpp_type == "F64":
-                return f'      case {tag}: return py::cast(u.get_{variant_name}().get());'
-            if cpp_type == "std::vector<F64>":
                 return (
-                    f'      case {tag}: {{\n'
-                    f'        const auto& v = u.get_{variant_name}();\n'
-                    f'        std::vector<double> out; out.reserve(v.size());\n'
-                    f'        for (const auto& f : v) out.push_back(f.get());\n'
-                    f'        return py::cast(out);\n'
-                    f'      }}'
+                    f"{prop}, [](const {name}& u) {{"
+                    f" return static_cast<int64_t>({getter}); }})"
                 )
             if cpp_type.startswith("ForwardRef<"):
-                return f'      case {tag}: return py::cast(*u.get_{variant_name}());'
-            return f'      case {tag}: return py::cast(u.get_{variant_name}());'
+                return (
+                    f"{prop}, [](const {name}& u)"
+                    f" -> const auto& {{ return *{getter}; }})"
+                )
+            return f"{prop}, &{name}::get_{variant_name})"
+
+        def _union_value_case(variant_name, cpp_type):
+            tag = f"{name}::Tag::{variant_name.upper()}"
+            if cpp_type == "F64":
+                return (
+                    f"      case {tag}: return py::cast(u.get_{variant_name}().get());"
+                )
+            if cpp_type == "std::vector<F64>":
+                return (
+                    f"      case {tag}: {{\n"
+                    f"        const auto& v = u.get_{variant_name}();\n"
+                    f"        std::vector<double> out; out.reserve(v.size());\n"
+                    f"        for (const auto& f : v) out.push_back(f.get());\n"
+                    f"        return py::cast(out);\n"
+                    f"      }}"
+                )
+            if cpp_type.startswith("ForwardRef<"):
+                return f"      case {tag}: return py::cast(*u.get_{variant_name}());"
+            return f"      case {tag}: return py::cast(u.get_{variant_name}());"
 
         value_cases = "\n".join(
-            _union_value_case(n, f["cpp_type"])
-            for n, f in cpp_fields.items()
+            _union_value_case(n, f["cpp_type"]) for n, f in cpp_fields.items()
         )
         variant_accessors = "\n".join(
-            _union_variant_accessor(n, f["cpp_type"])
-            for n, f in cpp_fields.items()
+            _union_variant_accessor(n, f["cpp_type"]) for n, f in cpp_fields.items()
         )
         pybind_defs[name] = f"""
   py::class_<{name}>(m, "Cpp{name}")
@@ -1006,7 +1029,8 @@ def update_schema():
         cpp_header=cpp_header,
         cpp_header_path=torch_prefix + "csrc/utils/generated_serialization_types.h",
         pybind_header=pybind_header,
-        pybind_header_path=torch_prefix + "csrc/utils/generated_serialization_bindings.h",
+        pybind_header_path=torch_prefix
+        + "csrc/utils/generated_serialization_bindings.h",
         enum_converter_header=enum_converter_header,
         enum_converter_header_path=torch_prefix
         + "csrc/inductor/aoti_torch/generated_enum_converters.h",
