@@ -3710,6 +3710,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
   TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
 
+  // Outer or inner dimension is 0
   if (result.numel() == 0 || self.size(1) == 0) {
     return result.zero_();
   }

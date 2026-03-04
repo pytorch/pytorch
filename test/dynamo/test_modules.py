@@ -2738,7 +2738,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         model = ToyModel()
         x = torch.zeros((3, 4))
         obj = CustomClass(model)
-        out = torch.compile(obj, fullgraph=True)(x)
+        out = torch.compile(obj, fullgraph=True, backend="eager")(x)
         self.assertEqual(out, (x + 1) * (x + 1))
 
     def test_module_dict_iter_name(self):
@@ -2810,7 +2810,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             x = torch.randn(1, 3)
             return models(x)
 
-        run = torch.compile(run, fullgraph=True)
+        run = torch.compile(run, fullgraph=True, backend="eager")
         run()
         self.assertTrue(models[0].abc)
 
@@ -2822,8 +2822,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.text_encoding
 
         mod = MyModule()
-        out = torch.compile(mod, fullgraph=True)(torch.randn(10))
-        assert mod.text_encoding is out
+        out = torch.compile(mod, fullgraph=True, backend="eager")(torch.randn(10))
+        if mod.text_encoding is not out:
+            raise AssertionError("Expected mod.text_encoding to be out")
 
     def test_module_dict_iter_values(self):
         class MyModule(torch.nn.Module):
@@ -3109,7 +3110,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return x + 1
 
         model = Mod()
-        compiled_model = torch.compile(model)
+        compiled_model = torch.compile(model, backend="eager")
         compiled_model.foo = 42
         del compiled_model.foo
 
@@ -3495,18 +3496,26 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         input_tensor = torch.randn(4, 10)
 
         eager_output = model(input_tensor)
-        assert hasattr(model.linear, "weight")
-        assert not hasattr(model.linear, "_tmp_weight")
+        if not hasattr(model.linear, "weight"):
+            raise AssertionError("Expected model.linear to have weight")
+        if hasattr(model.linear, "_tmp_weight"):
+            raise AssertionError("Expected model.linear to not have _tmp_weight")
 
         torch.manual_seed(0)
         model_to_compile = SimpleModel()
         model_to_compile.linear.register_forward_pre_hook(pre_forward_rename_hook)
         model_to_compile.linear.register_forward_hook(post_forward_restore_hook)
 
-        compiled_model = torch.compile(model_to_compile, fullgraph=True)
+        compiled_model = torch.compile(
+            model_to_compile, fullgraph=True, backend="eager"
+        )
         compiled_output = compiled_model(input_tensor)
-        assert hasattr(model.linear, "weight")
-        assert not hasattr(compiled_model.linear, "_tmp_weight")
+        if not hasattr(model.linear, "weight"):
+            raise AssertionError("Expected model.linear to have weight")
+        if hasattr(compiled_model.linear, "_tmp_weight"):
+            raise AssertionError(
+                "Expected compiled_model.linear to not have _tmp_weight"
+            )
         torch.testing.assert_close(eager_output, compiled_output)
 
     def test_submodule_forward_hooks_with_kwargs(self):
@@ -3545,7 +3554,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             layer.linear.register_forward_hook(noop_hook, with_kwargs=True)
 
         for i, layer in model.layers.named_children():
-            model.layers.register_module(i, torch.compile(layer, fullgraph=True))
+            model.layers.register_module(
+                i, torch.compile(layer, fullgraph=True, backend="eager")
+            )
 
         output = model(inp)
         self.assertEqual(output_eager, output)
@@ -3600,7 +3611,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_call_count, 7)
 
         for i, layer in model.layers.named_children():
-            model.layers.register_module(i, torch.compile(layer, fullgraph=True))
+            model.layers.register_module(
+                i, torch.compile(layer, fullgraph=True, backend="eager")
+            )
 
         call_count[0] = 0
         output = model(inp)

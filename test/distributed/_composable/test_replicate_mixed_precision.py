@@ -21,7 +21,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
-    FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     get_devtype,
     MLP,
@@ -38,10 +38,8 @@ from torch.testing._internal.common_utils import (
 device_type = torch.device(get_devtype())
 
 
-class TestReplicateMixedPrecisionTraining(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return min(2, torch.get_device_module(device_type).device_count())
+class TestReplicateMixedPrecisionTraining(FSDPTestContinuous):
+    world_size = 2
 
     def _init_models_and_optims(
         self,

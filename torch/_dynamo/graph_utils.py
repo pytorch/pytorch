@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.fx import Graph, map_arg, Node
@@ -79,7 +79,7 @@ def _detect_cycles(
     return "no cycle detected"
 
 
-def _graph_device_type(graph: Optional[Graph]) -> str:
+def _graph_device_type(graph: Graph | None) -> str:
     if graph is None:
         return "cpu"
 

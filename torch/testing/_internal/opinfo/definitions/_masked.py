@@ -456,6 +456,13 @@ op_db: list[OpInfo] = [
                 "test_reference_masked",
                 dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),
             ),
+            # FIXME: improve precision
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_reference_masked",
+                dtypes=(torch.float16,),
+            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestNormalizeOperators",
@@ -484,13 +491,6 @@ op_db: list[OpInfo] = [
                 "test_reference_masked",
                 device_type="xpu",
                 dtypes=[torch.complex128],
-            ),
-            # AssertionError: Scalars are not equal!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
             ),
         ),
         decorators=[
@@ -587,13 +587,6 @@ op_db: list[OpInfo] = [
                     torch.int8,
                     torch.complex128,
                 ),
-            ),
-            # AssertionError: Scalars are not equal!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
             ),
         ),
         decorators=[

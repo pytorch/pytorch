@@ -5,7 +5,7 @@ import functools
 import importlib
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, cast, Literal, Optional
+from typing import Any, cast, Literal
 
 import sympy
 from sympy import Expr, Integer
@@ -15,6 +15,7 @@ from torch.fx import GraphModule
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
+from ...virtualized import V
 from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
 
@@ -295,6 +296,8 @@ def create_flex_flash_attention_kernel(
     kv_indices: TensorBox | None,
     full_kv_num_blocks: TensorBox | None,
     full_kv_indices: TensorBox | None,
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
     mask_graph: Subgraph,
     subgraph: Subgraph | None = None,
 ) -> tuple[TensorBox, TensorBox]:
@@ -342,6 +345,9 @@ def create_flex_flash_attention_kernel(
         stride=[sympy.sympify(s) for s in output.get_stride()],
     )
 
+    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
+    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
+
     mask_graph_is_trivial = is_trivial_mask_graph(mask_graph.graph_module)
     score_graph_is_trivial = subgraph is None or is_trivial_score_graph(
         subgraph.graph_module
@@ -380,6 +386,8 @@ def create_flex_flash_attention_kernel(
             SM_SCALE=scale,
             HAS_SCORE_MOD=has_score_mod,
             NEEDS_BLOCK_MASK=needs_block_mask,
+            SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
+            SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
         )
 
     for choice in choices:
@@ -398,8 +406,8 @@ def create_flex_flash_attention_kernel(
 def _can_use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
-    joint_outputs: Optional[Any] = None,
-    score_mod_other_buffers: Optional[Sequence[TensorBox]] = None,
+    joint_outputs: Any | None = None,
+    score_mod_other_buffers: Sequence[TensorBox] | None = None,
     num_score_mod_placeholders: int = 5,
 ) -> tuple[bool, str]:
     if not ensure_flash_available():
@@ -432,8 +440,8 @@ def _use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
     backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
-    joint_outputs: Optional[Any] = None,
-    score_mod_other_buffers: Optional[Sequence[TensorBox]] = None,
+    joint_outputs: Any | None = None,
+    score_mod_other_buffers: Sequence[TensorBox] | None = None,
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
@@ -475,14 +483,16 @@ def create_flex_flash_attention_backward_kernel(
     grad_out: TensorBox,
     scale: float,
     kernel_options: dict[str, Any],
-    fw_subgraph_buffer: Optional[SubgraphResults] = None,
-    joint_subgraph_buffer: Optional[Any] = None,
-    score_mod_other_buffers: Optional[list[TensorBox]] = None,
-    mask_graph_buffer: Optional[SubgraphResults] = None,
-    q_num_blocks: Optional[TensorBox] = None,
-    q_indices: Optional[TensorBox] = None,
-    full_q_num_blocks: Optional[TensorBox] = None,
-    full_q_indices: Optional[TensorBox] = None,
+    sparse_q_block_size: int,
+    sparse_kv_block_size: int,
+    fw_subgraph_buffer: SubgraphResults | None = None,
+    joint_subgraph_buffer: Any | None = None,
+    score_mod_other_buffers: list[TensorBox] | None = None,
+    mask_graph_buffer: SubgraphResults | None = None,
+    q_num_blocks: TensorBox | None = None,
+    q_indices: TensorBox | None = None,
+    full_q_num_blocks: TensorBox | None = None,
+    full_q_indices: TensorBox | None = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
@@ -532,6 +542,9 @@ def create_flex_flash_attention_backward_kernel(
         stride=[sympy.sympify(s) for s in grad_query.get_stride()],
     )
 
+    sparse_q_block_size = V.graph.sizevars.guard_int(sparse_q_block_size)
+    sparse_kv_block_size = V.graph.sizevars.guard_int(sparse_kv_block_size)
+
     choices: list[Any] = []
 
     input_nodes: list[TensorBox] = [
@@ -577,6 +590,8 @@ def create_flex_flash_attention_backward_kernel(
             SM_SCALE=scale,
             HAS_SCORE_MOD=has_score_mod,
             HAS_BLOCK_MASK=has_block_mask,
+            SPARSE_Q_BLOCK_SIZE=sparse_q_block_size,
+            SPARSE_KV_BLOCK_SIZE=sparse_kv_block_size,
         )
 
     for choice in choices:

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from collections.abc import Callable
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility
@@ -26,8 +26,8 @@ class GraphTransformObserver:
         self,
         gm: GraphModule,
         passname: str,
-        subsystem: Optional[str] = None,
-        log_url: Optional[str] = None,
+        subsystem: str | None = None,
+        log_url: str | None = None,
     ):
         """
         log_url is inferred to be torch._inductor.config.trace.log_url_for_graph_xform unless otherwise specified
@@ -76,7 +76,7 @@ class GraphTransformObserver:
     def get_current_pass_count(cls):
         return cls.__pass_count
 
-    def apply_gm_pass(self, pass_fn: Callable[[GraphModule], T]) -> Optional[T]:
+    def apply_gm_pass(self, pass_fn: Callable[[GraphModule], T]) -> T | None:
         from torch._dynamo.utils import dynamo_timed
 
         with self:
@@ -89,7 +89,7 @@ class GraphTransformObserver:
             ):
                 return pass_fn(self.gm)
 
-    def apply_graph_pass(self, pass_fn: Callable[[Graph], T]) -> Optional[T]:
+    def apply_graph_pass(self, pass_fn: Callable[[Graph], T]) -> T | None:
         from torch._dynamo.utils import dynamo_timed
 
         with self:
@@ -154,7 +154,8 @@ class GraphTransformObserver:
                     e.obj_dict["attributes"]["fillcolor"] = "yellow"
                 else:
                     e.obj_dict["attributes"]["fillcolor"] = "grey"
-            assert self.log_url is not None
+            if self.log_url is None:
+                raise AssertionError("log_url is not set")
             self.input_dot_graph.write(
                 os.path.join(
                     self.log_url,
@@ -209,7 +210,8 @@ class GraphTransformObserver:
             if not new_node:
                 return
 
-            assert isinstance(new_node, Node)
+            if not isinstance(new_node, Node):
+                raise AssertionError(f"Expected Node, got {type(new_node)}")
 
             # replace hook is called once for each user of old
             # this avoids adding duplicated source nodes

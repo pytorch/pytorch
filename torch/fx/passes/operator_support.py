@@ -23,12 +23,13 @@ __all__ = [
 TargetTypeName = str
 
 # Arguments' dtypes for a given node, see `OperatorSupport`
-SupportedArgumentDTypes = t.Optional[
+SupportedArgumentDTypes = (
     tuple[
         t.Sequence[t.Sequence[torch.dtype]],
         dict[str, t.Sequence[torch.dtype]],
     ]
-]
+    | None
+)
 
 SupportDict = t.Mapping[TargetTypeName, SupportedArgumentDTypes]
 
@@ -66,7 +67,7 @@ class OperatorSupport(OperatorSupportBase):
 
     _support_dict: SupportDict
 
-    def __init__(self, support_dict: t.Optional[SupportDict] = None):
+    def __init__(self, support_dict: SupportDict | None = None):
         self._support_dict = support_dict or {}
 
     def is_node_supported(
@@ -219,7 +220,8 @@ class OpSupports:
 
 
 def _get_arg_dtype(arg: torch.fx.Node) -> t.Any:
-    assert isinstance(arg, torch.fx.Node)
+    if not isinstance(arg, torch.fx.Node):
+        raise AssertionError(f"Expected torch.fx.Node, got {type(arg)}")
     tensor_meta = arg.meta.get("tensor_meta")  # type: ignore[union-attr]
     dtype = (
         tensor_meta.dtype

@@ -26,7 +26,7 @@ on:
       cuda-arch-list:
         required: false
         type: string
-        default: "5.2"
+        default: "7.5"
         description: |
           List of CUDA architectures CI build should target.
       runner_prefix:
@@ -154,6 +154,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+          checkout-mode: treeless
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux

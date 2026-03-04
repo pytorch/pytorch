@@ -7,6 +7,9 @@ and fall in three categories: 1) type of mapping, 2) API of mapping, 3) unsuppor
 mapping.
 """
 
+import warnings
+warnings.warn("hipify's constants.py is no longer used as of version 2.0.0", FutureWarning)
+
 CONV_VERSION = 0,
 CONV_INIT = 1
 CONV_DEVICE = 2
@@ -54,8 +57,9 @@ API_LAST = 42
 API_FFT = 43
 API_RTC = 44
 API_ROCTX = 45
+API_PYT_EXT = 46
 
-HIP_UNSUPPORTED = 46
+HIP_UNSUPPORTED = 47
 API_PYTORCH = 1337
 API_CAFFE2 = 1338
 API_C10 = 1339

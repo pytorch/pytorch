@@ -39,6 +39,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.absolute.default", aten_absolute_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::absolute_out(self, out);
 })
 
@@ -49,6 +50,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.angle.default", aten_angle_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::angle_out(self, out);
 })
 
@@ -59,6 +61,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sgn.default", aten_sgn_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::sgn_out(out, self);
 })
 
@@ -69,6 +72,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.acos.default", aten_acos_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::acos_out(out, self);
 })
 
@@ -79,6 +83,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.arccos.default", aten_arccos_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::arccos_out(self, out);
 })
 
@@ -91,6 +96,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.add.Tensor", aten_add_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::add_out(out, self, other, alpha);
 })
 
@@ -102,6 +108,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.add.Scalar", aten_add_Scalar, {
     out = create_empty_from(self);
   }
   auto& out_t = KernelOutput(0).toTensor();
+  fastResizeToZero(out_t);
   at::add_out(out_t, self, other, alpha);
 })
 
@@ -114,6 +121,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten._add_relu.Tensor", aten__add_relu_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::add_relu_out(self, other, alpha, out);
 })
 
@@ -128,6 +136,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.addmv.default", aten_addmv_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::addmv_out(out, self, mat, vec, beta, alpha);
 })
 
@@ -142,6 +151,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.addr.default", aten_addr_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::addr_out(self, vec1, vec2, beta, alpha, out);
 })
 
@@ -154,6 +164,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.all.dim", aten_all_dim, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::all_out(out, self, dim, keepdim);
 })
 
@@ -166,6 +177,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.any.dim", aten_any_dim, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::any_out(out, self, dim, keepdim);
 })
 
@@ -178,6 +190,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.argmax.default", aten_argmax_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::argmax_out(out, self, dim, keepdim);
 })
 
@@ -188,6 +201,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.acosh.default", aten_acosh_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::acosh_out(out, self);
 })
 
@@ -198,6 +212,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.asinh.default", aten_asinh_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::asinh_out(out, self);
 })
 
@@ -208,6 +223,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.arcsinh.default", aten_arcsinh_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::arcsinh_out(self, out);
 })
 
@@ -218,6 +234,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.atanh.default", aten_atanh_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::atanh_out(out, self);
 })
 
@@ -228,6 +245,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.arctanh.default", aten_arctanh_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::arctanh_out(self, out);
 })
 
@@ -238,6 +256,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.asin.default", aten_asin_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::asin_out(out, self);
 })
 
@@ -248,6 +267,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.arcsin.default", aten_arcsin_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::arcsin_out(self, out);
 })
 
@@ -258,6 +278,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.atan.default", aten_atan_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::atan_out(out, self);
 })
 
@@ -268,6 +289,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.arctan.default", aten_arctan_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::arctan_out(self, out);
 })
 
@@ -282,6 +304,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.baddbmm.default", aten_baddbmm_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::baddbmm_out(out, self, batch1, batch2, beta, alpha);
 })
 
@@ -295,6 +318,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::bitwise_not_out(out, self);
     })
 
@@ -306,6 +330,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.copysign.Tensor", aten_copysign_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::copysign_out(out, self, other);
 })
 
@@ -319,6 +344,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::logical_not_out(self, out);
     })
 
@@ -333,6 +359,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::logical_xor_out(self, other, out);
     })
 
@@ -347,6 +374,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::logical_and_out(self, other, out);
     })
 
@@ -361,6 +389,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::logical_or_out(self, other, out);
     })
 
@@ -371,6 +400,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.ceil.default", aten_ceil_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::ceil_out(out, self);
 })
 
@@ -383,6 +413,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.clamp.default", aten_clamp_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::clamp_out(out, self, min, max);
 })
 
@@ -395,6 +426,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.clamp.Tensor", aten_clamp_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::clamp_out(out, self, min, max);
 })
 
@@ -409,6 +441,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::clamp_max_out(out, self, max);
     })
 
@@ -420,6 +453,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.clamp_max.Tensor", aten_clamp_max_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::clamp_max_out(out, self, max);
 })
 
@@ -432,6 +466,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.clip.default", aten_clip_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::clip_out(self, min, max, out);
 })
 
@@ -443,6 +478,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.complex.default", aten_complex_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::complex_out(real, imag, out);
 })
 
@@ -454,6 +490,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.polar.default", aten_polar_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::polar_out(abs, angle, out);
 })
 
@@ -464,6 +501,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.cos.default", aten_cos_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::cos_out(out, self);
 })
 
@@ -474,6 +512,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.cosh.default", aten_cosh_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::cosh_out(out, self);
 })
 
@@ -486,6 +525,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.cumprod.default", aten_cumprod_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::cumprod_out(out, self, dim, dtype);
 })
 
@@ -500,6 +540,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.diff.default", aten_diff_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::diff_out(self, n, dim, prepend, append, out);
 })
 
@@ -511,6 +552,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.div.Tensor", aten_div_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::div_out(out, self, other);
 })
 
@@ -523,6 +565,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.div.Tensor_mode", aten_div_Tensor_mode, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::div_out(out, self, other, rounding_mode);
 })
 
@@ -534,6 +577,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.divide.Tensor", aten_divide_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::divide_out(self, other, out);
 })
 
@@ -548,6 +592,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::true_divide_out(self, other, out);
     })
 
@@ -559,6 +604,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.dot.default", aten_dot_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::dot_out(self, tensor, out);
 })
 
@@ -570,6 +616,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.vdot.default", aten_vdot_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::vdot_out(self, other, out);
 })
 
@@ -580,6 +627,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.erf.default", aten_erf_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::erf_out(out, self);
 })
 
@@ -590,6 +638,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.erfc.default", aten_erfc_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::erfc_out(out, self);
 })
 
@@ -600,6 +649,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.exp.default", aten_exp_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::exp_out(out, self);
 })
 
@@ -610,6 +660,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.exp2.default", aten_exp2_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::exp2_out(out, self);
 })
 
@@ -620,6 +671,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.expm1.default", aten_expm1_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::expm1_out(out, self);
 })
 
@@ -630,6 +682,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.floor.default", aten_floor_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::floor_out(out, self);
 })
 
@@ -640,6 +693,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.frac.default", aten_frac_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::frac_out(out, self);
 })
 
@@ -651,6 +705,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.gcd.default", aten_gcd_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::gcd_out(out, self, other);
 })
 
@@ -662,6 +717,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.lcm.default", aten_lcm_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::lcm_out(out, self, other);
 })
 
@@ -678,6 +734,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::index_copy_out(out, self, dim, index, source);
     })
 
@@ -695,6 +752,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::isin_out(out, elements, test_elements, assume_unique, invert);
     })
 
@@ -712,6 +770,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::isin_out(out, elements, test_element, assume_unique, invert);
     })
 
@@ -729,6 +788,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::isin_out(out, element, test_elements, assume_unique, invert);
     })
 
@@ -740,6 +800,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.kron.default", aten_kron_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::kron_out(self, other, out);
 })
 
@@ -751,6 +812,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.ldexp.Tensor", aten_ldexp_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::ldexp_out(self, other, out);
 })
 
@@ -761,6 +823,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.log10.default", aten_log10_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::log10_out(out, self);
 })
 
@@ -771,6 +834,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.log1p.default", aten_log1p_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::log1p_out(out, self);
 })
 
@@ -781,6 +845,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.log2.default", aten_log2_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::log2_out(out, self);
 })
 
@@ -795,6 +860,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::logaddexp_out(out, self, other);
     })
 
@@ -809,6 +875,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::logaddexp2_out(out, self, other);
     })
 
@@ -820,6 +887,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.xlogy.Tensor", aten_xlogy_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::xlogy_out(out, self, other);
 })
 
@@ -835,6 +903,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::_log_softmax_out(out, self, dim, half_to_float);
     })
 
@@ -849,6 +918,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::_logcumsumexp_out_cpu(self, dim, out);
     })
 
@@ -863,6 +933,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::logcumsumexp_out(self, dim, out);
     })
 
@@ -877,6 +948,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::matrix_power_out(self, n, out);
     })
 
@@ -888,6 +960,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.mm.default", aten_mm_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::mm_out(out, self, mat2);
 })
 
@@ -899,6 +972,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.multiply.Tensor", aten_multiply_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::multiply_out(self, other, out);
 })
 
@@ -910,6 +984,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.mv.default", aten_mv_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::mv_out(self, vec, out);
 })
 
@@ -921,6 +996,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.mvlgamma.default", aten_mvlgamma_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::mvlgamma_out(self, p, out);
 })
 
@@ -931,6 +1007,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.rad2deg.default", aten_rad2deg_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::rad2deg_out(self, out);
 })
 
@@ -941,6 +1018,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.deg2rad.default", aten_deg2rad_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::deg2rad_out(self, out);
 })
 
@@ -954,6 +1032,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::reciprocal_out(out, self);
     })
 
@@ -964,6 +1043,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.neg.default", aten_neg_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::neg_out(out, self);
 })
 
@@ -974,6 +1054,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.negative.default", aten_negative_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::negative_out(self, out);
 })
 
@@ -984,6 +1065,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.round.default", aten_round_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::round_out(out, self);
 })
 
@@ -995,6 +1077,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.round.decimals", aten_round_decimals, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::round_out(out, self, decimals);
 })
 
@@ -1006,6 +1089,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.gelu.default", aten_gelu_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::gelu_out(out, self, approximate);
 })
 
@@ -1020,6 +1104,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::hardshrink_out(out, self, lambd);
     })
 
@@ -1035,6 +1120,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& grad_input = KernelOutput(0).toTensor();
+      fastResizeToZero(grad_input);
       at::cpu::hardshrink_backward_out(grad_input, grad_out, self, lambd);
     })
 
@@ -1045,6 +1131,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.rsqrt.default", aten_rsqrt_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::rsqrt_out(out, self);
 })
 
@@ -1055,6 +1142,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.silu.default", aten_silu_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::silu_out(out, self);
 })
 
@@ -1069,6 +1157,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& grad_input = KernelOutput(0).toTensor();
+      fastResizeToZero(grad_input);
       at::cpu::silu_backward_out(grad_input, grad_output, self);
     })
 
@@ -1079,6 +1168,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.mish.default", aten_mish_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::mish_out(out, self);
 })
 
@@ -1089,6 +1179,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sigmoid.default", aten_sigmoid_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::sigmoid_out(out, self);
 })
 
@@ -1099,6 +1190,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sin.default", aten_sin_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::sin_out(out, self);
 })
 
@@ -1109,6 +1201,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sinc.default", aten_sinc_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::sinc_out(out, self);
 })
 
@@ -1119,6 +1212,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sinh.default", aten_sinh_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::sinh_out(out, self);
 })
 
@@ -1131,6 +1225,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten._softmax.default", aten__softmax_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::_softmax_out(out, self, dim, half_to_float);
 })
 
@@ -1141,6 +1236,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.sqrt.default", aten_sqrt_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::sqrt_out(out, self);
 })
 
@@ -1151,6 +1247,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.square.default", aten_square_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::square_out(self, out);
 })
 
@@ -1162,6 +1259,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.prod.default", aten_prod_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::prod_out(self, dtype, out);
 })
 
@@ -1175,6 +1273,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.prod.dim_int", aten_prod_dim_int, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::prod_out(out, self, dim, keepdim, dtype);
 })
 
@@ -1185,6 +1284,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.tan.default", aten_tan_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::tan_out(out, self);
 })
 
@@ -1195,6 +1295,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.tanh.default", aten_tanh_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::tanh_out(out, self);
 })
 
@@ -1210,6 +1311,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::threshold_out(out, self, threshold, value);
     })
 
@@ -1226,6 +1328,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& grad_input = KernelOutput(0).toTensor();
+      fastResizeToZero(grad_input);
       at::cpu::threshold_backward_out(grad_input, grad_output, self, threshold);
     })
 
@@ -1236,6 +1339,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.trunc.default", aten_trunc_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::trunc_out(out, self);
 })
 
@@ -1246,6 +1350,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.fix.default", aten_fix_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::fix_out(self, out);
 })
 
@@ -1260,6 +1365,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::nuclear_norm_out(self, keepdim, out);
     })
 
@@ -1272,6 +1378,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.subtract.Tensor", aten_subtract_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::subtract_out(self, other, alpha, out);
 })
 
@@ -1286,6 +1393,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::heaviside_out(out, self, values);
     })
 
@@ -1305,6 +1413,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::_addmm_activation_out(
           out, self, mat1, mat2, beta, alpha, use_gelu);
     })
@@ -1323,6 +1432,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::index_add_out(out, self, dim, index, source, alpha);
     })
 
@@ -1336,6 +1446,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.scatter.src", aten_scatter_src, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::scatter_out(out, self, dim, index, src);
 })
 
@@ -1349,6 +1460,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.scatter.value", aten_scatter_value, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::scatter_out(out, self, dim, index, value);
 })
 
@@ -1363,6 +1475,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.scatter.reduce", aten_scatter_reduce, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::scatter_out(out, self, dim, index, src, reduce);
 })
 
@@ -1380,6 +1493,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::scatter_out(out, self, dim, index, value, reduce);
     })
 
@@ -1396,6 +1510,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::scatter_add_out(out, self, dim, index, src);
     })
 
@@ -1415,6 +1530,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::scatter_reduce_out(
           out, self, dim, index, src, reduce, include_self);
     })
@@ -1427,6 +1543,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.eq.Scalar", aten_eq_Scalar, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::eq_out(out, self, other);
 })
 
@@ -1438,6 +1555,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.eq.Tensor", aten_eq_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::eq_out(out, self, other);
 })
 
@@ -1452,6 +1570,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::bitwise_and_out(out, self, other);
     })
 
@@ -1466,6 +1585,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::bitwise_or_out(out, self, other);
     })
 
@@ -1480,6 +1600,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::bitwise_xor_out(out, self, other);
     })
 
@@ -1494,6 +1615,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::bitwise_left_shift_out(out, self, other);
     })
 
@@ -1508,6 +1630,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::bitwise_right_shift_out(out, self, other);
     })
 
@@ -1519,6 +1642,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.tril.default", aten_tril_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::tril_out(out, self, diagonal);
 })
 
@@ -1530,6 +1654,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.triu.default", aten_triu_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::triu_out(out, self, diagonal);
 })
 
@@ -1540,6 +1665,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.digamma.default", aten_digamma_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::digamma_out(out, self);
 })
 
@@ -1552,6 +1678,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.lerp.Scalar", aten_lerp_Scalar, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::lerp_out(out, self, end, weight);
 })
 
@@ -1564,6 +1691,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.lerp.Tensor", aten_lerp_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::lerp_out(out, self, end, weight);
 })
 
@@ -1578,6 +1706,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.addbmm.default", aten_addbmm_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::addbmm_out(self, batch1, batch2, beta, alpha, out);
 })
 
@@ -1590,6 +1719,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.cross.default", aten_cross_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::cross_out(self, other, dim, out);
 })
 
@@ -1601,6 +1731,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.ne.Scalar", aten_ne_Scalar, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::ne_out(out, self, other);
 })
 
@@ -1612,6 +1743,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.ne.Tensor", aten_ne_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::ne_out(out, self, other);
 })
 
@@ -1623,6 +1755,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.ge.Scalar", aten_ge_Scalar, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::ge_out(out, self, other);
 })
 
@@ -1634,6 +1767,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.ge.Tensor", aten_ge_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::ge_out(out, self, other);
 })
 
@@ -1645,6 +1779,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.le.Scalar", aten_le_Scalar, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::le_out(out, self, other);
 })
 
@@ -1656,6 +1791,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.le.Tensor", aten_le_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::le_out(out, self, other);
 })
 
@@ -1667,6 +1803,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.gt.Scalar", aten_gt_Scalar, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::gt_out(out, self, other);
 })
 
@@ -1678,6 +1815,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.gt.Tensor", aten_gt_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::gt_out(out, self, other);
 })
 
@@ -1689,6 +1827,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.lt.Scalar", aten_lt_Scalar, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::lt_out(out, self, other);
 })
 
@@ -1700,6 +1839,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.lt.Tensor", aten_lt_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::lt_out(out, self, other);
 })
 
@@ -1711,6 +1851,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.take.default", aten_take_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::take_out(self, index, out);
 })
 
@@ -1726,6 +1867,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::take_along_dim_out(self, indices, dim, out);
     })
 
@@ -1740,6 +1882,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::masked_select_out_cpu(self, mask, out);
     })
 
@@ -1753,6 +1896,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.gather.default", aten_gather_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::gather_out(out, self, dim, index, sparse_grad);
 })
 
@@ -1766,6 +1910,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.addcmul.default", aten_addcmul_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::addcmul_out(out, self, tensor1, tensor2, value);
 })
 
@@ -1779,6 +1924,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.addcdiv.default", aten_addcdiv_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::addcdiv_out(out, self, tensor1, tensor2, value);
 })
 
@@ -1797,6 +1943,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::linalg_solve_triangular_out(
           self, B, upper, left, unitriangular, out);
     })
@@ -1813,6 +1960,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::cholesky_solve_out(self, input2, upper, out);
     })
 
@@ -1827,6 +1975,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::cholesky_inverse_out(self, upper, out);
     })
 
@@ -1838,6 +1987,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.orgqr.default", aten_orgqr_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::orgqr_out(self, input2, out);
 })
 
@@ -1852,6 +2002,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.ormqr.default", aten_ormqr_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::ormqr_out(self, input2, input3, left, transpose, out);
 })
 
@@ -1862,6 +2013,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.lgamma.default", aten_lgamma_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::lgamma_out(out, self);
 })
 
@@ -1876,6 +2028,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::polygamma_out(out, n, self);
     })
 
@@ -1886,6 +2039,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.erfinv.default", aten_erfinv_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::erfinv_out(out, self);
 })
 
@@ -1896,6 +2050,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.i0.default", aten_i0_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::i0_out(out, self);
 })
 
@@ -1906,6 +2061,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.signbit.default", aten_signbit_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::signbit_out(out, self);
 })
 
@@ -1917,6 +2073,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.atan2.default", aten_atan2_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::atan2_out(out, self, other);
 })
 
@@ -1928,6 +2085,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.arctan2.default", aten_arctan2_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::arctan2_out(self, other, out);
 })
 
@@ -1941,6 +2099,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.histc.default", aten_histc_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::histogram_histc_out(self, bins, min, max, out);
 })
 
@@ -1952,6 +2111,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.fmod.Tensor", aten_fmod_Tensor, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::fmod_out(out, self, other);
 })
 
@@ -1963,6 +2123,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.hypot.default", aten_hypot_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::hypot_out(out, self, other);
 })
 
@@ -1974,6 +2135,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.igamma.default", aten_igamma_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::igamma_out(out, self, other);
 })
 
@@ -1985,6 +2147,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.igammac.default", aten_igammac_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::igammac_out(out, self, other);
 })
 
@@ -1999,6 +2162,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::nextafter_out(out, self, other);
     })
 
@@ -2010,6 +2174,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.fmin.default", aten_fmin_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::fmin_out(out, self, other);
 })
 
@@ -2021,6 +2186,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.fmax.default", aten_fmax_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::fmax_out(out, self, other);
 })
 
@@ -2032,6 +2198,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.maximum.default", aten_maximum_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::maximum_out(out, self, other);
 })
 
@@ -2043,6 +2210,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.minimum.default", aten_minimum_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::minimum_out(out, self, other);
 })
 
@@ -2054,6 +2222,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.min.other", aten_min_other, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::min_out(self, other, out);
 })
 
@@ -2069,6 +2238,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.quantile.default", aten_quantile_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::quantile_out(self, q, dim, keepdim, interpolation, out);
 })
 
@@ -2087,6 +2257,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::nanquantile_out(self, q, dim, keepdim, interpolation, out);
     })
 
@@ -2097,6 +2268,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.msort.default", aten_msort_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::msort_out(self, out);
 })
 
@@ -2107,6 +2279,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.all.default", aten_all_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::all_out(out, self);
 })
 
@@ -2117,6 +2290,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.any.default", aten_any_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::any_out(out, self);
 })
 
@@ -2130,6 +2304,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.renorm.default", aten_renorm_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::renorm_out(out, self, p, dim, maxnorm);
 })
 
@@ -2146,6 +2321,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::_convert_indices_from_coo_to_csr_out(out, self, size, out_int32);
     })
 
@@ -2163,6 +2339,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::_convert_indices_from_csr_to_coo_out(
           out, crow_indices, col_indices, out_int32, transpose);
     })
@@ -2176,6 +2353,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.mse_loss.default", aten_mse_loss_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::mse_loss_out(out, self, target, reduction);
 })
 
@@ -2195,6 +2373,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::multi_margin_loss_cpu_out(
           self, target, p, margin, weight, reduction, out);
     })
@@ -2212,6 +2391,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::multilabel_margin_loss_out(self, target, reduction, out);
     })
 
@@ -2227,6 +2407,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::soft_margin_loss_out(self, target, reduction, out);
     })
 
@@ -2240,6 +2421,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.elu.default", aten_elu_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::elu_out(out, self, alpha, scale, input_scale);
 })
 
@@ -2259,6 +2441,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& grad_input = KernelOutput(0).toTensor();
+      fastResizeToZero(grad_input);
       at::cpu::elu_backward_out(
           grad_input,
           grad_output,
@@ -2277,6 +2460,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.glu.default", aten_glu_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::glu_out(out, self, dim);
 })
 
@@ -2290,6 +2474,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::hardsigmoid_out(out, self);
     })
 
@@ -2304,6 +2489,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& grad_input = KernelOutput(0).toTensor();
+      fastResizeToZero(grad_input);
       at::cpu::hardsigmoid_backward_out(grad_input, grad_output, self);
     })
 
@@ -2316,6 +2502,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.hardtanh.default", aten_hardtanh_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::hardtanh_out(self, min_val, max_val, out);
 })
 
@@ -2329,6 +2516,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::hardswish_out(self, out);
     })
 
@@ -2346,6 +2534,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& grad_input = KernelOutput(0).toTensor();
+      fastResizeToZero(grad_input);
       at::cpu::leaky_relu_backward_out(
           grad_input, grad_output, self, negative_slope, self_is_result);
     })
@@ -2360,6 +2549,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::log_sigmoid_out(self, out);
     })
 
@@ -2372,6 +2562,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.softplus.default", aten_softplus_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::softplus_out(out, self, beta, threshold);
 })
 
@@ -2389,6 +2580,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& grad_input = KernelOutput(0).toTensor();
+      fastResizeToZero(grad_input);
       at::cpu::softplus_backward_out(
           grad_input, grad_output, self, beta, threshold);
     })
@@ -2404,6 +2596,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::softshrink_out(out, self, lambd);
     })
 
@@ -2420,6 +2613,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& grad_input = KernelOutput(0).toTensor();
+      fastResizeToZero(grad_input);
       at::cpu::softshrink_backward_out(grad_input, grad_output, self, lambd);
     })
 
@@ -2430,6 +2624,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.isposinf.default", aten_isposinf_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::isposinf_out(out, self);
 })
 
@@ -2440,6 +2635,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.isneginf.default", aten_isneginf_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::cpu::isneginf_out(out, self);
 })
 
@@ -2453,6 +2649,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::special_entr_out(out, self);
     })
 
@@ -2466,6 +2663,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::special_ndtri_out(out, self);
     })
 
@@ -2479,6 +2677,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::special_log_ndtr_out(out, self);
     })
 
@@ -2492,6 +2691,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_expm1_out(self, out);
     })
 
@@ -2505,6 +2705,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_exp2_out(self, out);
     })
 
@@ -2518,6 +2719,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_psi_out(self, out);
     })
 
@@ -2531,6 +2733,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_digamma_out(self, out);
     })
 
@@ -2544,6 +2747,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_gammaln_out(self, out);
     })
 
@@ -2557,6 +2761,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_erf_out(self, out);
     })
 
@@ -2570,6 +2775,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_erfc_out(self, out);
     })
 
@@ -2583,6 +2789,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::special_erfcx_out(out, self);
     })
 
@@ -2596,6 +2803,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_erfinv_out(self, out);
     })
 
@@ -2609,6 +2817,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_ndtr_out(self, out);
     })
 
@@ -2623,6 +2832,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::special_xlog1py_out(out, self, other);
     })
 
@@ -2637,6 +2847,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_xlogy_out(self, other, out);
     })
 
@@ -2651,6 +2862,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::special_zeta_out(out, self, other);
     })
 
@@ -2664,6 +2876,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_i0_out(self, out);
     })
 
@@ -2677,6 +2890,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::special_i0e_out(out, self);
     })
 
@@ -2690,6 +2904,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::special_i1_out(out, self);
     })
 
@@ -2703,6 +2918,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::special_i1e_out(out, self);
     })
 
@@ -2717,6 +2933,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_polygamma_out(n, self, out);
     })
 
@@ -2730,6 +2947,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_expit_out(self, out);
     })
 
@@ -2743,6 +2961,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_sinc_out(self, out);
     })
 
@@ -2757,6 +2976,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_round_out(self, decimals, out);
     })
 
@@ -2770,6 +2990,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_log1p_out(self, out);
     })
 
@@ -2784,6 +3005,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_gammainc_out(self, other, out);
     })
 
@@ -2798,6 +3020,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_gammaincc_out(self, other, out);
     })
 
@@ -2812,6 +3035,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::special_multigammaln_out(self, p, out);
     })
 
@@ -2827,6 +3051,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::cpu::linalg_cross_out(out, self, other, dim);
     })
 
@@ -2840,6 +3065,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::linalg_det_out(A, out);
     })
 
@@ -2854,6 +3080,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::linalg_matmul_out(self, other, out);
     })
 
@@ -2867,6 +3094,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::linalg_eigvals_out(self, out);
     })
 
@@ -2880,6 +3108,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::linalg_inv_out(A, out);
     })
 
@@ -2890,6 +3119,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.inverse.default", aten_inverse_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::inverse_out(self, out);
 })
 
@@ -2901,6 +3131,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.inner.default", aten_inner_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::inner_out(self, other, out);
 })
 
@@ -2912,6 +3143,7 @@ REGISTER_CPU_KERNEL("torch.ops.aten.outer.default", aten_outer_default, {
     return;
   }
   auto& out = KernelOutput(0).toTensor();
+  fastResizeToZero(out);
   at::native::outer_out(self, vec2, out);
 })
 
@@ -2926,6 +3158,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::linalg_cond_out(self, p, out);
     })
 
@@ -2941,6 +3174,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::linalg_solve_out(A, B, left, out);
     })
 
@@ -2955,6 +3189,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::linalg_tensorinv_out(self, ind, out);
     })
 
@@ -2969,6 +3204,7 @@ REGISTER_CPU_KERNEL(
         return;
       }
       auto& out = KernelOutput(0).toTensor();
+      fastResizeToZero(out);
       at::native::linalg_matrix_power_out(self, n, out);
     })
 

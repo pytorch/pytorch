@@ -12,7 +12,7 @@ from collections import namedtuple
 from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, ClassVar, Optional, TypeVar, Union
+from typing import Any, ClassVar, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -747,10 +747,13 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
         )
 
     # Replace your privateuse1 backend name with 'privateuse1'
+    # This handles the case where PrivateUse1TestBase.device_type has been
+    # changed from "privateuse1" to the actual backend name (e.g., "openreg")
+    # by setUpClass being called during previous instantiate_device_type_tests calls
     if is_privateuse1_backend_available():
         privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
 
-        def func_replace(x: str):
+        def func_replace(x: str) -> str:
             return x.replace(privateuse1_backend_name, "privateuse1")
 
         except_for = (
@@ -763,14 +766,20 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
             if not isinstance(only_for, str)
             else func_replace(only_for)
         )
+    else:
+
+        def func_replace(x: str) -> str:
+            return x
 
     if except_for:
         device_type_test_bases = filter(
-            lambda x: x.device_type not in except_for, device_type_test_bases
+            lambda x: func_replace(x.device_type) not in except_for,
+            device_type_test_bases,
         )
     if only_for:
         device_type_test_bases = filter(
-            lambda x: x.device_type in only_for, device_type_test_bases
+            lambda x: func_replace(x.device_type) in only_for,
+            device_type_test_bases,
         )
 
     return list(device_type_test_bases)
@@ -1055,8 +1064,8 @@ class ops(_TestParametrizer):
         self,
         op_list,
         *,
-        dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
-        allowed_dtypes: Optional[Sequence[torch.dtype]] = None,
+        dtypes: OpDTypes | Sequence[torch.dtype] = OpDTypes.supported,
+        allowed_dtypes: Sequence[torch.dtype] | None = None,
         skip_if_dynamo=True,
     ):
         self.op_list = list(op_list)
@@ -1078,7 +1087,7 @@ class ops(_TestParametrizer):
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
-            dtypes: Union[set[torch.dtype], set[None]]
+            dtypes: set[torch.dtype] | set[None]
             if isinstance(self.opinfo_dtypes, Sequence):
                 dtypes = set(self.opinfo_dtypes)
             elif self.opinfo_dtypes == OpDTypes.unsupported_backward:
@@ -1095,7 +1104,7 @@ class ops(_TestParametrizer):
                 dtypes = set(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Tries to pick a dtype that supports both forward or backward
-                supported = op.supported_dtypes(device_cls.device_type)
+                supported = set(op.supported_dtypes(device_cls.device_type))
                 supported_backward = op.supported_backward_dtypes(
                     device_cls.device_type
                 )
@@ -1428,7 +1437,7 @@ class expectedFailure:
 
 
 class onlyOn:
-    def __init__(self, device_type: Union[str, list]):
+    def __init__(self, device_type: str | list):
         self.device_type = device_type
 
     def __call__(self, fn):
@@ -1819,6 +1828,15 @@ def has_hipsolver():
     return rocm_version >= (5, 3)
 
 
+# Skips a test on CUDA if cuSOLVER is not available,
+# and on ROCm if MAGMA is not available.
+def skipCUDAIfNoCusolverROCMIfNoMagma(fn):
+    if TEST_WITH_ROCM:
+        return skipCUDAIfNoMagma(fn)
+    else:
+        return skipCUDAIfNoCusolver(fn)
+
+
 # Skips a test on CUDA/ROCM if cuSOLVER/hipSOLVER is not available
 def skipCUDAIfNoCusolver(fn):
     return skipCUDAIf(
@@ -1923,7 +1941,7 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
-def skipCUDAVersionIn(versions: Optional[list[tuple[int, int]]] = None):
+def skipCUDAVersionIn(versions: list[tuple[int, int]] | None = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1941,7 +1959,7 @@ def skipCUDAVersionIn(versions: Optional[list[tuple[int, int]]] = None):
 
 
 # Skips a test for CUDA versions less than specified, given in the form of [major, minor].
-def skipCUDAIfVersionLessThan(versions: Optional[tuple[int, int]] = None):
+def skipCUDAIfVersionLessThan(versions: tuple[int, int] | None = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -2048,23 +2066,26 @@ def get_all_device_types() -> list[str]:
 
 # skip since currently flex attention requires at least `avx2` support on CPU.
 IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
-    not torch.xpu.is_available()
-    and not torch.cuda.is_available()
-    and not IS_MACOS
+    not IS_MACOS
     and torch.cpu._is_avx2_supported()
     and os.getenv("ATEN_CPU_CAPABILITY") != "default"
 )
 IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED = (
     torch.xpu.is_available() and torch.utils._triton.has_triton()
 )
+IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED = (
+    torch.cuda.is_available()
+    and torch.utils._triton.has_triton()
+    and torch.cuda.get_device_capability() >= (8, 0)
+)
 flex_attention_supported_platform = unittest.skipUnless(
     IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED
-    or IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
     or (
-        torch.cuda.is_available()
-        and torch.utils._triton.has_triton()
-        and torch.cuda.get_device_capability() >= (8, 0)
-    ),
+        IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+        and not torch.xpu.is_available()
+        and not torch.cuda.is_available()
+    )
+    or IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
     "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
 if (

@@ -2800,8 +2800,14 @@ class GraphModule(torch.nn.Module):
             def impl(x, y):
                 # Check that the input strides are preserved. This helps in
                 # testing that the HOP preserves the output strides.
-                assert x.stride() == (16, 4, 1, 2)
-                assert y.stride() == (16, 4, 2, 1)
+                if x.stride() != (16, 4, 1, 2):
+                    raise AssertionError(
+                        f"Expected x.stride() == (16, 4, 1, 2), got {x.stride()}"
+                    )
+                if y.stride() != (16, 4, 2, 1):
+                    raise AssertionError(
+                        f"Expected y.stride() == (16, 4, 2, 1), got {y.stride()}"
+                    )
                 out = y.clone()  # contiguous with strides (16, 4, 2, 1)
                 out.add_(x.transpose(-1, -2))
                 return out

@@ -6,7 +6,7 @@ import types
 import typing
 import warnings
 from collections.abc import Callable
-from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
 from torch._jit_internal import boolean_dispatched
@@ -117,14 +117,18 @@ def _torchscript_schema_to_signature_impl(
         )
         # "from" is a keyword therefore it must be a POSITIONAL_ONLY argument
         if name == "from":
-            assert kind == Parameter.POSITIONAL_OR_KEYWORD
+            if kind != Parameter.POSITIONAL_OR_KEYWORD:
+                raise AssertionError(f"Expected POSITIONAL_OR_KEYWORD, got {kind}")
             # ParameterKind type is internal implementation detail to inspec package
             # which makes it hard to do type annotation
             kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
             # This renders all previous arguments to positional only
 
             for idx, p in enumerate(parameters):
-                assert p.kind == Parameter.POSITIONAL_OR_KEYWORD
+                if p.kind != Parameter.POSITIONAL_OR_KEYWORD:
+                    raise AssertionError(
+                        f"Expected POSITIONAL_OR_KEYWORD for param {p.name}, got {p.kind}"
+                    )
                 parameters[idx] = Parameter(
                     name=p.name,
                     kind=Parameter.POSITIONAL_ONLY,
@@ -340,9 +344,9 @@ def type_matches(signature_type: Any, argument_type: Any):
 def _normalize_function_or_error(
     target: Callable,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
-    arg_types: Optional[tuple[Any]] = None,
-    kwarg_types: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
+    arg_types: tuple[Any] | None = None,
+    kwarg_types: dict[str, Any] | None = None,
     normalize_to_only_use_kwargs: bool = False,
 ) -> ArgsKwargsPair:
     """
@@ -364,11 +368,11 @@ def _normalize_function_or_error(
 def normalize_function(
     target: Callable,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
-    arg_types: Optional[tuple[Any]] = None,
-    kwarg_types: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
+    arg_types: tuple[Any] | None = None,
+    kwarg_types: dict[str, Any] | None = None,
     normalize_to_only_use_kwargs: bool = False,
-) -> Optional[ArgsKwargsPair]:
+) -> ArgsKwargsPair | None:
     """
     Returns normalized arguments to PyTorch functions. This means that
     `args/kwargs` will be matched up to the functional's
@@ -415,7 +419,8 @@ def normalize_function(
             # a 2-way dispatch based on a boolean value. Here we check that the `true` and `false`
             # branches of the dispatch have exactly the same signature. If they do, use the `true`
             # branch signature for analysis. Otherwise, leave this un-normalized
-            assert not isinstance(target, str)
+            if isinstance(target, str):
+                raise AssertionError("target should not be a string here")
             dispatched = boolean_dispatched[target]
             if_true, if_false = dispatched["if_true"], dispatched["if_false"]
             if (
@@ -425,13 +430,17 @@ def normalize_function(
                 return None
             target_for_analysis = if_true
 
-        assert callable(target_for_analysis)
+        if not callable(target_for_analysis):
+            raise AssertionError(
+                f"target_for_analysis must be callable, got {type(target_for_analysis)}"
+            )
         sig = inspect.signature(inspect.unwrap(target_for_analysis))
         new_args_and_kwargs = _args_kwargs_to_normalized_args_kwargs(
             sig, args, kwargs, normalize_to_only_use_kwargs
         )
     else:
-        assert callable(target)
+        if not callable(target):
+            raise AssertionError(f"target must be callable, got {type(target)}")
         torch_op_schemas = get_signature_for_torch_op(target)
         matched_schemas = []
         if torch_op_schemas:
@@ -500,9 +509,9 @@ def normalize_module(
     root: torch.nn.Module,
     target: str,
     args: tuple[Any],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: dict[str, Any] | None = None,
     normalize_to_only_use_kwargs: bool = False,
-) -> Optional[ArgsKwargsPair]:
+) -> ArgsKwargsPair | None:
     """
     Returns normalized arguments to PyTorch modules. This means that
     `args/kwargs` will be matched up to the functional's
@@ -547,7 +556,7 @@ def _args_kwargs_to_normalized_args_kwargs(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     normalize_to_only_use_kwargs: bool,
-) -> Optional[ArgsKwargsPair]:
+) -> ArgsKwargsPair | None:
     """
     Given a call target, args, and kwargs, return the arguments normalized into
     an ArgsKwargsPair, or None if the type signature is not supported by

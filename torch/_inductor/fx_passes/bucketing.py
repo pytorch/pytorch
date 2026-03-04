@@ -263,8 +263,74 @@ def is_all_to_all_tensor(node: torch.fx.Node) -> bool:
     )
 
 
+def get_collective_type(node: torch.fx.Node) -> str:
+    """Get the collective type name for a node."""
+    if is_all_gather_into_tensor(node):
+        return "all_gather"
+    elif is_reduce_scatter_tensor(node):
+        return "reduce_scatter"
+    elif is_all_reduce_tensor(node):
+        return "all_reduce"
+    return ""
+
+
+def get_full_bucket_key(
+    node: torch.fx.Node, bucket_mode: BucketMode
+) -> tuple[str, Any]:
+    """Get the full bucket key including collective type and bucket key."""
+    return (get_collective_type(node), bucket_key(node, mode=bucket_mode))
+
+
 def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
+
+
+def is_fsdp_all_gather(
+    node: torch.fx.Node,
+    all_node_ancestors: dict[torch.fx.Node, OrderedSet[torch.fx.Node]],
+) -> bool:
+    """
+    Check if the node is a FSDP-related all_gather by its recursive ancestors.
+    On the path from the all-gather to its originate placeholder, there should not be any compute node
+    So there should be ONLY ONE placeholder in its recursive ancestors.
+    """
+    if not is_all_gather_into_tensor(node):
+        return False
+
+    seen_placeholders = 0
+    for ancestor in all_node_ancestors[node]:
+        if ancestor.op == "placeholder":
+            seen_placeholders += 1
+
+    return seen_placeholders == 1
+
+
+def is_fsdp_reduce_scatter(node: torch.fx.Node) -> bool:
+    """
+    Check if a reduce_scatter node is FSDP-related by verifying its output flows
+    directly to graph outputs through only unary ops (e.g., to_copy, wait).
+    """
+    if not is_reduce_scatter_tensor(node):
+        return False
+
+    visited: OrderedSet[torch.fx.Node] = OrderedSet()
+    stack = [node]
+
+    while stack:
+        curr = stack.pop()
+        if curr in visited:
+            continue
+        visited.add(curr)
+
+        for user in curr.users:
+            if user.op == "output":
+                continue
+            # Non-unary op means computation with external data
+            if len(user.all_input_nodes) != 1:
+                return False
+            stack.append(user)
+
+    return True
 
 
 def collect_node_descendants(

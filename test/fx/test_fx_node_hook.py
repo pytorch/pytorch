@@ -64,20 +64,22 @@ class TestFXNodeHook(TestCase):
         for node in graph.find_nodes(op="placeholder"):
             node_a = node
             break
-        assert node_a is not None
+        if node_a is None:
+            raise AssertionError("Expected to find a placeholder node")
         # This will create a new node
         node_a_copy = graph.node_copy(node_a)
         node_a.replace_all_uses_with(node_a_copy)
         graph.erase_node(node_a)
 
-        assert (
+        if not (
             create_node_hook1_called
             and create_node_hook2_called
             and erase_node_hook1_called
             and erase_node_hook2_called
             and replace_node_hook1_called
             and replace_node_hook2_called
-        )
+        ):
+            raise AssertionError("Expected all node hooks to be called")
 
         gm._unregister_create_node_hook(create_node_hook1)
         gm._unregister_create_node_hook(create_node_hook2)
@@ -86,9 +88,62 @@ class TestFXNodeHook(TestCase):
         gm._unregister_replace_node_hook(replace_node_hook1)
         gm._unregister_replace_node_hook(replace_node_hook2)
 
-        assert gm._create_node_hooks == []
-        assert gm._erase_node_hooks == []
-        assert gm._replace_hooks == []
+        if gm._create_node_hooks != []:
+            raise AssertionError("Expected gm._create_node_hooks to be empty")
+        if gm._erase_node_hooks != []:
+            raise AssertionError("Expected gm._erase_node_hooks to be empty")
+        if gm._replace_hooks != []:
+            raise AssertionError("Expected gm._replace_hooks to be empty")
+
+    def test_replace_hook_keyword_only_signature(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a = torch.neg(x)
+                return a + 1
+
+        gm = symbolic_trace(M())
+        calls: list[tuple[str, str, str | None]] = []
+
+        def hook(*, old, new, user):
+            calls.append((old.name, new, getattr(user, "name", None)))
+
+        gm._register_replace_node_hook(hook)
+        try:
+            target_node = next(n for n in gm.graph.nodes if n.op == "call_function")
+            target_node.name = target_node.name + "_patched"
+        finally:
+            gm._unregister_replace_node_hook(hook)
+
+        self.assertTrue(calls)
+        self.assertTrue(calls[0][1].endswith("_patched"))
+
+    def test_replace_hook_runs_for_rename(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = symbolic_trace(M())
+        placeholder = next(n for n in gm.graph.nodes if n.op == "placeholder")
+        users = {user.name for user in placeholder.users}
+        original_name = placeholder.name
+        rename_calls: list[tuple[str, str, str | None]] = []
+
+        def hook(*, old, new, user):
+            rename_calls.append((old.name, new, getattr(user, "name", None)))
+
+        gm._register_replace_node_hook(hook)
+        try:
+            placeholder._rename("renamed_placeholder")
+        finally:
+            gm._unregister_replace_node_hook(hook)
+
+        self.assertTrue(
+            rename_calls,
+            "_rename should notify registered replace hooks",
+        )
+        self.assertTrue(all(entry[0] == original_name for entry in rename_calls))
+        self.assertTrue(all(entry[1] == placeholder.name for entry in rename_calls))
+        self.assertEqual({entry[2] for entry in rename_calls}, users)
 
 
 if __name__ == "__main__":

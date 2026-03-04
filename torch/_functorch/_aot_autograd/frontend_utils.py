@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from contextlib import contextmanager
-from typing import Any, cast, Optional, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
@@ -31,7 +31,7 @@ def process_inputs(
     flat_args: list[Any],
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
-    shape_env: Optional[ShapeEnv],
+    shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
 ) -> FakifiedFlatArgs:
     with fake_mode:
@@ -106,7 +106,7 @@ def process_inputs(
 
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
-) -> tuple[FakeTensorMode, Optional[ShapeEnv]]:
+) -> tuple[FakeTensorMode, ShapeEnv | None]:
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
@@ -163,10 +163,13 @@ def _try_get_metadata_from_dynamo(
     static_input_indices = []
     # Collect the new inputs lifted by aotdispatch
     for i, name in enumerate(param_keys):
-        assert name in param_name_to_source, f"{name} not found."
+        if name not in param_name_to_source:
+            raise AssertionError(f"{name} not found in param_name_to_source")
         source = param_name_to_source[name]
-        assert source not in seen_sources, source
-        assert source is not None
+        if source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
+        if source is None:
+            raise AssertionError(f"source must not be None for {name}")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
@@ -176,12 +179,14 @@ def _try_get_metadata_from_dynamo(
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-        assert hasattr(node, "_dynamo_source")
+        if not hasattr(node, "_dynamo_source"):
+            raise AssertionError(f"node {node} must have _dynamo_source attribute")
         source = node._dynamo_source
         # `source`` specifies the source from user code. ddp optimizer may have
         # intermediate values becoming submodule placeholders which does not
         # have a source
-        assert source is None or source not in seen_sources, source
+        if source is not None and source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name if source else str(source)
@@ -204,7 +209,10 @@ def _try_get_metadata_from_dynamo(
                 "Non-static input pos %s for source %s", actual_pos, source_name
             )
 
-    assert full_args_num == len(aot_autograd_arg_pos_to_source)
+    if full_args_num != len(aot_autograd_arg_pos_to_source):
+        raise AssertionError(
+            f"full_args_num={full_args_num} != len(aot_autograd_arg_pos_to_source)={len(aot_autograd_arg_pos_to_source)}"
+        )
     return aot_autograd_arg_pos_to_source, static_input_indices
 
 

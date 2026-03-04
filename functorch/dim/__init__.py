@@ -553,12 +553,16 @@ class _Tensor:
             info = TensorInfo.create(f, not is_pointwise, False)
             infos.append(info)
             if info:
-                assert is_pointwise or info.batchedtensor is not None
+                if not (is_pointwise or info.batchedtensor is not None):
+                    raise AssertionError(
+                        "Expected pointwise or batchedtensor to be set"
+                    )
                 if device_holding_tensor is None and info.has_device:
                     device_holding_tensor = info.tensor
                 # Collect all unique levels
                 for level in info.levels:
-                    assert isinstance(level, DimEntry)
+                    if not isinstance(level, DimEntry):
+                        raise AssertionError(f"Expected DimEntry, got {type(level)}")
                     if level not in result_levels:
                         result_levels.append(level)
 
@@ -823,9 +827,10 @@ class _Tensor:
 
         # Handle dimension flattening if needed
         if len(to_flatten) > 0:
-            assert self_info.tensor is not None, (
-                "Cannot perform dimension flattening on None tensor"
-            )
+            if self_info.tensor is None:
+                raise AssertionError(
+                    "Cannot perform dimension flattening on None tensor"
+                )
             rearranged = _match_levels(self_info.tensor, self_info.levels, new_levels)
             sizes = rearranged.size()
             new_sizes: list[Any] = []
@@ -1003,18 +1008,20 @@ class Tensor(_Tensor):
         for l in levels:
             if l.is_positional():
                 # Validate consecutive positional dimensions
-                assert last == 0 or last + 1 == l.position(), (
-                    f"Positional dimensions must be consecutive, got {last} then {l.position()}"
-                )
+                if not (last == 0 or last + 1 == l.position()):
+                    raise AssertionError(
+                        f"Positional dimensions must be consecutive, got {last} then {l.position()}"
+                    )
                 last = l.position()
             else:
                 # This is a named dimension
                 seen_dims += 1
 
         # Validate final positional dimension
-        assert last == 0 or last == -1, (
-            f"Final positional dimension must be 0 or -1, got {last}"
-        )
+        if not (last == 0 or last == -1):
+            raise AssertionError(
+                f"Final positional dimension must be 0 or -1, got {last}"
+            )
 
         if not seen_dims:
             return tensor
@@ -1030,9 +1037,10 @@ class Tensor(_Tensor):
         result._delayed_args = None
 
         # Validate tensor dimensionality matches levels
-        assert tensor.dim() == len(levels), (
-            f"Tensor has {tensor.dim()} dimensions but {len(levels)} levels provided"
-        )
+        if tensor.dim() != len(levels):
+            raise AssertionError(
+                f"Tensor has {tensor.dim()} dimensions but {len(levels)} levels provided"
+            )
 
         return result
 
@@ -1119,7 +1127,8 @@ class Tensor(_Tensor):
             if min_index == -1:
                 return t
 
-            assert t is not None
+            if t is None:
+                raise AssertionError("Expected t to be non-None")
             t = torch._C._functorch._add_batch_dim(t, min_index, int(min_value))
 
             levels[min_real_index] = DimEntry()
@@ -1171,7 +1180,8 @@ def stack(tensors: Any, new_dim: Any, dim: int = 0) -> _Tensor:
     # Match all tensors to the common level structure using _match_levels
     inputs = []
     for info in infos:
-        assert info.tensor is not None, "Cannot stack tensors with None tensor data"
+        if info.tensor is None:
+            raise AssertionError("Cannot stack tensors with None tensor data")
         matched_tensor = _match_levels(info.tensor, info.levels, result_levels)
         inputs.append(matched_tensor)
 
@@ -1290,7 +1300,8 @@ def split(tensor: Any, split_size_or_sections: Any, dim: Any = None) -> tuple:
             indices.append(0)
             unbound.append(i)
 
-    assert self_info.tensor is not None, "Cannot get tensor size on None tensor"
+    if self_info.tensor is None:
+        raise AssertionError("Cannot get tensor size on None tensor")
     tensor_size = self_info.tensor.size(idx)
 
     # Handle unbound dimensions
@@ -1416,9 +1427,8 @@ def dot(lhs: Any, rhs: Any, sum_dims: Any) -> Union[_Tensor, torch.Tensor]:
         # Fall back to regular operations
         return torch.matmul(lhs, rhs)
 
-    assert lhs_info.tensor is not None and rhs_info.tensor is not None, (
-        "Cannot perform dot product on None tensors"
-    )
+    if lhs_info.tensor is None or rhs_info.tensor is None:
+        raise AssertionError("Cannot perform dot product on None tensors")
 
     lhs_strides = lhs_info.tensor.stride()
     rhs_strides = rhs_info.tensor.stride()
@@ -1515,7 +1525,8 @@ def index(self: Any, positions: Any, dims: Any) -> _Tensor:
     info = TensorInfo.create(self, ensure_batched=False, ensure_present=False)
 
     # Create the first-class tensor
-    assert info.tensor is not None, "Cannot index None tensor"
+    if info.tensor is None:
+        raise AssertionError("Cannot index None tensor")
     result = Tensor.from_positional(info.tensor, info.levels, info.has_device)
 
     # Now call the index method on the first-class tensor

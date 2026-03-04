@@ -135,6 +135,27 @@ class GraphModule(torch.nn.Module):
         res = fn(x)
         self.assertEqual(res, x)
 
+    def test_device_mesh_init_skip_after_graph_break(self):
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(1, self.world_size),
+            mesh_dim_names=("dp", "tp"),
+        )
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            # Graph break so the subsequent DeviceMesh construction happens
+            # at runtime, where eval_frame intercepts DeviceMesh.__init__
+            # as a top-level frame.
+            torch._dynamo.graph_break()
+            layout = device_mesh._get_slice_mesh_layout(("tp",))
+            sub = device_mesh._create_sub_mesh(layout, ("tp",))
+            return x + sub.size()
+
+        x = torch.ones(10)
+        res = fn(x)
+        self.assertEqual(res, x + self.world_size)
+
     def test_device_mesh_flatten(self):
         device_mesh = init_device_mesh(
             device_type="cpu",

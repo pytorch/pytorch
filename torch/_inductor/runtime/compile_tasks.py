@@ -51,6 +51,69 @@ def _set_triton_ptxas_path() -> None:
         warnings.warn(f"{ptxas} exists but is not an executable")
 
 
+def _set_triton_libdevice_path() -> None:
+    """
+    Use the CUDA toolkit's libdevice instead of Triton's bundled version.
+    This ensures Triton's pow matches CUDA's powf for bitwise precision.
+    Gated by config.eager_numerics.use_pytorch_libdevice.
+    """
+    from torch._inductor import config
+
+    if not config.eager_numerics.use_pytorch_libdevice:
+        return
+
+    _set_triton_libdevice_path_impl()
+
+
+def _set_triton_libdevice_path_impl() -> None:
+    try:
+        from triton import knobs
+    except ImportError:
+        return
+
+    env_path = os.environ.get("TRITON_LIBDEVICE_PATH")
+    if env_path is not None:
+        knobs.nvidia.libdevice_path = env_path
+        return
+
+    if knobs.nvidia.libdevice_path is not None:
+        return
+
+    try:
+        from torch.utils.cpp_extension import CUDA_HOME
+
+        if CUDA_HOME is None:
+            warnings.warn(
+                "CUDA_HOME not set; using Triton's bundled libdevice which may "
+                "cause minor precision differences in pow operations. "
+                "To fix: set TRITON_LIBDEVICE_PATH to your CUDA toolkit's libdevice, "
+                "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
+                stacklevel=3,
+            )
+            return
+        libdevice = Path(CUDA_HOME) / "nvvm" / "libdevice" / "libdevice.10.bc"
+        if libdevice.is_file():
+            knobs.nvidia.libdevice_path = str(libdevice)
+            # Also set env var so subprocess compile workers inherit it
+            os.environ["TRITON_LIBDEVICE_PATH"] = str(libdevice)
+        else:
+            warnings.warn(
+                f"CUDA libdevice not found at {libdevice}; using Triton's bundled "
+                "libdevice which may cause minor precision differences in pow operations. "
+                "To fix: set TRITON_LIBDEVICE_PATH to your CUDA toolkit's libdevice, "
+                "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
+                stacklevel=3,
+            )
+    except ImportError:
+        warnings.warn(
+            "torch.utils.cpp_extension not available; using Triton's bundled "
+            "libdevice which may cause minor precision differences in pow operations. "
+            "To fix: set TRITON_LIBDEVICE_PATH to your CUDA toolkit's libdevice, "
+            "e.g., export TRITON_LIBDEVICE_PATH=/usr/local/cuda/nvvm/libdevice/libdevice.10.bc",
+            stacklevel=3,
+        )
+
+
 def _worker_compile_triton(
     load_kernel: Callable[[], CachingAutotuner],
     extra_env: dict[str, str],
@@ -58,6 +121,15 @@ def _worker_compile_triton(
 ) -> tuple[CachingAutotuner, int]:
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
+    # Set libdevice path if passed via env from main process
+    libdevice_path = extra_env.get("TRITON_LIBDEVICE_PATH")
+    if libdevice_path:
+        try:
+            from triton import knobs
+
+            knobs.nvidia.libdevice_path = libdevice_path
+        except ImportError:
+            pass
     from torch._inductor import config
 
     with config.patch(extra_config):

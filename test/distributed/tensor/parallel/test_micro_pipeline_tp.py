@@ -524,6 +524,7 @@ class MicroPipelineTP4GPUTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
+    @torch._inductor.config.patch(shape_padding=False)
     def test_extra_collectives(self):
         device_mesh = DeviceMesh(
             "cuda",

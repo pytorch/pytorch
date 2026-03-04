@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -50,7 +50,7 @@ invoke_subgraph_counter = 0
 # InvokeSubgraphAutogradOp.
 @dataclass
 class OutputMetadata:
-    num_fw_outs: Optional[int] = None
+    num_fw_outs: int | None = None
     indexes_with_symint: set[int] = field(default_factory=set)
     indexes_with_no_grad: set[int] = field(default_factory=set)
 
@@ -61,8 +61,8 @@ class OutputMetadata:
 class NestedCompileRegionOptions:
     # A Callable that takes (gm, example_inputs, decompositions=None, **kwargs) as inputs.
     # Returns AOTCompiledArtifact
-    fw_compiler: Optional[Callable] = None
-    bw_compiler: Optional[Callable] = None
+    fw_compiler: Callable | None = None
+    bw_compiler: Callable | None = None
 
     # Note: [InvokeSubgraphHOP Partitioner]
     # If not None, add "partitioner" to HOP node meta.
@@ -70,11 +70,11 @@ class NestedCompileRegionOptions:
     # If str, the options are "default_partition" and "min_cut_rematerialization_partition".
     # The HOP joint graph will be partitioned using the corresponding functions in
     # torch/_functorch/partitioners.py
-    partitioner: Optional[Callable | str] = None
+    partitioner: Callable | str | None = None
 
     # If it's None, we'll inherit the parent call's decompositions.
     # Otherwise, the nested region will use this decompositions.
-    decompositions: Optional[dict[str, Any]] = None
+    decompositions: dict[str, Any] | None = None
 
 
 def _extract_nested_region_config(fn):
@@ -115,24 +115,26 @@ class InvokeSubgraphHOP(HigherOrderOperator):
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
         self,
-        subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
-        identifier: Optional[str],
+        subgraph: GraphModule | FunctionalizeCtxWrapper,
+        identifier: str | None,
         *operands,
     ):
-        assert identifier is None or isinstance(identifier, str), (
-            "identifier must be a None or a string"
-        )
+        if identifier is not None and not isinstance(identifier, str):
+            raise AssertionError(
+                f"identifier must be None or a string, got {type(identifier)}"
+            )
 
-        assert all(
+        if not all(
             isinstance(
                 o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
             )
             or is_opaque_type(type(o))
             for o in operands
             if o is not None
-        ), (
-            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator/opaque objects {operands}"
-        )
+        ):
+            raise AssertionError(
+                f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator, got {operands}"
+            )
 
         # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, identifier, *operands)
@@ -172,7 +174,7 @@ invoke_subgraph = InvokeSubgraphHOP()
 
 
 def invoke_subgraph_infer(
-    subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
+    subgraph: GraphModule | FunctionalizeCtxWrapper,
     *operands,
 ):
     """Inference-only entrypoint for invoke_subgraph that auto-generates identifier.
@@ -262,7 +264,7 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
     return func(*args, **kwargs)
 
 
-def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] = None):
+def mark_compile_region(fn=None, options: NestedCompileRegionOptions | None = None):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
@@ -604,7 +606,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         # Check that int (coming from symint) is at expected indexes.
         for idx, o in enumerate(out):
             if isinstance(o, int):
-                assert idx in output_metadata.indexes_with_symint
+                if idx not in output_metadata.indexes_with_symint:
+                    raise AssertionError(
+                        f"unexpected int output at index {idx}, not in indexes_with_symint"
+                    )
 
         return out
 
@@ -625,7 +630,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         filtered_grad_outs = []
         for idx, o in enumerate(grad_outs):
             if o is None:
-                assert idx in output_metadata.indexes_with_symint
+                if idx not in output_metadata.indexes_with_symint:
+                    raise AssertionError(
+                        f"unexpected None grad_out at index {idx}, not in indexes_with_symint"
+                    )
             elif idx in output_metadata.indexes_with_no_grad:
                 # Deliberately skip over the grad_outs which we know should be
                 # None because the corresponding fwd_out does not require_grad.
@@ -643,7 +651,8 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         from torch._subclasses.fake_tensor import extract_tensor_metadata
 
         fake_mode = detect_fake_mode(primals + filtered_grad_outs)
-        assert fake_mode is not None, "fake_mode should be enabled for HOPs"
+        if fake_mode is None:
+            raise AssertionError("fake_mode should be enabled for HOPs")
         state = _CacheKeyState(fake_mode.shape_env)
 
         tangent_metadata: list[object] = []
@@ -690,7 +699,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             cache_hit = bw_graph is not None
 
         if bw_graph is None:
-            assert suffix is None
+            if suffix is not None:
+                raise AssertionError(
+                    f"suffix should be None when bw_graph is None, got {suffix}"
+                )
             with dynamo_timed(
                 "invoke_subgraph_trace_joint_graph", log_pt2_compile_event=True
             ):
@@ -778,7 +790,9 @@ def _(subgraph, identifier, *operands):
     from torch.utils._python_dispatch import _get_current_dispatch_mode
 
     mode = _get_current_dispatch_mode()
-    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+
+    if mode is not None:
+        raise AssertionError("Mode should never be enabled for CPU/CUDA key")
 
     if getattr(subgraph, "_boxed_call", False):
         return subgraph(list(operands))
@@ -803,7 +817,10 @@ def _(ctx, subgraph, identifier, *operands):
         effects = invoke_subgraph_cache.get_effects(identifier)
 
     if effects:
-        assert len(effects) == 1, "Multiple effects within a subgraph NYI"
+        if len(effects) != 1:
+            raise AssertionError(
+                f"Multiple effects within a subgraph NYI, got {len(effects)} effects"
+            )
         tokens = ctx.mode._tokens
         effects = next(iter(effects))
         token_input = tokens[effects]
@@ -831,7 +848,10 @@ def _(ctx, subgraph, identifier, *operands):
         # In invoke_subgraph's functionalization key implementation, we create a new
         # identifier because the subgraph is replaced by FunctionWithNoFreeVars in a
         # functional + epilogue form.
-        assert isinstance(identifier, str), identifier
+        if not isinstance(identifier, str):
+            raise AssertionError(
+                f"identifier must be a string for auto_functionalize, got {type(identifier)}"
+            )
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,
@@ -860,9 +880,10 @@ def _(ctx, subgraph, identifier, *operands):
             discovered_effects.add(effect_type)
 
     if discovered_effects:
-        assert ctx.mode._allow_token_discovery, (
-            f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
-        )
+        if not ctx.mode._allow_token_discovery:
+            raise AssertionError(
+                f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
+            )
         # Store discovered effects in the cache by identifier
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_effects(identifier, discovered_effects)
@@ -876,6 +897,8 @@ def _(subgraph, identifier, *operands):
     from torch._dynamo.utils import dynamo_timed
 
     with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
+        if getattr(subgraph, "_boxed_call", False):
+            return subgraph(list(operands))
         return subgraph(*operands)
 
 
@@ -892,9 +915,14 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
 
         with dynamo_timed("invoke_subgraph_proxy_tensor", log_pt2_compile_event=True):
             subgraph_decomp_table = _extract_nested_region_config(subgraph)
-            graph = reenter_make_fx(
-                subgraph, subgraph_decomp_table=subgraph_decomp_table
-            )(*operands)
+
+            # NB: invoke_subgraph subgraph re-trace seq_nr
+            # The joint graph seq_nr will get wrong in the subsequent re-trace (all nodes will have the same seq_nr),
+            # so we preserve the original graph's seq_nr here.
+            with torch.fx.traceback._preserve_node_seq_nr():
+                graph = reenter_make_fx(
+                    subgraph, subgraph_decomp_table=subgraph_decomp_table
+                )(*operands)
 
         from torch._guards import detect_fake_mode
 
@@ -910,7 +938,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             )
             graph.recompile()
 
-        assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+        if not isinstance(proxy_mode.tracer, torch.fx.Tracer):
+            raise AssertionError(
+                f"expected proxy_mode.tracer to be torch.fx.Tracer, got {type(proxy_mode.tracer)}"
+            )
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
 
@@ -980,7 +1011,10 @@ def invoke_subgraph_inductor_compile(
         inductor_config_patches = {}
     compile_fn = config.patch(inductor_config_patches)(compile_fx_inner)
     compiled_fn_inner = compile_fn(gm, example_inputs)
-    assert compiled_fn_inner._boxed_call
+    if not compiled_fn_inner._boxed_call:
+        raise AssertionError(
+            "compiled_fn_inner must have _boxed_call attribute set to True"
+        )
 
     # Follow boxed calling convention
     @simple_wraps(compiled_fn_inner)

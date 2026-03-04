@@ -71,9 +71,24 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, **options: Any) -> LazyVariableTracker:
+    def create(value: Any, source: Any, **options: Any) -> VariableTracker:
         if type(value) in LazyConstantVariable.supported_types:
             return LazyConstantVariable.create(value, source, **options)
+
+        # Cache based on source when no extra options are passed
+        if source is not None and not options:
+            from ..symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            if tx is not None:
+                cache = tx.output.variable_tracker_cache
+                cached = cache.get(source)
+                if cached is not None:
+                    return cached
+                vt = LazyVariableTracker(LazyCache(value, source), source=source)
+                cache[source] = vt
+                return vt
+
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
@@ -169,6 +184,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         elif issubclass(value_cls, VariableTracker):
             # update value in-place
             result = value
+            # update cache now to prevent infinite recursion
+            cache[idx] = (result, value)
             value_dict = value.__dict__
             nonvars = value._nonvar_fields
             for key in value_dict:
@@ -240,7 +257,7 @@ class LazyConstantVariable(LazyVariableTracker):
     supported_types = (int, float, bool, str)
 
     @staticmethod
-    def create(  # pyrefly: ignore[bad-override]
+    def create(
         value: Any,
         source: Any,
         **options: Any,

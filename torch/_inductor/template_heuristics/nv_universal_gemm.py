@@ -124,6 +124,8 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         m, n, k = inputs.mnk_hinted()
         batch_size = inputs.batch_hinted()
         dtype_a = inputs.dtype(inputs._mat1_idx)
+        dtype_b = inputs.dtype(inputs._mat2_idx)
+        out_dtype = inputs.out_dtype()
         strides = inputs.strides_hinted()
         layout_a = "row" if strides[inputs._mat1_idx][-1] == 1 else "col"
         layout_b = "row" if strides[inputs._mat2_idx][-1] == 1 else "col"
@@ -145,6 +147,8 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             OrderedSet(config_to_kernels.keys()),
             accumulator_type,
             batch_size,
+            dtype_b=dtype_b,
+            out_dtype=out_dtype,
         )
 
         if not heuristic_configs:
@@ -247,6 +251,8 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         valid_configs: OrderedSet[ConfigKey],
         accumulator_type: torch.dtype = torch.float32,
         batch_size: int = 1,
+        dtype_b: torch.dtype | None = None,
+        out_dtype: torch.dtype | None = None,
     ) -> list[HeuristicConfig]:
         """
         Get kernel configurations recommended by nvMatmulHeuristics.
@@ -260,10 +266,21 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             torch.float32: "S",
             torch.float16: "H",
             torch.bfloat16: "T",
+            torch.float8_e4m3fn: "Q",
+            torch.float8_e5m2: "R",
         }
         a_char = dtype_to_cublas.get(dtype_a, "H")
+        b_char = dtype_to_cublas.get(dtype_b or dtype_a, a_char)
+        out_char = dtype_to_cublas.get(out_dtype or dtype_a, a_char)
         acc_char = dtype_to_cublas.get(accumulator_type, "S")
-        precision = f"{a_char}{acc_char}{a_char}"
+
+        # 3-letter {input}{compute}{output}: used when A=B (standard GEMM).
+        # 5-letter {A}{B}{C}{compute}{D}: used when A≠B or for FP8/FP4
+        # (nvMatmulHeuristics discovery sets only have 5-letter entries for these).
+        if a_char != b_char or a_char in ("Q", "R", "O"):
+            precision = f"{a_char}{b_char}{out_char}{acc_char}{out_char}"
+        else:
+            precision = f"{a_char}{acc_char}{out_char}"
 
         # NvMatmulHeuristicsInterfaceEx configuration:
         # - backend=CUTLASS3: Use CUTLASS 3.x kernel database for Hopper+ GPUs

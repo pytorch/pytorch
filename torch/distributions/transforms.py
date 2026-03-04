@@ -890,7 +890,6 @@ class CorrCholeskyTransform(Transform):
         # apply stick-breaking on the squared values
         # Note that y = sign(r) * sqrt(z * z1m_cumprod)
         #             = (sign(r) * sqrt(z)) * sqrt(z1m_cumprod) = r * sqrt(z1m_cumprod)
-        # pyrefly: ignore [unsupported-operation]
         z = r**2
         z1m_cumprod_sqrt = (1 - z).sqrt().cumprod(-1)
         # Diagonal elements must be 1.

@@ -342,30 +342,39 @@ class GraphModule(torch.nn.Module):
 
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
+        # On Python 3.10, dynamo names the >= node after the op ("ge")
+        # rather than the variable name ("mask").  Normalize so the
+        # expected string works on every Python version.
+        import re
+
+        actual = re.sub(r"\bge\b", "mask", actual)
 
         self.assertExpectedInline(
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_weight_: "f32[]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", \
-L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
+    def forward(self, L_weight_: "f32[]", L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
         l_weight_ = L_weight_
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
         l_tensors_0_ = L_tensors_0_
         l_tensors_1_ = L_tensors_1_
 
-        _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, \
-l_tensors_1_]);  l_end_tensors_0_ = l_end_tensors_1_ = None
+        _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, l_tensors_1_])
         getitem: "f32[4]" = _foreach_sub[0]
         getitem_1: "f32[4]" = _foreach_sub[1];  _foreach_sub = None
-        _foreach_mul = torch._foreach_mul((getitem, getitem_1), l_weight_);  getitem = getitem_1 = l_weight_ = None
-        getitem_2: "f32[4]" = _foreach_mul[0]
-        getitem_3: "f32[4]" = _foreach_mul[1];  _foreach_mul = None
-        _foreach_add_ = torch._foreach_add_([l_tensors_0_, l_tensors_1_], (getitem_2, getitem_3));  \
-l_tensors_0_ = l_tensors_1_ = getitem_2 = getitem_3 = _foreach_add_ = None
+        abs_1: "f32[]" = l_weight_.abs()
+        mask: "b8[]" = abs_1 >= 0.5;  abs_1 = None
+        sub: "f32[]" = 1.0 - l_weight_
+        neg_omw: "f32[]" = -sub;  sub = None
+        w: "f32[]" = torch.where(mask, neg_omw, l_weight_);  neg_omw = l_weight_ = None
+        b: "f32[4]" = torch.where(mask, l_end_tensors_0_, l_tensors_0_);  l_end_tensors_0_ = None
+        b_1: "f32[4]" = torch.where(mask, l_end_tensors_1_, l_tensors_1_);  mask = l_end_tensors_1_ = None
+        _foreach_addcmul_ = torch._foreach_addcmul_([b, b_1], [w, w], (getitem, getitem_1));  w = getitem = getitem_1 = _foreach_addcmul_ = None
+        copy_: "f32[4]" = l_tensors_0_.copy_(b);  l_tensors_0_ = b = copy_ = None
+        copy__1: "f32[4]" = l_tensors_1_.copy_(b_1);  l_tensors_1_ = b_1 = copy__1 = None
         return ()
-""",
+""",  # noqa: B950
         )
 
     @skipIfCrossRef
@@ -393,19 +402,26 @@ l_tensors_0_ = l_tensors_1_ = getitem_2 = getitem_3 = _foreach_add_ = None
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: "f32[4]", \
-L_end_tensors_1_: "f32[4]"):
-        l_tensors_0_ = L_tensors_0_
-        l_tensors_1_ = L_tensors_1_
+    def forward(self, L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
+        l_tensors_0_ = L_tensors_0_
+        l_tensors_1_ = L_tensors_1_
 
-        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], [l_end_tensors_0_, \
-l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end_tensors_1_ = _foreach_lerp_ = None
+        _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, l_tensors_1_])
+        getitem: "f32[4]" = _foreach_sub[0]
+        getitem_1: "f32[4]" = _foreach_sub[1];  _foreach_sub = None
+        tensor: "f32[]" = torch.tensor(0.5, dtype = torch.float32, device = device(type='cpu'))
+        sub: "f32[]" = 1.0 - tensor;  tensor = None
+        neg_omw: "f32[]" = -sub;  sub = None
+        copy_: "f32[4]" = l_tensors_0_.copy_(l_end_tensors_0_);  l_end_tensors_0_ = copy_ = None
+        copy__1: "f32[4]" = l_tensors_1_.copy_(l_end_tensors_1_);  l_end_tensors_1_ = copy__1 = None
+        _foreach_addcmul_ = torch._foreach_addcmul_([l_tensors_0_, l_tensors_1_], [neg_omw, neg_omw], (getitem, getitem_1));  l_tensors_0_ = l_tensors_1_ = neg_omw = getitem = getitem_1 = _foreach_addcmul_ = None
         return ()
-""",
+""",  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_foreach_lerp_inplace_decomposition_disabled_capture_scalar(self):
         """With decompositions disabled and capture_scalar_outputs=True, foreach_lerp_
         with scalar weight should work without graph breaks.
@@ -430,18 +446,23 @@ l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = l_end
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]", L_end_tensors_0_: \
-"f32[4]", L_end_tensors_1_: "f32[4]"):
-        l_tensors_0_ = L_tensors_0_
-        l_tensors_1_ = L_tensors_1_
+    def forward(self, L_end_tensors_0_: "f32[4]", L_end_tensors_1_: "f32[4]", L_tensors_0_: "f32[4]", L_tensors_1_: "f32[4]"):
         l_end_tensors_0_ = L_end_tensors_0_
         l_end_tensors_1_ = L_end_tensors_1_
+        l_tensors_0_ = L_tensors_0_
+        l_tensors_1_ = L_tensors_1_
 
-        _foreach_lerp_ = torch._foreach_lerp_([l_tensors_0_, l_tensors_1_], \
-[l_end_tensors_0_, l_end_tensors_1_], 0.5);  l_tensors_0_ = l_tensors_1_ = l_end_tensors_0_ = \
-l_end_tensors_1_ = _foreach_lerp_ = None
+        _foreach_sub = torch._foreach_sub([l_end_tensors_0_, l_end_tensors_1_], [l_tensors_0_, l_tensors_1_])
+        getitem: "f32[4]" = _foreach_sub[0]
+        getitem_1: "f32[4]" = _foreach_sub[1];  _foreach_sub = None
+        tensor: "f32[]" = torch.tensor(0.5, dtype = torch.float32, device = device(type='cpu'))
+        sub: "f32[]" = 1.0 - tensor;  tensor = None
+        neg_omw: "f32[]" = -sub;  sub = None
+        copy_: "f32[4]" = l_tensors_0_.copy_(l_end_tensors_0_);  l_end_tensors_0_ = copy_ = None
+        copy__1: "f32[4]" = l_tensors_1_.copy_(l_end_tensors_1_);  l_end_tensors_1_ = copy__1 = None
+        _foreach_addcmul_ = torch._foreach_addcmul_([l_tensors_0_, l_tensors_1_], [neg_omw, neg_omw], (getitem, getitem_1));  l_tensors_0_ = l_tensors_1_ = neg_omw = getitem = getitem_1 = _foreach_addcmul_ = None
         return ()
-""",
+""",  # noqa: B950
         )
 
     def test_foreach_pow_scalar_decomposition_enabled(self):

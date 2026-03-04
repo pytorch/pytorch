@@ -3,6 +3,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/xpu/Blas.h>
 #include <ATen/xpu/XPUScaledBlas.h>
@@ -359,7 +360,7 @@ using acceptance_fn = std::function<bool(
     ArrayRef<Tensor>&)>;
 using namespace std::placeholders;
 
-namespace scaled_blas = at::native::onednn::scaled;
+namespace scaled_blas = at::native::scaled;
 using scaled_blas::convert_int_to_enum;
 using scaled_blas::ScaledGemmImplementation;
 
