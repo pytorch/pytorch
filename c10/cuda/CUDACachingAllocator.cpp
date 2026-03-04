@@ -3962,6 +3962,12 @@ static bool forceUncachedAllocator() {
 
 static void* uncached_allocate(size_t size) {
   void* devPtr = nullptr;
+#if defined(USE_ROCM) && defined(USE_ASAN)
+  // The narrowest atomicCAS for HIP is 4 bytes.
+  // Under ASAN, to avoid legitimate buffer overruns by atomicCAS,
+  // we pad all allocations to the nearest 4 bytes.
+  size = (size + 3) & ~size_t(3);
+#endif
   // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
   // if someone tries to use forceUncachedAllocator while capturing.
   C10_CUDA_CHECK(cudaMalloc(&devPtr, size));
