@@ -85,15 +85,13 @@ struct static_cast_with_inter_type<
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(src_t src) {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     auto r = maybe_real<real, src_t>::apply(src);
-    if constexpr (std::is_floating_point_v<src_t> && std::is_integral_v<dest_t>) {
-      if (r >= static_cast<src_t>(std::numeric_limits<dest_t>::max()))
-        return std::numeric_limits<dest_t>::max();
-      else if (r < static_cast<src_t>(std::numeric_limits<dest_t>::min()))
-        return std::numeric_limits<dest_t>::min();
-      else
-        return static_cast<dest_t>(r);
+    if (r >= static_cast<src_t>(std::numeric_limits<dest_t>::max())) {
+      return std::numeric_limits<dest_t>::max();
+    } else if (r < static_cast<src_t>(std::numeric_limits<dest_t>::min())) {
+      return std::numeric_limits<dest_t>::min();
+    } else {
+      return static_cast<dest_t>(r);
     }
-    return static_cast<dest_t>(r);
   }
 };
 
