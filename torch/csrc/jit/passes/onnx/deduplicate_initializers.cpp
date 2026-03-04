@@ -15,14 +15,21 @@ using namespace ::c10::onnx;
 }
 
 struct HashValue {
-  HashValue(ValueToParamPairMap& valsToParamsMap)
-      : valsToParamsMap_(valsToParamsMap) {}
+  HashValue(ValueToParamPairMap& valsToParamsMap, bool compare_by_ptr)
+      : valsToParamsMap_(valsToParamsMap), compare_by_ptr_(compare_by_ptr) {}
 
   size_t operator()(Value* v) const {
     auto t = valsToParamsMap_.find(v)->second.second.toTensor();
 
-    // Use first element of the tensor as hash key to reduce hash collision,
-    // since most tensors differ from one another from the very first element.
+    if (compare_by_ptr_) {
+      // Hash by metadata + data pointer
+      return at::get_hash(
+          t.sizes(), t.strides(), t.has_storage() ? t.data_ptr() : 0);
+    }
+
+    // Hash by metadata + first element value (if exists). This is a fast
+    // approximation of hashing by the whole tensor value, which can be
+    // expensive for large tensors.
     double first_elem_double = 0.0;
     int64_t first_elem_int64 = 0;
     uint64_t first_elem_uint64 = 0;
@@ -51,6 +58,7 @@ struct HashValue {
 
  private:
   ValueToParamPairMap& valsToParamsMap_;
+  bool compare_by_ptr_;
 };
 
 struct CompareValue {
@@ -65,6 +73,9 @@ struct CompareValue {
   std::function<bool(Value*, Value*)> is_same_tensor_as_;
 };
 
+// forward declaration
+static bool DeduplicateInitializersByDataPtr(at::Tensor& t1, at::Tensor& t2);
+
 static void DeduplicateInitializers(
     std::shared_ptr<Graph>& g,
     ValueToParamPairMap& valsToParamsMap,
@@ -75,8 +86,11 @@ static void DeduplicateInitializers(
     return comp(t1, t2);
   };
 
+  bool compare_by_ptr = comp == &DeduplicateInitializersByDataPtr;
   std::unordered_set<Value*, HashValue, CompareValue> uniqueVals(
-      0, HashValue(valsToParamsMap), CompareValue(is_same_tensor_as));
+      0,
+      HashValue(valsToParamsMap, compare_by_ptr),
+      CompareValue(is_same_tensor_as));
   std::vector<size_t> inputsIndicesToRemove;
   auto b = g->block();
 
