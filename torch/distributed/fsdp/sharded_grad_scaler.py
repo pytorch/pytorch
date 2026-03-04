@@ -41,18 +41,19 @@ class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
             )
         self.master = master_tensor
         self._per_device_tensors: dict[torch.device, torch.Tensor] = {}
-    
+
         def get(self, device: torch.device) -> torch.Tensor:
-        retval = self._per_device_tensors.get(device, None)
-        if retval is None:
-            # Unlike the parent class which only handles CUDA->CUDA, this subclass
-            # also serves CPU targets (CPU offload). Use non_blocking=False so that
-            # a CUDA->CPU transfer completes before the returned tensor is handed to
-            # a CPU kernel; with non_blocking=True the async DMA can race against
-            # _amp_foreach_non_finite_check_and_unscale_ and overwrite its result.
-            retval = self.master.to(device=device, non_blocking=False, copy=True)
-            self._per_device_tensors[device] = retval
-        return retval
+            retval = self._per_device_tensors.get(device, None)
+            if retval is None:
+                # Unlike the parent class which only handles CUDA->CUDA, this subclass
+                # also serves CPU targets (CPU offload). Use non_blocking=False so that
+                # a CUDA->CPU transfer completes before the returned tensor is handed to
+                # a CPU kernel; with non_blocking=True the async DMA can race against
+                # _amp_foreach_non_finite_check_and_unscale_ and overwrite its result.
+                retval = self.master.to(device=device, non_blocking=False, copy=True)
+                self._per_device_tensors[device] = retval
+            return retval
+
 
 class ShardedGradScaler(GradScaler):
     """
