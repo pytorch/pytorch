@@ -3,6 +3,7 @@ import base64
 import copy
 import copyreg
 import dataclasses
+import functools
 import heapq
 import inspect
 import io
@@ -109,6 +110,42 @@ __all__ = [
 ]
 
 log = logging.getLogger(__name__)
+
+
+# Build a mapping from Python schema types to tuples that also include the C++
+# pybind11 counterparts (named "Cpp<Type>" in torch._C._export).  This allows
+# isinstance() checks to work transparently with both Python dataclasses and
+# C++ deserialized objects.
+_SCHEMA_TYPE_TUPLES: dict[type, tuple[type, ...]] = {}
+
+
+def _init_cpp_schema_types() -> None:
+    try:
+        cpp = torch._C._export
+    except AttributeError:
+        return
+    for py_type in (
+        TensorArgument, SymIntArgument, SymFloatArgument, SymBoolArgument,
+        OptionalTensorArgument, CustomObjArgument, TokenArgument,
+        GraphArgument, Argument, ExportedProgram, InputSpec, OutputSpec,
+    ):
+        cpp_type = getattr(cpp, f"Cpp{py_type.__name__}", None)
+        if cpp_type is not None:
+            _SCHEMA_TYPE_TUPLES[py_type] = (py_type, cpp_type)
+
+
+def _schema_isinstance(obj: object, types: type | tuple[type, ...]) -> bool:
+    """isinstance() that accepts both Python and C++ schema types."""
+    if isinstance(types, tuple):
+        expanded: list[type] = []
+        for t in types:
+            expanded.extend(_SCHEMA_TYPE_TUPLES.get(t, (t,)))
+        return isinstance(obj, tuple(expanded))
+    tup = _SCHEMA_TYPE_TUPLES.get(types, (types,))
+    return isinstance(obj, tup)
+
+
+_init_cpp_schema_types()
 
 
 class SerializeError(RuntimeError):
@@ -3103,7 +3140,7 @@ class GraphModuleDeserializer(metaclass=Final):
         elif typ_ == "as_layout":
             return _SERIALIZE_TO_TORCH_LAYOUT[inp.as_layout]
         elif typ_ == "as_graph":
-            if not isinstance(value, GraphArgument):
+            if not _schema_isinstance(value, GraphArgument):
                 raise AssertionError(
                     f"expected GraphArgument, got {type(value).__name__}"
                 )
@@ -3200,17 +3237,17 @@ class GraphModuleDeserializer(metaclass=Final):
             raise SerializeError(f"Unhandled constant argument {inp} to deserialize")
 
     def deserialize_sym_argument(self, sym_arg):
-        if isinstance(sym_arg, SymIntArgument):
+        if _schema_isinstance(sym_arg, SymIntArgument):
             if sym_arg.type == "as_int":
                 return sym_arg.as_int
             elif sym_arg.type == "as_name":
                 return self.serialized_name_to_node[sym_arg.as_name]
-        elif isinstance(sym_arg, SymFloatArgument):
+        elif _schema_isinstance(sym_arg, SymFloatArgument):
             if sym_arg.type == "as_float":
                 return sym_arg.as_float
             elif sym_arg.type == "as_name":
                 return self.serialized_name_to_node[sym_arg.as_name]
-        elif isinstance(sym_arg, SymBoolArgument):
+        elif _schema_isinstance(sym_arg, SymBoolArgument):
             if sym_arg.type == "as_bool":
                 return sym_arg.as_bool
             elif sym_arg.type == "as_name":
@@ -3237,7 +3274,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 arg = None
                 if serialized_node.outputs[0].type == "as_tensor":
                     arg = serialized_node.outputs[0].as_tensor
-                elif isinstance(
+                elif _schema_isinstance(
                     serialized_node.outputs[0].value,
                     (SymIntArgument, SymBoolArgument, SymFloatArgument),
                 ):
@@ -3261,7 +3298,7 @@ class GraphModuleDeserializer(metaclass=Final):
         ):
             self.sync_fx_node(serialized_node.outputs[0].as_tensor.name, fx_node)
             return
-        elif len(serialized_node.outputs) == 1 and isinstance(
+        elif len(serialized_node.outputs) == 1 and _schema_isinstance(
             serialized_node.outputs[0].value,
             (SymIntArgument, SymBoolArgument, SymFloatArgument),
         ):
@@ -3286,11 +3323,11 @@ class GraphModuleDeserializer(metaclass=Final):
         idx: int,
         deserialized_metadata: dict[str, Any],
     ):
-        if isinstance(arg, TensorArgument):
+        if _schema_isinstance(arg, TensorArgument):
             name = arg.name
-        elif isinstance(arg, SymIntArgument):
+        elif _schema_isinstance(arg, SymIntArgument):
             name = arg.as_name
-        elif isinstance(arg, SymFloatArgument):
+        elif _schema_isinstance(arg, SymFloatArgument):
             name = arg.as_name
         else:
             raise AssertionError(
@@ -3316,13 +3353,13 @@ class GraphModuleDeserializer(metaclass=Final):
         deserialized_metadata: dict[str, Any],
     ):
         for idx, arg in enumerate(args):
-            if isinstance(arg, (TensorArgument, SymIntArgument, SymFloatArgument)):
+            if _schema_isinstance(arg, (TensorArgument, SymIntArgument, SymFloatArgument)):
                 self.generate_getitem(
                     meta_val, fx_node, arg, idx, deserialized_metadata
                 )
                 continue
 
-            if not isinstance(arg, Argument):
+            if not _schema_isinstance(arg, Argument):
                 raise AssertionError(f"expected Argument, got {type(arg).__name__}")
             if arg.type in ("as_tensor", "as_sym_int", "as_sym_float"):
                 self.generate_getitem(
@@ -3379,7 +3416,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 raise AssertionError(
                     f"expected list, got {type(serialized_node.outputs[0].value).__name__}"
                 )
-            if not isinstance(serialized_node.outputs[0].value[0], TensorArgument):
+            if not _schema_isinstance(serialized_node.outputs[0].value[0], TensorArgument):
                 raise AssertionError(
                     f"expected TensorArgument, got {type(serialized_node.outputs[0].value[0]).__name__}"
                 )
@@ -3576,7 +3613,7 @@ class ExportedProgramDeserializer(metaclass=Final):
         *,
         _unsafe_skip_version_check=False,
     ) -> ep.ExportedProgram:
-        if not isinstance(exported_program, ExportedProgram):
+        if not _schema_isinstance(exported_program, ExportedProgram):
             raise AssertionError(
                 f"expected ExportedProgram, got {type(exported_program).__name__}"
             )
@@ -3687,7 +3724,7 @@ def serialize(
             serialize_constants=serialize_constants,
             serialize_example_inputs=serialize_example_inputs,
         )
-    if not isinstance(serialized_program.exported_program, ExportedProgram):
+    if not _schema_isinstance(serialized_program.exported_program, ExportedProgram):
         raise AssertionError(
             f"expected ExportedProgram, got {type(serialized_program.exported_program).__name__}"
         )
@@ -3710,6 +3747,19 @@ def _resolve_schema_cls(cls):
     if isinstance(cls, typing.ForwardRef):
         return _resolve_schema_cls(cls.__forward_arg__)
     return cls
+
+
+_SCHEMA_GLOBALNS: dict[str, Any] = vars(schema)
+
+
+@functools.cache
+def _cached_type_hints(cls):
+    return typing.get_type_hints(cls, globalns=_SCHEMA_GLOBALNS)
+
+
+@functools.cache
+def _cached_dataclass_fields(cls):
+    return dataclasses.fields(cls)
 
 
 def _dict_to_dataclass(cls, data):
@@ -3736,16 +3786,16 @@ def _dict_to_dataclass(cls, data):
         _value = next(iter(data.values()))
         if not isinstance(_type, str):
             raise AssertionError(f"expected str key, got {type(_type).__name__}")
-        type_hints = typing.get_type_hints(cls, globalns=vars(schema))
+        type_hints = _cached_type_hints(cls)
         field_type = type_hints[_type]
         # pyrefly: ignore [missing-attribute]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
         fields = {}
-        type_hints = typing.get_type_hints(cls, globalns=vars(schema))
+        type_hints = _cached_type_hints(cls)
         # For forward compatibility consideration, we ignore all the keys
         # that are not showing up in the dataclass definition.
-        for f in dataclasses.fields(cls):
+        for f in _cached_dataclass_fields(cls):
             name = f.name
             if name not in data:
                 continue
@@ -3863,7 +3913,7 @@ def _canonicalize_graph(
 
     # Stage 1: Reorder named items.
     def for_args(f, a):
-        if not isinstance(a, Argument):
+        if not _schema_isinstance(a, Argument):
             raise AssertionError(f"expected Argument, got {type(a).__name__}")
         pytree.tree_map(f, _get_argument(a))
 
@@ -3883,23 +3933,23 @@ def _canonicalize_graph(
         def get_name(a) -> str | None:
             if a is None:
                 return None
-            if isinstance(a, TensorArgument):
+            if _schema_isinstance(a, TensorArgument):
                 return a.name
-            elif isinstance(a, (SymIntArgument, SymBoolArgument, SymFloatArgument)):
+            elif _schema_isinstance(a, (SymIntArgument, SymBoolArgument, SymFloatArgument)):
                 if a.type == "as_name":
                     return a.as_name
                 elif a.type in ("as_int", "as_bool", "as_float"):
                     return None
                 else:
                     raise AssertionError(f"Unknown argument type: {a}")
-            elif isinstance(a, OptionalTensorArgument):
+            elif _schema_isinstance(a, OptionalTensorArgument):
                 if a.type == "as_tensor":
                     return a.as_tensor.name
                 elif a.type == "as_none":
                     return None
                 else:
                     raise AssertionError(f"Unknown optional tensor type: {a}")
-            elif isinstance(a, CustomObjArgument):
+            elif _schema_isinstance(a, CustomObjArgument):
                 return a.name
             else:
                 raise AssertionError(f"Unknown argument type: {a}")
@@ -4015,18 +4065,18 @@ def _canonicalize_graph(
 
         if a is None:
             return
-        if isinstance(a, TensorArgument):
+        if _schema_isinstance(a, TensorArgument):
             a.name = _rename(a.name, graph.tensor_values)
-        elif isinstance(a, SymIntArgument):
+        elif _schema_isinstance(a, SymIntArgument):
             if a.type == "as_name":
                 a.as_name = _rename(a.as_name, graph.sym_int_values)
-        elif isinstance(a, SymFloatArgument):
+        elif _schema_isinstance(a, SymFloatArgument):
             if a.type == "as_name":
                 a.as_name = _rename(a.as_name, graph.sym_float_values)
-        elif isinstance(a, SymBoolArgument):
+        elif _schema_isinstance(a, SymBoolArgument):
             if a.type == "as_name":
                 a.as_name = _rename(a.as_name, graph.sym_bool_values)
-        elif isinstance(a, CustomObjArgument):
+        elif _schema_isinstance(a, CustomObjArgument):
             a.name = _rename(a.name, graph.custom_obj_values)
         else:
             raise AssertionError(f"Unknown argument type: {a}")
@@ -4034,18 +4084,18 @@ def _canonicalize_graph(
     def replace_use(a):
         if a is None:
             return
-        if isinstance(a, TensorArgument):
+        if _schema_isinstance(a, TensorArgument):
             a.name = name_table.get(a.name, a.name)
-        elif isinstance(a, (SymIntArgument, SymFloatArgument)):
+        elif _schema_isinstance(a, (SymIntArgument, SymFloatArgument)):
             if a.type == "as_name":
                 a.as_name = name_table.get(a.as_name, a.as_name)
-        elif isinstance(a, SymBoolArgument):
+        elif _schema_isinstance(a, SymBoolArgument):
             if a.type == "as_name":
                 a.as_name = name_table.get(a.as_name, a.as_name)
-        elif isinstance(a, OptionalTensorArgument):
+        elif _schema_isinstance(a, OptionalTensorArgument):
             if a.type == "as_tensor":
                 a.as_tensor.name = name_table.get(a.as_tensor.name, a.as_tensor.name)
-        elif isinstance(a, CustomObjArgument):
+        elif _schema_isinstance(a, CustomObjArgument):
             a.name = name_table.get(a.name, a.name)
         else:
             raise AssertionError(f"Unknown argument type: {a}")
@@ -4165,7 +4215,7 @@ def canonicalize(
 
     def rank_input(inp) -> tuple[int, str | None, int]:
         idx, (_arg, spec) = inp
-        if not isinstance(spec, InputSpec):
+        if not _schema_isinstance(spec, InputSpec):
             raise AssertionError(f"expected InputSpec, got {type(spec).__name__}")
         if spec.type == "user_input":
             return 5, None, idx
@@ -4186,7 +4236,7 @@ def canonicalize(
 
     def rank_output(out) -> tuple[int, str | None, int]:
         idx, (_arg, spec) = out
-        if not isinstance(spec, OutputSpec):
+        if not _schema_isinstance(spec, OutputSpec):
             raise AssertionError(f"expected OutputSpec, got {type(spec).__name__}")
         if spec.type == "user_output":
             return 4, None, idx
@@ -4227,7 +4277,7 @@ def canonicalize(
     )
 
     def replace_input(spec):
-        if not isinstance(spec, InputSpec):
+        if not _schema_isinstance(spec, InputSpec):
             raise AssertionError(f"expected InputSpec, got {type(spec).__name__}")
         if spec.type == "user_input":
             arg = spec.user_input.arg
@@ -4283,7 +4333,7 @@ def canonicalize(
             raise AssertionError(f"Unknown input type: {spec}")
 
     def replace_output(out):
-        if not isinstance(spec, OutputSpec):
+        if not _schema_isinstance(spec, OutputSpec):
             raise AssertionError(f"expected OutputSpec, got {type(spec).__name__}")
         if spec.type == "user_output":
             arg = spec.user_output.arg

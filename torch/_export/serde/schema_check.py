@@ -43,6 +43,7 @@ def _staged_schema():
     cpp_class_defs: dict[str, str] = {}
     cpp_type_decls: list[str] = []
     cpp_json_defs: list[str] = []
+    pybind_defs: dict[str, str] = {}
     thrift_enum_defs: list[str] = []
     thrift_type_defs: dict[str, str] = {}
 
@@ -218,6 +219,14 @@ inline void parseEnum(std::string_view s, {name}& t) {{
   throw std::runtime_error("Unknown enum value: " + std::string{{s}});
 }}
 """
+        enum_values = "\n".join(
+            [f'    .value("{x.name}", {name}::{x.name})' for x in ty]
+        )
+        pybind_defs[name] = f"""
+  py::enum_<{name}>(m, "Cpp{name}")
+{enum_values}
+    .export_values();
+"""
         thrift_enum_defs.append(
             f"""
 enum {name} {{
@@ -290,6 +299,26 @@ class {name} {{
         cpp_json_defs.append(f"inline {to_json_decl} {to_json_def}")
         cpp_json_defs.append(f"inline {from_json_decl} {from_json_def}")
         cpp_type_decls.append(f"class {name};")
+
+        def pybind_property(field_name, cpp_type):
+            type_name = fields[field_name]["type"]
+            if type_name in cpp_enum_defs:
+                return f'    .def_property_readonly("{field_name}", [](const {name}& s) {{ return static_cast<int64_t>(s.get_{field_name}()); }})'
+            if cpp_type == "F64":
+                return f'    .def_property_readonly("{field_name}", [](const {name}& s) {{ return s.get_{field_name}().get(); }})'
+            if cpp_type.startswith("std::optional<") and cpp_type.endswith("F64>"):
+                return f'    .def_property_readonly("{field_name}", [](const {name}& s) -> std::optional<double> {{ const auto& v = s.get_{field_name}(); if (!v) return std::nullopt; return v->get(); }})'
+            if cpp_type.startswith("ForwardRef<"):
+                return f'    .def_property_readonly("{field_name}", [](const {name}& s) -> const auto& {{ return *s.get_{field_name}(); }})'
+            return f'    .def_property_readonly("{field_name}", &{name}::get_{field_name})'
+
+        props = "\n".join(
+            pybind_property(n, f["cpp_type"]) for n, f in cpp_fields.items()
+        )
+        pybind_defs[name] = f"""
+  py::class_<{name}>(m, "Cpp{name}")
+{props};
+"""
 
         thrift_type_defs[name] = f"""
 struct {name} {{
@@ -377,6 +406,54 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
 
 """
         cpp_type_decls.append(f"class {name};")
+
+        # pybind11 for union: .type returns tag string, .value returns active variant
+        type_cases = "\n".join(
+            f'      case {name}::Tag::{n.upper()}: return "{n}";'
+            for n in cpp_fields
+        )
+
+        def _union_variant_accessor(variant_name, cpp_type):
+            if cpp_type == "F64":
+                return f'    .def_property_readonly("{variant_name}", [](const {name}& u) {{ return u.get_{variant_name}().get(); }})'
+            if cpp_type == "int64_t" and fields[variant_name]["type"] in cpp_enum_defs:
+                return f'    .def_property_readonly("{variant_name}", [](const {name}& u) {{ return static_cast<int64_t>(u.get_{variant_name}()); }})'
+            if cpp_type.startswith("ForwardRef<"):
+                return f'    .def_property_readonly("{variant_name}", [](const {name}& u) -> const auto& {{ return *u.get_{variant_name}(); }})'
+            return f'    .def_property_readonly("{variant_name}", &{name}::get_{variant_name})'
+
+        def _union_value_case(variant_name, cpp_type):
+            tag = f'{name}::Tag::{variant_name.upper()}'
+            if cpp_type == "F64":
+                return f'      case {tag}: return py::cast(u.get_{variant_name}().get());'
+            if cpp_type.startswith("ForwardRef<"):
+                return f'      case {tag}: return py::cast(*u.get_{variant_name}());'
+            return f'      case {tag}: return py::cast(u.get_{variant_name}());'
+
+        value_cases = "\n".join(
+            _union_value_case(n, f["cpp_type"])
+            for n, f in cpp_fields.items()
+        )
+        variant_accessors = "\n".join(
+            _union_variant_accessor(n, f["cpp_type"])
+            for n, f in cpp_fields.items()
+        )
+        pybind_defs[name] = f"""
+  py::class_<{name}>(m, "Cpp{name}")
+    .def_property_readonly("type", [](const {name}& u) -> std::string {{
+      switch (u.tag()) {{
+{type_cases}
+        default: return "unknown";
+      }}
+    }})
+    .def_property_readonly("value", [](const {name}& u) -> py::object {{
+      switch (u.tag()) {{
+{value_cases}
+        default: return py::none();
+      }}
+    }})
+{variant_accessors};
+"""
 
         thrift_type_defs[name] = f"""
 union {name} {{
@@ -563,13 +640,69 @@ template <typename T> ForwardRef<T>& ForwardRef<T>::operator=(ForwardRef<T>&&) n
 template <typename T> ForwardRef<T>::~ForwardRef() = default;
 }} // namespace torch::_export
 """
+    # Generate pybind11 bindings header
+    # Enums first (no ordering needed), then classes sorted by source line
+    sorted_pybind_class_defs = dict(
+        sorted(
+            ((k, v) for k, v in pybind_defs.items() if k in class_ordering),
+            key=lambda x: class_ordering[x[0]],
+        )
+    )
+    pybind_enum_defs_str = "".join(
+        v for k, v in pybind_defs.items() if k not in class_ordering
+    )
+    pybind_class_defs_str = "".join(sorted_pybind_class_defs.values())
+
+    pybind_header = f"""
+#pragma once
+
+#include <torch/csrc/utils/generated_serialization_types.h>
+#include <torch/csrc/utils/pybind.h>
+
+// Auto-convert F64 to Python float.
+namespace pybind11 {{ namespace detail {{
+template <>
+struct type_caster<torch::_export::F64> {{
+  PYBIND11_TYPE_CASTER(torch::_export::F64, const_name("float"));
+  bool load(handle, bool) {{ return false; }}
+  static handle cast(const torch::_export::F64& src,
+                     return_value_policy, handle) {{
+    return PyFloat_FromDouble(src.get());
+  }}
+}};
+
+// Auto-dereference ForwardRef<T> to T when casting to Python.
+template <typename T>
+struct type_caster<torch::_export::ForwardRef<T>> {{
+  using value_conv = make_caster<T>;
+  PYBIND11_TYPE_CASTER(torch::_export::ForwardRef<T>, value_conv::name);
+  bool load(handle, bool) {{ return false; }}
+  static handle cast(const torch::_export::ForwardRef<T>& src,
+                     return_value_policy policy, handle parent) {{
+    return value_conv::cast(*src, policy, parent);
+  }}
+}};
+}}}}
+
+namespace torch {{
+namespace _export {{
+
+inline void registerSerializationBindings(py::module_& m) {{
+{pybind_enum_defs_str}
+{pybind_class_defs_str}
+}}
+
+}} // namespace _export
+}} // namespace torch
+"""
+
     thrift_schema = f"""
 namespace py3 torch._export
 namespace cpp2 torch._export.schema
 {chr(10).join(thrift_enum_defs)}
 {chr(10).join(dict(sorted(thrift_type_defs.items(), key=lambda x: class_ordering[x[0]])).values())}
 """
-    return yaml_ret, cpp_header, thrift_schema
+    return yaml_ret, cpp_header, pybind_header, thrift_schema
 
 
 def _diff_schema(dst, src):
@@ -771,6 +904,8 @@ class _Commit:
     checksum_head: str | None
     cpp_header: str
     cpp_header_path: str
+    pybind_header: str
+    pybind_header_path: str
     enum_converter_header: str
     enum_converter_header_path: str
     thrift_checksum_head: str | None
@@ -825,7 +960,7 @@ def update_schema():
         thrift_checksum_real = None
         dst = {"SCHEMA_VERSION": None, "TREESPEC_VERSION": None}
 
-    src, cpp_header, thrift_schema = _staged_schema()
+    src, cpp_header, pybind_header, thrift_schema = _staged_schema()
     enum_converter_header = _generate_enum_converters()
     additions, subtractions = _diff_schema(dst, src)
     # pyrefly: ignore [missing-attribute]
@@ -852,6 +987,8 @@ def update_schema():
         checksum_head=checksum_head,
         cpp_header=cpp_header,
         cpp_header_path=torch_prefix + "csrc/utils/generated_serialization_types.h",
+        pybind_header=pybind_header,
+        pybind_header_path=torch_prefix + "csrc/utils/generated_serialization_bindings.h",
         enum_converter_header=enum_converter_header,
         enum_converter_header_path=torch_prefix
         + "csrc/inductor/aoti_torch/generated_enum_converters.h",

@@ -853,9 +853,8 @@ def _load_payload_config(
     """
     Load and parse a payload config from the archive.
     """
-    return _dict_to_dataclass(
-        schema.PayloadConfig,
-        json.loads(archive_reader.read_string(config_file)),
+    return torch._C._export.deserialize_payload_config(
+        archive_reader.read_string(config_file)
     )
 
 
@@ -1003,11 +1002,9 @@ def _load_exported_programs(
         sample_inputs_file = SAMPLE_INPUTS_FILENAME_FORMAT.format(model_name)
         serialized_sample_inputs = archive_reader.read_bytes(sample_inputs_file)
 
-        from torch._export.serde.serialize import _bytes_to_dataclass
-
         exported_program_bytes = archive_reader.read_bytes(file)
-        serialized_exported_program = _bytes_to_dataclass(
-            schema.ExportedProgram, exported_program_bytes
+        serialized_exported_program = torch._C._export.deserialize_exported_program(
+            exported_program_bytes.decode("utf-8")
         )
         state_dict = _load_state_dict(archive_reader, model_name)
         constants = _load_constants(archive_reader, model_name)

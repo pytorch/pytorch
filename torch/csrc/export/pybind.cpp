@@ -2,6 +2,7 @@
 #include <torch/csrc/export/pt2_archive_constants.h>
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/export/upgrader.h>
+#include <torch/csrc/utils/generated_serialization_bindings.h>
 #include <torch/csrc/utils/generated_serialization_types.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -12,8 +13,7 @@ void initExportBindings(PyObject* module) {
   auto exportModule = rootModule.def_submodule("_export");
   auto pt2ArchiveModule = exportModule.def_submodule("pt2_archive_constants");
 
-  // NOLINTNEXTLINE(bugprone-unused-raii)
-  py::class_<ExportedProgram>(exportModule, "CppExportedProgram");
+  registerSerializationBindings(exportModule);
 
   exportModule.def(
       "deserialize_exported_program", [](const std::string& serialized) {
@@ -47,6 +47,12 @@ void initExportBindings(PyObject* module) {
 
   exportModule.def(
       "deregister_example_upgraders", []() { deregisterExampleUpgraders(); });
+
+  exportModule.def(
+      "deserialize_payload_config", [](const std::string& json_str) {
+        auto parsed = nlohmann::json::parse(json_str);
+        return parsed.get<PayloadConfig>();
+      });
 
   for (const auto& entry : torch::_export::archive_spec::kAllConstants) {
     pt2ArchiveModule.attr(entry.first) = entry.second;
