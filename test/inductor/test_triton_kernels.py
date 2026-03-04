@@ -2779,7 +2779,9 @@ def make_mutation_test(fn):
         from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
 
         kernel, inputs, tma_descriptor_metadata, outputs = fn()
-        tensor_accesses = identify_accessed_tensors(kernel, inputs, tma_descriptor_metadata)
+        tensor_accesses = identify_accessed_tensors(
+            kernel, inputs, tma_descriptor_metadata
+        )
         mutated_tensor_names = [dep.name for dep in tensor_accesses.read_writes.writes]
         self.assertListEqual(
             mutated_tensor_names,
