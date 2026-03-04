@@ -77,7 +77,9 @@ logger = logging.getLogger(__name__)
 
 _persistent_workers_atexit_lock = threading.Lock()
 _persistent_workers_atexit_registered = False
-_persistent_workers_atexit: weakref.WeakSet[Any] = weakref.WeakSet()
+_persistent_workers_atexit: weakref.WeakSet[_MultiProcessingDataLoaderIter] = (
+    weakref.WeakSet()
+)
 
 
 class _DatasetKind:
@@ -1217,7 +1219,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # atexit is used to shutdown thread and child processes in the
         # right sequence before main process exits
         if self._persistent_workers and self._pin_memory:
-            self._register_persistent_workers_atexit(self._workers)
+            self._register_persistent_workers_atexit()
 
         # .pid can be None only before process is spawned (not the case, so ignore)
         _utils.signal_handling._set_worker_pids(
@@ -1675,40 +1677,24 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         # we kill the worker.
                         w.terminate()
                         w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-                    with contextlib.suppress(Exception):
+                    if not w.is_alive():
                         w.close()
-
-    # staticmethod is used to remove reference to `_MultiProcessingDataLoaderIter`
-    @staticmethod
-    def _clean_up_worker(w) -> None:
-        with contextlib.suppress(ValueError):
-            w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-        try:
-            if w.is_alive():
-                w.terminate()
-                with contextlib.suppress(ValueError):
-                    w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
-        except ValueError:
-            pass
-        finally:
-            with contextlib.suppress(Exception):
-                w.close()
 
     @staticmethod
     def _clean_up_persistent_workers_atexit() -> None:
+        # This callback is registered after `_utils._set_python_exit_flag`,
+        # so it runs while `_shutdown_workers()` can still use multiprocessing.
         with _persistent_workers_atexit_lock:
-            workers = tuple(_persistent_workers_atexit)
-        for worker in workers:
-            _MultiProcessingDataLoaderIter._clean_up_worker(worker)
+            iterators = tuple(_persistent_workers_atexit)
+        for iterator in iterators:
+            iterator._shutdown_workers()
 
-    @staticmethod
-    def _register_persistent_workers_atexit(workers) -> None:
+    def _register_persistent_workers_atexit(self) -> None:
         import atexit
 
         global _persistent_workers_atexit_registered
         with _persistent_workers_atexit_lock:
-            for worker in workers:
-                _persistent_workers_atexit.add(worker)
+            _persistent_workers_atexit.add(self)
             if _persistent_workers_atexit_registered:
                 return
             atexit.register(
