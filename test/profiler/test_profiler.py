@@ -2762,6 +2762,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 x = torch.randn(10, 10)
                 y = torch.mm(x, x)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_nonmember_type_name(self):
         """Activity type name that is not a member of the requested activity group raises RuntimeError."""
