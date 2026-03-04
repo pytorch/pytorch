@@ -3389,6 +3389,63 @@ except RuntimeError as e:
             ]
         )
 
+    @unittest.skipIf(not TEST_CUDA, "pin_memory requires CUDA")
+    def test_persistent_workers_pin_memory_atexit_registered_once(self):
+        import atexit
+        from unittest import mock
+
+        target_fn = dataloader._MultiProcessingDataLoaderIter._clean_up_persistent_workers_atexit
+        register_call_count = 0
+        orig_register = atexit.register
+
+        def wrapped_register(fn, *args, **kwargs):
+            nonlocal register_call_count
+            if fn is target_fn:
+                register_call_count += 1
+            return orig_register(fn, *args, **kwargs)
+
+        with mock.patch("atexit.register", side_effect=wrapped_register):
+            for _ in range(8):
+                loader = self._get_data_loader(
+                    self.dataset, batch_size=2, num_workers=1, pin_memory=True
+                )
+                it = iter(loader)
+                next(it)
+                it._shutdown_workers()
+                del it
+                del loader
+                gc.collect()
+
+        self.assertEqual(register_call_count, 1)
+
+    @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
+    @unittest.skipIf(not IS_LINUX, "fd counting is only reliable on Linux")
+    @unittest.skipIf(not TEST_CUDA, "pin_memory requires CUDA")
+    def test_persistent_workers_pin_memory_fd_does_not_grow_linearly(self):
+        proc = psutil.Process()
+
+        def make_and_destroy_loader() -> None:
+            loader = self._get_data_loader(
+                self.dataset,
+                batch_size=2,
+                num_workers=1,
+                pin_memory=True,
+            )
+            it = iter(loader)
+            next(it)
+            it._shutdown_workers()
+            del it
+            del loader
+            gc.collect()
+            time.sleep(0.05)
+
+        make_and_destroy_loader()
+        baseline_fds = proc.num_fds()
+        for _ in range(15):
+            make_and_destroy_loader()
+        after_fds = proc.num_fds()
+        self.assertLessEqual(after_fds, baseline_fds + 8)
+
     def test_dataset_not_reset(self):
         dataset = DummyDataset()
         pin_memory_configs = [False]
