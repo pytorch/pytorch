@@ -1419,7 +1419,7 @@ fn(torch.randn(5))
         torch._dynamo.eval_frame.clear_dynamo_tls()
 
         # Test program
-        @torch.compile()
+        @torch.compile(backend="eager")
         def foo():
             x = torch.ones([10])
 

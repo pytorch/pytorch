@@ -2979,6 +2979,22 @@ class CommonTemplate:
 
         self.common(fn, (torch.randint(4, (4,)),))
 
+    def test_comparison_scalar_type_promotion_bf16(self):
+        if self.device == "mps":
+            raise unittest.SkipTest(
+                "MPS codegen doesn't upcast bf16 constants to float32"
+            )
+
+        def fn(x):
+            return x == 3.14
+
+        x = torch.tensor(
+            [3.14, 1.0, 3.140625, 0.0], dtype=torch.bfloat16, device=self.device
+        )
+        expected = fn(x)
+        actual = torch.compile(fn)(x)
+        self.assertEqual(actual, expected)
+
     @skip_if_gpu_halide
     @xfail_if_triton_cpu
     def test_dist(self):
@@ -12542,6 +12558,59 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         deterministic=deterministic,
                     )
 
+    @unittest.skipIf(IS_MACOS, "fails on macos")
+    @parametrize("dtype", test_dtypes)
+    def test_empty_deterministic(self, dtype):
+        def test_helper(fn, args):
+            cfunc = torch.compile(fn, fullgraph=True)
+
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
+                eager = fn(*args)
+                compiled = cfunc(*args)
+                torch.testing.assert_close(eager, compiled, equal_nan=True)
+
+        def fn():
+            return torch.empty(4, 4, device=self.device, dtype=dtype)
+
+        test_helper(fn, ())
+
+        def fn(x):
+            return torch.empty_like(x, device=self.device, dtype=dtype)
+
+        test_helper(fn, (torch.empty(4, 4, device=self.device),))
+
+        def fn():
+            return torch.empty_strided((2, 2), (2, 1), device=self.device, dtype=dtype)
+
+        test_helper(fn, ())
+
+        def fn():
+            return torch.empty_permuted(
+                (2, 3, 5), (1, 0, 2), device=self.device, dtype=dtype
+            )
+
+        test_helper(fn, ())
+
+    @requires_gpu()
+    @unittest.skipIf(IS_MACOS, "fails on macos")
+    def test_empty_deterministic_pin_memory(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("Test only runs on CPU")
+
+        def fn():
+            return torch.empty(
+                4, 4, device=self.device, dtype=torch.float32, pin_memory=True
+            )
+
+        cfunc = torch.compile(fn, fullgraph=True)
+
+        with DeterministicGuard(True, fill_uninitialized_memory=True):
+            eager = fn()
+            compiled = cfunc()
+            torch.testing.assert_close(eager, compiled, equal_nan=True)
+            self.assertTrue(eager.is_pinned())
+            self.assertTrue(compiled.is_pinned())
+
     def test_inplace_resize_as(self):
         def fn(x, y):
             x.resize_as_(y)
@@ -16536,6 +16605,45 @@ if RUN_GPU:
     tmp0 = tl.load(in_ptr0 + (x0), xmask, cache_modifier='.cg')
     tmp1 = tl.load(in_ptr1 + (x0), xmask, cache_modifier='.cg')""",
             )
+
+        @config.patch("triton.skip_l1_cache", True)
+        def test_skip_l1_cache_buf_read_counts_guard(self):
+            from torch._inductor.codegen import simd_kernel_features
+
+            class M(nn.Module):
+                def __init__(self, n: int):
+                    super().__init__()
+                    # nn.Parameter ensures we exercise the primals_* path.
+                    # We move the module to GPU later, so we don't need to
+                    # specify the device here.
+                    self.weight = nn.Parameter(torch.randn(n))
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return x * self.weight
+
+            N = 512
+            m = torch.compile(M(N).to(device=GPU_TYPE))
+            x = torch.randn(N, device=GPU_TYPE)
+
+            # Monkeypatch SIMDKernelFeatures.buffer_read_counts to
+            # simulate missing entries for all buffers (including primals_*).
+            orig = simd_kernel_features.SIMDKernelFeatures.buffer_read_counts
+
+            def fake_buffer_read_counts(self_inner):
+                return {}
+
+            simd_kernel_features.SIMDKernelFeatures.buffer_read_counts = (
+                fake_buffer_read_counts
+            )
+            try:
+                # This used to raise InductorError(KeyError('primals_X'))
+                # when load() unconditionally indexed buffer_read_counts[name].
+                # With the fix, we should successfully generate Triton code.
+                code = run_and_get_triton_code(m, x)
+                lines = [line for line in code.split("\n") if "tl.load" in line]
+                self.assertTrue(lines)
+            finally:
+                simd_kernel_features.SIMDKernelFeatures.buffer_read_counts = orig
 
         @config.patch("triton.use_block_ptr", True)
         @config.patch("triton.coalesce_tiling_analysis", False)

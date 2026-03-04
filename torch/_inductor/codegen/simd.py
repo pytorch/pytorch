@@ -1767,7 +1767,7 @@ class SIMDScheduling(BaseScheduling):
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 
-            stride_str = f"{nsplit} * {rnumel}"
+            stride_str = f"({nsplit}) * {rnumel}"
             start = f"{idx} * {stride_str}"
             end = f"({idx} + 1) * {stride_str}"
             reduction_type2op = {

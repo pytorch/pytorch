@@ -2488,6 +2488,13 @@ static PyObject* clear_DTensor_sharding_propagator_cache(
   Py_RETURN_NONE;
 }
 
+static PyObject* reinit_DTensor_dispatch_logger(
+    PyObject* self,
+    PyObject* noargs) {
+  dtensor_dispatch_logger_initialized = false;
+  Py_RETURN_NONE;
+}
+
 using getter = PyObject* (*)(PyObject*, void*);
 using setter = int (*)(PyObject*, PyObject*, void*);
 
@@ -3480,6 +3487,10 @@ static PyMethodDef extra_dtensor_functions[] = {
      nullptr},
     {"_clear_DTensor_sharding_propagator_cache",
      clear_DTensor_sharding_propagator_cache,
+     METH_NOARGS,
+     nullptr},
+    {"_reinit_DTensor_dispatch_logger",
+     reinit_DTensor_dispatch_logger,
      METH_NOARGS,
      nullptr},
     {nullptr}};

@@ -455,9 +455,17 @@ struct ExpandableSegment {
       if (enable_ipc_handles) {
         if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
             Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+#ifdef USE_ROCM
+          prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+#else
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+#endif
         } else {
+#ifdef USE_ROCM
+          prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+#else
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
+#endif
         }
       }
       int flag = 0;
@@ -656,14 +664,13 @@ struct ExpandableSegment {
         }
         CUmemGenericAllocationHandle handle = 0;
 #ifdef USE_ROCM
-        C10_CUDA_CHECK(hipMemImportFromShareableHandle(
-            &handle,
 #if ROCM_VERSION >= 70100
-            reinterpret_cast<void*>(static_cast<uintptr_t>(myfd)),
+        void* myfd_ptr = reinterpret_cast<void*>(static_cast<uintptr_t>(myfd));
 #else
-            (void*)(uintptr_t)&myfd,
+        void* myfd_ptr = (void*)(uintptr_t)&myfd;
 #endif
-            hipMemHandleTypePosixFileDescriptor));
+        C10_CUDA_CHECK(hipMemImportFromShareableHandle(
+            &handle, myfd_ptr, hipMemHandleTypePosixFileDescriptor));
 #else
         C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
             &handle,
@@ -748,7 +755,10 @@ struct ExpandableSegment {
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 #ifdef USE_ROCM
     C10_CUDA_CHECK(hipMemSetAccess(
-        ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
+        ptr() + begin * segment_size_,
+        (end - begin) * segment_size_,
+        &desc,
+        1));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
         ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
@@ -759,7 +769,7 @@ struct ExpandableSegment {
     for (auto i : c10::irange(begin, end)) {
 #ifdef USE_ROCM
       C10_CUDA_CHECK(hipMemMap(
-          ptr_ + i * segment_size_,
+          reinterpret_cast<char*>(ptr_) + i * segment_size_,
           segment_size_,
           0,
           handles_.at(i).value().handle,
@@ -800,7 +810,8 @@ struct ExpandableSegment {
       Handle h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
 #ifdef USE_ROCM
-      C10_CUDA_CHECK(hipMemUnmap(ptr_ + segment_size_ * i, segment_size_));
+      C10_CUDA_CHECK(hipMemUnmap(
+          reinterpret_cast<char*>(ptr_) + segment_size_ * i, segment_size_));
 #else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
           ptr_ + segment_size_ * i, segment_size_));

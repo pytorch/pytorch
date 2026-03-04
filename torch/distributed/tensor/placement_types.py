@@ -1223,6 +1223,7 @@ class Partial(torch._C._distributed.Partial):
     # reduce_ops that distribute over addition, enabling per-input linearity
     # for bilinear ops like mm: reduce_op(A_i @ B) = reduce_op(A_i) @ B
     LINEAR_REDUCE_OPS: tuple[str, ...] = ("sum", "avg")
+    ALL_REDUCE_OPS: tuple[str, ...] = ("sum", "avg", "min", "max", "product")
 
     """
     The ``Partial(reduce_op)`` placement describes the DTensor that is pending

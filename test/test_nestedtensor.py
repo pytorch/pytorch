@@ -8785,7 +8785,7 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     # clone() -> preserve format on an non-contiguous NJT with holes currently uses
     # unbind(), leading to data-dependent expression. Should be fixed via torch._check()
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
+        error_type=(torch._dynamo.exc.Unsupported, torch._dynamo.exc.UserError),
         # Ne(u1, u0) (unhinted: Ne(u1, u0)).  (Size-like symbols: u1, u0)
         error_msg="Could not guard on data-dependent expression",
         op_match_fn=lambda device, op: (op.full_name == "clone"),

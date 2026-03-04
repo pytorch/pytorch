@@ -540,6 +540,13 @@ TORCH_IMPL_FUNC(index_add_mps_out)
 
   auto casted_type = isFloatingType(source.scalar_type()) ? ScalarType::Float : ScalarType::Int;
 
+  bool needs_gather = needsGather(result);
+  Tensor output;
+  if (needs_gather) {
+    output = at::empty_like(result, MemoryFormat::Contiguous);
+    output.copy_(result);
+  }
+
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
@@ -585,7 +592,7 @@ TORCH_IMPL_FUNC(index_add_mps_out)
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
     Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, needs_gather ? output : result);
     MPSScalar alpha_scalar = getMPSScalar(alpha, casted_type);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -595,6 +602,10 @@ TORCH_IMPL_FUNC(index_add_mps_out)
       cachedGraph->alphaTensor_ : getMPSGraphTensorFromScalar(stream, alpha_scalar),
     };
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  if (needs_gather) {
+    result.copy_(output);
   }
 }
 
