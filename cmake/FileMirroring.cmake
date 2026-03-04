@@ -37,6 +37,7 @@ set(_cutedsl_src "${PROJECT_SOURCE_DIR}/third_party/cutlass/examples/python/CuTe
 if(EXISTS "${_cutedsl_src}")
   install(FILES "${_cutedsl_src}"
     DESTINATION "${SKBUILD_PLATLIB_DIR}/torch/_inductor/kernel/vendored_templates"
+    RENAME "cutedsl_grouped_gemm.py"
   )
   # Ensure __init__.py exists for the package
   file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/_vendored_templates_init.py" "")
