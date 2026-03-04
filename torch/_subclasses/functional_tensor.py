@@ -35,6 +35,16 @@ from torch.utils._python_dispatch import (
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 
+def _has_tensor_list_list_in_schema(func: Any) -> bool:
+    """Check if op schema has any List[List[Tensor]] arguments."""
+    if not isinstance(func, torch._ops.OpOverload):
+        return False
+    for arg in func._schema.arguments:
+        if "List[List[Tensor]]" in str(arg.type):
+            return True
+    return False
+
+
 # NOTE Some special handling for tensor conversion during export is needed.
 # Normally, when tracing through the model with tensor.to(), the maybe-aliasing
 # relationship between input and output tensors will be baked into the graph.
@@ -562,6 +572,22 @@ class FunctionalTensorMode(TorchDispatchMode):
             # inputs are FakeScriptObjects, we need to skip c++ dispatcher and
             # dispatch in python because C++ dispatcher will check the schema
             # and cannot recognize FakeScriptObject.
+            ctx = PythonFunctionalizeAPI()
+            fully_unwrapped_args = ctx.unwrap_tensors(args)
+            fully_unwrapped_kwargs = ctx.unwrap_tensors(
+                kwargs  # pyrefly: ignore[bad-argument-type]
+            )
+            outs_unwrapped = func(
+                *fully_unwrapped_args,
+                **fully_unwrapped_kwargs,
+            )
+            outs_wrapped = ctx.wrap_tensors(outs_unwrapped)
+        elif _has_tensor_list_list_in_schema(func):
+            # The C++ Functionalize kernel has a bug where it strips the
+            # FakeTensor Python subclass from tensors in List[List[Tensor]]
+            # args during conversion between Python list[list[Tensor]] and
+            # C++ c10::List<c10::List<at::Tensor>>. Bypass the C++ kernel
+            # using Python-level functionalization, same as TorchBindOpOverload.
             ctx = PythonFunctionalizeAPI()
             fully_unwrapped_args = ctx.unwrap_tensors(args)
             fully_unwrapped_kwargs = ctx.unwrap_tensors(
