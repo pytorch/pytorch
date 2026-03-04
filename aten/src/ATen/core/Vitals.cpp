@@ -91,6 +91,7 @@ APIVitals::APIVitals() : vitals_enabled(false) {
   // Set default values, force is necessary because in unit tests the env
   // variable may not be set when global APIVitals are constructed.
   setVital("CUDA", "used", "False", /* force = */ true);
+  setVital("XPU", "used", "False", /* force = */ true);
 }
 
 } // namespace at::vitals
