@@ -609,6 +609,26 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
+    def test_gather_backward(self):
+        device_mesh = self.build_device_mesh()
+        global_input = torch.randn(12, 8, 16, requires_grad=True)
+        global_index = torch.randint(8, (4, 4, 8))
+        gather_dim = 1
+
+        # Replicated input, Replicated index
+        input_dt = distribute_tensor(global_input, device_mesh, [Replicate()])
+        index_dt = distribute_tensor(global_index, device_mesh, [Replicate()])
+
+        global_output = torch.gather(global_input, gather_dim, global_index)
+        output_dt = torch.gather(input_dt, gather_dim, index_dt)
+
+        global_output.sum().backward()
+        output_dt.sum().backward()
+
+        self.assertEqual(output_dt.placements, [Replicate()])
+        self.assertEqual(output_dt.full_tensor(), global_output)
+        self.assertEqual(input_dt.grad.full_tensor(), global_input.grad)
+
     @skipIfRocmArch(MI200_ARCH)
     @serialTest()  # heavy combinatorial _test_op calls, serialize to avoid OOM
     def test_index(self):
@@ -768,6 +788,40 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
                 if isinstance(p, Shard):
                     self.assertIn(p.dim, [1, 2])
             self.assertEqual(output_dt.full_tensor(), ref)
+
+    def test_index_put_backward(self):
+        device_mesh = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        global_input = torch.randn(4, 8, device=self.device_type, requires_grad=True)
+        global_value = torch.randn(2, 8, device=self.device_type, requires_grad=True)
+        global_index = [torch.tensor([0, 2], device=self.device_type)]
+
+        # Shard input and value on non-indexed dim
+        input_dt = distribute_tensor(global_input.clone(), device_mesh, [Shard(1), Replicate()])
+        value_dt = distribute_tensor(global_value.clone(), device_mesh, [Shard(1), Replicate()])
+
+        # Test with accumulate=False
+        ref = torch.index_put(global_input, global_index, global_value, accumulate=False)
+        output_dt = torch.index_put(input_dt, global_index, value_dt, accumulate=False)
+        ref.sum().backward()
+        output_dt.sum().backward()
+        self.assertEqual(output_dt.full_tensor(), ref)
+        self.assertEqual(input_dt.grad.full_tensor(), global_input.grad)
+        self.assertEqual(value_dt.grad.full_tensor(), global_value.grad)
+
+        # Reset grads
+        global_input.grad.zero_()
+        global_value.grad.zero_()
+        input_dt.grad.zero_()
+        value_dt.grad.zero_()
+
+        # Test with accumulate=True
+        ref_accum = torch.index_put(global_input, global_index, global_value, accumulate=True)
+        output_dt_accum = torch.index_put(input_dt, global_index, value_dt, accumulate=True)
+        ref_accum.sum().backward()
+        output_dt_accum.sum().backward()
+        self.assertEqual(output_dt_accum.full_tensor(), ref_accum)
+        self.assertEqual(input_dt.grad.full_tensor(), global_input.grad)
+        self.assertEqual(value_dt.grad.full_tensor(), global_value.grad)
 
     def test_index_put_requires_replicated_index(self):
         """Test that index_put correctly replicates sharded indices."""
