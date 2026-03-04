@@ -18,4 +18,3 @@ diff = torch.histc(tensor, hbins, hmin, hmax) - (
     torch.histc(tensor[::2], hbins, hmin, hmax) + torch.histc(tensor[1::2], hbins, hmin, hmax)
 )
 print(f"torch.histc: {tensor.dtype=}, number of differences: {diff.abs().sum()}: {diff}")
-
