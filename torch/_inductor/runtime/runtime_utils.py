@@ -247,7 +247,6 @@ def torch_dtype_to_jax(dtype: torch.dtype) -> str:
     return f"jnp.{dtype_name}"
 
 
-
 def pallas_gpu_pad_inputs(inputs: list[Any], alignment: int = 128) -> list[Any]:
     """Flatten and pad each input JAX array to a multiple of alignment."""
     import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]

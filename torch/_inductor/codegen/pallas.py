@@ -1271,7 +1271,7 @@ class PallasKernel(SIMDKernel):
             r_only = load_index
             for pv in pw_vars:
                 r_only = r_only.subs(pv, 0)
-            r_coeffs: set[int] = set()
+            r_coeffs: OrderedSet[int] = OrderedSet()
             for term in sympy.Add.make_args(r_only):
                 if term.is_number:
                     continue
@@ -1301,9 +1301,7 @@ class PallasKernel(SIMDKernel):
             # using span to find flattened contiguous dims.
             r_stride = next(iter(r_coeffs))
             span = (red_numel - 1) * r_stride
-            is_contiguous = all(
-                strides[i] > strides[i + 1] for i in range(nd - 1)
-            )
+            is_contiguous = all(strides[i] > strides[i + 1] for i in range(nd - 1))
             if is_contiguous:
                 # Walk by dim index (strides are in descending order)
                 inner = matched[-1]
@@ -1315,7 +1313,8 @@ class PallasKernel(SIMDKernel):
                 # Non-contiguous layout: collect dims whose strides
                 # fall within the r_var's traversal range
                 axes = sorted(
-                    i for i in range(nd)
+                    i
+                    for i in range(nd)
                     if r_stride <= strides[i] and strides[i] < span + r_stride
                 )
                 if not axes:
@@ -2632,7 +2631,9 @@ class PallasKernel(SIMDKernel):
             if is_partial_reduction:
                 axes = self._get_reduction_axes()
                 axis_expr = axes[0] if len(axes) == 1 else axes
-                reduction_expr = f"{reduction_op}({value}, axis={axis_expr}, keepdims=True)"
+                reduction_expr = (
+                    f"{reduction_op}({value}, axis={axis_expr}, keepdims=True)"
+                )
             elif is_symbolic_partial:
                 # With symbolic shapes, strided loads produce a degenerate
                 # batch dim at axis=0 that just needs squeezing.
