@@ -647,19 +647,19 @@ namespace {
 // to the native cholesky_solve method in cuSOLVER is slow
 // with batched inputs.
 template <bool use_dedicated_kernel_unconditionally = false>
-inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
-  const Tensor& self,
+inline void _cholesky_solve_helper_cuda_cusolver_algo_selector(
+  Tensor& self,
   const Tensor& A,
   bool upper) {
   if constexpr (use_dedicated_kernel_unconditionally) {
-    return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+    _cholesky_solve_helper_cuda_cusolver(self, A, upper);
   } else {
     // TODO: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
     // TODO: Non-batched potrs is too slow in the batched setting compared to two triangular solves.
     // Non-batched input -> non-batched potrs.
     // Batched input -> two triangular solves.
     if (batchCount(self) == 1) {
-      return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+      _cholesky_solve_helper_cuda_cusolver(self, A, upper);
     } else {
       const auto L = upper
         ? c10::MaybeOwned<Tensor>::owned(A.mH())
@@ -668,22 +668,21 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_algo_selector(
       // because it handles memory layout optimization and conj/neg flags.
       // IMPORTANT NOTE: `self` and `A` are not processed for kernel calls yet!
       // Step 1: Solve for Y: L Y = B or U^H Y = B.
-      auto X = at::linalg_solve_triangular(*L, self, /*upper=*/false);
+      at::linalg_solve_triangular_out(self, *L, self, /*upper=*/false);
       // Step 2: Solve for X: L^H X = Y or U X = Y.
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(X), L->mH(), X, /*upper=*/true);
-      return X;
+      at::linalg_solve_triangular_out(self, L->mH(), self, /*upper=*/true);
     }
   }
 }
 
-inline Tensor _cholesky_solve_helper_cuda_cusolver_dispatcher(
-    const Tensor& self,
+inline void _cholesky_solve_helper_cuda_cusolver_dispatcher(
+    Tensor& self,
     const Tensor& A,
     bool upper) {
   // For now, unconditional dispatch to the dedicated cholesky solve
   // kernel in cuSOLVER is slow for batched inputs.
   // TODO: switch once resolved.
-  return _cholesky_solve_helper_cuda_cusolver_algo_selector<
+  _cholesky_solve_helper_cuda_cusolver_algo_selector<
     /*use_dedicated_kernel_unconditionally=*/false
   >(self, A, upper);
 }
@@ -692,7 +691,9 @@ inline Tensor _cholesky_solve_helper_cuda_cusolver_dispatcher(
 
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
   _warn_once_magma_deprecation("linalg.cholesky_solve");
-  return _cholesky_solve_helper_cuda_cusolver_dispatcher(self, A, upper);
+  at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
+  _cholesky_solve_helper_cuda_cusolver_dispatcher(self_working_copy, A, upper);
+  return self_working_copy;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -706,81 +707,16 @@ REGISTER_CUDA_DISPATCH(cholesky_stub, &cholesky_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/*
-Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky solver
-This is an in-place routine, content of 'input' is overwritten.
-'infos' is an int Tensor containing error codes for each matrix in the batched input.
-MAGMA requires 'infos' to reside in CPU memory.
-For more information see MAGMA's documentation for POTRS routine.
-*/
-template <typename scalar_t>
-static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
-#if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(false, "cholesky_inverse: MAGMA library not found in compilation. Please rebuild with MAGMA.");
-#else
-  // magmaCholeskyInverse (magma_dpotri_gpu) is slow because internally
-  // it transfers data several times between GPU and CPU and calls lapack routine on CPU
-  // using magmaCholeskySolveBatched is a lot faster
-  // note that magmaCholeskySolve is also slow
-
-  // 'input' is modified in-place we need to clone it and replace with a diagonal matrix
-  // for apply_cholesky_solve
-  auto input_working_copy = cloneBatchedColumnMajor(input);
-
-  // 'input' tensor has to be a batch of diagonal matrix
-  input.fill_(0);
-  input.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
-
-  Tensor result_u, input_u;
-  if (input.dim() == 2) {
-    // unsqueezing here so that the batched version is used
-    result_u = input.unsqueeze(0);
-    input_u = input_working_copy.unsqueeze(0);
-  } else {
-    result_u = input;
-    input_u = input_working_copy;
-  }
-
-  // magma's potrs_batched doesn't take matrix-wise array of ints as an 'info' argument
-  // it returns a single 'magma_int_t'
-  // if info = 0 the operation is successful, if info = -i, the i-th parameter had an illegal value.
-  int64_t info_tmp = 0;
-  apply_cholesky_solve<scalar_t>(result_u, input_u, upper, info_tmp);
-  infos.fill_(info_tmp);
-#endif
-}
-
-// This is a type dispatching helper function for 'apply_cholesky_inverse'
-Tensor& cholesky_inverse_kernel_impl_magma(Tensor &result, Tensor& infos, bool upper) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cuda", [&]{
-    apply_cholesky_inverse<scalar_t>(result, infos, upper);
-  });
-  return result;
-}
-
-Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) {
+Tensor& cholesky_inverse_kernel_impl(Tensor &result, [[maybe_unused]] Tensor& infos, bool upper) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
-  // the content of result is overwritten by 'apply_cholesky_inverse'
-#if defined(USE_LINALG_SOLVER)
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-      return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
-    case at::LinalgBackend::Magma:
-      return cholesky_inverse_kernel_impl_magma(result, infos, upper);
-    default:
-      if (batchCount(result) == 1 ||
-          !use_magma_) {
-        return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
-      } else {
-        return cholesky_inverse_kernel_impl_magma(result, infos, upper);
-      }
-  }
-#else
-  return cholesky_inverse_kernel_impl_magma(result, infos, upper);
-#endif
-
+  // the content of result is overwritten
+  _warn_once_magma_deprecation("linalg.cholesky_inverse");
+  at::Tensor A = cloneBatchedColumnMajor(result);
+  result.fill_(0);
+  result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+  _cholesky_solve_helper_cuda_cusolver_dispatcher(result, A, upper);
+  return result;
 }
 
 REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)

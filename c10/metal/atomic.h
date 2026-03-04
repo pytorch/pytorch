@@ -68,6 +68,13 @@ static inline void atomic_add_helper(
     device ::metal::atomic<uint>* data,
     long offset,
     T value) {
+  // atomic<uint> requires 4-byte alignment; fix up misaligned pointers
+  auto addr = reinterpret_cast<ulong>(data);
+  auto misalign = (addr % alignof(::metal::atomic<uint>)) / sizeof(T);
+  data = reinterpret_cast<device ::metal::atomic<uint>*>(
+      reinterpret_cast<device char*>(data) - misalign * sizeof(T));
+  offset += misalign;
+
   constexpr auto elem_per_enum = sizeof(uint) / sizeof(T);
   auto ptr = data + (offset / elem_per_enum);
   auto old = ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);
@@ -92,6 +99,13 @@ static inline void atomic_binary_op_helper(
     long offset,
     T value,
     T (*Op)(T, T)) {
+  // atomic<uint> requires 4-byte alignment; fix up misaligned pointers
+  auto addr = reinterpret_cast<ulong>(data);
+  auto misalign = (addr % alignof(::metal::atomic<uint>)) / sizeof(T);
+  data = reinterpret_cast<device ::metal::atomic<uint>*>(
+      reinterpret_cast<device char*>(data) - misalign * sizeof(T));
+  offset += misalign;
+
   constexpr auto elem_per_enum = sizeof(uint) / sizeof(T);
   auto ptr = data + (offset / elem_per_enum);
   auto old = ::metal::atomic_load_explicit(ptr, ::metal::memory_order_relaxed);

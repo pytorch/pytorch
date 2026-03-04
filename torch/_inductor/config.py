@@ -2283,6 +2283,11 @@ tpu_backend: Literal["pallas"] = "pallas"
 xpu_backend: Literal["triton"] = "triton"
 
 
+class mtia:
+    # Configuration to force inductor to never use welford reductions for MTIA backend
+    disable_welford_reduction = False
+
+
 class halide:
     # Base halide target to use for CPU devices
     cpu_target = "host"

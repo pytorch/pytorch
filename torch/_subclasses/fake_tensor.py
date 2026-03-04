@@ -540,7 +540,7 @@ class FakeTensorConverter:
 @functools.cache
 def init_gpu_context(device: torch.device) -> None:
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
-    if torch.cuda.is_available() or torch.xpu.is_available():
+    if torch.accelerator.current_accelerator(True) == device.type:
         (
             torch.empty(1, device=device)
             if torch.version.hip is None

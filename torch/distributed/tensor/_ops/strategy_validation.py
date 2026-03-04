@@ -514,7 +514,10 @@ def validate_combination(
                 # Create sharded LocalTensor directly to work in LocalTensorMode
                 shard_dim = placement.dim
                 chunks = tensor.tensor_split(world_size, dim=shard_dim)
-                _tmp = {r: chunks[r].clone().contiguous() for r in range(world_size)}
+                _tmp = {
+                    r: chunks[r].clone(memory_format=torch.contiguous_format)
+                    for r in range(world_size)
+                }
                 # pyrefly: ignore [bad-argument-type, bad-argument-count]
                 local_tensor = LocalTensor(_tmp)
             else:

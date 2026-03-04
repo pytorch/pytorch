@@ -25,7 +25,7 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_value
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -177,7 +177,7 @@ def fakify(
     if (
         _is_constant_argument(t)
         or isinstance(t, (torch.ScriptObject, torch.nn.Module))
-        or is_opaque_type(type(t))
+        or is_opaque_value(t)
     ):
         return t
 
@@ -984,7 +984,7 @@ def _fakify_script_objects(
         for obj, fqns in constant_attrs.items():
             if torch._library.fake_class_registry._is_script_object(
                 obj
-            ) or is_opaque_type(obj):
+            ) or is_opaque_value(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)

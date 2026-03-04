@@ -1240,11 +1240,11 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
         const uint64_t aBatchOffset = i * aRows * aCols;
         const uint64_t bBatchOffset = i * bRows * bCols;
         MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                              offset:(A_t.storage_offset() + aBatchOffset) * aElemSize
+                                                              offset:(A_.storage_offset() + aBatchOffset) * aElemSize
                                                           descriptor:sourceMatrixDesc] autorelease];
         MPSMatrix* rightHandSideMatrix =
             [[[MPSMatrix alloc] initWithBuffer:bBuffer
-                                        offset:(B_t.storage_offset() + bBatchOffset) * bElemSize
+                                        offset:(B_.storage_offset() + bBatchOffset) * bElemSize
                                     descriptor:rightHandSideMatrixDesc] autorelease];
         MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
                                                                 offset:(out.storage_offset() + bBatchOffset) * bElemSize
@@ -1432,8 +1432,8 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
   if (result.numel() == 0) {
     return result;
   }
-  auto cholesky = upper ? result.triu().clone() : result.tril().clone();
-  cholesky = cholesky.contiguous();
+  auto cholesky =
+      upper ? result.triu().clone(at::MemoryFormat::Contiguous) : result.tril().clone(at::MemoryFormat::Contiguous);
 
   auto n = result.size(-1);
   auto identity = at::eye(n, result.options()).expand_as(result).contiguous();

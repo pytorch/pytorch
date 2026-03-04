@@ -22,6 +22,7 @@ from torch.distributed.tensor._ops._matrix_ops import (
     mm_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
     register_single_dim_strategy,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -275,6 +276,40 @@ class DistMatrixOpsTest(DTensorTestBase):
                         f"Bias Partial should have same reduce_op as output Partial. "
                         f"Got bias={bias_placement.reduce_op}, output={output_placement.reduce_op}",
                     )
+
+    def test_gen_single_dim_einsum_strategies_batch_linearity(self):
+        """Test that batch-only equations auto-detect all-Partial linearity."""
+        S = _ShardingPlaceholder
+
+        # For "abcd,abcd->abcd": all dims are batch, no contracting/free.
+        # Expect: 4 batch-dim + 4 per-input linearity + 2 all-Partial linearity = 10
+        strategies = gen_single_dim_einsum_strategies("abcd,abcd->abcd")
+
+        # Convert to repr tuples for comparison since _ShardingPlaceholder lacks __eq__
+        actual = [tuple(repr(p) for p in s) for s in strategies]
+        expected = [
+            # batch dims: shard output and both inputs on same dim
+            (repr(S(0)), repr(S(0)), repr(S(0))),
+            (repr(S(1)), repr(S(1)), repr(S(1))),
+            (repr(S(2)), repr(S(2)), repr(S(2))),
+            (repr(S(3)), repr(S(3)), repr(S(3))),
+            # per-input linearity: one input Partial, other Replicate
+            ("Partial(sum)", "Partial(sum)", "Replicate()"),
+            ("Partial(sum)", "Replicate()", "Partial(sum)"),
+            ("Partial(avg)", "Partial(avg)", "Replicate()"),
+            ("Partial(avg)", "Replicate()", "Partial(avg)"),
+            # batch-dimension linearity: all inputs Partial
+            ("Partial(sum)", "Partial(sum)", "Partial(sum)"),
+            ("Partial(avg)", "Partial(avg)", "Partial(avg)"),
+        ]
+        self.assertEqual(actual, expected)
+
+        # For "mk,kn->mn": has contracting dim k, no all-Partial linearity.
+        mm_strategies = gen_single_dim_einsum_strategies("mk,kn->mn")
+        mm_all_partial = [
+            s for s in mm_strategies if all(isinstance(p, Partial) for p in s)
+        ]
+        self.assertEqual(len(mm_all_partial), 0)
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -780,21 +815,24 @@ class DistMatrixOpsTest(DTensorTestBase):
     def test_scaled_dot_product_attention(self):
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
+        head_dim = 8
+        if self.device_type == "xpu":
+            head_dim = 64
         # bsz, n_heads, slen, head_dim
         query = torch.rand(
-            (4, 8, 8, 8),
+            (4, 8, 8, head_dim),
             device=self.device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
         )
         key = torch.rand(
-            (4, 8, 8, 8),
+            (4, 8, 8, head_dim),
             device=self.device_type,
             dtype=torch.bfloat16,
             requires_grad=True,
         )
         value = torch.rand(
-            (4, 8, 8, 8),
+            (4, 8, 8, head_dim),
             device=self.device_type,
             dtype=torch.bfloat16,
             requires_grad=True,

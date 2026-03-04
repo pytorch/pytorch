@@ -47,6 +47,8 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
+    ObservedAttributeError,
+    raise_observed_exception,
     TorchRuntimeError,
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
@@ -341,6 +343,11 @@ class TensorVariable(VariableTracker):
                     tx.output.fake_mode, example_value
                 )
                 return TorchScriptObjectVariable.create(proxy, fake_script_obj)
+            elif isinstance(
+                example_value,
+                torch._library.fake_class_registry.FakeScriptObject,
+            ):
+                return TorchScriptObjectVariable.create(proxy, example_value)
             # any other attributes on the subclass (that are not methods)
             # are assumed to be constant metadata.
             elif not callable(example_value):
@@ -374,7 +381,16 @@ class TensorVariable(VariableTracker):
         if get_custom_getattr(_input_associated_real_value):
             raise NotImplementedError
 
-        real_value = getattr(_input_associated_real_value, name)
+        try:
+            real_value = getattr(_input_associated_real_value, name)
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'"
+                ],
+            )
 
         attr_source = AttrSource(self.source, name)
 
@@ -388,7 +404,9 @@ class TensorVariable(VariableTracker):
                 self, name, source=attr_source, py_type=type(real_value)
             )
 
-        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
+        install_guard(
+            self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+        )
         return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -508,12 +526,14 @@ class TensorVariable(VariableTracker):
             # in the event that TensorVariable returns NotImplemented
             # BuiltinVariable.call_getattr returns GetAttrVariable
             ret_val = not isinstance(var, GetAttrVariable)
-        except AttributeError:
+        except (AttributeError, ObservedAttributeError):
             ret_val = False
 
         if self.source:
             install_guard(
-                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
             )
 
         return VariableTracker.build(tx, ret_val)

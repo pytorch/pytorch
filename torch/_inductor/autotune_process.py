@@ -1189,7 +1189,7 @@ class AutotuneProcessPool:
                     self._warmup_start_time = time.perf_counter()
                     self._warmup_future = self.pool.submit(
                         _init_autotune_subprocess,
-                        allow_tf32=torch.backends.cuda.matmul.allow_tf32,
+                        fp32_precision=torch.backends.cuda.matmul.fp32_precision,
                     )
                     self._warmup_future.add_done_callback(self._on_warmup_complete)
                     autotuning_log.info("Warmup job submitted")
@@ -1249,7 +1249,7 @@ def use_pipelined_autotuning() -> bool:
     )
 
 
-def _init_autotune_subprocess(allow_tf32: bool) -> bool:
+def _init_autotune_subprocess(fp32_precision: str) -> bool:
     """
     Warmup function run in the autotune subprocess.
     """
@@ -1259,7 +1259,7 @@ def _init_autotune_subprocess(allow_tf32: bool) -> bool:
     if torch.cuda.is_available():
         torch.zeros(1, device="cuda")
 
-    torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+    torch.backends.cuda.matmul.fp32_precision = fp32_precision
 
     return True
 

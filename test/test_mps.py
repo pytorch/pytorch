@@ -925,8 +925,6 @@ class TestMPS(TestCaseMPS):
         # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
         self.ulpAssertAllClose(output.cpu(), output_cpu, n_ulps=4)
 
-
-
     def test_exp_strided_output(self):
         x = torch.rand((256, 10), device='mps')
         x_cpu = x.to("cpu")
@@ -8485,6 +8483,12 @@ class TestMPS(TestCaseMPS):
         # where
         cond, a, b = rand(100) > 0.5, rand(100), rand(100)
         self.assertEqual(torch.where(cond, a, b), torch.where(cond.cpu(), a.cpu(), b.cpu()))
+
+    def test_unsigned_cast_div(self):
+        # See https://github.com/pytorch/pytorch/issues/176296
+        x = torch.tensor([0, 65535], dtype=torch.uint16, device="mps")
+        y = x / 64
+        self.assertEqual(y, torch.tensor([0., 1023.9844], device="mps"))
 
 
 class TestLargeTensors(TestCaseMPS):

@@ -2159,13 +2159,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
-            # Exception: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
             # RuntimeError: linalg.solve.triangular(); Only float is supported!
             DecorateInfo(
                 unittest.expectedFailure,
@@ -2284,13 +2277,6 @@ op_db: list[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="cpu",
             ),
-            # IndexError: index -1085850505 is out of bounds for dimension 0 with size 5
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
             # Exception: linalg.lu_factor(): MPS only supports floats.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
@@ -2366,13 +2352,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # IndexError: index -1085850505 is out of bounds for dimension 0 with size 5
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
             # Exception: linalg.lu_factor(): MPS only supports floats.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
@@ -2395,12 +2374,6 @@ op_db: list[OpInfo] = [
         skips=(
             skipCPUIfNoLapack,
             # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
@@ -2819,13 +2792,6 @@ op_db: list[OpInfo] = [
                 toleranceOverride({torch.float32: tol(atol=2e-04, rtol=3e-06)}),
                 "TestConsistency",
                 "test_output_match",
-                device_type="mps",
-            ),
-            # Exception: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
                 device_type="mps",
             ),
         ],

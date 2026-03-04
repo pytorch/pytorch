@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Literal, Optional
+from typing import Literal
 from typing_extensions import deprecated
 
 import torch
@@ -64,7 +64,7 @@ class _ConvNd(Module):
         "out_channels",
         "kernel_size",
     ]
-    __annotations__ = {"bias": Optional[torch.Tensor]}
+    __annotations__ = {"bias": torch.Tensor | None}
 
     def _conv_forward(  # type: ignore[empty-body]
         self, input: Tensor, weight: Tensor, bias: Tensor | None

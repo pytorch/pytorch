@@ -4542,6 +4542,56 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused__to_copy"
                     ).run(code[0])
 
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
+    )
+    @parametrize("use_async_compile", (True, False))
+    def test_epilogue_prologue_fusion_cache_preserved(self, use_async_compile: bool):
+        def f(a, b):
+            # Prologue: pointwise operation on input 'a' before matmul
+            a_transformed = a + 1.0
+            # Matmul
+            mm_result = a_transformed @ b
+            # Epilogue: pointwise operation on output after matmul
+            return mm_result + 2.0
+
+        torch._dynamo.reset()
+
+        # Use float32 to avoid low precision heuristic rejection
+        a = torch.randn(512, 1024, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.randn(1024, 2048, device=GPU_TYPE, dtype=torch.float32)
+
+        triton_time = 0.1
+        aten_time = float("inf")
+        epilogue_runtime = 0.05
+
+        # Always allow prologue fusion heuristics
+        def always_allow_prologue(*args):
+            return True
+
+        with self._setup_mm_heuristic(use_async_compile):
+            with self.get_common_patches(
+                use_async_compile,
+                False,
+                aten_time=aten_time,
+                triton_time=triton_time,
+                mock_n_spills=0,
+                epilogue_runtime=epilogue_runtime,
+            ):
+                # Enable prologue fusion so both epilogue and prologue are considered
+                with config.patch(prologue_fusion=True):
+                    # Bypass prologue heuristics that might reject the fusion
+                    with mock.patch.object(
+                        Scheduler,
+                        "check_prologue_fusion_heuristics_fusable",
+                        always_allow_prologue,
+                    ):
+                        compiled_f = torch.compile(f)
+                        # If the bug exists, this will fail with:
+                        # "ValueError: min() arg is an empty sequence"
+                        # when get_min_choice() is called during prologue fusion
+                        run_and_get_code(compiled_f, a, b)
+
 
 def simple_fn():
     return 42

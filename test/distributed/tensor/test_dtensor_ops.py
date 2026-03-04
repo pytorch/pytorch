@@ -284,6 +284,8 @@ dtensor_compiled_fails = {
     xfail("expand_as"),
     xfail("hsplit"),
     xfail("linalg.diagonal"),
+    xfail("max", "reduction_with_dim"),
+    xfail("min", "reduction_with_dim"),
     xfail("movedim"),
     xfail("narrow"),
     xfail("permute"),
@@ -1230,11 +1232,8 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             lambda s: Shard(s.dim),
             single_dim_strats[aten_op](aten_op, args_meta, kwargs_meta),
         )
-        n_inputs = len(all_tensor_meta)
-        for strategy in strategies:
-            input_placements = strategy[-n_inputs:]
-            output_placements = strategy[:-n_inputs]
-
+        # TODO(pianpwk): handle multi-output once that lands for single-dim
+        for output_placement, *input_placements in strategies:
             # skip strategies with invalid shards
             def is_invalid_shard(meta, p):
                 ndim = len(meta.shape)
@@ -1254,16 +1253,17 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             ):
                 continue
 
+            # add the validate_sharding_rule function
             self.assertTrue(
                 validate_sharding_rule_sample(
                     aten_op,
                     full_args,
                     full_kwargs,
                     input_placements,
-                    tuple(output_placements),
+                    (output_placement,),
                     mesh,
                 ),
-                f"{op.name}: {input_placements} -> {tuple(output_placements)} failed",
+                f"{op.name}: {input_placements} -> {(output_placement,)} failed",
             )
 
 

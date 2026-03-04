@@ -39,7 +39,7 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
+    TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR,
@@ -14726,8 +14726,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
                # Exception: linalg.solve.triangular(); Only float is supported!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-               # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                DecorateInfo(unittest.skip("Tests different backward paths"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
            decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver]),
@@ -15544,11 +15542,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-03, rtol=5e-03)}),
                             "TestDecomp", "test_comprehensive", device_type="cpu"),
-               # AssertionError: Tensor-likes are not close!
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
                # See https://github.com/pytorch/pytorch/issues/173525
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
                             'TestConsistency', 'test_output_grad_match', device_type='mps'),
@@ -16301,11 +16294,6 @@ op_db: list[OpInfo] = [
                    'TestCommon', 'test_numpy_refs'
                ),
                DecorateInfo(unittest.skip("Bug in MPS backend!"), 'TestCommon', 'test_numpy_ref_mps'),
-               # AssertionError: Tensor-likes are not close!
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
                # See https://github.com/pytorch/pytorch/issues/173525
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
                             'TestConsistency', 'test_output_grad_match', device_type='mps'),
@@ -18952,11 +18940,6 @@ op_db: list[OpInfo] = [
                # RuntimeError: linalg.solve.triangular(); Only float is supported!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-               # AssertionError: Tensor-likes are not close!
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
            )),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
@@ -25241,16 +25224,6 @@ python_ref_db = [
         decorators=(
             # See https://github.com/pytorch/pytorch/issues/111126
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-            # Reference result was farther (nan) from the precise computation than the
-            # torch result was (inf)!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                dtypes=(torch.bfloat16,),
-                device_type="cpu",
-                active_if=not IS_S390X,
-            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -26698,6 +26671,8 @@ python_ref_db = [
             # FIXME: improve precision
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(
+                unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
             # torch._subclasses.fake_tensor.MetadataMismatchError: Dtypes torch.float32 and torch.complex64 are not equal!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
             DecorateInfo(

@@ -938,37 +938,6 @@ class TestOpSchemaMetaProperties(TestCase):
             out_spec = specs if isinstance(specs, DTensorSpec) else specs[0]
             self.assertEqual(out_spec.tensor_meta.stride, (8, 1))
 
-    def test_max_min_dim_single_dim_strategy(self):
-        """max.dim/min.dim only allow sharding on non-reduction dims."""
-        from torch.distributed.tensor._ops._math_ops import (
-            max_min_dim_single_dim_strategy,
-        )
-
-        input_meta = TensorMeta(
-            shape=torch.Size([8, 4]), stride=(4, 1), dtype=torch.float32
-        )
-        # reduce along dim=1: only dim 0 should be shardable
-        strategies = max_min_dim_single_dim_strategy(
-            torch.ops.aten.max.dim, (input_meta, 1), {}
-        )
-        # Should have exactly 1 strategy: shard on dim 0
-        self.assertEqual(len(strategies), 1)
-        values_plc, indices_plc, input_plc = strategies[0]
-        self.assertEqual(values_plc.dim, 0)
-        self.assertEqual(indices_plc.dim, 0)
-        self.assertEqual(input_plc.dim, 0)
-
-        # reduce along dim=0: only dim 1 should be shardable,
-        # output dim maps to 0 (since reduction collapses dim 0)
-        strategies = max_min_dim_single_dim_strategy(
-            torch.ops.aten.min.dim, (input_meta, 0), {}
-        )
-        self.assertEqual(len(strategies), 1)
-        values_plc, indices_plc, input_plc = strategies[0]
-        self.assertEqual(values_plc.dim, 0)
-        self.assertEqual(indices_plc.dim, 0)
-        self.assertEqual(input_plc.dim, 1)
-
     def test_layer_norm_backward_output_specs_are_tuple(self):
         """layer_norm backward returns (d_input, d_weight, d_bias) tuple."""
         from torch.distributed.tensor._ops._math_ops import (

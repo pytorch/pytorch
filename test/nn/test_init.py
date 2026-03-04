@@ -150,6 +150,11 @@ class TestNNInit(TestCase):
         if not self._is_trunc_normal(input_tensor, mean=0, std=1, a=0, b=1):
             raise AssertionError("Expected truncated normal distribution")
 
+    def test_trunc_normal_meta(self):
+        t = torch.empty(3, 5, device="meta")
+        result = init.trunc_normal_(t)
+        self.assertIs(result, t)
+
     def test_constant(self):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5)

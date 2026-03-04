@@ -23,7 +23,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 import torch._logging.structured as structured
@@ -95,7 +95,7 @@ class SymNode:
         expr,
         shape_env,
         pytype,
-        hint: Optional[Union[int, float, bool]],
+        hint: int | float | bool | None,
         constant=None,
         fx_node=None,
         optimized_summation=False,
@@ -167,7 +167,7 @@ class SymNode:
         else:
             hint = compute_hint()
         self._hint = hint
-        self.constant: Optional[Union[int, float, bool]] = constant
+        self.constant: int | float | bool | None = constant
 
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
@@ -1363,7 +1363,7 @@ def _make_node_magic(method, func):
                 else:
                     arguments = [self]
 
-                def get_id(sym_node) -> Optional[int]:
+                def get_id(sym_node) -> int | None:
                     # We don't want to return an ID if the input is a constant
                     import sympy
 
@@ -1752,7 +1752,7 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
-    def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+    def get_constant(x: SymInt | int | SymFloat | float | SymBool | bool):
         if isinstance(x, (int, float, bool)):
             return x
         if isinstance(x, SymInt):
