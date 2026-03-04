@@ -6746,9 +6746,7 @@ def forward(self, primals_1, tangents_1):
         from torch._higher_order_ops.effects import _register_effectful_op
         from torch._library.effects import EffectType
 
-        @torch.library.custom_op(
-            "test::effectful_static_idx_op", mutates_args=()
-        )
+        @torch.library.custom_op("test::effectful_static_idx_op", mutates_args=())
         def effectful_static_idx_op(x: torch.Tensor) -> torch.Tensor:
             return x.clone()
 
