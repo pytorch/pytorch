@@ -624,12 +624,19 @@ class CompiledFxGraph(OutputCode):
             # Store a metadata-stripped copy of the FX graph. Running this
             # under FakeTensorMode re-derives output shapes and aliasing
             # from the input fake tensors.
+            #
+            # We deepcopy only the graph (FX IR nodes) and create a new
+            # GraphModule that shallow-copies tensor attributes from gm.
+            # A full deepcopy of gm would fail on opaque tensor
+            # implementations (e.g. mkldnn from freezing).
             import copy
 
-            gm_copy = copy.deepcopy(gm)
-            for node in gm_copy.graph.nodes:
+            from torch.fx._lazy_graph_module import _make_graph_module
+
+            graph_copy = copy.deepcopy(gm.graph)
+            for node in graph_copy.nodes:
                 node.meta.clear()
-            self._original_gm = gm_copy
+            self._original_gm = _make_graph_module(gm, graph_copy)
 
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
