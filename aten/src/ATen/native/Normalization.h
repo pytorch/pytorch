@@ -12,6 +12,7 @@ enum class BatchNormBackend {
   Native,
   Cudnn,
   Miopen,
+  Hipdnn,
 };
 
 TORCH_API BatchNormBackend _select_batch_norm_backend(const Tensor& input, const Tensor& weight, const Tensor& bias, const Tensor& running_mean, const Tensor& running_var, bool training, double eps);
