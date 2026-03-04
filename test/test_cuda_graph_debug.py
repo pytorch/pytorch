@@ -1,7 +1,6 @@
 # Owner(s): ["module: cuda"]
 # ruff: noqa: F821, F841
 
-import gc
 import sys
 import warnings
 
@@ -15,17 +14,9 @@ if not TEST_CUDA:
     TestCase = NoTest  # noqa: F811
 
 
-def _sync_and_gc_collect():
-    torch.cuda.synchronize()
-    gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
-
-
 def _warmup_op(op, n=3):
     for _ in range(n):
         op()
-    torch.cuda.synchronize()
 
 
 class TestCUDAGraphDebugInputs(TestCase):
@@ -39,7 +30,6 @@ class TestCUDAGraphDebugInputs(TestCase):
             y = x * 2
 
         g.replay()
-        torch.cuda.synchronize()
         self.assertEqual(y, x * 2)
 
     def test_dead_input_tensor(self):
@@ -52,7 +42,6 @@ class TestCUDAGraphDebugInputs(TestCase):
             y = x * 2
 
         del x
-        _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
@@ -72,17 +61,13 @@ class TestCUDAGraphDebugInputs(TestCase):
             y = tmp + 1
 
         del tmp
-        _sync_and_gc_collect()
 
         g.replay()
-        torch.cuda.synchronize()
         self.assertEqual(y, x * 2 + 1)
 
         del y
-        _sync_and_gc_collect()
 
         g.replay()
-        torch.cuda.synchronize()
 
     def test_model_weight_dead(self):
         class SimpleMLP(nn.Module):
@@ -107,11 +92,9 @@ class TestCUDAGraphDebugInputs(TestCase):
             y = model(x)
 
         g.replay()
-        torch.cuda.synchronize()
         self.assertEqual(y, model(x))
 
         del model.layers[2].weight
-        _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
@@ -134,12 +117,10 @@ class TestCUDAGraphDebugInputs(TestCase):
             out.backward(static_grad)
 
         g.replay()
-        torch.cuda.synchronize()
 
         # out's grad_fn retains weight as a saved tensor from forward
         del out
         del model.weight
-        _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
@@ -155,14 +136,11 @@ class TestCUDAGraphDebugInputs(TestCase):
             y = view * 2
 
         del view
-        _sync_and_gc_collect()
 
         # should be ok, the base tensor's memory is still alive
         g.replay()
-        torch.cuda.synchronize()
 
         del base
-        _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
@@ -181,7 +159,6 @@ class TestCUDAGraphDebugInputs(TestCase):
             result = torch._foreach_add(xs, ys)
 
         del ys[1]
-        _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
@@ -201,10 +178,8 @@ class TestCUDAGraphDebugInputs(TestCase):
         self.assertNotIn(empty.data_ptr(), g._external_inputs)
 
         del empty
-        _sync_and_gc_collect()
 
         g.replay()
-        torch.cuda.synchronize()
 
     def test_non_capturing_stream_inputs_not_tracked(self):
         capture_stream = torch.cuda.Stream()
@@ -230,10 +205,8 @@ class TestCUDAGraphDebugInputs(TestCase):
         self.assertNotIn(y.data_ptr(), g._external_inputs)
 
         del y
-        _sync_and_gc_collect()
 
         g.replay()
-        torch.cuda.synchronize()
         self.assertEqual(result, x * 2)
 
     def test_shared_pool_tensor_not_tracked(self):
@@ -258,17 +231,14 @@ class TestCUDAGraphDebugInputs(TestCase):
             p = w + 1
 
         del y
-        _sync_and_gc_collect()
 
         g1.replay()
         g2.replay()
-        torch.cuda.synchronize()
         self.assertEqual(z, (x + 1) * 2 + external_input)
 
         del w
         g1.replay()
         g2.replay()
-        torch.cuda.synchronize()
 
     def test_pinned_memory_tensor_tracked(self):
         pinned = torch.randn(100).pin_memory()
@@ -290,10 +260,8 @@ class TestCUDAGraphDebugInputs(TestCase):
 
         # This should be OK
         g.replay()
-        torch.cuda.synchronize()
 
         del pinned
-        _sync_and_gc_collect()
 
         # This should raise
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
@@ -316,7 +284,6 @@ class TestCUDAGraphDebugBacktraces(TestCase):
             del a, b
 
         delete_tensors()
-        _sync_and_gc_collect()
 
         with self.assertRaises(RuntimeError) as ctx:
             g.replay()
@@ -354,7 +321,6 @@ class TestCUDAGraphDebugExternalOps(TestCase):
             y = ScaleOp.apply(x, scale)
 
         del scale
-        _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
@@ -378,7 +344,6 @@ class TestCUDAGraphDebugExternalOps(TestCase):
             y = scale_op(x, scale)
 
         del scale
-        _sync_and_gc_collect()
 
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
