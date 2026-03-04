@@ -609,6 +609,18 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
+    def test_bmm(self):
+        meshes = [
+            self.build_device_mesh(),  # 1D mesh
+        ]
+        for mesh in meshes:
+            self._test_op(
+                mesh,
+                torch.bmm,
+                torch.randn(16, 32, 16),
+                torch.randn(16, 16, 32),
+            )
+
     def test_gather_backward(self):
         device_mesh = self.build_device_mesh()
         global_input = torch.randn(12, 8, 16, requires_grad=True)
