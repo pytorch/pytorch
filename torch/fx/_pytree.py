@@ -1,6 +1,6 @@
 from collections import namedtuple
 from collections.abc import Callable
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import NamedTuple
 
 import torch.return_types
@@ -11,7 +11,7 @@ FlattenFuncSpec = Callable[[PyTree, TreeSpec], list]
 FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
 
 SUPPORTED_NODES: dict[type[Any], FlattenFuncSpec] = {}
-SUPPORTED_NODES_EXACT_MATCH: dict[type[Any], Optional[FlattenFuncExactMatchSpec]] = {}
+SUPPORTED_NODES_EXACT_MATCH: dict[type[Any], FlattenFuncExactMatchSpec | None] = {}
 
 _T = TypeVar("_T")
 _K = TypeVar("_K")
@@ -21,7 +21,7 @@ _V = TypeVar("_V")
 def register_pytree_flatten_spec(
     cls: type[Any],
     flatten_fn_spec: FlattenFuncSpec,
-    flatten_fn_exact_match_spec: Optional[FlattenFuncExactMatchSpec] = None,
+    flatten_fn_exact_match_spec: FlattenFuncExactMatchSpec | None = None,
 ) -> None:
     SUPPORTED_NODES[cls] = flatten_fn_spec
     SUPPORTED_NODES_EXACT_MATCH[cls] = flatten_fn_exact_match_spec

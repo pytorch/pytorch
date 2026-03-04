@@ -628,11 +628,9 @@ class TORCH_API TensorBase {
     return mutable_data_ptr();
   }
 
-  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
+  // Implemented in aten/src/ATen/templates/TensorMethods.cpp
+  template <typename T>
   const T* const_data_ptr() const;
-
-  template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
-  const std::remove_const_t<T>* const_data_ptr() const;
 
   template <typename T>
   T* mutable_data_ptr() const;

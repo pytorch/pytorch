@@ -1042,7 +1042,7 @@ elseif(USE_CUDA)
     add_library(torch_nvshmem SHARED
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
     # Add torch_cpu as a dependency to ensure ATen headers are available

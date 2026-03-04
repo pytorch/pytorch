@@ -258,7 +258,8 @@ class FxirTestCase(InductorTestCase):
 
         def get_offset(node: torch.fx.Node) -> int:
             (input_, shape, stride, offset) = node.args
-            assert isinstance(offset, int)
+            if not isinstance(offset, int):
+                raise AssertionError
             return offset
 
         # Check for 2 views, one of which is offset.

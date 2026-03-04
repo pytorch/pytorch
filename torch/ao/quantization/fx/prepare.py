@@ -185,7 +185,6 @@ def _is_input_arg_dtype_supported_by_backend(
     if isinstance(arg, (list, tuple)):  # noqa: UP038
         return all(
             _is_input_arg_dtype_supported_by_backend(
-                # pyrefly: ignore [bad-argument-type]
                 a,
                 node,
                 qconfig,
@@ -740,7 +739,6 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         for inner_arg in arg:
             new_inner_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
                 node,
-                # pyrefly: ignore [bad-argument-type]
                 inner_arg,
                 qconfig,
                 model,
@@ -1160,7 +1158,6 @@ def _maybe_insert_observers_before_graph_output(
         elif isinstance(maybe_node, (list, tuple)):  # noqa: UP038
             results = [
                 _recursive_maybe_replace_node_with_obs(
-                    # pyrefly: ignore [bad-argument-type]
                     inner_node,
                     model,
                     named_modules,

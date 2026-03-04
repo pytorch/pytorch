@@ -5,7 +5,7 @@ import functools
 import logging
 import warnings
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -94,10 +94,10 @@ cond_op = CondOp()
 
 @exposed_in("torch")
 def cond(
-    pred: Union[bool, int, float, torch.Tensor],
+    pred: bool | int | float | torch.Tensor,
     true_fn: Callable,
     false_fn: Callable,
-    operands: Union[tuple, list] = (),
+    operands: tuple | list = (),
 ) -> Any:
     r"""
     Conditionally applies `true_fn` or `false_fn`.
@@ -167,9 +167,10 @@ def cond(
             (Note: in-place tensor operations such as `add_` for intermediate results
             are allowed in a branch)
 
-          - The function can perform in-place mutations on its input tensors.
-            However, outputs will always be new tensors that do not share object
-            identity with the original inputs.
+          - The function can perform in-place mutations on its input tensors during inference (i.e.,
+            when `torch.is_grad_enabled()` is False).
+            Note: When using `torch.compile()` with a non-constant predicate, the outputs will always
+            be new tensors that do not share object identity with the original inputs.
 
             Example::
 
@@ -177,8 +178,17 @@ def cond(
                     return x.sin_()
 
 
-                x = torch.randn(4)
-                result = cond(x.shape[0] > 2, true_fn, false_fn, (x,))
+                def false_fn(x):
+                    return x + 1
+
+
+                def f(x):
+                    return cond(x.sum() > 0, true_fn, false_fn, (x,))
+
+
+                x = torch.ones(4)
+                with torch.no_grad():
+                    result = torch.compile(f)(x)
                 assert result is not x  # result is a new tensor, not the original x
 
     """
@@ -442,8 +452,8 @@ def check_tensor_meta_match(
 
 
 def _merge_output(
-    a: Optional[Union[torch.Tensor, int]],
-    b: Optional[Union[torch.Tensor, int]],
+    a: torch.Tensor | int | None,
+    b: torch.Tensor | int | None,
     mode: FakeTensorMode,
 ):
     from torch.fx.experimental.symbolic_shapes import (
@@ -521,9 +531,9 @@ def _merge_output(
         u2 has range [5, 8]
         u3 has range [5, 7]
     """
-    merged_size: list[Union[int, torch.SymInt]] = []
+    merged_size: list[int | torch.SymInt] = []
 
-    def _has_unbacked_symbols(s: Union[int, torch.SymInt]) -> bool:
+    def _has_unbacked_symbols(s: int | torch.SymInt) -> bool:
         if isinstance(s, int):
             return False
         else:
@@ -599,19 +609,19 @@ def _merge_output(
         b_ex_size: torch.Size,
         a_ex_stride: tuple[int, ...],
         b_ex_stride: tuple[int, ...],
-        merged_size: list[Union[int, torch.SymInt]],
-    ) -> list[Union[int, torch.SymInt]]:
+        merged_size: list[int | torch.SymInt],
+    ) -> list[int | torch.SymInt]:
         from torch._inductor.ir import get_stride_order
 
         a_sorted_stride_idx = get_stride_order(a_ex_stride, mode.shape_env)
         b_sorted_stride_idx = get_stride_order(b_ex_stride, mode.shape_env)
 
-        a_stride_li: list[Optional[tuple[Union[int, torch.SymInt], int]]] = [
-            None
-        ] * len(a_ex_stride)
-        b_stride_li: list[Optional[tuple[Union[int, torch.SymInt], int]]] = [
-            None
-        ] * len(b_ex_stride)
+        a_stride_li: list[tuple[int | torch.SymInt, int] | None] = [None] * len(
+            a_ex_stride
+        )
+        b_stride_li: list[tuple[int | torch.SymInt, int] | None] = [None] * len(
+            b_ex_stride
+        )
         for i, idx in enumerate(a_sorted_stride_idx):
             a_stride_li[idx] = (a_ex_stride[i], -i)
         for i, idx in enumerate(b_sorted_stride_idx):
@@ -633,14 +643,14 @@ def _merge_output(
                     f"Consider using contiguous() to make the two branches have the same contiguousness."
                 )
 
-        def _maybe_expr(s: Union[int, torch.SymInt]):
+        def _maybe_expr(s: int | torch.SymInt):
             if isinstance(s, int):
                 return s
             return s.node.expr
 
-        a_stride_expr: dict[Any, Union[int, torch.SymInt]] = {}
-        b_stride_expr: dict[Any, Union[int, torch.SymInt]] = {}
-        merged_strides: list[Union[int, torch.SymInt]] = [None] * len(a_ex_stride)  # type: ignore[list-item]
+        a_stride_expr: dict[Any, int | torch.SymInt] = {}
+        b_stride_expr: dict[Any, int | torch.SymInt] = {}
+        merged_strides: list[int | torch.SymInt] = [None] * len(a_ex_stride)  # type: ignore[list-item]
         for a_pair, b_pair in zip(a_stride_li, b_stride_li):
             if a_pair is None or b_pair is None:
                 raise AssertionError(
@@ -690,7 +700,7 @@ def _merge_output(
             b_stride_expr[_maybe_expr(b_val * b_ex_size[i])] = nxt_merged_stride_expr
         return merged_strides
 
-    merged_stride: list[Union[int, torch.SymInt]] = _bound_stride(
+    merged_stride: list[int | torch.SymInt] = _bound_stride(
         a.size(), b.size(), a.stride(), b.stride(), merged_size
     )
 

@@ -364,7 +364,8 @@ class DeviceMeshTest(DTensorTestBase):
     def test_from_group_with_invalid_mesh(self):
         global_pg = _get_default_group()
         global_pg_size = global_pg.size()
-        assert global_pg_size == 4, "Test assumes global world size of 4"
+        if global_pg_size != 4:
+            raise AssertionError("Test assumes global world size of 4")
         invalid_mesh = [[0, 1], [2, 3]]  # 2D mesh when we need 1D
         regex = r"Invalid mesh \[\[0, 1\], \[2, 3\]\] for ProcessGroup with ranks \[0, 1, 2, 3\]"
         with self.assertRaisesRegex(ValueError, regex):

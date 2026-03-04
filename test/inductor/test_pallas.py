@@ -161,7 +161,9 @@ class PallasTestsMixin:
             "tpu": "tpu_backend",
         }
         key = device_to_backend_key[self.DEVICE]
-        return torch.compile(fn, backend="inductor", options={key: "pallas"})
+        return torch.compile(
+            fn, backend="inductor", options={key: "pallas"}, dynamic=False
+        )
 
     def test_simple_add(self):
         """Test basic element-wise addition."""
@@ -390,7 +392,6 @@ class PallasTestsMixin:
                 expected = fn(x, y)
                 self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_different_shapes(self):
         """Test with different tensor shapes."""
         if self.DEVICE == "cuda":
@@ -444,7 +445,7 @@ class PallasTestsMixin:
         compiled = self._compile(operate_on_tensor)
 
         # Create a transposed (non-contiguous) view
-        x = torch.randn(64, 32, device=self.DEVICE)
+        x = torch.randn(128, 128, device=self.DEVICE)
         x_t = x.t()  # Non-contiguous view
         self.assertFalse(x_t.is_contiguous())
 
@@ -948,7 +949,6 @@ class PallasTestsMixin:
                 expected = fn(a, b)
                 self.assertEqual(result, expected)
 
-    @skip_if_tpu
     def test_sign(self):
         """Test sign operation."""
 
@@ -1092,7 +1092,6 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_softmax_two_pass(self):
         """Test two-pass softmax (max reduction + sum reduction)."""
 
@@ -1110,7 +1109,6 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_rms_norm(self):
         """Test RMS normalization (mean-of-squares reduction + rsqrt)."""
 
@@ -1150,7 +1148,6 @@ class PallasTestsMixin:
                 self.assertEqual(var_result, var_expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_layer_norm(self):
         """Test layer normalization (mean + variance reduction, normalize, scale + shift)."""
 
@@ -1569,7 +1566,6 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_nanogpt(self):
         """Test a minimal NanoGPT-style transformer block.
 

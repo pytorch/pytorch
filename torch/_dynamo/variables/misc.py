@@ -51,6 +51,7 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
+    DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
     TypeMROSource,
@@ -1356,7 +1357,6 @@ class GetAttrVariable(VariableTracker):
             and isinstance(
                 self.obj,
                 (
-                    variables.UserDefinedObjectVariable,
                     variables.NNModuleVariable,
                     variables.UserDefinedClassVariable,
                 ),
@@ -1365,7 +1365,19 @@ class GetAttrVariable(VariableTracker):
             obj = self.obj
             key = args[0].as_python_constant()
             if obj.has_key_in_generic_dict(tx, key):
-                # redirect to var_getattr on the original obj
+                if tx.output.side_effects.has_pending_mutation_of_attr(obj, key):
+                    return tx.output.side_effects.load_attr(obj, key)
+
+                # For instance dicts, read directly from __dict__
+                if isinstance(obj.value.__dict__, dict):
+                    raw_value = obj.value.__dict__[key]
+                    raw_source = (
+                        DictGetItemSource(AttrSource(obj.source, "__dict__"), key)
+                        if obj.source
+                        else None
+                    )
+                    return VariableTracker.build(tx, raw_value, raw_source)
+
                 return obj.var_getattr(tx, key)
 
             # Return the default value for get
@@ -1384,7 +1396,6 @@ class GetAttrVariable(VariableTracker):
             and isinstance(
                 self.obj,
                 (
-                    variables.UserDefinedObjectVariable,
                     variables.NNModuleVariable,
                     variables.UserDefinedClassVariable,
                 ),
@@ -1398,11 +1409,6 @@ class GetAttrVariable(VariableTracker):
                 return variables.CONSTANT_VARIABLE_FALSE
 
         elif name == "__setitem__" and self.name == "__dict__" and not kwargs:
-            if isinstance(self.obj, variables.UserDefinedObjectVariable):
-                # Bypass any custom setattr as we are updating the `__dict__` itself
-                return self.obj.method_setattr_standard(
-                    tx, args[0], args[1], directly_update_dict=True
-                )
             if isinstance(self.obj, variables.NNModuleVariable):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)

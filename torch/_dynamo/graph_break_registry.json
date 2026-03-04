@@ -325,6 +325,16 @@
     {
       "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
       "Context": "var_getattr {self} {name}",
+      "Explanation": "Dynamo could not trace through the custom `__getattribute__` method on this `nn.Module`.",
+      "Hints": [
+        "Simplify your `__getattribute__` implementation, ",
+        "or replace it with a targeted `@property`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
+      "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo does not support checking key existence on `nn.Module` instances that have a custom `__getattribute__` method defined.",
       "Hints": [
         "Avoid defining `__getattribute__` in your module.",
@@ -2510,6 +2520,17 @@
       "Hints": []
     }
   ],
+  "GB2520": [
+    {
+      "Gb_type": "assume_constant_result argument conversion failed",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Cannot convert argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result. The variable tracker does not support constant conversion.",
+      "Hints": [
+        "Remove torch._dynamo.assume_constant_result from this function",
+        "Ensure all arguments passed to the function can be converted to constants"
+      ]
+    }
+  ],
   "GB0209": [
     {
       "Gb_type": "torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
@@ -3324,6 +3345,16 @@
         "Include at least one checkpoint: (1) include at least 2 ops and (2) make sure there is some ",
         "line of code that is not in a try/with block, and has an empty Python stack.",
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB6604": [
+    {
+      "Gb_type": "Missing CALL_INTRINSIC_2 handler",
+      "Context": "CALL_INTRINSIC_2 operand: {inst.argval}",
+      "Explanation": "No handler implemented for CALL_INTRINSIC_2 {inst.argval} instruction.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

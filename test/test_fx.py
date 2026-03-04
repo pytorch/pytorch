@@ -66,6 +66,7 @@ from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBI
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
 
 from torch.fx.proxy import TraceError
+from torch.testing._internal.common_cuda import blas_library_context
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -4428,6 +4429,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    @blas_library_context("cublaslt")
     def test_profiler_stack_trace_augmentation(self):
         """
         Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
@@ -4835,6 +4837,11 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         # Forward ref
         if isinstance(t, str):
+            # Normalize "X | None" string annotations to Optional format
+            if t.endswith(" | None"):
+                inner = t[: -len(" | None")]
+                result = f"Optional[{inner}]"
+                return result if recursive else f"'{result}'"
             if recursive:
                 return t
             else:
@@ -4874,7 +4881,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         if origin in {tuple, tuple}:
             return f"Tuple{contained_type_str}"
-        if origin == typing.Union:
+        if origin == typing.Union or isinstance(t, types.UnionType):
             # Annoying hack to detect Optional
             if len(contained) == 2 and (contained[0] is type(None)) ^ (
                 contained[1] is type(None)

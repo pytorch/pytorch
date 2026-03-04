@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import logging
 import re
-from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 
 if TYPE_CHECKING:
@@ -106,13 +106,13 @@ class _GraphRouterBase(Generic[T]):
 
     def __init__(self, config_str: str, rule_type: str) -> None:
         self._rules: list[tuple[GraphIdFilter, T]] = []
-        self._values: list[Optional[T]] = []
-        self._overflow_value: Optional[T] = None
+        self._values: list[T | None] = []
+        self._overflow_value: T | None = None
         self._rule_type = rule_type
         self._parse(config_str)
         self._precompute()
 
-    def _parse_value_str(self, value_str: str) -> Optional[T]:
+    def _parse_value_str(self, value_str: str) -> T | None:
         """Parse a value string into the appropriate type. Returns None to skip."""
         raise NotImplementedError
 
@@ -165,13 +165,13 @@ class _GraphRouterBase(Generic[T]):
         # For IDs > max_id, the result is constant (only unbounded conditions apply)
         self._overflow_value = self._match_rules(max_id + 1)
 
-    def _match_rules(self, graph_id: int) -> Optional[T]:
+    def _match_rules(self, graph_id: int) -> T | None:
         for f, value in self._rules:
             if graph_id in f:
                 return value
         return None
 
-    def get_value_for_graph(self, graph_id: int) -> Optional[T]:
+    def get_value_for_graph(self, graph_id: int) -> T | None:
         """Get the value for a given graph ID. Returns None if no rule matches."""
         if graph_id < len(self._values):
             return self._values[graph_id]
@@ -208,7 +208,7 @@ class GraphBackendRouter(_GraphRouterBase[Any]):
     def __init__(self, config_str: str) -> None:
         super().__init__(config_str, "backend")
 
-    def _parse_value_str(self, value_str: str) -> Optional[Any]:
+    def _parse_value_str(self, value_str: str) -> Any | None:
         """Look up a backend, supporting 'backend:mode' format for inductor."""
         import torch
 
@@ -274,7 +274,7 @@ class GraphConfigRouter(_GraphRouterBase[dict[str, Any]]):
         except ValueError:
             return value_str
 
-    def _parse_value_str(self, value_str: str) -> Optional[dict[str, Any]]:
+    def _parse_value_str(self, value_str: str) -> dict[str, Any] | None:
         """Parse a config string like 'key1=val1,key2=val2' into a dict."""
         result: dict[str, Any] = {}
         for item in value_str.split(","):
@@ -295,11 +295,11 @@ class GraphConfigRouter(_GraphRouterBase[dict[str, Any]]):
 
 
 def _get_override_for_compile_id(
-    compile_id: Optional[CompileId],
+    compile_id: CompileId | None,
     config_str: str,
     create_router: Callable[[str], _GraphRouterBase[T]],
     log_msg: str,
-) -> Optional[T]:
+) -> T | None:
     """
     Get the override value for a given CompileId.
 
@@ -332,7 +332,7 @@ def _create_config_router(config_str: str) -> GraphConfigRouter:
 
 
 def get_backend_override_for_compile_id(
-    compile_id: Optional[CompileId],
+    compile_id: CompileId | None,
     config_str: str,
 ) -> Any:
     """
@@ -349,9 +349,9 @@ def get_backend_override_for_compile_id(
 
 
 def get_inductor_config_override_for_compile_id(
-    compile_id: Optional[CompileId],
+    compile_id: CompileId | None,
     config_str: str,
-) -> Optional[dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Get the inductor config override for a given CompileId.
 

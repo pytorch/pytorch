@@ -32,7 +32,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, cast, Literal, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 from torch import sym_float, sym_int
@@ -151,7 +151,7 @@ IN_PLACE_DESUGARING_MAP = {
 _HandlerCallback = Callable[
     ["InstructionTranslator", typing.Any, typing.Any], VariableTracker | None
 ]
-_TrackersType = Union[type[VariableTracker], tuple[type[VariableTracker], ...]]
+_TrackersType = type[VariableTracker] | tuple[type[VariableTracker], ...]
 polyfill_fn_mapping = {
     operator.eq: polyfills.cmp_eq,
     operator.ne: polyfills.cmp_ne,
@@ -1165,7 +1165,6 @@ class BuiltinVariable(VariableTracker):
                             hints=[*graph_break_hints.DYNAMO_BUG],
                             from_exc=exc,
                         )
-                    # pyrefly: ignore [unbound-name]
                     return VariableTracker.build(tx, res)
 
             else:
@@ -1198,7 +1197,6 @@ class BuiltinVariable(VariableTracker):
                                 tx,
                                 args=[VariableTracker.build(tx, a) for a in exc.args],
                             )
-                        # pyrefly: ignore [unbound-name]
                         return VariableTracker.build(tx, res)
                     return None
 
@@ -1702,7 +1700,6 @@ class BuiltinVariable(VariableTracker):
                 except AttributeError:
                     # Graph break
                     return None
-            # pyrefly: ignore [unbound-name]
             elif is_wrapper_or_member_descriptor(str_method):
                 unimplemented(
                     gb_type="Attempted to a str() method implemented in C/C++",
@@ -2474,10 +2471,8 @@ class BuiltinVariable(VariableTracker):
             # through it. This is a limitation of the current implementation.
             # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
             # might not be a big issue and we trade off it for performance.
-            # pyrefly: ignore [unbound-name]
             val = issubclass(arg_type, isinstance_type_tuple)
         except TypeError:
-            # pyrefly: ignore [unbound-name]
             val = arg_type in isinstance_type_tuple
         return VariableTracker.build(tx, val)
 
@@ -2595,9 +2590,7 @@ class BuiltinVariable(VariableTracker):
                 value = getattr(self.fn, name)
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
-            # pyrefly: ignore [unbound-name]
             if not callable(value):
-                # pyrefly: ignore [unbound-name]
                 return VariableTracker.build(tx, value, source)
         return variables.GetAttrVariable(self, name, source=source)
 
@@ -2737,7 +2730,12 @@ class BuiltinVariable(VariableTracker):
                 return variables.GetAttrVariable(obj, name, source=source)
         elif isinstance(obj, variables.TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
-            member = getattr(obj.value, name)
+            try:
+                member = getattr(obj.value, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+                raise
+
             if isinstance(
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
@@ -2756,12 +2754,6 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)  # type: ignore[arg-type, union-attr]
             return VariableTracker.build(tx, member, source)
-
-        elif istype(obj, variables.UserFunctionVariable) and name in (
-            "__name__",
-            "__module__",
-        ):
-            return VariableTracker.build(tx, getattr(obj.fn, name))
         else:
             try:
                 return obj.var_getattr(tx, name)

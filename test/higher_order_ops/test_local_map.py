@@ -932,6 +932,34 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(mm_nodes[2].meta["custom"]["inside_local_map"], 1)
         self.assertEqual(mm_nodes[3].meta["custom"]["inside_local_map"], 0)
 
+    @unittest.skipIf(*get_skip_reasons())
+    def test_local_map_make_contiguous_strides_for(self):
+        # make_contiguous_strides_for inside local_map must compile with dynamic shapes.
+        from torch._prims_common import make_contiguous_strides_for
+
+        @local_map(
+            out_placements=((Shard(0), Replicate()),),
+            in_placements=((Shard(0), Replicate()),),
+            redistribute_inputs=True,
+            device_mesh=self.mesh,
+        )
+        def fn(x):
+            strides = make_contiguous_strides_for(x.shape)
+            return (x.as_strided(x.shape, strides),)
+
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return fn(x)
+
+        model = MyModule()
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        x = torch.randn(80, 80)
+        with enable_local_map_wrapping():
+            out = torch.compile(model, backend=backend)(x)
+        self.assertEqual(out[0].shape, x.shape)
+
 
 if __name__ == "__main__":
     run_tests()
