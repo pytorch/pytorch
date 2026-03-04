@@ -39,8 +39,6 @@
 #include <magma_v2.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 
-const bool use_magma_ = true;
-
 namespace {
 struct MagmaInitializer {
   MagmaInitializer() {
@@ -59,9 +57,6 @@ struct MagmaInitializer {
 #if MAGMA_VERSION_MINOR >= 10 || MAGMA_VERSION_MICRO >= 10
 #error "MAGMA release minor or micro version >= 10, please correct AT_MAGMA_VERSION"
 #endif
-
-#else
-const bool use_magma_ = false;
 
 #endif
 
