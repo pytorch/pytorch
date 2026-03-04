@@ -2776,11 +2776,13 @@ def forward(self, arg0_1, arg1_1):
 def make_mutation_test(fn):
     @requires_gpu
     def test_fn(self):
-        from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
+        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
 
         kernel, inputs, tma_descriptor_metadata, outputs = fn()
+        tensor_accesses = identify_accessed_tensors(kernel, inputs, tma_descriptor_metadata)
+        mutated_tensor_names = [dep.name for dep in tensor_accesses.read_writes.writes]
         self.assertListEqual(
-            identify_mutated_tensors(kernel, inputs, tma_descriptor_metadata),
+            mutated_tensor_names,
             outputs,
         )
 
