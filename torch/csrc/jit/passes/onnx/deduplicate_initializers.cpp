@@ -83,20 +83,15 @@ static void DeduplicateInitializers(
 
   for (auto i : c10::irange(b->inputs().size())) {
     auto v = g->inputs().at(i);
-    if (valsToParamsMap.find(v) == valsToParamsMap.end()) {
-      // Skip model inputs
-      continue;
-    }
+    auto vals_to_param_it = valsToParamsMap.find(v);
 
     // Skip parameters without initializers
-    if (valsToParamsMap.find(v) == valsToParamsMap.end()) {
+    if (vals_to_param_it == valsToParamsMap.end()) {
       continue;
     }
 
-    auto iv = valsToParamsMap.find(v)->second.second;
-
     // Skip non-tensors
-    if (!iv.isTensor()) {
+    if (!vals_to_param_it->second.second.isTensor()) {
       continue;
     }
 
