@@ -311,7 +311,12 @@ inline void registerSerializationBindings(py::module_& m) {
       case Argument::Tag::AS_INT: return py::cast(u.get_as_int());
       case Argument::Tag::AS_INTS: return py::cast(u.get_as_ints());
       case Argument::Tag::AS_FLOAT: return py::cast(u.get_as_float().get());
-      case Argument::Tag::AS_FLOATS: return py::cast(u.get_as_floats());
+      case Argument::Tag::AS_FLOATS: {
+        const auto& v = u.get_as_floats();
+        std::vector<double> out; out.reserve(v.size());
+        for (const auto& f : v) out.push_back(f.get());
+        return py::cast(out);
+      }
       case Argument::Tag::AS_STRING: return py::cast(u.get_as_string());
       case Argument::Tag::AS_STRINGS: return py::cast(u.get_as_strings());
       case Argument::Tag::AS_SYM_INT: return py::cast(u.get_as_sym_int());
@@ -344,7 +349,12 @@ inline void registerSerializationBindings(py::module_& m) {
     .def_property_readonly("as_int", &Argument::get_as_int)
     .def_property_readonly("as_ints", &Argument::get_as_ints)
     .def_property_readonly("as_float", [](const Argument& u) { return u.get_as_float().get(); })
-    .def_property_readonly("as_floats", &Argument::get_as_floats)
+    .def_property_readonly("as_floats", [](const Argument& u) {
+      const auto& v = u.get_as_floats();
+      std::vector<double> out; out.reserve(v.size());
+      for (const auto& f : v) out.push_back(f.get());
+      return out;
+    })
     .def_property_readonly("as_string", &Argument::get_as_string)
     .def_property_readonly("as_strings", &Argument::get_as_strings)
     .def_property_readonly("as_sym_int", &Argument::get_as_sym_int)

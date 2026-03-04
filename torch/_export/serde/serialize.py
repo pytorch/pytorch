@@ -134,8 +134,15 @@ def _init_cpp_schema_types() -> None:
             _SCHEMA_TYPE_TUPLES[py_type] = (py_type, cpp_type)
 
 
+_schema_types_initialized = False
+
+
 def _schema_isinstance(obj: object, types: type | tuple[type, ...]) -> bool:
     """isinstance() that accepts both Python and C++ schema types."""
+    global _schema_types_initialized
+    if not _schema_types_initialized:
+        _init_cpp_schema_types()
+        _schema_types_initialized = True
     if isinstance(types, tuple):
         expanded: list[type] = []
         for t in types:
@@ -143,9 +150,6 @@ def _schema_isinstance(obj: object, types: type | tuple[type, ...]) -> bool:
         return isinstance(obj, tuple(expanded))
     tup = _SCHEMA_TYPE_TUPLES.get(types, (types,))
     return isinstance(obj, tup)
-
-
-_init_cpp_schema_types()
 
 
 class SerializeError(RuntimeError):
@@ -4333,8 +4337,8 @@ def canonicalize(
             raise AssertionError(f"Unknown input type: {spec}")
 
     def replace_output(out):
-        if not _schema_isinstance(spec, OutputSpec):
-            raise AssertionError(f"expected OutputSpec, got {type(spec).__name__}")
+        if not _schema_isinstance(out, OutputSpec):
+            raise AssertionError(f"expected OutputSpec, got {type(out).__name__}")
         if spec.type == "user_output":
             arg = spec.user_output.arg
             if arg.type == "as_tensor":

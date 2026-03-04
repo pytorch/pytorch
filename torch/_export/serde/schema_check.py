@@ -416,6 +416,15 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
         def _union_variant_accessor(variant_name, cpp_type):
             if cpp_type == "F64":
                 return f'    .def_property_readonly("{variant_name}", [](const {name}& u) {{ return u.get_{variant_name}().get(); }})'
+            if cpp_type == "std::vector<F64>":
+                return (
+                    f'    .def_property_readonly("{variant_name}", [](const {name}& u) {{\n'
+                    f'      const auto& v = u.get_{variant_name}();\n'
+                    f'      std::vector<double> out; out.reserve(v.size());\n'
+                    f'      for (const auto& f : v) out.push_back(f.get());\n'
+                    f'      return out;\n'
+                    f'    }})'
+                )
             if cpp_type == "int64_t" and fields[variant_name]["type"] in cpp_enum_defs:
                 return f'    .def_property_readonly("{variant_name}", [](const {name}& u) {{ return static_cast<int64_t>(u.get_{variant_name}()); }})'
             if cpp_type.startswith("ForwardRef<"):
@@ -426,6 +435,15 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
             tag = f'{name}::Tag::{variant_name.upper()}'
             if cpp_type == "F64":
                 return f'      case {tag}: return py::cast(u.get_{variant_name}().get());'
+            if cpp_type == "std::vector<F64>":
+                return (
+                    f'      case {tag}: {{\n'
+                    f'        const auto& v = u.get_{variant_name}();\n'
+                    f'        std::vector<double> out; out.reserve(v.size());\n'
+                    f'        for (const auto& f : v) out.push_back(f.get());\n'
+                    f'        return py::cast(out);\n'
+                    f'      }}'
+                )
             if cpp_type.startswith("ForwardRef<"):
                 return f'      case {tag}: return py::cast(*u.get_{variant_name}());'
             return f'      case {tag}: return py::cast(u.get_{variant_name}());'
