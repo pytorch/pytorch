@@ -76,7 +76,13 @@ regex = "^(?P<value>.+)$"
 install-dir = "torch"
 # Python packages to include in the wheel.
 packages = ["torch", "torchgen", "functorch"]
-license-files = ["LICENSE", "third_party/LICENSES_BUNDLED.txt"]
+license-files = [
+    "LICENSE",
+    "third_party/**/LICENSE",
+    "third_party/**/LICENSE.txt",
+    "third_party/**/LICENSE.rst",
+    "third_party/**/COPYING.BSD",
+]
 
 [tool.scikit-build.editable]
 # Editable installs use redirect mode: Python files are found in the source
