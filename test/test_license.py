@@ -51,7 +51,16 @@ class TestLicense(TestCase):
             license_file = os.path.join(distinfo[0], "LICENSE")
         with open(license_file) as fid:
             txt = fid.read()
-            self.assertTrue(starting_txt in txt)
+        if starting_txt not in txt:
+            # scikit-build-core includes license files separately; check
+            # for LICENSES_BUNDLED.txt next to LICENSE in the licenses/ dir.
+            bundled = os.path.join(
+                distinfo[0], "licenses", "third_party", "LICENSES_BUNDLED.txt"
+            )
+            if os.path.exists(bundled):
+                with open(bundled) as fid:
+                    txt = fid.read()
+        self.assertTrue(starting_txt in txt)
 
 
 if __name__ == "__main__":
