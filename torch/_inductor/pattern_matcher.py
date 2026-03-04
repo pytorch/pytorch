@@ -1666,6 +1666,8 @@ def register_replacement(
 
     # TODO: Revisit the functionalize_rng_ops for lowmem dropout
     with functorch_config.patch(functionalize_rng_ops=False):
+        if not isinstance(example_inputs, (list, tuple)):
+            example_inputs = (example_inputs,)
         requires_grad: list[bool] = [
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
         ]
