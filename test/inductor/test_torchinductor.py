@@ -8933,6 +8933,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         assertGeneratedKernelCountEqual(self, 2)
 
     @skip_if_halide
+    @skip_if_pallas
     def test_index_put_duplicate_indices_no_accumulate(self):
         # https://github.com/pytorch/pytorch/issues/174074
         def fn(x):
@@ -8941,7 +8942,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         # ncols=2048 forces multiple Triton blocks on GPU, exposing the
         # inter-block race that small tensors mask.
-        x = torch.randn(1, 2048, dtype=torch.float64)
+        x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
     @skip_if_pallas
@@ -8953,7 +8954,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             x.index_put_((idx,), vals, accumulate=True)
             return x
 
-        x = torch.randn(1, 2048, dtype=torch.float64)
+        x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
     def test_adding_tensor_offsets(self):

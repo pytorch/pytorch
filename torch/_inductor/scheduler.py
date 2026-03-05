@@ -6019,7 +6019,7 @@ class Scheduler:
         # Non-injective scatter: range vars absent from write index mean
         # multiple iterations hit the same location. Can't fuse the reader
         # in or it will see partially-written state between iterations.
-        if not set(write.var_names) <= write.index.free_symbols:
+        if not OrderedSet(write.var_names) <= write.index.free_symbols:
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
