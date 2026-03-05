@@ -260,7 +260,7 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           Tensor& out) {
 #if AT_MKLDNN_ENABLED() && !defined(__powerpc__)
   if (at::globalContext().userEnabledMkldnn()) {
-    bool mixed_dtype = mat_a.scalar_type() != mat_b.scalar_type();
+    bool mixed_dtype = mat1.scalar_type() != mat2.scalar_type();
     if ((!mixed_dtype && cpuinfo_has_x86_amx_int8()) ||
         (mixed_dtype && cpuinfo_has_x86_amx_fp16())) {
       return mkldnn_scaled_mm(
@@ -451,7 +451,7 @@ Tensor& _scaled_mm_cpu_v2_out(
 
   if (!found_impl) {
     const std::optional<at::Tensor> scale_a_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};
-    const std::optional<at::Tensor> scale_b_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};
+    const std::optional<at::Tensor> scale_b_opt = scale_b.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_b[0]};
 
     invalid_scaling_config(mat_a, mat_b, scale_a_opt, scale_b_opt);
   }
