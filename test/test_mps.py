@@ -1672,6 +1672,18 @@ class TestMPS(TestCaseMPS):
         helper([10, 5, 10, 3])
         helper([10, 5, 10, 3, 20])
 
+        # Test scalar tensor (0-dimensional) - should preserve shape
+        x_mps = torch.tensor(0, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+        mask_mps = torch.tensor(True, device="mps")
+        mask_cpu = mask_mps.detach().clone().cpu()
+        source_mps = torch.tensor([42], device="mps")
+        source_cpu = source_mps.detach().clone().cpu()
+        result_mps = x_mps.masked_scatter(mask_mps, source_mps)
+        result_cpu = x_cpu.masked_scatter(mask_cpu, source_cpu)
+        self.assertEqual(result_mps.shape, result_cpu.shape)
+        self.assertEqual(result_mps, result_cpu)
+
     def test_masked_scatter_raises(self):
         x_mps = torch.tensor([0, 0, 0], device="mps")
         mask_mps = torch.tensor([1, 1, 1], dtype=torch.bool, device="mps")

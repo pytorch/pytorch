@@ -784,8 +784,6 @@ def query_single_dim_strategy(
 
     strategy_func = propagator.op_single_dim_strategy_funcs[op_overload]
 
-    # Build args_meta preserving positional structure: tensors become TensorMeta,
-    # non-tensor args pass through (mirrors OpSchema.args_meta property).
     args_meta = tuple(
         TensorMeta(shape=a.shape, stride=a.stride(), dtype=a.dtype)
         if isinstance(a, torch.Tensor)

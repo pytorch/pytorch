@@ -20,11 +20,11 @@ jobs:
       (
         (github.event_name != 'issues' &&
          contains(github.event.comment.body, '@claude') &&
-         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
+         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.comment.author_association) ||
           github.actor == 'pytorch-auto-revert[bot]')) ||
         (github.event_name == 'issues' &&
          contains(github.event.issue.body, '@claude') &&
-         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) ||
+         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.issue.author_association) ||
           github.actor == 'pytorch-auto-revert[bot]'))
       )
     runs-on: ubuntu-latest

@@ -47,6 +47,8 @@ from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
+from ..stream_constants import DEFAULT_STREAM, ENTRANCE_EVENT, STREAM_NAME_TEMPLATE
+from ..stream_utils import get_stream_name
 from ..utils import (
     cache_on_self,
     DelayReplaceLine,
@@ -80,6 +82,7 @@ if TYPE_CHECKING:
 
     import triton
 
+    from ..event import CudaEventSym
     from ..graph import GraphLowering
     from ..ir import ExternKernel
     from ..scheduler import BaseSchedulerNode
@@ -711,6 +714,82 @@ class MemoryPlanningLine(WrapperLine):
                 f"{field.name}={val.get_name() if field.type is ir.Buffer else val}"
             )
         return f"{type(self).__name__}({', '.join(args)})"
+
+
+@dataclasses.dataclass
+class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine):
+    """Enter a CUDA device context and allocate required side streams.
+
+    Attributes:
+        num_streams: Number of streams to allocate (determined by user annotations on nodes).
+    """
+
+    num_streams: int = 1
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        """Generate context switching and stream allocation code."""
+        if V.graph.cpp_wrapper:
+            super().codegen(code)
+        else:
+            super().codegen(code)
+            code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
+            code.writeline(f"{ENTRANCE_EVENT} = {DEFAULT_STREAM}.record_event()")
+
+            if self.num_streams > 1:
+                for i in range(1, self.num_streams):
+                    code.writeline(
+                        f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
+                        f"= torch.cuda.Stream(device={self.device_idx})",
+                    )
+
+
+@dataclasses.dataclass
+class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
+    """Exit a CUDA device context.
+
+    Attributes:
+        num_streams: Number of streams that were allocated (must match Enter).
+    """
+
+    num_streams: int = 1
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        """Generate context exit code."""
+        if not V.graph.cpp_wrapper:
+            code.do_unindent()
+
+
+@dataclasses.dataclass
+class EnterCudaStreamContextLine(WrapperLine):
+    """Enter a context executed by respective CUDA Stream and insert necessary syncs.
+
+    Attributes:
+        wrapper: The code-gen wrapper of the current compilation phase.
+        stream_idx: The index number corresponds to the entering CUDA Stream context.
+        upstream_events: Names of CUDA Events that the current stream should be waiting for before
+            the stream switching.
+        buffers_from_other_streams: Name of buffers produced by other CUDA Streams. Those buffers
+            should be recorded to the current stream to avoid accidental memory free.
+    """
+
+    stream_idx: int
+
+    def __post_init__(self) -> None:
+        """Track buffers have been recorded on this stream to reduce duplicate recording."""
+        self.buffers_recorded_on_this_stream: OrderedSet[str] = OrderedSet()
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        """Generate stream switching and buffer recording code."""
+        code.writeline(f"with torch.cuda.stream({get_stream_name(self.stream_idx)}):")
+        code.do_indent()
+
+
+@dataclasses.dataclass
+class ExitCudaStreamContextLine(WrapperLine):
+    """Generate code to exit the current stream context."""
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
 
 
 class EfficientPeakEstimate:
@@ -1560,10 +1639,21 @@ class PythonWrapperCodegen(CodeGen):
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
-    def codegen_device_guard_enter(self, device_idx: int) -> None:
-        self.writeline(
-            EnterDeviceContextManagerLine(device_idx, self.last_seen_device_guard_index)
-        )
+    def codegen_device_guard_enter(self, device_idx: int, num_streams: int = 1) -> None:
+        if num_streams > 1:
+            self.writeline(
+                EnterDeviceContextManagerWithStreamInfoLine(
+                    device_idx,
+                    self.last_seen_device_guard_index,
+                    num_streams,
+                ),
+            )
+        else:
+            self.writeline(
+                EnterDeviceContextManagerLine(
+                    device_idx, self.last_seen_device_guard_index
+                )
+            )
         if config.triton.autotune_at_compile_time:
             # mimic logic of EnterDeviceContextManagerLine.codegen for the autotune code block
             self.write_triton_header_once()
@@ -1578,11 +1668,90 @@ class PythonWrapperCodegen(CodeGen):
                 f"stream{device_idx} = get_raw_stream({device_idx})"
             )
         self.last_seen_device_guard_index = device_idx
+        self._num_streams: int = num_streams
 
     def codegen_device_guard_exit(self) -> None:
-        self.writeline(ExitDeviceContextManagerLine())
+        if hasattr(self, "_num_streams") and self._num_streams > 1:
+            self.writeline(
+                ExitDeviceContextManagerWithStreamInfoLine(self._num_streams)
+            )
+        else:
+            self.writeline(ExitDeviceContextManagerLine())
         if config.triton.autotune_at_compile_time:
             self.kernel_autotune_calls.do_unindent()
+
+    def codegen_cuda_stream_enter(
+        self,
+        stream_idx: int,
+        upstream_events: OrderedSet[CudaEventSym],
+        buffers_from_other_streams: OrderedSet[str],
+    ) -> EnterCudaStreamContextLine:
+        """Generate data structure for entering a CUDA Stream context.
+
+        Args:
+            stream_idx: The index number of the entering CUDA Stream context.
+            upstream_events: Names of CUDA Events that the current stream should be waiting for
+                before the stream switching. This is usually the events that are generated by the
+                previous stream context.
+            buffers_from_other_streams: Name of buffers produced by other CUDA Streams. Those
+                buffers should be recorded to the current stream to avoid accidental memory free.
+
+        Note:
+            - Refer to :class:`EnterCudaStreamContextLine` for argument specifications;
+            - Once entered a context, the stream associated with this context will also be recorded
+              such that kernels in subsequent code-gen can get the correct stream index.
+
+        Raises:
+            ValueError: If this function is called while the previous stream context isn't exited.
+        """
+        # pyre-fixme[16]: scheduler.current_stream_name added in scheduler commit
+        if (current_stream_name := V.graph.scheduler.current_stream_name) is not None:
+            raise ValueError(
+                f"Nested stream context switching: {current_stream_name} -> "
+                f"{get_stream_name(stream_idx)}",
+            )
+        ctx_entrance = EnterCudaStreamContextLine(stream_idx=stream_idx)
+        self.writeline(ctx_entrance)
+        self.codegen_buffers_record_stream(
+            buffers=buffers_from_other_streams,
+            stream_idx=stream_idx,
+        )
+        ctx_entrance.buffers_recorded_on_this_stream |= buffers_from_other_streams
+        self.codegen_events_wait_stream(
+            events=upstream_events,
+            stream_idx=stream_idx,
+        )
+        return ctx_entrance
+
+    def codegen_cuda_stream_exit(self) -> None:
+        """Generate data structure for exiting a CUDA Stream context."""
+        self.writeline(ExitCudaStreamContextLine())
+
+    def codegen_events_wait_stream(
+        self, events: OrderedSet[CudaEventSym], stream_idx: int
+    ) -> None:
+        """Generate data structure for syncing hanging CUDA Events with certain stream.
+
+        Args:
+            events: Symbols of the events that need to be synchronized with the given stream.
+            stream_idx: Index of the CUDA stream to synchronize the events with.
+        """
+        for event in events:
+            self.writeline(event.wait(stream_idx))
+
+    def codegen_buffers_record_stream(
+        self,
+        buffers: OrderedSet[str],
+        stream_idx: int,
+    ) -> None:
+        """Generate code for recording stream on buffers to prevent premature memory free.
+
+        Args:
+            buffers: Names of buffers that need to be recorded on the given stream.
+            stream_idx: Index of the CUDA stream to record the buffers to.
+        """
+        for buff in buffers:
+            self.writeline(f"{buff}.record_stream({get_stream_name(stream_idx)})")
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
@@ -4038,6 +4207,27 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
             return
 
         super().codegen_allocation(buffer)
+
+    def _write_get_raw_stream(
+        self, device_idx: int, graph: GraphLowering | None = None
+    ) -> str:
+        self.write_triton_header_once()
+        # pyre-fixme[16]: scheduler.current_stream_name added in scheduler commit
+        if (current_stream_name := V.graph.scheduler.current_stream_name) is not None:
+            name = f"{current_stream_name}_raw"
+            self.writeline(f"{name} = {current_stream_name}.cuda_stream")
+        else:
+            name = f"stream{device_idx}"
+            self.writeline(f"{name} = get_raw_stream({device_idx})")
+        return name
+
+    def codegen_graph_nvtx_range_push(self, post_grad_graph_id: int) -> None:
+        """Generate NVTX range push for graph."""
+        self.writeline(f"torch.cuda.nvtx.range_push('graph {post_grad_graph_id}')")
+
+    def codegen_graph_nvtx_range_pop(self) -> None:
+        """Generate NVTX range pop for graph."""
+        self.writeline("torch.cuda.nvtx.range_pop()")
 
     @cache_on_self
     def write_triton_header_once(self) -> None:
