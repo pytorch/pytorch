@@ -102,9 +102,40 @@ register_op_strategy(
 )(propagate_single_input_strategy)
 
 
-register_op_strategy(
-    aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
-)(propagate_single_input_strategy)
+def _partial_needs_reduce_for_dtype_cast(
+    reduce_op: str,
+    src_dtype: torch.dtype,
+    target_dtype: torch.dtype | None,
+) -> bool:
+    """Return True when reduce_op does not commute with the dtype cast."""
+    if target_dtype is None or src_dtype == target_dtype:
+        return False
+    if target_dtype == torch.bool:
+        return True
+    if reduce_op in ("max", "min"):
+        return False
+    return src_dtype.is_floating_point and not target_dtype.is_floating_point
+
+
+@register_single_dim_strategy(
+    aten._to_copy.default,
+    schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"]),
+    allow_unbacked_sharding=True,
+)
+def _to_copy_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = cast(TensorMeta, args_schema[0])
+    src_dtype = input_meta.dtype
+    target_dtype = cast(torch.dtype | None, kwargs_schema.get("dtype", None))
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(len(input_meta.shape)):
+        strategies.append([_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)])
+    for reduce_op in Partial.ALL_REDUCE_OPS:
+        if not _partial_needs_reduce_for_dtype_cast(reduce_op, src_dtype, target_dtype):
+            strategies.append([Partial(reduce_op), Partial(reduce_op)])
+    return strategies
 
 
 @register_op_strategy(
