@@ -1224,7 +1224,7 @@ def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
         # Two cases could lead us here:
         # a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
         # b. N11W contiguous Tensor sliced on the W-dimension.
-        # ([N,1,1,1]@[W,W,W,W])
+        # ([N,1,1,1]@[W,W,W,1])
         if d == 0:
             r &= sympy.Ne(m, strides[1])
         # This is necessary to:
