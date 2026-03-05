@@ -4022,6 +4022,16 @@ def setup_determinism_for_accuracy_test(args):
     if args.devices == ["rocm"]:
         torch.use_deterministic_algorithms(True, warn_only=True)
 
+    # Some deterministic kernels have been implemented on XPU
+    if (
+        args.devices == ["xpu"]
+        and args.only
+        in {
+            "pytorch_CycleGAN_and_pix2pix",  # https://github.com/intel/torch-xpu-ops/pull/2901
+        }
+    ):
+        torch.use_deterministic_algorithms(True, warn_only=True)
+
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.backends.mkldnn.deterministic = True
