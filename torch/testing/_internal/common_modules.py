@@ -994,6 +994,43 @@ def module_error_inputs_torch_nn_BatchNorm1d_2d_3d(module_info, device, dtype, r
     ]
 
 
+def module_error_inputs_torch_nn_Conv2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    return [
+        # 1) Wrong input dimensions: 2D input instead of 3D/4D
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 16, 3),
+                forward_input=FunctionInput(make_input((3, 10))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d.*",
+        ),
+
+        # 2) Wrong number of channels: input has 5 channels, but in_channels=3
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 16, 3),
+                forward_input=FunctionInput(make_input((1, 5, 10, 10))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"Given groups=1.*expected input.*to have 3 channels.*but got 5 channels instead",
+        ),
+
+        # 3) Invalid groups: in_channels not divisible by groups (constructor-time validation)
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 16, 3, groups=2),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex=r"in_channels must be divisible by groups",
+        ),
+    ]
+
+
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
     N = kwargs['N']
     lazy = kwargs.get('lazy', False)
@@ -1867,31 +1904,42 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
             desc='2d_no_affine_LN'),
     ]
 
+def module_error_inputs_torch_nn_Conv2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    tensor_factory = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-def module_error_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, training, **kwargs):
-    """
-    Error inputs for GroupNorm that test error messages include actual values.
-    """
-    return [
-        ErrorModuleInput(
-            ModuleInput(
-                constructor_input=FunctionInput(3, 10),  # num_groups=3, num_channels=10
-                forward_input=FunctionInput(),  # Not needed for construction error
-            ),
-            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
-            error_type=ValueError,
-            error_regex=r"num_channels \(10\) must be divisible by num_groups \(3\)"
+    bad_rank = ErrorModuleInput(
+        ModuleInput(
+            constructor_input=FunctionInput(3, 16, 3),
+            forward_input=FunctionInput(tensor_factory((3, 10))),
+            desc="rank_mismatch_2d_input",
         ),
-        ErrorModuleInput(
-            ModuleInput(
-                constructor_input=FunctionInput(5, 13),  # num_groups=5, num_channels=13
-                forward_input=FunctionInput(),  # Not needed for construction error
-            ),
-            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
-            error_type=ValueError,
-            error_regex=r"num_channels \(13\) must be divisible by num_groups \(5\)"
+        error_on=ModuleErrorEnum.FORWARD_ERROR,
+        error_type=RuntimeError,
+        error_regex=r"Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d.*",
+    )
+
+    wrong_channels = ErrorModuleInput(
+        ModuleInput(
+            constructor_input=FunctionInput(3, 16, 3),
+            forward_input=FunctionInput(tensor_factory((1, 5, 10, 10))),
+            desc="channel_mismatch",
         ),
-    ]
+        error_on=ModuleErrorEnum.FORWARD_ERROR,
+        error_type=RuntimeError,
+        error_regex=r"Given groups=1.*expected input.*to have 3 channels.*but got 5 channels(?: instead)?",
+    )
+
+    bad_groups = ErrorModuleInput(
+        ModuleInput(
+            constructor_input=FunctionInput(3, 16, 3, groups=2),
+            desc="invalid_groups",
+        ),
+        error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+        error_type=ValueError,
+        error_regex=r"in_channels must be divisible by groups",
+    )
+
+    return [bad_rank, wrong_channels, bad_groups]
 
 
 def module_inputs_torch_nn_Hardshrink(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -3800,16 +3848,17 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.Conv2d,
-               module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False),
-               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-               module_memformat_affects_out=True,
-               skips=(
+           module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False),
+           module_error_inputs_func=module_error_inputs_torch_nn_Conv2d,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           module_memformat_affects_out=True,
+           skips=(
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='cuda', dtypes=[torch.float64]),
                ),
-               decorators=(
+               decorators=( 
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.Conv3d,
