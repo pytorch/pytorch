@@ -2409,36 +2409,39 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                     ],
                 )
 
-            ops = list()
-            peers = list()
-            tags = list()
-            tensors = list()
-            p2p_ops = kwargs["p2p_op_list"]
-            group_var = p2p_ops.items[0].group  # pyrefly: ignore [missing-attribute]
+            from .distributed import P2POpVariable
 
+            p2p_ops = kwargs["p2p_op_list"]
             if not isinstance(p2p_ops, variables.ListVariable):
                 raise torch._dynamo.exc.InternalTorchDynamoError(
                     "`P2POp` used incorrectly"
                 )
 
-            for op in p2p_ops.items:  # pyrefly: ignore [missing-attribute]
-                ops.append(op.op)  # pyrefly: ignore [missing-attribute]
-                tensors.append(op.tensor)  # pyrefly: ignore [missing-attribute]
-                peers.append(op.peer)  # pyrefly: ignore [missing-attribute]
-                tags.append(op.tag)  # pyrefly: ignore [missing-attribute]
-            new_args = tuple()
-            new_kwargs = {
+            ops = list()
+            peers = list()
+            tags = list()
+            tensors = list()
+            group_var: VariableTracker | None = None
+
+            for item in p2p_ops.items:
+                assert isinstance(item, P2POpVariable)
+                ops.append(item.op)
+                tensors.append(item.tensor)
+                peers.append(item.peer)
+                tags.append(item.tag)
+                if group_var is None:
+                    group_var = item.group
+
+            assert group_var is not None
+            new_args: tuple[VariableTracker, ...] = ()
+            new_kwargs: dict[str, VariableTracker] = {
                 "op_list": variables.ListVariable(ops),
                 "peer_list": variables.ListVariable(peers),
                 "tag_list": variables.ListVariable(tags),
                 "tensors": variables.ListVariable(tensors),
                 "group_name": group_var,
             }
-            return self.replacement_var.call_function(
-                tx,
-                new_args,
-                new_kwargs,  # pyrefly: ignore [bad-argument-type]
-            )
+            return self.replacement_var.call_function(tx, new_args, new_kwargs)
 
         if self.fn in (dist.isend, dist.irecv):
             if not config.enable_p2p_compilation:
