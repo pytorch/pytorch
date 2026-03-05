@@ -184,7 +184,7 @@ __device__ __forceinline__ void welford_merge_element(C& count,
                                                       const C& count_new,
                                                       const T& mean_new,
                                                       const T& m2n_new) {
-      T factor = T(1.0) / ::max(1, (count + count_new));
+      T factor = T(1.0) / ::max(C(1), (count + count_new));
       T delta0 = mean - mean_new;
       mean = (mean_new * count_new + mean * count) * factor;
       m2n += m2n_new + delta0 * delta0 * count_new * count * factor;
@@ -287,7 +287,12 @@ __global__ void batch_norm_collect_statistics_kernel(
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_mean,
     GenericPackedTensorAccessor<stat_accscalar_t, 1, RestrictPtrTraits, index_t> save_transformed_var) {
 
-  __shared__ int shared_n[2 * 2 * C10_WARP_SIZE + C10_WARP_SIZE];
+  // Use double for Welford accumulation when stat_accscalar_t is float to
+  // prevent overflow when squaring large deviations.
+  using var_acc_t = std::conditional_t<std::is_same_v<stat_accscalar_t, float>, double, stat_accscalar_t>;
+
+  __shared__ int shared_n[C10_WARP_SIZE];
+  __shared__ var_acc_t shared_avg_var[2 * C10_WARP_SIZE];
 
   int plane = blockIdx.x;
   int N = input.size(0) * input.size(2);
@@ -299,22 +304,21 @@ __global__ void batch_norm_collect_statistics_kernel(
   // and the parallel algorithm on the same page.
   // We use two shuffles to reduce across the entire block.
   // https://devblogs.nvidia.com/faster-parallel-reductions-kepler/ has a description.
-  stat_accscalar_t* shared_avg_var = (stat_accscalar_t*) &shared_n[C10_WARP_SIZE];
 
   // first the reductions each thread does separately
-  stat_accscalar_t avg = 0;
-  stat_accscalar_t var_n = 0;
+  var_acc_t avg = 0;
+  var_acc_t var_n = 0;
   int n = 0;
   for (int batch = threadIdx.y; batch < input.size(0); batch += blockDim.y) {
 #if defined(USE_ROCM)
     constexpr int UNRL = 4;
-    stat_accscalar_t v_[UNRL];
+    var_acc_t v_[UNRL];
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x*UNRL) {
       for (int u = 0; u < UNRL; u++)
         v_[u] = input[batch][plane][std::min(x+u*blockDim.x, input.size(2)-1)];
       for (int u = 0; u < UNRL; u++) {
         if (x+u*blockDim.x < input.size(2)) {
-          stat_accscalar_t d1 = v_[u] - avg;
+          var_acc_t d1 = v_[u] - avg;
           n++;
           avg += d1 / n;
           var_n += d1 * (v_[u] - avg);
@@ -323,8 +327,8 @@ __global__ void batch_norm_collect_statistics_kernel(
     }
 #else
     for (int x = threadIdx.x; x < input.size(2); x += blockDim.x) {
-      stat_accscalar_t v = input[batch][plane][x];
-      stat_accscalar_t d1 = v - avg;
+      var_acc_t v = input[batch][plane][x];
+      var_acc_t d1 = v - avg;
       n++;
       avg += d1 / n;
       var_n += d1 * (v - avg);
@@ -335,9 +339,9 @@ __global__ void batch_norm_collect_statistics_kernel(
   // first warpSum to get one value per thread to
   // one value per warp
   for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
-    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
+    var_acc_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
     int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
-    stat_accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
+    var_acc_t factor = var_acc_t(1.0) / ::max(1, n+o_n);
     var_n += WARP_SHFL_XOR(var_n, 1 << i, C10_WARP_SIZE) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
     avg = (n * avg + o_n * o_avg) * factor;
     n += o_n;
@@ -359,13 +363,13 @@ __global__ void batch_norm_collect_statistics_kernel(
 
   if (tid < C10_WARP_SIZE) {
     n = (tid < blockDim.x * blockDim.y / C10_WARP_SIZE ? shared_n[tid] : 0);
-    avg = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid] : stat_accscalar_t(0));
-    var_n = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid + 1] : stat_accscalar_t(0));
+    avg = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid] : var_acc_t(0));
+    var_n = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid + 1] : var_acc_t(0));
   }
   for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
-    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
+    var_acc_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
     int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
-    stat_accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
+    var_acc_t factor = var_acc_t(1.0) / ::max(1, n+o_n);
     var_n += WARP_SHFL_XOR(var_n, 1 << i, C10_WARP_SIZE) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
     avg = (n * avg + o_n * o_avg) * factor;
     n += o_n;
@@ -374,10 +378,13 @@ __global__ void batch_norm_collect_statistics_kernel(
   // Save the mean, variance, and moving averages
   if (tid == 0) {
     if (save_mean.data() != NULL) {
-      save_mean[plane] = avg;
+      save_mean[plane] = static_cast<stat_accscalar_t>(avg);
     }
     if (save_transformed_var.data() != NULL) {
-      save_transformed_var[plane] = VarTransform{}(var_n / N, epsilon);
+      // Compute VarTransform in double to avoid overflow when variance > float32 max,
+      // then narrow to stat_accscalar_t (the invstd result fits in float).
+      save_transformed_var[plane] = static_cast<stat_accscalar_t>(
+          VarTransform{}(var_n / static_cast<var_acc_t>(N), static_cast<double>(epsilon)));
     }
   }
 
@@ -970,27 +977,28 @@ template
    <typename VarTransform,
     typename scalar_t,
     typename accscalar_t,
+    typename var_acc_t,
     int PARALLEL_LOADS>
 __global__ void
 batch_norm_collect_statistics_channels_last_kernel(
       const scalar_t* __restrict__ input,
       accscalar_t* __restrict__ out_mean,
       accscalar_t* __restrict__ out_invstd,
-      volatile accscalar_t* staging_data,
+      volatile var_acc_t* staging_data,
       int* semaphores,
       const int reduction_size,
       const int stride,
       accscalar_t epsilon) {
   // hide latency with concurrency
-  accscalar_t x_mean[PARALLEL_LOADS];
-  accscalar_t m_2_n[PARALLEL_LOADS];
+  var_acc_t x_mean[PARALLEL_LOADS];
+  var_acc_t m_2_n[PARALLEL_LOADS];
   int count[PARALLEL_LOADS];
 
 #pragma unroll
   for (int i = 0; i < PARALLEL_LOADS; i++) {
-    x_mean[i] = accscalar_t(0);
-    m_2_n[i] = accscalar_t(0);
-    count[i] = accscalar_t(0);
+    x_mean[i] = var_acc_t(0);
+    m_2_n[i] = var_acc_t(0);
+    count[i] = 0;
   }
   // tensor dimension (m,c)
 
@@ -1006,9 +1014,9 @@ batch_norm_collect_statistics_channels_last_kernel(
   int address_increment = inner_loop_stride * stride;
 
   for (int i = 0; i < loop_count; i++) {
-    accscalar_t x_math[PARALLEL_LOADS];
-    accscalar_t x_count_inv[PARALLEL_LOADS];
-    accscalar_t is_valid[PARALLEL_LOADS];
+    var_acc_t x_math[PARALLEL_LOADS];
+    var_acc_t x_count_inv[PARALLEL_LOADS];
+    var_acc_t is_valid[PARALLEL_LOADS];
 
     // load multiple data in
 #pragma unroll
@@ -1016,12 +1024,12 @@ batch_norm_collect_statistics_channels_last_kernel(
       if (c_offset < stride && m_offset < reduction_size) {
         x_math[j] = input[address_base];
         count[j]++;
-        x_count_inv[j] = accscalar_t(1) / count[j];
-        is_valid[j] = accscalar_t(1);
+        x_count_inv[j] = var_acc_t(1) / count[j];
+        is_valid[j] = var_acc_t(1);
       } else {
-        x_math[j] = accscalar_t(0);
-        x_count_inv[j] = accscalar_t(0);
-        is_valid[j] = accscalar_t(0);
+        x_math[j] = var_acc_t(0);
+        x_count_inv[j] = var_acc_t(0);
+        is_valid[j] = var_acc_t(0);
       }
       m_offset += inner_loop_stride;
       address_base += address_increment;
@@ -1030,9 +1038,9 @@ batch_norm_collect_statistics_channels_last_kernel(
     // calculate mean/m2n with welford
 #pragma unroll
     for (int j = 0; j < PARALLEL_LOADS; j++) {
-      accscalar_t delta0 = x_math[j] - x_mean[j];
+      var_acc_t delta0 = x_math[j] - x_mean[j];
       x_mean[j] += delta0 * x_count_inv[j];
-      accscalar_t delta1 = x_math[j] - x_mean[j];
+      var_acc_t delta1 = x_math[j] - x_mean[j];
       m_2_n[j] += delta0 * delta1 * is_valid[j];
     }
   }
@@ -1049,15 +1057,15 @@ batch_norm_collect_statistics_channels_last_kernel(
   auto count_th = count[0];
 
   // block-wise reduction with shared memory (since reduction cannot be done within a warp)
-  static __shared__ accscalar_t shmem_mean[MAX_BLOCK_SIZE];
-  static __shared__ accscalar_t shmem_m2n[MAX_BLOCK_SIZE];
+  static __shared__ var_acc_t shmem_mean[MAX_BLOCK_SIZE];
+  static __shared__ var_acc_t shmem_m2n[MAX_BLOCK_SIZE];
   static __shared__ int shmem_count[MAX_BLOCK_SIZE];
 
   welford_merge_block_vertical(count_th, mean_th, m2_th, shmem_count, shmem_mean, shmem_m2n);
 
   if (gridDim.y > 1) {
-    volatile accscalar_t* staging_mean = staging_data;
-    volatile accscalar_t* staging_m2n = &staging_data[stride*gridDim.y];
+    volatile var_acc_t* staging_mean = staging_data;
+    volatile var_acc_t* staging_m2n = &staging_data[stride*gridDim.y];
     volatile int* staging_count = reinterpret_cast<volatile int*>(&staging_m2n[stride*gridDim.y]);
 
     address_base = c_offset + blockIdx.y * stride;
@@ -1083,14 +1091,14 @@ batch_norm_collect_statistics_channels_last_kernel(
     // check that all data is now available in global memory
     if (is_last_block_done) {
       count_th = 0;
-      mean_th = accscalar_t(0.0);
-      m2_th = accscalar_t(0.0);
+      mean_th = var_acc_t(0.0);
+      m2_th = var_acc_t(0.0);
 
       for (int y = threadIdx.y; y < gridDim.y; y += blockDim.y) {
         address_base = c_offset + y * stride;
         int count_new = c_offset < stride ? staging_count[address_base] : 0;
-        accscalar_t mean_new = c_offset < stride ? staging_mean[address_base] : accscalar_t(0.0);
-        accscalar_t m2n_new = c_offset < stride ? staging_m2n[address_base] : accscalar_t(0.0);
+        var_acc_t mean_new = c_offset < stride ? staging_mean[address_base] : var_acc_t(0.0);
+        var_acc_t m2n_new = c_offset < stride ? staging_m2n[address_base] : var_acc_t(0.0);
 
         welford_merge_element(count_th, mean_th, m2_th, count_new, mean_new, m2n_new);
       }
@@ -1098,13 +1106,15 @@ batch_norm_collect_statistics_channels_last_kernel(
       welford_merge_block_vertical(count_th, mean_th, m2_th, shmem_count, shmem_mean, shmem_m2n);
       if (threadIdx.y == 0 && c_offset < stride) {
         out_mean[c_offset] = static_cast<accscalar_t>(mean_th);
-        out_invstd[c_offset] = VarTransform{}(m2_th/count_th, epsilon);
+        out_invstd[c_offset] = static_cast<accscalar_t>(
+            VarTransform{}(m2_th / static_cast<var_acc_t>(count_th), static_cast<double>(epsilon)));
       }
     }
   } else {
     if (blockIdx.y == 0 && threadIdx.y == 0 && c_offset < stride) {
       out_mean[c_offset] = static_cast<accscalar_t>(mean_th);
-      out_invstd[c_offset] = VarTransform{}(m2_th/count_th, epsilon);
+      out_invstd[c_offset] = static_cast<accscalar_t>(
+          VarTransform{}(m2_th / static_cast<var_acc_t>(count_th), static_cast<double>(epsilon)));
     }
   }
 }
@@ -1457,6 +1467,7 @@ template<typename scalar_t, typename VarTransform>
 void batch_norm_stats_channels_last_cuda_template(
     const Tensor& out_mean, const Tensor& out_invstd, const Tensor& input, double epsilon) {
   using accscalar_t = at::acc_type<scalar_t, true>;
+  using var_acc_t = std::conditional_t<std::is_same_v<accscalar_t, float>, double, accscalar_t>;
 
   const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
@@ -1475,13 +1486,14 @@ void batch_norm_stats_channels_last_cuda_template(
   at::Tensor staging_data;
   at::Tensor semaphores;
   if (grid.y > 1) {
-    staging_data = at::empty({4*stride*grid.y}, out_mean.options());
+    staging_data = at::empty({4*stride*grid.y},
+        out_mean.options().dtype(c10::CppTypeToScalarType<var_acc_t>::value));
     semaphores = at::zeros({grid.x}, input.options().dtype(at::kInt));
   }
 
-  accscalar_t* staging_data_ptr = grid.y > 1 ? staging_data.mutable_data_ptr<accscalar_t>() : nullptr;
+  var_acc_t* staging_data_ptr = grid.y > 1 ? staging_data.mutable_data_ptr<var_acc_t>() : nullptr;
   int* semaphores_ptr = grid.y > 1 ? semaphores.mutable_data_ptr<int>() : nullptr;
-  batch_norm_collect_statistics_channels_last_kernel<VarTransform, scalar_t, accscalar_t, ELEMENTS_PER_ITER>
+  batch_norm_collect_statistics_channels_last_kernel<VarTransform, scalar_t, accscalar_t, var_acc_t, ELEMENTS_PER_ITER>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
       input.const_data_ptr<scalar_t>(),
       out_mean.mutable_data_ptr<accscalar_t>(),

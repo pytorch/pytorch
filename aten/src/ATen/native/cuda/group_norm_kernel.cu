@@ -36,16 +36,19 @@ __global__ void RowwiseMomentsCUDAKernel(
     T* mean,
     T* rstd) {
   using T_ACC = acc_type<T, true>;
-  using WelfordType = WelfordData<T_ACC, int64_t>;
+  // Use double for Welford accumulation when T_ACC is float to prevent
+  // overflow when squaring large deviations (~1e30 squared exceeds float max).
+  using var_acc_t = std::conditional_t<std::is_same_v<T_ACC, float>, double, T_ACC>;
+  using WelfordType = WelfordData<var_acc_t, int64_t>;
   using WelfordOp =
-      WelfordOps<T_ACC, T_ACC, int64_t, std::pair<T_ACC, T_ACC>>;
+      WelfordOps<var_acc_t, var_acc_t, int64_t, std::pair<var_acc_t, var_acc_t>>;
 
   const int64_t i = blockIdx.x;
   WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
   WelfordType val(0, 0, 0, 0);
   for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
     const int64_t index = i * N + j;
-    val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
+    val = welford_op.reduce(val, static_cast<var_acc_t>(X[index]), index);
   }
   if (blockDim.x <= C10_WARP_SIZE) {
     val = cuda_utils::WarpReduce(val, welford_op);
@@ -64,8 +67,8 @@ __global__ void RowwiseMomentsCUDAKernel(
   }
   if (threadIdx.x == 0) {
     auto [m2, m1] = welford_op.project(val);
-    mean[i] = m1;
-    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    mean[i] = static_cast<T>(m1);
+    rstd[i] = static_cast<T>(c10::cuda::compat::rsqrt(m2 + static_cast<var_acc_t>(eps)));
   }
 }
 
