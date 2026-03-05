@@ -207,8 +207,6 @@ dtensor_fails = {
     # DTensorConverter can't convert sparse tensor inputs
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
-    # bug in squeeze.dims strategy: TypeError with empty dims arg
-    xfail("squeeze", "multiple"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
     # output_specs count mismatch in unsafe_split strategy
@@ -251,7 +249,6 @@ dtensor_fails = {
     skip("_segment_reduce", "lengths"),
     skip("_segment_reduce", "offsets"),
     # TODO: fix the following ops
-    skip("squeeze"),
     skip("empty"),
     skip("empty_strided"),
     skip("empty_like"),
@@ -289,6 +286,8 @@ dtensor_compiled_fails = {
     xfail("permute"),
     xfail("select"),
     xfail("slice"),
+    xfail("squeeze"),
+    xfail("squeeze", "multiple"),
     xfail("t"),
     xfail("transpose_copy"),
     xfail("unsqueeze"),
@@ -357,7 +356,6 @@ dtensor_numeric_only_fails = {
     xfail("signal.windows.nuttall"),
     xfail("sparse.mm", "reduce"),
     xfail("sparse.sampled_addmm"),
-    xfail("squeeze_copy"),
     xfail("stack"),
     xfail("unsafe_chunk"),
     xfail("zeros"),
@@ -465,7 +463,6 @@ dtensor_fails_no_strategy = {
     xfail("special.shifted_chebyshev_polynomial_v"),
     xfail("special.shifted_chebyshev_polynomial_w"),
     xfail("special.xlog1py"),
-    xfail("squeeze_copy"),
     xfail("stft"),
     xfail("take"),
     xfail("to_sparse"),
@@ -780,7 +777,7 @@ class TestLocalDTensorOps(TestDTensorOps):
         _op_db,
         "TestLocalDTensorOps",
         "test_dtensor_op_db",
-        dtensor_fails | dtensor_fails_no_strategy,
+        dtensor_fails | dtensor_fails_no_strategy | {xfail("squeeze_copy")},
     )
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op)
@@ -904,7 +901,7 @@ ops_unbacked_dtensor_dde = {
     xfail("special.log_ndtr"),
     xfail("special.ndtri"),
     xfail("special.spherical_bessel_j0"),
-    xfail("squeeze", "multiple"),
+    xfail("squeeze_copy"),
     xfail("std_mean"),
     xfail("topk"),
     xfail("transpose_copy"),
