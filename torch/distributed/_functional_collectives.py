@@ -1854,17 +1854,17 @@ def _remapped_all_gather(*args, **kwargs):
 
 def _remapped_isend(*args, **kwargs):
     assert _are_we_tracing()
-    isend_inplace(*args, **kwargs)
+    return isend_inplace(*args, **kwargs)
 
 
 def _remapped_irecv(*args, **kwargs):
     assert _are_we_tracing()
-    irecv_inplace(*args, **kwargs)
+    return irecv_inplace(*args, **kwargs)
 
 
 def _remapped_batch_p2p_ops(*args, **kwargs):
     assert _are_we_tracing()
-    batch_p2p_ops_inplace(*args, **kwargs)
+    return batch_p2p_ops_inplace(*args, **kwargs)
 
 
 # This dict should contain sets of functions that dynamo is allowed to remap.
