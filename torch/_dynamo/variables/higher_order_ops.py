@@ -2527,8 +2527,8 @@ def validate_subgraph_output_types(
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.while_loop"
     _ALLOW_FALLBACK_TO_EAGER = False
-    supports_input_mutation = not torch.is_grad_enabled()
-    supports_aliasing = not torch.is_grad_enabled()
+    supports_input_mutation = False
+    supports_aliasing = False
 
     def _call_function(
         self,
@@ -2537,6 +2537,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         assert self._HOP_NAME is not None
+        self.supports_input_mutation = not torch.is_grad_enabled()
+        self.supports_aliasing = not torch.is_grad_enabled()
         return _call_while_loop(
             self, tx, args, kwargs, stack_output=False, hop_name=self._HOP_NAME
         )
