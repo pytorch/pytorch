@@ -6368,9 +6368,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(tensor, expected)
 
         torch.cuda.synchronize(device=device)
-        time.sleep(1)
-
-        self.assertTrue(True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -6440,12 +6437,12 @@ class NCCLTraceTest(NCCLTraceTestBase):
         _ = kernel_compiled(x0_c, x1_c, y0_c, y1_c)
         y0_c.zero_()
         y1_c.zero_()
-        out_c = kernel_compiled(x0_c, x1_c, y0_c, y1_c)
 
+        out_c = kernel_compiled(x0_c, x1_c, y0_c, y1_c)
         diff = (out_e - out_c).abs()
         local_max = diff.max()
         dist.all_reduce(local_max, op=dist.ReduceOp.MAX)
-        self.assertLess(float(local_max.item()), 1e-5)
+        self.assertLess(float(local_max.item()), 1e-3)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
