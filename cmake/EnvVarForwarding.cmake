@@ -117,6 +117,15 @@ if(Python_EXECUTABLE)
   )
   if(_py_purelib AND NOT "${_py_purelib}" STREQUAL "")
     list(PREPEND CMAKE_PREFIX_PATH "${_py_purelib}")
+    # Preserve paths from the CMAKE_PREFIX_PATH environment variable.
+    # Setting the cmake variable shadows the env var, so we must merge it in
+    # explicitly. This ensures conda's prefix (e.g. /opt/conda/envs/py_3.10)
+    # is present so cmake can find conda-provided libraries (libgomp, libnuma).
+    if(DEFINED ENV{CMAKE_PREFIX_PATH} AND NOT "$ENV{CMAKE_PREFIX_PATH}" STREQUAL "")
+      string(REPLACE ":" ";" _env_prefix "$ENV{CMAKE_PREFIX_PATH}")
+      list(APPEND CMAKE_PREFIX_PATH ${_env_prefix})
+    endif()
+    list(REMOVE_DUPLICATES CMAKE_PREFIX_PATH)
   endif()
 endif()
 
