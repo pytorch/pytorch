@@ -91,6 +91,7 @@ from torch.utils.checkpoint import (
     checkpoint_sequential,
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
+    set_checkpoint_early_stop,
 )
 from torch.utils.flop_counter import FlopCounterMode
 
@@ -7388,6 +7389,69 @@ for shape in [(1,), ()]:
         non-reentrant checkpoint recomputation on GPU.
         """
         self._test_checkpointing_non_reentrant_autocast(device_type="cuda")
+
+    def _run_checkpointing_non_reentrant_autocast_with_grad_toggle(
+        self, device_type: str
+    ) -> None:
+        seen_mm_dtypes: list[torch.dtype] = []
+
+        class Block(nn.Module):
+            def __init__(self, size: int):
+                super().__init__()
+                self.probe_weight = nn.Parameter(torch.randn(size, size))
+                self.norm = nn.LayerNorm(size)
+                self.linear = nn.Linear(size, size)
+
+            def forward(self, x):
+                probe = torch.mm(self.probe_weight, self.probe_weight)
+                seen_mm_dtypes.append(probe.dtype)
+                return self.linear(self.norm(x)) + probe[0]
+
+        class PairStack(nn.Module):
+            def __init__(self, size: int):
+                super().__init__()
+                self.block = Block(size)
+
+            def forward(self, x):
+                if torch.is_grad_enabled():
+                    return checkpoint(self.block, x, use_reentrant=False)
+                return self.block(x)
+
+        class Mod(nn.Module):
+            def __init__(self, size: int):
+                super().__init__()
+                self.stack = PairStack(size)
+                self.linear = nn.Linear(size, size)
+
+            def forward(self, x):
+                with torch.set_grad_enabled(False):
+                    x = self.stack(x)
+                x = self.stack(x)
+                return self.linear(x)
+
+        size = 64
+        model = Mod(size=size)
+        x = torch.linspace(0, 1, 2 * 3 * size).reshape(2, 3, size)
+        if device_type == "cuda":
+            model = model.cuda()
+            x = x.cuda()
+        with set_checkpoint_early_stop(False):
+            with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
+                out = model(x)
+        out.sum().backward()
+        self.assertGreaterEqual(len(seen_mm_dtypes), 3)
+        self.assertEqual(seen_mm_dtypes[-1], torch.bfloat16)
+        self.assertEqual(seen_mm_dtypes[-2], torch.bfloat16)
+
+    def test_checkpointing_non_reentrant_autocast_with_grad_toggle_cpu(self):
+        self._run_checkpointing_non_reentrant_autocast_with_grad_toggle("cpu")
+
+    @unittest.skipIf(
+        not torch.cuda.is_available() or not torch.cuda.is_bf16_supported(),
+        "Test requires CUDA bf16 support",
+    )
+    def test_checkpointing_non_reentrant_autocast_with_grad_toggle_cuda(self):
+        self._run_checkpointing_non_reentrant_autocast_with_grad_toggle("cuda")
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     @slowTest

@@ -88,6 +88,9 @@ class FSDPState(_State):
         self._states_to_forward_prefetch: list[FSDPState] = []
         self._states_to_backward_prefetch: list[FSDPState] = []
         self._modules_to_run_forward: set[nn.Module] = set()
+        # Activation checkpoint recompute should only replay input-to-device
+        # movement for module forwards that originally ran as the iteration root.
+        self._needs_input_device_move_for_recompute: list[bool] = []
         # ``False`` when user set reshard_after_forward
         # through ``fully_shard`` or ``set_reshard_after_forward``
         self._auto_reshard_after_forward: bool | None = True
@@ -168,18 +171,24 @@ class FSDPState(_State):
                 current_stream = self._device_handle.current_stream()
                 self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
                 self._comm_ctx.all_gather_stream.wait_stream(current_stream)
-            if self._device.type in [
-                "cuda",
-                "hpu",
-                "xpu",
-                "mtia",
-                torch._C._get_privateuse1_backend_name(),
-            ]:
-                with torch.profiler.record_function("FSDP::inputs_to_device"):
-                    args_tuple, kwargs_tuple = _to_kwargs(
-                        args, kwargs, self._device, False
-                    )  # same as DDP
-                args, kwargs = args_tuple[0], kwargs_tuple[0]
+            args, kwargs = self._move_forward_inputs_to_device(args, kwargs)
+        return args, kwargs
+
+    def _move_forward_inputs_to_device(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        if self._device.type in [
+            "cuda",
+            "hpu",
+            "xpu",
+            "mtia",
+            torch._C._get_privateuse1_backend_name(),
+        ]:
+            with torch.profiler.record_function("FSDP::inputs_to_device"):
+                args_tuple, kwargs_tuple = _to_kwargs(
+                    args, kwargs, self._device, False
+                )  # same as DDP
+            return args_tuple[0], kwargs_tuple[0]
         return args, kwargs
 
     def _lazy_init(self) -> None:
@@ -284,6 +293,20 @@ class FSDPState(_State):
                 if not fsdp_param_group.is_unsharded:
                     fsdp_param_group.unshard()
                     fsdp_param_group.wait_for_unshard()
+            if (
+                self._needs_input_device_move_for_recompute
+                and self._needs_input_device_move_for_recompute.pop()
+            ):
+                args, kwargs = self._move_forward_inputs_to_device(args, kwargs)
+            if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
+                with torch.profiler.record_function("FSDP::cast_forward_inputs"):
+                    cast_fn = functools.partial(
+                        _cast_fp_tensor, self._mp_policy.param_dtype
+                    )
+                    args, kwargs = (
+                        _apply_to_tensors(cast_fn, args),
+                        _apply_to_tensors(cast_fn, kwargs),
+                    )
             return args, kwargs
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
@@ -308,10 +331,21 @@ class FSDPState(_State):
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
         if self._training_state == TrainingState.PRE_BACKWARD:
+            if self._mp_policy.output_dtype is not None:
+                with torch.profiler.record_function("FSDP::cast_forward_outputs"):
+                    output = _apply_to_tensors(
+                        functools.partial(
+                            _cast_fp_tensor, self._mp_policy.output_dtype
+                        ),
+                        output,
+                    )
             return output
         for fsdp_param_group in self._fsdp_param_groups:
             output = fsdp_param_group.post_forward(module, input, output)
-        output = self._register_pre_backward_hook(output)
+        output = self._register_pre_backward_hook(
+            output,
+            move_inputs_to_device=self._state_ctx.iter_forward_root is self,
+        )
         self._training_state = TrainingState.IDLE
         if self._state_ctx.iter_forward_root is self:
             if all_gather_state := self._comm_ctx.all_gather_state:
@@ -354,6 +388,7 @@ class FSDPState(_State):
                         fsdp_param_group.post_backward()
                     fsdp_param_group._training_state = TrainingState.IDLE
                 state._training_state = TrainingState.IDLE
+                state._needs_input_device_move_for_recompute.clear()
                 if self._state_ctx.is_last_backward:
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
@@ -366,6 +401,7 @@ class FSDPState(_State):
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
+        self._needs_input_device_move_for_recompute.clear()
         if self._modules_to_run_forward:
             msg = (
                 f"{len(self._modules_to_run_forward)} of the {len(self._modules)} "
@@ -381,13 +417,26 @@ class FSDPState(_State):
         for fsdp_param_group in self._fsdp_param_groups:
             fsdp_param_group.finalize_backward()
 
-    def _register_pre_backward_hook(self, output: Any) -> Any:
+    def _register_pre_backward_hook(
+        self, output: Any, move_inputs_to_device: bool
+    ) -> Any:
         if not torch.is_grad_enabled():
             return output
         flat_outputs, _ = tree_flatten(output)
+        seen_graph_task_ids: set[int] = set()
+
+        def pre_backward(grad: torch.Tensor) -> torch.Tensor:
+            graph_task_id = torch._C._current_graph_task_id()
+            if graph_task_id not in seen_graph_task_ids:
+                self._needs_input_device_move_for_recompute.append(
+                    move_inputs_to_device
+                )
+                seen_graph_task_ids.add(graph_task_id)
+            return self._pre_backward(grad)
+
         for t in flat_outputs:
             if torch.is_tensor(t) and t.requires_grad:
-                t.register_hook(self._pre_backward)
+                t.register_hook(pre_backward)
         return output
 
     def _register_root_post_backward_final_callback(self):

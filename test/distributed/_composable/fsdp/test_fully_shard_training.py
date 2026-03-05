@@ -22,6 +22,7 @@ from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
+    MixedPrecisionPolicy,
     OffloadPolicy,
     register_fsdp_forward_method,
     share_comm_ctx,
@@ -89,6 +90,13 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
     def world_size(self) -> int:
         return 2
 
+    def _get_test_mp_dtype(self, device: torch.device) -> torch.dtype:
+        if device.type == "cuda":
+            return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        if device.type == "cpu":
+            return torch.bfloat16
+        self.skipTest("mixed precision checkpoint regression is scoped to CPU/CUDA")
+
     def test_root_move_forward_input_to_device(self):
         device = torch.device(device_type.type, 0)
 
@@ -116,6 +124,55 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         self.assertEqual(ys[0].device, torch.device("cpu"))
         self.assertEqual(ys[1].device, torch.device("cpu"))
         model(x, ys)
+
+    def test_cast_forward_inputs_applied_during_checkpoint_recompute(self):
+        class SinModule(nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return torch.sin(x)
+
+        device = torch.device(device_type.type, 0)
+        mp_dtype = self._get_test_mp_dtype(device)
+        model = SinModule().to(device)
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(param_dtype=mp_dtype),
+        ).to(device)
+        x = torch.randn(8, dtype=torch.float32, requires_grad=True)
+        if device.type != "cpu":
+            self.assertEqual(x.device, torch.device("cpu"))
+        y = torch.utils.checkpoint.checkpoint(model, x, use_reentrant=False)
+        self.assertEqual(y.dtype, mp_dtype)
+        self.assertEqual(y.device.type, device.type)
+        y.sum().backward()
+
+    def test_output_dtype_applied_during_checkpoint_recompute(self):
+        class SinModule(nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return torch.sin(x)
+
+        device = torch.device(device_type.type, 0)
+        output_dtype = self._get_test_mp_dtype(device)
+        model = SinModule().to(device)
+        fully_shard(
+            model,
+            mp_policy=MixedPrecisionPolicy(output_dtype=output_dtype),
+        ).to(device)
+        observed_output_dtypes: list[torch.dtype] = []
+
+        def run(x: torch.Tensor) -> torch.Tensor:
+            y = model(x)
+            observed_output_dtypes.append(y.dtype)
+            return y
+
+        x = torch.randn(8, dtype=torch.float32, requires_grad=True)
+        if device.type != "cpu":
+            self.assertEqual(x.device, torch.device("cpu"))
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            y = torch.utils.checkpoint.checkpoint(run, x, use_reentrant=False)
+        self.assertEqual(y.dtype, output_dtype)
+        self.assertEqual(y.device.type, device.type)
+        y.sum().backward()
+        self.assertEqual(observed_output_dtypes, [output_dtype, output_dtype])
 
 
 class TestFullyShardRegisteredParams(FSDPTestMultiThread):
@@ -1948,6 +2005,50 @@ class TestFullyShardWorldSize1(FSDPTest):
     @property
     def world_size(self) -> int:
         return 1
+
+    def test_non_root_checkpoint_recompute_preserves_cpu_inputs(self):
+        if device_type.type == "cpu":
+            self.skipTest("requires accelerator input-device movement")
+        device = torch.device(device_type.type, self.rank)
+        observed_cpu_bias_devices: list[torch.device] = []
+        test_case = self
+
+        class Inner(nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = nn.Linear(dim, dim)
+
+            def forward(
+                self, x: torch.Tensor, cpu_bias: torch.Tensor
+            ) -> torch.Tensor:
+                observed_cpu_bias_devices.append(cpu_bias.device)
+                test_case.assertEqual(cpu_bias.device.type, "cpu")
+                return self.linear(x + cpu_bias.to(device=x.device, dtype=x.dtype))
+
+        class Model(nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.pre = nn.Linear(dim, dim)
+                self.inner = Inner(dim)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = self.pre(x)
+                cpu_bias = torch.arange(x.size(-1), dtype=torch.float32, device="cpu")
+                cpu_bias = cpu_bias.expand_as(x)
+                return torch.utils.checkpoint.checkpoint(
+                    self.inner,
+                    x,
+                    cpu_bias,
+                    use_reentrant=False,
+                )
+
+        model = Model(dim=8).to(device)
+        fully_shard(model.inner).to(device)
+        fully_shard(model).to(device)
+        x = torch.randn(4, 8, dtype=torch.float32, requires_grad=True)
+        out = model(x)
+        out.sum().backward()
+        self.assertEqual(observed_cpu_bias_devices, [torch.device("cpu")] * 2)
 
     def test_train_parity_single_worldsize1(self):
         """
