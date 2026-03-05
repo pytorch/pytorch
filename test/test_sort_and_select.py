@@ -1332,12 +1332,17 @@ class TestSortAndSelect(TestCase):
     @onlyCUDA
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
     @slowTest
+    @largeTensorTest("170GB", "cpu")
+    @largeTensorTest("72GB", "cuda")
     def test_topk_large_k(self, device, dtype):
         """Test topk with k > 2^32 (integer overflow bug fix).
 
         Tests both random and edge case (all identical values) inputs.
         The edge case will force billions of elements to enter the same radix bin.
-        Requires GPU with sufficient memory; skips if memory is insufficient.
+
+        Memory requirements (in float32 case):
+        - GPU: ~72 GB (data ~16GB + values ~16GB + indices ~32GB + other ~8GB)
+        - CPU: ~170 GB (indices copy ~32GB + torch.unique extra memory ~130GB + other ~8GB)
         """
         extra = random.randint(500, 2000)
         n = 2**32 + extra
@@ -1350,19 +1355,13 @@ class TestSortAndSelect(TestCase):
         num_chunks = (k + chunk_size - 1) // chunk_size
 
         # pre-allocate GPU tensors
-        try:
-            data = torch.empty((1, n), device=device, dtype=dtype)
-            gpu_values = torch.empty((1, k), device=device, dtype=dtype)
-            gpu_indices = torch.empty((1, k), device=device, dtype=torch.long)
-            gpu_chunk_values = torch.empty(chunk_size, device=device, dtype=dtype)
-        except RuntimeError as e:
-            self.skipTest(f"Insufficient memory for GPU tensors in large k topk test: {e}")
+        data = torch.empty((1, n), device=device, dtype=dtype)
+        gpu_values = torch.empty((1, k), device=device, dtype=dtype)
+        gpu_indices = torch.empty((1, k), device=device, dtype=torch.long)
+        gpu_chunk_values = torch.empty(chunk_size, device=device, dtype=dtype)
 
         # pre-allocate CPU tensors
-        try:
-            cpu_indices_copy = torch.empty(k, dtype=torch.long, device='cpu')
-        except RuntimeError as e:
-            self.skipTest(f"Insufficient memory for CPU tensors in large k topk test: {e}")
+        cpu_indices_copy = torch.empty(k, dtype=torch.long, device='cpu')
 
         # run tests for both random and identical values
         for test_case in ["random", "identical"]:
@@ -1372,13 +1371,7 @@ class TestSortAndSelect(TestCase):
             else:
                 data.fill_(random_constant)
 
-            # run topk
-            try:
-                torch.topk(data, k, dim=1, largest=largest, sorted=False, out=(gpu_values, gpu_indices))
-            except RuntimeError as e:
-                if "out of memory" in str(e).lower():
-                    self.skipTest(f"Insufficient memory for topk with k={k:,} test: {e}")
-                raise
+            torch.topk(data, k, dim=1, largest=largest, sorted=False, out=(gpu_values, gpu_indices))
 
             indices = gpu_indices
             values = gpu_values
@@ -1388,17 +1381,9 @@ class TestSortAndSelect(TestCase):
             self.assertLess(indices.max().item(), n)
 
             # all indices must be unique
-            total_unique = None
-            try:
-                cpu_indices_copy.copy_(indices.squeeze(0))
-                total_unique = torch.unique(cpu_indices_copy).numel()
-            except RuntimeError as e:
-                # skip uniqueness check in case torch.unique on CPU causes OOM
-                if "out of memory" not in str(e).lower():
-                    raise
-
-            if total_unique is not None:
-                self.assertEqual(total_unique, k, f"Duplicates found in topk test: {k - total_unique}")
+            cpu_indices_copy.copy_(indices.squeeze(0))
+            total_unique = torch.unique(cpu_indices_copy).numel()
+            self.assertEqual(total_unique, k, f"Duplicates found in topk test: {k - total_unique}")
             
             # for random case, values must match at returned indices (use pre-allocated tensor)
             if test_case == "random":
@@ -1411,10 +1396,7 @@ class TestSortAndSelect(TestCase):
                     chunk_values = values[0, start:end]
 
                     actual_values = torch.index_select(data[0], 0, chunk_indices, out=gpu_chunk_values[:chunk_size_actual])
-                    self.assertTrue(
-                        torch.equal(chunk_values, actual_values),
-                        f"Value mismatch in chunk {i+1}"
-                    )
+                    self.assertEqual(chunk_values, actual_values, msg=f"Value mismatch in chunk {i+1}")
 
             # for identical case, all values must equal to constant
             if test_case == "identical":
