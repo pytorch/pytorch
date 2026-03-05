@@ -3,13 +3,13 @@ import logging
 import math
 import operator
 from enum import IntEnum
-from typing import Any, Optional
+from typing import Any
 
 import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -78,12 +78,12 @@ def get_ir_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int
     numel = sympy_product(size)
     if isinstance(numel, sympy.Integer):
         return int(numel)
-    return V.graph.sizevars.size_hint(numel, fallback=fallback)
+    return V.graph.sizevars.optimization_hint(numel, fallback=fallback)
 
 
 def get_fx_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
     numel = functools.reduce(operator.mul, size, 1)
-    result = hint_int(numel, fallback=fallback)
+    result = optimization_hint(numel, fallback=fallback)
     return result
 
 
@@ -193,7 +193,7 @@ llMaxBws = [
 ]
 
 
-def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  # type: ignore[no-untyped-def]
+def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float | None:  # type: ignore[no-untyped-def]
     kernel = snode.node
     assert kernel is not None
     py_kernel_name = getattr(kernel, "python_kernel_name", "")
@@ -411,7 +411,7 @@ def estimate_fx_collective_memory_footprint(fx_node: torch.fx.Node) -> int:
 
 def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
-    override_size: Optional[int] = None,
+    override_size: int | None = None,
     use_nccl_estimator: bool = True,
 ) -> float:
     """
@@ -427,6 +427,11 @@ def estimate_nccl_collective_runtime_from_fx_node(
     - collective is one of: allreduce, reducescatter, allgather
     """
     from torch.distributed.distributed_c10d import _get_group_size_by_name
+
+    if fx_node.target is torch.ops._c10d_functional.all_to_all_single.default:
+        # TODO(ivankobzarev): Temporarily disabled - NCCL estimator returns internal error.
+        # for all_to_all during inductor compilation. Falls back to heuristic estimation.
+        use_nccl_estimator = False
 
     if override_size is None:
         tensor_storage_size_bytes = estimate_fx_collective_size(fx_node)
@@ -448,15 +453,16 @@ def estimate_nccl_collective_runtime_from_fx_node(
     assert isinstance(fx_node.target, torch._ops.OpOverload)
     coll = get_collective_type_from_kernel_name(fx_node.target.name())
 
-    def _nccl_estimate() -> Optional[float]:
+    def _nccl_estimate() -> float | None:
         # TODO: Refactor with estimate_nccl_collective_runtime_nccl_estimator
         from torch.distributed.distributed_c10d import (
             _get_pg_default_device,
             _resolve_process_group,
+            Backend,
         )
 
         pg = _resolve_process_group(group_name)
-        if torch.distributed.distributed_c10d.get_backend(pg) == "fake":
+        if torch.distributed.distributed_c10d.get_backend(pg) == Backend.FAKE:
             # nccl estimator requires real process group
             return None
 
@@ -473,9 +479,6 @@ def estimate_nccl_collective_runtime_from_fx_node(
                 dtype=dtype,
                 device=device,
             )
-
-        def try_size_hint(s: sympy.Expr) -> int:
-            return V.graph.sizevars.size_hint(s, fallback=0)
 
         def to_real_tensor(e: Any) -> Any:
             if isinstance(e, torch.fx.Node):

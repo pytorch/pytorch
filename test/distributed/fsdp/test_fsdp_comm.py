@@ -19,7 +19,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     get_devtype,
     MLP,
     NestedWrappedModule,
@@ -51,7 +51,7 @@ class PassType(Enum):
     BWD = auto()
 
 
-class TestCommunication(FSDPTest):
+class TestCommunication(FSDPTestContinuous):
     """Tests ``FullyShardedDataParallel``'s collective communication usage."""
 
     def _init_model(
@@ -162,7 +162,7 @@ class TestCommunication(FSDPTest):
             # forward pass
             num_all_gathers = 0
         else:
-            assert 0, (
+            raise AssertionError(
                 f"Unsupported: add a branch for pass_type={pass_type} "
                 f"is_first_iter={is_first_iter} "
                 f"is_last_iter_no_sync={is_last_iter_no_sync} "
@@ -290,7 +290,7 @@ class TestCommunication(FSDPTest):
                 self.assertEqual(num_reduce_scatters, ref_num_reduce_scatters)
 
 
-class TestExplicitUnshard(FSDPTest):
+class TestExplicitUnshard(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(_get_device_module(self.device_type).device_count(), 2)

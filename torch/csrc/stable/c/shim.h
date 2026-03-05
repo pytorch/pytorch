@@ -16,7 +16,6 @@ extern "C" {
 #endif
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-using StableIValue = uint64_t;
 
 // Has the same semantic as aoti_torch_call_dispatcher, but takes an
 // additional argument for the extension build version. This is
@@ -154,6 +153,62 @@ AOTI_TORCH_EXPORT AOTITorchError
 torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+/**
+ * The beginning of all shims added in 2.11.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+// Shims for the a few dtypes not already in
+// torch/csrc/inductor/aoti_torch/c/shim.h
+AOTI_TORCH_EXPORT int32_t torch_dtype_float8_e8m0fnu();
+AOTI_TORCH_EXPORT int32_t torch_dtype_float4_e2m1fn_x2();
+
+// Creates a tensor from an existing data blob with an optional deleter.
+// The deleter is called with the data pointer when the tensor's storage
+// is deallocated.
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret, // returns new reference
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter)(void*));
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+/**
+ * The beginning of all shims added in 2.12.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+
+// Like torch_from_blob, but accepts a deleter with a context pointer.
+// This allows passing capturing lambdas across the C ABI boundary by
+// heap-allocating the callable and passing it as deleter_ctx.
+AOTI_TORCH_EXPORT AOTITorchError torch_from_blob_v2(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret,
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter)(void* data, void* ctx),
+    void* deleter_ctx);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 #ifdef __cplusplus
 } // extern "C"

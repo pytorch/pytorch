@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -38,9 +37,9 @@ def create_int8_compensation(
 ) -> tuple[
     bool,
     ir.TensorBox,
-    Optional[ir.TensorBox],
+    ir.TensorBox | None,
 ]:
-    x_w_scale: Optional[ir.TensorBox] = None
+    x_w_scale: ir.TensorBox | None = None
     use_int8_fast_compensation_path = all(
         isinstance(item, ir.TensorBox)
         and item.get_name() in V.graph.constants
@@ -81,10 +80,10 @@ def codegen_int8_gemm_template_compensation(
     use_int8_fast_compensation_path: bool,
     input: OpsValue,
     _weight_compo: OpsValue,
-    _x_scale: Optional[OpsValue],
-    _x_zp: Optional[OpsValue],
-    _w_scale: Optional[OpsValue],
-    _x_w_scale: Optional[OpsValue],
+    _x_scale: OpsValue | None,
+    _x_zp: OpsValue | None,
+    _w_scale: OpsValue | None,
+    _x_w_scale: OpsValue | None,
 ) -> OpsValue:
     if use_int8_fast_compensation_path:
         temp = ops.sub(
@@ -224,7 +223,7 @@ def register_onednn_fusion_ops():
             kernel_creator=mkldnn_ir.QLinearPointwiseBinaryPT2E.create,
         )
         cpu_needs_realized_inputs: list[
-            Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+            torch._ops.OpOverload | torch._ops.OpOverloadPacket
         ] = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
@@ -428,7 +427,7 @@ def register_onednn_fusion_ops():
                         "epilogue_creator": epilogue_creator,
                     }
 
-                    # pyrefly: ignore [unsupported-operation]
+                    # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
                     kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
                     CppGemmTemplate.add_choices(
                         choices,
@@ -624,7 +623,7 @@ def register_onednn_fusion_ops():
             alpha,
             unary_attr,
             unary_scalars,
-            unary_algorithmm,
+            unary_algorithm,
         ):
             if not isinstance(x_scale, ir.TensorBox):
                 assert type(x_scale) is float
@@ -681,7 +680,7 @@ def register_onednn_fusion_ops():
                     alpha,
                     unary_attr,
                     unary_scalars,
-                    unary_algorithmm,
+                    unary_algorithm,
                 )
             )
 
@@ -748,7 +747,7 @@ def register_onednn_fusion_ops():
                 # If w_zp is None, then it's a dummy tensor created to denote the
                 # absence of a zero point, and thus w is int8 symmetrically quantized.
                 # Moreover, oneDNN qlinear API doesn't accept None value for zp
-                # pyrefly: ignore [bad-assignment]
+
                 w_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="w_zp"
                 )
@@ -792,9 +791,7 @@ def register_onednn_fusion_ops():
                     ) = create_int8_compensation(
                         W_tensor,
                         packed_weight,
-                        # pyrefly: ignore [bad-argument-type]
                         x_scale,
-                        # pyrefly: ignore [bad-argument-type]
                         x_zp,
                         w_scale,
                     )
@@ -1014,7 +1011,7 @@ def register_onednn_fusion_ops():
             alpha,
             unary_attr,
             unary_scalars,
-            unary_algorithmm,
+            unary_algorithm,
             layout=None,
         ):
             x_size = x.get_size()
@@ -1044,7 +1041,6 @@ def register_onednn_fusion_ops():
                 )
 
             if w_zp is None:
-                # pyrefly: ignore [bad-assignment]
                 w_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="w_zp"
                 )
@@ -1120,9 +1116,7 @@ def register_onednn_fusion_ops():
                     ) = create_int8_compensation(
                         W_tensor,
                         packed_weight,
-                        # pyrefly: ignore [bad-argument-type]
                         x_scale,
-                        # pyrefly: ignore [bad-argument-type]
                         x_zp,
                         w_scale,
                     )
@@ -1212,7 +1206,7 @@ def register_onednn_fusion_ops():
                                 output_buf,
                                 unary_attr,
                                 scalars=unary_scalars,
-                                algorithm=unary_algorithmm,
+                                algorithm=unary_algorithm,
                             )
 
                         # Step 5: Cast output to Target Dtype
@@ -1289,7 +1283,7 @@ def register_onednn_fusion_ops():
                     binary_alpha=alpha,
                     unary_post_op=unary_attr,
                     unary_post_op_args=unary_scalars,
-                    unary_post_op_algorithm=unary_algorithmm,
+                    unary_post_op_algorithm=unary_algorithm,
                 )
                 if bias is None:
                     kwargs["bias"] = None
@@ -1355,7 +1349,7 @@ def register_onednn_fusion_ops():
                 x: TensorBox,
                 packed_w: TensorBox,
                 orig_w: TensorBox,
-                b: Optional[TensorBox],
+                b: TensorBox | None,
                 batch_size,
                 *,
                 layout=None,

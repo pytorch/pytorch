@@ -11,7 +11,7 @@ call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Buil
 where cl.exe
 
 cd %DEPENDENCIES_DIR%
-git clone https://github.com/libuv/libuv.git -b v1.39.0
+git clone https://github.com/libuv/libuv.git -b v1.47.0
 
 echo Configuring libuv...
 mkdir libuv\build

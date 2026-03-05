@@ -236,14 +236,14 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         self.affine = affine
         self.track_running_stats = track_running_stats
         if self.affine:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore [unexpected-keyword]
             self.weight = UninitializedParameter(**factory_kwargs)
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore [unexpected-keyword]
             self.bias = UninitializedParameter(**factory_kwargs)
         if self.track_running_stats:
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore [unexpected-keyword]
             self.running_mean = UninitializedBuffer(**factory_kwargs)
-            # pyrefly: ignore [bad-argument-type]
+            # pyrefly: ignore [unexpected-keyword]
             self.running_var = UninitializedBuffer(**factory_kwargs)
             self.num_batches_tracked = torch.tensor(
                 0,
@@ -356,7 +356,6 @@ class BatchNorm1d(_BatchNorm):
             raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
 
-# pyrefly: ignore [inconsistent-inheritance]
 class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm1d` module with lazy initialization.
 
@@ -468,7 +467,6 @@ class BatchNorm2d(_BatchNorm):
             raise ValueError(f"expected 4D input (got {input.dim()}D input)")
 
 
-# pyrefly: ignore [inconsistent-inheritance]
 class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization.
 
@@ -580,7 +578,6 @@ class BatchNorm3d(_BatchNorm):
             raise ValueError(f"expected 5D input (got {input.dim()}D input)")
 
 
-# pyrefly: ignore [inconsistent-inheritance]
 class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
     r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization.
 

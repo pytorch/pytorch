@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, TypeVar
 
 import torch
 from torch.testing import make_tensor
@@ -110,7 +110,8 @@ class DecorateInfo:
         # Validate dtypes
         if self.dtypes is not None:
             for dtype in self.dtypes:
-                assert isinstance(dtype, torch.dtype)
+                if not isinstance(dtype, torch.dtype):
+                    raise AssertionError(f"Expected torch.dtype, got {type(dtype)}")
 
     def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
         return (
@@ -162,23 +163,29 @@ class SampleInput:
         # Allow calling either as SampleInput(input, args=args, kwargs=kwargs), or as
         # SampleInput(input, *args, **kwargs) but not to mix the two forms
         if args is not None or kwargs is not None:
-            assert not var_args and not var_kwargs, """
-A SampleInput can be constructed "naturally" with *args and **kwargs or by
-explicitly setting the "args" and "kwargs" parameters, but the two
-methods of construction cannot be mixed!"""
+            if var_args or var_kwargs:
+                raise AssertionError(
+                    "A SampleInput can be constructed 'naturally' with *args and **kwargs or by "
+                    "explicitly setting the 'args' and 'kwargs' parameters, but the two "
+                    "methods of construction cannot be mixed!"
+                )
         elif var_args or var_kwargs:
-            assert (
+            if not (
                 output_process_fn_grad is None
                 and broadcasts_input is None
                 and name is None
-            ), """
-A SampleInput constructed "naturally" with *args and **kwargs
-cannot specify additional metadata in keyword arguments"""
+            ):
+                raise AssertionError(
+                    "A SampleInput constructed 'naturally' with *args and **kwargs "
+                    "cannot specify additional metadata in keyword arguments"
+                )
 
         self.args = args if args is not None else var_args
-        assert isinstance(self.args, tuple)
+        if not isinstance(self.args, tuple):
+            raise AssertionError(f"Expected args to be tuple, got {type(self.args)}")
         self.kwargs = kwargs if kwargs is not None else var_kwargs
-        assert isinstance(self.kwargs, dict)
+        if not isinstance(self.kwargs, dict):
+            raise AssertionError(f"Expected kwargs to be dict, got {type(self.kwargs)}")
 
         self.output_process_fn_grad = (
             output_process_fn_grad
@@ -645,7 +652,7 @@ class OpInfo:
 
     # An optional reference function that accepts ndarrays (AKA "NumPy arrays").
     # If given, the op will be compared with its reference on each of its sample inputs.
-    ref: Optional[Callable] = None
+    ref: Callable | None = None
 
     # the following metadata describes the operator, its variants, and its aliases, if any
 
@@ -743,7 +750,10 @@ class OpInfo:
     def __setattr__(self, name: str, value: Any) -> None:
         # TODO: After migration, start adding warnings here
         if name.startswith("dtypesIf") and name != "dtypesIf":
-            assert isinstance(value, (_dispatch_dtypes, type(None)))
+            if not isinstance(value, (_dispatch_dtypes, type(None))):
+                raise AssertionError(
+                    f"Expected _dispatch_dtypes or None, got {type(value)}"
+                )
             dev_name = name.removeprefix("dtypesIf").lower()
             self.dtypesIf[dev_name] = value
             return
@@ -754,6 +764,9 @@ class OpInfo:
 
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
+
+    # dtypes this function is expected to work with on MPS
+    dtypesIfMPS: _dispatch_dtypes = None
 
     dtypesIfHpu: _dispatch_dtypes = None
 
@@ -768,6 +781,9 @@ class OpInfo:
 
     # backward dtypes this function is expected to work with on ROCM
     backward_dtypesIfROCM: _dispatch_dtypes = None
+
+    # backward dtypes this function is expected to work with on MPS
+    backward_dtypesIfMPS: _dispatch_dtypes = None
 
     backward_dtypesIfHpu: _dispatch_dtypes = None
 
@@ -821,11 +837,11 @@ class OpInfo:
 
     # If `supports_cow_input_no_materialize_forward == True`, this list contains
     # the arg indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize_forward: list[Union[int, str]] = None
+    allow_cow_input_materialize_forward: list[int | str] = None
 
     # If `supports_cow_input_no_materialize_backward == True`, this list contains
     # the arg indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize_backward: list[Union[int, str]] = None
+    allow_cow_input_materialize_backward: list[int | str] = None
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
@@ -860,10 +876,10 @@ class OpInfo:
     aten_name: str = None
 
     # if this is a composite implicit autograd op, the decomposed op
-    decomp_aten_name: Optional[str] = None
+    decomp_aten_name: str | None = None
 
     # name of the corresponding aten:: operator for backwards
-    aten_backward_name: Optional[str] = None
+    aten_backward_name: str | None = None
 
     # if a op's aten::node is expected to be symbolically autodiffed
     assert_autodiffed: bool = False
@@ -928,12 +944,14 @@ class OpInfo:
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
-        assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
+        if self.dtypes is None:
+            raise AssertionError(f"OpInfo for {self.name} has no dtypes!")
 
         # Validates the dtypes are generated from the dispatch-related functions
         for name, val in self.dtypesIf.items():
             if val is not None:
-                assert isinstance(val, _dispatch_dtypes)
+                if not isinstance(val, _dispatch_dtypes):
+                    raise AssertionError(f"Expected _dispatch_dtypes, got {type(val)}")
                 self.dtypesIf[name] = set(val)
 
         if self.aten_name is None:
@@ -948,12 +966,20 @@ class OpInfo:
         if self.dynamic_dtypes:
             # Make sure `dtyesIfCUDA` is dynamic, if dynamic dispatch is used for CPU
             # This is because, below we set dtypesIfCUDA to dtypes if they are None.
-            assert isinstance(self.dtypesIfCUDA, utils._dynamic_dispatch_dtypes), (
-                f"To use dynamic dtypes for operator {self.name}, "
-                "acquire the dtypes dynamically for argument `dtypesIfCUDA`."
-                "This is to ensure that CUDA dtypes are acquired correctly as they"
-                "differ from CPU dtypes occasionally"
-            )
+            if not isinstance(self.dtypesIfCUDA, utils._dynamic_dispatch_dtypes):
+                raise AssertionError(
+                    f"To use dynamic dtypes for operator {self.name}, "
+                    "acquire the dtypes dynamically for argument `dtypesIfCUDA`. "
+                    "This is to ensure that CUDA dtypes are acquired correctly as they "
+                    "differ from CPU dtypes occasionally"
+                )
+            if not isinstance(self.dtypesIfMPS, utils._dynamic_dispatch_dtypes):
+                raise AssertionError(
+                    f"To use dynamic dtypes for operator {self.name}, "
+                    "acquire the dtypes dynamically for argument `dtypesIfMPS`. "
+                    "This is to ensure that MPS dtypes are acquired correctly as they "
+                    "differ from CPU dtypes occasionally"
+                )
 
         self.dtypes = set(self.dtypes)
 
@@ -986,6 +1012,17 @@ class OpInfo:
                 else self.dtypes
             )
         )
+        self.backward_dtypesIfMPS = (
+            set(self.backward_dtypesIfMPS) - {torch.float64, torch.cdouble}
+            if self.backward_dtypesIfMPS is not None
+            else (
+                set(self.backward_dtypes) - {torch.float64, torch.cdouble}
+                if self.backward_dtypes is not None
+                else set(self.dtypesIfMPS) - {torch.float64, torch.cdouble}
+                if self.dtypesIfMPS is not None
+                else set(self.dtypes) - {torch.float64, torch.cdouble}
+            )
+        )
         self.backward_dtypesIfHpu = (
             set(self.backward_dtypesIfHpu)
             if self.backward_dtypesIfHpu is not None
@@ -1011,6 +1048,17 @@ class OpInfo:
         for dev_type in ["rocm", "xpu"]:
             if self.dtypesIf.get(dev_type) is None:
                 self.dtypesIf[dev_type] = self.dtypesIf["cuda"]
+
+        # Inherit from cpu
+        for dev_type in ["mps"]:
+            if self.dtypesIf.get(dev_type) is None:
+                # Double floats are not supported on MPS
+                self.dtypesIf[dev_type] = self.dtypes - {torch.float64, torch.cdouble}
+            else:
+                self.dtypesIf[dev_type] = self.dtypesIf[dev_type] - {
+                    torch.float64,
+                    torch.cdouble,
+                }
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if not self.op:
@@ -1108,58 +1156,60 @@ class OpInfo:
         if self.supports_gradgrad is None:
             self.supports_gradgrad = self.supports_autograd
         else:
-            assert not (self.supports_gradgrad and not self.supports_autograd), (
-                "supports_gradgrad refines the part of autograd is supported, so it should "
-                "not be set if supports_autograd is False"
-            )
+            if self.supports_gradgrad and not self.supports_autograd:
+                raise AssertionError(
+                    "supports_gradgrad refines the part of autograd is supported, so it should "
+                    "not be set if supports_autograd is False"
+                )
         if self.check_batched_grad is None:
             self.check_batched_grad = self.supports_autograd or self.supports_forward_ad
         else:
-            assert not (
-                self.check_batched_grad
-                and not (self.supports_autograd or self.supports_forward_ad)
-            ), (
-                "check_batched_grad refines the part of autograd that will be checked (by gradcheck), so "
-                "it should not be set if supports_autograd is False"
-            )
+            if self.check_batched_grad and not (
+                self.supports_autograd or self.supports_forward_ad
+            ):
+                raise AssertionError(
+                    "check_batched_grad refines the part of autograd that will be checked (by gradcheck), so "
+                    "it should not be set if supports_autograd is False"
+                )
         if self.check_batched_gradgrad is None:
             self.check_batched_gradgrad = self.supports_gradgrad
         else:
-            assert not (self.check_batched_gradgrad and not self.supports_gradgrad), (
-                "check_batched_gradgrad refines the part of autograd that will be checked (by "
-                "gradgradcheck), so it should not be set if either supports_gradgrad or supports_autograd "
-                "is False."
-            )
+            if self.check_batched_gradgrad and not self.supports_gradgrad:
+                raise AssertionError(
+                    "check_batched_gradgrad refines the part of autograd that will be checked (by "
+                    "gradgradcheck), so it should not be set if either supports_gradgrad or supports_autograd "
+                    "is False."
+                )
         if self.check_batched_forward_grad is None:
             self.check_batched_forward_grad = self.supports_forward_ad
         else:
-            assert not (
-                self.check_batched_forward_grad and not self.supports_forward_ad
-            ), (
-                "check_batched_forward_grad should only be used when supports_forward_ad "
-                "is True. It is used to disable the test in the specific cases "
-                "where the op supports forward ad but fails to compute "
-                "batched forward grad."
-            )
+            if self.check_batched_forward_grad and not self.supports_forward_ad:
+                raise AssertionError(
+                    "check_batched_forward_grad should only be used when supports_forward_ad "
+                    "is True. It is used to disable the test in the specific cases "
+                    "where the op supports forward ad but fails to compute "
+                    "batched forward grad."
+                )
 
         if self.check_inplace_batched_forward_grad is None:
             self.check_inplace_batched_forward_grad = self.check_batched_forward_grad
         else:
-            assert not (
+            if (
                 self.check_inplace_batched_forward_grad
                 and not self.check_batched_forward_grad
-            ), (
-                "check_batched_forward_grad should only be used when check_batched_forward_grad "
-                "is True. It is used to disable the test in the specific cases "
-                "where the op supports batched forward grad but fails to compute batched forward "
-                "grad for the inplace variant of the op."
-            )
+            ):
+                raise AssertionError(
+                    "check_batched_forward_grad should only be used when check_batched_forward_grad "
+                    "is True. It is used to disable the test in the specific cases "
+                    "where the op supports batched forward grad but fails to compute batched forward "
+                    "grad for the inplace variant of the op."
+                )
 
-        assert not (self.supports_fwgrad_bwgrad and not self.supports_autograd), (
-            "supports_fwgrad_bwgrad enables forward-over-backward gradgrad checks and should only be "
-            "True if backward ad is also checked, i.e., supports_forward_ad should be True.",
-            self.name,
-        )
+        if self.supports_fwgrad_bwgrad and not self.supports_autograd:
+            raise AssertionError(
+                "supports_fwgrad_bwgrad enables forward-over-backward gradgrad checks and should only be "
+                f"True if backward ad is also checked, i.e., supports_forward_ad should be True. ({self.name})"
+            )
 
         # Autograd flags that depend on both forward AD and backward AD
         if self.supports_inplace_autograd is None:
@@ -1167,14 +1217,15 @@ class OpInfo:
                 self.supports_autograd or self.supports_forward_ad
             )
         else:
-            assert not (
+            if (
                 self.supports_inplace_autograd
                 and not self.supports_autograd
                 and not self.supports_forward_ad
-            ), (
-                "supports_inplace_autograd refines the part of autograd that is supported, so "
-                "it should not be set if both supports_autograd and supports_forward_ad are False"
-            )
+            ):
+                raise AssertionError(
+                    "supports_inplace_autograd refines the part of autograd that is supported, so "
+                    "it should not be set if both supports_autograd and supports_forward_ad are False"
+                )
 
         if self.aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in self.aliases)  # type: ignore[assignment]
@@ -1535,8 +1586,6 @@ def test_foo(self, device, dtype, op):
         if device_type == "cuda" and TEST_WITH_ROCM:
             device_type = "rocm"
         result = self.dtypesIf.get(device_type, self.dtypes)
-        if device_type == "mps":
-            return result - {torch.float64, torch.cdouble}
         return result
 
     def supported_backward_dtypes(self, device_type):
@@ -1556,7 +1605,7 @@ def test_foo(self, device, dtype, op):
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
         elif device_type == "mps":
-            backward_dtypes = self.backward_dtypes - {torch.double, torch.cdouble}
+            backward_dtypes = self.backward_dtypesIfMPS
         else:
             backward_dtypes = self.backward_dtypes
 
@@ -1770,11 +1819,11 @@ class ReductionOpInfo(OpInfo):
         name,
         *,
         # The identity value for the operator if it has one.
-        identity: Optional[Any] = None,
+        identity: Any | None = None,
         # The nan policy for the operator if it implements one.
         # - propagate: NaN values are propagated to the output
         # - omit: NaN values are discarded during the reduction
-        nan_policy: Optional[str] = None,
+        nan_policy: str | None = None,
         # Whether the operator supports reducing multiple dimensions.
         supports_multiple_dims: bool = True,
         # Whether the operator promotes integral to floating point dtypes.
@@ -1784,7 +1833,7 @@ class ReductionOpInfo(OpInfo):
         # If a specific dtype is given, then the operator always returns that
         # dtype irrespective of the input dtype. If None, the operator returns
         # the dtype according to the type promotion rules above.
-        result_dtype: Optional[torch.dtype] = None,
+        result_dtype: torch.dtype | None = None,
         # Casts complex results to real (e.g. linalg.norm or torch.var)
         complex_to_real: bool = False,
         # ReductionOpInfo tests generate their own input, dim and keepdim
@@ -1801,13 +1850,28 @@ class ReductionOpInfo(OpInfo):
         **kwargs,
     ):
         self._original_reduction_args = locals().copy()
-        assert nan_policy in (None, "propagate", "omit")
+        if nan_policy not in (None, "propagate", "omit"):
+            raise AssertionError(
+                f"nan_policy must be None, 'propagate', or 'omit', got {nan_policy}"
+            )
 
         # These are mutually exclusive options
-        assert not (result_dtype and promotes_int_to_float)
-        assert not (result_dtype and promotes_int_to_int64)
-        assert not (result_dtype and complex_to_real)
-        assert not (promotes_int_to_float and promotes_int_to_int64)
+        if result_dtype and promotes_int_to_float:
+            raise AssertionError(
+                "result_dtype and promotes_int_to_float are mutually exclusive"
+            )
+        if result_dtype and promotes_int_to_int64:
+            raise AssertionError(
+                "result_dtype and promotes_int_to_int64 are mutually exclusive"
+            )
+        if result_dtype and complex_to_real:
+            raise AssertionError(
+                "result_dtype and complex_to_real are mutually exclusive"
+            )
+        if promotes_int_to_float and promotes_int_to_int64:
+            raise AssertionError(
+                "promotes_int_to_float and promotes_int_to_int64 are mutually exclusive"
+            )
 
         # Default sample_inputs_func for ReductionOpInfo which augments sample
         # inputs from sample_inputs_reduction with the args and kwargs from
@@ -2056,7 +2120,7 @@ def generate_elementwise_binary_small_value_tensors(
         prod = product(complex_vals, complex_vals)
     elif dtype in (torch.int8, torch.int16, torch.int32, torch.int64):
         prod = product(_int_vals, _int_vals)
-    elif dtype is torch.uint8:
+    elif dtype in (torch.uint8, torch.uint16, torch.uint32, torch.uint64):
         prod = product(_unsigned_int_vals, _unsigned_int_vals)
     else:
         raise ValueError("Unsupported dtype!")
@@ -2080,6 +2144,7 @@ def generate_elementwise_binary_large_value_tensors(
     _large_int_vals = (-1113, 1113, -10701, 10701)
     _large_float16_vals = (-501, 501, -1001.2, 1001.2, -13437.7, 13437.7)
     _large_float_vals = _large_float16_vals + (-4988429.2, 4988429.2, -1e20, 1e20)
+    _large_uint_vals = (1113, 10701, 60000)
 
     l_vals = []
     r_vals = []
@@ -2096,6 +2161,8 @@ def generate_elementwise_binary_large_value_tensors(
         prod = product(complex_vals, complex_vals)
     elif dtype in (torch.int16, torch.int32, torch.int64):
         prod = product(_large_int_vals, _large_int_vals)
+    elif dtype in (torch.uint16, torch.uint32, torch.uint64):
+        prod = product(_large_uint_vals, _large_uint_vals)
     else:
         raise ValueError("Unsupported dtype!")
 
@@ -2479,9 +2546,10 @@ class BinaryUfuncInfo(OpInfo):
             self.supports_one_python_scalar = True
 
         if self.supports_one_python_scalar:
-            assert supports_rhs_python_scalar, (
-                "Can't support lhs and rhs Python scalars but not rhs scalars!"
-            )
+            if not supports_rhs_python_scalar:
+                raise AssertionError(
+                    "Can't support lhs and rhs Python scalars but not rhs scalars!"
+                )
 
 
 # The following functions and classes are for testing elementwise unary operators.
@@ -2964,6 +3032,7 @@ class ShapeFuncInfo(OpInfo):
         ref,  # a reference function
         dtypes=floating_types(),
         dtypesIfCUDA=None,
+        dtypesIfMPS=None,
         dtypesIfROCM=None,
         dtypesIfXPU=None,
         sample_inputs_func=None,
@@ -2973,6 +3042,7 @@ class ShapeFuncInfo(OpInfo):
             name,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
+            dtypesIfMPS=dtypesIfMPS,
             dtypesIfROCM=dtypesIfROCM,
             dtypesIfXPU=dtypesIfXPU,
             sample_inputs_func=sample_inputs_func,
@@ -3074,8 +3144,10 @@ class ForeachFuncInfo(OpInfo):
             # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
             # is not defined at the moment. Thus to skip the qualification, set a similar torch
             # function.
-            assert foreach_method is None
-            assert torch_ref_method is None
+            if foreach_method is not None:
+                raise AssertionError("foreach_method must be None")
+            if torch_ref_method is not None:
+                raise AssertionError("torch_ref_method must be None")
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
 

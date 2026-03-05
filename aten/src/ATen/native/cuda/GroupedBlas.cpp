@@ -13,7 +13,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAScaledBlas.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>
@@ -27,8 +27,8 @@
 #endif
 #include <ATen/ceil_div.h>
 
-#ifdef USE_FBGEMM_GENAI
-#include <fbgemm_gpu/torch_ops.h>
+#ifdef USE_MSLK
+#include <mslk/gemm/gemm_torch.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -61,20 +61,42 @@
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
-namespace scaled_blas = at::cuda::scaled;
+namespace scaled_blas = at::native::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
-using scaled_blas::_scaled_mm_allowed_device;
 
 namespace at::native {
 
 namespace {
 
+bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
+#ifdef USE_ROCM
+  static const std::vector<std::string> archs = {
+    "gfx942",
+#if ROCM_VERSION >= 60300
+    "gfx1200", "gfx1201",
+#endif
+#if ROCM_VERSION >= 60500
+    "gfx950"
+#endif
+};
+  return at::detail::getCUDAHooks().isGPUArch(archs);
+#else
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+
+  if (sm90_only || sm100_only) {
+    return (sm90_only && dprops->major == 9) || (sm100_only && dprops->major == 10);
+  } else {
+    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+  }
+#endif
+}
+
 // 2d-2d and 2d-3d
 // scaling=MXFP8
 // CUDA-only
 Tensor&
-_mx8_mx8_bf16_grouped_mm_fbgemm(
+_mx8_mx8_bf16_grouped_mm_mslk(
         const Tensor& mat_a,
         const Tensor& mat_b,
         const Tensor& scale_a,
@@ -102,8 +124,8 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
         "For CUDA MXFP8 grouped gemm, both scale swizzle types must be SWIZZLE_32_4_4");
 #endif
 
-#if defined(USE_FBGEMM_GENAI) and !defined(USE_ROCM)
-    fbgemm_gpu::mx8mx8bf16_grouped_mm(
+#if defined(USE_MSLK) and !defined(USE_ROCM)
+    mslk::gemm::mx8mx8bf16_grouped_mm(
         mat_a,
         mat_b,
         scale_a,
@@ -111,7 +133,7 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
         offs.value(),
         out);
 #else
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "mxfp8_mxfp8 grouped gemm requires compile with USE_FBGEMM_GENAI");
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "mxfp8_mxfp8 grouped gemm requires compile with USE_MSLK");
 #endif
     return out;
 }
@@ -147,6 +169,7 @@ _f8_f8_bf16_rowwise_grouped_mm_cuda(
 // 2d-2d and 2d-3d cases
 // scaling=rowwise
 // only being called for rocm
+#ifdef USE_ROCM
 Tensor&
 _f8_f8_bf16_rowwise_grouped_mm_rocm(
       const Tensor& mat_a,
@@ -155,11 +178,18 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
       const Tensor& scale_b,
       const std::optional<Tensor>& offs,
       Tensor& out) {
-  TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
-  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+  bool is_gfx942 = at::detail::getCUDAHooks().isGPUArch({"gfx942"});
 
-#if defined(USE_FBGEMM_GENAI) && defined(USE_ROCM)
-  fbgemm_gpu::f8f8bf16_rowwise_grouped_mm(
+  if (is_gfx942) {
+    TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_b to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+  } else {
+    TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+    TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+  }
+
+#if defined(USE_MSLK) && defined(USE_ROCM)
+  mslk::gemm::f8f8bf16_rowwise_grouped_mm(
       mat_a,
       // FBGEMM expects B matrix shape to be (.., N, K)
       mat_b.transpose(-2, -1),
@@ -168,11 +198,12 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
       offs,
       out);
 #else
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "grouped gemm is not supported without USE_FBGEMM_GENAI on ROCM")
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "grouped gemm is not supported without USE_MSLK on ROCM")
 #endif
   return out;
 
 }
+#endif // USE_ROCM
 
 // Dispatch f8 x f8 -> bf16 row-wise scaled to rocm/cuda
 Tensor&
@@ -212,7 +243,7 @@ _f8_f8_bf16_rowwise_grouped_mm(
 }
 
 Tensor&
-_f4_f4_bf16_grouped_mm_fbgemm(
+_f4_f4_bf16_grouped_mm_mslk(
       const Tensor& mat_a,
       const Tensor& mat_b,
       const Tensor& scale_a,
@@ -222,7 +253,7 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       const std::optional<Tensor>& offs,
       const std::optional<Tensor>& bias,
       Tensor& out) {
-#if !defined(USE_ROCM) && defined(USE_FBGEMM_GENAI)
+#if !defined(USE_ROCM) && defined(USE_MSLK)
   // Typing checks
   TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2,
       "mat_a must be Float4_e2n1fn_2, got: ", mat_a.scalar_type());
@@ -251,7 +282,7 @@ _f4_f4_bf16_grouped_mm_fbgemm(
           "scale_b must be Float8_e8m0fnu, got: ", scale_b.scalar_type());
   }
 
-  auto o = fbgemm_gpu::f4f4bf16_grouped_mm(
+  auto o = mslk::gemm::f4f4bf16_grouped_mm(
       mat_a,
       mat_b,
       scale_a,
@@ -261,7 +292,7 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       combined_global_scale
   );
 #else
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "nvfp4 grouped gemm is not supported without USE_FBGEMM_GENAI, and only for CUDA")
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "nvfp4 grouped gemm is not supported without USE_MSLK, and only for CUDA")
 #endif
 
   return out;
@@ -355,7 +386,7 @@ void _check_scales_blocked(const Tensor& mat, const Tensor& scale, const int dim
     int64_t blocked_scale_K = round_up(K/blocksize, 4);
     int64_t blocked_scale_N = round_up(N, 128);
 
-    // fbgemm expects stack of flattened blocked scales for 3d tensor, shape (G, blocked_scale_K * blocked_scale_N).
+    // mslk expects stack of flattened blocked scales for 3d tensor, shape (G, blocked_scale_K * blocked_scale_N).
     TORCH_CHECK(
       scale.dim() == mat.dim() - 1,
       "for block-scaled 2d-3d grouped GEMM, the 3d tensor of shape (G,K,N) must have a 2d scale of shape (G, blocked_scale_K * blocked_scale_N),",
@@ -448,7 +479,7 @@ _scaled_grouped_mm_cuda(
 
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
 
-#if defined(USE_FBGEMM_GENAI) && defined(USE_CUDA) && !defined(USE_ROCM)
+#if defined(USE_MSLK) && defined(USE_CUDA) && !defined(USE_ROCM)
   // MXFP8 grouped GEMM dispatching
   bool is_mx8mx8bf16 = (
     mat_a.scalar_type() == at::kFloat8_e4m3fn && mat_b.scalar_type() == at::kFloat8_e4m3fn &&
@@ -461,7 +492,7 @@ _scaled_grouped_mm_cuda(
   if (is_mx8mx8bf16) {
     // Note: Passing implied SwizzleType here, correctness of scale previously checked
     //       in `check_scale` call
-    return _mx8_mx8_bf16_grouped_mm_fbgemm(
+    return _mx8_mx8_bf16_grouped_mm_mslk(
         mat_a,
         mat_b,
         scale_a,
@@ -609,7 +640,7 @@ _scaled_grouped_mm_cuda_v2(
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
       // swizze checks
       TORCH_CHECK_VALUE(swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1, "Expected single swizzle argument");
-      return _mx8_mx8_bf16_grouped_mm_fbgemm(
+      return _mx8_mx8_bf16_grouped_mm_mslk(
           mat_a,
           mat_b,
           scale_a[0],
@@ -623,7 +654,7 @@ _scaled_grouped_mm_cuda_v2(
       // scale shape checks
       _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
-      return _f4_f4_bf16_grouped_mm_fbgemm(
+      return _f4_f4_bf16_grouped_mm_mslk(
           mat_a,
           mat_b,
           scale_a[0], /* block-scale A */
@@ -638,7 +669,7 @@ _scaled_grouped_mm_cuda_v2(
       // scale shape checks
       _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
-      return _f4_f4_bf16_grouped_mm_fbgemm(
+      return _f4_f4_bf16_grouped_mm_mslk(
           mat_a,
           mat_b,
           scale_a[0], /* block-scale A */

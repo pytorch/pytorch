@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -34,8 +34,10 @@ def replace_target_nodes_with(
         if node.op == old_op and node.target == old_target:
             args = map_arg(node.args, lambda n: val_map[n])
             kwargs = map_arg(node.kwargs, lambda n: val_map[n])
-            assert isinstance(args, tuple)
-            assert isinstance(kwargs, dict)
+            if not isinstance(args, tuple):
+                raise AssertionError(f"Expected tuple, got {type(args)}")
+            if not isinstance(kwargs, dict):
+                raise AssertionError(f"Expected dict, got {type(kwargs)}")
             val_map[node] = new_graph.create_node(
                 new_op, new_target, args, kwargs, node.name
             )
@@ -52,7 +54,7 @@ class size_bytes(NamedTuple):
 
 @compatibility(is_backward_compatible=False)
 def get_size_of_all_nodes(
-    fx_module: GraphModule, args: Optional[list[torch.Tensor]] = None
+    fx_module: GraphModule, args: list[torch.Tensor] | None = None
 ) -> None:
     """Given a fx graph module, update each node with its total size (weights + bias + output)
     and its output_size(output). For a non-module node, the total size is the output size.

@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import functools
 import json
 import random
 import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple
+
+
+# Patch ast._splitlines_no_ff with caching to avoid O(n²) re-splitting.
+# get_source_segment() calls _splitlines_no_ff() for every keyword argument,
+# but the same source string is passed repeatedly for the same file.
+if hasattr(ast, "_splitlines_no_ff"):
+    ast._splitlines_no_ff = functools.lru_cache(maxsize=128)(ast._splitlines_no_ff)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -42,6 +51,49 @@ class LintMessage(NamedTuple):
     original: str | None
     replacement: str | None
     description: str | None
+
+
+def _is_noqa_suppressed(source_lines: list[str], lineno: int) -> bool:
+    if lineno <= 0 or lineno > len(source_lines):
+        return False
+    if source_lines[lineno - 1].rstrip().endswith(f"# noqa: {LINTER_CODE}"):
+        return True
+    if lineno > 1 and source_lines[lineno - 2].strip() == f"# noqa: {LINTER_CODE}":
+        return True
+    return False
+
+
+def _is_forbidden_raise(node: ast.Raise) -> bool:
+    if not isinstance(node.exc, ast.Call):
+        return False
+    if isinstance(node.exc.func, ast.Name):
+        return node.exc.func.id == "Unsupported"
+    if isinstance(node.exc.func, ast.Attribute):
+        return node.exc.func.attr == "Unsupported"
+    return False
+
+
+def _collect_forbidden_unsupported_raises(
+    dynamo_dir: Path,
+) -> list[tuple[Path, int, int]]:
+    forbidden_raises: list[tuple[Path, int, int]] = []
+
+    for py_file in dynamo_dir.rglob("*.py"):
+        source = py_file.read_text(encoding="utf-8")
+        source_lines = source.splitlines()
+        try:
+            tree = ast.parse(source, filename=str(py_file))
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Raise) or not _is_forbidden_raise(node):
+                continue
+            if _is_noqa_suppressed(source_lines, node.lineno):
+                continue
+            forbidden_raises.append((py_file, node.lineno, node.col_offset + 1))
+
+    return forbidden_raises
 
 
 def _collect_all_calls(
@@ -165,6 +217,26 @@ def _update_registry_with_changes(
 def check_registry_sync(dynamo_dir: Path, registry_path: Path) -> list[LintMessage]:
     """Check registry sync and return lint messages."""
     lint_messages = []
+
+    forbidden_raises = _collect_forbidden_unsupported_raises(dynamo_dir)
+    for path, line, char in forbidden_raises:
+        lint_messages.append(
+            LintMessage(
+                path=str(path),
+                line=line,
+                char=char,
+                code=LINTER_CODE,
+                severity=LintSeverity.ERROR,
+                name="Direct raise Unsupported",
+                original=None,
+                replacement=None,
+                description=(
+                    "Do not directly `raise Unsupported(...)` in `torch/_dynamo`. "
+                    "Use `unimplemented(...)` for graph breaks, or add `# noqa: GB_REGISTRY` "
+                    "for infra-only exceptions."
+                ),
+            )
+        )
 
     all_calls = _collect_all_calls(dynamo_dir)
 

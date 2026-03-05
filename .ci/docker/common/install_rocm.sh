@@ -97,8 +97,8 @@ export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
 export LD_LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LD_LIBRARY_PATH:-}"
 export LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LIBRARY_PATH:-}"
 export MAGMA_HOME="${ROCM_HOME}/magma"
-# Disable FBGEMM_GENAI for theRock nightly (not yet supported)
-export USE_FBGEMM_GENAI=0
+# Disable MSLK for theRock nightly (not yet supported)
+export USE_MSLK=0
 ROCM_ENV
 
       # Append to bash.bashrc so interactive shells get the env vars
@@ -152,6 +152,29 @@ EOF
       else
         DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
       fi
+    fi
+
+    # ROCm 7.2 needs a fix from procprof sdk that isn't available until 7.2.1
+    if [[ $(ver $ROCM_VERSION) -eq $(ver 7.2) ]]; then
+        git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+        pushd rocm-systems/
+        git sparse-checkout init --cone
+        git sparse-checkout set projects/rocprofiler-sdk shared/rocprofiler-compute
+        git checkout develop
+        git checkout rocm-7.2.0
+        git config --global user.email "you@example.com"
+        git config --global user.name "Your Name"
+        git cherry-pick a71cc3cc88ed68b24c40cefec77d764053044862
+        sudo apt install -y cmake libdw-dev libsqlite3-dev
+        cmake                                         \
+              -B rocprofiler-sdk-build                \
+              -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
+              -DCMAKE_PREFIX_PATH=/opt/rocm           \
+              -DGPU_TARGETS="${PYTORCH_ROCM_ARCH}"    \
+              projects/rocprofiler-sdk
+        cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
+        cmake --build rocprofiler-sdk-build --target install
+        popd
     fi
 
     # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime

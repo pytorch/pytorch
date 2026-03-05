@@ -5,7 +5,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter import _constants
 
 
@@ -20,13 +20,32 @@ logger = logging.getLogger(__name__)
 
 
 def rename_inputs(model: ir.Model, new_names: Sequence[str]) -> None:
-    # TODO: Ensure the names do not have duplicates
+    unique_names = frozenset(new_names)
+    if len(unique_names) != len(new_names):
+        seen = set()
+        duplicates = []
+        for name in new_names:
+            if name in seen:
+                duplicates.append(name)
+            seen.add(name)
+        raise ValueError(f"Input names cannot be duplicated: {duplicates}")
+
     for input, new_name in zip(model.graph.inputs, new_names):
         input.metadata_props["pkg.torch.onnx.original_node_name"] = str(input.name)
         input.name = new_name
 
 
 def rename_outputs(model: ir.Model, new_names: Sequence[str]) -> None:
+    unique_names = frozenset(new_names)
+    if len(unique_names) != len(new_names):
+        seen = set()
+        duplicates = []
+        for name in new_names:
+            if name in seen:
+                duplicates.append(name)
+            seen.add(name)
+        raise ValueError(f"Output names cannot be duplicated: {duplicates}")
+
     for output, new_name in zip(model.graph.outputs, new_names):
         output.metadata_props["pkg.torch.onnx.original_node_name"] = str(output.name)
         output.name = new_name
@@ -55,15 +74,36 @@ def _replace_names(shape_expr: str, rename_mapping: dict[str, str]) -> str:
     return shape_expr
 
 
-def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
+def rename_axis(
+    model: ir.Model, rename_mapping: dict[str | ir.SymbolicDim, str]
+) -> None:
     """Rename dynamic axes in a model according to the specified dynamic_axes names."""
 
-    # NOTE: Mapping needs to be srted by length because the shape expression
+    # Create a mapping from string to string for easier replacement
+    string_mapping: dict[str, str] = {}
+    for key, value in tuple(rename_mapping.items()):
+        if isinstance(key, ir.SymbolicDim):
+            if isinstance(key.value, str):
+                string_mapping[key.value] = value
+            else:
+                raise ValueError(
+                    f"Invalid SymbolicDim value in rename_mapping: {key.value!r}. "
+                    "Expected str."
+                )
+        elif isinstance(key, str):
+            string_mapping[key] = value
+        else:
+            raise ValueError(
+                f"Invalid key type in rename_mapping: {type(key)}({key!r}). Expected "
+                "str or ir.SymbolicDim."
+            )
+
+    # NOTE: Mapping needs to be sorted by length because the shape expression
     # could have multiple ways to be expressed, for example,
     # {"s1": sequence_length, "s11": "past_sequence_length", "s1 + s11": "masked_sequence_length"}
     # We prefer the replacement starts from the longest match.
     sorted_rename_mapping = dict(
-        sorted(rename_mapping.items(), key=lambda item: len(item[0]), reverse=True)
+        sorted(string_mapping.items(), key=lambda item: len(item[0]), reverse=True)
     )
     for value in _all_values(model):
         if value.shape is None:
@@ -76,7 +116,6 @@ def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
                 continue
             dim_name = dim.value
             if dim_name in sorted_rename_mapping:
-                # pyrefly: ignore
                 new_shape.append(sorted_rename_mapping[dim_name])
                 changed = True
             elif dim_name is not None:

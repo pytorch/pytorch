@@ -1,14 +1,15 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import gzip
 import json
 import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, Optional
+from typing import Any, TYPE_CHECKING
 from typing_extensions import deprecated, Self
 from warnings import warn
 
@@ -26,6 +27,10 @@ from torch._environment import is_fbcode
 from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
 
 
 __all__ = [
@@ -129,6 +134,10 @@ class _KinetoProfile:
             When this argument is included the observer start() and stop() will be called for the
             same time window as PyTorch profiler.
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
+        post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
+            results. In this context, post-processing happens after the profiling itself has finished.
+            If specified, event parsing will stop after this duration and return partial results. Useful
+            for handling large traces that may take too long to process.
 
 
     .. note::
@@ -153,6 +162,7 @@ class _KinetoProfile:
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
         custom_trace_id_callback: Callable[[], str] | None = None,
+        post_processing_timeout_s: float | None = None,
     ) -> None:
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
@@ -164,6 +174,7 @@ class _KinetoProfile:
         self.execution_trace_observer = execution_trace_observer
         self.acc_events = acc_events
         self.custom_trace_id_callback = custom_trace_id_callback
+        self.post_processing_timeout_s = post_processing_timeout_s
         self.profiler: prof.profile | None = None
         self.has_cudagraphs = False
         self.mem_tl: MemoryProfileTimeline | None = None
@@ -212,6 +223,7 @@ class _KinetoProfile:
                 experimental_config=self.experimental_config,
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
+                post_processing_timeout_s=self.post_processing_timeout_s,
             )
         if (self.profiler is not None) and (not self.acc_events):
             _warn_once(
@@ -406,7 +418,7 @@ class _KinetoProfile:
         }
         if backend == "nccl":
             nccl_version = torch.cuda.nccl.version()
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [bad-typed-dict-key, unsupported-operation]
             dist_info["nccl_version"] = ".".join(str(v) for v in nccl_version)
         return dist_info
 
@@ -623,6 +635,9 @@ class profile(_KinetoProfile):
             When this argument is included the observer start() and stop() will be called for the
             same time window as PyTorch profiler. See the examples section below for a code sample.
         acc_events (bool): Enable the accumulation of FunctionEvents across multiple profiling cycles
+        post_processing_timeout_s (float): Optional timeout in seconds for post-processing profiler
+            results. If specified, event parsing will stop after this duration and return partial
+            results. Useful for handling large traces that may take too long to process.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -739,6 +754,7 @@ class profile(_KinetoProfile):
         # deprecated:
         use_cuda: bool | None = None,
         custom_trace_id_callback: Callable[[], str] | None = None,
+        post_processing_timeout_s: float | None = None,
     ) -> None:
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
@@ -763,10 +779,10 @@ class profile(_KinetoProfile):
             with_modules=with_modules,
             experimental_config=experimental_config,
             execution_trace_observer=execution_trace_observer
-            if execution_trace_observer
-            else ExecutionTraceObserver.build_execution_trace_obs_from_env(),
+            or ExecutionTraceObserver.build_execution_trace_obs_from_env(),
             acc_events=acc_events,
             custom_trace_id_callback=custom_trace_id_callback,
+            post_processing_timeout_s=post_processing_timeout_s,
         )
 
         if schedule:
@@ -954,7 +970,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         self.unregister_callback()
 
     @staticmethod
-    def build_execution_trace_obs_from_env() -> Optional["ExecutionTraceObserver"]:
+    def build_execution_trace_obs_from_env() -> ExecutionTraceObserver | None:
         """
         Returns an ExecutionTraceObserver instance if the environment variable
         ENABLE_PYTORCH_EXECUTION_TRACE is set to 1, otherwise returns None.

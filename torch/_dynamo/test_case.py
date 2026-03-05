@@ -17,7 +17,7 @@ import re
 import sys
 import unittest
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 import torch.testing
@@ -36,7 +36,7 @@ from . import config, reset, utils
 log = logging.getLogger(__name__)
 
 
-def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
+def run_tests(needs: str | tuple[str, ...] = ()) -> None:
     from torch.testing._internal.common_utils import run_tests
 
     if TEST_WITH_TORCHDYNAMO or TEST_WITH_CROSSREF:
@@ -94,7 +94,7 @@ class TestCase(TorchTestCase):
     def tearDown(self) -> None:
         trace_log.removeHandler(self.handler)
         for k, v in utils.counters.items():
-            print(k, v.most_common())
+            log.debug("%s %s", k, v.most_common())
         reset()
         utils.counters.clear()
         torch._C._autograd._saved_tensors_hooks_enable()
@@ -169,6 +169,7 @@ class CPythonTestCase(TestCase):
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
+    # pyrefly: ignore [bad-override]
     assertDictEqual = polyfills.assert_dict_equal
     # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
@@ -183,7 +184,7 @@ class CPythonTestCase(TestCase):
     def compile_fn(
         self,
         fn: Callable[..., Any],
-        backend: Union[str, Callable[..., Any]],
+        backend: str | Callable[..., Any],
         nopython: bool,
     ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
@@ -239,3 +240,7 @@ class CPythonTestCase(TestCase):
                 enable_trace_unittest=True,
             ),
         )
+
+    # pyrefly: ignore [implicit-any]
+    def wrap_with_policy(self, method_name: str, policy: Callable) -> None:
+        pass

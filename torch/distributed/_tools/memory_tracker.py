@@ -108,7 +108,8 @@ class MemoryTracker:
             # h3 = m.register_backward_hook(self._create_backward_hook(name))
             self._hooks.extend([h1, h2])
         self._device_module.empty_cache()
-        assert getattr(self, "profile_mode", None) is None
+        if getattr(self, "profile_mode", None) is not None:
+            raise AssertionError
         self.profile_mode = MemoryProfileDispatchMode(self)
         self.profile_mode.__enter__()
 
@@ -126,7 +127,8 @@ class MemoryTracker:
         for h in self._hooks:
             h.remove()
         self._hooks.clear()
-        assert getattr(self, "profile_mode", None) is not None
+        if getattr(self, "profile_mode", None) is None:
+            raise AssertionError
         self.profile_mode.__exit__(None, None, None)
         self.profile_mode = None
 
@@ -232,9 +234,7 @@ class MemoryTracker:
         def _pre_forward_hook(module: nn.Module, inputs: Any) -> None:
             self._cur_module_name = f"{name}.forward"
             if (
-                # pyrefly: ignore [invalid-argument]
                 hasattr(module, "_memory_tracker_is_root")
-                # pyrefly: ignore [not-callable]
                 and module._memory_tracker_is_root
             ):
                 self._add_marker("fw_start")
@@ -250,9 +250,7 @@ class MemoryTracker:
             outputs: Sequence[torch.Tensor],
         ) -> None:
             if (
-                # pyrefly: ignore [invalid-argument]
                 hasattr(module, "_memory_tracker_is_root")
-                # pyrefly: ignore [not-callable]
                 and module._memory_tracker_is_root
             ):
                 self._add_marker("fw_bw_boundary")

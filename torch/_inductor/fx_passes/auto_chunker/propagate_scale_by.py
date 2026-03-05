@@ -89,9 +89,13 @@ def propagate_scale_by(nodes_with_chunking_meta: Sequence[Node]) -> None:
 def propagate_div(div_node: Node) -> bool:
     lhs_node, rhs_node = div_node.args[:2]
     assert isinstance(lhs_node, Node)
-    assert isinstance(rhs_node, Node)
     lhs_scale_by = get_scale_by_from_node(lhs_node)
-    rhs_scale_by = get_scale_by_from_node(rhs_node)
+
+    # When gradient accumulation is enabled, rhs_node can be a constant
+    # representing the gradient accumulation steps
+    rhs_scale_by = (
+        get_scale_by_from_node(rhs_node) if isinstance(rhs_node, Node) else None
+    )
     if lhs_scale_by and rhs_scale_by is None:
         update_chunking_meta(div_node, scale_by=lhs_scale_by)
         return True
@@ -129,8 +133,36 @@ def propagate_where(where_node: Node) -> bool:
 
 @register_propagate_rule(
     [
+        aten.exp.default,
+        aten.log.default,
+        aten.tanh.default,
+    ]
+)
+def propagate_nonlinear_requires_no_scaling(out_node: Node) -> bool:
+    """
+    For nonlinear ops like exp, log, tanh, scale_by cannot be propagated
+    through since f(S*x) != S*f(x). These ops typically appear in the chunking
+    subgraph when the final gradient is 1 (i.e. scale_by is None),
+    making scaling a no-op.
+    """
+    args_node = get_args_of_node_type(out_node)
+    args_meta = get_chunking_metas(args_node)
+    out_meta = get_chunking_meta(out_node)
+
+    scale_by = get_scale_by_from_metas(*args_meta)  # type: ignore[arg-type]
+    assert scale_by is None, (
+        f"Nonlinear op {out_node.target} requires scale_by=None, got {scale_by}"
+    )
+    assert out_meta is not None
+    out_meta.scale_by = None
+    return True
+
+
+@register_propagate_rule(
+    [
         aten.mul.Tensor,
         prims.convert_element_type.default,
+        aten.neg.default,
         aten.sum.dim_IntList,
         aten.sum.default,  # sum to scalar
         aten.mm.default,

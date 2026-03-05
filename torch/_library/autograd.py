@@ -2,7 +2,7 @@
 import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from torch import _C, _ops, autograd, Tensor
 from torch.utils import _pytree
@@ -11,14 +11,14 @@ from . import utils
 
 
 class InfoProtocol(Protocol):
-    _backward_fn: Optional[Callable]
-    _setup_context_fn: Optional[Callable]
+    _backward_fn: Callable | None
+    _setup_context_fn: Callable | None
 
 
 @dataclasses.dataclass
 class Info:
-    _backward_fn: Optional[Callable]
-    _setup_context_fn: Optional[Callable]
+    _backward_fn: Callable | None
+    _setup_context_fn: Callable | None
 
 
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
@@ -129,8 +129,8 @@ def supports_tensorlist(cls: Any) -> Any:
     @dataclass
     class Metadata:
         input_spec: _pytree.TreeSpec
-        output_spec: Optional[_pytree.TreeSpec] = None
-        result_is_tuple: Optional[bool] = None
+        output_spec: _pytree.TreeSpec | None = None
+        result_is_tuple: bool | None = None
 
     def new_forward(ctx, *args):
         metadata = args[-1]
@@ -205,11 +205,16 @@ def supports_tensorlist(cls: Any) -> Any:
         flat_args, input_spec = _pytree.tree_flatten(args, is_leaf=not_list_of_tensor)
         metadata = Metadata(input_spec)
         result = orig_apply(*flat_args, metadata)  # type: ignore[misc]
-        assert metadata.output_spec is not None
+        if metadata.output_spec is None:
+            raise AssertionError("metadata.output_spec must not be None")
         result = _pytree.tree_unflatten(list(result), metadata.output_spec)
         if not metadata.result_is_tuple:
-            assert isinstance(result, tuple)
-            assert len(result) == 1
+            if not isinstance(result, tuple):
+                raise AssertionError(f"result must be tuple, got {type(result)}")
+            if len(result) != 1:
+                raise AssertionError(
+                    f"result tuple must have length 1, got {len(result)}"
+                )
             return result[0]
         return result
 

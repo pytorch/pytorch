@@ -65,6 +65,8 @@ using cusparseDnVecDescr = std::remove_pointer_t<hipsparseDnVecDescr_t>;
 using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
 using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
 using cusparseSpGEMMDescr = std::remove_pointer_t<hipsparseSpGEMMDescr_t>;
+using cusparseSpSVDescr = std::remove_pointer_t<hipsparseSpSVDescr_t>;
+using cusparseSpSMDescr = std::remove_pointer_t<hipsparseSpSMDescr_t>;
 using bsrsv2Info = std::remove_pointer_t<bsrsv2Info_t>;
 using bsrsm2Info = std::remove_pointer_t<bsrsm2Info_t>;
 #endif

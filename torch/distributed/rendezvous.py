@@ -111,7 +111,6 @@ def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(world_size, numbers.Integral):
         raise RuntimeError(f"`world_size` must be an integer. {world_size}")
 
-    # pyrefly: ignore [bad-argument-type]
     return _rendezvous_helper(url, rank, world_size, **kwargs)
 
 

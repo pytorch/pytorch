@@ -134,7 +134,15 @@ class TestCustomLowering(InductorTestCase):
         cls.impl_meta.impl("add_custom", add_custom)
 
         def add_custom_lowering(a, b):
-            fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
+            if torch.version.hip:
+                # ROCm GCN assembly
+                fn = partial(
+                    ops.inline_asm_elementwise,
+                    asm="v_add_f32 $0, $1, $2",
+                    constraints="=v, v, v",
+                )
+            else:
+                fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
             return make_pointwise(fn)(a, b)
 
         register_lowering(
@@ -156,8 +164,10 @@ class TestCustomLowering(InductorTestCase):
         def foo_lowering(x):
             return x
 
-        assert torch.ops.helion_test.foo in custom_lowering_dict
-        assert torch.ops.helion_test.foo not in torch._inductor.lowering.lowerings
+        if torch.ops.helion_test.foo not in custom_lowering_dict:
+            raise AssertionError
+        if torch.ops.helion_test.foo in torch._inductor.lowering.lowerings:
+            raise AssertionError
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
@@ -223,7 +233,6 @@ class TestCustomLowering(InductorTestCase):
         self.assertEqual(a, b)
 
     @requires_gpu()
-    @skipIfRocm
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_multi_inp_asm(self):

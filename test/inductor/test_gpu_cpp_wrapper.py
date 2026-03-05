@@ -108,10 +108,6 @@ test_failures_gpu_wrapper = {
     "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
     ),
-    "test_randint_xpu": test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=False),
-    "test_randint_xpu_dynamic_shapes": test_torchinductor.TestFailure(
-        ("gpu_wrapper",), is_skip=False
-    ),
     # ATen ops: scaled_dot_product_efficient_attention not implemented on XPU.
     "test_scaled_dot_product_efficient_attention_xpu": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=False
@@ -120,6 +116,13 @@ test_failures_gpu_wrapper = {
         ("gpu_wrapper",), is_skip=False
     ),
 }
+
+# Skip only on CUDA as wrapper dynamic shapes passes on ROCm.
+# Per https://github.com/pytorch/pytorch/pull/172780
+if not torch.version.hip:
+    test_failures_gpu_wrapper["test_mm_plus_mm3_dynamic_shapes"] = (
+        test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=False)
+    )
 
 
 def make_test_case(
@@ -137,7 +140,8 @@ def make_test_case(
         code_string_count = {}
 
     func = getattr(tests, test_name)
-    assert callable(func), "not a callable"
+    if not callable(func):
+        raise AssertionError("not a callable")
     func = slowTest(func) if slow else func
 
     @config.patch(cpp_wrapper=True)
@@ -290,13 +294,12 @@ if RUN_GPU:
             )
         ],
         BaseTest("test_dtypeview_fusion"),
-        # skip if not enough SMs
+        # skip the next two tests if not enough SMs, logic for this is handled by TestSelectAlgorithm.setUp()
         BaseTest(
             "test_addmm",
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
-        # skip if not enough SMs
         BaseTest(
             "test_linear_relu",
             device=None,
@@ -306,19 +309,6 @@ if RUN_GPU:
         if item.device == "xpu" and item.name in XPU_BASE_TEST_SKIP:
             continue
         make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
-
-    from torch._inductor.utils import is_big_gpu
-
-    if GPU_TYPE in ("cuda", "xpu") and is_big_gpu():
-        skip_list = ["test_addmm", "test_linear_relu"]
-        # need to skip instead of omit, otherwise fbcode ci can be flaky
-        for test_name in skip_list:
-            test_failures_gpu_wrapper[f"{test_name}_{device_type}"] = (
-                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
-            )
-            test_failures_gpu_wrapper[f"{test_name}_gpu_dynamic_shapes"] = (
-                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
-            )
 
     test_torchinductor.copy_tests(
         GpuWrapperTemplate, TestGpuWrapper, "gpu_wrapper", test_failures_gpu_wrapper

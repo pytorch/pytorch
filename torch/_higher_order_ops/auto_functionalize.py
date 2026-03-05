@@ -3,7 +3,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, get_args, Optional, Union
+from typing import Any, get_args
 
 import torch
 import torch._library.utils as library_utils
@@ -40,7 +40,8 @@ class SchemaHolder:
 
     @classmethod
     def from_tree_spec(cls, tree_spec: pytree.TreeSpec):
-        assert tree_spec is not None
+        if tree_spec is None:
+            raise AssertionError("tree_spec cannot be None")
         return cls(pytree.tree_unflatten([], tree_spec).schema)
 
 
@@ -70,8 +71,8 @@ class ViewInfo(ABC):
 
 @dataclass
 class AsStridedViewInfo(ViewInfo):
-    size: Sequence[Union[int, torch.SymInt]]
-    stride: Sequence[Union[int, torch.SymInt]]
+    size: Sequence[int | torch.SymInt]
+    stride: Sequence[int | torch.SymInt]
     storage_offset: int
 
     def __init__(self, base_index, size, stride, storage_offset):
@@ -91,9 +92,9 @@ class AsStridedViewInfo(ViewInfo):
 
 @dataclass
 class SliceViewInfo(ViewInfo):
-    dim: Union[int, torch.SymInt]
-    start: Union[int, torch.SymInt]
-    end: Union[int, torch.SymInt]
+    dim: int | torch.SymInt
+    start: int | torch.SymInt
+    end: int | torch.SymInt
 
     def __init__(self, base_index, dim, start, end):
         super().__init__(base_index)
@@ -185,14 +186,21 @@ def write_view_information_to_args(
     """
 
     def write_single_view(prefix: str, tensor: Tensor, base_index: int):
-        assert f"{prefix}_base_index" not in kwargs
-        assert f"{prefix}_size" not in kwargs
-        assert f"{prefix}_stride" not in kwargs
-        assert f"{prefix}_storage_offset" not in kwargs
+        if f"{prefix}_base_index" in kwargs:
+            raise AssertionError(f"{prefix}_base_index already in kwargs")
+        if f"{prefix}_size" in kwargs:
+            raise AssertionError(f"{prefix}_size already in kwargs")
+        if f"{prefix}_stride" in kwargs:
+            raise AssertionError(f"{prefix}_stride already in kwargs")
+        if f"{prefix}_storage_offset" in kwargs:
+            raise AssertionError(f"{prefix}_storage_offset already in kwargs")
 
-        assert f"{prefix}_slice_dim" not in kwargs
-        assert f"{prefix}_slice_start" not in kwargs
-        assert f"{prefix}_slice_end" not in kwargs
+        if f"{prefix}_slice_dim" in kwargs:
+            raise AssertionError(f"{prefix}_slice_dim already in kwargs")
+        if f"{prefix}_slice_start" in kwargs:
+            raise AssertionError(f"{prefix}_slice_start already in kwargs")
+        if f"{prefix}_slice_end" in kwargs:
+            raise AssertionError(f"{prefix}_slice_end already in kwargs")
 
         def use_as_strided(tensor):
             kwargs[f"{prefix}_size"] = tensor.size()
@@ -354,8 +362,10 @@ class AutoFunctionalized(HigherOrderOperator):
         _mutable_op: OpOverload,
         **kwargs: Any,
     ) -> tuple[Any, tuple[Tensor, ...]]:
-        assert can_auto_functionalize(_mutable_op)
-        assert isinstance(kwargs, dict)
+        if not can_auto_functionalize(_mutable_op):
+            raise AssertionError(f"Cannot auto-functionalize op {_mutable_op}")
+        if not isinstance(kwargs, dict):
+            raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
         # pyrefly: ignore [missing-attribute]
         return super().__call__(_mutable_op, **kwargs)
 
@@ -367,7 +377,7 @@ auto_functionalized.fallthrough(DispatchKey.AutogradCPU)
 auto_functionalized.fallthrough(DispatchKey.AutogradCUDA)
 
 
-_MutableOpType = Union[OpOverload, HigherOrderOperator]
+_MutableOpType = OpOverload | HigherOrderOperator
 
 
 class AutoFunctionalizedV2(HigherOrderOperator):
@@ -387,7 +397,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         _mutable_op: _MutableOpType,
         **kwargs: Any,
     ) -> tuple[Any, tuple[Tensor, ...]]:
-        _op_to_check: Optional[Union[OpOverload, HopInstance]] = None
+        _op_to_check: OpOverload | HopInstance | None = None
         if isinstance(_mutable_op, HigherOrderOperator):
             _op_to_check = HopInstance(
                 _mutable_op,
@@ -396,9 +406,12 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         else:
             _op_to_check = _mutable_op
 
-        assert _op_to_check is not None
-        assert can_auto_functionalize(_op_to_check)
-        assert isinstance(kwargs, dict)
+        if _op_to_check is None:
+            raise AssertionError("_op_to_check cannot be None")
+        if not can_auto_functionalize(_op_to_check):
+            raise AssertionError(f"Cannot auto-functionalize op {_op_to_check}")
+        if not isinstance(kwargs, dict):
+            raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
         # pyrefly: ignore [missing-attribute]
         return super().__call__(_mutable_op, **kwargs)
 
@@ -411,7 +424,7 @@ auto_functionalized_v2.fallthrough(DispatchKey.AutogradCUDA)
 
 
 def can_auto_functionalize(
-    op: Union[OperatorBase, HopInstance],
+    op: OperatorBase | HopInstance,
 ) -> bool:
     if isinstance(op, HopInstance):
         # HOPs that implement gen_schema and schema is not functional are auto_functionalizable.
@@ -532,19 +545,24 @@ def do_auto_functionalize(
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names, _ = get_mutable_args(op)
 
-    unwrapped_actual_out: Union[Any, tuple[Any]] = unwrapped_outs[
-        : -len(mutable_args_names)
-    ]
+    unwrapped_actual_out: Any | tuple[Any] = unwrapped_outs[: -len(mutable_args_names)]
     unwrapped_mutable_out = unwrapped_outs[-len(mutable_args_names) :]
 
     if len(op._schema.returns) == 0:
-        assert unwrapped_actual_out[0] is None
+        if unwrapped_actual_out[0] is not None:
+            raise AssertionError(
+                f"Expected None for op with no returns, got {unwrapped_actual_out[0]}"
+            )
         unwrapped_actual_out = None
     elif len(op._schema.returns) == 1:
-        assert len(unwrapped_actual_out) == 1
+        if len(unwrapped_actual_out) != 1:
+            raise AssertionError(f"Expected 1 output, got {len(unwrapped_actual_out)}")
         unwrapped_actual_out = unwrapped_actual_out[0]
     else:
-        assert len(unwrapped_actual_out) == len(op._schema.returns)
+        if len(unwrapped_actual_out) != len(op._schema.returns):
+            raise AssertionError(
+                f"Expected {len(op._schema.returns)} outputs, got {len(unwrapped_actual_out)}"
+            )
 
     for name, unwrapped_out in zip(mutable_args_names, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
@@ -564,7 +582,10 @@ def do_auto_functionalize(
         elif isinstance(unwrapped_out, list) and all(
             isinstance(o, torch.Tensor) for o in unwrapped_out
         ):
-            assert len(orig_arg) == len(unwrapped_out)
+            if len(orig_arg) != len(unwrapped_out):
+                raise AssertionError(
+                    f"orig_arg length ({len(orig_arg)}) != unwrapped_out length ({len(unwrapped_out)})"
+                )
             for orig_a, o in zip(orig_arg, unwrapped_out):
                 sync_update(o, orig_a)
         else:
@@ -585,13 +606,19 @@ def do_auto_functionalize(
 class FunctionalCallableWithEpilogue:
     def __init__(self, orig_callable: Callable):
         self.orig_callable = orig_callable
+        # Propagate so callers pass inputs as a list, enabling input deallocation.
+        self._boxed_call = getattr(orig_callable, "_boxed_call", False)
 
     def __call__(self, *args, **kwargs):
-        # We call torch.func.functionalize. This allows us to inline the epilogue graph.
-        # Inlining has the benefit of allowing easiser fusion inside subgraph.
-        # Though the epilogue graph contains copy_, it is OK because inductor can handle it
-        # and this is also how we have been supporting top-level graph input mutation.
-        return tuple(torch.func.functionalize(self.orig_callable)(*args, **kwargs))
+        # Functionalize to inline the epilogue graph (copy_ ops) for better fusion.
+        functionalized = torch.func.functionalize(self.orig_callable)
+        if self._boxed_call:
+            # Not all callers respect _boxed_call (e.g. reenter_make_fx
+            # always calls f(*args)). Detect which convention was used.
+            if len(args) == 1 and isinstance(args[0], list):
+                return tuple(functionalized(args[0]))
+            return tuple(functionalized(list(args)))
+        return tuple(functionalized(*args, **kwargs))
 
     def __hash__(self):
         return id(self.orig_callable)
@@ -599,7 +626,7 @@ class FunctionalCallableWithEpilogue:
 
 def do_auto_functionalize_v2(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
-    op: Union[OpOverload, HopInstance],
+    op: OpOverload | HopInstance,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> Any:
@@ -614,14 +641,27 @@ def do_auto_functionalize_v2(
     schema = op._schema
     # pyrefly: ignore [bad-assignment]
     op = op._op if isinstance(op, HopInstance) else op
-    assert isinstance(op, get_args(_MutableOpType))
+    if not isinstance(op, get_args(_MutableOpType)):
+        raise AssertionError(f"Expected _MutableOpType, got {type(op)}")
 
-    def _functionalize_callable(arg: Any):
-        if callable(arg):
+    subgraph_arg_names = {
+        arg_info.name
+        for arg_info in schema.arguments
+        if isinstance(arg_info.type, torch._C.AnyType)
+    }
+
+    def _maybe_functionalize(name: str, arg: Any) -> Any:
+        if name in subgraph_arg_names and callable(arg):
             return FunctionalCallableWithEpilogue(arg)
         return arg
 
-    args, kwargs = pytree.tree_map(_functionalize_callable, (args, kwargs))
+    args = tuple(
+        _maybe_functionalize(schema.arguments[i].name, a)
+        if i < len(schema.arguments)
+        else a
+        for i, a in enumerate(args)
+    )
+    kwargs = {k: _maybe_functionalize(k, v) for k, v in kwargs.items()}
 
     for idx, arg in enumerate(schema.arguments):
         # NB: torch_dispatch kwargs are the args defined as kwarg-only in the schema
@@ -699,10 +739,12 @@ def do_auto_functionalize_v2(
         )
     all_basis_unwrapped = ctx.unwrap_tensors(all_bases)
 
-    assert "_all_bases" not in unwrapped_kwargs, (op, unwrapped_kwargs)
+    if "_all_bases" in unwrapped_kwargs:
+        raise AssertionError(f"_all_bases already in unwrapped_kwargs for {op}")
     auto_func_kwargs = dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)
     if isinstance(op, HigherOrderOperator):
-        assert "_ops_schema" not in unwrapped_kwargs, (op, unwrapped_kwargs)
+        if "_ops_schema" in unwrapped_kwargs:
+            raise AssertionError(f"_ops_schema already in unwrapped_kwargs for {op}")
         # We pass in the tree_spec of tree_flatten(SchemaHolder) to make it proxable
         auto_func_kwargs.update(
             {"_op_schema": pytree.tree_flatten(SchemaHolder(schema))[1]}
@@ -714,7 +756,7 @@ def do_auto_functionalize_v2(
             **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
-    unwrapped_actual_out: Union[Any, tuple[Any]] = (
+    unwrapped_actual_out: Any | tuple[Any] = (
         unwrapped_outs if len(all_bases) == 0 else unwrapped_outs[: -len(all_bases)]
     )
 
@@ -723,19 +765,32 @@ def do_auto_functionalize_v2(
     )
 
     if isinstance(op, HigherOrderOperator):
-        assert len(schema.returns) > 0, (
-            f"hop is expected to return at least one output {schema}."
-        )
-        assert len(unwrapped_actual_out) == len(schema.returns)
+        if len(schema.returns) <= 0:
+            raise AssertionError(
+                f"hop is expected to return at least one output {schema}."
+            )
+        if len(unwrapped_actual_out) != len(schema.returns):
+            raise AssertionError(
+                f"Expected {len(schema.returns)} outputs, got {len(unwrapped_actual_out)}"
+            )
     else:
         if len(schema.returns) == 0:
-            assert unwrapped_actual_out[0] is None
+            if unwrapped_actual_out[0] is not None:
+                raise AssertionError(
+                    f"Expected None for op with no returns, got {unwrapped_actual_out[0]}"
+                )
             unwrapped_actual_out = None
         elif len(schema.returns) == 1:
-            assert len(unwrapped_actual_out) == 1
+            if len(unwrapped_actual_out) != 1:
+                raise AssertionError(
+                    f"Expected 1 output, got {len(unwrapped_actual_out)}"
+                )
             unwrapped_actual_out = unwrapped_actual_out[0]
         else:
-            assert len(unwrapped_actual_out) == len(schema.returns)
+            if len(unwrapped_actual_out) != len(schema.returns):
+                raise AssertionError(
+                    f"Expected {len(schema.returns)} outputs, got {len(unwrapped_actual_out)}"
+                )
 
     for orig_arg, unwrapped_out in zip(all_bases, unwrapped_mutable_out):
         # Can be None if input was `Tensor(a!)?`
@@ -753,7 +808,10 @@ def do_auto_functionalize_v2(
         elif isinstance(unwrapped_out, list) and all(
             isinstance(o, torch.Tensor) for o in unwrapped_out
         ):
-            assert len(orig_arg) == len(unwrapped_out)
+            if len(orig_arg) != len(unwrapped_out):
+                raise AssertionError(
+                    f"orig_arg length ({len(orig_arg)}) != unwrapped_out length ({len(unwrapped_out)})"
+                )
             for orig_a, o in zip(orig_arg, unwrapped_out):
                 sync_update(o, orig_a)
         else:
@@ -768,7 +826,7 @@ def do_auto_functionalize_v2(
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: OpOverload,
-    _only_clone_these_tensors: Optional[tuple[str, ...]] = None,
+    _only_clone_these_tensors: tuple[str, ...] | None = None,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
@@ -845,7 +903,7 @@ def auto_functionalized_func(ctx, _mutable_op, **kwargs):
 @auto_functionalized_v2.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_v2_dense(
     _mutable_op: _MutableOpType,
-    _only_clone_these_bases: Optional[tuple[int, ...]] = None,
+    _only_clone_these_bases: tuple[int, ...] | None = None,
     **kwargs: Any,
 ) -> tuple[Any, tuple[Tensor, ...]]:
     _all_bases: list[Tensor] = kwargs.pop("_all_bases", [])
@@ -858,9 +916,10 @@ def auto_functionalized_v2_dense(
         schema = pytree.tree_unflatten([], kwargs.pop("_op_schema")).schema
 
     if isinstance(_mutable_op, OpOverload):
-        _callable_op: Union[HopInstance, OpOverload] = _mutable_op
+        _callable_op: HopInstance | OpOverload = _mutable_op
     else:
-        assert isinstance(schema, HopSchema)
+        if not isinstance(schema, HopSchema):
+            raise AssertionError(f"Expected HopSchema, got {type(schema)}")
         _callable_op = HopInstance(_mutable_op, schema)
 
     op_kwargs_new, all_bases_new = _generate_new_op_kwargs_from_bases(
@@ -978,13 +1037,21 @@ def auto_functionalized_v2_proxy(
             HopInstance(_mutable_op, schema), tuple(), new_kwargs
         )
 
-        # Only replace the callabes in kwargs with the materialized subgraphs.
+        # Only replace the callables in kwargs with the materialized subgraphs.
         # The rest of the kwargs are kept unchanged.
+        subgraph_arg_names = {
+            arg_info.name
+            for arg_info in schema.arguments
+            if isinstance(arg_info.type, torch._C.AnyType)
+        }
         for k, v in kwargs.items():
-            if callable(v):
-                assert k in materialized_kwargs and isinstance(
+            if k in subgraph_arg_names and callable(v):
+                if k not in materialized_kwargs or not isinstance(
                     materialized_kwargs[k], torch.fx.GraphModule
-                )
+                ):
+                    raise AssertionError(
+                        f"Expected {k} to be in materialized_kwargs as a GraphModule"
+                    )
                 kwargs[k] = materialized_kwargs[k]
 
     with disable_proxy_modes_tracing():

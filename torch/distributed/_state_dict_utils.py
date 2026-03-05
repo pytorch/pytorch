@@ -4,7 +4,7 @@ import io
 import math
 import weakref
 from collections.abc import Callable, Mapping, MutableMapping
-from typing import Any, cast, NamedTuple, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, TYPE_CHECKING
 
 import torch
 import torch.cuda._pin_memory_utils as pin_memory_utils
@@ -201,7 +201,6 @@ def _iterate_state_dict(
                             ret.local_shards()[idx].tensor, non_blocking=non_blocking
                         )
                 else:
-                    # pyrefly: ignore [missing-attribute]
                     companion_obj.copy_(ret, non_blocking=non_blocking)
                 ret = companion_obj
     else:
@@ -732,7 +731,7 @@ def _distribute_state_dict(
 # These APIs are from torch.distributed.checkpoint.
 # TODO: We should consolidate the code here as some not all modules can depend on
 # DCP.
-PATH_ITEM = Union[str, int]
+PATH_ITEM = str | int
 OBJ_PATH = tuple[PATH_ITEM, ...]
 FLATTEN_MAPPING = dict[str, OBJ_PATH]
 STATE_DICT_TYPE = dict[str, Any]

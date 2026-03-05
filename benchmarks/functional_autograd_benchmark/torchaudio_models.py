@@ -225,7 +225,8 @@ class Lookahead(nn.Module):
     # output shape - same as input
     def __init__(self, n_features, context):
         super().__init__()
-        assert context > 0
+        if context <= 0:
+            raise AssertionError(f"context must be positive, but got {context}")
         self.context = context
         self.n_features = n_features
         self.pad = (0, self.context - 1)
@@ -538,21 +539,24 @@ class MultiheadAttentionContainer(torch.nn.Module):
             query.size(-1),
         )
         q, k, v = self.in_proj_container(query, key, value)
-        assert q.size(-1) % self.nhead == 0, (
-            "query's embed_dim must be divisible by the number of heads"
-        )
+        if q.size(-1) % self.nhead != 0:
+            raise AssertionError(
+                f"query's embed_dim ({q.size(-1)}) must be divisible by the number of heads ({self.nhead})"
+            )
         head_dim = q.size(-1) // self.nhead
         q = q.reshape(tgt_len, bsz * self.nhead, head_dim)
 
-        assert k.size(-1) % self.nhead == 0, (
-            "key's embed_dim must be divisible by the number of heads"
-        )
+        if k.size(-1) % self.nhead != 0:
+            raise AssertionError(
+                f"key's embed_dim ({k.size(-1)}) must be divisible by the number of heads ({self.nhead})"
+            )
         head_dim = k.size(-1) // self.nhead
         k = k.reshape(src_len, bsz * self.nhead, head_dim)
 
-        assert v.size(-1) % self.nhead == 0, (
-            "value's embed_dim must be divisible by the number of heads"
-        )
+        if v.size(-1) % self.nhead != 0:
+            raise AssertionError(
+                f"value's embed_dim ({v.size(-1)}) must be divisible by the number of heads ({self.nhead})"
+            )
         head_dim = v.size(-1) // self.nhead
         v = v.reshape(src_len, bsz * self.nhead, head_dim)
 
@@ -612,16 +616,22 @@ class ScaledDotProduct(torch.nn.Module):
             of attention heads, N is the batch size, and E is the embedding dimension.
         """
         if bias_k is not None and bias_v is not None:
-            assert (
+            if not (
                 key.size(-1) == bias_k.size(-1)
                 and key.size(-2) == bias_k.size(-2)
                 and bias_k.size(-3) == 1
-            ), "Shape of bias_k is not supported"
-            assert (
+            ):
+                raise AssertionError(
+                    f"Shape of bias_k is not supported: key.shape={key.shape}, bias_k.shape={bias_k.shape}"
+                )
+            if not (
                 value.size(-1) == bias_v.size(-1)
                 and value.size(-2) == bias_v.size(-2)
                 and bias_v.size(-3) == 1
-            ), "Shape of bias_v is not supported"
+            ):
+                raise AssertionError(
+                    f"Shape of bias_v is not supported: value.shape={value.shape}, bias_v.shape={bias_v.shape}"
+                )
             key = torch.cat([key, bias_k])
             value = torch.cat([value, bias_v])
             if attn_mask is not None:
@@ -629,10 +639,15 @@ class ScaledDotProduct(torch.nn.Module):
                 attn_mask = torch.nn.functional.pad(_attn_mask, [0, 1])
 
         tgt_len, head_dim = query.size(-3), query.size(-1)
-        assert query.size(-1) == key.size(-1) == value.size(-1), (
-            "The feature dim of query, key, value must be equal."
-        )
-        assert key.size() == value.size(), "Shape of key, value must match"
+        if not (query.size(-1) == key.size(-1) == value.size(-1)):
+            raise AssertionError(
+                f"The feature dim of query, key, value must be equal: "
+                f"query={query.size(-1)}, key={key.size(-1)}, value={value.size(-1)}"
+            )
+        if key.size() != value.size():
+            raise AssertionError(
+                f"Shape of key, value must match: key.shape={key.shape}, value.shape={value.shape}"
+            )
         src_len = key.size(-3)
         batch_heads = max(query.size(-2), key.size(-2))
 

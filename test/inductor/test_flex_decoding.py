@@ -11,6 +11,7 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
+from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.experimental._paged_attention import PagedAttention
@@ -24,12 +25,19 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, with_tf32_off
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_FP8,
+    with_tf32_off,
+)
 from torch.testing._internal.common_device_type import (
+    E4M3_MAX_POS,
+    e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
     skipXPUIf,
 )
+from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._triton import has_triton_tma_device
 
@@ -378,10 +386,12 @@ class TestFlexDecoding(InductorTestCase):
         device="cuda",
         kernel_options=None,
     ):
-        assert score_mod is not None or block_mask is not None, (
-            "Must provide score_mod or block_mask"
-        )
-        assert Q_H % KV_H == 0
+        if score_mod is None and block_mask is None:
+            raise AssertionError("Must provide score_mod or block_mask")
+        if Q_H % KV_H != 0:
+            raise AssertionError(
+                f"Expected Q_H % KV_H == 0, got {Q_H} % {KV_H} = {Q_H % KV_H}"
+            )
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
 
@@ -496,7 +506,8 @@ class TestFlexDecoding(InductorTestCase):
         page_size: int = 128,
         device="cuda",
     ):
-        assert block_mask is not None, "Must provide block_mask"
+        if block_mask is None:
+            raise AssertionError("Must provide block_mask")
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
         Q_B, Q_H, Q_S, _ = q.shape
@@ -634,7 +645,10 @@ class TestFlexDecoding(InductorTestCase):
         block_mask: Optional[BlockMask] = None,
         device="cuda",
     ):
-        assert Q_H % KV_H == 0
+        if Q_H % KV_H != 0:
+            raise AssertionError(
+                f"Expected Q_H % KV_H == 0, got {Q_H} % {KV_H} = {Q_H % KV_H}"
+            )
         if device == "cpu" and dtype is torch.float16:
             dtype = torch.float32
         q = torch.randn(
@@ -782,7 +796,10 @@ class TestFlexDecoding(InductorTestCase):
         self, device, dtype: torch.dtype, score_mod: Callable, head_dims
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
         self.run_test(score_mod, dtype, Q_H=Hq, KV_H=Hkv, device=device)
         self.run_test_with_paged_attention(
             score_mod, dtype, Q_H=Hq, KV_H=Hkv, device=device
@@ -802,7 +819,10 @@ class TestFlexDecoding(InductorTestCase):
         page_size: int,
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
 
         def generate_causal_offset(offset: torch.Tensor):
             def causal_offset_mask(b, h, q_idx, kv_idx):
@@ -874,7 +894,10 @@ class TestFlexDecoding(InductorTestCase):
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     def test_strided_inputs(self, device, dtype: torch.dtype, k_s, v_s, head_dims):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
         q1 = torch.randn((B * Hq * D), dtype=dtype, device=device)
         k1 = torch.randn((B * Hkv * S * D * 4), dtype=dtype, device=device)
         v1 = torch.randn((B * Hkv * S * D * 4), dtype=dtype, device=device)
@@ -886,14 +909,22 @@ class TestFlexDecoding(InductorTestCase):
 
         k_strides, k_offset = k_s(B, Hkv, S, D)
         k_max = [x * (y - 1) for x, y in zip(k_strides, k_shape)]
-        assert sum(k_max) + k_offset < B * Hkv * S * D * 4
-        assert k_strides[-1] == 1
+        if sum(k_max) + k_offset >= B * Hkv * S * D * 4:
+            raise AssertionError(
+                f"Expected sum(k_max) + k_offset < {B * Hkv * S * D * 4}, got {sum(k_max) + k_offset}"
+            )
+        if k_strides[-1] != 1:
+            raise AssertionError(f"Expected k_strides[-1] == 1, got {k_strides[-1]}")
         k = torch.as_strided(k1, k_shape, k_strides, k_offset)
 
         v_strides, v_offset = v_s(B, Hkv, S, D)
         v_max = [x * (y - 1) for x, y in zip(v_strides, v_shape)]
-        assert sum(v_max) + v_offset < B * Hkv * S * D * 4
-        assert v_strides[-1] == 1
+        if sum(v_max) + v_offset >= B * Hkv * S * D * 4:
+            raise AssertionError(
+                f"Expected sum(v_max) + v_offset < {B * Hkv * S * D * 4}, got {sum(v_max) + v_offset}"
+            )
+        if v_strides[-1] != 1:
+            raise AssertionError(f"Expected v_strides[-1] == 1, got {v_strides[-1]}")
         v = torch.as_strided(v1, v_shape, v_strides, v_offset)
 
         score_mod = _generate_alibi_bias(8)
@@ -933,10 +964,16 @@ class TestFlexDecoding(InductorTestCase):
         score_mod: Callable,
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
 
         Bq, Bkv = batch_dims
-        assert Bq > 1 and Bkv == 1
+        if not (Bq > 1 and Bkv == 1):
+            raise AssertionError(
+                f"Expected Bq > 1 and Bkv == 1, got Bq={Bq}, Bkv={Bkv}"
+            )
 
         block_mask = create_block_mask(noop_mask, Bq, 1, 1, S, device=device)
 
@@ -1135,7 +1172,10 @@ class TestFlexDecoding(InductorTestCase):
         self, device, dtype: torch.dtype, score_mod, head_dims
     ):
         Hq, Hkv = head_dims
-        assert Hq % Hkv == 0
+        if Hq % Hkv != 0:
+            raise AssertionError(
+                f"Expected Hq % Hkv == 0, got {Hq} % {Hkv} = {Hq % Hkv}"
+            )
 
         def head_attention_mod(kv_head_num):
             head_type = torch.tensor(
@@ -1274,8 +1314,19 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("dtype", test_dtypes_fast)
     @common_utils.serialTest()
     def test_non_pow_2_headdim(self, device, dtype, head_dim):
+        # Use Q_S=1 (decode path) by not passing Q_S parameter - it defaults to 1
+        # This tests the flex_decode kernel with non-power-of-2 head dimensions
         self.run_test(
-            _rel_bias, dtype, B, Hq, S, head_dim, B, Hkv, S, head_dim, device=device
+            _rel_bias,
+            dtype,
+            Q_B=B,
+            Q_H=Hq,
+            Q_D=head_dim,
+            KV_B=B,
+            KV_H=Hkv,
+            KV_S=S,
+            V_D=head_dim,
+            device=device,
         )
 
     @supported_platform
@@ -1557,14 +1608,140 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(causal_njt, dtype, device=device)
 
     @supported_platform
-    def test_mixed_dtypes_fails(self, device):
-        query = torch.randn((1, 1, 8, 64), dtype=torch.float32, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_mixed_dtypes(self, device):
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        query = torch.randn((1, 1, 8, 64), dtype=dtype_high, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
+        )
+        value = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
+        )
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        out = torch.compile(flex_attention)(
+            query, key, value, _identity, kernel_options=kernel_options
+        )
+        self.assertEqual(out.shape, query.shape)
+        self.assertEqual(out.dtype, query.dtype)
+
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    @unittest.skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
+    def test_mixed_dtypes_sqnr_per_tensor(self, device):
+        query_ref = torch.testing.make_tensor(
+            (1, 1, 8, 64), dtype=torch.bfloat16, device=device
+        )
+        key_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        value_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+
+        key_scale = torch.max(torch.abs(key_ref)) / E4M3_MAX_POS
+        value_scale = torch.max(torch.abs(value_ref)) / E4M3_MAX_POS
+
+        key_fp8 = (key_ref / key_scale).to(e4m3_type)
+        value_fp8 = (value_ref / value_scale).to(e4m3_type)
+
+        def score_mod(score, b, h, m, n):
+            # Dequantize keys inside the attention score computation
+            return score * key_scale
+
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        out = (
+            compiled_fn(
+                query_ref, key_fp8, value_fp8, score_mod, kernel_options=kernel_options
+            )
+            * value_scale
+        )
+        out_ref = compiled_fn(
+            query_ref, key_ref, value_ref, _identity, kernel_options=kernel_options
+        )
+        _, _, sqnr = _snr(out_ref, out)
+        self.assertGreater(sqnr, 10)
+
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    @unittest.skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
+    def test_mixed_dtypes_sqnr_per_head(self, device):
+        query_ref = torch.testing.make_tensor(
+            (1, 4, 8, 64), dtype=torch.bfloat16, device=device
+        )
+        key_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        value_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+
+        fp8_max = E4M3_MAX_POS
+
+        key_scale = torch.amax(torch.abs(key_ref), dim=(-2, -1)) / fp8_max  # (B, H)
+        value_scale = torch.amax(torch.abs(value_ref), dim=(-2, -1)) / fp8_max  # (B, H)
+
+        key_scale_b = key_scale[..., None, None]  # (B, H, 1, 1) for broadcasting
+        value_scale_b = value_scale[..., None, None]
+
+        key_fp8 = (key_ref / key_scale_b).to(e4m3_type)
+        value_fp8 = (value_ref / value_scale_b).to(e4m3_type)
+
+        def score_mod(score, b, h, m, n):
+            # Dequantize keys inside the attention score computation
+            return score * key_scale[b, h]
+
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        out = (
+            compiled_fn(
+                query_ref, key_fp8, value_fp8, score_mod, kernel_options=kernel_options
+            )
+            * value_scale_b
+        )
+        out_ref = compiled_fn(
+            query_ref, key_ref, value_ref, _identity, kernel_options=kernel_options
+        )
+        _, _, sqnr = _snr(out_ref, out)
+        self.assertGreater(sqnr, 10)
+
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_mixed_dtype_backwards(self, device):
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        q = torch.testing.make_tensor(
+            (1, 1, 8, 64),
+            dtype=dtype_high,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=dtype_high,
+            device=device,
+            requires_grad=True,
+        ).to(dtype_low)
+        v = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=dtype_high,
+            device=device,
+            requires_grad=True,
+        ).to(dtype_low)
+
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
         with self.assertRaisesRegex(
-            ValueError, "Expected query, key, and value to have the same dtype"
+            InductorError,
+            "Backward pass with mixed query, key, and value dtype is not supported",
         ):
-            flex_attention(query, key, value, _identity)
+            out_mixed = (
+                compiled_fn(q, k, v, _identity, kernel_options=kernel_options)
+            ).mean()
+            out_mixed.backward()
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -1843,7 +2020,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
-    @skip_on_xpu  # TODO: SYCL acc issue
     def test_non_sparse_mulitple_block_size(self, device):
         def generate_causal_offset(offset: torch.Tensor):
             def causal_offset_mask(b, h, q_idx, kv_idx):

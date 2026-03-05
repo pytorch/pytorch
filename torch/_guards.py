@@ -6,7 +6,6 @@ import enum
 import functools
 import logging
 import re
-import sys
 import threading
 import traceback
 import unittest.mock
@@ -16,18 +15,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
-
-
-if sys.version_info >= (3, 11):
-    from typing import dataclass_transform
-else:
-
-    def dataclass_transform():
-        def decorator(fn):
-            return fn
-
-        return decorator
-
+from typing_extensions import dataclass_transform
 
 import torch
 from torch.utils import _pytree as pytree
@@ -652,6 +640,15 @@ class GuardsSet:
             self.inner: OrderedSet[Guard] = OrderedSet()
         else:
             self.inner = inner
+        # Map from source to list of guards with that source. Incrementally
+        # built in `add` method.
+        self.source_to_guards: defaultdict[Source, list[Guard]] = defaultdict(list)
+        for guard in self.inner:
+            self.track_guard_by_source(guard)
+
+    def track_guard_by_source(self, guard: Guard) -> None:
+        source = guard.originating_source
+        self.source_to_guards[source].append(guard)
 
     def __iter__(self) -> Iterator[Guard]:
         return iter(self.inner)
@@ -667,6 +664,10 @@ class GuardsSet:
     def __bool__(self) -> bool:
         return bool(self.inner)
 
+    def clear(self) -> None:
+        self.inner = OrderedSet()
+        self.source_to_guards = defaultdict(list)
+
     def add(
         self, guard: Guard, *, collect_debug_stack: bool = True, skip: int = 0
     ) -> None:
@@ -678,11 +679,16 @@ class GuardsSet:
         if guard.user_stack is None:
             guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
+        self.track_guard_by_source(guard)
 
     def update(self, *others: set[Guard]) -> None:
         for o in others:
             for g in o:
                 self.add(g, skip=1)
+
+    def get_guards_for_source(self, source: Source) -> list[Guard]:
+        """Return all guards with the given originating_source."""
+        return list(self.source_to_guards[source])
 
     def remove_guards_with_source(self, source: Source) -> None:
         """Delete all guards that contains a given source"""
@@ -691,6 +697,11 @@ class GuardsSet:
         self.inner = OrderedSet(
             g for g in self.inner if not is_from_source(g.originating_source, source)
         )
+        # Rebuild the index since is_from_source walks the chain, so
+        # multiple source keys may need removal.
+        self.source_to_guards = defaultdict(list)
+        for guard in self.inner:
+            self.track_guard_by_source(guard)
 
 
 """
@@ -887,6 +898,15 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
+@dataclass
+class InlinedCodeCache:
+    """Cache for code-object-derived data used during inlining."""
+
+    instructions: list[Any]
+    indexof: dict[Any, int]
+    code_options: dict[str, Any]
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -913,6 +933,8 @@ class TracingContext:
         self.global_context = GlobalContext()
         self.previously_inlined_functions: dict[Any, Any] = dict()
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
+        # Combined cache for inlined code data (instructions, indexof, code_options)
+        self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
         self.fake_mode: FakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -957,6 +979,7 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
+        self.cudagraph_annotation: Any = None
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
@@ -964,6 +987,7 @@ class TracingContext:
         self.global_context.global_state = {}
         self.previously_inlined_functions.clear()
         self.previously_cleaned_instructions.clear()
+        self.inlined_code_cache.clear()
 
     @staticmethod
     @contextmanager
@@ -1226,6 +1250,13 @@ class Source:
         """True if you can guard on attributes of this"""
         return self.guard_source != GuardSource.SYNTHETIC_LOCAL
 
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        # Frozen dataclass, so returning self is effectively a clone.
+        # Subclasses with mutable state should override.
+        if transform_fn is not None:
+            return transform_fn(self)
+        return self
+
 
 # Subclasses can be found in torch/_dynamo/source.py
 @dataclass_with_cached_hash(frozen=True)
@@ -1272,6 +1303,19 @@ class ChainedSource(Source):
         cache[self] = value
         return value
 
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        cloned_fields: dict[str, Any] = {"base": self.base.clone(transform_fn)}
+        for f in dataclasses.fields(self):
+            if f.name == "base":
+                continue
+            val = getattr(self, f.name)
+            if isinstance(val, Source):
+                cloned_fields[f.name] = val.clone(transform_fn)
+        result = dataclasses.replace(self, **cloned_fields)
+        if transform_fn is not None:
+            result = transform_fn(result)
+        return result
+
 
 def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
     """
@@ -1290,24 +1334,25 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         get_plain_tensors,
     )
 
-    fake_modes = []
-
+    # If TracingContext has a fake_mode, use it authoritatively.
+    # This is the case when Dynamo is driving compilation - any fake tensors
+    # from other modes in the inputs will be refakified by the caller.
     if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            fake_modes.append((fake_mode, "tracing context", 0))
+            return fake_mode
+
+    fake_modes = []
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((m, "active fake mode", i))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
@@ -1316,7 +1361,6 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
                 x for x in out if isinstance(x, FakeTensor)
             ]
             fake_modes.extend(
-                # pyrefly: ignore [bad-argument-type]
                 [
                     (tensor.fake_mode, f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
@@ -1329,12 +1373,10 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
             if fake_mode is not m:
                 raise AssertionError(
                     f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                    # pyrefly: ignore [missing-attribute]
                     f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                    # pyrefly: ignore [missing-attribute]
                     f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
                 )
-        # pyrefly: ignore [bad-return]
+
         return fake_mode
     else:
         return None
