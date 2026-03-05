@@ -16,6 +16,8 @@ exclude_patterns = [
     'functorch/docs/source/tutorials/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     'test/test_torchfuzz_repros.py',
@@ -118,7 +120,10 @@ include_patterns = [
     'functorch/**/*.py',
     'functorch/**/*.pyi',
 ]
-exclude_patterns = []
+exclude_patterns = [
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
+]
 command = [
     'uv',
     'run',
@@ -1108,6 +1113,8 @@ exclude_patterns = [
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'torch/utils/model_dump/preact.mjs',
 ]
 is_formatter = true
@@ -1491,6 +1498,8 @@ exclude_patterns = [
     'functorch/docs/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
     'test/dynamo/cpython/**',
     'test/test_torchfuzz_repros.py',
     'scripts/**',
@@ -1669,6 +1678,10 @@ command = [
 ]
 include_patterns = [
    'torch/_inductor/**/*.py'
+]
+exclude_patterns = [
+    'torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**',
+    'torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py',
 ]
 is_formatter = false
 
