@@ -1,5 +1,6 @@
 from ._flat_param import FlatParameter as FlatParameter
 from ._fully_shard import (
+    CopyEngineAllGather,
     CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
@@ -48,6 +49,7 @@ __all__ = [
     "StateDictSettings",
     "StateDictType",
     # FSDP2
+    "CopyEngineAllGather",
     "CPUOffloadPolicy",
     "FSDPModule",
     "fully_shard",
@@ -59,6 +61,7 @@ __all__ = [
 ]
 
 # Set namespace for exposed private names
+CopyEngineAllGather.__module__ = "torch.distributed.fsdp"
 CPUOffloadPolicy.__module__ = "torch.distributed.fsdp"
 FSDPModule.__module__ = "torch.distributed.fsdp"
 fully_shard.__module__ = "torch.distributed.fsdp"

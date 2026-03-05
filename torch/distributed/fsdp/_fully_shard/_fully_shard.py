@@ -13,6 +13,7 @@ import torch.nn as nn
 from torch.distributed._composable import contract
 
 from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
+from ._fsdp_collectives import CopyEngineAllGather, DefaultAllGather
 from ._fsdp_common import FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -488,6 +489,28 @@ class FSDPModule:
             )
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._all_gather_comm = comm
+
+    def set_copy_engine_all_gather(self, enable: bool = True) -> None:
+        """Enable copy engine (zero-CTA) all-gather for this FSDP module.
+
+        Allocates all-gather buffers from symmetric memory so NCCL uses
+        copy engines instead of SMs, reducing interference with overlapping
+        computation.
+
+        Requires:
+        - NCCL >= 2.28
+        - Process group created with
+          ``opts.config.cta_policy = ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO``
+        - Symmetric memory backend set to NCCL via
+          ``torch.distributed._symmetric_memory.set_backend("NCCL")``
+        """
+        if enable:
+            state = self._get_fsdp_state()
+            for fsdp_param_group in state._fsdp_param_groups:
+                group = fsdp_param_group._all_gather_process_group
+                fsdp_param_group._all_gather_comm = CopyEngineAllGather(group)
+        else:
+            self.set_custom_all_gather(DefaultAllGather())
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
         """

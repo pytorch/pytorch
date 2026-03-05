@@ -5,6 +5,7 @@ from typing import Any, cast, NamedTuple
 
 import torch
 import torch.distributed as dist
+import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
@@ -96,6 +97,44 @@ class DefaultAllGather(DefaultAllocMixin, AllGather):
 class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
     def __init__(self, group: dist.ProcessGroup) -> None:
         super().__init__(group)
+
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        async_op: bool = False,
+    ) -> dist.Work | None:
+        return dist.all_gather_into_tensor(
+            output_tensor,
+            input_tensor,
+            group=group,
+            async_op=async_op,
+        )
+
+
+class CopyEngineAllGather(AllGather):
+    """AllGather using symmetric memory buffers for copy engine (zero-CTA) collectives.
+
+    Requires the process group to be initialized with
+    cta_policy=ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO (NCCL >= 2.28).
+    """
+
+    def __init__(self, group: dist.ProcessGroup) -> None:
+        self._group_name = group.group_name
+
+    def allocate(
+        self,
+        size: Sequence[int | torch.SymInt],
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        t = symm_mem.empty(  # pyrefly: ignore[no-matching-overload]
+            size, dtype=dtype, device=device
+        )
+        symm_mem.rendezvous(t, group=self._group_name)
+        return t
 
     def __call__(
         self,

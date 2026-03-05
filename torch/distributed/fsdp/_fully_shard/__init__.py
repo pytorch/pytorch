@@ -1,4 +1,5 @@
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_collectives import CopyEngineAllGather
 from ._fully_shard import (
     FSDPModule,
     fully_shard,
@@ -9,6 +10,7 @@ from ._fully_shard import (
 
 
 __all__ = [
+    "CopyEngineAllGather",
     "CPUOffloadPolicy",
     "FSDPModule",
     "fully_shard",
