@@ -9522,6 +9522,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(x.int().type(torch.Tensor).dtype, torch.get_default_dtype())
         self.assertEqual(x.type(torch.int32).dtype, torch.int32)
 
+    def test_type_float_to_int_overflow(self):
+        x = torch.tensor([[float(torch.iinfo(torch.int64).max)]])
+        x = x.long()
+        self.assertEqual(x.item(), torch.iinfo(torch.int64).max)
+
     # FIXME: port to a quantization test suite
     @xfailIfS390X
     def test_qengine(self):
