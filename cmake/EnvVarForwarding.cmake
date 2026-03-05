@@ -127,15 +127,34 @@ if(Python_EXECUTABLE)
     endif()
     list(REMOVE_DUPLICATES CMAKE_PREFIX_PATH)
 
-    # Add conda env lib dirs as -rpath-link so the conda compat linker
-    # (selected via -B compiler_compat) can find versioned shared libraries
-    # (e.g. libnuma.so.1, libgomp.so.1) needed transitively by PyTorch's
-    # shared libraries when linking test executables.
-    # Using -rpath-link rather than LIBRARY_PATH avoids placing conda libs
-    # ahead of system libs for explicit -l lookups (which would shadow
-    # libstdc++ and trigger GLIBC_PRIVATE link failures in cmake feature tests).
+    # Add -rpath-link dirs so the conda compat linker (-B compiler_compat) can
+    # find versioned shared libraries (libnuma.so.1, libgomp.so.1) when
+    # resolving transitive DT_NEEDED during test-binary and torch_shm_manager
+    # linking.  System lib dirs come first so system-native builds of these
+    # libraries are preferred over conda's sysroot versions, which would
+    # otherwise pull in sysroot libpthread/libdl and trigger GLIBC_PRIVATE
+    # link failures.
     if(DEFINED ENV{CMAKE_PREFIX_PATH} AND NOT "$ENV{CMAKE_PREFIX_PATH}" STREQUAL "")
       string(REPLACE ":" ";" _rp_prefixes "$ENV{CMAKE_PREFIX_PATH}")
+      # System multiarch lib dir (Debian/Ubuntu: /lib/x86_64-linux-gnu, etc.).
+      if(CMAKE_LIBRARY_ARCHITECTURE)
+        foreach(_syslib IN ITEMS
+            "/lib/${CMAKE_LIBRARY_ARCHITECTURE}"
+            "/usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}")
+          if(IS_DIRECTORY "${_syslib}")
+            string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-rpath-link,${_syslib}")
+            string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,-rpath-link,${_syslib}")
+          endif()
+        endforeach()
+      endif()
+      # Traditional 64-bit lib dirs (RHEL/manylinux).
+      foreach(_syslib IN ITEMS "/lib64" "/usr/lib64")
+        if(IS_DIRECTORY "${_syslib}")
+          string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-rpath-link,${_syslib}")
+          string(APPEND CMAKE_SHARED_LINKER_FLAGS " -Wl,-rpath-link,${_syslib}")
+        endif()
+      endforeach()
+      # Conda env lib dirs as fallback for versioned libs absent from the system.
       foreach(_prefix IN LISTS _rp_prefixes)
         if(IS_DIRECTORY "${_prefix}/lib")
           string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-rpath-link,${_prefix}/lib")
