@@ -647,7 +647,9 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         meshes = [
             self.build_device_mesh(),  # 1D mesh
             # TODO(@azzolini): un-comment when DTensorConverter supports N-D mesh
-            # DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, -1)), # 2D mesh
+            # (currently commented out because the conversion logic only handles 1D,
+            # and enabling would require refactoring to avoid a combinatorial explosion
+            # of sharding combinations)
         ]
         for mesh in meshes:
             self._test_op(
