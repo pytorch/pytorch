@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <ATen/Parallel.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
@@ -116,6 +117,23 @@ UpdateMomentsVec(
 template <typename T, int64_t kMaxDepth>
 std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
   using math_t = opmath_t<T>;
+  using acc_t = at::acc_type<T, false>;
+
+  // When acc_type differs from opmath_type (e.g. T=float on CPU where
+  // acc_type=double), use a scalar Welford in higher precision to avoid
+  // overflow when squaring large deviations.
+  if constexpr (!std::is_same_v<math_t, acc_t>) {
+    acc_t m1 = 0, m2 = 0;
+    for (int64_t i = 0; i < N; i++) {
+      acc_t x = static_cast<acc_t>(X[i]);
+      acc_t delta = x - m1;
+      m1 += delta / static_cast<acc_t>(i + 1);
+      m2 += delta * (x - m1);
+    }
+    return std::make_pair(
+      static_cast<math_t>(m1),
+      static_cast<math_t>(m2 / static_cast<acc_t>(N - ddof)));
+  }
 
   constexpr int64_t kVecSize = vec::Vectorized<T>::size();
   constexpr int64_t kAccVecSize = vec::Vectorized<math_t>::size();

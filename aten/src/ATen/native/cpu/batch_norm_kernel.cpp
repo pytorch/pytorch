@@ -208,8 +208,8 @@ batch_norm_cpu_collect_stats_contiguous_impl(
       for (const auto n : c10::irange(n_batch)) {
         for (const auto i : c10::irange(image_size)) {
           auto offset = n * n_channel * image_size + c * image_size + i;
-          auto x = input_data[offset];
-          _var_sum += (x - mean) * (x - mean);
+          accscalar_t diff = static_cast<accscalar_t>(input_data[offset]) - static_cast<accscalar_t>(mean);
+          _var_sum += diff * diff;
         }
       }
       var_sum_data[c] = _var_sum;
@@ -277,21 +277,21 @@ batch_norm_cpu_collect_stats_channels_last_impl(
       }
     });
 
-    // compute variance per input, reuse the immediate buffer
-    buffer.zero_();
+    // compute variance per input using double-precision accumulation
+    // to avoid overflow when squaring large deviations in float
+    Tensor var_buffer = at::zeros({num_threads, n_channel}, input.options().dtype(at::kDouble));
+    accscalar_t* var_buffer_data = var_buffer.data_ptr<accscalar_t>();
+
     at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
       int tid = at::get_thread_num();
       TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
-      scalar_t* buffer_ptr = buffer_data + tid * n_channel;
+      accscalar_t* var_buf_ptr = var_buffer_data + tid * n_channel;
       for (const auto i : c10::irange(begin, end)) {
         const scalar_t* x_ptr = input_data + i * n_channel;
-        vec::map3<scalar_t>(
-            [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
-            buffer_ptr,
-            x_ptr,
-            buffer_ptr,
-            mean_data,
-            n_channel);
+        for (int64_t c = 0; c < n_channel; c++) {
+          accscalar_t diff = static_cast<accscalar_t>(x_ptr[c]) - static_cast<accscalar_t>(mean_data[c]);
+          var_buf_ptr[c] += diff * diff;
+        }
       }
     });
 
@@ -299,9 +299,9 @@ batch_norm_cpu_collect_stats_channels_last_impl(
       for (const auto c : c10::irange(begin, end)) {
         accscalar_t _var_sum = 0;
         for (const auto t : c10::irange(num_threads)) {
-          _var_sum += buffer_data[t * n_channel + c];
+          _var_sum += var_buffer_data[t * n_channel + c];
         }
-        var_sum_data[c] = _var_sum;
+        var_sum_data[c] = static_cast<scalar_t>(_var_sum);
       }
     });
   } else {
@@ -351,23 +351,25 @@ batch_norm_cpu_collect_stats_channels_last_impl(
         }
       });
 
-      // compute variance per input
+      // compute variance per input using double-precision accumulation
+      // to avoid overflow when squaring large deviations in float
       var_sum.zero_();
       at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
         for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
           int64_t jj_begin = tile_idx * TILE_SIZE;
           int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
-          scalar_t* var_sum_ptr = var_sum_data + jj_begin;
-          scalar_t* mean_ptr = mean_data + jj_begin;
+          std::vector<accscalar_t> var_sum_acc(jj_end - jj_begin, 0);
           for (const auto i : c10::irange(N)) {
             const scalar_t* x_ptr = input_data + (i * n_channel + jj_begin);
-            vec::map3<scalar_t>(
-              [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
-              var_sum_ptr,
-              x_ptr,
-              var_sum_ptr,
-              mean_ptr,
-              jj_end - jj_begin);
+            const scalar_t* mean_ptr = mean_data + jj_begin;
+            for (int64_t d = 0; d < jj_end - jj_begin; d++) {
+              accscalar_t diff = static_cast<accscalar_t>(x_ptr[d]) - static_cast<accscalar_t>(mean_ptr[d]);
+              var_sum_acc[d] += diff * diff;
+            }
+          }
+          scalar_t* var_sum_ptr = var_sum_data + jj_begin;
+          for (int64_t d = 0; d < jj_end - jj_begin; d++) {
+            var_sum_ptr[d] = static_cast<scalar_t>(var_sum_acc[d]);
           }
         }
       });
@@ -391,7 +393,8 @@ batch_norm_cpu_collect_stats_channels_last_impl(
         for (const auto c : c10::irange(begin, end)) {
           accscalar_t _var_sum = 0;
           for (const auto t : c10::irange(N)) {
-            _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * (input_data[t * n_channel + c] - mean_data[c]);
+            accscalar_t diff = static_cast<accscalar_t>(input_data[t * n_channel + c]) - static_cast<accscalar_t>(mean_data[c]);
+            _var_sum += diff * diff;
           }
           var_sum_data[c] = _var_sum;
         }

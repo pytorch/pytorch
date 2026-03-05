@@ -12,6 +12,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <ATen/native/cpu/moments_utils.h>
 #include <ATen/native/cpu/mixed_data_type.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/OpMathType.h>
 #include <c10/util/irange.h>
 
@@ -86,33 +87,24 @@ void GroupNormKernelImplInternal(
 
 template <typename T>
 std::enable_if_t<std::is_same_v<T, at::opmath_type<T>>,
-  std::tuple<T, T>>
+  std::tuple<at::acc_type<T, false>, at::acc_type<T, false>>>
 ColumnwiseMoments(
     const T* X_data,
     int64_t HxW,
     int64_t C,
     int64_t D) {
-  using Vec = vec::Vectorized<T>;
-  constexpr int64_t K = Vec::size();
-  const int64_t inner_size = D / K * K;
-  Vec acc0_vec{0}, acc1_vec{0};
+  using accscalar_t = at::acc_type<T, false>;
+  accscalar_t sum_val = 0;
+  accscalar_t sum_sq_val = 0;
   for (const auto m : c10::irange(HxW)) {
     const T* X_ptr = X_data + m * C;
-    int64_t d = 0;
-    for (; d < inner_size; d += K) {
-      Vec x_vec = Vec::loadu(X_ptr + d);
-      acc0_vec += x_vec;
-      acc1_vec += x_vec * x_vec;
-    }
-    if (D - d > 0) {
-      Vec x_vec = Vec::loadu(X_ptr + d, D - d);
-      acc0_vec += x_vec;
-      acc1_vec += x_vec * x_vec;
+    for (int64_t d = 0; d < D; d++) {
+      accscalar_t x = static_cast<accscalar_t>(X_ptr[d]);
+      sum_val += x;
+      sum_sq_val += x * x;
     }
   }
-  T mean_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc0_vec);
-  T rstd_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc1_vec);
-  return std::tuple<T, T>(mean_val, rstd_val);
+  return std::tuple<accscalar_t, accscalar_t>(sum_val, sum_sq_val);
 }
 
 
@@ -351,19 +343,21 @@ void GroupNormKernelImplChannelsLastInternal(
                 C,
                 D);
 
-        mean_val *= s;
-        rstd_val = std::max(rstd_val * s - mean_val * mean_val, opmath_t(0));
-        rstd_val = opmath_t(1) / std::sqrt(rstd_val + eps);
-        mean_data[i] = mean_val;
-        rstd_data[i] = rstd_val;
+        using accscalar_t = at::acc_type<T, false>;
+        auto acc_s = static_cast<accscalar_t>(s);
+        mean_val *= acc_s;
+        rstd_val = std::max(rstd_val * acc_s - mean_val * mean_val, accscalar_t(0));
+        rstd_val = accscalar_t(1) / std::sqrt(rstd_val + static_cast<accscalar_t>(eps));
+        mean_data[i] = static_cast<opmath_t>(mean_val);
+        rstd_data[i] = static_cast<opmath_t>(rstd_val);
 
         // step-2: calculate scale and bias
         opmath_t* scale_ptr = buffer_data + i * 2 * D;
         opmath_t* bias_ptr = scale_ptr + D;
         for (const auto d : c10::irange(D)) {
           const int64_t c = g * D + d;
-          scale_ptr[d] = rstd_val * (gamma_null ? opmath_t(1) : opmath_t(gamma_data[c]));
-          bias_ptr[d] = -scale_ptr[d] * mean_val + (beta_null ? opmath_t(0) : opmath_t(beta_data[c]));
+          scale_ptr[d] = static_cast<opmath_t>(rstd_val) * (gamma_null ? opmath_t(1) : opmath_t(gamma_data[c]));
+          bias_ptr[d] = -scale_ptr[d] * static_cast<opmath_t>(mean_val) + (beta_null ? opmath_t(0) : opmath_t(beta_data[c]));
         }
 
         // step-3: apply scale and bias
@@ -380,14 +374,16 @@ void GroupNormKernelImplChannelsLastInternal(
     // impl-2: parallel on N * HxW.
     //
     // temp buffer holding x and x2
+    using accscalar_t = at::acc_type<T, false>;
     int num_threads = at::get_num_threads();
-    Tensor buffer = at::empty({num_threads, N, 2 * C},
-      X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value)).zero_();
-    opmath_t* buffer_data = buffer.data_ptr<opmath_t>();
+    Tensor acc_buffer = at::empty({num_threads, N, 2 * C},
+      X.options().dtype(c10::CppTypeToScalarType<accscalar_t>::value)).zero_();
+    accscalar_t* acc_buffer_data = acc_buffer.data_ptr<accscalar_t>();
     Tensor tmp_buffer = at::empty({N, 2 * G},
       X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value));
     opmath_t* tmp_buffer_data = tmp_buffer.data_ptr<opmath_t>();
-    // step-1: accumulate on dimension of C
+    // step-1: accumulate on dimension of C using double precision
+    // to avoid overflow when squaring large values in float
     //
     // In order to improve multi-core performance when N=1,
     // we parallel on the all the outer dimensions of N and HxW,
@@ -402,15 +398,19 @@ void GroupNormKernelImplChannelsLastInternal(
     //
     at::parallel_for(0, N * HxW, 1, [&](int64_t begin, int64_t end) {
       int tid = at::get_thread_num();
-      opmath_t* buffer_ptr = buffer_data + tid * N * 2 * C;
+      accscalar_t* buffer_ptr = acc_buffer_data + tid * N * 2 * C;
 
       int64_t n{0}, m{0};
       data_index_init(begin, n, N, m, HxW);
       for (const auto i : c10::irange(begin, end)) {
-        opmath_t* mean_ptr = buffer_ptr + n * 2 * C;
-        opmath_t* rstd_ptr = mean_ptr + C;
+        accscalar_t* mean_ptr = buffer_ptr + n * 2 * C;
+        accscalar_t* rstd_ptr = mean_ptr + C;
         const T* X_ptr = X_data + i * C;
-        CalcMeanVar<T, opmath_t>(X_ptr, mean_ptr, rstd_ptr, C);
+        for (int64_t c = 0; c < C; c++) {
+          accscalar_t x = static_cast<accscalar_t>(X_ptr[c]);
+          mean_ptr[c] += x;
+          rstd_ptr[c] += x * x;
+        }
         data_index_step(n, N, m, HxW);
       }
     });
@@ -418,19 +418,20 @@ void GroupNormKernelImplChannelsLastInternal(
     // step-2: compute mean and rstd
     for (const auto n : c10::irange(N)) {
       for (const auto g : c10::irange(G)) {
-        opmath_t mean_val{0}, rstd_val{0};
+        accscalar_t mean_val{0}, rstd_val{0};
         for (const auto d : c10::irange(D)) {
           for (const auto t : c10::irange(num_threads)) {
-            opmath_t* buffer_ptr = buffer_data + t * N * 2 * C + n * 2 * C;
+            accscalar_t* buffer_ptr = acc_buffer_data + t * N * 2 * C + n * 2 * C;
             mean_val += buffer_ptr[g * D + d];
             rstd_val += buffer_ptr[g * D + d + C];
            }
         }
-        mean_val *= s;
-        rstd_val = std::max(rstd_val * s - mean_val * mean_val, opmath_t(0));
-        rstd_val = opmath_t(1) / std::sqrt(rstd_val + eps);
-        tmp_buffer_data[n * 2 * G + 2 * g] = mean_val;
-        tmp_buffer_data[n * 2 * G + 2 * g + 1] = rstd_val;
+        auto acc_s = static_cast<accscalar_t>(s);
+        mean_val *= acc_s;
+        rstd_val = std::max(rstd_val * acc_s - mean_val * mean_val, accscalar_t(0));
+        rstd_val = accscalar_t(1) / std::sqrt(rstd_val + static_cast<accscalar_t>(eps));
+        tmp_buffer_data[n * 2 * G + 2 * g] = static_cast<opmath_t>(mean_val);
+        tmp_buffer_data[n * 2 * G + 2 * g + 1] = static_cast<opmath_t>(rstd_val);
       }
     }
 
@@ -444,9 +445,13 @@ void GroupNormKernelImplChannelsLastInternal(
     //   a. D might be too small for vectorization;
     //   b. Avoid duplicate calculation of scale/bias, each HxW plain share the same scale/bias
     //
+    Tensor sb_buffer = at::empty({N, 2 * C},
+      X.options().dtype(c10::CppTypeToScalarType<opmath_t>::value));
+    opmath_t* sb_buffer_data = sb_buffer.data_ptr<opmath_t>();
+
     for (const auto n : c10::irange(N)) {
       for (const auto g : c10::irange(G)) {
-        opmath_t* scale_ptr = buffer_data + n * 2 * C;
+        opmath_t* scale_ptr = sb_buffer_data + n * 2 * C;
         opmath_t* bias_ptr = scale_ptr + C;
         opmath_t mean_val = tmp_buffer_data[n * 2 * G + 2 * g];
         opmath_t rstd_val = tmp_buffer_data[n * 2 * G + 2 * g + 1];
@@ -472,7 +477,7 @@ void GroupNormKernelImplChannelsLastInternal(
       for (const auto i : c10::irange(begin, end)) {
         const T* X_ptr = X_data + i * C;
         T* Y_ptr = Y_data + i * C;
-        opmath_t* scale_ptr = buffer_data + n * 2 * C;
+        opmath_t* scale_ptr = sb_buffer_data + n * 2 * C;
         opmath_t* bias_ptr = scale_ptr + C;
         ApplyScaleBias<T, opmath_t>(Y_ptr, X_ptr, scale_ptr, bias_ptr, C);
         data_index_step(n, N, m, HxW);
