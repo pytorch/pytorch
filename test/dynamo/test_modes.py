@@ -1424,7 +1424,7 @@ class outer_fn(torch.nn.Module):
 
     @requires_gpu
     def test_nested_compile_dynamic(self):
-        """Test that wrap_compiled_regions raises on dynamic shapes."""
+        """Test that wrap_compiled_regions works with dynamic shapes."""
 
         d_model = 64
 
@@ -1436,21 +1436,26 @@ class outer_fn(torch.nn.Module):
             def forward(self, x):
                 return self.linear(x)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "wrap_compiled_regions does not support dynamic shapes yet",
-        ):
-            torch._dynamo.reset()
+        torch._dynamo.reset()
 
-            compiled_mm = torch.compile(
-                MMLayer(d_model).to(GPU_TYPE),
-                backend="inductor",
-                options={"wrap_inductor_compiled_regions": True},
-                dynamic=True,
-            )
+        layer = MMLayer(d_model).to(GPU_TYPE)
+        compiled_mm = torch.compile(
+            layer,
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            dynamic=True,
+        )
 
-            x = torch.randn(2, d_model, device=GPU_TYPE)
-            compiled_mm(x)
+        x = torch.randn(2, d_model, device=GPU_TYPE)
+        result = compiled_mm(x)
+        self.assertEqual(result.shape, (2, d_model))
+        torch.testing.assert_close(result, layer(x))
+
+        # Different batch size reuses the same compiled code
+        x2 = torch.randn(5, d_model, device=GPU_TYPE)
+        result2 = compiled_mm(x2)
+        self.assertEqual(result2.shape, (5, d_model))
+        torch.testing.assert_close(result2, layer(x2))
 
     @requires_gpu
     def test_nested_compile_input_mutation(self):

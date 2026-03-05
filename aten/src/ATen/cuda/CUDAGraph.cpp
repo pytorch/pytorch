@@ -1,4 +1,5 @@
 #include <ATen/core/CachingHostAllocator.h>
+#include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
@@ -280,6 +281,10 @@ void CUDAGraph::reset() {
   // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
   // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
   if (capture_ended_) {
+    // Clean up cuBLAS workspaces allocated on the capture stream, otherwise live allocations prevent
+    // private pool cleanup
+    clearCublasWorkspacesForStream(capture_stream_.stream());
+
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
     at::getHostAllocator(at::kCUDA)->release_pool(mempool_id_);

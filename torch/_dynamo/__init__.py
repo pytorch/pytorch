@@ -12,6 +12,7 @@ import torch
 
 from . import (
     aot_compile,
+    bytecode_debugger,
     config,
     convert_frame,
     eval_frame,
@@ -38,6 +39,7 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     nonstrict_trace,
+    override_cudagraphs,
     patch_dynamo_config,
     run,
     set_stance,
@@ -79,6 +81,7 @@ from .polyfills import loader as _  # usort: skip # noqa: F401
 __all__ = [
     "allow_in_graph",
     "assume_constant_result",
+    "bytecode_debugger",
     "config",
     "disable",
     "disable_nested_graph_breaks",
@@ -106,6 +109,7 @@ __all__ = [
     "reset",
     "reset_recompile_user_contexts",
     "run",
+    "override_cudagraphs",
     "error_on_graph_break",
     "set_recursion_limit",
     "set_stance",

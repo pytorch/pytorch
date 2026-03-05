@@ -33,7 +33,7 @@ import math
 import re
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
-from typing import Any, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeIs
 
 import torch._C
@@ -63,7 +63,7 @@ from ..create_parameter_op import (
     tracable_create_parameter,
 )
 from ..device_interface import get_registered_device_interfaces
-from ..exc import raise_observed_exception, unimplemented
+from ..exc import raise_observed_exception, unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -211,7 +211,7 @@ constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
 @functools.cache
-def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
+def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
     # Defined as a function to avoid circular import like torch.onnx
     return {
         torch.jit.is_scripting: False,
@@ -307,7 +307,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
 def _collect_tensors_with_sources(
     var: VariableTracker,
-) -> list[tuple[torch.Tensor, Optional[str]]]:
+) -> list[tuple[torch.Tensor, str | None]]:
     """Extract (fake_tensor, source_name) pairs from a VariableTracker.
 
     Used by handle_autograd_grad to collect tensors from the outputs and inputs
@@ -317,7 +317,7 @@ def _collect_tensors_with_sources(
     from .lists import BaseListVariable
     from .tensor import TensorVariable
 
-    results: list[tuple[torch.Tensor, Optional[str]]] = []
+    results: list[tuple[torch.Tensor, str | None]] = []
     if isinstance(var, TensorVariable):
         fake_tensor = var.as_proxy().node.meta.get("example_value")
         assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
@@ -1154,9 +1154,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> VariableTracker | None:
-            if not config.enable_dynamo_decompositions:
-                return None
-
+            # Decompose via addcmul_ so tensor weights (e.g. 0-dim tensor
+            # from tensor betas in Adam) stay in tensor arguments instead of
+            # hitting float() in the native lerp_scalar lowering.
             if len(args) == 3 and not isinstance(args[2], ListVariable) and not kwargs:
                 return tx.inline_user_function_return(
                     VariableTracker.build(tx, polyfills.foreach_lerp_inplace),
@@ -1420,7 +1420,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
-            fallback: Optional[VariableTracker] = None,
+            fallback: VariableTracker | None = None,
         ) -> VariableTracker | None:
             fallback_int = fallback.as_python_constant() if fallback else None
             if isinstance(expr, SymNodeVariable):
@@ -2762,6 +2762,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         decorated_fn = self.value
         real_impl = decorated_fn._torchdynamo_leaf_real_fn
         fake_impl = decorated_fn._torchdynamo_leaf_fake_fn
+        mutates_args = decorated_fn._torchdynamo_leaf_mutates_args
 
         if fake_impl is None:
             raise ValueError(
@@ -2773,6 +2774,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
+
         flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
             VariableTracker.build(tx, (args_with_states, kwargs_with_states))
         ).unpack_var_sequence(tx)
@@ -2780,6 +2782,19 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
         ]
         input_spec = input_spec_var.as_python_constant()
+
+        mutated_flat_indices = ""
+        if mutates_args:
+            from torch._higher_order_ops.invoke_leaf_function import (
+                _resolve_mutated_flat_indices,
+            )
+
+            try:
+                mutated_flat_indices = _resolve_mutated_flat_indices(
+                    real_impl, mutates_args, len(flat_arg_proxies), input_spec
+                )
+            except ValueError as e:
+                raise UserError(UserErrorType.INVALID_INPUT, str(e)) from e
 
         # Single-element mutable list so the wrappers can write back the output
         # TreeSpec. Read captured_out_spec[0] after the wrappers have been called.
@@ -2804,6 +2819,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             real_impl_proxy,
             fake_impl_proxy,
             input_spec_proxy,
+            mutated_flat_indices,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(

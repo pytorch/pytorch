@@ -11,6 +11,7 @@ from typing import Any, Literal
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor import config
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import (
     _schedulable_wait_node,
@@ -82,24 +83,6 @@ def make_all_device_put_sync(gm: torch.fx.GraphModule) -> int:
                 count += 1
 
     return count
-
-
-def estimate_runtime_analytical(n: torch.fx.Node) -> float:
-    """Estimate runtime using analytical roofline model for mm operations."""
-    if n.target != torch.ops.aten.mm.default:
-        return 0.0
-    import torch.utils._pytree as pytree
-    from torch.distributed._tools import RuntimeEstimator
-
-    def _val(node: Any) -> Any:
-        if not isinstance(node, torch.fx.Node):
-            return node
-        return node.meta["val"]
-
-    args = pytree.tree_map(_val, n.args)
-    kwargs = pytree.tree_map(_val, n.kwargs)
-    _, ms = RuntimeEstimator._roofline_estimate(n.target, args, kwargs)
-    return ms
 
 
 @dataclass
@@ -177,25 +160,52 @@ def is_compute_node(n: fx.Node) -> bool:
     )
 
 
-def estimate_mem_bound_runtime_ms(node: fx.Node) -> float:
-    """Estimate runtime for a memory-bound node based on input/output bytes.
+def estimate_roofline_runtime_ms(node: fx.Node) -> float:
+    """Estimate runtime using roofline model (max of compute and memory bound).
 
-    Returns 0 for view nodes (no memory cost).
+    Uses FLOPs for compute-bound estimate if op is in flop_registry,
+    and memory bandwidth for memory-bound estimate.
+    Returns 0 for view nodes (no cost).
     """
     from torch._inductor.fx_passes.fusion_regions import is_view_node
-    from torch.utils._pytree import tree_flatten
-    from torch.utils._runtime_estimation import get_transfer_time
+    from torch.utils._pytree import tree_flatten, tree_map
+    from torch.utils._runtime_estimation import get_compute_time, get_transfer_time
+    from torch.utils.flop_counter import flop_registry
 
     if is_view_node(node):
         return 0.0
 
-    input_vals = [inp.meta.get("val") for inp in node.all_input_nodes]
-    output_vals = [node.meta.get("val")]
-    flat_inputs, _ = tree_flatten(input_vals)
-    flat_outputs, _ = tree_flatten(output_vals)
+    def _get_val(n: Any) -> Any:
+        if isinstance(n, fx.Node):
+            return n.meta.get("val")
+        return n
 
-    transfer_time_ns = get_transfer_time(flat_inputs, flat_outputs)
-    return transfer_time_ns / 1e6
+    args = tree_map(_get_val, node.args)
+    kwargs = tree_map(_get_val, node.kwargs)
+    out = _get_val(node)
+
+    if out is None:
+        return 0.0
+
+    flat_args_kwargs, _ = tree_flatten((args, kwargs))
+    flat_outs, _ = tree_flatten(out)
+    out_dtypes = OrderedSet([t.dtype for t in flat_outs if isinstance(t, torch.Tensor)])
+
+    # Compute time (FLOPs-based, only if op is in flop_registry)
+    # May return SymFloat if shapes are symbolic (after flop division)
+    compute_ns: float = 0.0
+    func_packet = getattr(node.target, "overloadpacket", None)
+    if func_packet in flop_registry and len(out_dtypes) == 1:
+        compute_ns = get_compute_time(func_packet, args, kwargs, out, out_dtypes.copy())
+        # Extract hint from symbolic value if needed
+        if isinstance(compute_ns, (torch.SymInt, torch.SymFloat)):
+            compute_ns = compute_ns.node.hint if compute_ns.node.has_hint() else 0.0
+
+    # Transfer time (memory bandwidth-based, uses size_hint internally)
+    transfer_ns = get_transfer_time(flat_args_kwargs, flat_outs)
+
+    # Roofline: max of compute and transfer, convert ns to ms
+    return max(float(compute_ns), float(transfer_ns)) / 1e6
 
 
 def get_hint(x: int | torch.SymInt) -> int | None:
@@ -361,6 +371,7 @@ class OverlapScheduler:
         max_coll_distance: int,
         custom_runtime_estimation: Callable[[fx.Node, int | None], float | None] | None,
         collective_estimator: Literal["analytical", "benchmark"],
+        compute_estimator: Literal["analytical", "benchmark"] = "benchmark",
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
         log_final_collectives_estimations: bool = False,
@@ -380,7 +391,13 @@ class OverlapScheduler:
         self.collective_bucketing = collective_bucketing
         self.insert_overlap_deps = insert_overlap_deps
         self.max_compute_pre_fetch = max_compute_pre_fetch
-        self.collective_estimator = collective_estimator
+        # In deterministic mode, force analytical estimation to avoid GPU sync
+        if config.deterministic:
+            self.collective_estimator = "analytical"
+            self.compute_estimator = "analytical"
+        else:
+            self.collective_estimator = collective_estimator
+            self.compute_estimator = compute_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
         self.bucket_only_internode_comms = bucket_only_internode_comms
@@ -686,11 +703,17 @@ class OverlapScheduler:
         runtime_estimations_analytical: list[float] = []
 
         for n in self.compute_nodes:
-            val, key = benchmark_node_with_cache_key(n, self.custom_runtime_estimation)
-
-            # Analytical estimations
-            val_analytical = estimate_runtime_analytical(n)
+            # Compute analytical estimation using roofline model
+            val_analytical = estimate_roofline_runtime_ms(n)
             runtime_estimations_analytical.append(val_analytical)
+
+            if self.compute_estimator == "benchmark":
+                val, key = benchmark_node_with_cache_key(
+                    n, self.custom_runtime_estimation
+                )
+            else:
+                # Use analytical estimation
+                val, key = val_analytical, None
 
             runtime_estimations.append(val)
             runtime_estimations_keys.append(key)
@@ -738,24 +761,33 @@ class OverlapScheduler:
                     runtime_estimations_keys.append(cuda_key)
                     benchmarked_collective_nodes.append(n)
 
-        # Single all_gather and compute medians
+        # When both estimators are analytical, estimates are deterministic across ranks
+        # (same shapes = same estimates), so skip the all_gather to avoid sync.
         import torch.distributed as dist
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
-        from torch.distributed.distributed_c10d import _get_default_group
 
         world_size = dist.get_world_size()
-        pg = _get_default_group()
 
-        with unset_fake_temporarily():
-            gathered_runtime_estimations: list[list[float]] = [
-                [] for _ in range(world_size)
-            ]
-            dist.all_gather_object(
-                gathered_runtime_estimations, runtime_estimations, pg
-            )
-            median_runtime_estimations = torch.median(
-                torch.tensor(gathered_runtime_estimations), dim=0
-            ).values.tolist()
+        if (
+            self.compute_estimator == "analytical"
+            and self.collective_estimator == "analytical"
+        ):
+            median_runtime_estimations = runtime_estimations
+        else:
+            # Single all_gather and compute medians
+            from torch._subclasses.fake_tensor import unset_fake_temporarily
+            from torch.distributed.distributed_c10d import _get_default_group
+
+            pg = _get_default_group()
+            with unset_fake_temporarily():
+                gathered_runtime_estimations: list[list[float]] = [
+                    [] for _ in range(world_size)
+                ]
+                dist.all_gather_object(
+                    gathered_runtime_estimations, runtime_estimations, pg
+                )
+                median_runtime_estimations = torch.median(
+                    torch.tensor(gathered_runtime_estimations), dim=0
+                ).values.tolist()
 
         # Cache medians
         collective_keys = []
@@ -970,7 +1002,10 @@ class OverlapScheduler:
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
         if is_compute_node(node):
-            return benchmark_node(node, self.custom_runtime_estimation)
+            if self.compute_estimator == "benchmark":
+                return benchmark_node(node, self.custom_runtime_estimation)
+            else:
+                return estimate_roofline_runtime_ms(node)
 
         # Use precomputed cost for fusion region call_module nodes
         # This takes priority even over custom estimation since fusion regions
@@ -986,7 +1021,7 @@ class OverlapScheduler:
 
         # assume any node without flop counter is mem bound
         if node.op == "call_function":
-            return estimate_mem_bound_runtime_ms(node)
+            return estimate_roofline_runtime_ms(node)
 
         return None
 
@@ -1566,6 +1601,7 @@ def schedule_overlap_bucketing(
     custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
     | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
+    compute_estimator: Literal["analytical", "benchmark"] = "benchmark",
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
     log_final_collectives_estimations: bool = False,
@@ -1593,6 +1629,8 @@ def schedule_overlap_bucketing(
             If None, uses default estimations. This is currently limited to collectives and compute nodes.
         collective_estimator: Method for estimating collective runtime. "analytical" uses bandwidth formulas,
             "benchmark" uses CUDA events with power-of-2 rounding and interpolation.
+        compute_estimator: Method for estimating compute (ATen op) runtime. "analytical" uses roofline model
+            estimates (deterministic, no GPU sync), "benchmark" uses GPU benchmarking (more accurate).
         max_memory_increase_gb: Maximum GB increase above baseline memory (absolute cap). If None, no absolute limit.
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
@@ -1619,6 +1657,7 @@ def schedule_overlap_bucketing(
         collective_bucketing=collective_bucketing,
         insert_overlap_deps=insert_overlap_deps,
         collective_estimator=collective_estimator,
+        compute_estimator=compute_estimator,
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
         log_final_collectives_estimations=log_final_collectives_estimations,
@@ -1662,6 +1701,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "custom_runtime_estimation",
         "insert_overlap_deps",
         "collective_estimator",
+        "compute_estimator",
         "max_memory_increase_gb",
         "max_memory_increase_ratio",
         "compute_overlap_multipler",

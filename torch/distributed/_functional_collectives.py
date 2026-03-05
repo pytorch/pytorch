@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import contextlib
+import math
 import sys
 import warnings
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -90,14 +91,14 @@ Functional collectives can accept any of these types to describe the ranks parti
 
 The different types will be desugared to a canonical format
 """
-RANK_TYPES = Union[
-    list[int],
-    list[list[int]],
-    dist.ProcessGroup,
-    DeviceMesh,
-    tuple["dist.tensor.DeviceMesh", int],
-    c10d.GroupName,
-]
+RANK_TYPES = (
+    list[int]
+    | list[list[int]]
+    | dist.ProcessGroup
+    | DeviceMesh
+    | tuple["dist.tensor.DeviceMesh", int]
+    | c10d.GroupName
+)
 
 
 from torch._utils import _chunk_or_narrow_cat  # noqa: F401
@@ -207,13 +208,16 @@ def all_gather_tensor(
         self, group_size, group_name
     )
     res = _maybe_wrap_tensor(tensor)
-    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
-        # torch.cat access the data so we already need to wait here, first do wait
-        # and then chunk + cat avoid us going through ACT dispatching logic again
+        # Check if _maybe_view_chunk_cat can use the view optimization.
+        # If not, it will use torch.cat which needs the data anyway, so
+        # wait early to avoid AsyncCollectiveTensor dispatch overhead.
         if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
-
+            shape = list(res.shape)
+            numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+            can_use_view = shape[0] == group_size and numel_between == 1
+            if not can_use_view:
+                res = res.wait()
         res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
@@ -241,13 +245,17 @@ def all_gather_tensor_autograd(
         self, group_size, group_name
     )
     res = _FromTorchTensor.apply(tensor)
-    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
-        # torch.cat access the data so we already need to wait here, first do wait
-        # and then chunk + cat avoid us going through ACT dispatching logic again
+        # Check if _maybe_view_chunk_cat can use the view optimization.
+        # If not, it will use torch.cat which needs the data anyway, so
+        # wait early to avoid AsyncCollectiveTensor dispatch overhead.
         if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+            shape = list(res.shape)
+            numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+            can_use_view = shape[0] == group_size and numel_between == 1
+            if not can_use_view:
+                res = res.wait()
+        res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
 
@@ -1210,7 +1218,9 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
             dim = group[1]
             return dmesh._dim_group_names[dim]
         else:
-            raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
+            raise ValueError(
+                f"Invalid tuple for group must be (DeviceMesh, int). Instead got {(type(group[0]), type(group[1]))}"
+            )
     elif isinstance(group, list):
         if not is_torchdynamo_compiling():
             warnings.warn(
@@ -1807,27 +1817,38 @@ from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecate
 # fn.__name__ as a module attribute — a def's __name__ matches its variable name
 # automatically, whereas a closure's would not.
 def _remapped_allgather(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_allgather should only be called during tracing")
     all_gather_tensor_inplace(*args, **kwargs)
 
 
 def _remapped_reducescatter(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_reducescatter should only be called during tracing"
+        )
     reduce_scatter_tensor_inplace(*args, **kwargs)
 
 
 def _remapped_allreduce(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_allreduce should only be called during tracing")
     all_reduce_inplace(*args, **kwargs)
 
 
 def _remapped_all_to_all_single(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_all_to_all_single should only be called during tracing"
+        )
     all_to_all_inplace(*args, **kwargs)
 
 
 def _remapped_all_gather(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_all_gather should only be called during tracing"
+        )
     all_gather_inplace(*args, **kwargs)
 
 

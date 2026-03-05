@@ -42,7 +42,8 @@ def get_inductor_decomp_graphs(model: nn.Module, args, kwargs):
     output.backward()
 
     # one fwd, one bwd graph
-    assert len(graphs) == 2
+    if len(graphs) != 2:
+        raise AssertionError
     return graphs
 
 

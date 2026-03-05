@@ -39,6 +39,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
@@ -1602,6 +1603,26 @@ class outer_fn(torch.nn.Module):
             1,
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
+
+    def test_device_mesh_slice(self):
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=8)
+        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
+
+        def fn(x):
+            tp_mesh = mesh["tp"]
+            dt = DTensor.from_local(x, tp_mesh, [Shard(0)], run_check=False)
+            if "tp" not in dt.device_mesh.mesh_dim_names:
+                return x
+            return dt.to_local()
+
+        x = torch.randn(4, 4)
+        res = fn(x)
+        traced = make_fx(fn, tracing_mode="fake")(x)
+        self.assertEqual(traced(x), res)
+
+        compiled = torch.compile(fn, backend="aot_eager")(x)
+        self.assertEqual(compiled, res)
 
     def test_compile_redistribute_flattened_mesh(self):
         """

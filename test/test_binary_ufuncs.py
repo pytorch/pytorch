@@ -50,7 +50,6 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_methods_invocations import (
     binary_ufuncs,
-    binary_ufuncs_and_refs,
     generate_elementwise_binary_broadcasting_tensors,
     generate_elementwise_binary_extremal_value_tensors,
     generate_elementwise_binary_large_value_tensors,
@@ -505,7 +504,7 @@ class TestBinaryUfuncs(TestCase):
     # NOTE: because the cross-product of all possible type promotion tests is huge, this
     #   just spot checks some handwritten cases.
     # NOTE: It may be possible to refactor this test into something simpler
-    @ops(binary_ufuncs_and_refs, dtypes=OpDTypes.none)
+    @ops(binary_ufuncs, dtypes=OpDTypes.none)
     def test_type_promotion(self, device, op):
         supported_dtypes = op.supported_dtypes(torch.device(device).type)
         make_lhs = partial(

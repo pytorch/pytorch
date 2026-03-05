@@ -52,7 +52,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #ifdef USE_NVSHMEM
-#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.hpp>
 #endif
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
@@ -3715,6 +3715,9 @@ Returns:
       .value("_REDUCE_SCATTER_BASE", ::c10d::OpType::_REDUCE_SCATTER_BASE)
       .value("COALESCED", ::c10d::OpType::COALESCED)
       .value("_ALLREDUCE_SPARSE", ::c10d::OpType::_ALLREDUCE_SPARSE)
+      .value(
+          "REDUCE_SCATTER_TENSOR_COALESCED",
+          ::c10d::OpType::REDUCE_SCATTER_TENSOR_COALESCED)
       .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
 
   py::enum_<::c10d::WorkResult>(module, "WorkResult")

@@ -1,9 +1,10 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import logging
+from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
+from typing import Any, cast, TypeAlias, TypeVar
 
 import torch
 from torch._ops import OpOverload
@@ -12,6 +13,7 @@ from torch.distributed.tensor._op_schema import (
     ArgsType,
     KwargsType,
     OpSchema,
+    OpSpec,
     OpStrategy,
     PlacementList,
     RuntimeSchemaInfo,
@@ -29,6 +31,10 @@ from torch.utils._pytree import tree_map_only
 
 
 logger = logging.getLogger(__name__)
+
+
+def _is_sharding(p: Placement) -> bool:
+    return isinstance(p, (Shard, _StridedShard))
 
 
 class _ShardingPlaceholder:
@@ -61,6 +67,7 @@ _ExpandedSingleDimStrategyFunc: TypeAlias = Callable[
 class _SingleDimStrategyInfo:
     func: _SingleDimStrategyFunc
     allow_unbacked_sharding: bool | None = field(default=None)
+    allow_uneven_sharding: bool = field(default=False)
 
     # Delegate to func so this can be used interchangeably with a raw
     # _SingleDimStrategyFunc (e.g. in tests that call strategy functions directly).
@@ -79,7 +86,8 @@ def _insert_single_dim_replication_strategy(
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
     """
     for strategy in single_dim_strategies_with_placeholders:
-        assert not all(isinstance(p, Replicate) for p in strategy)
+        if all(isinstance(p, Replicate) for p in strategy):
+            raise AssertionError
     single_dim_strategies_with_placeholders.insert(
         0, [Replicate()] * (num_outputs + num_input_tensors)
     )
@@ -132,11 +140,13 @@ def _fill_single_dim_strategy_placeholders(
                         # with other metadata (e.g. split_factor) from the sharding class
                         expanded_strategy.append(shard_builder(maybe_placeholder.dim))
                     else:
-                        assert isinstance(maybe_placeholder, Placement)
+                        if not isinstance(maybe_placeholder, Placement):
+                            raise AssertionError
                         expanded_strategy.append(maybe_placeholder)
                 expanded_strategies_over_one_mesh_dim.append(expanded_strategy)
         else:
-            assert all(isinstance(p, Placement) for p in s)
+            if not all(isinstance(p, Placement) for p in s):
+                raise AssertionError
             expanded_strategies_over_one_mesh_dim.append(cast(list[Placement], (s)))
 
     return expanded_strategies_over_one_mesh_dim
@@ -149,7 +159,8 @@ def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
         if isinstance(obj, DTensorSpec):
             unique_placements.update(obj.placements)
         elif isinstance(obj, OpStrategy):
-            assert len(obj.strategies) == 1
+            if len(obj.strategies) != 1:
+                raise AssertionError
             unique_placements.update(obj.strategies[0].output_spec.placements)
         elif isinstance(obj, TupleStrategy):
             for child in obj.children:
@@ -178,6 +189,219 @@ def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
         elif isinstance(obj, TupleStrategy):
             num_inputs += len(obj.children)
     return num_inputs
+
+
+def _build_output_specs(
+    mesh: DeviceMesh,
+    per_mesh_dim_placements: list[tuple[Placement, ...]],
+    num_outputs: int,
+    output_metas: tuple[TensorMeta | None, ...],
+) -> DTensorSpec | tuple[DTensorSpec | None, ...]:
+    """Build output spec(s) by transposing per-mesh-dim placements to per-output.
+
+    per_mesh_dim_placements is indexed [mesh_dim][output_idx]. output_metas must
+    have exactly num_outputs elements.
+    """
+    if num_outputs <= 0:
+        raise AssertionError(f"Expected num_outputs > 0, got {num_outputs}")
+    if len(output_metas) != num_outputs:
+        raise AssertionError(
+            f"Expected {num_outputs} output_metas, got {len(output_metas)}"
+        )
+
+    def _placements_for_output(out_idx: int) -> tuple[Placement, ...]:
+        return tuple(out[out_idx] for out in per_mesh_dim_placements)
+
+    if num_outputs > 1:
+        return tuple(
+            DTensorSpec(mesh, _placements_for_output(i), tensor_meta=output_metas[i])
+            for i in range(num_outputs)
+        )
+    else:
+        return DTensorSpec(mesh, _placements_for_output(0), tensor_meta=output_metas[0])
+
+
+class _PreparedSingleDimStrategy:
+    """A single-dim strategy materialized for a specific op.
+
+    Expands a strategy function's placeholder-based rules into concrete
+    placement rules by filling in the actual shard/partial placements from
+    the op_schema. The result is a lookup table (strategy_lookup) that maps
+    input placements to output placements for one mesh dimension.
+
+    Provides try_propagate() for matching a multi-dim placement tuple against
+    the per-dim rules, and exposes allowed_sharding_per_input /
+    allowed_partial_per_input for graph search neighbor generation.
+    """
+
+    strategy_lookup: dict[tuple[Placement, ...], tuple[Placement, ...]]
+    expanded_strategies: list[list[Placement]]
+    num_outputs: int
+    num_inputs: int
+    output_metas: tuple[TensorMeta | None, ...]
+    allowed_sharding_per_input: dict[int, set[Placement]]
+    allowed_partial_per_input: dict[int, set[Placement]]
+    allow_unbacked_sharding: bool | None
+
+    # many, but not all ops are able to support unevenly sharded tensors
+    # there are existing BC expectations even if we wanted to ban for
+    # simplicity, see why justification for why pointwise_ops always work
+    # with uneven sharding at
+    # https://github.com/pytorch/pytorch/pull/174874#issuecomment-3995152777
+    allow_uneven_sharding: bool
+
+    def __init__(
+        self,
+        strategy_fn: _SingleDimStrategyInfo
+        | Callable[
+            [OpOverload, ArgsType, KwargsType],
+            list[list[Placement | _ShardingPlaceholder]],
+        ],
+        op_schema: OpSchema,
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
+        num_inputs: int | None = None,
+    ) -> None:
+        # Note: circular import
+        from torch.distributed.tensor.placement_types import Partial
+
+        if isinstance(strategy_fn, _SingleDimStrategyInfo):
+            self.allow_unbacked_sharding = strategy_fn.allow_unbacked_sharding
+            self.allow_uneven_sharding = strategy_fn.allow_uneven_sharding
+            func = strategy_fn.func
+        else:
+            self.allow_unbacked_sharding = None
+            self.allow_uneven_sharding = False
+            func = strategy_fn
+
+        if num_inputs is None:
+            num_inputs = _get_num_tensor_inputs(op_schema)
+        self.num_inputs = num_inputs
+
+        strategies_with_placeholders = func(
+            op_schema.op, op_schema.args_meta, op_schema.kwargs_meta
+        )
+
+        # Validate strategy length against the op schema. The schema is the
+        # ground truth for num_outputs; combined with num_inputs (which counts
+        # all tensor args + kwargs), it gives the expected strategy length.
+        # A mismatch means the strategy is missing kwargs placements or has
+        # extra entries.
+        if len(strategies_with_placeholders) > 0:
+            schema_num_outputs = sum(
+                1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
+            )
+            expected_len = schema_num_outputs + num_inputs
+            actual_len = len(strategies_with_placeholders[0])
+            if actual_len != expected_len:
+                raise AssertionError(
+                    f"Strategy length {actual_len} != expected {expected_len} "
+                    f"(schema_outputs={schema_num_outputs} + inputs={num_inputs}) "
+                    f"for {op_schema.op}. Strategies must include placements "
+                    f"for all outputs, args, and tensor kwargs."
+                )
+
+        # Compute num_outputs from strategy structure or output_tensor_meta
+        if len(strategies_with_placeholders) > 0:
+            num_outputs = len(strategies_with_placeholders[0]) - num_inputs
+        elif output_tensor_meta is None:
+            num_outputs = 0
+        elif isinstance(output_tensor_meta, TensorMeta):
+            num_outputs = 1
+        else:
+            num_outputs = len(output_tensor_meta)
+        self.num_outputs = num_outputs
+
+        strategies_with_placeholders = _insert_single_dim_replication_strategy(
+            strategies_with_placeholders, num_outputs, num_inputs
+        )
+
+        unique_input_placements = _get_unique_placements(op_schema)
+        self.expanded_strategies = _fill_single_dim_strategy_placeholders(
+            unique_input_placements, strategies_with_placeholders
+        )
+
+        # Build strategy lookup: map input placements -> output placements
+        self.strategy_lookup = {}
+        for strategy in self.expanded_strategies:
+            input_key = tuple(strategy[num_outputs:])
+            if input_key not in self.strategy_lookup:
+                self.strategy_lookup[input_key] = tuple(strategy[:num_outputs])
+
+        # Precompute allowed placements per input from the expanded rules
+        self.allowed_sharding_per_input: dict[int, set[Placement]] = defaultdict(set)
+        self.allowed_partial_per_input: dict[int, set[Placement]] = defaultdict(set)
+        for strategy in self.expanded_strategies:
+            for input_idx in range(num_inputs):
+                p = strategy[num_outputs + input_idx]
+                if _is_sharding(p):
+                    self.allowed_sharding_per_input[input_idx].add(p)
+                elif isinstance(p, Partial):
+                    self.allowed_partial_per_input[input_idx].add(p)
+
+        # Resolve output tensor_meta per output index
+        if output_tensor_meta is None:
+            self.output_metas = (None,) * max(num_outputs, 0)
+        elif isinstance(output_tensor_meta, TensorMeta):
+            self.output_metas = (output_tensor_meta,)
+        else:
+            self.output_metas = tuple(output_tensor_meta)
+
+    def try_propagate(
+        self,
+        mesh: DeviceMesh,
+        input_placements: tuple[tuple[Placement, ...], ...],
+        input_specs: list[DTensorSpec],
+    ) -> OpStrategy | None:
+        """Try to match input placements against single-dim strategy rules on every mesh dim.
+
+        Checks whether the given input placements independently match a rule in
+        strategy_lookup on each mesh dimension, and that all inputs are shardable
+        with those placements. If so, returns an OpStrategy with the matched output
+        placements and zero redistribute costs.
+        """
+        from torch.distributed.tensor._ops.utils import is_tensor_shardable
+
+        selected_output_placements: list[tuple[Placement, ...]] = []
+        for mesh_dim in range(mesh.ndim):
+            input_placements_for_dim = tuple(
+                placements[mesh_dim] for placements in input_placements
+            )
+            output_for_dim = self.strategy_lookup.get(input_placements_for_dim)
+            if output_for_dim is not None:
+                selected_output_placements.append(output_for_dim)
+            else:
+                return None
+
+        arg_specs = [
+            DTensorSpec(mesh, placements, tensor_meta=input_spec.tensor_meta)
+            for placements, input_spec in zip(input_placements, input_specs)
+        ]
+        if not all(
+            is_tensor_shardable(spec.tensor_meta.shape, spec)
+            for spec in arg_specs
+            if spec.tensor_meta is not None
+        ):
+            return None
+
+        output_spec = (
+            _build_output_specs(
+                mesh,
+                selected_output_placements,
+                self.num_outputs,
+                self.output_metas,
+            )
+            if self.num_outputs > 0
+            else None
+        )
+        return OpStrategy(
+            [
+                OpSpec(
+                    output_specs=output_spec,
+                    input_specs=arg_specs,
+                    redistribute_cost=[[0.0] for _ in input_specs],
+                )
+            ]
+        )
 
 
 def _expand_single_dim_strategy_to_mesh(
@@ -209,43 +433,8 @@ def _expand_single_dim_strategy_to_mesh(
         def expanded_strategy(
             op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
         ) -> StrategyType:
-            # Note: op_schema vs [args_schema, kwargs_schema]
-            # -----------------------------------------------
-            # Inside `expanded_strategy function we purposefully have access to 2 similar structures.
-            # 1) (op, args_schema, kwargs_schema): This is all the single_dim_strategy is allowed to see.
-            # importantly, it does not contain information about input placements or meshes - just TensorMeta.
-            # 2) op_schema - captured from the parent scope, this contains the input placement and mesh info, needed
-            # to actually perform expansion.
-            unique_input_placements = _get_unique_placements(op_schema)
-            num_inputs = _get_num_tensor_inputs(op_schema)
-
-            # Compute num_outputs from output_tensor_meta
-            if output_tensor_meta is None:
-                num_outputs = 0
-            elif isinstance(output_tensor_meta, TensorMeta):
-                num_outputs = 1
-            else:
-                num_outputs = len(output_tensor_meta)
-
-            # Note: Trees vs Flat Lists
-            # -------------------------
-            # op_schema.args_schema may contain a TupleStrategy with child strategies for List[Tensor] inputs.
-            # args_schema has corresponding TupleStrategy, but with TensorSpec in place of child strategies.
-            # CURRENTLY: single_dim_strategy will return a flat list of Placements for each strategy, where any
-            # input tuple strategies have been inlined.  I'm not sure if we want to keep doing this, or preserve a pytree
-            # structure here.  I'm following the convention in the current DTensor sharding strategies for now.
-            # Inside expanded_strategy, we need to carefully align the OpStrategies / Specs from op_schema which are _not_
-            # flattened, with the flat Placement list returned from single_dim strategy.
-            strategies_over_one_mesh_dim = strategy_info.func(
-                op, args_schema, kwargs_schema
-            )
-            strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
-                strategies_over_one_mesh_dim, num_outputs, num_inputs
-            )
-            expanded_strategies_over_one_mesh_dim = (
-                _fill_single_dim_strategy_placeholders(
-                    unique_input_placements, strategies_over_one_mesh_dim
-                )
+            prepared_strategy = _PreparedSingleDimStrategy(
+                strategy_info, op_schema, output_tensor_meta
             )
 
             # Detect inplace ops by checking if the base op name ends with '_'
@@ -256,11 +445,12 @@ def _expand_single_dim_strategy_to_mesh(
             return expand_to_full_mesh_op_strategy(
                 mesh,
                 op_schema,
-                cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
+                cast(list[PlacementList], prepared_strategy.expanded_strategies),
                 output_tensor_meta=output_tensor_meta,
                 inplace_op=is_inplace,
-                input_index=num_outputs,
-                allow_unbacked_sharding=strategy_info.allow_unbacked_sharding,
+                input_index=prepared_strategy.num_outputs,
+                allow_unbacked_sharding=prepared_strategy.allow_unbacked_sharding,
+                allow_uneven_sharding=prepared_strategy.allow_uneven_sharding,
             )
 
         return expanded_strategy
@@ -370,9 +560,10 @@ def _expand_single_dim_strategy_to_mesh(
 
 
 def register_single_dim_strategy(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
+    schema_info: RuntimeSchemaInfo | None = None,
     allow_unbacked_sharding: bool | None = None,
+    allow_uneven_sharding: bool = False,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
@@ -420,6 +611,7 @@ def register_single_dim_strategy(
         info = _SingleDimStrategyInfo(
             func=impl,
             allow_unbacked_sharding=allow_unbacked_sharding,
+            allow_uneven_sharding=allow_uneven_sharding,
         )
         registration_wrapper(info)
         return impl

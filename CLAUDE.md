@@ -23,6 +23,8 @@ if __name__ == "__main__":
 ```
 
 To test Tensor equality, use assertEqual.
+For tests over multiple inputs, use the `@parametrize` decorator.
+For any test that checks numerics of the on-device implementation, use `instantiate_device_type_tests` to write device-generic tests.
 
 # Linting
 

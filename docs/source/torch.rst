@@ -733,6 +733,7 @@ Utilities
     is_warn_always_enabled
     vmap
     _assert
+    typename
 
 Symbolic Numbers
 ----------------
@@ -756,6 +757,7 @@ Symbolic Numbers
     sym_min
     sym_not
     sym_ite
+    sym_sqrt
     sym_sum
 
 Export Path

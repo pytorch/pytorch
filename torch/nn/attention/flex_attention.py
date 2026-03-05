@@ -1006,7 +1006,6 @@ class BlockMask:
             for attr, val in zip(cls._CONTEXT_ATTRS, context)
         }
         kwargs.update(zip(cls._TENSOR_ATTRS, tensors))
-        # pyrefly: ignore [bad-argument-type]
         return cls(**kwargs)
 
     def _flatten_with_keys(self):

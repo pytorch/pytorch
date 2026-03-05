@@ -22,7 +22,7 @@ from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch._C import _fx_map_arg as map_arg, _NamespaceBase, _NodeIter
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -146,82 +146,22 @@ def _is_from_torch(obj: Any) -> bool:
     return False
 
 
-class _Namespace:
+class _Namespace(_NamespaceBase):
     """A context for associating names uniquely with objects.
 
     The following invariants are enforced:
     - Each object gets a single name.
     - Each name is unique within a given namespace.
     - Names generated do not shadow builtins, unless the object is indeed that builtin.
+
+    This class is now implemented in C++ (_NamespaceBase) for performance.
+    See torch/csrc/fx/graph.cpp for the implementation.
     """
 
-    def __init__(self):
-        self._obj_to_name: dict[Any, str] = {}
-        self._used_names: set[str] = set()
-        self._base_count: dict[str, int] = {}
-
-    def create_name(self, candidate: str, obj: Optional[Any]) -> str:
-        """Create a unique name.
-
-        Arguments:
-            candidate: used as the basis for the unique name, relevant to the user.
-            obj: If not None, an object that will be associated with the unique name.
-        """
-        if obj is not None and obj in self._obj_to_name:
-            return self._obj_to_name[obj]
-
-        # optimistically check if candidate is already a valid name
-        match = _name_regex.match(candidate)
-        if match is None:
-            # delete all characters that are illegal in a Python identifier
-            candidate = _illegal_char_regex.sub("_", candidate)
-
-            if not candidate:
-                candidate = "_unnamed"
-
-            if candidate[0].isdigit():
-                candidate = f"_{candidate}"
-
-            match = _name_regex.match(candidate)
-            if match is None:
-                raise AssertionError(
-                    f"Name regex failed to match candidate: {candidate}"
-                )
-
-        base, num = match.group(1, 2)
-        if num is None or candidate in self._used_names:
-            num = self._base_count.get(candidate, 0)
-            if _illegal_names.get(candidate, obj) is not obj:
-                num += 1
-                candidate = f"{base}_{num}"
-                # assume illegal names don't end in _\d so no need to check again
-        else:
-            num = int(num)
-
-        while candidate in self._used_names:
-            num += 1
-            candidate = f"{base}_{num}"
-
-        self._used_names.add(candidate)
-        self._base_count[base] = num
-        if obj is not None:
-            self._obj_to_name[obj] = candidate
-        return candidate
-
-    def associate_name_with_obj(self, name: str, obj: Any):
-        """Associate a unique name with an object.
-
-        Neither `name` nor `obj` should be associated already.
-        """
-        maybe_existing = self._obj_to_name.setdefault(obj, name)
-        if maybe_existing is not name:
-            raise AssertionError("obj is already associated")
-
-    def _rename_object(self, obj: Any, name: str):
-        if obj not in self._obj_to_name:
-            raise AssertionError(f"Object {obj} is not in _obj_to_name")
-        self._obj_to_name[obj] = name
-        self._used_names.add(name)
+    # Type annotations for the members (implemented in C++)
+    _obj_to_name: dict[Any, str]
+    _used_names: set[str]
+    _base_count: dict[str, int]
 
 
 @compatibility(is_backward_compatible=True)
@@ -237,7 +177,7 @@ class PythonCode:
     globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
     # node index. Line number starts at the prologue (i.e. forward()).
-    _lineno_map: Optional[dict[int, Optional[int]]]
+    _lineno_map: dict[int, int | None] | None
     # The line number of prologue in fn_code
     _prologue_start: int = 0
 
@@ -291,7 +231,7 @@ class _PyTreeInfo(NamedTuple):
 
     orig_args: list[str]
     in_spec: pytree.TreeSpec
-    out_spec: Optional[pytree.TreeSpec]
+    out_spec: pytree.TreeSpec | None
 
 
 @dataclass(frozen=True)
@@ -311,7 +251,7 @@ class _ParsedStackTrace:
 
 # get File:lineno code from stack_trace
 def _parse_stack_trace(
-    stack_trace: str, filter_fn: Optional[Callable[[str, str, str], bool]] = None
+    stack_trace: str, filter_fn: Callable[[str, str, str], bool] | None = None
 ):
     if stack_trace is None:
         return None
@@ -341,7 +281,7 @@ class CodeGen:
     _sym_repr: Callable[["torch.types.PySymType"], str] = lambda x: repr(x)
 
     def __init__(self):
-        self._body_transformer: Optional[TransformCodeFunc] = None
+        self._body_transformer: TransformCodeFunc | None = None
         self._func_name: str = "forward"
 
     def _format_multiline_args(self, args: list[str]) -> str:
@@ -411,7 +351,7 @@ class CodeGen:
             return f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
 
     def generate_output(
-        self, output_args: Argument, *, descs: Optional[Any] = None
+        self, output_args: Argument, *, descs: Any | None = None
     ) -> str:
         """
         Given the output arguments, generates the return statement of the FX function.
@@ -461,7 +401,7 @@ class CodeGen:
         # Render each argument on its own line
         expanded_def: bool = False,
         record_func: bool = False,
-        additional_meta: Optional[list[str]] = None,
+        additional_meta: list[str] | None = None,
     ) -> PythonCode:
         free_vars: list[str] = []
         body: list[str] = []
@@ -958,7 +898,7 @@ class CodeGen:
         )
 
         # remove counter and generate lineno to node index mapping
-        lineno_map: dict[int, Optional[int]] = {}
+        lineno_map: dict[int, int | None] = {}
         prologue_len = prologue.count("\n") + 1
         new_lines: list[str] = []
         cur_idx = None
@@ -1136,7 +1076,7 @@ class _PyTreeCodeGen(CodeGen):
             fn_definition += self.gen_var_bindings(fn_args, free_vars, expanded_def)
         return fn_definition
 
-    def generate_output(self, output_args, *, descs: Optional[Any] = None):
+    def generate_output(self, output_args, *, descs: Any | None = None):
         if self.pytree_info and self.pytree_info.out_spec:
             if descs is not None and isinstance(output_args, (list, tuple)):
                 return (
@@ -1160,7 +1100,7 @@ class _ExportCodeGen(_PyTreeCodeGen):
         in_shuffle_graph: "GraphModule",
         out_shuffle_graph: "GraphModule",
         tree_leaf_names: list[str],
-        root: Optional[torch.nn.Module],
+        root: torch.nn.Module | None,
     ):
         super().__init__(pytree_info)
         self.in_shuffle_graph = in_shuffle_graph
@@ -1205,11 +1145,11 @@ class _FindNodesLookupTable:
     """
 
     def __init__(self):
-        self.table: dict[tuple[str, Optional[Target]], dict[Node, None]] = defaultdict(
+        self.table: dict[tuple[str, Target | None], dict[Node, None]] = defaultdict(
             dict
         )
 
-    def _key(self, node) -> tuple[str, Optional[Target]]:
+    def _key(self, node) -> tuple[str, Target | None]:
         return (node.op, node.target if node.op == "call_function" else None)
 
     def __contains__(self, node) -> bool:
@@ -1287,8 +1227,8 @@ class Graph:
     def __init__(
         self,
         owning_module: Optional["GraphModule"] = None,
-        tracer_cls: Optional[type["Tracer"]] = None,
-        tracer_extras: Optional[dict[str, Any]] = None,
+        tracer_cls: type["Tracer"] | None = None,
+        tracer_extras: dict[str, Any] | None = None,
     ):
         """
         Construct an empty Graph.
@@ -1364,7 +1304,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def graph_copy(
         self, g: "Graph", val_map: dict[Node, Node], return_output_node=False
-    ) -> "Optional[Argument]":
+    ) -> "Argument | None":
         """
         Copy all nodes from a given graph into ``self``.
 
@@ -1422,10 +1362,10 @@ class Graph:
         self,
         op: str,
         target: "Target",
-        args: Optional[tuple["Argument", ...]] = None,
-        kwargs: Optional[dict[str, "Argument"]] = None,
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None,
+        args: tuple["Argument", ...] | None = None,
+        kwargs: dict[str, "Argument"] | None = None,
+        name: str | None = None,
+        type_expr: Any | None = None,
     ) -> Node:
         """
         Create a ``Node`` and add it to the ``Graph`` at the current insert-point.
@@ -1535,7 +1475,7 @@ class Graph:
         )
 
     @compatibility(is_backward_compatible=True)
-    def inserting_before(self, n: Optional[Node] = None):
+    def inserting_before(self, n: Node | None = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
         then restore it when the with statement exits::
@@ -1560,7 +1500,7 @@ class Graph:
         return _InsertPoint(self, n.prepend)
 
     @compatibility(is_backward_compatible=True)
-    def inserting_after(self, n: Optional[Node] = None):
+    def inserting_after(self, n: Node | None = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
         then restore it when the with statement exits::
@@ -1588,7 +1528,7 @@ class Graph:
     def placeholder(
         self,
         name: str,
-        type_expr: Optional[Any] = None,
+        type_expr: Any | None = None,
         default_value: Any = inspect.Signature.empty,
     ) -> Node:
         """
@@ -1618,7 +1558,7 @@ class Graph:
         return self.create_node("placeholder", name, args=args, type_expr=type_expr)
 
     @compatibility(is_backward_compatible=True)
-    def get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> Node:
+    def get_attr(self, qualified_name: str, type_expr: Any | None = None) -> Node:
         """
         Insert a ``get_attr`` node into the Graph. A ``get_attr`` ``Node`` represents the
         fetch of an attribute from the ``Module`` hierarchy.
@@ -1689,9 +1629,9 @@ class Graph:
     def call_module(
         self,
         module_name: str,
-        args: Optional[tuple["Argument", ...]] = None,
-        kwargs: Optional[dict[str, "Argument"]] = None,
-        type_expr: Optional[Any] = None,
+        args: tuple["Argument", ...] | None = None,
+        kwargs: dict[str, "Argument"] | None = None,
+        type_expr: Any | None = None,
     ) -> Node:
         """
         Insert a ``call_module`` ``Node`` into the ``Graph``. A ``call_module`` node
@@ -1739,9 +1679,9 @@ class Graph:
     def call_method(
         self,
         method_name: str,
-        args: Optional[tuple["Argument", ...]] = None,
-        kwargs: Optional[dict[str, "Argument"]] = None,
-        type_expr: Optional[Any] = None,
+        args: tuple["Argument", ...] | None = None,
+        kwargs: dict[str, "Argument"] | None = None,
+        type_expr: Any | None = None,
     ) -> Node:
         """
         Insert a ``call_method`` ``Node`` into the ``Graph``. A ``call_method`` node
@@ -1778,10 +1718,10 @@ class Graph:
     def call_function(
         self,
         the_function: Callable[..., Any],
-        args: Optional[tuple["Argument", ...]] = None,
-        kwargs: Optional[dict[str, "Argument"]] = None,
-        type_expr: Optional[Any] = None,
-        name: Optional[str] = None,
+        args: tuple["Argument", ...] | None = None,
+        kwargs: dict[str, "Argument"] | None = None,
+        type_expr: Any | None = None,
+        name: str | None = None,
     ) -> Node:
         """
         Insert a ``call_function`` ``Node`` into the ``Graph``. A ``call_function`` node
@@ -1854,7 +1794,7 @@ class Graph:
         return result_node
 
     @compatibility(is_backward_compatible=True)
-    def output(self, result: "Argument", type_expr: Optional[Any] = None):
+    def output(self, result: "Argument", type_expr: Any | None = None):
         """
         Insert an ``output`` ``Node`` into the ``Graph``. An ``output`` node represents
         a ``return`` statement in Python code. ``result`` is the value that should
@@ -1876,7 +1816,7 @@ class Graph:
             op="output", target="output", args=(result,), type_expr=type_expr
         )
 
-    def _target_to_str(self, target: Optional[Target]) -> str:
+    def _target_to_str(self, target: Target | None) -> str:
         if callable(target):
             op = target.__name__
         else:
@@ -1899,7 +1839,7 @@ class Graph:
         colored: bool = False,
         expanded_def: bool = False,
         record_func: bool = False,
-        additional_meta: Optional[list[str]] = None,
+        additional_meta: list[str] | None = None,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1982,7 +1922,7 @@ class Graph:
         colored: bool = False,
         expanded_def: bool = False,
         record_func: bool = False,
-        additional_meta: Optional[list[str]] = None,
+        additional_meta: list[str] | None = None,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes,
@@ -2049,7 +1989,7 @@ class Graph:
         """
 
         # Check topo order
-        def check_arg(arg: Node, n: Optional[Node] = None) -> None:
+        def check_arg(arg: Node, n: Node | None = None) -> None:
             context_str = f" of Node '{n}' " if n else " "
             if arg.graph is not self:
                 raise RuntimeError(
@@ -2119,7 +2059,7 @@ class Graph:
 
     @compatibility(is_backward_compatible=True)
     def eliminate_dead_code(
-        self, is_impure_node: Optional[Callable[[Node], bool]] = None
+        self, is_impure_node: Callable[[Node], bool] | None = None
     ) -> bool:
         """
         Remove all dead code from the graph, based on each node's number of
@@ -2213,7 +2153,7 @@ class Graph:
     @compatibility(is_backward_compatible=False)
     def on_generate_code(
         self,
-        make_transformer: Callable[[Optional[TransformCodeFunc]], TransformCodeFunc],
+        make_transformer: Callable[[TransformCodeFunc | None], TransformCodeFunc],
     ):
         """Register a transformer function when python code is generated
 

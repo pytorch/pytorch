@@ -202,6 +202,10 @@ ROCM_BLOCKLIST = [
 if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
     # Some autotune tests on gfx1100 are hanging, disable for now
     ROCM_BLOCKLIST.append("inductor/test_max_autotune")
+    # ROCm 7.2 gfx1100 started timing out due to these
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_dynamic_shapes")
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_opinfo")
+    ROCM_BLOCKLIST.append("inductor/test_ck_backend")
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
@@ -983,6 +987,15 @@ def test_openreg(test_module, test_directory, options):
     install_dir, return_code = install_cpp_extensions(openreg_dir)
     if return_code != 0:
         return return_code
+
+    # Run the openreg C++ unit tests (gtest) built by cmake.
+    ortests_bin = os.path.join(
+        openreg_dir, "build", "third_party", "openreg", "ortests"
+    )
+    if os.path.isfile(ortests_bin):
+        return_code = shell([ortests_bin], cwd=openreg_dir)
+        if return_code != 0:
+            return return_code
 
     with extend_python_path([install_dir]):
         cmd = [

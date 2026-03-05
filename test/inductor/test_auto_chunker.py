@@ -247,6 +247,30 @@ class AutoChunkerTest(TestCase):
             f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
         )
 
+    @config.patch("auto_chunker.output_size_threshold", 1024)
+    @config.patch("auto_chunker.num_chunk", 2)
+    def test_propagate_tanh_neg(self):
+        M, K, N = 256, 4, 256
+        x = torch.randn(M, K, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(K, N, device=GPU_TYPE, requires_grad=True)
+
+        def f(x, w):
+            out = (x * 2) @ w
+            out = torch.tanh(out)
+            out = -out
+            loss = out.sum()
+            loss.backward()
+            return loss
+
+        expect = (f(x, w), x.grad, w.grad)
+        x.grad = None
+        w.grad = None
+        opt_f = torch.compile(f)
+        actual = (opt_f(x, w), x.grad, w.grad)
+
+        self.assertTrue(same(expect, actual, tol=1e-3))
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
     def test_set_num_chunk_with_compile_options(self):
         B = 32
         T = 1024
