@@ -1375,7 +1375,7 @@ else:
                 raise ValueError(
                     f"dim {dim} specified in `_unflatten` is out of range {self.ndim}"
                 )
-            elif isinstance(dim, str) and dim in not_none(self.mesh_dim_names):
+            elif isinstance(dim, str) and dim not in not_none(self.mesh_dim_names):
                 raise ValueError(
                     f"dim {dim} specified in `_unflatten` is not in {self.mesh_dim_names}"
                 )
