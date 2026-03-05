@@ -4119,7 +4119,14 @@ class TestBufferProtocol(TestCase):
 #   The implementation itself is based on the Python Array API:
 #   https://data-apis.org/array-api/latest/API_specification/creation_functions.html
 def get_another_device(device):
-    return "cuda" if torch.device(device).type == "cpu" else "cpu"
+    device_type = torch.device(device).type
+    if device_type == "cpu":
+        # Return first available accelerator, or None if none available
+        if torch.cuda.is_available():
+            return "cuda"
+        return None
+    else:
+        return "cpu"
 
 def identity(tensor):
     return tensor
@@ -4233,8 +4240,8 @@ class TestAsArray(TestCase):
         check(device=device, dtype=dtype, copy=True)
 
         # Copy is forced because of different device
-        if torch.cuda.is_available():
-            other = get_another_device(device)
+        other = get_another_device(device)
+        if other is not None:
             check(same_device=False, device=other, dtype=dtype)
             check(same_device=False, device=other, dtype=dtype, copy=True)
 
@@ -4306,8 +4313,8 @@ class TestAsArray(TestCase):
     def test_unsupported_alias(self, device, dtype):
         original = make_tensor((5, 5), dtype=dtype, device=device)
 
-        if torch.cuda.is_available():
-            other_device = get_another_device(device)
+        other_device = get_another_device(device)
+        if other_device is not None:
             with self.assertRaisesRegex(ValueError,
                                         f"from device '{device}' to '{other_device}'"):
                 torch.asarray(original, device=other_device, copy=False)
@@ -4420,15 +4427,17 @@ class TestAsArray(TestCase):
                 else:
                     self.assertEqual(data, tensor)
 
-    @onlyCUDA
+    @skipMeta  # meta devices don't have meaningful device index behavior
+    @onlyNativeDeviceTypes
     def test_device_without_index(self, device):
-        original = torch.arange(5, device="cuda")
+        device_type = torch.device(device).type  # e.g., "cuda" or "cpu"
+        original = torch.arange(5, device=device_type)
 
-        tensor = torch.asarray(original, device="cuda")
+        tensor = torch.asarray(original, device=device_type)
         # The storage pointers should be equal
         self.assertEqual(original.data_ptr(), tensor.data_ptr())
 
-        tensor = torch.asarray(original, copy=True, device="cuda")
+        tensor = torch.asarray(original, copy=True, device=device_type)
         # The storage pointers should not be equal
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 
