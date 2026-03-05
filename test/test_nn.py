@@ -9369,6 +9369,84 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = group_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
+    @onlyCPU
+    def test_norm_extreme_values_no_overflow(self, device):
+        """Variance computation in float32 must not overflow for large inputs.
+
+        Regression test: values near 1e30 caused (x - mean)^2 to overflow
+        float32 to inf, producing NaN/zero outputs.  The fix promotes
+        intermediate accumulation to double on CPU.
+        """
+        def _ref_output(layer, x):
+            return layer.double()(x.double()).float()
+
+        torch.manual_seed(42)
+        extreme = torch.linspace(-1e30, 1e30, steps=12)
+
+        # --- BatchNorm1d (contiguous) ---
+        x_bn1 = extreme.reshape(3, 4)
+        bn1 = nn.BatchNorm1d(4, affine=False).float()
+        out = bn1(x_bn1)
+        ref = _ref_output(deepcopy(bn1), x_bn1)
+        self.assertFalse(out.isnan().any(), "BatchNorm1d contiguous produced NaN")
+        self.assertFalse(out.isinf().any(), "BatchNorm1d contiguous produced inf")
+        self.assertEqual(out, ref, atol=1e-5, rtol=1e-5)
+
+        # --- BatchNorm2d (contiguous) ---
+        x_bn2 = extreme.reshape(1, 3, 2, 2)
+        bn2 = nn.BatchNorm2d(3, affine=False).float()
+        out = bn2(x_bn2)
+        ref = _ref_output(deepcopy(bn2), x_bn2)
+        self.assertFalse(out.isnan().any(), "BatchNorm2d contiguous produced NaN")
+        self.assertFalse(out.isinf().any(), "BatchNorm2d contiguous produced inf")
+        self.assertEqual(out, ref, atol=1e-5, rtol=1e-5)
+
+        # --- BatchNorm2d (channels_last) ---
+        x_bn2_cl = x_bn2.contiguous(memory_format=torch.channels_last)
+        bn2_cl = nn.BatchNorm2d(3, affine=False).float()
+        out = bn2_cl(x_bn2_cl)
+        ref = _ref_output(deepcopy(bn2_cl), x_bn2_cl)
+        self.assertFalse(out.isnan().any(), "BatchNorm2d channels_last produced NaN")
+        self.assertFalse(out.isinf().any(), "BatchNorm2d channels_last produced inf")
+        self.assertEqual(out, ref, atol=1e-5, rtol=1e-5)
+
+        # --- LayerNorm ---
+        x_ln = extreme.reshape(3, 4)
+        ln = nn.LayerNorm(4, elementwise_affine=False).float()
+        out = ln(x_ln)
+        ref = _ref_output(deepcopy(ln), x_ln)
+        self.assertFalse(out.isnan().any(), "LayerNorm produced NaN")
+        self.assertFalse(out.isinf().any(), "LayerNorm produced inf")
+        self.assertEqual(out, ref, atol=1e-5, rtol=1e-5)
+
+        # --- GroupNorm (contiguous, uses moments_utils.h) ---
+        x_gn = extreme.reshape(1, 4, 3)
+        gn = nn.GroupNorm(2, 4, affine=False).float()
+        out = gn(x_gn)
+        ref = _ref_output(deepcopy(gn), x_gn)
+        self.assertFalse(out.isnan().any(), "GroupNorm contiguous produced NaN")
+        self.assertFalse(out.isinf().any(), "GroupNorm contiguous produced inf")
+        self.assertEqual(out, ref, atol=1e-5, rtol=1e-5)
+
+        # --- GroupNorm (channels_last, uses ColumnwiseMoments) ---
+        x_gn_cl = torch.linspace(-1e30, 1e30, steps=48).reshape(2, 4, 2, 3)
+        x_gn_cl = x_gn_cl.contiguous(memory_format=torch.channels_last)
+        gn_cl = nn.GroupNorm(2, 4, affine=False).float()
+        out = gn_cl(x_gn_cl)
+        ref = _ref_output(deepcopy(gn_cl), x_gn_cl)
+        self.assertFalse(out.isnan().any(), "GroupNorm channels_last produced NaN")
+        self.assertFalse(out.isinf().any(), "GroupNorm channels_last produced inf")
+        self.assertEqual(out, ref, atol=1e-5, rtol=1e-5)
+
+        # --- InstanceNorm (backed by BatchNorm kernel) ---
+        x_in = extreme.reshape(1, 3, 4)
+        inst = nn.InstanceNorm1d(3, affine=False).float()
+        out = inst(x_in)
+        ref = _ref_output(deepcopy(inst), x_in)
+        self.assertFalse(out.isnan().any(), "InstanceNorm1d produced NaN")
+        self.assertFalse(out.isinf().any(), "InstanceNorm1d produced inf")
+        self.assertEqual(out, ref, atol=1e-5, rtol=1e-5)
+
     @expectedFailureMPS  # Double is not supported on MPS
     @onlyNativeDeviceTypes
     @dtypes(torch.float64, torch.complex128)
