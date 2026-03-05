@@ -13174,6 +13174,7 @@ op_db: list[OpInfo] = [
            assert_autodiffed=False,
            sample_inputs_func=sample_inputs_cdist,
            skips=(
+               # NotImplementedError: The operator 'aten::_cdist_backward' is not currently implemented for the MPS device
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
                DecorateInfo(toleranceOverride(
@@ -16145,6 +16146,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive',
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                   'TestCommon', 'test_noncontiguous_samples', device_type='mps',
+               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -16159,10 +16164,9 @@ op_db: list[OpInfo] = [
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # AssertionError: Tensor-likes are not close!
                DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32, torch.int64)
+                   unittest.expectedFailure, 'TestCommon',
+                   device_type='mps', dtypes=(torch.int64,)
                ),
            ),
            supports_expanded_weight=True,
@@ -20666,11 +20670,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # Not Implemented on XLA.
                DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla'),
-               # RuntimeError: histogramdd(): weight should be contiguous on MPS
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
@@ -20684,11 +20683,6 @@ op_db: list[OpInfo] = [
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # RuntimeError: histogramdd(): weight should be contiguous on MPS
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
            )),
     OpInfo('histc',
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -22316,7 +22310,6 @@ op_db: list[OpInfo] = [
             # Error: The operator 'aten::grid_sampler_3d_backward' is not currently implemented for the MPS device.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-            # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4),
                                             torch.float16: tol(atol=1e-4, rtol=1e-4),
