@@ -5260,14 +5260,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.skipTest("Failed on CUDA")
 
         if torch.version.hip:
-            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16") \
+            if "_train_NCHW_vs_native_mixed_bfloat16" in self._testMethodName \
                     and _get_torch_rocm_version() >= (6, 4):
                 # https://github.com/pytorch/pytorch/issues/156513
                 self.skipTest("bfloat16 NCHW train failed due to native tolerance issue")
 
-            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
-                self.skipTest("3D float16 NCHW train failed on ROCm")
+            if "_3D_train_NCHW_vs_native_mixed_float16" in self._testMethodName :
+                self.skipTest("3D float16 NCHW train failed on ROCm due to native tolerance issue")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
