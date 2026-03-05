@@ -312,6 +312,71 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    @parametrize("out_dtype", (torch.float32, torch.bfloat16))
+    @parametrize(
+        "m,n,k",
+        (
+            (256, 512, 1024),
+            (256, 1024, 512),
+            (128, 256, 512),
+            (512, 256, 1024),
+        ),
+    )
+    def test_scaled_gemm_nvf4(self, out_dtype, m, n, k):
+        """Test NVF4 (Float4 + Float8E4M3FN scales, block_size=16) with NVGEMM backend.
+
+        NVF4 is the FP4 format supported end-to-end through torch._scaled_mm.
+        ATen requires float8_e4m3fn scale factors for FP4 blockwise scaling.
+        Uses autotune_choice_name_regex to force the vendored kernel.
+        """
+        from torch._inductor.utils import ceildiv
+
+        packed_k = k // 2
+        block_size = 16
+        device = "cuda"
+
+        def _round_up(x, multiple):
+            return ((x + multiple - 1) // multiple) * multiple
+
+        def scaled_mm(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a, b, scale_a=scale_a, scale_b=scale_b, out_dtype=out_dtype
+            )
+
+        a_fp4 = torch.randint(
+            0, 256, (m, packed_k), device=device, dtype=torch.uint8
+        ).view(torch.float4_e2m1fn_x2)
+        b_fp4 = torch.randint(
+            0, 256, (n, packed_k), device=device, dtype=torch.uint8
+        ).view(torch.float4_e2m1fn_x2)
+        b_fp4_t = b_fp4.T
+
+        num_k_blocks = ceildiv(k, block_size)
+        padded_k_blocks = _round_up(num_k_blocks, 4)
+        block_size_mn = 128
+        scale_a_numel = block_size_mn * ceildiv(m, block_size_mn) * padded_k_blocks
+        scale_b_numel = block_size_mn * ceildiv(n, block_size_mn) * padded_k_blocks
+
+        scale_a = torch.rand(scale_a_numel, device=device).to(torch.float8_e4m3fn)
+        scale_b = torch.rand(scale_b_numel, device=device).to(torch.float8_e4m3fn)
+
+        expected = scaled_mm(a_fp4, b_fp4_t, scale_a, scale_b)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "nvgemm_max_profiling_configs": 3,
+                "autotune_fallback_to_aten": False,
+                # Force vendored kernel via description regex
+                "test_configs.autotune_choice_desc_regex": "inductor_vendored",
+            }
+        ):
+            compiled_fn = torch.compile(scaled_mm)
+            result = compiled_fn(a_fp4, b_fp4_t, scale_a, scale_b)
+
+        torch.testing.assert_close(result, expected)
+
     def test_grouped_gemm(self):
         """Test grouped GEMM with NVGEMM backend.
 
