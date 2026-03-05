@@ -1232,8 +1232,8 @@ def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
         #     [H, 1, 1, 1] channels_last stride
         #     [H, H, 1, 1] contiguous stride
         # 2. permutation of 1C1W:
-        #     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
-        #     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as
+        #     [1, C, 1, W]@[WC, W, W, 1] transpose(1, 3)
+        #     [1, W, 1, C]@[WC, 1, W, W] shouldn't be identified as
         #     channels_last
         m = strides[d] * Max(sizes[d], 1)
 
