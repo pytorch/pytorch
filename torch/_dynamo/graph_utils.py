@@ -43,9 +43,7 @@ def _detect_cycles(
 
         # Stack holds (current_node, children_iterator).
         # Using an iterator allows us to pause and resume processing a node's children.
-        stack = [
-            (root, iter(_get_flat_args_unique(root, node_to_additional_deps)))
-        ]
+        stack = [(root, iter(_get_flat_args_unique(root, node_to_additional_deps)))]
         state[root] = 1  # Visiting
 
         while stack:
@@ -66,16 +64,7 @@ def _detect_cycles(
 
                 if child_state == 0:
                     state[child] = 1
-                    stack.append(
-                        (
-                            child,
-                            iter(
-                                _get_flat_args_unique(
-                                    child, node_to_additional_deps
-                                )
-                            ),
-                        )
-                    )
+                    stack.append((child, iter(_get_flat_args_unique(child, node_to_additional_deps))))
                 # child_state == 2 means already verified safe; skip.
 
             except StopIteration:
