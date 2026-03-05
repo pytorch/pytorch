@@ -993,6 +993,42 @@ def module_error_inputs_torch_nn_BatchNorm1d_2d_3d(module_info, device, dtype, r
         ),
     ]
 
+def module_error_inputs_torch_nn_Conv2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    tensor_factory = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    bad_rank = ErrorModuleInput(
+        ModuleInput(
+            constructor_input=FunctionInput(3, 16, 3),
+            forward_input=FunctionInput(tensor_factory((3, 10))),
+            desc="rank_mismatch_2d_input",
+        ),
+        error_on=ModuleErrorEnum.FORWARD_ERROR,
+        error_type=RuntimeError,
+        error_regex=r"Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d.*",
+    )
+
+    wrong_channels = ErrorModuleInput(
+        ModuleInput(
+            constructor_input=FunctionInput(3, 16, 3),
+            forward_input=FunctionInput(tensor_factory((1, 5, 10, 10))),
+            desc="channel_mismatch",
+        ),
+        error_on=ModuleErrorEnum.FORWARD_ERROR,
+        error_type=RuntimeError,
+        error_regex=r"Given groups=1.*expected input.*to have 3 channels.*but got 5 channels(?: instead)?",
+    )
+
+    bad_groups = ErrorModuleInput(
+        ModuleInput(
+            constructor_input=FunctionInput(3, 16, 3, groups=2),
+            desc="invalid_groups",
+        ),
+        error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+        error_type=ValueError,
+        error_regex=r"in_channels must be divisible by groups",
+    )
+
+    return [bad_rank, wrong_channels, bad_groups]
 
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
     N = kwargs['N']
@@ -3802,6 +3838,7 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.Conv2d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+               module_error_inputs_func=module_error_inputs_torch_nn_Conv2d,
                module_memformat_affects_out=True,
                skips=(
                    # This was wrongly being skipped before and needs investigation.
@@ -3809,7 +3846,7 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='cuda', dtypes=[torch.float64]),
                ),
-               decorators=(
+               decorators=( 
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.Conv3d,
