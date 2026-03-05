@@ -1717,17 +1717,20 @@ def isend_inplace(
     tensor: torch.Tensor,
     dst: int,
     tag: int = 0,
-    group: RANK_TYPES = "",
+    group: RANK_TYPES = "",  # pyrefly: ignore [bad-function-definition]
     group_dst: int = -1,
 ):
-    group = group or dist.group.WORLD
+    group = group or dist.group.WORLD  # pyrefly: ignore [bad-assignment]
     assert group is not None
     if group_dst != -1:
         if dst is not None:
             raise ValueError(
                 "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
             )
-        global_dst = c10d.get_global_rank(group, group_dst)
+        global_dst = c10d.get_global_rank(
+            group,  # pyrefly: ignore [bad-argument-type]
+            group_dst,
+        )
     else:
         global_dst = dst
 
@@ -1742,17 +1745,20 @@ def irecv_inplace(
     tensor: torch.Tensor,
     src: int,
     tag: int = 0,
-    group: RANK_TYPES = "",
+    group: RANK_TYPES = "",  # pyrefly: ignore [bad-function-definition]
     group_src: int = -1,
 ):
-    group = group or dist.group.WORLD
+    group = group or dist.group.WORLD  # pyrefly: ignore [bad-assignment]
     assert group is not None
     if group_src != -1:
         if src is not None:
             raise ValueError(
                 "Cannot specify both 'src' and 'group_src' args as per eager impl"
             )
-        global_src = c10d.get_global_rank(group, group_src)
+        global_src = c10d.get_global_rank(
+            group,  # pyrefly: ignore [bad-argument-type]
+            group_src,
+        )
     else:
         global_src = src
     group_name = _resolve_group_name(group)

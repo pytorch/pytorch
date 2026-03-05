@@ -2401,7 +2401,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         if self.fn == dist.batch_isend_irecv:
             if not config.enable_p2p_compilation:
                 unimplemented(
-                    gb_type="P2P compilation disabled",
+                    gb_type="P2P compilation disabled for batch_isend_irecv",
                     context=f"{self.fn}",
                     explanation="P2P compilation is disabled.",
                     hints=[
@@ -2414,18 +2414,18 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             tags = list()
             tensors = list()
             p2p_ops = kwargs["p2p_op_list"]
-            group_var = p2p_ops.items[0].group
+            group_var = p2p_ops.items[0].group  # pyrefly: ignore [missing-attribute]
 
             if not isinstance(p2p_ops, variables.ListVariable):
                 raise torch._dynamo.exc.InternalTorchDynamoError(
                     "`P2POp` used incorrectly"
                 )
 
-            for op in p2p_ops.items:  # list of P2POpVariable
-                ops.append(op.op)
-                tensors.append(op.tensor)
-                peers.append(op.peer)
-                tags.append(op.tag)
+            for op in p2p_ops.items:  # pyrefly: ignore [missing-attribute]
+                ops.append(op.op)  # pyrefly: ignore [missing-attribute]
+                tensors.append(op.tensor)  # pyrefly: ignore [missing-attribute]
+                peers.append(op.peer)  # pyrefly: ignore [missing-attribute]
+                tags.append(op.tag)  # pyrefly: ignore [missing-attribute]
             new_args = tuple()
             new_kwargs = {
                 "op_list": variables.ListVariable(ops),
@@ -2434,12 +2434,16 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 "tensors": variables.ListVariable(tensors),
                 "group_name": group_var,
             }
-            return self.replacement_var.call_function(tx, new_args, new_kwargs)
+            return self.replacement_var.call_function(
+                tx,
+                new_args,
+                new_kwargs,  # pyrefly: ignore [bad-argument-type]
+            )
 
         if self.fn in (dist.isend, dist.irecv):
             if not config.enable_p2p_compilation:
                 unimplemented(
-                    gb_type="P2P compilation disabled",
+                    gb_type="P2P compilation disabled for isend/irecv",
                     context=f"{self.fn}",
                     explanation="P2P compilation is disabled.",
                     hints=[

@@ -340,6 +340,8 @@ class BackwardHookVariable(VariableTracker):
 class P2POpVariable(VariableTracker):
     @staticmethod
     def can_rewrite(variable):
+        import torch.distributed as dist
+
         return isinstance(variable, dist.P2POp)
 
     def __init__(
@@ -389,7 +391,12 @@ class P2POpVariable(VariableTracker):
         return self.tensor.as_proxy()
 
     def reconstruct(self, codegen):
-        unimplemented_v2("Cannot reconstruct P2POpVariable")
+        unimplemented(
+            gb_type="Cannot reconstruct P2POpVariable",
+            context="P2POpVariable.reconstruct",
+            explanation="P2POpVariable does not support reconstruction.",
+            hints=[],
+        )
 
     def var_getattr(self, tx, name):
         if name == "op":

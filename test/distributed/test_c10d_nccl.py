@@ -12,7 +12,6 @@ import sys
 import tempfile
 import threading
 import time
-import unittest
 import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -6145,7 +6144,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_isend_with_wait(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl()
+        self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
         compiled_isend_wait = torch.compile(self._single_isend_with_wait_pattern)
@@ -6167,7 +6166,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_with_reduce_overhead(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl()
+        self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
         peer = 1 - self.rank
 
@@ -6197,7 +6196,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_paired_isend_irecv_with_waits(self, tensor_size):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl()
+        self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
         compiled_paired_comm = torch.compile(
@@ -6222,7 +6221,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_multiple_isend_with_waits(self, num_tensors):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl()
+        self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
         compiled_multi_isend = torch.compile(self._multiple_isend_with_waits_pattern)
@@ -6261,7 +6260,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_iterative_communication_with_waits(self, num_iterations):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl()
+        self._create_process_group_nccl()
         device = torch.device(f"cuda:{self.rank}")
 
         compiled_iterative_comm = torch.compile(self._iterative_communication_pattern)
@@ -6309,9 +6308,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_p2p_interleave(self):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl()
+        self._create_process_group_nccl()
         torch.cuda.set_device(self.rank)
-        device = self.local_device
 
         def _kernel(x0, x1, y0, y1):
             r = dist.get_rank()
@@ -6387,7 +6385,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     def test_compiled_ring_attention_pattern(self, num_steps, M):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
-        pg = self._create_process_group_nccl()
+        self._create_process_group_nccl()
         torch.cuda.set_device(self.rank)
         device = self.local_device
         N = M

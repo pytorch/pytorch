@@ -514,7 +514,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value is torch.distributed.P2POp:
             if not config.enable_p2p_compilation:
                 unimplemented(
-                    gb_type="P2P compilation disabled",
+                    gb_type="P2P compilation disabled for P2POp construction",
                     context="torch.distributed.P2POp",
                     explanation="P2P compilation is disabled.",
                     hints=[
