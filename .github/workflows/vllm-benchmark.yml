@@ -127,4 +127,5 @@ jobs:
       pytorch_commit: ${{ inputs.pytorch_commit }}
       models: ${{ matrix.models }}
       compilation_config: ${{ inputs.compilation_config }}
+      is_nightly: ${{ github.event_name == 'schedule' }}
     secrets: inherit

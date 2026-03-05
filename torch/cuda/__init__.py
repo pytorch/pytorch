@@ -18,7 +18,7 @@ import traceback
 import warnings
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, cast, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NewType, Optional, TYPE_CHECKING
 
 import torch
 import torch._C
@@ -245,7 +245,7 @@ class _CompatInterval:
     also allows excluding specific versions from the range.
     """
 
-    def __init__(self, start, exclude: Optional[set[int]] = None):
+    def __init__(self, start, exclude: set[int] | None = None):
         self.major, self.minor = start // 10, start % 10
         self.exclude = set() if exclude is None else exclude
 
@@ -288,7 +288,7 @@ class _CompatSet:
 # - The keys in dict correspond to known sm versions but the values
 #   are merely rules based on sm compatibility guarantees for NVIDIA
 #   devices while accounting for incompatibility of iGPU and dGPU.
-DEVICE_REQUIREMENT: dict[int, Union[_CompatSet, _CompatInterval]] = {
+DEVICE_REQUIREMENT: dict[int, _CompatSet | _CompatInterval] = {
     50: _CompatInterval(start=50, exclude={53}),
     52: _CompatInterval(start=52, exclude={53}),
     53: _CompatSet({53}),

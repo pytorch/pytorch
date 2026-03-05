@@ -228,8 +228,12 @@ static PyObject* NamespaceBase_create_name(
   }
 
   if (!has_num || in_used_names) {
-    // num = self._base_count.get(candidate, 0)
-    PyObject* count_obj = PyDict_GetItem(ns->base_count, candidate_py.get());
+    // num = self._base_count.get(base, 0)
+    THPObjectPtr base_key_lookup(PyUnicode_FromString(base.c_str()));
+    if (!base_key_lookup) {
+      return nullptr;
+    }
+    PyObject* count_obj = PyDict_GetItem(ns->base_count, base_key_lookup.get());
     if (count_obj) {
       num = PyLong_AsLongLong(count_obj);
       if (num == -1 && PyErr_Occurred()) {

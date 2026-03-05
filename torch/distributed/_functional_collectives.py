@@ -3,7 +3,7 @@ import contextlib
 import math
 import sys
 import warnings
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -91,14 +91,14 @@ Functional collectives can accept any of these types to describe the ranks parti
 
 The different types will be desugared to a canonical format
 """
-RANK_TYPES = Union[
-    list[int],
-    list[list[int]],
-    dist.ProcessGroup,
-    DeviceMesh,
-    tuple["dist.tensor.DeviceMesh", int],
-    c10d.GroupName,
-]
+RANK_TYPES = (
+    list[int]
+    | list[list[int]]
+    | dist.ProcessGroup
+    | DeviceMesh
+    | tuple["dist.tensor.DeviceMesh", int]
+    | c10d.GroupName
+)
 
 
 from torch._utils import _chunk_or_narrow_cat  # noqa: F401

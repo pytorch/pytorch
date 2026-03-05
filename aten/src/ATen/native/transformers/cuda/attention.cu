@@ -646,7 +646,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
 #endif
   const auto dim_per_head = D / num_head;
-  if ((query.is_same(key) && key.is_same(value)) && dim_per_head % 8 == 0 && !need_weights) {
+  if ((query.is_same(key) && key.is_same(value)) && !need_weights) {
 
     // We have not done linear projection yet but the input for SDP
     // Is expected to be 4 dimensional. We "cheaply" create view tensors

@@ -12913,6 +12913,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         FileCheck().check("def triton").check("def triton").run(code[0])
 
     @requires_gpu()
+    @skip_if_gpu_halide
+    @skip_if_not_triton
+    def test_bucketize_nan_consistency(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/173133.
+        def fn(x, boundaries, right):
+            return torch.bucketize(torch.rsqrt(x), boundaries, right=right)
+
+        x = torch.tensor([-1.0], device=self.device)
+        boundaries = torch.tensor([0.2, 0.5, 0.8], device=self.device)
+        expected = torch.tensor(
+            [boundaries.numel()], device=self.device, dtype=torch.int64
+        )
+
+        for right in (False, True):
+            self.assertEqual(fn(x, boundaries, right), expected)
+            self.common(fn, (x, boundaries, right), check_lowp=False)
+
+    @requires_gpu()
     @config.patch(assume_aligned_inputs=False)
     def test_config_option_dont_assume_alignment(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
@@ -15069,6 +15087,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 return out
 
         inputs = (torch.randn(4, device=self.device),)
+        self.common(Model(), inputs)
+
+    @requires_gpu_and_triton
+    def test_triton_kernel_bool_tensor_arg(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        from torch.testing._internal.triton_utils import (
+            masked_add_kernel_with_bool_tensor,
+        )
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y, mask):
+                out = torch.zeros_like(x)
+                n = x.numel()
+                masked_add_kernel_with_bool_tensor[(n,)](
+                    in_ptr0=x,
+                    in_ptr1=y,
+                    mask_ptr=mask,
+                    out_ptr=out,
+                    n_elements=n,
+                    BLOCK_SIZE=1024,
+                )
+                return out
+
+        n = 128
+        x = torch.randn(n, device=self.device)
+        y = torch.randn(n, device=self.device)
+        mask = torch.arange(n, device=self.device) < n // 2
+        inputs = (x, y, mask)
         self.common(Model(), inputs)
 
     @skipIfXpu(

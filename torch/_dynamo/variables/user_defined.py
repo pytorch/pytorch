@@ -477,11 +477,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return VariableTracker.build(tx, self.value == args[0].value)
         elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
             return VariableTracker.build(tx, self.value != args[0].value)
-        elif (
-            issubclass(self.value, (dict,))
-            and name != "__new__"
-            and getattr(self.value, name) in dict_methods
-        ):
+        elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, dict).call_method(
                 tx, name, args, kwargs
@@ -2656,13 +2652,8 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
             assert self.source is None, (
                 "dict_vt must be constructed by builder.py when source is present"
             )
-            user_cls = (
-                collections.OrderedDict
-                if isinstance(value, collections.OrderedDict)
-                else dict
-            )
-            self._dict_vt = variables.ConstDictVariable(
-                user_cls(), user_cls=user_cls, mutation_type=ValueMutationNew()
+            self._dict_vt = ConstDictVariable(
+                {}, type(value), mutation_type=ValueMutationNew()
             )
         else:
             self._dict_vt = dict_vt

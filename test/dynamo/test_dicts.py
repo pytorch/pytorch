@@ -1903,7 +1903,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(value, 1)
 
         # Test invalid usage
-        if self.thetype != OrderedDict:
+        if self.thetype is not OrderedDict:
             # OrderedDict accepts a keyword arg
             self.assertRaises(TypeError, d.popitem, 1)
 

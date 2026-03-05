@@ -342,6 +342,9 @@ def bucketize_binary_search(
         else:
             is_above = values > bucket_upper_bound
 
+        if is_floating(values):
+            is_above = is_above | (values != values)
+
         low = tl.where(is_above & mask, mid + 1, low)
         high = tl.where(is_above, high, mid)
 

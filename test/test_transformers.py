@@ -379,6 +379,31 @@ class TestTransformers(NNTestCase):
             # of NaNs for fully masked rows
             self.assertEqual(out, out_fp.nan_to_num())
 
+    @onlyCUDA
+    def test_multiheadattention_fastpath_fp16_head_dim_alignment(self, device):
+        previous_fastpath = torch.backends.mha.get_fastpath_enabled()
+        try:
+            torch.manual_seed(0)
+            mha = nn.MultiheadAttention(
+                96,
+                16,
+                dropout=0.2,
+                batch_first=True,
+                dtype=torch.float16,
+                device=device,
+            )
+            x = torch.randn(8, 32, 96, device=device, dtype=torch.float16) * 238.15560380049612
+            with torch.no_grad():
+                torch.backends.mha.set_fastpath_enabled(True)
+                mha.eval()
+                out, _ = mha(x, x, x, need_weights=False)
+                torch.backends.mha.set_fastpath_enabled(False)
+                out_ref, _ = mha(x, x, x, need_weights=False)
+            self.assertTrue(torch.isfinite(out).all())
+            self.assertEqual(out, out_ref, atol=2e-2, rtol=8e-2)
+        finally:
+            torch.backends.mha.set_fastpath_enabled(previous_fastpath)
+
     @parametrize("nhead", [1, 4, 8])
     def test_transformerencoderlayer_src_mask(self, device, nhead):
         batch_size = 2

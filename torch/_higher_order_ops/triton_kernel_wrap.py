@@ -466,7 +466,14 @@ def generate_ttir(
             if kernel.params[idx].is_constexpr:
                 return "constexpr"
             # pyrefly: ignore [not-callable]
-            return mangle_type(arg)
+            result = mangle_type(arg)
+            # Workaround for Triton i1/u1 AOTI bug: PyTorch stores bool
+            # tensors as uint8 (1 byte per element), but *i1/*u1 causes
+            # the compiled kernel to generate bit-packed loads. Use *u8
+            # so loads correctly read 1 byte per element.
+            if result in ("*i1", "*u1"):
+                result = "*u8"
+            return result
 
     else:
 

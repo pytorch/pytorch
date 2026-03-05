@@ -20,11 +20,11 @@ jobs:
       (
         (github.event_name != 'issues' &&
          contains(github.event.comment.body, '@claude') &&
-         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
+         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.comment.author_association) ||
           github.actor == 'pytorch-auto-revert[bot]')) ||
         (github.event_name == 'issues' &&
          contains(github.event.issue.body, '@claude') &&
-         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) ||
+         (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.issue.author_association) ||
           github.actor == 'pytorch-auto-revert[bot]'))
       )
     runs-on: ubuntu-latest
@@ -80,7 +80,8 @@ jobs:
           # We filter by github.actor at workflow level, there is no point of filtering here as well
           allowed_bots: "*"
           use_bedrock: "true"
-          claude_args: "--model global.anthropic.claude-opus-4-6-v1"
+          claude_args: "--model global.anthropic.claude-opus-4-6-v1 --allowedTools Skill"
+          prompt: "When asked to review a PR, always use the /pr-review skill."
           settings: '{"alwaysThinkingEnabled": true}'
 
       - name: Upload usage metrics

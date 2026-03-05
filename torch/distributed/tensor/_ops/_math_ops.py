@@ -4,7 +4,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, cast, Union
+from typing import Any, cast
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -56,7 +56,7 @@ class NormReduction:
     norm_type: int | float
 
 
-ReductionOpType = Union[NormReduction, str]
+ReductionOpType = NormReduction | str
 
 
 @dataclass(frozen=True)

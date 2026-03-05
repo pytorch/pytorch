@@ -44,7 +44,7 @@ verify_correctness = False
 #   - Individual IDs: "0,5,10"
 #   - Ranges: "10-20" (inclusive)
 #   - Comparisons: ">10", ">=10", "<5", "<=5"
-# Backends can be: "eager", "aot_eager", "inductor", "inductor:reduce-overhead", etc.
+# Backends can be: "eager", "aot_eager", "inductor", etc.
 # Examples:
 #   ">10:eager"                    - Run graphs with frame_id > 10 in dynamo eager backend
 #   "<=5:aot_eager;>5:inductor"    - First 6 graphs use aot_eager, rest use inductor
@@ -851,6 +851,12 @@ _custom_ops_profile: Any | None = None
 # Experimental flag to enable regional compile on invoke_subgraph HOP.
 # For testing only!
 enable_invoke_subgraph_regional_compile: bool = False
+
+# When True, run a post-tracing pass that inlines all invoke_subgraph HOPs
+# back into the parent graph, producing a flat FX graph. Useful when
+# downstream compilers (like vllm-compile) don't support HOPs or prefer a
+# flat graph.
+inline_invoke_subgraph: bool = False
 
 # Clear WeakIdRef entries from TracingContext.tensor_to_context and
 # MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
