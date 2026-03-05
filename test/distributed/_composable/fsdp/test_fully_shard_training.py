@@ -2018,9 +2018,7 @@ class TestFullyShardWorldSize1(FSDPTest):
                 super().__init__()
                 self.linear = nn.Linear(dim, dim)
 
-            def forward(
-                self, x: torch.Tensor, cpu_bias: torch.Tensor
-            ) -> torch.Tensor:
+            def forward(self, x: torch.Tensor, cpu_bias: torch.Tensor) -> torch.Tensor:
                 observed_cpu_bias_devices.append(cpu_bias.device)
                 test_case.assertEqual(cpu_bias.device.type, "cpu")
                 return self.linear(x + cpu_bias.to(device=x.device, dtype=x.dtype))
