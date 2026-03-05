@@ -59,12 +59,16 @@ else
   #    Commonly this is /opt/conda/
   if [[ -v CONDA_PREFIX ]]; then
     export CMAKE_PREFIX_PATH=${CONDA_PREFIX}
+    export LIBRARY_PATH="${CONDA_PREFIX}/lib${LIBRARY_PATH:+:${LIBRARY_PATH}}"
   elif [[ -v ANACONDA_PYTHON_VERSION ]]; then
     export CMAKE_PREFIX_PATH="/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}"
+    export LIBRARY_PATH="/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib${LIBRARY_PATH:+:${LIBRARY_PATH}}"
   else
     # already checked by `! which conda`
     CMAKE_PREFIX_PATH="$(conda info --base)"
     export CMAKE_PREFIX_PATH
+    LIBRARY_PATH="$(conda info --base)/lib${LIBRARY_PATH:+:${LIBRARY_PATH}}"
+    export LIBRARY_PATH
   fi
 
   # Workaround required for MKL library linkage
