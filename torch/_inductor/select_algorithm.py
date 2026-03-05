@@ -3621,12 +3621,21 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 if needed_size > current_size:
                     # Create a new base tensor with sufficient storage
-                    new_base = torch.randn(
-                        needed_size,
-                        dtype=base.dtype,
-                        device=base.device,
-                        requires_grad=base.requires_grad,
-                    )
+                    if base.dtype == torch.float4_e2m1fn_x2:
+                        new_base = torch.randint(
+                            0,
+                            256,
+                            (needed_size,),
+                            dtype=torch.uint8,
+                            device=base.device,
+                        ).view(torch.float4_e2m1fn_x2)
+                    else:
+                        new_base = torch.randn(
+                            needed_size,
+                            dtype=base.dtype,
+                            device=base.device,
+                            requires_grad=base.requires_grad,
+                        )
                     base = new_base.as_strided(
                         base.size(), base.stride(), base.storage_offset()
                     )
@@ -3646,12 +3655,21 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if needed_out_size > current_out_size:
             # Create a new base tensor with sufficient storage
-            new_out_base = torch.randn(
-                needed_out_size,
-                dtype=out_base.dtype,
-                device=out_base.device,
-                requires_grad=out_base.requires_grad,
-            )
+            if out_base.dtype == torch.float4_e2m1fn_x2:
+                new_out_base = torch.randint(
+                    0,
+                    256,
+                    (needed_out_size,),
+                    dtype=torch.uint8,
+                    device=out_base.device,
+                ).view(torch.float4_e2m1fn_x2)
+            else:
+                new_out_base = torch.randn(
+                    needed_out_size,
+                    dtype=out_base.dtype,
+                    device=out_base.device,
+                    requires_grad=out_base.requires_grad,
+                )
             out_base = new_out_base.as_strided(
                 out_base.size(), out_base.stride(), out_base.storage_offset()
             )
