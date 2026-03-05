@@ -962,7 +962,9 @@ class OpDecompositions:
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> OpVarT:
-        r = ops.mod(a, b)
+        # Use fmod instead of mod: mod (%) loses precision for large float
+        # values in some backends (e.g. Triton), while fmod is precise.
+        r = ops.fmod(a, b)
         cond = ops.and_(
             ops.ne(r, ops.constant(0, torch.int32)),
             ops.ne(ops.signbit(r), ops.signbit(b)),
