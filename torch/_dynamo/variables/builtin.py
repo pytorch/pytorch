@@ -1638,7 +1638,7 @@ class BuiltinVariable(VariableTracker):
                 return arg.call_method(tx, "__bool__", [], {})
             elif arg.call_obj_hasattr(tx, "__len__").value:
                 length = arg.call_method(tx, "__len__", [], {})
-                return ConstantVariable.create(length.value > 0)
+                return ConstantVariable.create(length.value > 0)  # type: ignore[missing-attr]
             else:
                 return ConstantVariable.create(True)
 

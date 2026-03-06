@@ -2092,6 +2092,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         if not bool(q):
             self.fail("non-empty mapping must compare to True")
 
+
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
 
