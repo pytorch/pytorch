@@ -2080,6 +2080,17 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertTrue(same(f(A(), x), opt_f(A(), x)))
 
+    def test_bool(self):
+        p = self.thetype()
+        q = self.thetype({"a": 1, "b": 2})
+        if p:
+            self.fail("empty mapping must compare to False")
+        if not q:
+            self.fail("non-empty mapping must compare to True")
+        if bool(p):
+            self.fail("empty mapping must compare to False")
+        if not bool(q):
+            self.fail("non-empty mapping must compare to True")
 
 class DictSubclassMethodsTests(DictMethodsTests):
     thetype = SimpleDict
