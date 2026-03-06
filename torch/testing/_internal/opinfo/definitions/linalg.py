@@ -2529,7 +2529,7 @@ op_db: list[OpInfo] = [
         # to avoid any rank changes caused by the perturbations in the gradcheck
         op=lambda a, b: torch.linalg.pinv(a @ b.mT),
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=[torch.float32],
+        dtypesIfMPS=(torch.float32,),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
