@@ -378,6 +378,91 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(next(i2), next(it2))
         self.assertEqual(a, b)
 
+    def test_itertools_islice_basic_ops(self):
+        # Test cases taken from the CPython test TestBasicOps.test_islice. That test has a lot of
+        # cases that we can't realistically support, whence we copy the sensible cases here.
+        def fn():
+            for args in [  # islice(args) should agree with range(args)
+                (10, 20, 3),
+                (10, 3, 20),
+                (10, 20),
+                (10, 10),
+                (10, 3),
+                (20,),
+            ]:
+                self.assertEqual(
+                    list(itertools.islice(range(100), *args)), list(range(*args))
+                )
+
+            for args, tgtargs in [  # Stop when seqn is exhausted
+                ((10, 110, 3), ((10, 100, 3))),
+                ((10, 110), ((10, 100))),
+                ((110,), (100,)),
+            ]:
+                self.assertEqual(
+                    list(itertools.islice(range(100), *args)), list(range(*tgtargs))
+                )
+
+            # Test stop=None
+            self.assertEqual(list(itertools.islice(range(10), None)), list(range(10)))
+            self.assertEqual(
+                list(itertools.islice(range(10), None, None)), list(range(10))
+            )
+            self.assertEqual(
+                list(itertools.islice(range(10), None, None, None)), list(range(10))
+            )
+            self.assertEqual(
+                list(itertools.islice(range(10), 2, None)), list(range(2, 10))
+            )
+            self.assertEqual(
+                list(itertools.islice(range(10), 1, None, 2)), list(range(1, 10, 2))
+            )
+
+            # Test number of items consumed     SF #1171417
+            it = iter(range(10))
+            self.assertEqual(list(itertools.islice(it, 3)), list(range(3)))
+            self.assertEqual(list(it), list(range(3, 10)))
+
+            it = iter(range(10))
+            self.assertEqual(list(itertools.islice(it, 3, 3)), [])
+            self.assertEqual(list(it), list(range(3, 10)))
+
+            # Issue #10323:  Less islice in a predictable state
+            c = itertools.count()
+            self.assertEqual(list(itertools.islice(c, 1, 3, 50)), [1])
+            self.assertEqual(next(c), 3)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn()
+
+    @unittest.expectedFailure
+    def test_itertools_islice_intlike(self):
+        # CPython issue #30537: islice can accept integer-like objects as arguments.
+        class IntLike:
+            def __init__(self, val):
+                self.val = val
+
+            def __index__(self):
+                return self.val
+
+        def fn():
+            self.assertEqual(
+                list(itertools.islice(range(100), IntLike(10))), list(range(10))
+            )
+            self.assertEqual(
+                list(itertools.islice(range(100), IntLike(10), IntLike(50))),
+                list(range(10, 50)),
+            )
+            self.assertEqual(
+                list(
+                    itertools.islice(range(100), IntLike(10), IntLike(50), IntLike(5))
+                ),
+                list(range(10, 50, 5)),
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn()
+
     @make_test
     def test_obj_eq(a, b):
         v = a + b

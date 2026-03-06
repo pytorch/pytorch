@@ -630,6 +630,70 @@ class TestRecheckAutotuneCache(TestCase):
         self.assertEqual(len(autotuner.compile_results), 2)
 
 
+@triton.jit
+def hip_autotune_kernel(
+    in_ptr,
+    out_ptr,
+    numel,
+    XBLOCK: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    offsets = pid * XBLOCK + tl.arange(0, XBLOCK)
+    mask = offsets < numel
+    data = tl.load(in_ptr + offsets, mask=mask)
+    tl.store(out_ptr + offsets, data * 2.0, mask=mask)
+
+
+@functools.lru_cache
+def get_hip_autotune_kernel_with_invalid_config():
+    # num_warps=32 with HIP warp_size=64 = 2048 threads, exceeds 1024 limit
+    return triton.autotune(
+        configs=[
+            triton.Config({"XBLOCK": 128}, num_warps=32, num_stages=1),  # invalid
+            triton.Config({"XBLOCK": 256}, num_warps=1, num_stages=1),  # valid
+        ],
+        key=["numel"],
+    )(hip_autotune_kernel)
+
+
+class TestHIPInvalidConfigHandling(TestCase):
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_benchmark_returns_inf_on_invalid_config(self):
+        from torch._inductor.runtime.benchmarking import TritonBenchmarker
+
+        benchmarker = TritonBenchmarker()
+
+        def failing_callable():
+            raise RuntimeError(
+                "Triton Error [HIP]: Code: 9, Message: invalid configuration argument"
+            )
+
+        result = benchmarker.benchmark(
+            fn=failing_callable,
+            device=GPU_TYPE,
+            is_vetted_benchmarking=True,
+        )
+        self.assertEqual(result, float("inf"))
+
+    @runOnRocm
+    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_autotune_skips_invalid_hip_config_and_succeeds(self):
+        numel = 1024 * 1024
+        x = torch.randn(numel, device=GPU_TYPE, dtype=torch.float32)
+        y = torch.empty_like(x)
+
+        kernel = get_hip_autotune_kernel_with_invalid_config()
+
+        def grid(meta):
+            return (triton.cdiv(numel, meta["XBLOCK"]),)
+
+        kernel[grid](x, y, numel)
+
+        expected = x * 2.0
+        torch.testing.assert_close(y, expected)
+
+
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
         run_tests()

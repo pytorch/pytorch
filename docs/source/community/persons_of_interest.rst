@@ -248,9 +248,9 @@ Windows
 Apple M1/MPS/Metal
 ~~~~~~~~~~~~~~~~~~~~
 
--  Kulin Seth (`kulinseth <https://github.com/kulinseth>`__)
--  Alban Desmaison (`alband <https://github.com/alband>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
+-  (emeritus) Kulin Seth (`kulinseth <https://github.com/kulinseth>`__)
+-  (emeritus) Alban Desmaison (`alband <https://github.com/alband>`__)
 -  (emeritus) Ramin Azarmehr (`razarmehr <https://github.com/razarmehr>`__)
 
 PowerPC

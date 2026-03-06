@@ -28,6 +28,16 @@ on:
         type: string
         description: The list of models to benchmark. Default to all models.
         default: ''
+      compilation_config:
+        required: false
+        type: string
+        description: A JSON string for vLLM --compilation-config, applied to all benchmark tests.
+        default: ''
+      is_nightly:
+        required: false
+        type: boolean
+        description: Whether this is a nightly scheduled run. When true, TRANSFORMERS_OFFLINE is disabled.
+        default: false
 
 jobs:
   benchmark:
@@ -163,6 +173,7 @@ jobs:
       - name: Setup benchmark tests
         env:
           MODELS: ${{ inputs.models }}
+          COMPILATION_CONFIG: ${{ inputs.compilation_config }}
         shell: bash
         run: |
           set -eux
@@ -178,7 +189,8 @@ jobs:
             --to-benchmark-configs-dir ../../vllm-project/vllm/.buildkite/performance-benchmarks/tests \
             --models "${MODELS}" \
             --device "${DEVICE_NAME}" \
-            --include-eager-mode
+            --include-eager-mode \
+            --compilation-config "${COMPILATION_CONFIG}"
           popd
 
           pushd vllm-project/vllm
@@ -191,7 +203,8 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_HOME: /mnt/hf_cache
-          TRANSFORMERS_OFFLINE: 1
+          # Nightly runs download from HF to periodically refresh the local cache
+          TRANSFORMERS_OFFLINE: ${{ inputs.is_nightly && '0' || '1' }}
           # vLLM-related environment variables
           ENGINE_VERSION: v1
           SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1

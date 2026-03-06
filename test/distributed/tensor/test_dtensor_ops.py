@@ -284,8 +284,6 @@ dtensor_compiled_fails = {
     xfail("expand_as"),
     xfail("hsplit"),
     xfail("linalg.diagonal"),
-    xfail("max", "reduction_with_dim"),
-    xfail("min", "reduction_with_dim"),
     xfail("movedim"),
     xfail("narrow"),
     xfail("permute"),
@@ -900,6 +898,7 @@ ops_unbacked_dtensor_dde = {
     xfail("clamp_max"),
     xfail("clamp_min"),
     xfail("column_stack"),
+    xfail("constant_pad_nd"),
     xfail("copysign"),
     xfail("cumprod"),
     xfail("diagflat"),
@@ -987,6 +986,7 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.mish"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
     xfail("nn.functional.normalize"),
+    xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.pixel_unshuffle"),
     xfail("nn.functional.poisson_nll_loss"),
     xfail("nn.functional.relu6"),
@@ -1232,8 +1232,11 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             lambda s: Shard(s.dim),
             single_dim_strats[aten_op](aten_op, args_meta, kwargs_meta),
         )
-        # TODO(pianpwk): handle multi-output once that lands for single-dim
-        for output_placement, *input_placements in strategies:
+        n_inputs = len(all_tensor_meta)
+        for strategy in strategies:
+            input_placements = strategy[-n_inputs:]
+            output_placements = strategy[:-n_inputs]
+
             # skip strategies with invalid shards
             def is_invalid_shard(meta, p):
                 ndim = len(meta.shape)
@@ -1253,17 +1256,16 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             ):
                 continue
 
-            # add the validate_sharding_rule function
             self.assertTrue(
                 validate_sharding_rule_sample(
                     aten_op,
                     full_args,
                     full_kwargs,
                     input_placements,
-                    (output_placement,),
+                    tuple(output_placements),
                     mesh,
                 ),
-                f"{op.name}: {input_placements} -> {(output_placement,)} failed",
+                f"{op.name}: {input_placements} -> {tuple(output_placements)} failed",
             )
 
 

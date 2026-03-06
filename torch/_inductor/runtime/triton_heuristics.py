@@ -4,6 +4,7 @@ from __future__ import annotations
 import builtins
 import copy
 import dataclasses
+import enum
 import functools
 import hashlib
 import inspect
@@ -87,6 +88,13 @@ from .triton_compat import (
     triton,
 )
 from .triton_helpers import get_constexprs
+
+
+class BenchmarkFailureReason(enum.Enum):
+    """Reasons why a triton config benchmark may return float('inf')."""
+
+    REGISTER_SPILLING = "register_spilling"
+    INVALID_CONFIG = "invalid_config"
 
 
 class InductorConfig(Config):
@@ -382,6 +390,7 @@ class CachingAutotuner(KernelInterface):
         self.compile_results: list[CompileResult[_KernelType]] = []
         self.launchers: list[LauncherType] = []
         self.lock = threading.Lock()
+        self.benchmark_failure_reasons: dict[Any, BenchmarkFailureReason] = {}
         if os.getenv("TRITON_CACHE_DIR") is None:
             os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
                 self.triton_meta.get("device", 0)
@@ -933,7 +942,7 @@ class CachingAutotuner(KernelInterface):
         return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
 
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
-        """Measure the performance of a given launcher"""
+        """Measure the performance of a given launcher."""
         # we don't skip configs with spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
         # control over the kernel code; (ii) there is empirical evidence that
@@ -949,6 +958,9 @@ class CachingAutotuner(KernelInterface):
                 "Skip config %s because of register spilling: %d",
                 launcher.config,
                 launcher.n_spills,
+            )
+            self.benchmark_failure_reasons[launcher] = (
+                BenchmarkFailureReason.REGISTER_SPILLING
             )
             return float("inf")
 
@@ -978,7 +990,14 @@ class CachingAutotuner(KernelInterface):
                             stream=stream,
                         )
                     except Exception:
-                        log.error("Failed during launch %s: ", kernel_name)
+                        log.error(
+                            "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
+                            kernel_name,
+                            launcher.config,
+                            launcher.config.num_warps,
+                            launcher.config.num_stages,
+                            launcher.config.kwargs,
+                        )
                         raise
 
             else:
@@ -989,7 +1008,14 @@ class CachingAutotuner(KernelInterface):
                         stream=stream,
                     )
                 except Exception:
-                    log.error("Failed during launch %s: ", kernel_name)
+                    log.error(
+                        "Failed during launch %s with config: %s (num_warps=%s, num_stages=%s, kwargs=%s)",
+                        kernel_name,
+                        launcher.config,
+                        launcher.config.num_warps,
+                        launcher.config.num_stages,
+                        launcher.config.kwargs,
+                    )
                     raise
             self.restore_args_from_cpu(cpu_copies)
 
@@ -1004,11 +1030,19 @@ class CachingAutotuner(KernelInterface):
             if self.device_props.type == "cpu"
             else {"rep": 40, "is_vetted_benchmarking": True}
         )
-        return benchmarker.benchmark(
+        result = benchmarker.benchmark(
             fn=kernel_call,
             device=self.device_props.type,
             **benchmark_kwargs,  # type: ignore[arg-type]
         )
+        # benchmarker.benchmark() only returns float("inf") when catching an
+        # "invalid configuration" exception - all other exceptions are re-raised.
+        # Therefore, if result is inf here, it must be due to invalid config.
+        if result == float("inf"):
+            self.benchmark_failure_reasons[launcher] = (
+                BenchmarkFailureReason.INVALID_CONFIG
+            )
+        return result
 
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
         """
@@ -1183,6 +1217,47 @@ class CachingAutotuner(KernelInterface):
         start_time = time.time_ns()
         timings = self.benchmark_all_configs(*args, **kwargs)
         benchmark_time_taken_ns = time.time_ns() - start_time
+
+        # Check if any configs failed (have inf timing) and log which one was selected
+        failed_launchers = [
+            launcher for launcher, timing in timings.items() if timing == float("inf")
+        ]
+        if failed_launchers:
+            valid_timings = [(k, v) for k, v in timings.items() if v != float("inf")]
+            if valid_timings:
+                best_launcher, best_time = min(valid_timings, key=lambda x: x[1])
+
+                # Count failures by reason
+                spill_count = sum(
+                    1
+                    for launcher in failed_launchers
+                    if self.benchmark_failure_reasons.get(launcher)
+                    == BenchmarkFailureReason.REGISTER_SPILLING
+                )
+                invalid_config_count = sum(
+                    1
+                    for launcher in failed_launchers
+                    if self.benchmark_failure_reasons.get(launcher)
+                    == BenchmarkFailureReason.INVALID_CONFIG
+                )
+
+                reason_parts = []
+                if spill_count > 0:
+                    reason_parts.append(f"{spill_count} register spilling")
+                if invalid_config_count > 0:
+                    reason_parts.append(f"{invalid_config_count} invalid config")
+                reason_str = ", ".join(reason_parts) if reason_parts else "unknown"
+
+                log.info(
+                    "Skipped %d/%d configs for %s (%s). Selected: %s (%.4f ms)",
+                    len(failed_launchers),
+                    len(timings),
+                    self.fn.__name__,
+                    reason_str,
+                    best_launcher.config,
+                    best_time,
+                )
+
         self.launchers = [builtins.min(timings, key=timings.get)]
         self.autotune_time_taken_ns = (
             self.precompile_time_taken_ns + benchmark_time_taken_ns
@@ -3808,7 +3883,10 @@ def persistent_reduction(
             # With large rnumel, we have higher chance of out-of-shared memory
             # To avoid adding too much autotuning overhead, we just constrain NUM_STAGES
             # if rnumel is large
-            MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
+            if inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
+                MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
+            else:
+                MAX_NUM_STAGES = 1
             c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), MAX_NUM_STAGES)
 
             if rnumel_hint <= 1024:
@@ -4043,7 +4121,7 @@ class GridExpr:
     def __post_init__(self) -> None:
         assert self.mode in ("python", "cpp")
 
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         raise NotImplementedError
 
     def ceildiv(self, numel: str | int, block: int | str | None) -> str | int:
@@ -4121,34 +4199,68 @@ class GridExpr:
         exec(f"grid_2 = {self.z_grid}", scope)
         return scope["grid_0"], scope["grid_1"], scope["grid_2"]
 
+    def generate_lazy(self, kernel_name: str) -> None:
+        """
+        Creates a GridExpr for lazy compile, where config values are not known
+        at codegen time and are instead referenced by variable names.
+        """
+        meta: dict[str, Any] = {
+            "XBLOCK": f"{kernel_name}_result.xblock",
+            "YBLOCK": f"{kernel_name}_result.yblock",
+            "ZBLOCK": f"{kernel_name}_result.zblock",
+            "R0_BLOCK": f"{kernel_name}_result.r0block",
+            "RSPLIT": f"{kernel_name}_result.rsplit",
+            "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
+        }
+        # assertions are done based on real values, so we can skip here
+        self.generate(meta, is_lazy=True)
+
+    @classmethod
+    def from_meta_lazy(
+        cls,
+        inductor_meta: dict[str, Any] | None,
+        kernel_name: str,
+    ) -> GridExpr:
+        """Factory method for lazy compile mode."""
+        assert inductor_meta is not None, (
+            "inductor_meta must be specified for lazy compile"
+        )
+        grid_type = inductor_meta.get("grid_type", None)
+        assert grid_type is not None, "grid_type must be specified for lazy compile"
+        grid_cls = globals()[grid_type]
+        assert issubclass(grid_cls, GridExpr)
+        grid = grid_cls(inductor_meta=inductor_meta, mode="cpp")
+        grid.generate_lazy(kernel_name)
+        return grid
+
 
 class Grid1D(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
 
 
 class Grid2D(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
 
 
 class Grid3D(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
         self.z_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
 
 
 class BatchMatmulGrid3D(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.z_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
         self.x_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
 
 
 class Grid2DWithYZOverflow(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.prefix.extend(
             [
@@ -4165,24 +4277,26 @@ class Grid2DWithYZOverflow(GridExpr):
 
 
 class MixOrderReductionGrid(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
-        assert split_size, "Missing RSPLIT_SIZE"
-        assert xblock, "Missing XBLOCK"
-        assert split_size % xblock == 0, f"{split_size=}, {xblock=}"
+        if not is_lazy:
+            assert split_size, "Missing RSPLIT_SIZE"
+            assert xblock, "Missing XBLOCK"
+            assert split_size % xblock == 0, f"{split_size=}, {xblock=}"
         self.x_grid = self.ceildiv("xnumel", split_size)
 
 
 class CooperativeReductionGrid(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.x_grid = str(meta["RSPLIT"])
         self.y_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
 
 
 class SplitScanGrid(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
-        assert meta.get("XBLOCK", 1) == 1
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
+        if not is_lazy:
+            assert meta.get("XBLOCK", 1) == 1
         self.x_grid = self.ceildiv("r0_numel", meta.get("R0_BLOCK"))
         self.y_grid = "xnumel"
 
@@ -4197,12 +4311,12 @@ class FixedGrid(GridExpr):
             "extra_launcher_args": ["_grid_0", "_grid_1", "_grid_2"],
         }
 
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.x_grid, self.y_grid, self.z_grid = self.inductor_meta["fixed_grid"]
 
 
 class PrecomputedGrid(GridExpr):
-    def generate(self, meta: dict[str, int]) -> None:
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         for candidate in self.inductor_meta["precomputed_grids"]:
             if all(meta.get(k) == v for k, v in candidate["config"].items()):
                 self.x_grid, self.y_grid, self.z_grid = candidate[self.mode]
@@ -4213,7 +4327,7 @@ class PrecomputedGrid(GridExpr):
 
 
 class ComboKernelGrid(GridExpr):
-    def generate(self, meta: dict[str, int]):
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         combo_meta = self.inductor_meta["combo_grid_meta"]
         if combo_meta["default_config"]:
             meta = {**combo_meta["default_config"], **meta}
@@ -4276,7 +4390,7 @@ class SequentialComboKernelGrid(ComboKernelGrid):
 class SequentialFlattenComboKernelGrid(GridExpr):
     """Flattened grid: (sum of x*y blocks, 1, 1) for per-subkernel with flattened dispatch."""
 
-    def generate(self, meta: dict[str, int]):
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         combo_meta = self.inductor_meta["combo_grid_meta"]
         if combo_meta["default_config"]:
             meta = {**combo_meta["default_config"], **meta}

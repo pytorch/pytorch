@@ -6,7 +6,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed import is_available
@@ -201,7 +201,7 @@ else:
         _rank_map: torch.Tensor
         _mesh_dim_names: tuple[str, ...] | None
         _layout: _MeshLayout
-        _root_mesh: Optional["DeviceMesh"] = None
+        _root_mesh: "DeviceMesh | None" = None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
         # Registry mapping group names to ProcessGroup objects (to avoid C++ lookup)
@@ -210,7 +210,7 @@ else:
         def __init__(
             self,
             device_type: str,
-            mesh: Union[torch.Tensor, "ArrayLike"] | None = None,
+            mesh: "torch.Tensor | ArrayLike | None" = None,
             *,
             mesh_dim_names: tuple[str, ...] | None = None,
             backend_override: tuple[BackendConfig, ...] | None = None,
@@ -218,7 +218,7 @@ else:
             _rank: int | None = None,
             _layout: _MeshLayout | None = None,
             _rank_map: torch.Tensor | None = None,
-            _root_mesh: Optional["DeviceMesh"] = None,
+            _root_mesh: "DeviceMesh | None" = None,
         ) -> None:
             # no-op in OSS, logs API usage metrics in meta-internal runs
             torch._C._log_api_usage_once(
@@ -333,7 +333,7 @@ else:
 
                 self._coordinate_on_dim = self._compute_coordinate_on_dim()
 
-            self._hash: Optional[int] = None
+            self._hash: int | None = None
 
         @staticmethod
         def _compute_coordinates_from_mesh(
@@ -1037,7 +1037,7 @@ else:
         def from_group(
             group: ProcessGroup | list[ProcessGroup],
             device_type: str,
-            mesh: Union[torch.Tensor, "ArrayLike"] | None = None,
+            mesh: "torch.Tensor | ArrayLike | None" = None,
             *,
             mesh_dim_names: tuple[str, ...] | None = None,
         ) -> "DeviceMesh":
@@ -1591,54 +1591,5 @@ def _register_distributed_opaque_types():
             "_get_backend_name": MemberType.USE_REAL,
             "group_name": MemberType.USE_REAL,
             "__eq__": MemberType.USE_REAL,
-        },
-    )
-
-    register_opaque_type(
-        DeviceMesh,
-        typ="reference",
-        guard_fn=lambda obj: [
-            obj._flatten_rank_map,
-            obj._layout,
-            obj._device_type,
-            obj._mesh_dim_names,
-            obj._thread_id,
-        ],
-        members={
-            # USE_REAL: Evaluate these with the real object at compile time
-            # and bake the result as a constant
-            "_flatten_rank_map": MemberType.USE_REAL,
-            "_layout": MemberType.USE_REAL,
-            "_device_type": MemberType.USE_REAL,
-            "_mesh_dim_names": MemberType.USE_REAL,
-            "_thread_id": MemberType.USE_REAL,
-            "get_rank": MemberType.USE_REAL,
-            "size": MemberType.USE_REAL,
-            "get_coordinate": MemberType.USE_REAL,
-            "get_local_rank": MemberType.USE_REAL,
-            "__eq__": MemberType.USE_REAL,
-            "ndim": MemberType.USE_REAL,
-            "shape": MemberType.USE_REAL,
-            "mesh_dim_names": MemberType.USE_REAL,
-            "get_group": MemberType.INLINED,
-            "_pg_registry": MemberType.INLINED,
-            "_hash": MemberType.USE_REAL,
-            "_create_flatten_mesh": MemberType.USE_REAL,
-            "_coordinate_on_dim": MemberType.USE_REAL,
-            "_dim_group_names": MemberType.USE_REAL,
-            "_flatten_mapping": MemberType.USE_REAL,
-            "_rank_map": MemberType.USE_REAL,
-            "_root_mesh": MemberType.USE_REAL,
-            "device_type": MemberType.USE_REAL,
-            "mesh": MemberType.USE_REAL,
-            "_flatten": MemberType.INLINED,
-            "_unflatten": MemberType.USE_REAL,
-            "_is_current_rank_part_of_mesh": MemberType.USE_REAL,
-            "_sym_get_coordinate": MemberType.USE_REAL,
-            "_get_mesh_dim_by_name": MemberType.USE_REAL,
-            "_get_root_mesh": MemberType.INLINED,
-            "_get_slice_mesh_layout": MemberType.INLINED,
-            "_create_sub_mesh": MemberType.INLINED,
-            "__getitem__": MemberType.INLINED,
         },
     )

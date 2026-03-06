@@ -4,7 +4,7 @@ import itertools
 import os
 import warnings
 from collections.abc import Callable, Generator, Iterable, Iterator
-from typing import Any, no_type_check, Optional, TYPE_CHECKING
+from typing import Any, no_type_check, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -61,7 +61,7 @@ FSDP_SYNCED = "_fsdp_synced"
 # Specification of process groups for hybrid sharding strategies.
 HybridShardProcessGroupType = tuple[dist.ProcessGroup, dist.ProcessGroup]
 # Overall specification of process group.
-ProcessGroupType = Optional[dist.ProcessGroup | HybridShardProcessGroupType]
+ProcessGroupType = dist.ProcessGroup | HybridShardProcessGroupType | None
 
 
 # TODO (awgu): Refactor this later

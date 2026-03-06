@@ -2,13 +2,12 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Union
 
 import torch
 import torch.distributed as dist
 
 
-_ReduceOp = Union[dist.ReduceOp, dist.ReduceOp.RedOpType]
+_ReduceOp = dist.ReduceOp | dist.ReduceOp.RedOpType
 
 
 @dataclass(frozen=True)

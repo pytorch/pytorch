@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 from collections.abc import Callable, Sequence
-from typing import Any, Optional
+from typing import Any
 from unittest import skip
 
 import torch
@@ -86,9 +86,9 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         device_mesh: DeviceMesh,
         placements: Sequence[Placement],
         op: Callable,
-        pre_op_fn: Optional[Callable] = None,
+        pre_op_fn: Callable | None = None,
         args: Sequence[Any] = (),
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
     ):
         if pre_op_fn is None:
             pre_op_fn = no_op
@@ -127,7 +127,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         *,
         device_mesh: DeviceMesh,
         placements: Sequence[Placement],
-        pre_op_fn: Optional[Callable] = None,
+        pre_op_fn: Callable | None = None,
         input_size: Sequence[int],
         op: Callable,
         **kwargs,

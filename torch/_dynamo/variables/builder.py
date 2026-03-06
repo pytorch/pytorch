@@ -203,7 +203,7 @@ from .dicts import (
     OrderedSetVariable,
     SetVariable,
 )
-from .distributed import WorldMetaClassVariable
+from .distributed import DeviceMeshVariable, WorldMetaClassVariable
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
@@ -487,6 +487,7 @@ class VariableBuilder:
             )
 
     def _call_impl(self, value: object) -> VariableTracker:
+        self.tx.output.current_tracer.traced_sources.add(self.source)
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
@@ -1227,6 +1228,10 @@ class VariableBuilder:
             return DispatchKeySetVariable(value)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
+        elif DeviceMeshVariable.is_device_mesh(value):
+            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
+            return DeviceMeshVariable(value, source=self.source)
         elif value is OrderedSet:
             self.install_guards(GuardBuilder.ID_MATCH)
             return OrderedSetClassVariable()
@@ -4178,6 +4183,8 @@ class SourcelessBuilder:
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
+        elif DeviceMeshVariable.is_device_mesh(value):
+            return DeviceMeshVariable(value)
         elif isinstance(value, re.Pattern):
             return ConstantLikeVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):

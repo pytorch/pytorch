@@ -1525,7 +1525,7 @@ class TestProfiler(TestCase):
             torch.cuda.synchronize()
             torch.add(t1, t2)
 
-        def trace_and_check(exp_config: Optional[_ExperimentalConfig]) -> None:
+        def trace_and_check(exp_config: _ExperimentalConfig | None) -> None:
             with _profile(
                 use_kineto=True,
                 use_device="cuda",

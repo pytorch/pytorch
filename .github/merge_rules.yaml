@@ -202,7 +202,6 @@
   - aten/src/ATen/mps/**
   - aten/src/ATen/native/mps/**
   approved_by:
-  - alband
   - malfet
   - DenisVieriu97
   - kurtamohler

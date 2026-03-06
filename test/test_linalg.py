@@ -15,7 +15,6 @@ import random
 from random import randrange
 from itertools import product
 from functools import reduce, partial
-from typing import Union, Optional
 from torch._prims_common import DimsType
 from packaging import version
 from torch.testing._internal.common_device_type import (
@@ -1478,8 +1477,8 @@ class TestLinalg(TestCase):
                 return tensor_unbacked_size
 
         def test(
-            ord: Union[float, int],
-            dim: Optional[DimsType],
+            ord: float | int,
+            dim: DimsType | None,
             expect_numel_runtime_check: bool,
             expect_index_0_check: bool = False,
         ) -> None:
@@ -3232,7 +3231,7 @@ class TestLinalg(TestCase):
                     Ax = torch.matmul(A, x)
                     self.assertEqual(Ax, b.expand_as(Ax))
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -3290,7 +3289,7 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_cholesky_solve_backward(self, device, dtype):
@@ -9539,7 +9538,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             run_test(matsize, batchdims, mat_chars=['sym', 'sym_pd', 'sym_psd'])
             run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_inverse(self, device, dtype):
@@ -9587,7 +9586,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         expected = torch.inverse(A)
         self.assertEqual(expected, out)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_inverse_errors_and_warnings(self, device, dtype):

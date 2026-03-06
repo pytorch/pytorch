@@ -21,12 +21,14 @@ from typing_extensions import ParamSpec
 
 from torch.utils._ordered_set import OrderedSet
 
-from .ir import ComputedBuffer
+from .ir import ComputedBuffer, Pointwise
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
     from types import ModuleType
+
+    from .codegen.wrapper import PythonWrapperCodegen
 
 import sympy
 
@@ -537,6 +539,8 @@ class BaseSchedulerNode:
     # in `self.scheduler.nodes`, then for this FusedSchedulerNode, .min_order is 1 and .max_order is 3.
     # For non-"grouped" nodes (i.e. regular SchedulerNode),
     # .min_order = .max_order = X if this node is X-th node in `self.scheduler.nodes`.
+    min_input_distance: int
+    max_input_distance: int
     min_order: int
     max_order: int
     mpi_node: MemoryPlanningInfoForNode
@@ -558,6 +562,8 @@ class BaseSchedulerNode:
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node = node
         self.ancestors = OrderedSet()
+        self.min_input_distance = 0
+        self.max_input_distance = 0
         self.last_usage = OrderedSet[
             str
         ]()  # buffers that won't be used after this kernel
@@ -592,6 +598,8 @@ class BaseSchedulerNode:
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
 {name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
+{name}.min_input_distance = {self.min_input_distance}
+{name}.max_input_distance = {self.max_input_distance}
 {name}.outputs = [
         """
         )
@@ -1470,6 +1478,13 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         self._init_from_node(node)
         self.set_read_writes(node.get_read_writes())
 
+        if isinstance(node, ir.UserDefinedTritonKernel) and node.can_fuse_epilogue():
+            numel = math.prod(node.mutable_args[0].shape)
+            rnumel = 1
+            device = node.get_device_or_error()
+            # pyrefly: ignore [bad-assignment]
+            self.group = (device, (numel, rnumel))
+
     def debug_str_extra(self) -> str:
         return f"{self.get_name()}.node.kernel = {getattr(self.node, 'python_kernel_name', None)}"
 
@@ -1479,6 +1494,19 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
     def has_side_effects(self) -> bool:
         assert self.node is not None
         return hasattr(self.node, "has_side_effects") and self.node.has_side_effects()
+
+    def get_ranges(self) -> Sequence[Sequence[sympy.Expr]]:
+        if (
+            isinstance(self.node, ir.UserDefinedTritonKernel)
+            and self.node.can_fuse_epilogue()
+        ):
+            numel = math.prod(self.node.mutable_args[0].shape)
+            return ([numel], [])
+        return ([], [])
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        assert isinstance(self.node, ir.ExternKernel)
+        return self.node.codegen(wrapper)
 
 
 class NopKernelSchedulerNode(BaseSchedulerNode):
@@ -1858,6 +1886,12 @@ def init_group_node(
 
     group_snode.min_order = min(x.min_order for x in group_snode.snodes)
     group_snode.max_order = max(x.max_order for x in group_snode.snodes)
+    group_snode.min_input_distance = min(
+        x.min_input_distance for x in group_snode.snodes
+    )
+    group_snode.max_input_distance = max(
+        x.max_input_distance for x in group_snode.snodes
+    )
     group_snode.outputs_by_name = {
         buf.get_name(): buf for buf in group_snode.get_outputs()
     }
@@ -2097,6 +2131,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
 {name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
+{name}.min_input_distance = {self.min_input_distance}
+{name}.max_input_distance = {self.max_input_distance}
 {name}.outputs = [
             """
         )
@@ -2153,6 +2189,13 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         if not self.scheduler.can_fuse(node1, node2, allow_mix_order_reduction=False):
             return False
 
+        # Since node1 is from the current mix order reduction, if node1 is
+        # contiguous, the fused node should also be contiguous.
+        if MixOrderReduction.is_contiguous_node(
+            node1
+        ) and not MixOrderReduction.is_contiguous_node(node2):
+            return False
+
         def _get_ancestors(nodes: tuple[BaseSchedulerNode, ...]) -> OrderedSet[str]:
             out = OrderedSet()
             return out.union(*(n.ancestors for n in nodes))
@@ -2204,6 +2247,67 @@ class FusedMixOrderReductions(FusedSchedulerNode):
             else:
                 fused_node = backend.fuse(self.node2, other)
                 return FusedMixOrderReductions(self.node1, fused_node)
+
+
+class FusedExternTritonKernelSchedulerNode(FusedSchedulerNode):
+    def __init__(
+        self,
+        scheduler: Scheduler,
+        kernel_node: ExternKernelSchedulerNode,
+        fused_epilogue: SchedulerNode,
+    ) -> None:
+        assert isinstance(kernel_node.node, ir.UserDefinedTritonKernel)
+        snodes = typing.cast(list[BaseSchedulerNode], [kernel_node, fused_epilogue])
+        super().__init__(scheduler, snodes)
+        self.kernel_node = kernel_node
+        self.fused_epilogue = fused_epilogue
+        self.min_order = self.kernel_node.min_order
+        self.outputs = fused_epilogue.outputs
+
+    @classmethod
+    def epilogue_fuse(
+        cls,
+        node1: ExternKernelSchedulerNode,
+        node2: SchedulerNode,
+    ) -> FusedSchedulerNode:
+        scheduler = node1.scheduler
+        # this unmet dependency is the buffer which is mutated
+        # after fusion, we don't need this buffer anymore,
+        # because the kernel directly writes to the output buffer of the epilogue
+        assert len(node1.unmet_dependencies) == 1
+        original_mutated_buffer = scheduler.name_to_buf[
+            next(iter(node1.unmet_dependencies)).name
+        ]
+        original_mutated_buffer.users.remove(NodeUser(node1))
+        return FusedExternTritonKernelSchedulerNode(scheduler, node1, node2)
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        assert isinstance(self.fused_epilogue.node, ir.ComputedBuffer)
+        assert isinstance(self.kernel_node.node, ir.UserDefinedTritonKernel)
+        assert self.kernel_node.node.can_fuse_epilogue()
+        numel = math.prod(self.kernel_node.node.mutable_args[0].shape)
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        tiling, _ = SIMDScheduling.get_tiling_and_scores([self.fused_epilogue], numel)
+
+        from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+
+        kernel_features = SIMDKernelFeatures([self.fused_epilogue], numel)
+
+        from torch._inductor.codegen.triton import FusedUserDefinedTritonKernel
+
+        fused_user_kernel = FusedUserDefinedTritonKernel(tiling, kernel_features, self)
+        new_kernel_src = fused_user_kernel.codegen()
+
+        return self.kernel_node.node.codegen_with_epilogue_fusion(
+            wrapper, (self.fused_epilogue.node, new_kernel_src)
+        )
+
+    def is_extern(self) -> bool:
+        return True
+
+    def get_ranges(self) -> Sequence[Sequence[sympy.Expr]]:
+        return self.kernel_node.get_ranges()
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
@@ -2398,6 +2502,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
             self.min_order = min([prev_node_1.min_order, prev_node_2.min_order])
             self.max_order = max([prev_node_1.max_order, prev_node_2.max_order])
+            self.min_input_distance = min(
+                prev_node_1.min_input_distance, prev_node_2.min_input_distance
+            )
+            self.max_input_distance = max(
+                prev_node_1.max_input_distance, prev_node_2.max_input_distance
+            )
 
             if prev_node_1.is_foreach():
                 assert isinstance(prev_node_1, ForeachKernelSchedulerNode)
@@ -3005,6 +3115,7 @@ class Scheduler:
         self.dead_node_elimination()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
+        self.compute_input_distances()
 
         # pyrefly: ignore [bad-assignment]
         metrics.ir_nodes_pre_fusion += len(self.nodes)
@@ -3027,6 +3138,15 @@ class Scheduler:
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
+
+        if any(
+            isinstance(node, FusedExternTritonKernelSchedulerNode)
+            for node in self.nodes
+        ):
+            # if a user triton kernel has been epilogue-fused,
+            # there is likely an opportunity to prune an NopKernel
+            # (which is originally used to generate the buffer which the triton kernel writes to)
+            self.dead_node_elimination()
 
         self.merge_loops()
         self.finalize_multi_template_buffers()
@@ -3719,6 +3839,36 @@ class Scheduler:
             node.min_order = order
             node.max_order = order
 
+    def compute_input_distances(self) -> None:
+        """
+        Populate each node's min/max_input_distance with the depth from graph
+        inputs, measured as dependency hops before fusion. Nodes whose
+        dependencies are all satisfied by graph inputs/constants have depth 0.
+        """
+        name_to_min_distance: dict[str, int] = {}
+        name_to_max_distance: dict[str, int] = {}
+        for node in self.nodes:
+            if not node.unmet_dependencies:
+                min_dist = 0
+                max_dist = 0
+            else:
+                dep_min_dists = [
+                    name_to_min_distance[self.name_to_buf[dep.name].defining_op_name()]
+                    + 1
+                    for dep in node.unmet_dependencies
+                ]
+                dep_max_dists = [
+                    name_to_max_distance[self.name_to_buf[dep.name].defining_op_name()]
+                    + 1
+                    for dep in node.unmet_dependencies
+                ]
+                min_dist = min(dep_min_dists)
+                max_dist = max(dep_max_dists)
+            name_to_min_distance[node.get_name()] = min_dist
+            name_to_max_distance[node.get_name()] = max_dist
+            node.min_input_distance = min_dist
+            node.max_input_distance = max_dist
+
     def merge_loops(self) -> None:
         if not config.loop_ordering_after_fusion:
             return
@@ -4380,8 +4530,9 @@ class Scheduler:
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_triton_caller(ms_fused_choice)
 
-                    # pyrefly: ignore [missing-attribute]
-                    multi_node._choice_timings[None] = new_timings
+                    if bench_epilogue:
+                        # pyrefly: ignore [missing-attribute]
+                        multi_node._choice_timings[None] = new_timings
                     return True
                 else:
                     return False
@@ -4712,12 +4863,12 @@ class Scheduler:
         )
         new_possible_fusions = []
         for n1, n2 in possible_fusions:
-            if is_prologue_fusion(n1, n2) and n1 in epilogue_template_nodes:
+            if is_prologue_fusion(n1, n2) and n2 in epilogue_template_nodes:
                 deferred_prologue_fusions.append((n1, n2))
             else:
                 new_possible_fusions.append((n1, n2))
 
-        possible_fusions = new_possible_fusions
+        return new_possible_fusions
 
     def fuse_nodes_once(
         self,
@@ -4762,7 +4913,9 @@ class Scheduler:
             and config.prologue_fusion
             and config.epilogue_fusion
         ):
-            self._handle_template_overlap(possible_fusions, deferred_prologue_fusions)
+            possible_fusions = self._handle_template_overlap(
+                possible_fusions, deferred_prologue_fusions
+            )
 
         self._try_fusion_pairs(
             possible_fusions,
@@ -5379,7 +5532,7 @@ class Scheduler:
         Is this node unfusable under any conditions.
         """
         return (
-            isinstance(node, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
+            isinstance(node, (NopKernelSchedulerNode,))
             and not node.is_template()
             and not is_output_of_multi_outputs_template(node.node)
         )
@@ -5574,12 +5727,61 @@ class Scheduler:
         ):
             why("grouped node must not be fused with other nodes")
             return False
-        if (
-            isinstance(node1, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
-            and not node1.is_template()
-        ):
-            why("node1 is extern or nop")
+        if isinstance(node1, NopKernelSchedulerNode) and not node1.is_template():
+            why("node1 is nop")
             return False
+
+        if isinstance(node1, ExternKernelSchedulerNode):
+            if not isinstance(node1.node, ir.UserDefinedTritonKernel):
+                why("node1 is extern but not a triton kernel")
+                return False
+
+            if not node1.node.can_fuse_epilogue():
+                why("node1's triton kernel doesn't support epilogue fusion")
+                return False
+
+            if not isinstance(node2, SchedulerNode):
+                why("node1 is extern but node2 is not SchedulerNode")
+                return False
+            if not isinstance(node2.node, ComputedBuffer):
+                why("node1 is extern but node2.node is not SchedulerNode")
+                return False
+            if not isinstance(node2.node.data, Pointwise):
+                why("node1 is extern but node2.node.data is not Pointwise")
+                return False
+
+            # the epilogue depends on expressions which may not available in the user triton kernel
+            # (e.g. indexing exprs used not in a load)
+            node2_inner_fn_free_symbols = node2.node.data.inner_fn_free_symbols()
+            for symbol in node2_inner_fn_free_symbols:
+                usages = node2.node.data.collect_inner_fn_symbol_usage(symbol)
+                if any(usage != "load" for usage in usages):
+                    return False
+
+            # should be true now because we checked `can_fuse_epilogue`
+            assert len(node1.node.mutable_args) == 1
+            if node1.node.mutable_args[0].layout != node2.node.layout:
+                why("node1 and node2 uses different buf layouts")
+                return False
+
+            assert len(node1.node.mutation_outputs) == 1
+            written_buffer_name = node1.node.mutation_outputs[0].name
+
+            def _is_other_node_that_references_mutation_buffer(
+                other_node: BaseSchedulerNode,
+            ):
+                return (
+                    (other_node is not node1)
+                    and (other_node is not node2)
+                    and written_buffer_name in other_node.used_buffer_names()
+                )
+
+            if any(
+                _is_other_node_that_references_mutation_buffer(node)
+                for node in self.nodes
+            ):
+                return False
+
         if (
             isinstance(node2, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node2.is_template()
@@ -5745,14 +5947,22 @@ class Scheduler:
             remaining_deps_by_name[name].append(dep)
 
         for cd in node1.read_writes.writes:
-            if not isinstance(cd, MemoryDep):
+            if not isinstance(cd, MemoryDep) and not isinstance(cd, StarDep):
                 continue
             remaining = remaining_deps_by_name.get(
                 self.mutation_renames.get(cd.name, cd.name)
             )
             if remaining:
                 for rd in remaining:
-                    if self.fusable_read_and_write(rd, cd):
+                    if isinstance(cd, MemoryDep) and self.fusable_read_and_write(
+                        rd, cd
+                    ):
+                        remaining.remove(rd)  # noqa: B909
+                    elif isinstance(
+                        cd, StarDep
+                    ) and self.fusable_stardep_write_and_read_on_empty_tensor(
+                        rd, cd, node1.node
+                    ):
                         remaining.remove(rd)  # noqa: B909
 
         remaining_deps = OrderedSet(
@@ -5867,6 +6077,22 @@ class Scheduler:
                 return True
         return False
 
+    # on tensors that are "empty" (i.e. with undefined values),
+    # we relax the conditions for fusion and additionally allow matching a writing StarDep with any read dep.
+    # This makes use of the fact that `f(UB) = UB`.
+    def fusable_stardep_write_and_read_on_empty_tensor(
+        self, read: Dep, write: StarDep, writing_node: ir.Operation | None
+    ) -> bool:
+        if not isinstance(writing_node, ir.UserDefinedTritonKernel):
+            return False
+        if not writing_node.can_fuse_epilogue():
+            return False
+        read_name = self.mutation_renames.get(read.name, read.name)
+        write_name = self.mutation_renames.get(write.name, write.name)
+        if isinstance(write, StarDep) and read_name == write_name:
+            return True
+        return False
+
     def dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         return V.graph.get_dep_size_hint(dep, count_bytes)
 
@@ -5897,6 +6123,35 @@ class Scheduler:
             # fusions only share weight/bias go later.
             score = MixOrderReduction.get_fusion_score(node1, node2)
             return _construct_return_value(score, True)
+
+        # for evaluating fusion memory scores of UserDefinedTritonKernel,
+        # we use a slightly different logic which allows matching StarDep with MemoryDep in certain scenarios.
+        # (See the checks we make in `can_fuse_epilogue()` that makes this possible)
+        if (
+            isinstance(node1.node, ir.UserDefinedTritonKernel)
+            and node1.node.can_fuse_epilogue()
+        ):
+            node1_deps = node1.read_writes.reads | node1.read_writes.writes
+            node2_deps = node2.read_writes.reads | node2.read_writes.writes
+
+            def _match(dep1: Dep, dep2: Dep):
+                if dep1 == dep2:
+                    return True
+                if (isinstance(dep1, StarDep) and isinstance(dep2, MemoryDep)) or (
+                    isinstance(dep1, StarDep) and isinstance(dep2, MemoryDep)
+                ):
+                    return dep1.name == dep2.name
+                return False
+
+            score = 0
+            for node1_dep in node1_deps:
+                for node2_dep in node2_deps:
+                    if _match(node1_dep, node2_dep):
+                        score += max(
+                            self.dep_size_hint(node1_dep), self.dep_size_hint(node2_dep)
+                        )
+
+            return _construct_return_value(score, False)
 
         node1_dep_len = len(node1.read_writes.reads) + len(node1.read_writes.writes)
         node2_dep_len = len(node2.read_writes.reads) + len(node2.read_writes.writes)
@@ -6005,8 +6260,14 @@ class Scheduler:
             backend.flush()
         self.free_buffers()
 
-    def codegen_extern_call(self, scheduler_node: ExternKernelSchedulerNode) -> None:
-        assert isinstance(scheduler_node, ExternKernelSchedulerNode)
+    def codegen_extern_call(
+        self,
+        scheduler_node: BaseSchedulerNode,
+    ) -> None:
+        assert isinstance(
+            scheduler_node,
+            (ExternKernelSchedulerNode, FusedExternTritonKernelSchedulerNode),
+        )
         # 'decide_inplace_update' stores the inplace update decisions in
         # the current kernel from where 'allocate' retrieve those decisions.
         # We have to make sure there is a non-NULL kernel handler to store
@@ -6015,9 +6276,7 @@ class Scheduler:
         with V.set_kernel_handler(Kernel(increase_kernel_count=False)):
             scheduler_node.decide_inplace_update()
             scheduler_node.mark_run()
-        node = scheduler_node.node
-        assert isinstance(node, ir.ExternKernel), f"{type(node)=}"
-        node.codegen(V.graph.wrapper_code)
+        scheduler_node.codegen(V.graph.wrapper_code)
         self.free_buffers()
 
     def create_backend(self, device: torch.device) -> BaseScheduling:
@@ -6948,7 +7207,6 @@ class Scheduler:
                     template_node, epilogue, prologue
                 )
             elif node.is_extern():
-                node = typing.cast(ExternKernelSchedulerNode, node)
                 self.codegen_extern_call(node)
             elif node.is_foreach():
                 node = typing.cast(ForeachKernelSchedulerNode, node)
@@ -7185,6 +7443,11 @@ class BaseScheduling:  # noqa: docstring_linter
             return FusedMixOrderReductions(node1, node2)
         elif isinstance(node1, FusedMixOrderReductions):
             return node1.fuse_with(node2)
+        elif isinstance(node1, ExternKernelSchedulerNode) and isinstance(
+            node2, SchedulerNode
+        ):
+            assert isinstance(node1.node, ir.UserDefinedTritonKernel)
+            return FusedExternTritonKernelSchedulerNode.epilogue_fuse(node1, node2)
         else:
             return FusedSchedulerNode.fuse(node1, node2)
 

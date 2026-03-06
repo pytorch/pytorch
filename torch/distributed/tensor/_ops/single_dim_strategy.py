@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
+from typing import Any, cast, TypeAlias, TypeVar
 
 import torch
 from torch._ops import OpOverload
@@ -67,6 +67,7 @@ _ExpandedSingleDimStrategyFunc: TypeAlias = Callable[
 class _SingleDimStrategyInfo:
     func: _SingleDimStrategyFunc
     allow_unbacked_sharding: bool | None = field(default=None)
+    allow_uneven_sharding: bool = field(default=False)
 
     # Delegate to func so this can be used interchangeably with a raw
     # _SingleDimStrategyFunc (e.g. in tests that call strategy functions directly).
@@ -242,6 +243,13 @@ class _PreparedSingleDimStrategy:
     allowed_partial_per_input: dict[int, set[Placement]]
     allow_unbacked_sharding: bool | None
 
+    # many, but not all ops are able to support unevenly sharded tensors
+    # there are existing BC expectations even if we wanted to ban for
+    # simplicity, see why justification for why pointwise_ops always work
+    # with uneven sharding at
+    # https://github.com/pytorch/pytorch/pull/174874#issuecomment-3995152777
+    allow_uneven_sharding: bool
+
     def __init__(
         self,
         strategy_fn: _SingleDimStrategyInfo
@@ -258,9 +266,11 @@ class _PreparedSingleDimStrategy:
 
         if isinstance(strategy_fn, _SingleDimStrategyInfo):
             self.allow_unbacked_sharding = strategy_fn.allow_unbacked_sharding
+            self.allow_uneven_sharding = strategy_fn.allow_uneven_sharding
             func = strategy_fn.func
         else:
             self.allow_unbacked_sharding = None
+            self.allow_uneven_sharding = False
             func = strategy_fn
 
         if num_inputs is None:
@@ -270,6 +280,25 @@ class _PreparedSingleDimStrategy:
         strategies_with_placeholders = func(
             op_schema.op, op_schema.args_meta, op_schema.kwargs_meta
         )
+
+        # Validate strategy length against the op schema. The schema is the
+        # ground truth for num_outputs; combined with num_inputs (which counts
+        # all tensor args + kwargs), it gives the expected strategy length.
+        # A mismatch means the strategy is missing kwargs placements or has
+        # extra entries.
+        if len(strategies_with_placeholders) > 0:
+            schema_num_outputs = sum(
+                1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
+            )
+            expected_len = schema_num_outputs + num_inputs
+            actual_len = len(strategies_with_placeholders[0])
+            if actual_len != expected_len:
+                raise AssertionError(
+                    f"Strategy length {actual_len} != expected {expected_len} "
+                    f"(schema_outputs={schema_num_outputs} + inputs={num_inputs}) "
+                    f"for {op_schema.op}. Strategies must include placements "
+                    f"for all outputs, args, and tensor kwargs."
+                )
 
         # Compute num_outputs from strategy structure or output_tensor_meta
         if len(strategies_with_placeholders) > 0:
@@ -421,6 +450,7 @@ def _expand_single_dim_strategy_to_mesh(
                 inplace_op=is_inplace,
                 input_index=prepared_strategy.num_outputs,
                 allow_unbacked_sharding=prepared_strategy.allow_unbacked_sharding,
+                allow_uneven_sharding=prepared_strategy.allow_uneven_sharding,
             )
 
         return expanded_strategy
@@ -530,9 +560,10 @@ def _expand_single_dim_strategy_to_mesh(
 
 
 def register_single_dim_strategy(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
+    schema_info: RuntimeSchemaInfo | None = None,
     allow_unbacked_sharding: bool | None = None,
+    allow_uneven_sharding: bool = False,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
@@ -580,6 +611,7 @@ def register_single_dim_strategy(
         info = _SingleDimStrategyInfo(
             func=impl,
             allow_unbacked_sharding=allow_unbacked_sharding,
+            allow_uneven_sharding=allow_uneven_sharding,
         )
         registration_wrapper(info)
         return impl

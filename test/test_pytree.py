@@ -11,7 +11,7 @@ import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass, field
 from enum import auto
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import torch
 import torch.utils._pytree as python_pytree
@@ -1256,7 +1256,7 @@ if "optree" in sys.modules:
         class Data:
             a: torch.Tensor
             b: str = "moo"
-            c: Optional[str] = None
+            c: str | None = None
             d: str = field(init=False, default="")
 
         python_pytree.register_dataclass(Data)

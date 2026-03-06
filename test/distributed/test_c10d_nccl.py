@@ -5340,6 +5340,33 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
                 )
         self.assertEqual(scatter_object_output_list, expected)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    def test_broadcast_float8(self, float8_dtype):
+        device = torch.device(f"cuda:{self.rank}")
+        if sm_is_or_higher_than(device, 9, 0):  # noqa: F821
+            self.skipTest("FP8 broadcast natively supported on sm90+")
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        src_rank = 0
+        if self.rank == src_rank:
+            tensor = torch.arange(8, device=device, dtype=torch.float32).to(
+                float8_dtype
+            )
+        else:
+            tensor = torch.empty(8, device=device, dtype=float8_dtype)
+
+        expected = torch.arange(8, device=device, dtype=torch.float32).to(float8_dtype)
+
+        dist.broadcast(tensor, src=src_rank)
+        self.assertEqual(tensor, expected)
+
 
 instantiate_parametrized_tests(LargeCommTest)
 

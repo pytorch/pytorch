@@ -313,6 +313,13 @@ def bmm(
     batch2: torch.Tensor,
     out_dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
+    # Outer-product specialization: [B, M, 1] x [B, 1, N] -> [B, M, N].
+    # This avoids introducing a reduction and maps directly to broadcasted mul.
+    if statically_known_true(self.shape[2] == 1) or statically_known_true(
+        batch2.shape[1] == 1
+    ):
+        return (self * batch2).contiguous()
+
     # TODO: Re-enable for mps once our reductions are performant enough
     # (https://github.com/pytorch/pytorch/issues/150121)
     if config.coordinate_descent_tuning and self.device.type not in ["cpu", "mps"]:

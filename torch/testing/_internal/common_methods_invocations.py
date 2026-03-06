@@ -8916,6 +8916,32 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
     scale_tensor2 = make_scale(scale2, torch.float8_e4m3fn)
     samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
 
+    # Case 4: MXFP4 (float4_e2m1fn_x2) with E8M0 blockwise scaling
+    # Regression test: E8M0 blockwise scale size validation must account for
+    # packed FP4 format where self.size(1) = K/2.
+    # Only supported on MI350 (gfx950).
+    if device == 'cuda' and torch.version.hip:
+        if 'gfx950' in torch.cuda.get_device_properties(0).gcnArchName:
+            mxfp4_M, mxfp4_K, mxfp4_N = 256, 256, 256
+            block_size_k = 32
+            block_size_mn = 128
+            num_k_blocks = math.ceil(mxfp4_K / block_size_k)
+            padded_num_k_blocks = math.ceil(num_k_blocks / 4) * 4
+            scale_a_size = block_size_mn * math.ceil(mxfp4_M / block_size_mn) * padded_num_k_blocks
+            scale_b_size = block_size_mn * math.ceil(mxfp4_N / block_size_mn) * padded_num_k_blocks
+            mat1 = _bfloat16_to_float4_e2m1fn_x2(
+                torch.randn(mxfp4_M, mxfp4_K, device=device, dtype=torch.bfloat16)
+            )
+            mat2 = _bfloat16_to_float4_e2m1fn_x2(
+                torch.randn(mxfp4_N, mxfp4_K, device=device, dtype=torch.bfloat16)
+            ).t()
+            scale_tensor1 = torch.ones(scale_a_size, device=device, dtype=torch.float8_e8m0fnu)
+            scale_tensor2 = torch.ones(scale_b_size, device=device, dtype=torch.float8_e8m0fnu)
+            samples.append(SampleInput(
+                mat1, mat2, scale_tensor1, scale_tensor2,
+                out_dtype=torch.bfloat16,
+            ))
+
     yield from samples
 
 def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
@@ -13174,6 +13200,7 @@ op_db: list[OpInfo] = [
            assert_autodiffed=False,
            sample_inputs_func=sample_inputs_cdist,
            skips=(
+               # NotImplementedError: The operator 'aten::_cdist_backward' is not currently implemented for the MPS device
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
                DecorateInfo(toleranceOverride(
@@ -16145,6 +16172,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float16: tol(atol=5e-3, rtol=1e-3)}),
                    'TestInductorOpInfo', 'test_comprehensive',
                ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                   'TestCommon', 'test_noncontiguous_samples', device_type='mps',
+               ),
            ),
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -16159,10 +16190,9 @@ op_db: list[OpInfo] = [
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
                # RuntimeError: Convolution is supported only for Floating types
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # AssertionError: Tensor-likes are not close!
                DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32, torch.int64)
+                   unittest.expectedFailure, 'TestCommon',
+                   device_type='mps', dtypes=(torch.int64,)
                ),
            ),
            supports_expanded_weight=True,
@@ -20666,11 +20696,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # Not Implemented on XLA.
                DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla'),
-               # RuntimeError: histogramdd(): weight should be contiguous on MPS
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
@@ -20684,11 +20709,6 @@ op_db: list[OpInfo] = [
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # RuntimeError: histogramdd(): weight should be contiguous on MPS
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
            )),
     OpInfo('histc',
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
@@ -22316,7 +22336,6 @@ op_db: list[OpInfo] = [
             # Error: The operator 'aten::grid_sampler_3d_backward' is not currently implemented for the MPS device.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-            # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4),
                                             torch.float16: tol(atol=1e-4, rtol=1e-4),

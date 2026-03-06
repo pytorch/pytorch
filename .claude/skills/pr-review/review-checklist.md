@@ -29,6 +29,12 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **Useful comments only** - Comments explain non-obvious context that cannot be inferred locally. For large comment use the `# Note [Good note title]` and `See Note [Good note title]` to write larger comments that can be referenced from multiple places in the codebase.
 - [ ] **No backward-compatibility hacks** - Unused code is deleted completely, not renamed with underscores or marked with "removed" comments
 - [ ] **Appropriate complexity** - Solutions are as simple as possible for the current requirements
+- [ ] **Documentation shows correct patterns only** - Docs and markdown files should show the right way to do things directly, not anti-patterns followed by corrections. Code examples must have correct indentation, names, and syntax
+
+### Initialization and Module Design
+
+- [ ] **No fragile init ordering** - If multiple imports/calls must happen in a specific undocumented order, flag the design. Dependencies should be explicit or combined into a single entry point
+- [ ] **Idempotent global state** - Registries and global lists that accumulate entries must handle multiple calls safely (no duplicate registration, clear cleanup story)
 
 ### Common Issues to Flag
 
@@ -48,6 +54,7 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 
 ### Test Patterns
 
+- [ ] **Proper module ownership** - Test files must have a real `# Owner(s): ["module: ..."]` label, not `"module: unknown"`. The author should create a new module label if needed and add themselves as owner
 - [ ] **Use OpInfo** - Any testing for an operator or a cross cutting feature must be done via OpInfo
 - [ ] **Use TestCase** - Tests inherit from `torch.testing._internal.common_utils.TestCase`
 - [ ] **Use run_tests** - Test file ends with `if __name__ == "__main__": run_tests()`

@@ -7,7 +7,7 @@ import itertools
 import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -331,7 +331,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         replicate(ref_model, device_ids=_get_device_ids(self.rank))
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             return Shard(param.shape.index(max(param.shape)))
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
@@ -419,7 +419,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     def _test_train_parity_multi_group(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         offload_policy: OffloadPolicy,
         test_device_type: str,
         delay_after_forward: bool,
@@ -587,7 +587,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_multi_forward_module,
         )
 
-    def _test_multi_forward_module(self, reshard_after_forward: Union[bool, int]):
+    def _test_multi_forward_module(self, reshard_after_forward: bool | int):
         class MultiForwardModule(nn.Module):
             def __init__(self, device: torch.device):
                 super().__init__()
@@ -736,7 +736,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
     def _test_train_parity_with_activation_checkpointing(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         checkpoint_impl: str,
         module_grouping: str,
     ):
@@ -907,7 +907,7 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         ref_model = copy.deepcopy(model).to(device_type)
         ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             return Shard(param.shape.index(max(param.shape)))
 
         for layer in model.layers:
@@ -951,7 +951,7 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
         dim = 4
         model = MLP(dim=dim)
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             if param.ndim > 1:
                 return Shard(1)
             return Shard(0)
@@ -1084,7 +1084,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
     def _test_gradient_accumulation(
         self,
         mesh: DeviceMesh,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         mode: str,
         reshard_after_backward: bool,
         offload_policy: OffloadPolicy,
@@ -1898,15 +1898,15 @@ class TestFullyShardShareCommContext(FSDPTest):
             reduce_scatter_group: dist.ProcessGroup,
             reduce_scatter_stream: torch.Stream,
             reduce_scatter_comm: ReduceScatter,
-            orig_dtype: Optional[torch.dtype],
-            reduce_dtype: Optional[torch.dtype],
+            orig_dtype: torch.dtype | None,
+            reduce_dtype: torch.dtype | None,
             device: torch.device,
-            gradient_divide_factor: Optional[float],
-            all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
+            gradient_divide_factor: float | None,
+            all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
             all_reduce_stream: torch.Stream,
             all_reduce_grads: bool,
-            partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
-            all_reduce_hook: Optional[Callable[[torch.Tensor], None]],
+            partial_reduce_output: torch.Tensor | None,  # only used for HSDP
+            all_reduce_hook: Callable[[torch.Tensor], None] | None,
             force_sum_reduction_for_comms: bool = False,
         ):
             nonlocal reduce_scatter_streams
@@ -1977,7 +1977,7 @@ class TestFullyShardWorldSize1(FSDPTest):
         replicate(ref_model, device_ids=_get_device_ids(self.rank))
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
-        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def _shard_placement_fn(param: nn.Parameter) -> Shard | None:
             return Shard(param.shape.index(max(param.shape)))
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None

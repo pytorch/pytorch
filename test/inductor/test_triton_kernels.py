@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
+import contextlib
 import functools
 import logging
 import os
@@ -28,6 +29,8 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import (
+    get_func_call,
+    get_kernel_launch,
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
@@ -113,6 +116,10 @@ class KernelTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     def test_triton_kernel_ill_formed(self):
+        if inductor_config.cpp_wrapper:
+            # With lazy compile, kernel errors happen at runtime, not codegen
+            self.skipTest("kernel errors happen at runtime instead of codegen time")
+
         @triton.jit
         def ill_formed_kernel(kernel):
             off_n = tl.program_id(0)
@@ -1770,6 +1777,11 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("autotune", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_params(self, autotune, backend):
+        if backend == "inductor" and inductor_config.cpp_wrapper:
+            raise unittest.SkipTest(
+                "cpp-wrapper doesn't support num_warps/num_stages as constexpr"
+            )
+
         @triton.jit
         def special_params_kernel(
             in_ptr,
@@ -1841,6 +1853,8 @@ def forward(self, x_1, output_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_on_device_tma_new_api
@@ -1941,6 +1955,8 @@ def forward(self, x_1, output_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
@@ -2043,6 +2059,8 @@ def forward(self, arg0_1, arg1_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_with_tma_1d_new_api
@@ -2100,6 +2118,8 @@ def forward(self, arg0_1, arg1_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper and backend == "inductor":
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_with_tma_1d_new_api
@@ -2166,6 +2186,8 @@ def forward(self, arg0_1, arg1_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_with_tma_1d_new_api
@@ -2773,11 +2795,15 @@ def forward(self, arg0_1, arg1_1):
 def make_mutation_test(fn):
     @requires_gpu
     def test_fn(self):
-        from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
+        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
 
         kernel, inputs, tma_descriptor_metadata, outputs = fn()
+        tensor_accesses = identify_accessed_tensors(
+            kernel, inputs, tma_descriptor_metadata
+        )
+        mutated_tensor_names = [dep.name for dep in tensor_accesses.read_writes.writes]
         self.assertListEqual(
-            identify_mutated_tensors(kernel, inputs, tma_descriptor_metadata),
+            mutated_tensor_names,
             outputs,
         )
 
@@ -4396,6 +4422,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_reset_to_zero(self, backend, autotune_at_compile_time):
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper to be enhanced")
         if autotune_at_compile_time and backend != "inductor":
             raise unittest.SkipTest("compile-time autotuning only exists in inductor")
 
@@ -4502,6 +4530,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by(self, backend, with_perf_model, non_strict):
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper to be enhanced")
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
@@ -4594,6 +4624,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by_recompile(self, backend, with_perf_model):
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper to be enhanced")
         """
         We want to recompile if anyone changes configs in the autotuner object
         In short if for example the following sequence of events happens:
@@ -4690,6 +4722,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     def test_triton_kernel_heuristic(
         self, backend, autotune_at_compile_time, non_strict
     ):
+        if inductor_config.cpp_wrapper:
+            self.skipTest("cpp_wrapper to be enhanced")
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
@@ -4811,8 +4845,346 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                 compiled_f(dst, src, N=N)
 
 
+class TestUserKernelEpilogueFusion(torch._inductor.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._stack = contextlib.ExitStack()
+        torch._inductor.config.epilogue_fusion_user_defined_triton_kernel = True
+
+    def check_code(self, code_str, num_kernels, num_allocs, num_deallocs):
+        FileCheck().check(get_func_call()).check_count(
+            get_kernel_launch(),
+            num_kernels,
+            exactly=True,
+        ).run(code_str)
+
+        if num_allocs is not None:
+            FileCheck().check(get_func_call()).check_count(
+                "empty_strided", num_allocs, exactly=True
+            ).run(code_str)
+
+        # skip the deallocation check when using cpp_wrapper; most deallocations happen
+        # outside of our control via RAIIAtenTensorHandle
+        from torch._inductor import config
+
+        if num_deallocs is not None and not config.cpp_wrapper:
+            FileCheck().check(get_func_call()).check_count(
+                "del", num_deallocs, exactly=True
+            ).run(code_str)
+
+    @requires_cuda_and_triton
+    def test_fusion_relu_epilogue(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu()
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    @requires_cuda_and_triton
+    def test_fusion_sigmoid_epilogue(self):
+        @triton.jit
+        def add_kernel(in_ptr0, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + x, mask=mask)
+
+        def fn(a):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, out, a.numel(), BLOCK_SIZE=1024)
+            return out.sigmoid()
+
+        a = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a)
+        self.assertEqual(out, fn(a), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
+
+    @requires_cuda_and_triton
+    def test_fusion_custom_kernel_with_linebreaks(self):
+        # we do AST manipulation / string manipulation of the kernel source code
+        # so we wanna make sure to correctly handle edge cases with tricky line breaks
+        @triton.jit
+        def add_kernel(in_ptr0, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            tl.store(
+                out_ptr + offs,
+                # forcing the `value` arg to be written in multiple lines
+                (
+                    # forcing the `value` arg to be written in multiple lines
+                    x + x
+                ),
+                mask=mask,
+            )
+
+        def fn(a):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, out, a.numel(), BLOCK_SIZE=1024)
+            return out.sigmoid()
+
+        a = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a)
+        self.assertEqual(out, fn(a), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=1)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_for_read_write_tensors(self):
+        # cannot epilogue-fuse this one because the kernel reads from `out_ptr` before writing to it
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            original_out = tl.load(out_ptr + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y + original_out, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu()
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        _, code = run_and_get_code(torch.compile(fn), a, b)
+        # no fusion, so 2 kernels: add_kernel, relu
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_for_multiple_stores(self):
+        # cannot epilogue-fuse this one because the kernel stores twice (once directly and once indirectly via another triton func)
+        """
+        We defined these globally after this class, because triton doesn't like local jit functions that reference each other..
+
+        @triton.jit
+        def custom_store(ptr, val, mask):
+            tl.store(ptr, val, mask)
+
+        @triton.jit
+        def add_kernel_with_custom_store(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+            custom_store(out_ptr + offs, x + y, mask=mask)
+        """
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel_with_custom_store[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu()
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        _, code = run_and_get_code(torch.compile(fn), a, b)
+        # no fusion, so 2 kernels: add_kernel, relu
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_for_non_empty_outputs(self):
+        # cannot epilogue-fuse this one because the kernel writes to buffer initialized with non-UB values
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs // 2, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.ones_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu()
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
+        # no fusion, so 3 kernels: ones, add_kernel, relu
+        self.check_code(code[0], num_kernels=3, num_allocs=2, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_for_concat_outputs(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out_first_half = torch.empty(int(len(a) / 2), dtype=a.dtype, device="cuda")
+            out_second_half = torch.empty(int(len(a) / 2), dtype=a.dtype, device="cuda")
+            out = torch.concat((out_first_half, out_second_half))
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu()
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
+        # no fusion, so 3 kernels: concat, add_kernel, relu
+        self.check_code(code[0], num_kernels=3, num_allocs=2, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_for_multiple_reads_on_mutated_tensor(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu(), out.sigmoid()
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
+        # two kernels: user defined `add_kernel`, and the generated one for both sigmoid and relu
+        self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_for_atomic_store(self):
+        # on ROCm we skip this because `tl.atomic_xchg` fails to compile in ROCm
+        if torch.version.cuda is None:
+            return
+
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.atomic_xchg(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu()
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
+
+    @requires_cuda_and_triton
+    def test_no_fusion_indexing_var_usage(self):
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            # this arange causes the final kernel to require indexing expressions not available in the user kernel
+            return out.relu() + torch.arange(out.shape[0], device="cuda")
+
+        a = torch.tensor([-0.3] * 8, dtype=torch.float32, device="cuda")
+        b = torch.tensor(
+            [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], dtype=torch.float32, device="cuda"
+        )
+
+        out, code = run_and_get_code(torch.compile(fn), a, b)
+        self.assertEqual(out, fn(a, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
+
+
+if HAS_CUDA_AND_TRITON:
+
+    @triton.jit
+    def custom_store(ptr, val, mask):
+        tl.store(ptr, val, mask)
+
+    @triton.jit
+    def add_kernel_with_custom_store(
+        in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(0)
+        offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offs < n_elements
+        x = tl.load(in_ptr0 + offs, mask=mask)
+        y = tl.load(in_ptr1 + offs, mask=mask)
+        tl.store(out_ptr + offs, x + y, mask=mask)
+        custom_store(out_ptr + offs, x + y, mask=mask)
+
+
 common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
+common_utils.instantiate_parametrized_tests(TestUserKernelEpilogueFusion)
 
 
 if __name__ == "__main__":

@@ -371,11 +371,23 @@ class TritonBenchmarker(Benchmarker):
         for kwarg in list(kwargs.keys()):
             if kwarg not in do_bench_params:
                 del kwargs[kwarg]
-        if "quantiles" in kwargs:
-            return self.triton_do_bench(_callable, **kwargs)[0]
-        elif "return_mode" in kwargs:
-            return self.triton_do_bench(_callable, **kwargs)
-        return self.triton_do_bench(_callable, **kwargs, return_mode="median")
+        try:
+            if "quantiles" in kwargs:
+                return self.triton_do_bench(_callable, **kwargs)[0]
+            elif "return_mode" in kwargs:
+                return self.triton_do_bench(_callable, **kwargs)
+            return self.triton_do_bench(_callable, **kwargs, return_mode="median")
+        except Exception as e:
+            # ErrorInvalidConfiguration
+            # Return inf to skip this config during autotuning
+            error_str = str(e).lower()
+            if "invalid configuration" in error_str:
+                logger.warning(
+                    "Skipping benchmark due to invalid configuration error: %s",
+                    error_str,
+                )
+                return float("inf")
+            raise
 
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter

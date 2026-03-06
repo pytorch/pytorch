@@ -83,6 +83,7 @@ from .dependencies import (
     extract_free_symbols,
     extract_input_node_reduction_ranges,
     extract_read_writes,
+    SymbolUsageCollectorOpsHandler,
     var_builder,
 )
 from .loop_body import LoopBody
@@ -1042,6 +1043,16 @@ class Loops(IRNode):
     def inner_fn_free_symbols(self, unbacked_only: bool = False) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
         return extract_free_symbols(self.inner_fn, index, unbacked_only=unbacked_only)
+
+    # returns a list of op names which references the symbol
+    def collect_inner_fn_symbol_usage(self, symbol: Symbol) -> OrderedSet[str]:
+        index = self._index(self.ranges)
+        handler = SymbolUsageCollectorOpsHandler(symbol)
+        with (
+            V.set_ops_handler(handler),
+        ):
+            self.inner_fn(index)
+        return handler.usages
 
     def get_reads(self) -> OrderedSet[Dep]:
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -7244,6 +7255,10 @@ class SubgraphBuffer(ExternKernel):
 
 
 class UserDefinedTritonKernel(ExternKernel):
+    """
+    A user-defined triton kernel (e.g. via @triton.jit).
+    """
+
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
         from triton.runtime.autotuner import Autotuner
 
@@ -7276,8 +7291,79 @@ class UserDefinedTritonKernel(ExternKernel):
 
         return kernel, configs, restore_value_args, reset_to_zero_args
 
+    def can_fuse_epilogue(self) -> bool:
+        """
+        For kernels like
+
+        @triton.jit
+        def add_kernel(in_ptr0, in_ptr1, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offs < n_elements
+            x = tl.load(in_ptr0 + offs, mask=mask)
+            y = tl.load(in_ptr1 + offs, mask=mask)
+            tl.store(out_ptr + offs, x + y, mask=mask)
+
+        @torch.compile
+        def fn(a, b):
+            out = torch.empty_like(a)
+            grid = (triton.cdiv(a.numel(), 1024),)
+            add_kernel[grid](a, b, out, a.numel(), BLOCK_SIZE=1024)
+            return out.relu()
+
+        We can potentially fuse the relu epilogue into the add_kernel.
+        We do this by pruning the `out` tensor allocation and directly writing the relu-output.
+        """
+
+        if not config.epilogue_fusion_user_defined_triton_kernel:
+            return False
+
+        if not self.arg_accesses.can_fuse_epilogue:
+            return False
+
+        # We achieve fusion by parsing the original src into a python AST,
+        # then identify the expr containing the original value written via tl.store().
+        # We generate an expr for the value after the epilogue and replace that into the tl.store.
+        # So far we only support the simple case where there is a single tl.store in the kernel.
+        if len(self.kernel_stores.stores) != 1:
+            return False
+
+        # Only fuse if the mutated arg is originally an "empty" tensor.
+        # This is because we don't know exactly which element of that tensor is being written to.
+        # If the kernel only writes to a subset of the tensor, then we only apply the epilogue to that subset.
+        # In these edge cases, our fusion is only correct if the original tensor is empty,
+        # where the semantics is that content values are UB, and we can rely on the fact that `epilogue(UB) == UB`.
+        assert len(self.mutable_args) == 1
+        if not isinstance(self.mutable_args[0], TensorBox):
+            return False
+        if not isinstance(self.mutable_args[0].data, StorageBox):
+            return False
+        if not isinstance(self.mutable_args[0].data.data, ComputedBuffer):
+            return False
+        if not isinstance(self.mutable_args[0].data.data.data, Pointwise):
+            return False
+        if not all(r == 0 for r in self.mutable_args[0].data.data.data.ranges):
+            return False
+
+        return True
+
     @override
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        return self._codegen(wrapper, epilogue_fusion=None)
+
+    def codegen_with_epilogue_fusion(
+        self, wrapper: PythonWrapperCodegen, epilogue_fusion: tuple[ComputedBuffer, str]
+    ) -> None:
+        """
+        epilogue_fusion: (fused epilogue node, modified kerel src code)
+        """
+        return self._codegen(wrapper, epilogue_fusion)
+
+    def _codegen(
+        self,
+        wrapper: PythonWrapperCodegen,
+        epilogue_fusion: tuple[ComputedBuffer, str] | None,
+    ) -> None:
         """Overrides the parent member.
         See https://github.com/pytorch/pytorch/issues/151692"""
 
@@ -7303,10 +7389,19 @@ class UserDefinedTritonKernel(ExternKernel):
             restore_value_args,
             reset_to_zero_args,
             self.grid,
+            epilogue_fusion,
         )
         named_args = {
             k: self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         }
+
+        if epilogue_fusion:
+            assert len(self.arg_accesses.read_writes.writes) == 1
+            mutable_arg_name = next(iter(self.arg_accesses.read_writes.writes)).name
+            assert mutable_arg_name in named_args
+            epilogue_computed_buffer, _ = epilogue_fusion
+            named_args[mutable_arg_name] = epilogue_computed_buffer
+
         arg_names = [p.name for p in kernel.params]  # type: ignore[attr-defined]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]  # type: ignore[attr-defined]
         constexpr_names = OrderedSet(arg_names[i] for i in constexprs)
@@ -7425,16 +7520,29 @@ class UserDefinedTritonKernel(ExternKernel):
             arg for arg in kernel.arg_names if arg in kernel_args
         ]
 
-        from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            identify_accessed_tensors,
+            identify_triton_stores,
+        )
 
         autotuned_kwargs = configs[0].kwargs if len(configs) > 0 else {}
+
+        import ast
+
+        # pyrefly: ignore [missing-attribute]
+        self.kernel_src = kernel.src
+        self.kernel_ast = ast.parse(self.kernel_src)
+        self.kernel_stores = identify_triton_stores(self.kernel_ast)
+        self.kernel_args = kernel_args
+        # names in `arg_accesses.read_writes` are names of formal arguments in the kernel's prototype
+        self.arg_accesses = identify_accessed_tensors(
+            kernel,
+            {**kernel_args, **autotuned_kwargs},
+            tma_descriptor_metadata,
+        )
+
         self.mutable_args = [
-            kernel_args[key]
-            for key in identify_mutated_tensors(
-                kernel,
-                {**kernel_args, **autotuned_kwargs},
-                tma_descriptor_metadata,
-            )
+            kernel_args[key.name] for key in self.arg_accesses.read_writes.writes
         ]
 
         self.mutation_outputs = [
@@ -7442,6 +7550,39 @@ class UserDefinedTritonKernel(ExternKernel):
             for buf in self.mutable_args
         ]
         V.graph.register_operation(self)
+
+    @override
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        # maps formal arg name to actual arg name
+        read_renames = {
+            formal_arg_dep.name: self.kernel_args[formal_arg_dep.name].get_name()
+            for formal_arg_dep in self.arg_accesses.read_writes.reads
+        }
+
+        formal_arg_writes = list(self.arg_accesses.read_writes.writes)
+        write_renames = {
+            formal_arg_dep.name: mut_output.get_name()
+            for formal_arg_dep, mut_output in zip(
+                formal_arg_writes, self.mutation_outputs
+            )
+        }
+
+        read_writes = dependencies.ReadWrites(
+            reads=OrderedSet(
+                [
+                    dep.rename(read_renames)
+                    for dep in self.arg_accesses.read_writes.reads
+                ]
+            ),
+            writes=OrderedSet(
+                [
+                    dep.rename(write_renames)
+                    for dep in self.arg_accesses.read_writes.writes
+                ]
+            ),
+            index_exprs=OrderedSet(),
+        )
+        return read_writes
 
     def get_outputs(self) -> list[Buffer]:
         return list(self.mutation_outputs)
@@ -8456,21 +8597,33 @@ class FallbackKernel(ExternKernelAlloc):
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        # Try to lower functional custom ops to their out-variant via
-        # ExternKernelOut for buffer reuse. Only affects ops with the
-        # torch.Tag.out_variant tag (custom ops / symm_mem), not aten ops.
+        # Try to lower single output functional custom ops to their out-variant.
         if isinstance(kernel, torch._ops.OpOverload):
-            from .custom_op_out_lowering import try_lower_to_out_variant
-
-            result = try_lower_to_out_variant(
-                kernel,
-                example_output,
-                tensor_args,
-                non_tensor_args,
-                kwargs,
+            from torch._library._out_variant import (
+                _is_functional,
+                get_out_arg_names,
+                to_out_variant,
             )
-            if result is not None:
-                return result  # type: ignore[return-value]
+
+            if _is_functional(kernel._schema) and isinstance(
+                example_output, torch.Tensor
+            ):
+                out_op = to_out_variant(kernel)
+                if out_op is not None and len(get_out_arg_names(out_op)) == 1:
+                    layout = FixedLayout(
+                        device=example_output.device,
+                        dtype=example_output.dtype,
+                        size=[*example_output.shape],
+                        stride=[*example_output.stride()],
+                    )
+                    return ExternKernelOut(  # type: ignore[return-value]
+                        layout=layout,
+                        inputs=list(tensor_args),
+                        constant_args=list(non_tensor_args),
+                        kwargs=kwargs,
+                        python_kernel_name=_make_out_variant_kernel_name(out_op),
+                        op_overload=out_op,
+                    )
 
         # We need this extra check for input alignment since the example
         # inputs we created are always aligned.
@@ -8484,6 +8637,26 @@ class FallbackKernel(ExternKernelAlloc):
             or kernel is torch.ops.higher_order.print
         ):
             device = torch.device("cpu")
+
+        # Try multi-output .out() lowering for ops with out_variant tag.
+        if (
+            isinstance(kernel, torch._ops.OpOverload)
+            and not V.graph.cpp_wrapper
+            and device
+        ):
+            out_result = ExternKernelMultiOut.try_create(
+                kernel,
+                example_output,
+                device,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                kwargs,
+                unbacked_bindings=unbacked_bindings,
+                has_unaligned_input=has_unaligned_input,
+            )
+            if out_result is not None:
+                return out_result  # type: ignore[return-value]
 
         if example_output is None:
             packed = cls(
@@ -8659,6 +8832,135 @@ class MultiOutput(ExternKernel):
             if isinstance(inp, FallbackKernel)
             and len(inp.get_inputs_that_alias_output()) > 0
         ]
+
+
+class AllocatingMultiOutput(MultiOutput):
+    """MultiOutput with Inductor-controlled allocation for .out() variant ops.
+
+    Overrides should_allocate()=True so Inductor allocates the output buffer,
+    and skips tuple-indexing codegen since .out() writes directly into these buffers.
+    """
+
+    def should_allocate(self) -> bool:
+        return True
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        if not self.skip_size_stride_alignment_checks:
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
+
+
+def _make_out_variant_kernel_name(out_op: torch._ops.OpOverload) -> str:
+    """Build fully-qualified kernel name for an out-variant op."""
+    ns = out_op.namespace
+    op_name = out_op._schema.name.split("::")[1]
+    overload = out_op._overloadname
+    return f"torch.ops.{ns}.{op_name}.{overload}"
+
+
+class ExternKernelMultiOut(FallbackKernel):
+    """Multi-output .out() variant lowering.
+
+    Subclass of FallbackKernel that emits .out() calls with pre-allocated
+    output buffers. Uses AllocatingMultiOutput child nodes for each output.
+    """
+
+    out_arg_names: list[str]
+    out_variant_output_nodes: list[AllocatingMultiOutput]
+
+    def __init__(
+        self,
+        *args: Any,
+        out_op: torch._ops.OpOverload,
+        out_arg_names: list[str],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.out_arg_names = out_arg_names
+        self.out_variant_output_nodes = []
+        self.python_kernel_name = _make_out_variant_kernel_name(out_op)
+        self.op_overload = out_op
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        self.codegen_comment(wrapper)
+        wrapper.generate_extern_kernel_multi_out(self)
+
+    @classmethod
+    def try_create(
+        cls,
+        kernel: torch._ops.OpOverload,
+        example_output: Any,
+        device: torch.device,
+        tensor_args: Sequence[IRNode],
+        non_tensor_args: Sequence[Any],
+        unflatten_args: Callable[..., Any],
+        kwargs: dict[str, Any] | None,
+        *,
+        unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None = None,
+        has_unaligned_input: bool = False,
+    ) -> Sequence[AllocatingMultiOutput] | None:
+        """Create an ExternKernelMultiOut if the op has a matching .out() variant."""
+        from torch._library._out_variant import (
+            _is_functional,
+            get_out_arg_names,
+            to_out_variant,
+        )
+
+        if not _is_functional(kernel._schema):
+            return None
+
+        if not isinstance(example_output, (tuple, list)):
+            return None
+
+        out_op = to_out_variant(kernel)
+        if out_op is None:
+            return None
+
+        out_arg_names = get_out_arg_names(out_op)
+        if not all(isinstance(t, torch.Tensor) for t in example_output):
+            return None
+        if len(example_output) != len(out_arg_names):
+            return None
+
+        packed = cls(
+            MultiOutputLayout(device=device),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            kwargs=kwargs,
+            unbacked_bindings=unbacked_bindings,
+            out_op=out_op,
+            out_arg_names=out_arg_names,
+        )
+
+        outputs: list[AllocatingMultiOutput] = []
+        for i, tensor_out in enumerate(example_output):
+            layout = FixedLayout(
+                device=tensor_out.device,
+                dtype=tensor_out.dtype,
+                size=[*tensor_out.shape],
+                stride=[*tensor_out.stride()],
+            )
+            multi_out = AllocatingMultiOutput(
+                layout=layout,
+                input=packed,
+                indices=[(type(example_output), i)],
+            )
+            if (
+                config.assume_unaligned_fallback_output
+                or has_unaligned_input
+                or not tensor_is_aligned(tensor_out)
+            ):
+                V.graph.unaligned_buffers.add(multi_out.name)  # type: ignore[arg-type]
+            outputs.append(multi_out)
+
+        packed.out_variant_output_nodes = outputs
+        packed.outputs = outputs
+
+        if isinstance(example_output, tuple):
+            return tuple(outputs)  # type: ignore[return-value]
+        return list(outputs)
 
 
 # We just use a normal dataclass for MutableBox/TensorBox/StorageBox since
