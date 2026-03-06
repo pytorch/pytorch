@@ -3,8 +3,8 @@
 """Test examples for NEP 50."""
 
 import itertools
-from unittest import skipIf as skipif, SkipTest
 import sys
+from unittest import skipIf as skipif, SkipTest
 
 
 try:
@@ -222,7 +222,10 @@ class TestCompareToNumpy(TestCase):
             if result is not None and result_numpy is not None:
                 # On Windows, int scalar promotion can differ (LLP64 vs LP64); skip dtype assert there.
                 skip_dtype_assert = sys.platform == "win32" and isinstance(scalar, int)
-                if not skip_dtype_assert and result.tensor.numpy().dtype != result_numpy.dtype:
+                if (
+                    not skip_dtype_assert
+                    and result.tensor.numpy().dtype != result_numpy.dtype
+                ):
                     raise AssertionError(
                         f"Expected result dtype == {result_numpy.dtype}, got {result.tensor.numpy().dtype}"
                     )

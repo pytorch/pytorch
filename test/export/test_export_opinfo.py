@@ -155,7 +155,7 @@ class TestExportOnFakeCuda(TestCase):
     @onlyCUDA
     @unittest.skipIf(
         sys.platform == "win32",
-        "Subprocess with CUDA_VISIBLE_DEVICES=\"\" imports op_db which triggers "
+        'Subprocess with CUDA_VISIBLE_DEVICES="" imports op_db which triggers '
         "get_device_capability(); 0 devices raises Invalid device id on Windows.",
     )
     @ops(selected_op_db, allowed_dtypes=(torch.float,))
