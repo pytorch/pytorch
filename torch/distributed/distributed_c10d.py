@@ -2066,6 +2066,12 @@ def _new_process_group_helper(
             )
             recorder = FlightRecorderHook(max_entries=int(buffer_size))
             recorder.register_with_comm(comm)
+            if (os.environ.get("TORCH_ENABLE_DEBUG_SERVER", "0") == "1"):
+                from torch.distributed.debug import start_debug_server
+                start_debug_server(
+                    port=int(os.environ.get("PORT_debug_server", "25999")),
+                    worker_port=int(os.environ.get("PORT_worker_server", "0")),
+                )
             # Keep a reference so the comm outlives this function scope.
             _world.comms.append(comm)
             group_name = GroupName(group_name)
