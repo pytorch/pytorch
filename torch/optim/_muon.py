@@ -307,8 +307,9 @@ def _single_tensor_muon(
             raise ValueError("Param gradient must be a 2D matrix")
 
         buf = muon_momentum_bufs[i]
-        buf.lerp_(grad, 1 - momentum)
-        update = grad.lerp(buf, momentum) if nesterov else buf
+        buf.mul_(momentum)
+        buf.add_(grad, alpha=1 - momentum)
+        update = grad + momentum * buf if nesterov else buf
 
         update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
 
