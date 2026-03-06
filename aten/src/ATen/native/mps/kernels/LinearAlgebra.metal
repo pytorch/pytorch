@@ -933,7 +933,6 @@ kernel void unpack_pivots(
   }
 }
 
-
 template <typename T>
 kernel void linalg_qr_householder(
     device T* A [[buffer(0)]],
@@ -965,8 +964,9 @@ kernel void linalg_qr_householder(
   device T* v_batch = v_work + batch_idx * v_stride;
 
   constexpr auto kMaxThreadsPerThreadgroup = 1024;
-  constexpr auto kMaxSIMDGroups = kMaxThreadsPerThreadgroup / c10::metal::simdgroup_size;
-  
+  constexpr auto kMaxSIMDGroups =
+      kMaxThreadsPerThreadgroup / c10::metal::simdgroup_size;
+
   threadgroup opmath_t scratch[kMaxSIMDGroups];
   threadgroup opmath_t tau_shared;
 
@@ -990,8 +990,8 @@ kernel void linalg_qr_householder(
       const auto val = static_cast<opmath_t>(r_ik);
       norm_sq = fma(val, val, norm_sq);
     }
-    const auto norm =
-        ::metal::precise::sqrt(c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size));
+    const auto norm = ::metal::precise::sqrt(
+        c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size));
 
     // scale norm_eps by matrix dimension to handle accumulated error
     const auto norm_eps = ::metal::numeric_limits<opmath_t>::epsilon() * m;
