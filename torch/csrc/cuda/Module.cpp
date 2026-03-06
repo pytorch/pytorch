@@ -26,6 +26,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
@@ -1620,7 +1621,7 @@ PyObject* THCPModule_getCurrentSolverHandle_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  cusolverDnHandle_t handle = at::cuda::getCurrentCUDASolverDnHandle();
+  void* handle = at::native::getCurrentCUDASolverDnHandleLazy();
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS
 }

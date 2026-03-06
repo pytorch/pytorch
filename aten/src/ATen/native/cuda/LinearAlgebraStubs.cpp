@@ -13,9 +13,8 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/TransposeType.h>
-#if defined(BUILD_LAZY_CUDA_LINALG)
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
-
+#if defined(BUILD_LAZY_CUDA_LINALG)
 #if AT_MAGMA_ENABLED()
 #include <ATen/cuda/detail/CUDAHooks.h>
 
@@ -172,6 +171,22 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
     return disp.cholesky_solve_helper(self, A, upper);
 }
 
+void* getCurrentCUDASolverDnHandleLazy() {
+  using GetCurrentCUDASolverDnHandleFn = void* (*)();
+  static auto* fn = reinterpret_cast<GetCurrentCUDASolverDnHandleFn>(
+      getTorchLinalgLibrary().sym("at_cuda_getCurrentCUDASolverDnHandle"));
+  TORCH_CHECK(
+      fn != nullptr,
+      "Can't find at_cuda_getCurrentCUDASolverDnHandle");
+  return fn();
+}
+
 #endif /*defined(BUILD_LAZY_CUDA_LINALG)*/
+
+#if !defined(BUILD_LAZY_CUDA_LINALG)
+void* getCurrentCUDASolverDnHandleLazy() {
+  return reinterpret_cast<void*>(at::cuda::getCurrentCUDASolverDnHandle());
+}
+#endif
 
 } // namespace at::native

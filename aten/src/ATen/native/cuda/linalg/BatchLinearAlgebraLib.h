@@ -94,4 +94,6 @@ C10_EXPORT void registerLinalgDispatch(const LinalgDispatch& /*disp_*/);
 } // namespace cuda::detail
 #endif
 
+C10_EXPORT void* getCurrentCUDASolverDnHandleLazy();
+
 } // namespace at::native
