@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -4122,8 +4122,8 @@ def get_another_device(device):
     device_type = torch.device(device).type
     if device_type == "cpu":
         # Return first available accelerator, or None if none available
-        if torch.cuda.is_available():
-            return "cuda"
+        if torch.accelerator.is_available():
+            return torch.accelerator.current_accelerator().type
         return None
     else:
         return "cpu"
@@ -4427,8 +4427,8 @@ class TestAsArray(TestCase):
                 else:
                     self.assertEqual(data, tensor)
 
-    @skipMeta  # meta devices don't have meaningful device index behavior
-    @onlyNativeDeviceTypes
+    @skipMeta
+    @onlyAccelerator
     def test_device_without_index(self, device):
         device_type = torch.device(device).type  # e.g., "cuda" or "cpu"
         original = torch.arange(5, device=device_type)
