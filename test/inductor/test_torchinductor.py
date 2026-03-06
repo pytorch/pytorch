@@ -15915,6 +15915,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result = torch.compile(fn)(x_base.clone()[:, 2:, :], index, source)
         self.assertEqual(result, expected)
 
+    def test_bfloat_constant(self):
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest("bfloat16 not supported")
+        self.common(
+            lambda x: x + 1.0,
+            (make_tensor(1024, dtype=torch.bfloat16, device=self.device),),
+        )
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_lowp_reduction(self, dtype):
+        if not self.is_dtype_supported(dtype):
+            raise unittest.SkipTest(f"{dtype} not supported")
+        self.common(
+            lambda x: x.sum(),
+            (make_tensor(1024, dtype=dtype, device=self.device),),
+            check_lowp=False,
+        )
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_lowp_where(self, dtype):
+        if not self.is_dtype_supported(dtype):
+            raise unittest.SkipTest(f"{dtype} not supported")
+        self.common(
+            lambda x: torch.where(x > 0.5, x, x.new_zeros(())),
+            (make_tensor(1024, dtype=dtype, device=self.device),),
+            check_lowp=False,
+        )
+
     # end of class CommonTemplate - add new tests here
 
 

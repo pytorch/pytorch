@@ -207,14 +207,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def constant(val: bool | float | int, dtype: torch.dtype) -> str:
-        raw = value_to_metal(val)
-        if (
-            dtype in (torch.bfloat16, torch.float16)
-            and isinstance(val, (float, int))
-            and not isinstance(val, bool)
-        ):
-            return f"static_cast<{DTYPE_TO_METAL[dtype]}>({raw})"
-        return raw
+        return value_to_metal(val)
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
@@ -250,19 +243,17 @@ class MetalOverrides(OpOverrides):
             )
             with V.kernel.compute.indent():
                 V.kernel.compute.splice(scoped_body)
-                V.kernel.compute.writeline(f"{var} = {rc};")
+                V.kernel.compute.writeline(
+                    f"{var} = static_cast<decltype({var})>({rc});"
+                )
             V.kernel.compute.writeline(
-                f"}} else {var} = static_cast<{DTYPE_TO_METAL[rc.dtype]}>({other_str});"
+                f"}} else {var} = static_cast<decltype({var})>({other_str});"
             )
         return var
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
-        c_str = value_to_metal(c)
-        if isinstance(b, CSEVariable) and b.dtype in (torch.bfloat16, torch.float16):
-            assert b.dtype is not None
-            c_str = f"static_cast<{DTYPE_TO_METAL[b.dtype]}>({c_str})"
-        return f"{a} ? {b} : {c_str}"
+        return f"{a} ? {b} : static_cast<decltype({b})>({value_to_metal(c)})"
 
     @staticmethod
     def remainder(a: OpVarT, b: OpVarT) -> str:
