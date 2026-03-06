@@ -3326,8 +3326,11 @@ class BuiltinVariable(VariableTracker):
         # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
-        if isinstance(a, (ListVariable, ConstDictVariable, UserDefinedDictVariable)):
+        if isinstance(a, (ListVariable, ConstDictVariable)):
             return VariableTracker.build(tx, len(a.items) == 0)
+        if isinstance(a, UserDefinedObjectVariable):
+            bool_result = self.call_bool(tx, a)
+            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
 
         return None
 
