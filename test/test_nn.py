@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    _get_torch_rocm_version
+    TEST_HIPDNN, _get_torch_rocm_version
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -5080,6 +5080,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         grad = grad.permute(0, 2, 1, 3)
         run_test(input, grad)
 
+    @unittest.skipIf(not TEST_HIPDNN, "hipDNN not available")
+    def test_batchnorm_hipdnn_backend_selection(self):
+        # impl_index: 0=Native, 1=cuDNN, 2=MIOpen, 3=hipDNN
+        c = 16
+        bn = torch.nn.BatchNorm2d(c).cuda()
+        input = torch.randn(4, c, 8, 8, device="cuda")
+
+        # With hipdnn enabled, should select hipDNN backend (index 3)
+        with torch.backends.hipdnn.flags(enabled=True):
+            _, _, _, _, impl_index = torch._batch_norm_impl_index(
+                input, bn.weight, bn.bias, bn.running_mean, bn.running_var,
+                bn.training, bn.momentum, bn.eps, torch.backends.cudnn.enabled)
+            self.assertEqual(impl_index, 3)
+
+        # With hipdnn disabled, should fall back to MIOpen (index 2)
+        with torch.backends.hipdnn.flags(enabled=False):
+            _, _, _, _, impl_index = torch._batch_norm_impl_index(
+                input, bn.weight, bn.bias, bn.running_mean, bn.running_var,
+                bn.training, bn.momentum, bn.eps, torch.backends.cudnn.enabled)
+            self.assertEqual(impl_index, 2)
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_batchnorm_cudnn_half(self):
         # THNN
@@ -5191,6 +5212,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @parametrize_test("backend", ["default", "hipdnn"] if TEST_HIPDNN else ["default"],
+                      name_fn=lambda x: x if x == "hipdnn" else "")
     @parametrize_test("dims", [2, 3], name_fn=lambda x: f"{x}D")
     @parametrize_test("mode", ["train", "inference"], name_fn=lambda x: x)
     @parametrize_test(
@@ -5227,7 +5250,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ],
         name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
     )
-    def test_batchnorm(self, dims, mode, memory_format, ref_backend, mixed, dtype):
+    def test_batchnorm(self, backend, dims, mode, memory_format, ref_backend, mixed, dtype):
         if torch.version.cuda:
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
                                         "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
@@ -5237,14 +5260,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.skipTest("Failed on CUDA")
 
         if torch.version.hip:
-            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16") \
+            if "_train_NCHW_vs_native_mixed_bfloat16" in self._testMethodName \
                     and _get_torch_rocm_version() >= (6, 4):
                 # https://github.com/pytorch/pytorch/issues/156513
                 self.skipTest("bfloat16 NCHW train failed due to native tolerance issue")
 
-            if self._testMethodName == "test_batchnorm_3D_train_NCHW_vs_native_mixed_float16":
-                self.skipTest("3D float16 NCHW train failed on ROCm")
+            if "_3D_train_NCHW_vs_native_mixed_float16" in self._testMethodName :
+                self.skipTest("3D float16 NCHW train failed on ROCm due to native tolerance issue")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
@@ -5356,10 +5378,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 ref_out = ref_mod(ref_inp)
             self.assertEqual(out, ref_out)
 
-        if mode == "train":
-            _train(memory_format, ref_backend, mixed, dtype)
-        else:
-            _inference(memory_format, ref_backend, mixed, dtype)
+        with torch.backends.hipdnn.flags(enabled=True) if backend == "hipdnn" else contextlib.nullcontext():
+            if mode == "train":
+                _train(memory_format, ref_backend, mixed, dtype)
+            else:
+                _inference(memory_format, ref_backend, mixed, dtype)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_batchnorm_nhwc_cuda(self):
