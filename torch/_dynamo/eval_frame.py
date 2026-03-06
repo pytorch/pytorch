@@ -1018,7 +1018,7 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
-                except (Unsupported, UncapturedHigherOrderOpError) as e:
+                except (Unsupported, UncapturedHigherOrderOpError, UserError) as e:
                     if config.verbose:
                         raise
                     # strip internal tracebacks from causes

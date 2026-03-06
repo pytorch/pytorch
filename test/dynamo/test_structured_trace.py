@@ -625,6 +625,7 @@ class StructuredTraceTest(TestCase):
 
     @requires_distributed()
     @requires_cuda_and_triton
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/176188")
     def test_ddp_graphs(self):
         import torch._dynamo.convert_frame as convert_frame
 
@@ -802,6 +803,7 @@ class StructuredTraceTest(TestCase):
         self.assertParses()
 
     @requires_tlparse
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/176188")
     def test_graph_breaks(self):
         @torch.compile(backend="inductor")
         def fn(x):

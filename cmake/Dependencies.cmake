@@ -1089,13 +1089,6 @@ if(USE_ROCM)
       )
     endif()
 
-    # ROCM-SMI needed to support symmetric memory
-    if(USE_DISTRIBUTED AND UNIX)
-      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        rocm_smi64
-      )
-    endif()
-
     # ---[ Kernel asserts
     # Kernel asserts is disabled for ROCm by default.
     # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
@@ -1468,26 +1461,6 @@ if(NOT INTERN_BUILD_MOBILE)
 
   # ARM specific flags
   find_package(ARM)
-  if(ASIMD_FOUND)
-    message(STATUS "asimd/Neon found with compiler flag : -D__NEON__")
-    add_compile_options(-D__NEON__)
-  elseif(NEON_FOUND)
-    if(APPLE)
-      message(STATUS "Neon found with compiler flag : -D__NEON__")
-      add_compile_options(-D__NEON__)
-    else()
-      message(STATUS "Neon found with compiler flag : -mfpu=neon -D__NEON__")
-      add_compile_options(-mfpu=neon -D__NEON__)
-    endif()
-  endif()
-  if(CORTEXA8_FOUND)
-    message(STATUS "Cortex-A8 Found with compiler flag : -mcpu=cortex-a8")
-    add_compile_options(-mcpu=cortex-a8 -fprefetch-loop-arrays)
-  endif()
-  if(CORTEXA9_FOUND)
-    message(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
-    add_compile_options(-mcpu=cortex-a9)
-  endif()
 
   find_package(LAPACK)
   if(LAPACK_FOUND)

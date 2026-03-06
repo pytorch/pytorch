@@ -217,13 +217,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if not V.graph.aot_mode:
             self.header.splice(
-                """
+                '''
                 import torch
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
-                r'''
-                """
+                r"""
+                '''
             )
 
         for device in V.graph.device_types:
@@ -1175,11 +1175,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if config.cpp_wrapper_build_separate:
             # Close the wrapper code block, then write any kernel definitions.
-            result.splice("'''\n)")
+            result.splice('"""\n)')
             if self.kernel_declarations:
-                result.splice("\nkernel_src = (\nr'''")
+                result.splice('\nkernel_src = (\nr"""')
                 result.splice(self.kernel_declarations.getvalue())
-                result.splice("'''\n)")
+                result.splice('"""\n)')
             else:
                 result.splice(
                     """
@@ -1191,7 +1191,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             result.splice(self.kernel_declarations.getvalue())
             self.kernel_declarations.clear()
             # Close the wrapper code block
-            result.splice("'''\n)")
+            result.splice('"""\n)')
 
         kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
         # Cpp entry function for JIT with cpp wrapper

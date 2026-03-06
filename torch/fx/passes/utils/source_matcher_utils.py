@@ -2,7 +2,7 @@ import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
@@ -56,7 +56,7 @@ class SourcePartition:
 def get_source_partitions(
     graph: Graph,
     wanted_sources: list[Any],
-    filter_fn: Optional[Callable[[Node], bool]] = None,
+    filter_fn: Callable[[Node], bool] | None = None,
 ) -> dict[Any, list[SourcePartition]]:
     """
     Args:
@@ -103,7 +103,7 @@ def get_source_partitions(
             # placeholder, get_attr, or output nodes in partitions.
             if not matched and node.op == "call_function":
                 nn_module_stack = node.meta.get("nn_module_stack", None)
-                if nn_module_stack is not None:
+                if nn_module_stack:
                     # Get the innermost module (last entry in the ordered dict)
                     innermost_fqn, innermost_cls = list(nn_module_stack.values())[-1]
                     for src in wanted_sources:

@@ -22,6 +22,7 @@ import argparse
 import fnmatch
 import itertools
 import re
+import sys
 import time
 from collections import defaultdict
 from collections.abc import Callable
@@ -126,6 +127,8 @@ class ComparisonStats:
     total_combinations: int = 0
     skip_reasons: dict[str, int] = field(default_factory=dict)
     no_dtensor_support: bool = False
+    # Per aten op variant breakdown (e.g. "aten.min.dim" -> 5)
+    true_positives_by_op: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -512,7 +515,10 @@ def validate_combination(
                 # Create sharded LocalTensor directly to work in LocalTensorMode
                 shard_dim = placement.dim
                 chunks = tensor.tensor_split(world_size, dim=shard_dim)
-                _tmp = {r: chunks[r].clone().contiguous() for r in range(world_size)}
+                _tmp = {
+                    r: chunks[r].clone(memory_format=torch.contiguous_format)
+                    for r in range(world_size)
+                }
                 # pyrefly: ignore [bad-argument-type, bad-argument-count]
                 local_tensor = LocalTensor(_tmp)
             else:
@@ -759,19 +765,13 @@ def get_aten_op_for_sample(
     else:
         return None, (), {}
 
-    non_tensor_args = tuple(a for a in captured_args if not isinstance(a, torch.Tensor))
-    non_tensor_kwargs = {
-        k: v for k, v in captured_kwargs.items() if not isinstance(v, torch.Tensor)
-    }
-
-    return captured_op, non_tensor_args, non_tensor_kwargs
+    return captured_op, captured_args, captured_kwargs
 
 
 def query_single_dim_strategy(
     op_overload: OpOverload,
-    tensors: list[tuple[str, torch.Tensor]],
-    mesh: DeviceMesh | None,
-    kwargs: dict[str, Any] | None = None,
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
 ) -> list[list[Placement]] | None:
     """
     Query DTensor's single-dim strategy for given input tensors.
@@ -785,11 +785,20 @@ def query_single_dim_strategy(
     strategy_func = propagator.op_single_dim_strategy_funcs[op_overload]
 
     args_meta = tuple(
-        TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype) for _, t in tensors
+        TensorMeta(shape=a.shape, stride=a.stride(), dtype=a.dtype)
+        if isinstance(a, torch.Tensor)
+        else a
+        for a in captured_args
     )
+    kwargs_meta = {
+        k: TensorMeta(shape=v.shape, stride=v.stride(), dtype=v.dtype)
+        if isinstance(v, torch.Tensor)
+        else v
+        for k, v in captured_kwargs.items()
+    }
 
     try:
-        result = strategy_func(op_overload, args_meta, kwargs or {})
+        result = strategy_func(op_overload, args_meta, kwargs_meta)
 
         expanded_result: list[list[Placement]] = []
         for combo in result:
@@ -968,8 +977,8 @@ def _prepare_false_positive_mitigations(
 def _query_dtensor_rules(
     aten_op: OpOverload | None,
     tensors: list[tuple[str, torch.Tensor]],
-    non_tensor_args: tuple[Any, ...],
-    non_tensor_kwargs: dict[str, Any],
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
     input_shapes: tuple[tuple[int, ...], ...],
     output_shape: tuple[int, ...],
     world_size: int,
@@ -985,18 +994,22 @@ def _query_dtensor_rules(
     if not aten_op:
         return set()
 
+    num_tensors = len(tensors)
+    non_tensor_kwargs = {
+        k: v for k, v in captured_kwargs.items() if not isinstance(v, torch.Tensor)
+    }
     propagator = DTensor._op_dispatcher.sharding_propagator
     rules: set[ComboKey] = set()
 
     if aten_op in propagator.op_single_dim_strategy_funcs:
         strategy_result = query_single_dim_strategy(
-            aten_op, tensors, None, kwargs=non_tensor_kwargs
+            aten_op, captured_args, captured_kwargs
         )
         if strategy_result:
             for combo in strategy_result:
-                if len(combo) >= len(tensors) + 1:
+                if len(combo) >= num_tensors + 1:
                     output_plc = combo[0]
-                    input_plcs = tuple(combo[1 : len(tensors) + 1])
+                    input_plcs = tuple(combo[1 : num_tensors + 1])
                     rule_key = (
                         tuple(str(p) for p in input_plcs),
                         str(output_plc),
@@ -1015,8 +1028,9 @@ def _query_dtensor_rules(
     elif aten_op in propagator.op_strategy_funcs:
         try:
             mesh = init_device_mesh("cpu", (world_size,))
-            input_strategies = []
-            for name, t in tensors:
+            # Build OpStrategy objects for each tensor, keyed by identity
+            tensor_to_strategy: dict[int, OpStrategy] = {}
+            for _, t in tensors:
                 input_placements = get_1d_input_placements_for_tensor(
                     t, include_partial=True
                 )
@@ -1030,8 +1044,12 @@ def _query_dtensor_rules(
                         ),
                     )
                     specs.append(OpSpec(output_specs=spec, input_specs=tuple()))
-                input_strategies.append(OpStrategy(specs))
-            args_schema = list(input_strategies) + list(non_tensor_args)
+                tensor_to_strategy[id(t)] = OpStrategy(specs)
+            # Interleave strategies and non-tensor args at original positions
+            args_schema = [
+                tensor_to_strategy[id(a)] if isinstance(a, torch.Tensor) else a
+                for a in captured_args
+            ]
             op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
             strategy_func = propagator.op_strategy_funcs[aten_op]
             output_strategy = strategy_func(op_schema)
@@ -1050,20 +1068,25 @@ def _query_dtensor_rules(
         if DecompShardingStrategy.has_decomp(aten_op):
             try:
                 mesh = init_device_mesh("cpu", (world_size,))
-                args_schema = []
-                for i, (_, t) in enumerate(tensors):
-                    # First tensor gets Shard(0) to seed candidate
-                    # placement generation in _get_candidate_placements
-                    plc = Shard(0) if i == 0 else Replicate()
-                    spec = DTensorSpec(
-                        mesh=mesh,
-                        placements=(plc,),
-                        tensor_meta=TensorMeta(
-                            shape=t.shape, stride=t.stride(), dtype=t.dtype
-                        ),
-                    )
-                    args_schema.append(spec)
-                args_schema.extend(non_tensor_args)
+                # Interleave DTensorSpec and non-tensor args at original positions
+                tensor_idx = 0
+                args_schema: list[Any] = []
+                for a in captured_args:
+                    if isinstance(a, torch.Tensor):
+                        # First tensor gets Shard(0) to seed candidate
+                        # placement generation in _get_candidate_placements
+                        plc = Shard(0) if tensor_idx == 0 else Replicate()
+                        spec = DTensorSpec(
+                            mesh=mesh,
+                            placements=(plc,),
+                            tensor_meta=TensorMeta(
+                                shape=a.shape, stride=a.stride(), dtype=a.dtype
+                            ),
+                        )
+                        args_schema.append(spec)
+                        tensor_idx += 1
+                    else:
+                        args_schema.append(a)
                 op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
                 propagator.decomp_strategy.ensure_schema_info(aten_op)
                 output_strategy = propagator.decomp_strategy.propagate_strategy(
@@ -1121,8 +1144,10 @@ def _validate_with_mitigations(
         and mitigations.negated_sample
         and has_pmin_pmax(input_placements, output_placement)
     ):
-        assert mitigations.negated_tensors is not None
-        assert mitigations.negated_ground_truth is not None
+        if mitigations.negated_tensors is None:
+            raise AssertionError("negated_tensors is None")
+        if mitigations.negated_ground_truth is None:
+            raise AssertionError("negated_ground_truth is None")
         negated_combo = PlacementCombination(input_placements, output_placement)
         negated_valid, _ = validate_combination(
             op,
@@ -1140,7 +1165,8 @@ def _validate_with_mitigations(
         and mitigations.non_rounded_sample
         and has_any_partial(input_placements, output_placement)
     ):
-        assert mitigations.non_rounded_ground_truth is not None
+        if mitigations.non_rounded_ground_truth is None:
+            raise AssertionError("non_rounded_ground_truth is None")
         non_rounded_combo = PlacementCombination(input_placements, output_placement)
         non_rounded_valid, _ = validate_combination(
             op,
@@ -1158,8 +1184,10 @@ def _validate_with_mitigations(
         and mitigations.non_rounded_negated_sample
         and has_pmin_pmax(input_placements, output_placement)
     ):
-        assert mitigations.non_rounded_negated_tensors is not None
-        assert mitigations.non_rounded_negated_ground_truth is not None
+        if mitigations.non_rounded_negated_tensors is None:
+            raise AssertionError("non_rounded_negated_tensors is None")
+        if mitigations.non_rounded_negated_ground_truth is None:
+            raise AssertionError("non_rounded_negated_ground_truth is None")
         nr_negated_combo = PlacementCombination(input_placements, output_placement)
         nr_negated_valid, _ = validate_combination(
             op,
@@ -1182,10 +1210,11 @@ def _assert_keys_normalized(
 ) -> None:
     """Assert all combo keys have trivial shards already normalized to Replicate."""
     for key in keys:
-        assert key == normalize_combo_key(key, input_shapes, output_shape), (
-            f"Key {key} contains un-normalized trivial shards; "
-            f"call normalize_combo_key before _compare_rules"
-        )
+        if key != normalize_combo_key(key, input_shapes, output_shape):
+            raise AssertionError(
+                f"Key {key} contains un-normalized trivial shards; "
+                f"call normalize_combo_key before _compare_rules"
+            )
 
 
 def _compare_rules(
@@ -1208,9 +1237,13 @@ def _compare_rules(
     _assert_keys_normalized(ground_truth_valid, input_shapes, output_shape)
     _assert_keys_normalized(dtensor_rules, input_shapes, output_shape)
 
+    op_str = str(aten_op)
     for combo_key in ground_truth_valid:
         if combo_key in dtensor_rules:
             stats.true_positives += 1
+            stats.true_positives_by_op[op_str] = (
+                stats.true_positives_by_op.get(op_str, 0) + 1
+            )
         else:
             stats.false_negatives.append(
                 Discrepancy(
@@ -1289,7 +1322,7 @@ def _print_discrepancy_section(
         lambda: defaultdict(list)
     )
     for d in discrepancies:
-        op_str = str(d.aten_op) if d.aten_op else "(unknown)"
+        op_str = str(d.aten_op)
         key = (d.input_placements, d.output_placement)
         by_op[op_str][key].append(d)
 
@@ -1314,6 +1347,24 @@ def _print_comparison_summary(
     show_repro: int = 0,
 ) -> None:
     """Print discrepancy details for an operator."""
+    # Per aten op variant breakdown
+    fp_by_op: dict[str, set[ComboKey]] = defaultdict(set)
+    for d in stats.false_positives:
+        op_str = str(d.aten_op)
+        fp_by_op[op_str].add((d.input_placements, d.output_placement))
+    fn_by_op: dict[str, set[ComboKey]] = defaultdict(set)
+    for d in stats.false_negatives:
+        op_str = str(d.aten_op)
+        fn_by_op[op_str].add((d.input_placements, d.output_placement))
+
+    all_ops = sorted(set(stats.true_positives_by_op) | set(fp_by_op) | set(fn_by_op))
+    if len(all_ops) > 1:
+        for op_str in all_ops:
+            tp = stats.true_positives_by_op.get(op_str, 0)
+            fp = len(fp_by_op.get(op_str, set()))
+            fn = len(fn_by_op.get(op_str, set()))
+            print(f"  {op_str}: {tp} correct, {fp} incorrect, {fn} missing")
+
     _print_discrepancy_section(
         "Incorrect (has rule but ground truth invalid)",
         stats.false_positives,
@@ -1475,15 +1526,15 @@ def compare_operator(
             ]
             output_placement_options = get_1d_output_placements_for_tensor(first_gt)
 
-            aten_op, non_tensor_args, non_tensor_kwargs = get_aten_op_for_sample(
+            aten_op, captured_args, captured_kwargs = get_aten_op_for_sample(
                 op, sample, opinfo.name
             )
 
             dtensor_rules = _query_dtensor_rules(
                 aten_op,
                 tensors,
-                non_tensor_args,
-                non_tensor_kwargs,
+                captured_args,
+                captured_kwargs,
                 input_shapes,
                 output_shape,
                 world_size,
@@ -1625,6 +1676,74 @@ def get_registered_op_names() -> list[str]:
     return sorted(result)
 
 
+def report_registrations(verbose: bool = False) -> None:
+    """Report the number (and optionally full list) of ops by registration method.
+
+    Directly registered categories (mutually exclusive):
+      - rule: ops registered via register_prop_rule
+      - op_strategy: ops registered via register_op_strategy
+      - single_dim_strategy: ops registered via register_single_dim_strategy
+
+    Ops not in any of the above may still be supported at runtime via
+    DecompShardingStrategy, which traces through the op's decomposition and
+    propagates placements through the decomposed sub-ops.  Whether this
+    actually works depends on every sub-op having a registered strategy.
+    We report the decomposition_table entries as a separate (untested) count.
+    """
+    from torch._decomp import decomposition_table
+
+    propagator = DTensor._op_dispatcher.sharding_propagator
+
+    rule_ops = sorted(propagator.op_to_rules.keys(), key=str)
+    strategy_ops = sorted(propagator.op_strategy_funcs.keys(), key=str)
+    single_dim_ops = sorted(propagator.op_single_dim_strategy_funcs.keys(), key=str)
+
+    directly_registered = (
+        set(propagator.op_to_rules.keys())
+        | set(propagator.op_strategy_funcs.keys())
+        | set(propagator.op_single_dim_strategy_funcs.keys())
+    )
+
+    # Ops from the explicit decomposition table that aren't directly registered.
+    # These *may* work via DecompShardingStrategy if all their sub-ops are
+    # supported, but we can't verify that without tracing each one.
+    decomp_only_ops = sorted(
+        (op for op in decomposition_table if op not in directly_registered),
+        key=str,
+    )
+
+    print("=" * 70)
+    print("DTensor operator registration report")
+    print("=" * 70)
+
+    print("\nDirectly registered:")
+    print(f"  rule (register_prop_rule):            {len(rule_ops):>4}")
+    print(f"  op_strategy (register_op_strategy):   {len(strategy_ops):>4}")
+    print(f"  single_dim_strategy:                  {len(single_dim_ops):>4}")
+    print(f"  total:                                {len(directly_registered):>4}")
+
+    print(f"\nDecomposition table (not directly registered): {len(decomp_only_ops)}")
+    print(
+        "  These ops have entries in torch._decomp.decomposition_table but no\n"
+        "  direct DTensor strategy. They may work at runtime via\n"
+        "  DecompShardingStrategy if all decomposed sub-ops are supported.\n"
+        "  Additional ops beyond this count may also be reachable via CIA\n"
+        "  (CompositeImplicitAutograd) decompositions."
+    )
+
+    if verbose:
+
+        def _print_ops(label: str, ops: list) -> None:
+            print(f"\n{label} ({len(ops)}):")
+            for op in ops:
+                print(f"  {op}")
+
+        _print_ops("rule", rule_ops)
+        _print_ops("op_strategy", strategy_ops)
+        _print_ops("single_dim_strategy", single_dim_ops)
+        _print_ops("decomp table (not directly registered)", decomp_only_ops)
+
+
 if __name__ == "__main__":
     # Override common size variables to ensure even sharding across world_size=2.
     # These are process-global mutations, but this is a CLI entry point so the
@@ -1675,6 +1794,16 @@ if __name__ == "__main__":
         metavar="N",
         help="Show N sample repros per rule (default 1 if flag given, -1 for all)",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Show registration statistics (op counts per registration method)",
+    )
+    parser.add_argument(
+        "--report-full",
+        action="store_true",
+        help="Show full op lists with registration statistics (implies --report)",
+    )
     args = parser.parse_args()
 
     dtype_map = {
@@ -1686,6 +1815,14 @@ if __name__ == "__main__":
     dtype = dtype_map.get(args.dtype, torch.float32)
 
     dist.init_process_group("fake", rank=0, world_size=args.world_size)
+
+    if args.report or args.report_full:
+        report_registrations(verbose=args.report_full)
+        if not args.all_registered and not args.op:
+            dist.destroy_process_group()
+            sys.exit(0)
+        print()
+
     try:
         if args.all_registered:
             op_names = get_registered_op_names()

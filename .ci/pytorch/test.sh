@@ -359,6 +359,7 @@ test_python_smoke_b200() {
       inductor/test_flex_flash \
       inductor/test_torchinductor \
       inductor/test_nv_universal_gemm \
+      inductor/test_fused_attention \
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -584,7 +585,7 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro inductor/test_triton_kernels \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py --inductor \
@@ -592,7 +593,10 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
-
+  TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=0 python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_triton_kernels\
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     python test/run_test.py \
       --include inductor/test_mkldnn_pattern_matcher \
@@ -1847,6 +1851,7 @@ test_attention_microbenchmark() {
 }
 
 test_openreg() {
+  git submodule update --init --depth 1 third_party/googletest
   python test/run_test.py --openreg --verbose
   assert_git_not_dirty
 }
@@ -1881,6 +1886,9 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     (cd .ci/lumen_cli && python -m pip install -e .)
 
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
+elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
+    (cd .ci/lumen_cli && python -m pip install -e .)
+    python -m cli.run test external torchtitan --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then

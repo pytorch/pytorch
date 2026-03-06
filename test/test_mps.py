@@ -925,8 +925,6 @@ class TestMPS(TestCaseMPS):
         # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
         self.ulpAssertAllClose(output.cpu(), output_cpu, n_ulps=4)
 
-
-
     def test_exp_strided_output(self):
         x = torch.rand((256, 10), device='mps')
         x_cpu = x.to("cpu")
@@ -1673,6 +1671,18 @@ class TestMPS(TestCaseMPS):
         helper([5, 10, 3])
         helper([10, 5, 10, 3])
         helper([10, 5, 10, 3, 20])
+
+        # Test scalar tensor (0-dimensional) - should preserve shape
+        x_mps = torch.tensor(0, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+        mask_mps = torch.tensor(True, device="mps")
+        mask_cpu = mask_mps.detach().clone().cpu()
+        source_mps = torch.tensor([42], device="mps")
+        source_cpu = source_mps.detach().clone().cpu()
+        result_mps = x_mps.masked_scatter(mask_mps, source_mps)
+        result_cpu = x_cpu.masked_scatter(mask_cpu, source_cpu)
+        self.assertEqual(result_mps.shape, result_cpu.shape)
+        self.assertEqual(result_mps, result_cpu)
 
     def test_masked_scatter_raises(self):
         x_mps = torch.tensor([0, 0, 0], device="mps")
@@ -8485,6 +8495,12 @@ class TestMPS(TestCaseMPS):
         # where
         cond, a, b = rand(100) > 0.5, rand(100), rand(100)
         self.assertEqual(torch.where(cond, a, b), torch.where(cond.cpu(), a.cpu(), b.cpu()))
+
+    def test_unsigned_cast_div(self):
+        # See https://github.com/pytorch/pytorch/issues/176296
+        x = torch.tensor([0, 65535], dtype=torch.uint16, device="mps")
+        y = x / 64
+        self.assertEqual(y, torch.tensor([0., 1023.9844], device="mps"))
 
 
 class TestLargeTensors(TestCaseMPS):

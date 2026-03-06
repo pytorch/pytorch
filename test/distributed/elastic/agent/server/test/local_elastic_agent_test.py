@@ -18,7 +18,6 @@ import unittest
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Optional
 from unittest import mock
 from unittest.mock import Mock, patch
 
@@ -292,8 +291,8 @@ class LocalElasticAgentTest(unittest.TestCase):
         max_nodes=1,
         max_restarts=0,
         monitor_interval=0.01,
-        master_addr_override: Optional[str] = None,
-        master_port_override: Optional[int] = None,
+        master_addr_override: str | None = None,
+        master_port_override: int | None = None,
         is_host=True,
     ):
         rdzv_params = RendezvousParameters(
@@ -323,7 +322,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         node_config: Conf,
         start_method: str = "spawn",
         exit_barrier_timeout=5,
-        log_line_prefix_template: Optional[str] = None,
+        log_line_prefix_template: str | None = None,
     ) -> LocalElasticAgent:
         return LocalElasticAgent(
             spec,
@@ -343,18 +342,18 @@ class LocalElasticAgentTest(unittest.TestCase):
     def run_agent(
         self,
         conf: Conf,
-        agent_results: Optional[mp.Queue] = None,  # (role, agent_result)
+        agent_results: mp.Queue | None = None,  # (role, agent_result)
         min_nodes=1,
         max_nodes=1,
         start_method: str = "spawn",
         max_restarts: int = 0,
         exit_barrier_timeout=5,
-        master_addr_override: Optional[str] = None,
-        master_port_override: Optional[int] = None,
+        master_addr_override: str | None = None,
+        master_port_override: int | None = None,
         is_host=True,
         monitor_interval=0.01,
-        log_line_prefix_template: Optional[str] = None,
-    ) -> Optional[RunResult]:
+        log_line_prefix_template: str | None = None,
+    ) -> RunResult | None:
         """
         Runs a single agent. This method can be called either on a separate process
         or the main test process. When calling this method on a separate process make
@@ -397,7 +396,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         self,
         node_configs: list[Conf],
         exit_barrier_timeout: int = 5,
-        log_line_prefix_template: Optional[str] = None,
+        log_line_prefix_template: str | None = None,
     ) -> dict[str, list[RunResult]]:
         """
         Simulates running a distributed job by running multiple agents
@@ -774,7 +773,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         self.run_test_with_backend(backend="etcd-v2", test_to_run=self.simple_dist_sum)
 
     def run_distributed_sum_homogeneous(
-        self, log_line_prefix_template: Optional[str] = None
+        self, log_line_prefix_template: str | None = None
     ):
         node_configs = [
             Conf(role="sum", entrypoint=_dist_sum, local_world_size=4, tee=Std.ALL),

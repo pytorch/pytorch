@@ -22,6 +22,13 @@ static bool _cuda_graphs_debug = false;
 static std::mutex _currently_capturing_graphs_mutex;
 static ska::flat_hash_map<CaptureId_t, CUDAGraph*> _currently_capturing_graphs;
 
+#if defined(USE_ROCM)
+bool is_graph_capture_active() {
+  std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+  return !_currently_capturing_graphs.empty();
+}
+#endif
+
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
   // cudaStreamGetCaptureInfo id_s in capture_begin.
@@ -140,7 +147,7 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream.stream() == capture_stream_.stream(),
               "Capture must end on the same stream it began on.");
 
-  AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
+  cudaError_t endCaptureErr = cudaStreamEndCapture(capture_stream_, &graph_);
 
   {
     std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
@@ -149,6 +156,8 @@ void CUDAGraph::capture_end() {
         "capture_end() called before capture_begin().");
     _currently_capturing_graphs.erase(capture_id_);
   }
+
+  AT_CUDA_CHECK(endCaptureErr);
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);

@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import ast
 import collections
 import contextlib
+import copy
 import dataclasses
 import functools
 import itertools
@@ -50,7 +52,13 @@ from ..runtime.hints import (
     TRITON_MAX_RSPLIT,
 )
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
-from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
+from ..scheduler import (
+    BaseSchedulerNode,
+    FusedExternTritonKernelSchedulerNode,
+    FusedSchedulerNode,
+    Scheduler,
+    SchedulerNode,
+)
 from ..shape_propagation import get_broadcasted_shape
 from ..utils import (
     cache_on_self,
@@ -1182,6 +1190,14 @@ class TritonOverrides(OpOverrides):
         triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
+        # Triton's scalar_constant() treats -0.0 as 0 (since -0.0 == 0 in Python),
+        # Work around by encoding -0.0 as its IEEE 754 hex in uint and bitcasting.
+        if value == 0 and math.copysign(1.0, value) < 0:
+            if triton_type == "tl.float32":
+                return f"tl.full({shape}, 0x80000000, tl.uint32).to({triton_type}, bitcast=True)"
+            elif triton_type == "tl.float64":
+                return f"tl.full({shape}, 0x8000000000000000, tl.uint64).to({triton_type}, bitcast=True)"
+
         # NOTE: We use tl.full here to get the expected type.
         # Otherwise, subnormal float32 values are treated as fp64
         # causing fp32 * fp64 promotion and different numerical results.
@@ -1780,11 +1796,22 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def floordiv(a, b):
         # See the comment in lowering.div_mode. a and b are integer type.
-        # Similar to div_floor_kernel_cuda in pytorch core.
-        # Notice that // in triton behaves as truncdiv instead of floordiv
-        quot = f"{a} // {b}"
-        rem = f"{a} % {b}"
-        return f"tl.where(({a} < 0) != ({b} < 0), tl.where({rem} != 0, {quot} - 1, {quot}), {quot})"
+        # Notice that // in triton behaves as truncdiv instead of floordiv.
+        #
+        # We avoid feeding negative values into Triton's // operator because
+        # Triton's AxisInfo analysis incorrectly deduplicates signed division
+        # results for contiguous inputs (triton-lang/triton#XXXX). Instead we
+        # use bitwise complement (~) to make the dividend non-negative:
+        #   floor_div(a, b) = ~(~a // b) when a < 0, a // b when a >= 0
+        # For negative b we negate both operands first.
+        zero = ops.constant(0, torch.int32)
+        b_neg = ops.lt(b, zero)
+        a = ops.where(b_neg, ops.sub(zero, a), a)
+        b = ops.where(b_neg, ops.sub(zero, b), b)
+        a_neg = ops.lt(a, zero)
+        a = ops.where(a_neg, ops.bitwise_not(a), a)
+        quot = ops.truncdiv(a, b)
+        return ops.where(a_neg, ops.bitwise_not(quot), quot)
 
     @staticmethod
     def sign(x):
@@ -3565,7 +3592,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         has_read_deps = True
         if config.triton.skip_l1_cache:
             buffer_read_counts = self.features.buffer_read_counts()
-            has_read_deps = buffer_read_counts[name] > 1
+            # Graph inputs, primals_*, arg*_* would not be tracked by `buffer_read_counts`
+            # and it'd be fair to expect them to be reused.
+            if name in buffer_read_counts:
+                has_read_deps = buffer_read_counts[name] > 1
         """Skip L1 cache if we're (pretty?) sure the data is used only once
         """
         skip_l1_cache = (
@@ -5311,6 +5341,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "store_cubin": config.triton.store_cubin,
             "deterministic": config.deterministic,
             "force_filter_reduction_configs": config.test_configs.force_filter_reduction_configs,
+            "mix_order_reduction_allow_multi_stages": config.triton.mix_order_reduction_allow_multi_stages,
         }
 
         if config.write_are_deterministic_algorithms_enabled:
@@ -6030,6 +6061,131 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         elif not (x == "x" and self.mix_order_reduction):
             # mix order reduction should generate xmask inside the loop
             code.writeline(f"{x}mask = {entry.name} < {x}numel")
+
+
+class FusedUserDefinedTritonKernel(TritonKernel):
+    """
+    When fusing a user-defined triton kernel with epilogues, we use this class to generate the modified triton kernel source
+    """
+
+    def __init__(
+        self,
+        tiling: dict[str, sympy.Expr],
+        features: SIMDKernelFeatures,
+        scheduler_node: FusedExternTritonKernelSchedulerNode,
+    ) -> None:
+        super().__init__(
+            tiling,
+            features=features,
+            min_elem_per_thread=0,
+            optimize_mask=True,
+            fixed_config=None,
+            hint_override=None,
+            is_combo_kernel=False,
+        )
+        self.scheduler_node = scheduler_node
+        assert isinstance(
+            self.scheduler_node.kernel_node.node, ir.UserDefinedTritonKernel
+        )
+        self.ir_node: ir.UserDefinedTritonKernel = self.scheduler_node.kernel_node.node
+        assert self.ir_node.can_fuse_epilogue()
+
+        # must be true because `self.ir_node.can_fuse_epilogue()`
+        assert len(self.ir_node.kernel_stores.stores) == 1
+        self.original_stored_expr = ast.unparse(
+            self.ir_node.kernel_stores.stores[0].store_value_node
+        )
+        self.original_stored_expr = self.original_stored_expr.replace("\n", "")
+
+    def load(self, name: str, index: sympy.Expr) -> TritonCSEVariable:
+        # must be true because `self.ir_node.can_fuse_epilogue()`
+        assert len(self.ir_node.mutable_args) == 1
+        if name == self.ir_node.mutable_args[0].get_name():
+            # when the fused epilogue nodes tries to load the mutated buffer
+            # we replace the load with the expression stored by the user kernel
+            loaded_expr = self.original_stored_expr
+            indexing = self.indexing(index)
+            dtype = V.graph.get_dtype(name)
+            if indexing.expand_shape:
+                shape = indexing.expand_shape
+            else:
+                shape = TritonSymbols.get_block_shape(indexing.index)
+            result_var = self.cse.generate(
+                self.loads, loaded_expr, dtype=dtype, shape=shape
+            )
+            return result_var
+        else:
+            return super().load(name, index)
+
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
+        assert isinstance(self.scheduler_node.fused_epilogue.node, ir.ComputedBuffer)
+        if name == self.scheduler_node.fused_epilogue.node.get_name():
+            # when the fused epilogue nodes tries to store to its destination buffer
+            # we remember this expr and then later replace it into the `tl.store` call of the original kernel
+            self.new_store_cse_var = value
+        else:
+            super().store(name, index, value, mode)
+
+    # returns a str which is the src code of a modified version of the user kernel that includes the epilogues
+    def codegen(self) -> str:
+        with self:
+            index_vars = self.split_and_set_ranges(
+                self.scheduler_node.fused_epilogue.get_ranges()
+            )
+            self.scheduler_node.fused_epilogue.codegen(index_vars)
+
+        # Generate a new AST where the store value expr is replaced with the new value
+        new_ast = copy.deepcopy(self.ir_node.kernel_ast)
+        from torch._higher_order_ops.triton_kernel_wrap import identify_triton_stores
+
+        kernel_stores = identify_triton_stores(new_ast)
+        assert len(kernel_stores.stores) == 1
+
+        new_store_value_node = ast.Name(self.new_store_cse_var.name)
+
+        def _replace_arg(
+            call_node: ast.Call,
+            arg_name: str,
+            positional_index: int,
+            new_arg,
+        ):
+            if len(call_node.args) > positional_index:
+                call_node.args[positional_index] = new_arg
+
+            # Check keyword args
+            for keyword in call_node.keywords:
+                if keyword.arg == arg_name:
+                    keyword.value = new_arg
+
+        _replace_arg(
+            kernel_stores.stores[0].store_node, "value", 1, new_store_value_node
+        )
+
+        src_with_store_replaced = ast.unparse(new_ast)
+
+        # then, we need to inject the additional `load` and `compute` lines generated when we `codegen` the epilogue nodes
+
+        src_lines = src_with_store_replaced.splitlines()
+
+        # identify the store again, because the previous parse-modify-unparse could've change its location
+        kernel_stores = identify_triton_stores(ast.parse(src_with_store_replaced))
+        # python ast lineno is 1-indexed
+        store_line_index = kernel_stores.stores[0].store_node.lineno - 1
+
+        indentations = " " * kernel_stores.stores[0].store_node.col_offset
+
+        load_lines = [indentations + l for l in self.loads.get_lines_ref()]
+        compute_lines = [indentations + l for l in self.compute.get_lines_ref()]
+
+        new_src_lines = (
+            src_lines[:store_line_index]
+            + load_lines
+            + compute_lines
+            + src_lines[store_line_index:]
+        )
+        return "\n".join(new_src_lines)
 
 
 class TritonScheduling(SIMDScheduling):

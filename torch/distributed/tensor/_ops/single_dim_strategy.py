@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
+from typing import Any, cast, TypeAlias, TypeVar
 
 import torch
 from torch._ops import OpOverload
@@ -67,6 +67,7 @@ _ExpandedSingleDimStrategyFunc: TypeAlias = Callable[
 class _SingleDimStrategyInfo:
     func: _SingleDimStrategyFunc
     allow_unbacked_sharding: bool | None = field(default=None)
+    allow_uneven_sharding: bool = field(default=False)
 
     # Delegate to func so this can be used interchangeably with a raw
     # _SingleDimStrategyFunc (e.g. in tests that call strategy functions directly).
@@ -85,7 +86,8 @@ def _insert_single_dim_replication_strategy(
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
     """
     for strategy in single_dim_strategies_with_placeholders:
-        assert not all(isinstance(p, Replicate) for p in strategy)
+        if all(isinstance(p, Replicate) for p in strategy):
+            raise AssertionError
     single_dim_strategies_with_placeholders.insert(
         0, [Replicate()] * (num_outputs + num_input_tensors)
     )
@@ -138,11 +140,13 @@ def _fill_single_dim_strategy_placeholders(
                         # with other metadata (e.g. split_factor) from the sharding class
                         expanded_strategy.append(shard_builder(maybe_placeholder.dim))
                     else:
-                        assert isinstance(maybe_placeholder, Placement)
+                        if not isinstance(maybe_placeholder, Placement):
+                            raise AssertionError
                         expanded_strategy.append(maybe_placeholder)
                 expanded_strategies_over_one_mesh_dim.append(expanded_strategy)
         else:
-            assert all(isinstance(p, Placement) for p in s)
+            if not all(isinstance(p, Placement) for p in s):
+                raise AssertionError
             expanded_strategies_over_one_mesh_dim.append(cast(list[Placement], (s)))
 
     return expanded_strategies_over_one_mesh_dim
@@ -155,7 +159,8 @@ def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
         if isinstance(obj, DTensorSpec):
             unique_placements.update(obj.placements)
         elif isinstance(obj, OpStrategy):
-            assert len(obj.strategies) == 1
+            if len(obj.strategies) != 1:
+                raise AssertionError
             unique_placements.update(obj.strategies[0].output_spec.placements)
         elif isinstance(obj, TupleStrategy):
             for child in obj.children:
@@ -197,8 +202,12 @@ def _build_output_specs(
     per_mesh_dim_placements is indexed [mesh_dim][output_idx]. output_metas must
     have exactly num_outputs elements.
     """
-    assert num_outputs > 0
-    assert len(output_metas) == num_outputs
+    if num_outputs <= 0:
+        raise AssertionError(f"Expected num_outputs > 0, got {num_outputs}")
+    if len(output_metas) != num_outputs:
+        raise AssertionError(
+            f"Expected {num_outputs} output_metas, got {len(output_metas)}"
+        )
 
     def _placements_for_output(out_idx: int) -> tuple[Placement, ...]:
         return tuple(out[out_idx] for out in per_mesh_dim_placements)
@@ -234,6 +243,13 @@ class _PreparedSingleDimStrategy:
     allowed_partial_per_input: dict[int, set[Placement]]
     allow_unbacked_sharding: bool | None
 
+    # many, but not all ops are able to support unevenly sharded tensors
+    # there are existing BC expectations even if we wanted to ban for
+    # simplicity, see why justification for why pointwise_ops always work
+    # with uneven sharding at
+    # https://github.com/pytorch/pytorch/pull/174874#issuecomment-3995152777
+    allow_uneven_sharding: bool
+
     def __init__(
         self,
         strategy_fn: _SingleDimStrategyInfo
@@ -250,9 +266,11 @@ class _PreparedSingleDimStrategy:
 
         if isinstance(strategy_fn, _SingleDimStrategyInfo):
             self.allow_unbacked_sharding = strategy_fn.allow_unbacked_sharding
+            self.allow_uneven_sharding = strategy_fn.allow_uneven_sharding
             func = strategy_fn.func
         else:
             self.allow_unbacked_sharding = None
+            self.allow_uneven_sharding = False
             func = strategy_fn
 
         if num_inputs is None:
@@ -262,6 +280,25 @@ class _PreparedSingleDimStrategy:
         strategies_with_placeholders = func(
             op_schema.op, op_schema.args_meta, op_schema.kwargs_meta
         )
+
+        # Validate strategy length against the op schema. The schema is the
+        # ground truth for num_outputs; combined with num_inputs (which counts
+        # all tensor args + kwargs), it gives the expected strategy length.
+        # A mismatch means the strategy is missing kwargs placements or has
+        # extra entries.
+        if len(strategies_with_placeholders) > 0:
+            schema_num_outputs = sum(
+                1 for r in op_schema.op._schema.returns if "Tensor" in str(r.type)
+            )
+            expected_len = schema_num_outputs + num_inputs
+            actual_len = len(strategies_with_placeholders[0])
+            if actual_len != expected_len:
+                raise AssertionError(
+                    f"Strategy length {actual_len} != expected {expected_len} "
+                    f"(schema_outputs={schema_num_outputs} + inputs={num_inputs}) "
+                    f"for {op_schema.op}. Strategies must include placements "
+                    f"for all outputs, args, and tensor kwargs."
+                )
 
         # Compute num_outputs from strategy structure or output_tensor_meta
         if len(strategies_with_placeholders) > 0:
@@ -413,6 +450,7 @@ def _expand_single_dim_strategy_to_mesh(
                 inplace_op=is_inplace,
                 input_index=prepared_strategy.num_outputs,
                 allow_unbacked_sharding=prepared_strategy.allow_unbacked_sharding,
+                allow_uneven_sharding=prepared_strategy.allow_uneven_sharding,
             )
 
         return expanded_strategy
@@ -522,9 +560,10 @@ def _expand_single_dim_strategy_to_mesh(
 
 
 def register_single_dim_strategy(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
+    schema_info: RuntimeSchemaInfo | None = None,
     allow_unbacked_sharding: bool | None = None,
+    allow_uneven_sharding: bool = False,
 ) -> Callable[[_SingleDimStrategyFunc], _SingleDimStrategyFunc]:
     """
     Registers a single_dim_strategy function for the given op.
@@ -572,6 +611,7 @@ def register_single_dim_strategy(
         info = _SingleDimStrategyInfo(
             func=impl,
             allow_unbacked_sharding=allow_unbacked_sharding,
+            allow_uneven_sharding=allow_uneven_sharding,
         )
         registration_wrapper(info)
         return impl

@@ -2271,9 +2271,6 @@ PyObject* initModule() {
   NodeBase_init(module);
   NodeIter_init(module);
   Namespace_init(module);
-  FindNodesLookupTable_init(module);
-  NodeList_init(module);
-  GraphBase_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
@@ -2742,6 +2739,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_rocm_fa_preferred_backend", []() {
     return at::globalContext().getROCmFAPreferredBackend();
+  });
+
+  py_module.def("_is_ck_sdpa_available", []() {
+#ifdef USE_ROCM
+    return at::globalContext().ckSupported() && at::globalContext().hasCKSDPA();
+#else
+    return false;
+#endif
   });
 
   py_module.def(

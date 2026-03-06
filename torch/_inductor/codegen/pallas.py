@@ -3397,10 +3397,11 @@ from torch._inductor.runtime.runtime_utils import (
         transpose_literal = "True" if self.tile_has_transpose else "False"
 
         skip_n = self.tile_skip_last_n
+        is_tpu_literal = "True" if ctx.is_tpu else "False"
         code.writeline(
             f"_tile, _grid, _ax2g = pallas_compute_tiling("
             f"out_shapes[0], transpose={transpose_literal}, "
-            f"skip_last_n={skip_n}, exact_only=True)"
+            f"skip_last_n={skip_n}, exact_only=True, is_tpu={is_tpu_literal})"
         )
         code.writeline("_ng = len(_grid)")
         code.writeline("_ref = out_shapes[0]")
@@ -3493,7 +3494,6 @@ from torch._inductor.runtime.runtime_utils import (
             f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
         )
         with code.indent():
-            code.writeline("jax.config.update('jax_enable_x64', True)")
             code.writeline("jax.clear_caches()")
 
             # Build JAX placeholders for all inputs

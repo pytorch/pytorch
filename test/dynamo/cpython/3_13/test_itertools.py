@@ -1497,7 +1497,7 @@ class TestBasicOps(__TestCase):
             c = starmap(operator.pow, zip(range(3), range(1,7)))
             self.pickletest(proto, c)
 
-    # @pickle_deprecated
+    @pickle_deprecated
     def test_islice(self):
         for args in [          # islice(args) should agree with range(args)
                 (10, 20, 3),
@@ -1534,20 +1534,20 @@ class TestBasicOps(__TestCase):
         self.assertEqual(list(islice(it, 3, 3)), [])
         self.assertEqual(list(it), list(range(3, 10)))
 
-        # # Test invalid arguments
-        # ra = range(10)
-        # self.assertRaises(TypeError, islice, ra)
-        # self.assertRaises(TypeError, islice, ra, 1, 2, 3, 4)
-        # self.assertRaises(ValueError, islice, ra, -5, 10, 1)
-        # self.assertRaises(ValueError, islice, ra, 1, -5, -1)
-        # self.assertRaises(ValueError, islice, ra, 1, 10, -1)
-        # self.assertRaises(ValueError, islice, ra, 1, 10, 0)
-        # self.assertRaises(ValueError, islice, ra, 'a')
-        # self.assertRaises(ValueError, islice, ra, 'a', 1)
-        # self.assertRaises(ValueError, islice, ra, 1, 'a')
-        # self.assertRaises(ValueError, islice, ra, 'a', 1, 1)
-        # self.assertRaises(ValueError, islice, ra, 1, 'a', 1)
-        # self.assertEqual(len(list(islice(count(), 1, 10, maxsize))), 1)
+        # Test invalid arguments
+        ra = range(10)
+        self.assertRaises(TypeError, islice, ra)
+        self.assertRaises(TypeError, islice, ra, 1, 2, 3, 4)
+        self.assertRaises(ValueError, islice, ra, -5, 10, 1)
+        self.assertRaises(ValueError, islice, ra, 1, -5, -1)
+        self.assertRaises(ValueError, islice, ra, 1, 10, -1)
+        self.assertRaises(ValueError, islice, ra, 1, 10, 0)
+        self.assertRaises(ValueError, islice, ra, 'a')
+        self.assertRaises(ValueError, islice, ra, 'a', 1)
+        self.assertRaises(ValueError, islice, ra, 1, 'a')
+        self.assertRaises(ValueError, islice, ra, 'a', 1, 1)
+        self.assertRaises(ValueError, islice, ra, 1, 'a', 1)
+        self.assertEqual(len(list(islice(count(), 1, 10, maxsize))), 1)
 
         # Issue #10323:  Less islice in a predictable state
         c = count()
@@ -1562,13 +1562,12 @@ class TestBasicOps(__TestCase):
                 (10, 3),
                 (20,)
                 ]:
-            # self.assertEqual(list(copy.copy(islice(range(100), *args))),
-            #                  list(range(*args)))
-            # self.assertEqual(list(copy.deepcopy(islice(range(100), *args))),
-            #                  list(range(*args)))
-            with torch._dynamo.error_on_graph_break(False):
-                for proto in range(pickle.HIGHEST_PROTOCOL + 1):
-                    self.pickletest(proto, islice(range(100), *args))
+            self.assertEqual(list(copy.copy(islice(range(100), *args))),
+                             list(range(*args)))
+            self.assertEqual(list(copy.deepcopy(islice(range(100), *args))),
+                             list(range(*args)))
+            for proto in range(pickle.HIGHEST_PROTOCOL + 1):
+                self.pickletest(proto, islice(range(100), *args))
 
         # Issue #21321: check source iterator is not referenced
         # from islice() after the latter has been exhausted

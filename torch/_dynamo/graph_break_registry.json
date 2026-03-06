@@ -2520,6 +2520,17 @@
       "Hints": []
     }
   ],
+  "GB2520": [
+    {
+      "Gb_type": "assume_constant_result argument conversion failed",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Cannot convert argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result. The variable tracker does not support constant conversion.",
+      "Hints": [
+        "Remove torch._dynamo.assume_constant_result from this function",
+        "Ensure all arguments passed to the function can be converted to constants"
+      ]
+    }
+  ],
   "GB0209": [
     {
       "Gb_type": "torch.autograd._unsafe_preserve_version_counter escaped from compiled region",

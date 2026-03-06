@@ -207,7 +207,7 @@ class KnapsackEvaluator:
             knapsack_algo (Callable): The knapsack algorithm to use for evaluation.
             memory_budget_values (List[float]): A list of memory budgets to evaluate.
         """
-        results = list()
+        results = []
         for memory_budget in memory_budget_values:
             _, saved_nodes, recomputed_nodes = knapsack_algo(
                 self._graph_info_provider.get_knapsack_memory_input(),

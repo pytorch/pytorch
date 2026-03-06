@@ -54,7 +54,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -82,28 +82,27 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -127,7 +126,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -150,20 +149,19 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -184,7 +182,7 @@ jobs:
       contents: read
     needs: wheel-py3_11-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -204,7 +202,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -232,28 +230,27 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -277,7 +274,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -300,20 +297,19 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -334,7 +330,7 @@ jobs:
       contents: read
     needs: wheel-py3_12-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -354,7 +350,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -382,28 +378,27 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - name: Bootstrap sccache
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_sccache.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_sccache.bat"
       - name: Bootstrap Libuv
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_libuv.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_libuv.bat"
       - name: Populate binary env
         shell: bash
         run: |
@@ -427,7 +422,7 @@ jobs:
     runs-on: "windows-11-arm64-preview"
     timeout-minutes: 360
     env:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -450,20 +445,19 @@ jobs:
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
-          path: "pytorch"
           submodules: recursive
       - name: Bootstrap APL
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_apl.bat"
       - name: Bootstrap Python
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Rust
         shell: cmd
         run: |
-          "pytorch/.ci/pytorch/windows/arm64/bootstrap_rust.bat"
+          ".ci/pytorch/windows/arm64/bootstrap_rust.bat"
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
@@ -484,7 +478,7 @@ jobs:
       contents: read
     needs: wheel-py3_13-cpu-test
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -514,7 +508,6 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           sparse-checkout: .ci/libtorch/
-          path: pytorch
           show-progress: false
       - uses: actions/download-artifact@v4.1.7
         name: Download Wheel Artifact
@@ -526,7 +519,7 @@ jobs:
         run: |
           set -eux
           mkdir -p "${{ runner.temp }}/libtorch_output"
-          python3 pytorch/.ci/libtorch/extract_libtorch_from_wheel.py \
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
             --wheel-dir "${{ runner.temp }}/wheel_artifact" \
             --output-dir "${{ runner.temp }}/libtorch_output" \
             --platform windows \
@@ -546,7 +539,7 @@ jobs:
       contents: read
     needs: libtorch-cpu-shared-with-deps-release-extract
     with:
-      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu

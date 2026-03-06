@@ -43,8 +43,11 @@ log = logging.getLogger(__name__)
 
 # Tracks active method calls on VariableTracker instances to detect self-referential
 # calls (e.g., as_python_constant on a list that contains itself). Maps
-# (id(instance), method_name) tuples to track which calls are in progress.
-_vt_active_calls: ContextVar[set[tuple[int, str]] | None] = ContextVar(
+# (id(instance), id(original_method)) tuples to track which calls are in progress.
+# We use id(original_method) rather than the method name string so that super()
+# delegation within a class hierarchy (e.g. TorchScriptObjectVariable.as_python_constant
+# calling UserDefinedObjectVariable.as_python_constant) is not a false positive.
+_vt_active_calls: ContextVar[set[tuple[int, int]] | None] = ContextVar(
     "_vt_active_calls", default=None
 )
 
@@ -976,7 +979,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 active = set()
                 _vt_active_calls.set(active)
 
-            key = (id(self), method)
+            key = (id(self), id(original_method))
             if key in active:
                 callback(self)
 

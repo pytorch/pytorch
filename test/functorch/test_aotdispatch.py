@@ -14,7 +14,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
 
 from common_utils import (
@@ -424,8 +424,8 @@ class TestAOTAutograd(AOTTestCase):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -463,11 +463,11 @@ class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, list[Any]],
+        inp_: Callable | list[Any],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[dict] = None,
+        decompositions: dict | None = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
@@ -6736,6 +6736,65 @@ def forward(self, primals_1, tangents_1):
         finally:
             handle.destroy()
 
+    def test_static_input_indices_with_effect_tokens(self):
+        """Test that static_input_indices are correctly offset when effect tokens are prepended."""
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.graph_capture_wrappers import (
+            handle_effect_tokens_fn,
+        )
+        from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_static_idx_op", mutates_args=())
+        def effectful_static_idx_op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @effectful_static_idx_op.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_static_idx_op, EffectType.ORDERED)
+
+        try:
+            meta = ViewAndMutationMeta(
+                input_info=[],
+                output_info=[],
+                num_intermediate_bases=0,
+                keep_input_mutations=False,
+                traced_tangents=[],
+                subclass_inp_meta=[],
+                subclass_fw_graph_out_meta=[],
+                subclass_tangent_meta=[],
+                is_train=False,
+                traced_tangents_descs=[],
+            )
+            meta.tokens = {EffectType.ORDERED: torch.tensor([])}
+            # Simulate: params at indices 1, 2 before token insertion
+            meta.static_input_indices = [1, 2]
+
+            args = [torch.randn(4, 3), torch.randn(2, 3), torch.randn(2)]
+            args_descs = [PlainAOTInput(i) for i in range(3)]
+
+            _, new_args, _ = handle_effect_tokens_fn(
+                lambda *a: (torch.randn(1), []),
+                args,
+                args_descs,
+                meta=meta,
+                trace_joint=False,
+            )
+
+            num_tokens = len(meta.tokens)
+            self.assertGreater(num_tokens, 0)
+            # After prepending tokens, args grow and indices must be offset
+            self.assertEqual(len(new_args), len(args) + num_tokens)
+            self.assertEqual(
+                meta.static_input_indices,
+                [1 + num_tokens, 2 + num_tokens],
+            )
+        finally:
+            handle.destroy()
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
@@ -8901,8 +8960,8 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -9125,8 +9184,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -9148,11 +9207,11 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, list[Any]],
+        inp_: Callable | list[Any],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[dict] = None,
+        decompositions: dict | None = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.

@@ -36,7 +36,7 @@ __all__ = [
 ]
 
 current_meta: dict[str, Any] = {}
-current_replay_node: Optional[Node] = None
+current_replay_node: Node | None = None
 # Preserve the node meta fields in torch.fx.proxy._COPY_META_FIELDS
 should_preserve_node_meta = False
 # Preserve the "seq_nr" node meta field
@@ -91,14 +91,14 @@ class NodeSource:
     action: list["NodeSourceAction"]
     from_node: list["NodeSource"]
     node_info: Optional["NodeInfo"]
-    _dict: Optional[dict[str, Any]]
-    _action_string: Optional[str]
+    _dict: dict[str, Any] | None
+    _action_string: str | None
 
     def __init__(
         self,
-        node: Optional[Node],
+        node: Node | None,
         pass_name: str = "",
-        action: Optional[Union["NodeSourceAction", list["NodeSourceAction"]]] = None,
+        action: Union["NodeSourceAction", list["NodeSourceAction"]] | None = None,
     ):
         self.pass_name = pass_name
 
@@ -124,8 +124,8 @@ class NodeSource:
             self.from_node = []
 
         # cache the action string and dict representation for performance.
-        self._action_string: Optional[str] = None
-        self._dict: Optional[dict[str, Any]] = None
+        self._action_string: str | None = None
+        self._dict: dict[str, Any] | None = None
 
     @property
     def name(self) -> str:
@@ -196,7 +196,7 @@ class NodeSource:
         return hash(_make_hashable(self.to_dict()))
 
     @classmethod
-    def _from_dict(cls, d: Optional[dict]) -> Optional["NodeSource"]:
+    def _from_dict(cls, d: dict | None) -> Optional["NodeSource"]:
         """
         Recursively deserialize from_node metadata from dictionary data.
         It is used to deserialize the from_node field from serialized metadata.
@@ -532,7 +532,7 @@ def _get_custom_metadata(gm: GraphModule) -> str:
 
 
 def _get_ordered_seq_nr_groups(
-    gm: Union[GraphModule, list[GraphModule]],
+    gm: GraphModule | list[GraphModule],
 ) -> list[list[str]]:
     """
     Group call_function nodes by seq_nr, order by seq_nr value,

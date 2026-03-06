@@ -346,10 +346,10 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     in_negative = self < 0
     max_deriv = torch.where(in_negative, 1, 0)
     sign = torch.where(in_negative, 1, -1)
-    z = torch.exp(-torch.abs(self))
+    # On CPU, forward saves buffer = exp(-|x|); reuse it to match the native kernel.
+    # On CUDA/XPU, buffer is empty so we recompute.
+    z = buffer if buffer.numel() > 0 else torch.exp(-torch.abs(self))
     return grad_output * (max_deriv - sign * (z / (1 + z)))
-    # CPU has a special formula that uses buffer, but disabled for convenience sake
-    # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
 @register_decomposition(aten.ldexp)
@@ -4261,9 +4261,10 @@ def nll_loss_forward(
         )
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    if not (no_batch_dim or (self.shape[0] == target.shape[0])):
-        raise AssertionError(
-            f"size mismatch (got input: {self.shape}, target: {target.shape})"
+    if not no_batch_dim:
+        torch._check(
+            self.shape[0] == target.shape[0],
+            lambda: f"size mismatch (got input: {self.shape}, target: {target.shape})",
         )
 
     n_classes = self.shape[-1]

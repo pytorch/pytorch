@@ -4,7 +4,6 @@ import re
 import threading
 import unittest
 from datetime import timedelta
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -636,7 +635,7 @@ class _DummyWork(dist.Work):
         super().__init__()
         self.pg = pg
 
-    def wait(self, timeout: Optional[timedelta] = None) -> bool:
+    def wait(self, timeout: timedelta | None = None) -> bool:
         self.pg.waits += 1
         return True
 
@@ -722,7 +721,7 @@ class CrossThreadWaitTest(TestCase):
         than where the collective was registered.
         """
         wait_called = False
-        exception_in_thread: Optional[BaseException] = None
+        exception_in_thread: BaseException | None = None
 
         class MyWork(dist.Work):
             def wait(self, _=None):

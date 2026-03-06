@@ -7,7 +7,6 @@ import itertools
 import operator
 import unittest
 from collections.abc import Callable
-from typing import Optional
 
 import sympy
 
@@ -98,7 +97,7 @@ class FxirTestCase(InductorTestCase):
         args,
         expected_num_triton_kernels: int = 1,
         metadata_only: bool = False,
-        compile_kwargs: Optional[dict] = None,
+        compile_kwargs: dict | None = None,
     ):
         if compile_kwargs is None:
             compile_kwargs = {}

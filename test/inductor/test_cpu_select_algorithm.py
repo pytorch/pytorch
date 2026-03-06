@@ -3,7 +3,6 @@ import contextlib
 import functools
 import sys
 import unittest
-from typing import Optional
 from unittest.mock import patch
 
 import torch
@@ -100,7 +99,7 @@ def verify(dtype):
         yield atol, rtol
 
 
-def _get_epilogue(epilogue: str, other: Optional[torch.Tensor] = None):
+def _get_epilogue(epilogue: str, other: torch.Tensor | None = None):
     if epilogue == "none":
         return lambda x: x
     elif epilogue == "relu":

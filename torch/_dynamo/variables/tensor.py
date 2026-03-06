@@ -47,6 +47,8 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
+    ObservedAttributeError,
+    raise_observed_exception,
     TorchRuntimeError,
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
@@ -341,6 +343,11 @@ class TensorVariable(VariableTracker):
                     tx.output.fake_mode, example_value
                 )
                 return TorchScriptObjectVariable.create(proxy, fake_script_obj)
+            elif isinstance(
+                example_value,
+                torch._library.fake_class_registry.FakeScriptObject,
+            ):
+                return TorchScriptObjectVariable.create(proxy, example_value)
             # any other attributes on the subclass (that are not methods)
             # are assumed to be constant metadata.
             elif not callable(example_value):
@@ -374,7 +381,16 @@ class TensorVariable(VariableTracker):
         if get_custom_getattr(_input_associated_real_value):
             raise NotImplementedError
 
-        real_value = getattr(_input_associated_real_value, name)
+        try:
+            real_value = getattr(_input_associated_real_value, name)
+        except AttributeError:
+            raise_observed_exception(
+                AttributeError,
+                tx,
+                args=[
+                    f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'"
+                ],
+            )
 
         attr_source = AttrSource(self.source, name)
 
@@ -388,7 +404,9 @@ class TensorVariable(VariableTracker):
                 self, name, source=attr_source, py_type=type(real_value)
             )
 
-        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
+        install_guard(
+            self.source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+        )
         return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -508,12 +526,14 @@ class TensorVariable(VariableTracker):
             # in the event that TensorVariable returns NotImplemented
             # BuiltinVariable.call_getattr returns GetAttrVariable
             ret_val = not isinstance(var, GetAttrVariable)
-        except AttributeError:
+        except (AttributeError, ObservedAttributeError):
             ret_val = False
 
         if self.source:
             install_guard(
-                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+                self.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
             )
 
         return VariableTracker.build(tx, ret_val)
@@ -1571,6 +1591,80 @@ class TensorVariable(VariableTracker):
             tx, [result], {}
         )
         return result.call_method(tx, "item", [], {})
+
+    def method_redistribute(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+        # and rewrite args to have only proxyable args, then insert call_function
+        args_as_value = [x.as_python_constant() for x in args]
+        kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+
+        def redistribute_fn_with_prim_types(x: Any) -> Any:
+            return x.redistribute(*args_as_value, **kwargs_as_value)
+
+        # attach the same function name for better debugging
+        redistribute_fn_with_prim_types.__name__ = "prim_redistribute"
+
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                redistribute_fn_with_prim_types,
+                *proxy_args_kwargs([self], {}),
+            ),
+        )
+
+    def method_to_local(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+        # and rewrite args to have only proxyable args, then insert call_function
+
+        # custom grad_placements do not work with  as_python_constant,
+        # to support them we need to handle UserDefinedObject
+        def extract_python_value(vt: VariableTracker) -> Any:
+            if isinstance(vt, variables.UserDefinedObjectVariable):
+                return vt.value
+
+            return vt.as_python_constant()
+
+        grad_placements_vt = kwargs.get("grad_placements", CONSTANT_VARIABLE_NONE)
+        if isinstance(grad_placements_vt, variables.UserDefinedObjectVariable):
+            grad_placements_vt = VariableTracker.build(tx, tuple).call_function(
+                tx, [grad_placements_vt], {}
+            )
+
+        if kwargs.get("grad_placements") is not None:
+            kwargs["grad_placements"] = grad_placements_vt
+
+        args_as_value = [extract_python_value(x) for x in args]
+        kwargs_as_value = {k: extract_python_value(v) for k, v in kwargs.items()}
+
+        def to_local_fn_with_prim_types(x: Any) -> Any:
+            return x.to_local(*args_as_value, **kwargs_as_value)
+
+        # attach the same function name for better debugging
+        to_local_fn_with_prim_types.__name__ = "prim_to_local"
+
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                to_local_fn_with_prim_types,
+                *proxy_args_kwargs([self], {}),
+            ),
+        )
 
     def method_register_hook(
         self,

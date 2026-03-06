@@ -701,6 +701,222 @@ class DistTensorRandomOpTest(DTensorTestBase):
         philox.seed = philox.seed.clone()
 
 
+class DistTensorRandomOpCompileTest(DTensorTestBase):
+    def _run_with_seed(self, fn, create_input, num_runs):
+        """Run fn num_runs times after resetting RNG, returning results and states."""
+        torch.manual_seed(0)
+        results = []
+        rng_states = [torch.cuda.get_rng_state()]
+        for _ in range(num_runs):
+            x = create_input()
+            result = fn(x)
+            results.append(result.to_local().clone())
+            rng_states.append(torch.cuda.get_rng_state())
+        # verify RNG state advances after each call
+        for i in range(len(rng_states) - 1):
+            self.assertFalse(
+                torch.equal(rng_states[i], rng_states[i + 1]),
+                f"RNG state did not change between call {i} and {i + 1}",
+            )
+        return results, rng_states
+
+    def _run_eager_and_compiled(self, fn, create_input, num_runs):
+        """Run fn both eagerly and compiled with aot_eager, returning results
+        and RNG states. Verifies the graph contains run_dtensor_rng_op."""
+        from torch._dynamo.testing import AotEagerAndRecordGraphs
+
+        eager_results, eager_rng_states = self._run_with_seed(
+            fn, create_input, num_runs
+        )
+        backend = AotEagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        compiled_results, compiled_rng_states = self._run_with_seed(
+            compiled_fn, create_input, num_runs
+        )
+        self.assertIn("run_dtensor_rng_op", backend.fw_graphs[0].code)
+        return eager_results, eager_rng_states, compiled_results, compiled_rng_states
+
+    def _assert_eager_compiled_match(
+        self, eager_results, eager_rng_states, compiled_results, compiled_rng_states
+    ):
+        """Assert per-iteration results and RNG states match between eager and compiled."""
+        for i in range(len(eager_results)):
+            self.assertEqual(eager_results[i], compiled_results[i])
+            self.assertEqual(
+                eager_rng_states[i + 1],
+                compiled_rng_states[i + 1],
+                f"RNG state mismatch between eager and compiled after call {i}",
+            )
+
+    def _assert_replicate_cross_rank_equal(self, results, device_mesh):
+        """Assert all ranks produced identical results (for Replicate placement)."""
+        for i in range(len(results)):
+            local_result = results[i]
+            gathered = funcol.all_gather_tensor(
+                local_result, gather_dim=0, group=(device_mesh, 0)
+            ).wait()
+            local_size = local_result.shape[0]
+            for other_rank in range(self.world_size):
+                if self.rank != other_rank:
+                    self_slice = slice(
+                        self.rank * local_size, (self.rank + 1) * local_size
+                    )
+                    other_slice = slice(
+                        other_rank * local_size, (other_rank + 1) * local_size
+                    )
+                    self.assertEqual(
+                        gathered[self_slice],
+                        gathered[other_slice],
+                    )
+
+    def _test_compile_random_op(
+        self, fn, device_mesh, create_input=None, num_runs=3, placements=None
+    ):
+        """Run fn eager and compiled num_runs times, assert i-th results match
+        and graph contains run_dtensor_rng_op. Tests both aot_eager and inductor
+        backends."""
+        if placements is None:
+            placements = [Shard(0)]
+
+        if create_input is None:
+
+            def create_input():
+                return torch.distributed.tensor.ones(
+                    (8, 8), device_mesh=device_mesh, placements=placements
+                )
+
+        # Test with aot_eager backend (also verifies graph contents)
+        eager_results, eager_rng_states, compiled_results, compiled_rng_states = (
+            self._run_eager_and_compiled(fn, create_input, num_runs)
+        )
+        self._assert_eager_compiled_match(
+            eager_results, eager_rng_states, compiled_results, compiled_rng_states
+        )
+        if all(isinstance(p, Replicate) for p in placements):
+            self._assert_replicate_cross_rank_equal(compiled_results, device_mesh)
+
+        # Test with inductor backend
+        torch._dynamo.reset()
+        inductor_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        inductor_results, inductor_rng_states = self._run_with_seed(
+            inductor_fn, create_input, num_runs
+        )
+        self._assert_eager_compiled_match(
+            eager_results, eager_rng_states, inductor_results, inductor_rng_states
+        )
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_native_dropout(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.nn.functional.dropout(x, p=0.5, training=True)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_normal_(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return x.normal_()
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_rand_like(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.rand_like(x)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_randn_like(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.randn_like(x)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_randint_like(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.randint_like(x, 0, 10)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_uniform_(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return x.uniform_(0.0, 1.0)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_bernoulli(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return torch.bernoulli(x)
+
+        for placements in ([Shard(0)], [Replicate()]):
+
+            def create_input(placements=placements):
+                return distribute_tensor(
+                    torch.full((8, 8), 0.5, device=self.device_type),
+                    device_mesh,
+                    placements,
+                )
+
+            self._test_compile_random_op(
+                fn, device_mesh, create_input=create_input, placements=placements
+            )
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_bernoulli_float(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            return x.bernoulli_(0.5)
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_compile_multiple_random_ops(self):
+        device_mesh = self.build_device_mesh()
+
+        def fn(x):
+            x = x.uniform_(0, 1)
+            x = torch.nn.functional.dropout(x, p=0.5)
+            return x
+
+        for placements in ([Shard(0)], [Replicate()]):
+            self._test_compile_random_op(fn, device_mesh, placements=placements)
+
+
 class DistTensorRandomOpsTest3D(DTensorTestBase):
     @property
     def world_size(self):

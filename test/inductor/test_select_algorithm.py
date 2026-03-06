@@ -3,10 +3,8 @@ import contextlib
 import functools
 import unittest.mock
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
-
-import pytest
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -292,10 +290,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @pytest.mark.xfail(
-        condition=not torch.version.hip,
-        reason="C++ wrapper dynamic shapes fails on CUDA, fixed on ROCm",
-    )
     @patches
     def test_mm_plus_mm3(self):
         @torch.compile
@@ -480,9 +474,9 @@ class TestSelectAlgorithm(TestCase):
             def get_template_configs(
                 self,
                 kernel_inputs: KernelInputs,
-                templates: list[Union[KernelTemplate, ExternKernelChoice]],
+                templates: list[KernelTemplate | ExternKernelChoice],
                 op_name: str,
-                kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+                kwarg_overrides: dict[str, dict[str, Any]] | None = None,
             ):
                 return super().get_template_configs(
                     kernel_inputs, templates, op_name, kwarg_overrides

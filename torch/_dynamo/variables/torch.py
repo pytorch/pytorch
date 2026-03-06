@@ -1239,6 +1239,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 get_rank,
                 get_world_size,
             )
+            from torch.distributed.tensor import DTensor
 
             @register(
                 _get_group_size_by_name,
@@ -1300,6 +1301,66 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # guard propagation via options is the best we can do.
                 return VariableTracker.build(tx, invocation_result)
 
+            @register(DTensor.from_local)
+            def handle_from_local(
+                self,
+                tx: "InstructionTranslator",
+                *args: VariableTracker,
+                **kwargs: VariableTracker,
+            ) -> VariableTracker:
+                # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+                # and rewrite args to have only proxyable args, then insert call_function
+                placements_vt = kwargs.get("placements")
+
+                if placements_vt is None and len(args) >= 3:
+                    placements_vt = args[2]
+
+                if placements_vt is None:
+                    placements_vt = CONSTANT_VARIABLE_NONE
+                elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
+                    placements_vt = VariableTracker.build(tx, tuple).call_function(
+                        tx, [placements_vt], {}
+                    )
+
+                new_args = list(args)
+                if len(new_args) >= 3:
+                    new_args[2] = placements_vt
+                elif kwargs.get("placements") is not None:
+                    kwargs["placements"] = placements_vt
+
+                args_as_value = [x.as_python_constant() for x in new_args[1:]]
+                kwargs_as_value = {
+                    k: v.as_python_constant()
+                    for k, v in kwargs.items()
+                    if k not in ["shape", "stride"]
+                }
+
+                kwargs_to_be_proxied = {
+                    k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
+                }
+
+                def fn_with_prim_types(
+                    x: Any, shape: Any | None = None, stride: Any | None = None
+                ) -> Any:
+                    return self.value(
+                        x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
+                    )
+
+                # attach the same function name for better debugging
+                fn_with_prim_types.__name__ = "prim " + self.value.__name__
+
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        fn_with_prim_types,
+                        *proxy_args_kwargs(
+                            [args[0]],
+                            kwargs_to_be_proxied,
+                        ),
+                    ),
+                )
+
         @register(torch.nested.nested_tensor)
         def handle_nested_tensor(
             self,
@@ -1354,8 +1415,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
-        @register(torch.fx.experimental.symbolic_shapes.size_hint)
-        def handle_size_hint(
+        @register(torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw)
+        def handle_guarding_hint_or_throw(
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
+        ) -> VariableTracker | None:
+            if isinstance(expr, SymNodeVariable):
+                return VariableTracker.build(
+                    tx,
+                    torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                        expr.sym_num
+                    ),
+                )
+            elif expr.is_python_constant():
+                return expr
+            else:
+                return None
+
+        @register(torch.fx.experimental.symbolic_shapes.optimization_hint)
+        def handle_optimization_hint(
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
@@ -1365,7 +1444,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if isinstance(expr, SymNodeVariable):
                 return VariableTracker.build(
                     tx,
-                    torch.fx.experimental.symbolic_shapes.size_hint(
+                    torch.fx.experimental.symbolic_shapes.optimization_hint(
                         expr.sym_num, fallback_int
                     ),
                 )

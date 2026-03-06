@@ -29,7 +29,7 @@ from torch._ops import OpOverload
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.immutable_collections import immutable_dict
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import blas_library_context, TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_ARM64,
@@ -1084,8 +1084,6 @@ if HAS_CUDA_AND_TRITON:
             def get_unaligned_inputs():
                 return [torch.rand([6, 5], device="cuda")[1:] for _ in range(2)]
 
-            from torch._higher_order_ops.wrap import inductor_compiled_code
-
             class CloneCounterMode(TorchDispatchMode):
                 def __init__(self) -> None:
                     self.count = 0
@@ -1094,11 +1092,6 @@ if HAS_CUDA_AND_TRITON:
                     kwargs = {} if kwargs is None else kwargs
                     self.count += func is torch.ops.aten.clone.default
                     return func(*args, **kwargs)
-
-            @inductor_compiled_code.py_impl(CloneCounterMode)
-            def _(mode, func, inputs):
-                with mode:
-                    return func(inputs)
 
             for _ in range(3):
                 with CloneCounterMode() as m:
@@ -1938,6 +1931,7 @@ if HAS_CUDA_AND_TRITON:
 
         @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
+        @blas_library_context("cublas")
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
 
