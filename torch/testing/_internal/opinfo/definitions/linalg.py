@@ -2529,6 +2529,7 @@ op_db: list[OpInfo] = [
         # to avoid any rank changes caused by the perturbations in the gradcheck
         op=lambda a, b: torch.linalg.pinv(a @ b.mT),
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=[torch.float32],
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -2557,19 +2558,6 @@ op_db: list[OpInfo] = [
                 "test_fn_gradgrad",
                 device_type="cuda",
                 dtypes=[torch.cdouble],
-            ),
-            # linalg_qr: MPS currently supports float32 only
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_dtypes",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
         ),
     ),
