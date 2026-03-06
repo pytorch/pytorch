@@ -93,6 +93,55 @@ class TestLRScheduler(TestCase):
             self.assertEqual(len(warning.message.args), 1)
             self.assertEqual(warning.message.args[0], EPOCH_DEPRECATION_WARNING)
 
+    def test_repr(self):
+        # StepLR should show its config parameters
+        scheduler = StepLR(self.opt, step_size=30, gamma=0.1)
+        repr_str = repr(scheduler)
+        self.assertIn("StepLR", repr_str)
+        self.assertIn("step_size: 30", repr_str)
+        self.assertIn("gamma: 0.1", repr_str)
+        # optimizer and private attrs should not appear
+        self.assertNotIn("optimizer", repr_str)
+        self.assertNotIn("_step_count", repr_str)
+
+        # ReduceLROnPlateau has different init path
+        scheduler = ReduceLROnPlateau(self.opt, mode="min", factor=0.5, patience=5)
+        repr_str = repr(scheduler)
+        self.assertIn("ReduceLROnPlateau", repr_str)
+        self.assertIn("factor: 0.5", repr_str)
+        self.assertIn("patience: 5", repr_str)
+        self.assertIn("mode: min", repr_str)
+
+        # OneCycleLR with many parameters
+        scheduler = OneCycleLR(self.opt, max_lr=0.01, total_steps=100)
+        repr_str = repr(scheduler)
+        self.assertIn("OneCycleLR", repr_str)
+        self.assertIn("total_steps: 100", repr_str)
+
+        # SequentialLR should show its nested schedulers and milestones
+        scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=20)
+        scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = SequentialLR(
+            self.opt, schedulers=[scheduler1, scheduler2], milestones=[20]
+        )
+        repr_str = repr(scheduler)
+        self.assertIn("SequentialLR", repr_str)
+        self.assertIn("milestones: [20]", repr_str)
+        self.assertIn("ConstantLR", repr_str)
+        self.assertIn("ExponentialLR", repr_str)
+        self.assertIn("last_epoch", repr_str)
+
+        # ChainedScheduler should show its nested schedulers
+        scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=20)
+        scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = ChainedScheduler(
+            [scheduler1, scheduler2], optimizer=self.opt
+        )
+        repr_str = repr(scheduler)
+        self.assertIn("ChainedScheduler", repr_str)
+        self.assertIn("ConstantLR", repr_str)
+        self.assertIn("ExponentialLR", repr_str)
+
     def test_error_when_getlr_has_epoch(self):
         class MultiStepLR(torch.optim.lr_scheduler.LRScheduler):
             def __init__(self, optimizer, gamma, milestones, last_epoch=-1):

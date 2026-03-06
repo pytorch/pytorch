@@ -179,6 +179,15 @@ class LRScheduler:
         with _initial_mode(self):
             self.step()
 
+    def __repr__(self) -> str:  # noqa: D105
+        format_string = self.__class__.__name__ + " ("
+        for key in sorted(self.__dict__.keys()):
+            if key == "optimizer" or key.startswith("_"):
+                continue
+            format_string += f"\n    {key}: {self.__dict__[key]}"
+        format_string += "\n)"
+        return format_string
+
     def state_dict(self) -> dict[str, Any]:
         """Return the state of the scheduler as a :class:`dict`.
 
@@ -1182,6 +1191,15 @@ class SequentialLR(LRScheduler):
         elif hasattr(scheds, "last_epoch"):
             scheds.last_epoch -= 1
 
+    def __repr__(self) -> str:  # noqa: D105
+        schedulers = [type(s).__name__ for s in self._schedulers]
+        format_string = self.__class__.__name__ + " ("
+        format_string += f"\n    milestones: {list(self._milestones)}"
+        format_string += f"\n    schedulers: {schedulers}"
+        format_string += f"\n    last_epoch: {self.last_epoch}"
+        format_string += "\n)"
+        return format_string
+
     def step(self) -> None:  # type: ignore[override]
         """Perform a step."""
         self.last_epoch += 1
@@ -1534,6 +1552,13 @@ class ChainedScheduler(LRScheduler):
         self._schedulers = schedulers
         self.optimizer = optimizer
         self._last_lr = _param_groups_val_list(self._schedulers[-1].optimizer, "lr")
+
+    def __repr__(self) -> str:  # noqa: D105
+        schedulers = [type(s).__name__ for s in self._schedulers]
+        format_string = self.__class__.__name__ + " ("
+        format_string += f"\n    schedulers: {schedulers}"
+        format_string += "\n)"
+        return format_string
 
     def step(self) -> None:  # type: ignore[override]
         """Perform a step."""
