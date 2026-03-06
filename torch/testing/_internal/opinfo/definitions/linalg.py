@@ -27,6 +27,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import (
     all_types_and_complex,
     all_types_and_complex_and,
+    floating_types,
     floating_and_complex_types,
     floating_and_complex_types_and,
 )
@@ -2529,7 +2530,7 @@ op_db: list[OpInfo] = [
         # to avoid any rank changes caused by the perturbations in the gradcheck
         op=lambda a, b: torch.linalg.pinv(a @ b.mT),
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=(torch.float32,),
+        dtypesIfMPS=floating_types(),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
