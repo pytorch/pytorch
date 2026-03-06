@@ -40,6 +40,7 @@
 #include <ATen/ops/slice.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/triangular_solve_native.h>
+#include <ATen/ops/_cholesky_solve_helper_native.h>
 #endif
 
 #include <c10/util/env.h>
@@ -1453,6 +1454,32 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
   return result;
 }
 
+static Tensor& cholesky_solve_helper_mps_impl(const Tensor& self, const Tensor& A, bool upper, Tensor& out) {
+  TORCH_CHECK(self.is_mps() && A.is_mps(), "cholesky_solve: tensors must be on MPS");
+  TORCH_CHECK(self.scalar_type() == kFloat && A.scalar_type() == kFloat,
+              "cholesky_solve: MPS only supports float type!");
+
+  auto tmp = at::empty({0}, self.options().memory_format(MemoryFormat::Contiguous));
+  const bool first_transpose = upper;
+  const bool second_transpose = !upper;
+
+  linalg_solve_triangular_mps_impl(A,
+                                   self,
+                                   upper,
+                                   first_transpose,
+                                   /*left=*/true,
+                                   /*unitriangular=*/false,
+                                   tmp);
+  linalg_solve_triangular_mps_impl(A,
+                                   tmp,
+                                   upper,
+                                   second_transpose,
+                                   /*left=*/true,
+                                   /*unitriangular=*/false,
+                                   out);
+  return out;
+}
+
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
@@ -1638,6 +1665,12 @@ Tensor& linalg_solve_triangular_mps_out(const Tensor& A,
 Tensor linalg_solve_triangular_mps(const Tensor& A, const Tensor& B, bool upper, bool left, bool unitriangular) {
   Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   mps::linalg_solve_triangular_mps_impl(A, B, upper, /*transpose=*/false, left, unitriangular, out);
+  return out;
+}
+
+Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool upper) {
+  auto out = at::empty({0}, self.options().memory_format(MemoryFormat::Contiguous));
+  mps::cholesky_solve_helper_mps_impl(self, A, upper, out);
   return out;
 }
 

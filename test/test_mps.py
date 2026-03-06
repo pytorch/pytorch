@@ -6088,6 +6088,60 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, r'leading minor of order 2 is not positive-definite'):
             torch.linalg.cholesky_ex(A, check_errors=True)
 
+    def test_cholesky_solve(self):
+        def make_pd_matrix(shape):
+            cpu_a = torch.randn(*shape, dtype=torch.float32, device="cpu")
+            eye = torch.eye(shape[-1], dtype=torch.float32, device="cpu")
+            return cpu_a @ cpu_a.mT + eye.expand(shape)
+
+        def as_noncontiguous(tensor):
+            result = tensor.transpose(-2, -1).contiguous().transpose(-2, -1)
+            self.assertEqual(result.shape, tensor.shape)
+            self.assertFalse(result.is_contiguous())
+            return result
+
+        def run_cholesky_solve_test(a_shape, b_shape, upper, noncontiguous=False, out_variant=False):
+            cpu_a = make_pd_matrix(a_shape)
+            cpu_l = torch.linalg.cholesky(cpu_a, upper=upper)
+            cpu_b = torch.randn(*b_shape, dtype=torch.float32, device="cpu")
+
+            if noncontiguous:
+                cpu_l = as_noncontiguous(cpu_l)
+                cpu_b = as_noncontiguous(cpu_b)
+
+            expected = torch.cholesky_solve(cpu_b, cpu_l, upper=upper)
+            mps_l = cpu_l.to("mps")
+            mps_b = cpu_b.to("mps")
+            actual = torch.cholesky_solve(mps_b, mps_l, upper=upper)
+            self.assertEqual(actual.cpu(), expected)
+
+            if out_variant:
+                out = torch.empty_like(actual).transpose(-2, -1).contiguous().transpose(-2, -1)
+                self.assertFalse(out.is_contiguous())
+                torch.cholesky_solve(mps_b, mps_l, upper=upper, out=out)
+                self.assertEqual(out.cpu(), expected)
+
+        cases = (
+            # 2D cases
+            ((3, 3), (3, 2), False, False, True),
+            ((3, 3), (3, 2), True, False, False),
+            # 3D cases
+            ((2, 3, 3), (2, 3, 4), False, False, False),
+            ((2, 3, 3), (1, 2, 3, 2), True, False, True),
+            # 5D cases
+            ((2, 2, 2, 3, 3), (2, 2, 2, 3, 5), False, False, False),
+            # Irregular-size non-contiguous case
+            ((17, 17), (17, 19), False, True, True),
+        )
+
+        for a_shape, b_shape, upper, noncontiguous, out_variant in cases:
+            run_cholesky_solve_test(a_shape, b_shape, upper, noncontiguous=noncontiguous, out_variant=out_variant)
+
+        half_l = torch.linalg.cholesky(make_pd_matrix((3, 3))).to("mps", dtype=torch.float16)
+        half_b = torch.randn(3, 2, dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "MPS only supports float type"):
+            torch.cholesky_solve(half_b, half_l)
+
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
             inputCPU = torch.arange(N * C * H * W, device='cpu', dtype=torch.float,
