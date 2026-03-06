@@ -1179,7 +1179,7 @@ class Optimizer:
 
         param_set: set[torch.Tensor] = set()
         for group in self.param_groups:
-            param_set.update(set(group["params"]))
+            param_set.update(group["params"])
             if ("param_names" in param_group) != ("param_names" in group):
                 current_group_txt = (
                     "with names" if "param_names" in param_group else "without names"
@@ -1189,7 +1189,7 @@ class Optimizer:
                     f"cannot add param group {current_group_txt} to the optimizer"
                 )
 
-        if not param_set.isdisjoint(set(param_group["params"])):
+        if not param_set.isdisjoint(param_group["params"]):
             raise ValueError("some parameters appear in more than one parameter group")
 
         self.param_groups.append(param_group)
