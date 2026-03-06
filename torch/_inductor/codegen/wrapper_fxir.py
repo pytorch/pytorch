@@ -914,6 +914,8 @@ class FxConverter:
         kwargs = {}
         if reduce := ir_node.kwargs.get("reduce"):
             kwargs["reduce"] = reduce
+        if "include_self" in ir_node.kwargs:
+            kwargs["include_self"] = ir_node.kwargs["include_self"]
 
         self._generate_fallback_call(ir_node, args, kwargs)
 
