@@ -2080,6 +2080,13 @@ class DunderDictVariable(ConstDictVariable):
                 return DictKeysVariable(merged_dict)
             elif name == "values":
                 return DictValuesVariable(merged_dict)
+        elif name == "get":
+            if len(args) not in (1, 2):
+                raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
+            name = args[0].as_python_constant()
+            if self.contains(name):
+                return self.getitem(name)
+            return CONSTANT_VARIABLE_NONE if len(args) == 1 else args[1]
         return super().call_method(tx, name, args, kwargs)
 
     def _get_merged_dict(

@@ -29,6 +29,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
+    floating_types,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
@@ -1943,7 +1944,19 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_qr_geqrf,
         decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
         skips=(
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # MPS doesn't support complex types for linalg.qr yet
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_dtypes",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -2517,6 +2530,7 @@ op_db: list[OpInfo] = [
         # to avoid any rank changes caused by the perturbations in the gradcheck
         op=lambda a, b: torch.linalg.pinv(a @ b.mT),
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -2545,12 +2559,6 @@ op_db: list[OpInfo] = [
                 "test_fn_gradgrad",
                 device_type="cuda",
                 dtypes=[torch.cdouble],
-            ),
-            # NotImplementedError: The operator 'aten::linalg_qr.out' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
             ),
         ),
     ),

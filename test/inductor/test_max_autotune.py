@@ -4708,6 +4708,27 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
         2,
     )
+    def test_autotune_process_pool_inactivity_shutdown_warmup_only(self):
+        """Test that the pool shuts down from inactivity even when only warmup is called."""
+        AutotuneProcessPool.shutdown_instance()
+        AutotuneProcessPool._shutdown_for_inactivity = False
+
+        pool_instance = AutotuneProcessPool.get_instance()
+        warmup_future = pool_instance.warm_up()
+        warmup_future.result()
+
+        self.assertIsNotNone(pool_instance._pool)
+
+        time.sleep(5)
+
+        self.assertIsNone(pool_instance._pool)
+        self.assertIsNone(pool_instance._timer)
+        self.assertTrue(AutotuneProcessPool._shutdown_for_inactivity)
+
+    @patch(
+        "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
+        2,
+    )
     @config.patch(max_autotune=True)
     def test_compilation_after_inactivity(self):
         """Test that compilation after pool inactivity shutdown uses synchronous path."""
