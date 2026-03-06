@@ -287,7 +287,7 @@ class TestLinalg(TestCase):
         if self.device_type == 'cpu':
             drivers = ('gels', 'gelsy', 'gelsd', 'gelss', None)
         else:
-            drivers = ('gels', None)
+            drivers = ('gels', 'gelsd', None)
 
         def check_solution_correctness(a, b, sol):
             sol2 = a.pinverse() @ b
@@ -313,10 +313,10 @@ class TestLinalg(TestCase):
             a_3d = a.view(batch_size, m, n)
             b_3d = b.view(batch_size, m, nrhs)
 
-            solution_3d = res.solution.view(batch_size, n, nrhs)
-            residuals_2d = apply_if_not_empty(res.residuals, lambda t: t.view(-1, nrhs))
-            rank_1d = apply_if_not_empty(res.rank, lambda t: t.view(-1))
-            singular_values_2d = res.singular_values.view(batch_size, res.singular_values.shape[-1])
+            solution_3d = res.solution.cpu().view(batch_size, n, nrhs)
+            residuals_2d = apply_if_not_empty(res.residuals.cpu(), lambda t: t.view(-1, nrhs))
+            rank_1d = apply_if_not_empty(res.rank.cpu(), lambda t: t.view(-1))
+            singular_values_2d = res.singular_values.cpu().view(batch_size, res.singular_values.shape[-1])
 
             if a.numel() > 0:
                 for i in range(batch_size):
@@ -376,7 +376,7 @@ class TestLinalg(TestCase):
 
                 def numpy_ref(a, b):
                     return np.linalg.lstsq(a, b, rcond=rcond)
-                check_correctness_ref(a, b, res, numpy_ref)
+                check_correctness_ref(a.cpu(), b.cpu(), res, numpy_ref)
 
         ms = [2 ** i for i in range(5)]
         m_ge_n_sizes = [(m, m // 2) for m in ms] + [(m, m) for m in ms]
@@ -569,7 +569,7 @@ class TestLinalg(TestCase):
         b = torch.rand(2, 2, 2, dtype=dtype, device=device)
 
         if device != 'cpu':
-            with self.assertRaisesRegex(RuntimeError, '`driver` other than `gels` is not supported on CUDA'):
+            with self.assertRaisesRegex(RuntimeError, '`driver` other than `gels` or `gelsd` is not supported on CUDA'):
                 torch.linalg.lstsq(a, b, driver='fictitious_driver')
         # if on cpu
         else:

@@ -1575,13 +1575,16 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
 void linalg_lstsq_gelsd(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond) {
   auto m = A.size(-2);
   auto n = A.size(-1);
+
+  if (m == 0 || n == 0) return;
+
   ScalarType real_dtype = toRealValueType(A.scalar_type());
 
   auto [U, S, Vh] = at::linalg_svd(A, /*full_matrices=*/false, std::nullopt);
   singular_values.copy_(S);
 
   Tensor tol;
-  if (rcond > 0) {
+  if (rcond > 0 && rcond < 1) {
     auto s_max = singular_values.select(-1, 0).unsqueeze(-1).expand(singular_values.sizes());
     tol = at::mul(s_max, rcond);
   } else {
