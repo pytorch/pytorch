@@ -27,10 +27,19 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/full_like.h>
 #include <ATen/ops/linalg_eigh.h>
 #include <ATen/ops/linalg_eigvalsh.h>
+#include <ATen/ops/linalg_norm.h>
+#include <ATen/ops/linalg_svd.h>
 #include <ATen/ops/linalg_solve_triangular.h>
+#include <ATen/ops/matmul.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/reciprocal.h>
+#include <ATen/ops/sub.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #endif
 
@@ -1563,25 +1572,102 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
   }
 }
 
-void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singular_values*/, Tensor& infos, double /*rcond*/, std::string /*driver_name*/)  {
+void linalg_lstsq_gelsd(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond) {
+  // Least squares via reduced SVD: A = U @ diag(S) @ Vh, solution = Vh.mH() @ (S_pinv * (U.mH() @ B))
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+  // auto mn = std::min(m, n);
+  auto batch_sizes = A.sizes().slice(0, A.dim() - 2);
+
+  ScalarType real_dtype = toRealValueType(A.scalar_type());
+
+  // Allocate U and Vh; SVD writes directly into singular_values (no copy).
+  // DimVector U_shape(batch_sizes.begin(), batch_sizes.end());
+  // U_shape.insert(U_shape.end(), {m, mn});
+  // DimVector Vh_shape(batch_sizes.begin(), batch_sizes.end());
+  // Vh_shape.insert(Vh_shape.end(), {mn, n});
+
+  // Tensor U = at::empty(U_shape, A.options());
+  // Tensor Vh = at::empty(Vh_shape, A.options());
+  // at::linalg_svd_out(U, singular_values, Vh, A, /*full_matrices=*/false, std::nullopt);
+
+  bool test1 = false;
+  bool compute_full_matrices = false;
+  if (!test1) compute_full_matrices = m > n;
+
+  auto [U, S, Vh] = at::linalg_svd(A, /*full_matrices=*/compute_full_matrices, std::nullopt);
+
+  singular_values.copy_(S);
+
+  // Tolerance for rank: rcond * max(S) per batch, or machine epsilon * max(m,n) if rcond <= 0
+  Tensor tol;
+  if (rcond > 0) {
+    auto s_max = singular_values.select(-1, 0).unsqueeze(-1).expand(singular_values.sizes());
+    tol = at::mul(s_max, rcond);
+  } else {
+    tol = at::full_like(singular_values, _get_epsilon(real_dtype) * static_cast<double>(std::max(m, n)));
+  }
+
+  Tensor above_tol = singular_values.gt(tol);
+  rank.copy_((above_tol).sum(-1).to(at::kLong));
+  Tensor S_pinv = at::where(above_tol, at::reciprocal(singular_values), at::zeros_like(singular_values));
+  
+  auto B_narrowed = B.narrow(-2, 0, m); // B may have expanded if m < n.
+  Tensor UhB = at::matmul(U.mH(), B_narrowed);  // B may have expanded if m < n. 
+  Tensor Spinv_expanded = S_pinv.unsqueeze(-1).to(A.scalar_type());
+  // Tensor SpinvUhB = at::mul(Spinv_expanded, UhB);
+  Tensor SpinvUhB = at::mul(Spinv_expanded, UhB.narrow(-2, 0, S_pinv.size(-1))); // only the first min(m,n) rows of UhB are multiplied by Spinv, the rest are zero'd out
+  
+  if (test1) {
+    auto X = at::matmul(Vh.mH(), SpinvUhB);
+    if (m > n)
+    {
+      // Most of the clever 'tricks' to computing the residuals from the SVD require the full unitary U matrix which we don't have (because we used reduced svd). 
+      // Thus, the residual will be computed directly and saved on the last location.  
+      // the increase in runtime to compute the residual directly is not significant compared to the rest of the computation.
+      auto residual = at::sub(at::matmul(A, X), B_narrowed);
+      auto col_norms = at::linalg_norm(residual, 2, std::vector<int64_t>{-2}, false);
+      B.narrow(-2, n, m - n).zero_();
+      B.select(-2, m - 1).copy_(col_norms);
+    }
+    B.narrow(-2, 0, n).copy_(X);
+  } else {
+    B.narrow(-2, 0, n) = at::matmul(Vh.mH(), SpinvUhB);
+    B.narrow(-2, n, m - n) = UhB.narrow(-2, n, m - n);
+  }
+}
+
+void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_values, Tensor& infos, double rcond, std::string driver_name)  {
   auto m = a.size(-2);
   auto n = a.size(-1);
 
   _warn_once_magma_deprecation("linalg.lstsq");
-  // first handle the underdetermined case (m < n)
-  // this case is not supported by cuBLAS
-  if (m < n) {
-    linalg_lstsq_gels(a, b, infos);
-  } else { // m >= n
-    // On CUDA platform we use either cuBLAS or cuSOLVER here
-    // the batched vs looped dispatch is implemented based on the following performance results
-    // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
-    if (m <= 256 && batchCount(b) >= std::max<int64_t>(2, m / 16)) {
-      gels_batched_cublas(a, b, infos);
-    } else {
+
+  if (driver_name == "gels")
+  {
+    // first handle the underdetermined case (m < n)
+    // this case is not supported by cuBLAS
+    if (m < n) {
       linalg_lstsq_gels(a, b, infos);
+    } else { // m >= n
+      // On CUDA platform we use either cuBLAS or cuSOLVER here
+      // the batched vs looped dispatch is implemented based on the following performance results
+      // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
+      if (m <= 256 && batchCount(b) >= std::max<int64_t>(2, m / 16)) {
+        gels_batched_cublas(a, b, infos);
+      } else {
+        linalg_lstsq_gels(a, b, infos);
+      }
     }
+
+  } else if (driver_name == "gelsd") {
+    linalg_lstsq_gelsd(a, b, rank, singular_values, infos, rcond);
+
+  } else {
+    // this should never be reached since the driver is checked in get_default_lstsq_driver() 
+    TORCH_CHECK(false, "linalg.lstsq: Does not support driver '", driver_name, "' on CUDA.");
   }
+  
 }
 
 REGISTER_CUDA_DISPATCH(lstsq_stub, &lstsq_kernel)
