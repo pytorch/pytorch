@@ -669,7 +669,10 @@ class _BaseDataLoaderIter:
                 f"ignore pin_memory_device='{loader.pin_memory_device}'.",
                 stacklevel=2,
             )
-        if loader.pin_memory and not torch.accelerator.is_available():
+        _acc = torch.accelerator.current_accelerator()
+        _acc_available = _acc is not None and torch.get_device_module(_acc).is_available()
+
+        if loader.pin_memory and not _acc_available:
             warn_msg = (
                 "'pin_memory' argument is set as true but no accelerator is found, "
                 "then device pinned memory won't be used."
@@ -678,15 +681,10 @@ class _BaseDataLoaderIter:
 
         # Enabling pin_memory in _BaseDataLoaderIter to support identical
         # behavior in forked implementations using _BaseDataLoaderIter.
-        self._pin_memory = loader.pin_memory and torch.accelerator.is_available()
+        self._pin_memory = loader.pin_memory and _acc_available
 
         # Set pin memory device based on the current accelerator.
-        self._pin_memory_device = (
-            acc.type
-            if self._pin_memory
-            and (acc := torch.accelerator.current_accelerator()) is not None
-            else None
-        )
+        self._pin_memory_device = _acc.type if self._pin_memory else None
 
         # Currently, pin_memory would raise error on the MPS backend (see
         # https://github.com/pytorch/pytorch/issues/86060), so forcibly
