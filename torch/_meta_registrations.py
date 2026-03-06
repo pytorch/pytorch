@@ -6638,6 +6638,8 @@ def _check_scaled_mm_sizes(
                 _k = _k * 2
             else:
                 block_size_k = 32
+                if self.dtype == torch.float4_e2m1fn_x2:
+                    _k = _k * 2
 
             block_size_mn = 128
 

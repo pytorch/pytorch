@@ -80,18 +80,50 @@ For local branch reviews:
 
 ### GitHub Actions Mode
 
-When invoked via workflow, PR data is passed as context. The PR number or diff will be available in the prompt.
+When invoked via `@claude /pr-review` on a GitHub PR, the action pre-fetches PR
+metadata and injects it into the prompt. Detect this mode by the presence of
+`<formatted_context>`, `<pr_or_issue_body>`, and `<comments>` tags in the prompt.
+
+The prompt already contains:
+- PR metadata (title, author, branch names, additions/deletions, file count)
+- PR body/description
+- All comments and review comments (with file/line references)
+- List of changed files with paths and change types
+
+Use git commands to get the diff and commit history. The base branch name is in the
+prompt context (look for `PR Branch: <head> -> <base>` or the `baseBranch` field).
+
+```bash
+# Get the full diff against the base branch
+git diff origin/<baseBranch>...HEAD
+
+# Get diff stats
+git diff --stat origin/<baseBranch>...HEAD
+
+# Get commit history for this PR
+git log origin/<baseBranch>..HEAD --oneline
+
+# If the base branch ref is not available, fetch it first
+git fetch origin <baseBranch> --depth=1
+```
+
+Do NOT use `gh` CLI commands in this mode -- only git commands are available.
+All PR metadata, comments, and reviews are already in the prompt context;
+only the diff and commit log need to be fetched via git.
 
 ## Review Workflow
 
 ### Step 1: Fetch PR Information
 
-For local mode, use `gh` commands to get:
-1. PR metadata (title, description, author)
-2. List of changed files
-3. Full diff of changes
-4. Existing comments/reviews
-5. Fetch associated issue information when applicable
+**Local CLI mode**: Use `gh` commands to get PR metadata, changed files, full diff,
+existing comments/reviews, and associated issue information.
+
+**Local Branch mode**: Use `git diff` and `git log` against `main` as shown in the
+Local Branch Mode section above.
+
+**GitHub Actions mode**: PR metadata, comments, and reviews are already in the prompt.
+Use `git diff origin/<baseBranch>...HEAD` for the full diff and
+`git log origin/<baseBranch>..HEAD --oneline` for the commit log.
 
 ### Step 2: Analyze Changes
 

@@ -18,7 +18,6 @@ import math
 import itertools
 import torch.optim as optim
 from torch.testing._internal.common_device_type import expectedFailureMPS, instantiate_device_type_tests, onlyCUDA, largeTensorTest
-from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -96,7 +95,7 @@ def _check_equal(
     reference: torch.Tensor,
     test: torch.Tensor,
     fudge_factor: float,
-    tensor_name: Optional[str] = None
+    tensor_name: str | None = None
 ) -> None:
     """
     Compare test tensor against golden and reference tensors.
@@ -151,8 +150,8 @@ def check_out_and_grad(
     grad_query_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     grad_key_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     grad_value_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    grad_attn_mask_tuple: Optional[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
-    fudge_factors: Optional[dict[str, float]] = None
+    grad_attn_mask_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
+    fudge_factors: dict[str, float] | None = None
 ) -> None:
     """
     Check output and gradients of attention mechanism tensors.
@@ -378,6 +377,31 @@ class TestTransformers(NNTestCase):
             # The FP kernel will return NaNs while the sdpa kernel which is ran when the fast path is turned off returns 0 instead
             # of NaNs for fully masked rows
             self.assertEqual(out, out_fp.nan_to_num())
+
+    @onlyCUDA
+    def test_multiheadattention_fastpath_fp16_head_dim_alignment(self, device):
+        previous_fastpath = torch.backends.mha.get_fastpath_enabled()
+        try:
+            torch.manual_seed(0)
+            mha = nn.MultiheadAttention(
+                96,
+                16,
+                dropout=0.2,
+                batch_first=True,
+                dtype=torch.float16,
+                device=device,
+            )
+            x = torch.randn(8, 32, 96, device=device, dtype=torch.float16) * 238.15560380049612
+            with torch.no_grad():
+                torch.backends.mha.set_fastpath_enabled(True)
+                mha.eval()
+                out, _ = mha(x, x, x, need_weights=False)
+                torch.backends.mha.set_fastpath_enabled(False)
+                out_ref, _ = mha(x, x, x, need_weights=False)
+            self.assertTrue(torch.isfinite(out).all())
+            self.assertEqual(out, out_ref, atol=2e-2, rtol=8e-2)
+        finally:
+            torch.backends.mha.set_fastpath_enabled(previous_fastpath)
 
     @parametrize("nhead", [1, 4, 8])
     def test_transformerencoderlayer_src_mask(self, device, nhead):
@@ -859,7 +883,7 @@ class TestTransformers(NNTestCase):
         mask = None
 
         def scaled_dot_product_attention(
-            xq: torch.Tensor, xk: torch.Tensor, xv: torch.Tensor, mask: Optional[torch.Tensor], backend: SDPBackend
+            xq: torch.Tensor, xk: torch.Tensor, xv: torch.Tensor, mask: torch.Tensor | None, backend: SDPBackend
         ) -> torch.Tensor:
             n_rep = 1
             xq, xk, xv = (tensor.transpose(1, 2) for tensor in (xq, xk, xv))
@@ -4952,8 +4976,8 @@ class TestAttnBias(NNTestCase):
         make_q,
         make_kv,
         attn_bias=None,
-        forw_tolerances: Optional[Tolerances] = None,
-        grad_tolerances: Optional[Tolerances] = None,
+        forw_tolerances: Tolerances | None = None,
+        grad_tolerances: Tolerances | None = None,
         backend=None,
         causal_variant=None,
     ):

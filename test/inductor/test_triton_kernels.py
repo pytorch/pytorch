@@ -3682,6 +3682,75 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["c_ptr"],
         )
 
+    @unittest.skipIf(
+        not has_triton_tensor_descriptor_host_tma(),
+        "requires TensorDescriptor API in Triton",
+    )
+    @requires_gpu
+    def test_descriptor_load_store_read_write_detection(self):
+        """
+        Regression test: tl.make_tensor_descriptor + desc.load()/desc.store()
+        generates tt.descriptor_load/tt.descriptor_store ops in TTIR. These
+        must be recognized by identify_accessed_tensors so that Inductor
+        correctly tracks read/write dependencies.
+        """
+        from torch._higher_order_ops.triton_kernel_wrap import identify_accessed_tensors
+
+        @triton.jit
+        def add_kernel_descriptor_method(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            M,
+            N,
+            BLOCK_M: "tl.constexpr",
+            BLOCK_N: "tl.constexpr",
+        ):
+            in0_desc = tl.make_tensor_descriptor(
+                in_ptr0,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+            in1_desc = tl.make_tensor_descriptor(
+                in_ptr1,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+            out_desc = tl.make_tensor_descriptor(
+                out_ptr,
+                [M, N],
+                [N, 1],
+                [BLOCK_M, BLOCK_N],
+            )
+            pid_m = tl.program_id(0)
+            pid_n = tl.program_id(1)
+            off_m = pid_m * BLOCK_M
+            off_n = pid_n * BLOCK_N
+            a = in0_desc.load([off_m, off_n])
+            b = in1_desc.load([off_m, off_n])
+            out_desc.store([off_m, off_n], a + b)
+
+        t = torch.randn(64, 64)
+        tensor_accesses = identify_accessed_tensors(
+            add_kernel_descriptor_method,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "M": 64,
+                "N": 64,
+                "BLOCK_M": 32,
+                "BLOCK_N": 32,
+            },
+            {},
+        )
+        read_names = [dep.name for dep in tensor_accesses.read_writes.reads]
+        write_names = [dep.name for dep in tensor_accesses.read_writes.writes]
+        self.assertListEqual(read_names, ["in_ptr0", "in_ptr1"])
+        self.assertListEqual(write_names, ["out_ptr"])
+
 
 if HAS_GPU:
     t = torch.randn(4)

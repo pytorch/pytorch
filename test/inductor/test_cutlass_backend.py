@@ -11,7 +11,6 @@ import unittest.mock as mock
 from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cutlass.serialization import (
@@ -961,8 +960,8 @@ class TestCutlassBackend(TestCase):
         max_autotune_gemm_backends: str = "CUTLASS",
         fp16=True,
         expected_fuse_count=0,
-        mm: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
-        batch_size: Optional[int] = None,
+        mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
+        batch_size: int | None = None,
     ):
         # Note: The ops that are available
         # also depend on the alignment of the shapes

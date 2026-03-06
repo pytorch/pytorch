@@ -622,6 +622,34 @@ class ExternKernelOutLine(WrapperLine):
 
 
 @dataclasses.dataclass
+class ExternKernelMultiOutLine(WrapperLine):
+    """Codegen line for multi-output .out() variant calls.
+
+    Generates a kernel call with pre-allocated output buffers passed as
+    keyword arguments. E.g. kernel(x, out0=buf0, out1=buf1).
+    """
+
+    wrapper: PythonWrapperCodegen
+    node: ir.ExternKernelMultiOut
+
+    def codegen(self, code: IndentedBuffer) -> None:
+        node = self.node
+        kernel_name = node.get_kernel_name()
+
+        args = [*node.codegen_args(), *node.codegen_kwargs()]
+        for out_name, out_node in zip(
+            node.out_arg_names, node.out_variant_output_nodes
+        ):
+            args.append(f"{out_name}={out_node.get_name()}")
+
+        code.writeline(f"{node.get_name()} = {kernel_name}({', '.join(args)})")
+
+        for out_node in node.out_variant_output_nodes:
+            if isinstance(out_node.layout, ir.Layout):
+                out_node.codegen_size_asserts(self.wrapper)
+
+
+@dataclasses.dataclass
 class FreeLine(WrapperLine):
     wrapper: PythonWrapperCodegen
     node: BufferLike | ir.TorchBindObject
@@ -1800,6 +1828,12 @@ class PythonWrapperCodegen(CodeGen):
                 custom_codegen(node, self.writeline)
                 return
         self.writeline(ExternKernelAllocLine(self, node))
+
+    def generate_extern_kernel_multi_out(self, node: ir.ExternKernelMultiOut) -> None:
+        """Generate .out() call with pre-allocated output buffers."""
+        for out_node in node.out_variant_output_nodes:
+            self.codegen_allocation(out_node)
+        self.writeline(ExternKernelMultiOutLine(self, node))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)

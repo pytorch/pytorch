@@ -4,7 +4,6 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
-from typing import Optional
 
 import torch
 import torch._inductor.test_case
@@ -61,7 +60,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue(any((event.get("name") in valid_names) for event in events))
 
     def _test_profiling_kernel_names(
-        self, fn, args, kernel_name_str: str, check_fn: Optional[Callable] = None
+        self, fn, args, kernel_name_str: str, check_fn: Callable | None = None
     ):
         """
         We expect a record_function event to be added on the CPU side, surrounding

@@ -154,8 +154,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         start_method="spawn",
         exit_barrier_timeout: float = 300,
         log_line_prefix_template: str | None = None,
+        shutdown_timeout: int = 30,
     ):
-        super().__init__(spec, exit_barrier_timeout)
+        super().__init__(spec, exit_barrier_timeout, shutdown_timeout)
         self._start_method = start_method
         self._pcontext: PContext | None = None
         self._rdzv_handler = spec.rdzv_handler
@@ -408,7 +409,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         if "CUDA_VISIBLE_DEVICES" in os.environ:
             worker_env["CUDA_VISIBLE_DEVICES"] = os.environ["CUDA_VISIBLE_DEVICES"]
 
-    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
+    def _shutdown(
+        self, death_sig: signal.Signals = signal.SIGTERM, timeout: int = 30
+    ) -> None:
         if self._worker_watchdog is not None:
             self._worker_watchdog.stop()
             self._worker_watchdog = None
@@ -416,7 +419,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             self._health_check_server.stop()
             self._health_check_server = None
         if self._pcontext:
-            self._pcontext.close(death_sig)
+            self._pcontext.close(death_sig, timeout)
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.

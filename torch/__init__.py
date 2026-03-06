@@ -2469,10 +2469,11 @@ class _TorchCompileInductorWrapper:
                     )
             self.config[attr_name] = val
 
-    def __call__(self, model_, inputs_):
+    def __call__(self, model_, inputs_, *, config_patches=None):
         from torch._inductor.compile_fx import compile_fx
 
-        return compile_fx(model_, inputs_, config_patches=self.config)
+        all_patches = {**self.config, **(config_patches or {})}
+        return compile_fx(model_, inputs_, config_patches=all_patches)
 
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
@@ -2497,7 +2498,7 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         self.apply_options({"cpp_wrapper": True})
         self.apply_options({"aot_inductor.package": True})
 
-    def __call__(self, model_, inputs_):
+    def __call__(self, model_, inputs_, *, config_patches=None):
         from contextlib import nullcontext
         from unittest import mock
 
@@ -2515,7 +2516,7 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
             ctx,
             torch._inductor.config.patch("enable_autograd_for_aot", True),
         ):
-            return super().__call__(model_, inputs_)
+            return super().__call__(model_, inputs_, config_patches=config_patches)
 
 
 class _TorchCompileWrapper:

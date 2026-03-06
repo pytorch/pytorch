@@ -2016,21 +2016,25 @@ class MultiProcContinuousTest(TestCase):
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
-                # Wait for the workers to finish the test
+                # Drain all completion queues before raising any exception,
+                # so stale results don't desync subsequent tests.
+                deferred_exception = None
                 for i, completion_queue in enumerate(self.completion_queues):
                     rv = completion_queue.get()
+                    if deferred_exception is not None:
+                        # Already captured an exception; just drain
+                        continue
                     if isinstance(rv, unittest.SkipTest):
-                        raise rv
+                        deferred_exception = rv
+                        continue
                     if isinstance(rv, BaseException):
-                        # Hit an exception, re-raise it in the main process.
                         logger.warning(
                             f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
                             f"skipping rest of tests in Test class: {self.__class__.__name__}"  # noqa: G004
                         )
-                        # Poison rest of tests (because ProcessGroup may be not
-                        # reusable now)
                         self.__class__.poison_pill = True
-                        raise rv
+                        deferred_exception = rv
+                        continue
 
                     # Success
                     if rv != self.id():
@@ -2040,6 +2044,9 @@ class MultiProcContinuousTest(TestCase):
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
+
+                if deferred_exception is not None:
+                    raise deferred_exception
             else:
                 # Worker just runs the test
                 fn()

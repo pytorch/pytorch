@@ -23,10 +23,11 @@ import functools
 import inspect
 import itertools
 import logging
+import traceback
 import types
 import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import torch._C
@@ -119,7 +120,11 @@ class SubgraphTracingInfo:
     Future additions may include aliasing info, mutation info, etc.
     """
 
-    has_side_effect: bool = False
+    # User code stack at the point where the first externally-visible side
+    # effect was detected.  None means no side effect was observed.
+    side_effect_stack: traceback.StackSummary | None = None
+    # All sources accessed via VariableBuilder during the subgraph trace.
+    traced_sources: OrderedSet[Any] = field(default_factory=OrderedSet)
 
 
 # This function is a syntax sugar for creating a dummy new subtracer so that
@@ -1795,7 +1800,8 @@ def speculate_subgraph_with_auto_output_flattening(
             #   FX graph outputs (basically the vts associated with graph outputs)
             # - `tracing_info`: Properties observed during subgraph tracing
             tracing_info = SubgraphTracingInfo(
-                has_side_effect=subtracer.has_side_effect,
+                side_effect_stack=subtracer.side_effect_stack,
+                traced_sources=subtracer.traced_sources,
             )
 
             return (

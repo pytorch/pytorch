@@ -487,6 +487,7 @@ class VariableBuilder:
             )
 
     def _call_impl(self, value: object) -> VariableTracker:
+        self.tx.output.current_tracer.traced_sources.add(self.source)
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
