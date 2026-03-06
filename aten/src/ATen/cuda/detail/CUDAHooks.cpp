@@ -452,9 +452,25 @@ std::string CUDAHooks::showConfig() const {
 
 #if !defined(USE_ROCM)
 #if AT_CUDNN_ENABLED()
+#if CUDNN_FRONTEND_VERSION < 10300
+  auto printCudnnStyleVersion = [&](size_t v) {
+    if (v >= 9000) {
+      oss << (v / 10000) << '.' << (v / 100 % 100);
+    } else {
+      oss << (v / 1000) << '.' << (v / 100 % 10);
+    }
+    if (v % 100 != 0) {
+      oss << '.' << (v % 100);
+    }
+  };
+#endif
   size_t cudnnVersion = cudnnGetVersion();
   oss << "  - CuDNN runtime version ";
+#if CUDNN_FRONTEND_VERSION < 10300
+  oss << printCudnnStyleVersion(cudnnVersion);
+#else
   oss << cudnn_frontend::detail::convert_version_to_str(cudnnVersion);
+#endif
   size_t cudnnCudartVersion = cudnnGetCudartVersion();
   if (cudnnCudartVersion != CUDART_VERSION) {
     oss << "  (built against CUDA ";
@@ -464,7 +480,11 @@ std::string CUDAHooks::showConfig() const {
   oss << '\n';
   if (cudnnVersion != CUDNN_VERSION) {
     oss << "    - Built with CuDNN compile-time version";
+#if CUDNN_FRONTEND_VERSION < 10300
+    oss << printCudnnStyleVersion(CUDNN_VERSION);
+#else
     oss << cudnn_frontend::detail::convert_version_to_str(CUDNN_VERSION);
+#endif
     oss << '\n';
   }
 #endif
