@@ -64,7 +64,12 @@ def _detect_cycles(
 
                 if child_state == 0:
                     state[child] = 1
-                    stack.append((child, iter(_get_flat_args_unique(child, node_to_additional_deps))))
+                    stack.append(
+                        (
+                            child,
+                            iter(_get_flat_args_unique(child, node_to_additional_deps)),
+                        )
+                    )
                 # child_state == 2 means already verified safe; skip.
 
             except StopIteration:
