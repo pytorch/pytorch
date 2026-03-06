@@ -213,6 +213,43 @@ def equal_1_arg_indices(
     return equal_to_1
 
 
+def _get_buffer_layout(buf_name: str):
+    """Get the layout for a buffer, handling both scheduler buffers and graph inputs."""
+    if V.graph.scheduler:
+        try:
+            return V.graph.scheduler.get_buffer_layout(buf_name)
+        except (KeyError, AttributeError):
+            pass
+
+    buffer = V.graph.try_get_buffer(buf_name)
+    if buffer:
+        return buffer.get_layout()
+
+    if hasattr(V, "kernel") and V.kernel is not None and buf_name == V.kernel.output_node.name:
+        return V.kernel.output_node.layout
+
+    return None
+
+
+def _is_tensor_within_2gb(arg: TensorArg) -> bool:
+    """Check if a tensor argument's storage is provably within 2GB.
+
+    Mirrors HIPBackend.is_within_2gb() but uses compile-time symbolic analysis
+    instead of runtime tensor inspection. This enables canonicalize_pointers to
+    decompose pointer arithmetic into (splat(base), offset) form for buffer ops.
+    """
+    MAX_BYTES = 2**31 - 1
+    try:
+        layout = _get_buffer_layout(arg.buffer)
+        if layout is None:
+            return False
+
+        storage_bytes = layout.storage_size() * arg.dtype.itemsize
+        return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
+    except Exception:
+        return False
+
+
 def config_of(
     args: list[KernelArgType],
     *,
@@ -263,5 +300,15 @@ def config_of(
 
     equal_to_1 = equal_1_arg_indices(args, indices=indices)
 
+    # On AMD/HIP, tag tensor args whose storage fits in 2GB so Triton
+    # can use 32-bit pointer offsets and emit buffer load/store ops.
+    pointer_range_32: tuple[int, ...] = ()
+    if torch.version.hip is not None:
+        pointer_range_32 = tuple(
+            i
+            for i, arg in zip(indices, args)
+            if isinstance(arg, TensorArg) and _is_tensor_within_2gb(arg)
+        )
+
     # pyrefly: ignore [bad-argument-type]
-    return AttrsDescriptorWrapper(divisible_by_16, equal_to_1)
+    return AttrsDescriptorWrapper(divisible_by_16, equal_to_1, pointer_range_32)
