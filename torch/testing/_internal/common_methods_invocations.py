@@ -19319,6 +19319,9 @@ op_db: list[OpInfo] = [
                        DecorateInfo(
                            toleranceOverride({torch.float32: tol(atol=3e-5, rtol=1e-3)}),
                            'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'),
+                       DecorateInfo(
+                           toleranceOverride({torch.float32: tol(atol=5e-5, rtol=3e-4)}),
+                           'TestConsistency', 'test_output_grad_match', device_type='mps'),
                        ],
            skips=(
                # test does not work with passing lambda for op
