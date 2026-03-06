@@ -2659,7 +2659,7 @@ class Module:
                     continue
                 if remove_duplicate:
                     memo.add(v)
-                name = module_prefix + ("." if module_prefix else "") + k
+                name = (module_prefix + "." + k) if module_prefix else k
                 yield name, v
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
@@ -2877,7 +2877,7 @@ class Module:
             for name, module in self._modules.items():
                 if module is None:
                     continue
-                submodule_prefix = prefix + ("." if prefix else "") + name
+                submodule_prefix = (prefix + "." + name) if prefix else name
                 yield from module.named_modules(
                     memo, submodule_prefix, remove_duplicate
                 )
