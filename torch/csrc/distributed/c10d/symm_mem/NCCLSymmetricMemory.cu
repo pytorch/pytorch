@@ -2,6 +2,7 @@
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
 
+#include <algorithm>
 #include <vector_types.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
@@ -18,8 +19,13 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/error.h>
-
 #include <mutex>
+#include <c10/util/flat_hash_map.h>
+#include <c10/util/hash.h>
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <c10/cuda/driver_api.h>
+#endif
 
 namespace c10d {
 namespace symmetric_memory {
@@ -34,7 +40,8 @@ struct NCCLAllocation {
   int device_idx;
   std::mutex mutex;
   // Map of group name to peer alloc info
-  std::unordered_map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos_;
+  ska::flat_hash_map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>>
+      peer_alloc_infos_;
 
   NCCLAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
@@ -52,6 +59,82 @@ struct NCCLAllocation {
     }
   }
 };
+
+namespace {
+
+struct NCCLSymmMemKey {
+  void* ptr;
+  std::string group_name;
+
+  bool operator==(const NCCLSymmMemKey& other) const {
+    return ptr == other.ptr && group_name == other.group_name;
+  }
+};
+
+struct NCCLSymmMemKeyHash {
+  size_t operator()(const NCCLSymmMemKey& key) const {
+    auto seed = c10::hash_combine(0, std::hash<void*>{}(key.ptr));
+    return c10::hash_combine(seed, std::hash<std::string>{}(key.group_name));
+  }
+};
+
+// Base allocation ptr -> owning NCCL allocation metadata.
+using NCCLAllocMap = ska::flat_hash_map<void*, std::unique_ptr<NCCLAllocation>>;
+// (Tensor storage/data ptr, group name) -> cached SymmetricMemory handle.
+using NCCLSymmMemMap = ska::flat_hash_map<
+    NCCLSymmMemKey,
+    c10::intrusive_ptr<NCCLSymmetricMemory>,
+    NCCLSymmMemKeyHash>;
+// Base allocation ptr -> cached `(tensor ptr, group)` keys derived from it.
+using NCCLSymmMemKeysByAlloc =
+    ska::flat_hash_map<void*, ska::flat_hash_set<NCCLSymmMemKey, NCCLSymmMemKeyHash>>;
+
+bool pointer_in_allocation(void* ptr, const NCCLAllocation& allocation) {
+  auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+  auto base_ptr = reinterpret_cast<uintptr_t>(allocation.ptr);
+  return ptr_int >= base_ptr && ptr_int < base_ptr + allocation.buffer_size;
+}
+
+NCCLAllocMap::iterator find_allocation_covering_linear(
+    void* ptr,
+    NCCLAllocMap& allocations) {
+  return std::find_if(
+      allocations.begin(),
+      allocations.end(),
+      [&](const auto& entry) {
+        return pointer_in_allocation(ptr, *entry.second);
+      });
+}
+
+NCCLAllocMap::iterator find_allocation_covering(
+    void* ptr,
+    NCCLAllocMap& allocations) {
+  auto alloc_it = allocations.find(ptr);
+  if (alloc_it != allocations.end()) {
+    return alloc_it;
+  }
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  auto driver_api = c10::cuda::DriverAPI::get();
+  CUdeviceptr base_ptr = 0;
+  // Recover the CUDA allocation base for interior pointers before falling
+  // back to the linear scan below when the direct lookup cannot help.
+  auto status = driver_api->cuMemGetAddressRange_(
+      &base_ptr,
+      nullptr,
+      reinterpret_cast<CUdeviceptr>(ptr));
+  if (status == CUDA_SUCCESS) {
+    alloc_it = allocations.find(reinterpret_cast<void*>(base_ptr));
+    if (alloc_it != allocations.end()) {
+      return alloc_it;
+    }
+  }
+#else
+  // No driver API support here, so fall through to the linear scan below.
+#endif
+  return find_allocation_covering_linear(ptr, allocations);
+}
+
+} // namespace
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 static __global__ void build_ptr_dev(
@@ -352,7 +435,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     C10D_NCCL_CHECK(ncclMemAlloc(&ptr, size), "ncclMemAlloc");
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      allocations_.try_emplace(
+      allocations_.emplace(
           ptr, std::make_unique<NCCLAllocation>(ptr, size, device_idx));
     }
     return ptr;
@@ -360,7 +443,18 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
   void free(void* ptr) override {
     std::lock_guard<std::mutex> lock(mutex_);
-    allocations_.erase(ptr);
+    auto alloc_it = allocations_.find(ptr);
+    if (alloc_it == allocations_.end()) {
+      return;
+    }
+    auto cache_keys_it = symm_mem_keys_by_alloc_.find(ptr);
+    if (cache_keys_it != symm_mem_keys_by_alloc_.end()) {
+      for (const auto& key : cache_keys_it->second) {
+        symm_mems_.erase(key);
+      }
+      symm_mem_keys_by_alloc_.erase(cache_keys_it);
+    }
+    allocations_.erase(alloc_it);
   };
 
   size_t get_alloc_size(void* ptr) override {
@@ -377,21 +471,18 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       void* ptr,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
-
-    // Find the allocation covering the ptr under the allocator lock.
-    // We grab a raw pointer to the NCCLAllocation so we can release the
-    // allocator lock before doing expensive per-allocation work.
     NCCLAllocation* allocation;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      auto alloc_it = std::find_if(
-          allocations_.begin(), allocations_.end(), [&](const auto& pair) {
-            auto& alloc = pair.second;
-            auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-            auto base_ptr = reinterpret_cast<uintptr_t>(alloc->ptr);
-            return ptr_int >= base_ptr &&
-                ptr_int < base_ptr + alloc->buffer_size;
-          });
+      auto it = symm_mems_.find({ptr, *group_name});
+      if (it != symm_mems_.end()) {
+        return it->second;
+      }
+
+      // Find the allocation covering the ptr under the allocator lock.
+      // We grab a raw pointer to the NCCLAllocation so we can release the
+      // allocator lock before doing expensive per-allocation work.
+      auto alloc_it = find_allocation_covering(ptr, allocations_);
       TORCH_CHECK(
           alloc_it != allocations_.end(),
           "Pointer not within any SymmetricMemory allocation, "
@@ -406,6 +497,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto& peer_alloc_infos = allocation->peer_alloc_infos_;
     auto pai_it = peer_alloc_infos.find(*group_name);
     if (pai_it == peer_alloc_infos.end()) {
+      // Never rendezvoused with this group before, create a new peer alloc info.
       pai_it = peer_alloc_infos.emplace_hint(
           pai_it,
           *group_name,
@@ -413,8 +505,21 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     }
 
     auto& pai = pai_it->second;
-    size_t offset = reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(allocation->ptr);
-    return c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
+    size_t offset =
+        reinterpret_cast<uintptr_t>(ptr) -
+        reinterpret_cast<uintptr_t>(allocation->ptr);
+    auto symm_mem = c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
+    NCCLSymmMemKey key{ptr, *group_name};
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto it = symm_mems_.find(key);
+      if (it != symm_mems_.end()) {
+        return it->second;
+      }
+      symm_mems_[key] = symm_mem;
+      symm_mem_keys_by_alloc_[allocation->ptr].insert(key);
+    }
+    return symm_mem;
   }
 
   bool has_multicast_support(int device_idx) override {
@@ -431,7 +536,9 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
  private:
   std::mutex mutex_;
-  std::unordered_map<void*, std::unique_ptr<NCCLAllocation>> allocations_;
+  NCCLAllocMap allocations_;
+  NCCLSymmMemMap symm_mems_;
+  NCCLSymmMemKeysByAlloc symm_mem_keys_by_alloc_;
 };
 
 struct RegisterNCCLSymmetricMemoryAllocator {
