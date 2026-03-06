@@ -2558,6 +2558,19 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=[torch.cdouble],
             ),
+            # linalg_qr: MPS currently supports float32 only
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_dtypes",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
