@@ -354,9 +354,7 @@ def backward(
 
     # Check for __torch_function__ on tensors (similar to torch.autograd.grad)
     # This allows tensor subclasses to customize backward behavior
-    t_tensors = tuple(t for t in tensors if is_tensor_like(t))
-    t_inputs = tuple(t for t in inputs_tuple if is_tensor_like(t))
-    overridable_args = t_tensors + t_inputs
+    overridable_args = tuple(t for t in tensors + inputs_tuple if is_tensor_like(t))
     if has_torch_function(overridable_args):
         return handle_torch_function(
             backward,
@@ -472,9 +470,7 @@ def grad(
     else:
         # pyrefly: ignore [bad-argument-type]
         inputs = tuple(inputs)
-    t_outputs = tuple(i for i in outputs if is_tensor_like(i))
-    t_inputs = tuple(i for i in inputs if is_tensor_like(i))
-    overridable_args = t_outputs + t_inputs
+    overridable_args = tuple(i for i in outputs + inputs if is_tensor_like(i))
     if has_torch_function(overridable_args):
         return handle_torch_function(
             grad,
