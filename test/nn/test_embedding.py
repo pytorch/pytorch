@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
@@ -44,7 +45,7 @@ class TestEmbeddingNN(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA/XPU unavailable")
+    @unittest.skipIf(device_type not in ("cuda", "xpu", "mps"), "CUDA/XPU/MPS unavailable")
     def test_embedding_max_norm_unsorted_repeating_indices(self):
         def create_embedding(device):
             # Seed RNG so we get the same Embedding each time
@@ -993,7 +994,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     rtol = None
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyOn(["cuda", "xpu", "mps"])
+    @dtypesIfMPS(torch.float32, torch.float16)
     @dtypes(
         *(
             (torch.float, torch.double, torch.bfloat16, torch.half)
@@ -1940,7 +1942,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         bag(x, per_sample_weights=F.softmax(w, dim=-1))
 
 
-instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestEmbeddingNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestEmbeddingNN)
 
 if __name__ == "__main__":

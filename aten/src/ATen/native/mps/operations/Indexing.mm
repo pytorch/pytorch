@@ -43,6 +43,12 @@
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
 #include <ATen/ops/ones_like.h>
+#include <ATen/ops/renorm.h>
+#include <ATen/ops/renorm_native.h>
+#include <ATen/ops/sort.h>
+#include <ATen/ops/sort_native.h>
+#include <ATen/ops/unique_consecutive.h>
+#include <ATen/ops/unique_consecutive_native.h>
 #include <ATen/ops/view_as_real.h>
 #endif
 
@@ -218,6 +224,8 @@ static void index_put_kernel_mps(TensorIterator& iter,
   }
 }
 } // namespace mps
+
+Tensor& embedding_renorm_mps_(Tensor& self, const Tensor& indices, double max_norm, double norm_type);
 
 TORCH_IMPL_FUNC(index_copy_out_mps)(const Tensor& self,
                                     int64_t dim,
@@ -955,6 +963,27 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
     runMPSGraph(stream, cachedGraph->graph(), feeds, outgoingGradPlaceholder);
   }
   return outgoing_gradient;
+}
+
+Tensor& embedding_renorm_mps_(Tensor& self, const Tensor& indices, double max_norm, double norm_type) {
+  auto self_arg = TensorArg(self, "self", 1);
+  auto indices_arg = TensorArg(indices, "indices", 2);
+  checkDim("embedding_renorm_", self_arg, 2);
+  checkScalarTypes("embedding_renorm_", indices_arg, {kLong, kInt});
+  checkAllSameGPU(__func__, {self_arg, indices_arg});
+
+  auto indices_contig = indices.contiguous().view(-1);
+  if (indices_contig.numel() == 0) {
+    return self;
+  }
+
+  auto sorted_indices = std::get<0>(at::sort(indices_contig, /*dim=*/-1, /*descending=*/false));
+  auto unique_indices = std::get<0>(
+      at::unique_consecutive(sorted_indices, /*return_inverse=*/false, /*return_counts=*/false, std::nullopt));
+  auto rows = self.index_select(0, unique_indices);
+  auto rows_renorm = at::renorm(rows, norm_type, /*dim=*/0, max_norm);
+  self.index_put_({unique_indices}, rows_renorm, /*accumulate=*/false);
+  return self;
 }
 
 Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Tensor& value) {
