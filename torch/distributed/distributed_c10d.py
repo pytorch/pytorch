@@ -2532,6 +2532,11 @@ def isend(
     """
     Send a tensor asynchronously.
 
+    .. note::
+        For CUDA tensors with the NCCL backend, the returned :class:`~torch.distributed.Work`
+        object provides CUDA stream synchronization; It may not block the CPU thread by default.
+        See :ref:`distributed-p2p` for details.
+
     .. warning::
         Modifying ``tensor`` before the request completes causes undefined
         behavior.
@@ -2588,6 +2593,11 @@ def irecv(
 ) -> Work | None:
     """
     Receives a tensor asynchronously.
+
+    .. note::
+        For CUDA tensors with the NCCL backend, the returned :class:`~torch.distributed.Work`
+        object provides CUDA stream synchronization; It may not block the CPU thread by default.
+        See :ref:`distributed-p2p` for details.
 
     .. warning::
         ``tag`` is not supported with the NCCL backend.
@@ -2647,6 +2657,11 @@ def send(
     """
     Send a tensor synchronously.
 
+    .. note::
+        For CUDA tensors with the NCCL backend, "synchronous" refers to CUDA stream
+        synchronization rather than blocking the CPU thread. The Python call may
+        return before GPU communication has completed. See :ref:`distributed-p2p` for details.
+
     .. warning::
         ``tag`` is not supported with the NCCL backend.
 
@@ -2690,6 +2705,11 @@ def recv(
 ) -> int:
     """
     Receives a tensor synchronously.
+
+    .. note::
+        For CUDA tensors with the NCCL backend, "synchronous" refers to CUDA stream
+        synchronization rather than blocking the CPU thread. The Python call may
+        return before GPU communication has completed. See :ref:`distributed-p2p` for details.
 
     .. warning::
         ``tag`` is not supported with the NCCL backend.
