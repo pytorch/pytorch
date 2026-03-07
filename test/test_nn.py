@@ -9435,6 +9435,13 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
+    def test_ReplicationPad_empty_grad_output(self, device):
+        # regression test for https://github.com/pytorch/pytorch/issues/142834
+        grad_output = torch.full((2, 0, 6, 8), 1, dtype=torch.float, device=device)
+        inp = torch.full((2, 2, 4, 4), 1, dtype=torch.float, device=device)
+        result = torch.ops.aten.replication_pad2d_backward(grad_output, inp, [2, 2, 1, 1])
+        self.assertEqual(result, torch.zeros_like(inp))
+
     @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])

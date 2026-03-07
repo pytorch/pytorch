@@ -208,7 +208,7 @@ void replication_pad2d_backward_out_cpu_template(
       "gradOutput height unexpected. Expected: ", oheight, ", Got: ",
       gradOutput.size(dimh));
 
-  if (gradInput.numel() == 0) {
+  if (gradOutput.numel() == 0 || gradInput.numel() == 0) {
     return;
   }
 
@@ -264,7 +264,7 @@ void replication_pad3d_backward_out_cpu_template(
       "gradOutput depth unexpected. Expected: ", odepth, ", Got: ",
       gradOutput.size(dimd));
 
-  if (gradInput.numel() == 0) {
+  if (gradOutput.numel() == 0 || gradInput.numel() == 0) {
     return;
   }
 
@@ -282,7 +282,7 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cpu) (
 TORCH_IMPL_FUNC(replication_pad1d_backward_out_cpu) (
   const Tensor& gradOutput, const Tensor& input, IntArrayRef paddingSize, const Tensor& gradInput
 ) {
-  if (gradInput.numel() == 0) {
+  if (gradOutput.numel() == 0 || gradInput.numel() == 0) {
     return;
   }
   gradInput.zero_();
