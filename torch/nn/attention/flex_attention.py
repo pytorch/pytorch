@@ -2,6 +2,8 @@
 # flake8: noqa: B950
 """This module implements the user facing API for flex_attention in PyTorch."""
 
+from __future__ import annotations
+
 import functools
 import inspect
 import itertools
@@ -11,8 +13,8 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Literal, NamedTuple, TypeAlias
-from typing_extensions import NotRequired, TypedDict
+from typing import Any, Generic, Literal, NamedTuple, ParamSpec, TypeAlias, TypeVar, cast
+from typing_extensions import NotRequired, Self, TypedDict
 
 import torch
 from torch import Tensor
@@ -70,6 +72,9 @@ __all__ = [
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 _Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 class FlexKernelOptions(TypedDict, total=False):
@@ -206,6 +211,11 @@ class FlexKernelOptions(TypedDict, total=False):
     """
 
 
+class _KernelOptionsWithInternals(FlexKernelOptions, total=False):
+    OUTPUT_LOGSUMEXP: bool
+    OUTPUT_MAX: bool
+
+
 class AuxRequest(NamedTuple):
     """Request which auxiliary outputs to compute from flex_attention.
 
@@ -238,7 +248,7 @@ class _ModificationType(Enum):
     UNKNOWN = 3
 
 
-def _get_mod_type(fn: Callable) -> _ModificationType:
+def _get_mod_type(fn: _score_mod_signature | _mask_mod_signature | Callable[..., Any]) -> _ModificationType:
     """Get the type of modification function.
     This function inspects the number of positional arguments of the function to determine
     the type of modification function. If the function has 5 positional arguments, it is
@@ -273,12 +283,12 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
 
 # Need to define it here so that Dynamo doesn't skip it
 def _vmap_for_bhqkv(
-    fn: Callable,
+    fn: Callable[..., _R],
     prefix: tuple[int | None, ...],
     suffix: tuple[int | None, ...] = (),
     out_dims: int | list[int | None] = 0,
     group_dim: bool = False,
-):
+) -> Callable[..., _R]:
     """Used to vmap both score_mods and mask_mods over 4-dimensional/5-dimension inputs.
     Mapping over the [b, hq, q_idx, kv_idx] or [b, hkv, g, q_idx, kv_idx] dimensions.
 
@@ -369,7 +379,7 @@ _DEFAULT_SPARSE_BLOCK_SIZE = 128
 _LARGE_SPARSE_BLOCK_SIZE = 1 << 30
 
 
-def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
+def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor) -> Tensor:
     num_rows = col_indices.shape[-2]
     num_cols = col_indices.shape[-1]
     batch_dims = num_blocks_in_row.shape[:-1]
@@ -399,7 +409,7 @@ def _ordered_to_dense(num_blocks_in_row: Tensor, col_indices: Tensor):
     return out
 
 
-def _dense_to_ordered(dense_mask) -> tuple[Tensor, Tensor]:
+def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
     dense_mask = dense_mask.to(dtype=torch.int32)
     num_blocks_in_row = dense_mask.sum(dim=-1)
     col_indices = torch.argsort(dense_mask, dim=-1, descending=True, stable=True)
@@ -409,7 +419,7 @@ def _dense_to_ordered(dense_mask) -> tuple[Tensor, Tensor]:
     )
 
 
-def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor):
+def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor) -> tuple[Tensor, Tensor]:
     dense = _ordered_to_dense(num_blocks_in_row, col_indices)
     return _dense_to_ordered(dense.transpose(-2, -1))
 
@@ -419,7 +429,7 @@ def _adjust_num_blocks_and_indices(
     indices: Tensor,
     new_num_rows: int,
     new_num_cols: int,
-):
+) -> tuple[Tensor, Tensor]:
     indices = indices[:, :, :new_num_rows, :new_num_cols]
     num_blocks = num_blocks[:, :, :new_num_rows]
     num_blocks = torch.where(num_blocks < new_num_cols, num_blocks, new_num_cols)
@@ -435,7 +445,7 @@ def _closure_contents(fn: object) -> tuple[object, ...]:
     return tuple(cell.cell_contents for cell in closure)
 
 
-class _MaskModWrapper:
+class _MaskModWrapper(Generic[_P, _R]):
     """Wraps a mask_mod function with value-based equality.
 
     BlockMask stores an arbitrary callable (mask_mod) in its pytree context.
@@ -446,10 +456,10 @@ class _MaskModWrapper:
 
     __slots__ = ("fn",)
 
-    def __init__(self, fn: _mask_mod_signature) -> None:
+    def __init__(self, fn: Callable[_P, _R]) -> None:
         self.fn = fn
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         return self.fn(*args, **kwargs)
 
     def __eq__(self, other: object) -> bool:
@@ -621,7 +631,7 @@ class BlockMask:
         mask_mod: _mask_mod_signature | None = None,
         seq_lengths: tuple[int, int] | None = None,
         compute_q_blocks: bool = True,
-    ):
+    ) -> Self:
         """
         Creates a BlockMask instance from key-value block information.
 
@@ -686,7 +696,7 @@ class BlockMask:
             mask_mod=mask_mod,
         )
 
-    def as_tuple(self, flatten: bool = True):
+    def as_tuple(self, flatten: bool = True) -> tuple[Any, ...]:
         """
         Returns a tuple of the attributes of the BlockMask.
 
@@ -716,7 +726,7 @@ class BlockMask:
         )
 
     @property
-    def shape(self):
+    def shape(self) -> tuple[int, ...]:
         *batch_dims, _, _ = self.kv_indices.shape
         return tuple(batch_dims) + self.seq_lengths
 
@@ -727,7 +737,7 @@ class BlockMask:
         s += "\n)"
         return s
 
-    def __getitem__(self, index) -> "BlockMask":
+    def __getitem__(self, index: int | slice | Tensor | tuple[int | slice | Tensor, ...]) -> Self:
         """
         Returns a new BlockMask instance by getting the mask for the given index position.
 
@@ -820,7 +830,7 @@ class BlockMask:
             f")"
         )
 
-    def _adjust(self, new_q_len: int, new_kv_len: int):
+    def _adjust(self, new_q_len: int, new_kv_len: int) -> Self:
         new_num_rows = (new_q_len + self.BLOCK_SIZE[0] - 1) // self.BLOCK_SIZE[0]
         new_num_cols = (new_kv_len + self.BLOCK_SIZE[1] - 1) // self.BLOCK_SIZE[1]
         new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
@@ -850,7 +860,7 @@ class BlockMask:
             self.mask_mod,
         )
 
-    def numel(self):
+    def numel(self) -> int:
         """Returns the number of elements (not accounting for sparsity) in the mask."""
         shape = self.shape
 
@@ -882,7 +892,7 @@ class BlockMask:
             )
         return partial_dense
 
-    def to_string(self, grid_size=(20, 20), limit=4):
+    def to_string(self, grid_size: int | tuple[int, int] = (20, 20), limit: int = 4) -> str:
         """Returns a string representation of the block mask. Quite nifty.
 
         If grid_size is -1, prints out an uncompressed version. Warning, it can be quite big!
@@ -986,7 +996,9 @@ class BlockMask:
             return value.fn
         return value
 
-    def _flatten(self):
+    def _flatten(
+        self,
+    ) -> tuple[tuple[Tensor | None, ...], tuple[Any, ...]]:
         """Flatten BlockMask into a list of tensors and context.
 
         Wraps mask_mod in _MaskModWrapper for value-based comparison in TreeSpec.
@@ -999,7 +1011,11 @@ class BlockMask:
         return tensors, context
 
     @classmethod
-    def _unflatten(cls, tensors, context):
+    def _unflatten(
+        cls,
+        tensors: tuple[Tensor | None, ...],
+        context: tuple[Any, ...],
+    ) -> Self:
         """Unflatten tensors and context back into a BlockMask."""
         kwargs = {
             attr: cls._unwrap_context_value(attr, val)
@@ -1008,7 +1024,9 @@ class BlockMask:
         kwargs.update(zip(cls._TENSOR_ATTRS, tensors))
         return cls(**kwargs)
 
-    def _flatten_with_keys(self):
+    def _flatten_with_keys(
+        self,
+    ) -> tuple[tuple[tuple[GetAttrKey, Any], ...], tuple[tuple[GetAttrKey, Any], ...]]:
         """Flatten BlockMask with keys for better tracing.
 
         Wraps mask_mod in _MaskModWrapper for value-based comparison in TreeSpec.
@@ -1023,20 +1041,20 @@ class BlockMask:
         return tensors, context
 
 
-def _broadcast_to_dim(x, dim):
+def _broadcast_to_dim(x: Tensor, dim: int) -> Tensor:
     while x.dim() < dim:
         x = x.unsqueeze(0)
     return x
 
 
-def _round_up_to_multiple(x, multiple):
+def _round_up_to_multiple(x: int, multiple: int) -> int:
     return (x + multiple - 1) // multiple * multiple
 
 
 def _convert_mask_to_block_mask(
     mask: Tensor,
-    Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
-    KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
+    Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     separate_full_blocks: bool = False,
 ) -> tuple[Tensor, Tensor | None]:
     if mask.dtype != torch.bool:
@@ -1091,7 +1109,7 @@ def or_masks(*mask_mods: _mask_mod_signature) -> _mask_mod_signature:
     if not all(callable(arg) for arg in mask_mods):
         raise RuntimeError(f"All inputs should be callable mask_mods: {mask_mods}")
 
-    def or_mask(b, h, q_idx, kv_idx):
+    def or_mask(b: Tensor, h: Tensor, q_idx: Tensor, kv_idx: Tensor) -> Tensor:
         result = b.new_zeros((), dtype=torch.bool)
         for mask in mask_mods:
             result = result | mask(b, h, q_idx, kv_idx)
@@ -1105,7 +1123,7 @@ def and_masks(*mask_mods: _mask_mod_signature) -> _mask_mod_signature:
     if not all(callable(arg) for arg in mask_mods):
         raise RuntimeError(f"All inputs should be callable mask_mods: {mask_mods}")
 
-    def and_mask(b, h, q_idx, kv_idx):
+    def and_mask(b: Tensor, h: Tensor, q_idx: Tensor, kv_idx: Tensor) -> Tensor:
         result = b.new_ones((), dtype=torch.bool)
         for mask in mask_mods:
             result = result & mask(b, h, q_idx, kv_idx)
@@ -1115,9 +1133,9 @@ def and_masks(*mask_mods: _mask_mod_signature) -> _mask_mod_signature:
 
 
 def _convert_block_mask_to_mask(
-    block_mask,
-    KV_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
-    Q_BLOCK_SIZE=_DEFAULT_SPARSE_BLOCK_SIZE,
+    block_mask: Tensor,
+    KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
+    Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
 ) -> Tensor:
     if block_mask.dim() != 4:
         raise AssertionError(f"block_mask.dim() must be 4, got {block_mask.dim()}")
@@ -1131,7 +1149,7 @@ def _convert_block_mask_to_mask(
 
 def _create_sparse_block_from_block_mask(
     block_mask: tuple[Tensor, Tensor | None],
-    mask_mod: Callable | None,
+    mask_mod: _mask_mod_signature | None,
     seq_lengths: tuple[int, int],
     Q_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
     KV_BLOCK_SIZE: int = _DEFAULT_SPARSE_BLOCK_SIZE,
@@ -1311,14 +1329,14 @@ def _apply_kernel_options(
     key: Tensor,
     value: Tensor,
     return_lse: bool,
-    kernel_options,
+    kernel_options: FlexKernelOptions | None,
     return_aux: AuxRequest | None = None,
-):
-    kernel_options = {} if kernel_options is None else dict(kernel_options)
+) -> _KernelOptionsWithInternals:
+    kernel_options = cast(
+        _KernelOptionsWithInternals, {} if kernel_options is None else dict(kernel_options)
+    )
 
-    if "BACKEND" in kernel_options and kernel_options.get(
-        "FORCE_USE_FLEX_ATTENTION", False
-    ):
+    if "BACKEND" in kernel_options and kernel_options.get("FORCE_USE_FLEX_ATTENTION", False):
         # TODO: remove FORCE_USE_FLEX_ATTENTION once BACKEND is fully adopted.
         raise RuntimeError(
             "BACKEND cannot be combined with legacy FORCE_USE_FLEX_ATTENTION. "
