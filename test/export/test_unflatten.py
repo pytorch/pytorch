@@ -1081,6 +1081,58 @@ def forward(self, x):
         self.assertEqual(unf.m.type_name().split(".")[-1], "M")
         self.assertTrue(torch.allclose(unf(*inp), M1()(*inp)))
 
+    def test_unflatten_sym_numel(self):
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                return x.view(x.numel() // 2, 2)
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = Inner()
+
+            def forward(self, x):
+                return self.inner(x)
+
+        inp = (torch.randn(6),)
+        _batch = torch.export.Dim("_batch", min=1)
+        ep = export(
+            Outer(),
+            inp,
+            dynamic_shapes={"x": {0: 2 * _batch}},
+        )
+        unf = unflatten(ep)
+        self.assertTrue(torch.allclose(unf(*inp), Outer()(*inp)))
+        # Also test with a different dynamic shape
+        inp2 = (torch.randn(10),)
+        self.assertTrue(torch.allclose(unf(*inp2), Outer()(*inp2)))
+
+    def test_unflatten_mutation_intermediate_list_args(self):
+        class Child(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.zeros(6))
+
+            def forward(self, x, y):
+                self.buf.copy_(torch.cat([x, y]))
+                return self.buf
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x, y):
+                return self.child(x, y)
+
+        eager = Parent()
+        inp = (torch.randn(3), torch.randn(3))
+        ep = export(eager, inp)
+        unf = unflatten(ep)
+        eager_out = eager(*inp)
+        unf_out = unf(*inp)
+        self.assertTrue(torch.allclose(eager_out, unf_out))
+
 
 if __name__ == "__main__":
     run_tests()
