@@ -22,6 +22,7 @@ from torch._higher_order_ops.flex_attention import flex_attention as flex_attent
 from torch._higher_order_ops.utils import setup_compilation_env
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import GetAttrKey, tree_map_only
+from torch.utils._typing_utils import copy_method_sig
 
 if typing.TYPE_CHECKING:
     from torch._prims_common import DeviceLikeType
@@ -74,7 +75,6 @@ __all__ = [
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 _Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
-
 _R = TypeVar("_R")
 
 
@@ -460,10 +460,9 @@ class _MaskModWrapper:
     def __init__(self, fn: _mask_mod_signature) -> None:
         self.fn = fn
 
-    def __call__(
-        self, b: Tensor, h: Tensor, q_idx: Tensor, kv_idx: Tensor
-    ) -> Tensor:
-        return self.fn(b, h, q_idx, kv_idx)
+    @copy_method_sig(_mask_mod_signature)
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self.fn(*args, **kwargs)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _MaskModWrapper):
