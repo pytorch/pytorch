@@ -1938,6 +1938,24 @@ class TestMPS(TestCaseMPS):
                         helper(shape, eps=3, momentum=0.67, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
 
+    def test_batch_norm_stats(self):
+        def helper(shape, mean_axes, channels_last=False):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
+            if channels_last:
+                cpu_x = cpu_x.to(memory_format=torch.channels_last)
+            x = cpu_x.detach().clone().to('mps')
+
+            mean, invstd = torch.batch_norm_stats(x, 1e-5)
+            mean_ref = cpu_x.mean(mean_axes, keepdim=False)
+            invstd_ref = torch.rsqrt(cpu_x.var(mean_axes, keepdim=False, unbiased=False) + 1e-5)
+
+            self.assertEqual(mean, mean_ref)
+            self.assertEqual(invstd, invstd_ref)
+
+        helper((2, 4, 8, 8), (0, 2, 3))
+        helper((2, 4, 8, 8), (0, 2, 3), channels_last=True)
+        helper((2, 4, 4, 8, 8), (0, 2, 3, 4))
+
     def test_batch_norm_backward(self):
         inputs = torch.rand(1, 8, 4, 4, device="mps", requires_grad=True)
         x = torch.nn.BatchNorm2d(8).to("mps")
