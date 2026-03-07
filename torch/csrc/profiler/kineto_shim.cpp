@@ -37,7 +37,8 @@ std::unordered_set<libkineto::ActivityType> filterActivities(
         break;
       }
     }
-    TORCH_CHECK(found, "Unknown or non-member activity type name: '", name, "'");
+    TORCH_CHECK(
+        found, "Unknown or non-member activity type name: '", name, "'");
   }
   return result;
 }
@@ -309,19 +310,18 @@ void prepareTrace(
   std::set<libkineto::ActivityType> k_activities;
 
   // Helper: insert activity types for a group, applying the filter if present.
-  auto insertActivities =
-      [&](torch::autograd::profiler::ActivityType group,
-          const ActivityTypeMap& defaults) {
-        auto filter_it = activity_filter.find(group);
-        if (filter_it != activity_filter.end()) {
-          auto filtered = filterActivities(defaults, filter_it->second);
-          k_activities.insert(filtered.begin(), filtered.end());
-        } else {
-          for (const auto& [type, name] : defaults) {
-            k_activities.insert(type);
-          }
-        }
-      };
+  auto insertActivities = [&](torch::autograd::profiler::ActivityType group,
+                              const ActivityTypeMap& defaults) {
+    auto filter_it = activity_filter.find(group);
+    if (filter_it != activity_filter.end()) {
+      auto filtered = filterActivities(defaults, filter_it->second);
+      k_activities.insert(filtered.begin(), filtered.end());
+    } else {
+      for (const auto& [type, name] : defaults) {
+        k_activities.insert(type);
+      }
+    }
+  };
 
   bool has_cpu_activity =
       activities.count(torch::autograd::profiler::ActivityType::CPU);

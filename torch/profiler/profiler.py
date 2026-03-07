@@ -119,22 +119,16 @@ def _parse_activities(
     for item in activities:
         if isinstance(item, ProfilerActivity):
             if item in parsed_activities:
-                raise ValueError(
-                    f"Activity {item} specified more than once"
-                )
+                raise ValueError(f"Activity {item} specified more than once")
             parsed_activities.add(item)
         elif isinstance(item, dict):
             for key, val in item.items():
                 if key in parsed_activities:
-                    raise ValueError(
-                        f"Activity {key} specified more than once"
-                    )
+                    raise ValueError(f"Activity {key} specified more than once")
                 parsed_activities.add(key)
                 activity_filters[key] = set(val)
         else:
-            raise TypeError(
-                f"Expected ProfilerActivity or dict, got {type(item)}"
-            )
+            raise TypeError(f"Expected ProfilerActivity or dict, got {type(item)}")
     return parsed_activities, activity_filters
 
 

@@ -2778,7 +2778,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             ) as p:
                 x = torch.randn(10, 10)
                 y = torch.mm(x, x)
-    
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_empty_list(self):

@@ -108,8 +108,9 @@ struct ActivityTraceWrapper {
 };
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
-using ActivityFilter =
-    std::unordered_map<torch::autograd::profiler::ActivityType, std::unordered_set<std::string>>;
+using ActivityFilter = std::unordered_map<
+    torch::autograd::profiler::ActivityType,
+    std::unordered_set<std::string>>;
 void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
