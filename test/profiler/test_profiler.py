@@ -2724,9 +2724,15 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             y = torch.mm(x, x)
         events = p.events()
         self.assertGreater(len(events), 0)
-        has_overhead = any(
-            "Lazy Function Loading" in e.name for e in events
-        )  # Lazy Function Loading is an OVERHEAD event
+        print(events)
+        # Verify we got GPU_MEMCPY events (HtoD copy from .to("cuda")).
+        has_memcpy = any("Memcpy" in e.name for e in events)
+        self.assertTrue(has_memcpy, "Expected GPU_MEMCPY events")
+        # Verify we got CUDA_RUNTIME events (e.g. cudaLaunchKernel).
+        has_runtime = any("cuda" in e.name for e in events)
+        self.assertTrue(has_runtime, "Expected CUDA_RUNTIME events")
+        # OVERHEAD events (e.g. Lazy Function Loading) should NOT appear.
+        has_overhead = any("Lazy Function Loading" in e.name for e in events)
         self.assertFalse(has_overhead)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
@@ -2742,7 +2748,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_activity_filter_duplicate_raises(self):
-        """Same activity as both enum and dict key raises ValueError."""
+        """Same activity appearing more than once raises ValueError."""
         with self.assertRaises(ValueError):
             with profile(
                 activities=[
@@ -2772,6 +2778,17 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             ) as p:
                 x = torch.randn(10, 10)
                 y = torch.mm(x, x)
+    
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_empty_list(self):
+        """Passing an empty list to activities means not collecting for the specified activity."""
+        with profile(
+            activities=[{ProfilerActivity.CUDA: []}],
+        ) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        self.assertEqual(len(p.events()), 0)
 
 
 class SimpleNet(nn.Module):

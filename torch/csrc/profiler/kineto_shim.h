@@ -1,6 +1,5 @@
 #pragma once
 
-#include <map>
 #include <memory>
 #include <string>
 
@@ -110,7 +109,7 @@ struct ActivityTraceWrapper {
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 using ActivityFilter =
-    std::map<torch::autograd::profiler::ActivityType, std::set<std::string>>;
+    std::unordered_map<torch::autograd::profiler::ActivityType, std::unordered_set<std::string>>;
 void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
