@@ -233,9 +233,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_alloc(self):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
-        # Warm up the NCCL communicator before the first symmetric-memory
-        # rendezvous. Without this, symmetric-memory setup can fail because the
-        # communicator has not been initialized yet.
+        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
@@ -258,9 +258,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     def test_nccl_symmem_rendezvous_many_allocations(self):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
-        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
-        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
-        # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
 
