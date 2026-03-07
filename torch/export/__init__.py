@@ -285,6 +285,7 @@ def load(
     *,
     extra_files: dict[str, Any] | None = None,
     expected_opset_version: dict[str, int] | None = None,
+    weights_only: bool = False,
 ) -> ExportedProgram:
     """
 
@@ -308,6 +309,11 @@ def load(
 
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
+
+        weights_only (bool): Indicates whether to only load weights. If False,
+         it allows loading custom objects and other complex artifacts, which
+         could be a security risk if the file is from an untrusted source.
+         Defaults to False for backward compatibility.
 
     Returns:
         An :class:`ExportedProgram` object
@@ -343,6 +349,7 @@ def load(
         pt2_contents = load_pt2(
             f,
             expected_opset_version=expected_opset_version,
+            weights_only=weights_only,
         )
     except RuntimeError:
         log.warning("Ran into the following error when deserializing", exc_info=True)
@@ -429,7 +436,11 @@ def load(
         )
 
         # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
+        ep = deserialize(
+            artifact,
+            expected_opset_version,
+            weights_only=weights_only,
+        )
 
         return ep
 
