@@ -142,6 +142,7 @@ void filterEngineConfigs(
     cudnn_frontend::EngineConfigList& to,
     bool deterministic,
     bool allow_tf32,
+    bool allow_reduced_precision_reduction,
     c10::ScalarType scalar_type) {
   auto filter = [=](cudnnBackendDescriptor_t c) {
     if (deterministic) {
@@ -159,6 +160,13 @@ void filterEngineConfigs(
       if (!allow_tf32 &&
           cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(
               c)) {
+        return true;
+      }
+    }
+    if (!allow_reduced_precision_reduction &&
+        (scalar_type == kHalf || scalar_type == kBFloat16)) {
+      if (cudnn_frontend::hasNumericalNote<
+              CUDNN_NUMERICAL_NOTE_REDUCED_PRECISION_REDUCTION>(c)) {
         return true;
       }
     }
@@ -580,6 +588,7 @@ auto get_generator_sources(
     const Tensor& x,
     const bool deterministic,
     const bool allow_tf32,
+    const bool allow_reduced_precision_reduction,
     const cudnnBackendHeurMode_t heur_mode,
     const bool heuristic,
     const bool fallback,
@@ -590,6 +599,7 @@ auto get_generator_sources(
       [/*&desc,*/ &x,
        deterministic,
        allow_tf32,
+       allow_reduced_precision_reduction,
        heur_mode,
        get_all_heuristic_configs,
        heuristic_config_count](cudnn_frontend::OperationGraph& opGraph)
@@ -609,11 +619,12 @@ auto get_generator_sources(
         filtered_configs,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         x.scalar_type());
     return filtered_configs;
   };
   // Method for engine config generator based on fallback list
-  const auto fallback_method = [&desc, &x, deterministic, allow_tf32](
+  const auto fallback_method = [&desc, &x, deterministic, allow_tf32, allow_reduced_precision_reduction](
                                    cudnn_frontend::OperationGraph& opGraph)
       -> cudnn_frontend::EngineConfigList {
     auto fallback = cudnn_frontend::EngineFallbackListBuilder()
@@ -627,6 +638,7 @@ auto get_generator_sources(
         filtered_configs,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         x.scalar_type());
     return filtered_configs;
   };
@@ -778,7 +790,8 @@ auto get_plans_from_find(
     const IntArrayRef stride,
     const IntArrayRef dilation,
     const bool deterministic,
-    const bool allow_tf32) {
+    const bool allow_tf32,
+    const bool allow_reduced_precision_reduction) {
   auto opGraph =
       build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
   void* data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
@@ -790,6 +803,7 @@ auto get_plans_from_find(
       x,
       deterministic,
       allow_tf32,
+      allow_reduced_precision_reduction,
       CUDNN_HEUR_MODE_INSTANT,
       true,
       true,
@@ -834,7 +848,8 @@ auto get_plans_from_find_fused(
     const IntArrayRef stride,
     const IntArrayRef dilation,
     const bool deterministic,
-    const bool allow_tf32) {
+    const bool allow_tf32,
+    const bool allow_reduced_precision_reduction) {
   auto opGraph = build_opgraph_fused(
       handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
   void* data_ptrs[] = {
@@ -846,6 +861,7 @@ auto get_plans_from_find_fused(
       x,
       deterministic,
       allow_tf32,
+      allow_reduced_precision_reduction,
       CUDNN_HEUR_MODE_INSTANT,
       true,
       true,
@@ -892,6 +908,7 @@ auto get_configs_from_heuristics(
     const IntArrayRef dilation,
     const bool deterministic,
     const bool allow_tf32,
+    const bool allow_reduced_precision_reduction,
     const bool fallback,
     const bool get_all_heuristic_configs = false) {
   auto opGraph =
@@ -906,6 +923,7 @@ auto get_configs_from_heuristics(
       x,
       deterministic,
       allow_tf32,
+      allow_reduced_precision_reduction,
       heuristic_mode,
       !fallback,
       fallback,
@@ -933,6 +951,7 @@ auto get_configs_from_heuristics_fused(
     const IntArrayRef dilation,
     const bool deterministic,
     const bool allow_tf32,
+    const bool allow_reduced_precision_reduction,
     const bool fallback,
     const bool get_all_heuristic_configs = false) {
   auto opGraph = build_opgraph_fused(
@@ -947,6 +966,7 @@ auto get_configs_from_heuristics_fused(
       x,
       deterministic,
       allow_tf32,
+      allow_reduced_precision_reduction,
       heuristic_mode,
       !fallback,
       fallback,
@@ -1121,6 +1141,8 @@ void run_single_conv(
     const bool deterministic,
     const bool allow_tf32) {
   cudnnHandle_t handle = getCudnnHandle();
+  auto allow_reduced_precision_reduction =
+      at::globalContext().allowReducedPrecisionReductionCuDNN();
   CacheKeyWrapper key(
       operation,
       y,
@@ -1158,6 +1180,7 @@ void run_single_conv(
         dilation,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         false);
     const bool tried_top_config = !engine_config_result.configs.empty();
     if (tried_top_config) {
@@ -1188,6 +1211,7 @@ void run_single_conv(
           dilation,
           deterministic,
           allow_tf32,
+          allow_reduced_precision_reduction,
           false,
           true);
       auto configs_begin = engine_config_result.configs.begin();
@@ -1223,6 +1247,7 @@ void run_single_conv(
         dilation,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         true);
     if (try_configs(
             engine_config_result.configs,
@@ -1249,7 +1274,8 @@ void run_single_conv(
         stride,
         dilation,
         deterministic,
-        allow_tf32);
+        allow_tf32,
+        allow_reduced_precision_reduction);
     // Replicate v7 behavior: clear cached blocks as benchmark incurs
     // significant memory consumptiont that is not needed after this step
     if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
@@ -1274,6 +1300,8 @@ void run_fused_conv(
     const bool deterministic,
     const bool allow_tf32) {
   cudnnHandle_t handle = getCudnnHandle();
+  auto allow_reduced_precision_reduction =
+      at::globalContext().allowReducedPrecisionReductionCuDNN();
 
   CacheKeyFusedWrapper key(
       y,
@@ -1315,6 +1343,7 @@ void run_fused_conv(
         dilation,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         false);
     const bool tried_top_config = !engine_config_result.configs.empty();
     if (tried_top_config) {
@@ -1345,11 +1374,12 @@ void run_fused_conv(
           key,
           padding,
           stride,
-          dilation,
-          deterministic,
-          allow_tf32,
-          false,
-          true);
+        dilation,
+        deterministic,
+        allow_tf32,
+        allow_reduced_precision_reduction,
+        false,
+        true);
       auto configs_begin = engine_config_result.configs.begin();
       // The top-config path already tried the first filtered heuristic config.
       if (tried_top_config &&
@@ -1386,6 +1416,7 @@ void run_fused_conv(
         dilation,
         deterministic,
         allow_tf32,
+        allow_reduced_precision_reduction,
         true);
     if (try_configs_fused(
             engine_config_result.configs,
@@ -1415,7 +1446,8 @@ void run_fused_conv(
         stride,
         dilation,
         deterministic,
-        allow_tf32);
+        allow_tf32,
+        allow_reduced_precision_reduction);
     try_plans_fused(plans, key, handle, x, y, w, z, b);
   }
 }
