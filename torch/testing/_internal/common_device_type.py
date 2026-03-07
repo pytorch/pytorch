@@ -1684,6 +1684,15 @@ def onlyHPU(fn):
 
 def onlyAccelerator(fn):
     """Skip test if not running on an accelerator device (i.e., skip on CPU and meta)."""
+    @wraps(fn)
+    def only_fn(self, *args, **kwargs):
+        if self.device_type in ("cpu", "meta"):
+            reason = "onlyAccelerator: doesn't run on CPU or meta devices"
+            raise unittest.SkipTest(reason)
+        return fn(self, *args, **kwargs)
+
+    return only_fn
+
 
     @wraps(fn)
     def only_fn(self, *args, **kwargs):

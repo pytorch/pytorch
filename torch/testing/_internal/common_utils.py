@@ -1524,6 +1524,12 @@ TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
 
 TEST_Z3 = _check_module_exists('z3')
 
+ACCELERATOR_TYPE = LazyVal(lambda: (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else None
+))
+
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
 
