@@ -25,6 +25,7 @@ from torch.testing._internal.common_dtype import (
     integral_types,
 )
 from torch.testing._internal.common_utils import (
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     slowTest,
@@ -1334,7 +1335,8 @@ class TestSortAndSelect(TestCase):
     @slowTest
     @largeTensorTest("170GB", "cpu")
     @largeTensorTest("72GB", "cuda")
-    def test_topk_large_k(self, device, dtype):
+    @parametrize("test_case", ["random", "identical"])
+    def test_topk_large_k(self, device, dtype, test_case):
         """Test topk with k > 2^32 (integer overflow bug fix).
 
         Tests both random and edge case (all identical values) inputs.
@@ -1349,7 +1351,6 @@ class TestSortAndSelect(TestCase):
         k = random.randint(2**32 + 100, n - 100)
         largest = random.choice([True, False])
 
-
         # check correctness chunkwise later to avoid OOM
         chunk_size = 100_000_000
         num_chunks = (k + chunk_size - 1) // chunk_size
@@ -1361,46 +1362,58 @@ class TestSortAndSelect(TestCase):
         gpu_chunk_values = torch.empty(chunk_size, device=device, dtype=dtype)
 
         # pre-allocate CPU tensors
-        cpu_indices_copy = torch.empty(k, dtype=torch.long, device='cpu')
+        cpu_indices_copy = torch.empty(k, dtype=torch.long, device="cpu")
 
-        # run tests for both random and identical values
-        for test_case in ["random", "identical"]:
-            random_constant = random.random()
-            if test_case == "random":
-                data.random_()
-            else:
-                data.fill_(random_constant)
+        random_constant = random.random()
+        if test_case == "random":
+            data.random_()
+        else:
+            data.fill_(random_constant)
 
-            torch.topk(data, k, dim=1, largest=largest, sorted=False, out=(gpu_values, gpu_indices))
+        torch.topk(
+            data, k, dim=1, largest=largest, sorted=False, out=(gpu_values, gpu_indices)
+        )
 
-            indices = gpu_indices
-            values = gpu_values
+        indices = gpu_indices
+        values = gpu_values
 
-            # all indices must be in valid range
-            self.assertGreaterEqual(indices.min().item(), 0)
-            self.assertLess(indices.max().item(), n)
+        # all indices must be in valid range
+        self.assertGreaterEqual(indices.min().item(), 0)
+        self.assertLess(indices.max().item(), n)
 
-            # all indices must be unique
-            cpu_indices_copy.copy_(indices.squeeze(0))
-            total_unique = torch.unique(cpu_indices_copy).numel()
-            self.assertEqual(total_unique, k, f"Duplicates found in topk test: {k - total_unique}")
-            
-            # for random case, values must match at returned indices (use pre-allocated tensor)
-            if test_case == "random":
-                for i in range(num_chunks):
-                    start = i * chunk_size
-                    end = min((i + 1) * chunk_size, k)
-                    chunk_size_actual = end - start
+        # all indices must be unique
+        cpu_indices_copy.copy_(indices.squeeze(0))
+        total_unique = torch.unique(cpu_indices_copy).numel()
+        self.assertEqual(
+            total_unique, k, f"Duplicates found in topk test: {k - total_unique}"
+        )
+        # for random case, values must match at returned indices (use pre-allocated tensor)
+        if test_case == "random":
+            for i in range(num_chunks):
+                start = i * chunk_size
+                end = min((i + 1) * chunk_size, k)
+                chunk_size_actual = end - start
 
-                    chunk_indices = indices[0, start:end]
-                    chunk_values = values[0, start:end]
+                chunk_indices = indices[0, start:end]
+                chunk_values = values[0, start:end]
 
-                    actual_values = torch.index_select(data[0], 0, chunk_indices, out=gpu_chunk_values[:chunk_size_actual])
-                    self.assertEqual(chunk_values, actual_values, msg=f"Value mismatch in chunk {i+1}")
+                actual_values = torch.index_select(
+                    data[0], 0, chunk_indices, out=gpu_chunk_values[:chunk_size_actual]
+                )
+                self.assertEqual(
+                    chunk_values, actual_values, msg=f"Value mismatch in chunk {i + 1}"
+                )
 
-            # for identical case, all values must equal to constant
-            if test_case == "identical":
-                self.assertTrue((values == random_constant).all().item(), "Values not equal to random constant")
+        # for identical case, all values must equal to constant
+        if test_case == "identical":
+            # use .all() instead of self.assertEqualBroadcasting because the latter
+            # allocates a full-size tensor with the same size as values, causing OOM
+            self.assertEqual(
+                (values == random_constant).all().item(),
+                True,
+                "Values not equal to random constant",
+            )
+
 
 instantiate_device_type_tests(TestSortAndSelect, globals())
 
