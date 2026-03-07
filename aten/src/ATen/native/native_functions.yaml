@@ -2348,6 +2348,7 @@
   dispatch:
     CPU: embedding_renorm_cpu_
     CUDA: embedding_renorm_cuda_
+    MPS: embedding_renorm_mps_
   autogen: embedding_renorm, embedding_renorm.out
 
 - func: embedding_sparse_backward(Tensor grad, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor

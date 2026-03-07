@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
@@ -1940,7 +1941,41 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         bag(x, per_sample_weights=F.softmax(w, dim=-1))
 
 
+class TestEmbeddingNNRenormDeviceType(NNTestCase):
+    @onlyOn(["cuda", "xpu", "mps"])
+    @dtypesIfCUDA(torch.float32, torch.float16)
+    @dtypesIfXPU(torch.float32, torch.float16)
+    @dtypesIfMPS(torch.float32, torch.float16)
+    @dtypes(torch.float32)
+    def test_embedding_renorm_device(self, device, dtype):
+        weight = torch.tensor(
+            [
+                [3.0, 4.0, 0.0],
+                [0.3, 0.4, 0.0],
+                [6.0, 8.0, 0.0],
+                [5.0, 12.0, 0.0],
+            ],
+            dtype=dtype,
+        )
+        indices = torch.tensor([[2, 0, 2], [3, 0, 3]], dtype=torch.long)
+
+        expected = torch.embedding_renorm_(weight.clone(), indices, 5.0, 2.0)
+        actual = torch.embedding_renorm_(
+            weight.to(device), indices.to(device), 5.0, 2.0
+        )
+
+        atol = 0.01 if dtype == torch.float16 else None
+        rtol = 0.01 if dtype == torch.float16 else None
+        self.assertEqual(actual.cpu(), expected, atol=atol, rtol=rtol)
+
+
 instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestEmbeddingNNRenormDeviceType,
+    globals(),
+    allow_mps=True,
+    allow_xpu=True,
+)
 instantiate_parametrized_tests(TestEmbeddingNN)
 
 if __name__ == "__main__":
