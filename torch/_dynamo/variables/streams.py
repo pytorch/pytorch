@@ -86,6 +86,32 @@ def _get_event_by_index(index: int) -> torch.Event:
     return event
 
 
+def _ensure_device_specific_stream(stream: torch.Stream) -> torch.Stream:
+    """Convert a generic torch.Stream to a device-specific stream if needed.
+
+    torch.accelerator.current_stream() returns a generic torch.Stream, but
+    device-specific event operations (record, wait) dispatch through the base
+    THPStream C methods which use the c10::Event interface. This interface
+    checks that the event's device type matches the stream's device type,
+    which fails for device-specific events (e.g. torch.cuda.Event) whose
+    c10::Event field may not be initialized.
+
+    Converting to a device-specific stream (e.g. torch.cuda.Stream) ensures
+    that record_event/wait_event dispatch through the correct device-specific
+    C methods instead.
+    """
+    if type(stream) is not torch.Stream:
+        return stream
+    device = stream.device
+    if device.type == "cuda" and torch.cuda.is_available():
+        return torch.cuda.Stream(
+            stream_id=stream.stream_id,
+            device_index=stream.device_index,
+            device_type=stream.device_type,
+        )
+    return stream
+
+
 @custom_op("streams::fork", mutates_args=())
 def fork_stream(
     from_index: int,  # kept to make stream transitions clearer
@@ -125,7 +151,7 @@ has_side_effect(torch.ops.streams.join.default)
 def record_event(event_index: int, stream_index: int) -> None:
     event = _get_event_by_index(event_index)
     stream = _get_stream_by_index(stream_index)
-    stream.record_event(event)
+    _ensure_device_specific_stream(stream).record_event(event)
 
 
 @record_event.register_fake
@@ -143,7 +169,7 @@ has_side_effect(torch.ops.streams.record_event.default)
 def wait_event(event_index: int, stream_index: int) -> None:
     event = _get_event_by_index(event_index)
     stream = _get_stream_by_index(stream_index)
-    stream.wait_event(event)
+    _ensure_device_specific_stream(stream).wait_event(event)
 
 
 @wait_event.register_fake

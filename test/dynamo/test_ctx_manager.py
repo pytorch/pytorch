@@ -571,6 +571,18 @@ class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertExpectedInline(str(cnts.op_count), """16""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_event_record_in_compiled_fn(self):
+        event = torch.cuda.Event()
+
+        @torch.compile
+        def f(x):
+            event.record()
+            return x + 1
+
+        res = f(torch.tensor(1.0, device="cuda"))
+        self.assertEqual(res, torch.tensor(2.0, device="cuda"))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_device(self):
         def fn(x):
             with torch.cuda.device(x.device.index - 1):
