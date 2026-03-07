@@ -2407,6 +2407,11 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         ctor = self.python_type()
         return ctor(*args, **kwargs)
 
+    def var_getattr(self, tx, name):
+        if name in self.fields:
+            return self.fields[name]
+        return super().var_getattr(tx, name)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         from dataclasses import fields
 
@@ -2489,7 +2494,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         directly_update_dict: bool = False,
     ) -> VariableTracker:
         self.fields[name.as_python_constant()] = value
-        return super().method_setattr_standard(tx, name, value, directly_update_dict)
+        return variables.CONSTANT_VARIABLE_NONE
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"

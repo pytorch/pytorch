@@ -835,6 +835,17 @@ class SideEffects:
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
 
+                if isinstance(var, variables.FrozenDataClassVariable):
+                    for name, value in var.fields.items():
+                        cg.load_import_from("builtins", "object")
+                        cg.load_method("__setattr__")
+                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(variables.ConstantVariable(name))
+                        cg(value)
+                        cg.extend_output(
+                            [*create_call_method(3), create_instruction("POP_TOP")]
+                        )
+
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
             cg.load_method("save_for_backward")
