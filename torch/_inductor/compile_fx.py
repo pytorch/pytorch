@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -535,11 +535,12 @@ def _recursive_joint_graph_passes(
     gm: GraphModule,
     skip_invoke_subgraph: bool = False,
     input_device: torch.device | None = None,
+    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
 ) -> GraphModule:
     def _run_on_sub_graph_module(subgraph_name: str) -> None:
         subgraph = getattr(gm, subgraph_name)
         new_subgraph = _recursive_joint_graph_passes(
-            subgraph, skip_invoke_subgraph, input_device
+            subgraph, skip_invoke_subgraph, input_device, get_decomp_fn=get_decomp_fn
         )
         setattr(gm, subgraph_name, new_subgraph)
 
@@ -561,7 +562,7 @@ def _recursive_joint_graph_passes(
         for subgraph_name in old_subgraph_names:
             _run_on_sub_graph_module(subgraph_name)
 
-        out_gm = joint_graph_passes(gm, input_device)
+        out_gm = joint_graph_passes(gm, input_device, get_decomp_fn=get_decomp_fn)
 
         # Some joint graph passes may create new sub graph module. Run one round
         # for the newly created graph modules.
@@ -2350,6 +2351,7 @@ def compile_fx_forward(
     compiler_config_extra: CompilerConfigExtra,
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     is_inference: bool = False,
+    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
 ) -> OutputCode:
     """
     Compile the forward graph of the given graph module.
@@ -2395,7 +2397,7 @@ def compile_fx_forward(
         _recursive_record_original_output_strides(gm)
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
-        gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
+        gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)), get_decomp_fn=get_decomp_fn)
 
         trace_structured(
             "artifact",
@@ -2600,6 +2602,7 @@ def compile_fx(
     config_patches: dict[str, Any] | None = None,
     decompositions: dict[OpOverload, Callable[..., Any]] | None = None,
     ignore_shape_env: bool = False,
+    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
 ) -> CompileFxOutput:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2630,6 +2633,7 @@ def compile_fx(
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
                 ignore_shape_env=ignore_shape_env,
+                get_decomp_fn=get_decomp_fn,
             )
 
     # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
@@ -2672,6 +2676,7 @@ def compile_fx(
                     ),
                     decompositions=decompositions,
                     ignore_shape_env=ignore_shape_env,
+                    get_decomp_fn=get_decomp_fn,
                 )
 
     return _maybe_wrap_and_compile_fx_main(
@@ -2680,6 +2685,7 @@ def compile_fx(
         inner_compile,
         decompositions,
         ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
     )
 
 
@@ -2720,6 +2726,7 @@ def _maybe_wrap_and_compile_fx_main(
     inner_compile: Callable[..., OutputCode],
     decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
+    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
 ) -> CompileFxOutput:
     """
     Part of compile_fx, called after patching configs.
@@ -2735,6 +2742,7 @@ def _maybe_wrap_and_compile_fx_main(
         inner_compile=inner_compile,
         decompositions=decompositions,
         ignore_shape_env=ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
     )
     if not graph_returns_tuple(model_):
         return make_graph_return_tuple(model_, example_inputs_, compile_gm)
@@ -2757,6 +2765,7 @@ def _maybe_wrap_and_compile_fx_main(
         inner_compile,
         decompositions,
         ignore_shape_env,
+        get_decomp_fn=get_decomp_fn,
     )
 
 
@@ -2766,6 +2775,7 @@ def _compile_fx_main(
     inner_compile: Callable[..., OutputCode],
     decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
+    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
 ) -> CompileFxOutput:
     """
     Main part of compile_fx, called after wrapping is done.
@@ -2797,9 +2807,16 @@ def _compile_fx_main(
         gm_meta = model_.meta if isinstance(model_, GraphModule) else None
         compiler_config_extra = create_compiler_config_extra(config, gm_meta)
 
+        _user_provided_decompositions = decompositions is not None or get_decomp_fn is not None
         decompositions = (
             decompositions if decompositions is not None else select_decomp_table()
         )
+
+        if get_decomp_fn is None and _user_provided_decompositions:
+            _decomps_ref = decompositions
+
+            def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
+                return _decomps_ref
 
         def fw_compiler_base(
             gm: GraphModule,
@@ -2819,6 +2836,7 @@ def _compile_fx_main(
                     compiler_config_extra=compiler_config_extra,
                     inner_compile=inner_compile,
                     is_inference=is_inference,
+                    get_decomp_fn=get_decomp_fn,
                 )
 
         fw_compiler: Callable[[GraphModule, Sequence[InputType]], OutputCode] = (

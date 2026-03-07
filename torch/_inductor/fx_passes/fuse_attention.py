@@ -3,6 +3,8 @@ import functools
 import inspect
 import logging
 import warnings
+from collections.abc import Callable
+from typing import Any
 
 import torch
 
@@ -1327,6 +1329,18 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
 
 
 @functools.cache
-def _sfdp_init(input_device: torch.device | None = None):
+def _sfdp_init(
+    input_device: torch.device | None = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+):
     for key, register_replacement_kwargs in _get_sfdp_patterns(input_device):
+        # skip_duplicates=True is always needed: _sfdp_init is cached per
+        # (input_device, get_decomp_fn), so two compilations with different
+        # get_decomp_fn values will both try to register the same SFDP patterns.
+        # The second call must skip gracefully.
+        register_replacement_kwargs = {
+            **register_replacement_kwargs,
+            "skip_duplicates": True,
+            **({"get_decomp_fn": get_decomp_fn} if get_decomp_fn is not None else {}),
+        }
         gen_register_replacement(key, **register_replacement_kwargs)

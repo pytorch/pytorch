@@ -1454,6 +1454,7 @@ def register_replacement(
     exclusive_arg_names: Sequence[str] = (),
     search_fn_pattern: PatternExpr | None = None,
     skip_duplicates: bool = False,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
 ) -> bool:
     """
     Create a replacement rule based on example functions that get traced
@@ -1545,7 +1546,9 @@ def register_replacement(
 
                     try:
                         # pyrefly: ignore [bad-argument-type]
-                        specific_graph = trace_fn(search_fn_new, sym_args + args)
+                        specific_graph = trace_fn(
+                            search_fn_new, sym_args + args, get_decomp_fn=get_decomp_fn
+                        )
                     except RuntimeError as e:
                         log_trace_failure(search_fn, e)
                         return False
@@ -1571,7 +1574,9 @@ def register_replacement(
                     argnames = sym_arg_names + argnames
                 else:
                     try:
-                        specific_graph = trace_fn(search_fn, args)
+                        specific_graph = trace_fn(
+                            search_fn, args, get_decomp_fn=get_decomp_fn
+                        )
                     except RuntimeError as e:
                         log_trace_failure(search_fn, e)
                         return False
@@ -1598,7 +1603,9 @@ def register_replacement(
 
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
-                match.replacement_graph = trace_fn(replace_fn, args)
+                match.replacement_graph = trace_fn(
+                    replace_fn, args, get_decomp_fn=get_decomp_fn
+                )
                 if len(match.nodes) == 1:
                     for n in match.replacement_graph.graph.nodes:
                         _transfer_meta(
@@ -1772,6 +1779,7 @@ def gen_register_replacement(
     scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
     skip_duplicates: bool = False,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
 ) -> None:
     # Make sure the example_inputs is materialized.
     example_inputs = tuple(example_inputs)
@@ -1814,6 +1822,7 @@ def gen_register_replacement(
         exclusive_arg_names,
         search_fn_pattern=pat,
         skip_duplicates=skip_duplicates,
+        get_decomp_fn=get_decomp_fn,
     )
 
 
@@ -2239,7 +2248,12 @@ def fwd_only(
 
 
 @torch.enable_grad()
-def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.GraphModule:
+def joint_fwd_bwd(
+    fn: Callable[..., Any],
+    args: Sequence[Any],
+    *,
+    get_decomp_fn: Callable[..., Any] | None = None,
+) -> torch.fx.GraphModule:
     """Build a normalized training graph, for use with fx_to_pattern"""
     gm: torch.fx.GraphModule | None = None
 
@@ -2257,7 +2271,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
             # pyrefly: ignore[bad-argument-type]
             lambda gm, example_inputs: make_boxed_func(gm),
             partition_fn=record_joint_graph,
-            decompositions=select_decomp_table(),
+            decompositions=get_decomp_fn() if get_decomp_fn is not None else select_decomp_table(),
             keep_inference_input_mutations=True,
             enable_log=False,
         )(*args)
@@ -2320,16 +2334,27 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
     assert not waiting and len(ready) == len(graph.nodes)
 
 
-def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
+def init_once_fakemode(fn: Callable[..., Any]) -> Callable[..., Any]:
     """Wrapper around lazy init functions in fx_passes/"""
+
+    _fn_params = inspect.signature(fn).parameters
 
     @functools.cache
     @functools.wraps(fn)
-    def lazy_init(input_device: torch.device | None = None) -> Any:
+    def lazy_init(
+        input_device: Any | None = None,
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+    ) -> Any:
         counters_ref = counters[backend].copy()
 
+        kwargs: dict[str, Any] = {}
+        if "input_device" in _fn_params:
+            kwargs["input_device"] = input_device
+        if "get_decomp_fn" in _fn_params:
+            kwargs["get_decomp_fn"] = get_decomp_fn
+
         with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
-            result = fn(input_device)
+            result = fn(**kwargs)
 
         # clear view matches encountered during tracing
         counters[backend] = counters_ref
