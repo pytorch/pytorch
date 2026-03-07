@@ -509,6 +509,18 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
         map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
       }
     }
+
+    auto seqNumber = debugInfo->getSeqNumber();
+    auto isP2P = debugInfo->isP2P();
+    const auto& group_name_for_hash = debugInfo->getProcessGroupName();
+    size_t comms_id = c10::get_hash(
+        group_name_for_hash,
+        seqNumber,
+        isP2P,
+        globalRankStart,
+        globalRankStride,
+        debugInfo->getWorldSize());
+    map.emplace(kCommsId, std::to_string(comms_id));
   }
 
   map.emplace(

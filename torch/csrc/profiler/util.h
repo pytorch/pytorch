@@ -204,6 +204,7 @@ constexpr auto kP2pDst = "Dst Rank";
 constexpr auto kInTensorsStart = "Input Tensors start";
 constexpr auto kOutTensorsStart = "Output Tensors start";
 constexpr auto kIsAsynchronizedOp = "Is asynchronized op";
+constexpr auto kCommsId = "Comms Id";
 #endif // USE_DISTRIBUTED
 
 } // namespace torch::profiler::impl

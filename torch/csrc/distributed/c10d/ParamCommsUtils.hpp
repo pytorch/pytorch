@@ -24,7 +24,9 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       int globalRankStart,
       int globalRankStride,
       int worldSize,
-      bool isAsynchronizedOp = true);
+      bool isAsynchronizedOp = true,
+      int64_t seqNumber = 0,
+      bool isP2P = false);
 
   ~ParamCommsDebugInfo() override = default;
 
@@ -84,6 +86,14 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     return isAsynchronizedOp_;
   }
 
+  int64_t getSeqNumber() const {
+    return seqNumber_;
+  }
+
+  bool isP2P() const {
+    return isP2P_;
+  }
+
  private:
   std::tuple<std::string, std::string> pgName_; // <group_name, group_desc>
   int rank_{};
@@ -96,6 +106,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   std::vector<int64_t> outputSplitSizes_;
   int globalRankStart_{};
   int globalRankStride_{};
+  int64_t seqNumber_{0};
+  bool isP2P_{false};
   std::vector<int64_t> groupRanks_;
   bool isAsynchronizedOp_{};
 };
@@ -125,7 +137,9 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       globalRankStart,                                                         \
       globalRankStride,                                                        \
       worldSize,                                                               \
-      false);                                                                  \
+      false,                                                                   \
+      std::get<0>(seq),                                                        \
+      std::get<1>(seq));                                                       \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       seq,                                                                     \
@@ -201,7 +215,9 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       globalRankStart,                                                         \
       globalRankStride,                                                        \
       worldSize,                                                               \
-      isAsyncOp);                                                              \
+      isAsyncOp,                                                               \
+      std::get<0>(seq),                                                        \
+      std::get<1>(seq));                                                       \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(InputTensors),                                               \
