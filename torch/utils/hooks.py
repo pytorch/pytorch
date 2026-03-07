@@ -49,7 +49,7 @@ class RemovableHandle:
             or module_impl._global_forward_hooks
             or module_impl._global_forward_pre_hooks
         ):
-            module_impl._anyGlobalHookSet = False
+            module_impl._atLeastOneGlobalHookSet = False
 
     def __getstate__(self):
         if self.extra_dict_ref is None:
