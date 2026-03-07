@@ -7,7 +7,6 @@ import re
 import itertools
 import tempfile
 import unittest
-from typing import Optional
 
 import torch
 
@@ -295,7 +294,7 @@ def scaled_grouped_mm_wrap(
 
 
 
-def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype, bias: torch.Tensor | None = None) -> torch.Tensor:
     # naive implementation: dq -> op -> q
     x_fp32 = x.to(torch.float) / x_scale
     y_fp32 = y.to(torch.float) / y_scale
@@ -322,8 +321,8 @@ def addmm_float8_unwrapped(
     b_data: torch.Tensor,
     b_scale: torch.tensor,
     output_dtype: torch.dtype,
-    output_scale: Optional[torch.Tensor],
-    bias: Optional[torch.Tensor] = None,
+    output_scale: torch.Tensor | None,
+    bias: torch.Tensor | None = None,
 ) -> torch.Tensor:
     a_inverse_scale = a_scale.reciprocal()
     b_inverse_scale = b_scale.reciprocal()
@@ -632,7 +631,7 @@ class TestFP8Matmul(TestCase):
     def _test_tautological_mm(self, device: str = "cuda",
                               x_dtype: torch.dtype = e4m3_type,
                               y_dtype: torch.dtype = e4m3_type,
-                              out_dtype: Optional[torch.dtype] = None,
+                              out_dtype: torch.dtype | None = None,
                               x_cm: bool = True,
                               y_cm: bool = False,
                               size: int = 16) -> None:

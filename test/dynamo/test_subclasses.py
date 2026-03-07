@@ -2170,7 +2170,7 @@ class GraphModule(torch.nn.Module):
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
         from collections.abc import Callable
-        from typing import Any, Optional
+        from typing import Any
 
         from torch._dynamo.decorators import mark_static_address
         from torch._inductor.compile_fx import compile_fx
@@ -2184,16 +2184,16 @@ class GraphModule(torch.nn.Module):
         def inner_compile(
             gm: torch.fx.GraphModule,
             example_inputs: list[torch.Tensor],
-            cudagraphs: Optional[BoxedBool] = None,
-            static_input_idxs: Optional[list[int]] = None,
+            cudagraphs: BoxedBool | None = None,
+            static_input_idxs: list[int] | None = None,
             is_backward: bool = False,
-            graph_id: Optional[int] = None,
+            graph_id: int | None = None,
             cpp_wrapper: bool = False,
             aot_mode: bool = False,
             is_inference: bool = False,
-            boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-            layout_opt: Optional[bool] = None,
-            extern_node_serializer: Optional[Callable[[list[Any]], Any]] = None,
+            boxed_forward_device_index: BoxedDeviceIndex | None = None,
+            layout_opt: bool | None = None,
+            extern_node_serializer: Callable[[list[Any]], Any] | None = None,
         ):
             if dynamic:
                 self.assertEqual(static_input_idxs, [2, 3, 4])
@@ -2212,7 +2212,7 @@ class GraphModule(torch.nn.Module):
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_subclass_parameters_are_static_under_training(self):
         from collections.abc import Callable
-        from typing import Any, Optional
+        from typing import Any
 
         from torch._inductor.compile_fx import compile_fx
         from torch._inductor.cudagraph_utils import BoxedDeviceIndex
@@ -2221,16 +2221,16 @@ class GraphModule(torch.nn.Module):
         def inner_compile(
             gm: torch.fx.GraphModule,
             example_inputs: list[torch.Tensor],
-            cudagraphs: Optional[BoxedBool] = None,
-            static_input_idxs: Optional[list[int]] = None,
+            cudagraphs: BoxedBool | None = None,
+            static_input_idxs: list[int] | None = None,
             is_backward: bool = False,
-            graph_id: Optional[int] = None,
+            graph_id: int | None = None,
             cpp_wrapper: bool = False,
             aot_mode: bool = False,
             is_inference: bool = False,
-            boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-            layout_opt: Optional[bool] = None,
-            extern_node_serializer: Optional[Callable[[list[Any]], Any]] = None,
+            boxed_forward_device_index: BoxedDeviceIndex | None = None,
+            layout_opt: bool | None = None,
+            extern_node_serializer: Callable[[list[Any]], Any] | None = None,
         ):
             # Important bit: there are 3 params: linear.weight.a, linear.weight.b, linear.bias,
             # which are the first 3 args of the graph.

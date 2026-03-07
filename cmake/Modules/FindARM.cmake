@@ -11,6 +11,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
         a = svdup_n_f64(0);
         float32x4_t b = vdupq_n_f32(0);
         bfloat16x8_t c = vreinterpretq_bf16_f32(b);
+        bfloat16x4_t d = vget_low_bf16(c);
         return 0;
       }
     ")
@@ -25,8 +26,13 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       message(STATUS "SVE support detected.")
     else()
       set(CXX_SVE_FOUND FALSE CACHE BOOL "SVE not available on host")
-      message(STATUS "No SVE support on this machine.")
+      if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" AND NOT DEFINED ENV{BUILD_IGNORE_SVE_UNAVAILABLE})
+        message(FATAL_ERROR "No SVE support on this machine. "
+          "Set BUILD_IGNORE_SVE_UNAVAILABLE environment variable to ignore this error.")
+      else()
+        message(STATUS "No SVE support on this machine.")
+      endif()
     endif()
 
     mark_as_advanced(CXX_SVE_FOUND CXX_SVE256_FOUND)
-ENDIF(CMAKE_SYSTEM_NAME MATCHES "Linux")
+ENDIF()

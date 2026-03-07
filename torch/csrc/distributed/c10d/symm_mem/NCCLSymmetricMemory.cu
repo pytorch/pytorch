@@ -122,6 +122,10 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     buffers_.resize(world_size_);
     signal_pads_.resize(world_size_);
 
+    // Fill out the peer pointer array
+#if NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+    // Lack of host-side API to get peer pointers, so we get them inside a
+    // kernel and copy the result to host.
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
     build_ptr_dev<<<1, threads, 0, stream>>>(buffer_win_, 0, buffers_dev_, world_size_);
@@ -139,15 +143,40 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       signal_pads_dev_,  // src (device)
       arr_size,
       cudaMemcpyDeviceToHost));
-#endif
+#else
+  // Starting from NCCL 2.29, we can use host-side APIs to get peer pointers.
+  for (int i = 0; i < world_size_; i++) {
+    // If peer is not accessible within LSA domain, `ncclGetPeerDevicePointer`
+    // returns nullptr.
+    C10D_NCCL_CHECK(
+      ncclGetPeerDevicePointer(buffer_win_, 0, i, &buffers_[i]),
+      "ncclGetPeerDevicePointer failed");
+    C10D_NCCL_CHECK(
+      ncclGetPeerDevicePointer(signal_handle_, 0, i, &signal_pads_[i]),
+      "ncclGetPeerDevicePointer failed");
+  }
+  // Copy the peer access pointers to device arrays.
+  C10_CUDA_CHECK(cudaMemcpy(
+    buffers_dev_,  // dst (device)
+    buffers_.data(),  // src (host)
+    arr_size,
+    cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+    signal_pads_dev_,  // dst (device)
+    signal_pads_.data(),  // src (host)
+    arr_size,
+    cudaMemcpyHostToDevice));
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
   // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
+  // to get multicast address.
   void* mc_addr = nullptr;
+  // Skip CHECK on purpose to improve fault tolerance since some machine's
+  // Fabric Manager may be in bad NVLink Sharp state.
   if (ncclGetLsaMultimemDevicePointer(buffer_win_, 0, &mc_addr) == ncclSuccess) {
     mc_addr_ = mc_addr;
   }
-#endif
+#endif // NCCL_VERSION_CODE < NCCL_VERSION(2, 29, 0)
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   }
 
   // Exact copy is not needed / supported

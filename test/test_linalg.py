@@ -15,7 +15,6 @@ import random
 from random import randrange
 from itertools import product
 from functools import reduce, partial
-from typing import Union, Optional
 from torch._prims_common import DimsType
 from packaging import version
 from torch.testing._internal.common_device_type import (
@@ -1478,8 +1477,8 @@ class TestLinalg(TestCase):
                 return tensor_unbacked_size
 
         def test(
-            ord: Union[float, int],
-            dim: Optional[DimsType],
+            ord: float | int,
+            dim: DimsType | None,
             expect_numel_runtime_check: bool,
             expect_index_0_check: bool = False,
         ) -> None:

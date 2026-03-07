@@ -384,12 +384,14 @@ class TensorVariable(VariableTracker):
         try:
             real_value = getattr(_input_associated_real_value, name)
         except AttributeError:
+            error_message = VariableTracker.build(
+                tx,
+                f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'",
+            )
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[
-                    f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'"
-                ],
+                args=[error_message],
             )
 
         attr_source = AttrSource(self.source, name)

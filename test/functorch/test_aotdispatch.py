@@ -14,7 +14,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
 
 from common_utils import (
@@ -424,8 +424,8 @@ class TestAOTAutograd(AOTTestCase):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -463,11 +463,11 @@ class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, list[Any]],
+        inp_: Callable | list[Any],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[dict] = None,
+        decompositions: dict | None = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
@@ -8960,8 +8960,8 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -9184,8 +9184,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -9207,11 +9207,11 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, list[Any]],
+        inp_: Callable | list[Any],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[dict] = None,
+        decompositions: dict | None = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.

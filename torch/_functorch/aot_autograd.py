@@ -140,7 +140,6 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
 )
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
-    _get_symint_hints,
     call_func_at_runtime_with_args,
     create_tree_flattened_fn,
     KNOWN_TYPES,

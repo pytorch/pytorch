@@ -7953,6 +7953,43 @@ SavedForBackwardsAOTOutput(idx=5)""",
         with torch._dynamo.config.patch(error_on_recompile=True):
             linear(torch.randn(1, 2, device="cpu"))
 
+    def test_property_setter_with_dict_get_176608(self):
+        """
+        Test that property setters work correctly with __dict__.get() in compiled functions.
+        Regression test for https://github.com/pytorch/pytorch/issues/176608
+        """
+        from torch.compiler import disable
+
+        class Container:
+            def __init__(self):
+                self._len_value = 0
+
+            @property
+            def _len(self):
+                # Using __dict__.get instead of self._len_value triggers the bug
+                return self.__dict__.get("_len_value", 0)
+
+            @_len.setter
+            def _len(self, value):
+                self._len_value = value
+
+            def add(self, n):
+                self._len = self._len + n
+
+            @disable()
+            def __len__(self):
+                return self._len
+
+        c = Container()
+
+        @torch.compile(backend="eager")
+        def f(x):
+            c.add(x.shape[0])  # mutates c._len_value via property setter
+            return len(c)  # reads c._len via property getter -> __dict__.get
+
+        result = f(torch.randn(5))
+        self.assertEqual(result, 5)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):

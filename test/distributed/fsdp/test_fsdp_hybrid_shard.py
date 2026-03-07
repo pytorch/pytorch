@@ -405,9 +405,7 @@ class TestFSDPHybridShard(FSDPTestContinuous):
         hsdp_sharding_strategy: ShardingStrategy,
         sharding_strategy_mode: str,
         use_orig_params: bool,
-        hsdp_process_groups: Optional[
-            tuple[dist.ProcessGroup, dist.ProcessGroup]
-        ] = None,
+        hsdp_process_groups: tuple[dist.ProcessGroup, dist.ProcessGroup] | None = None,
         hsdp_device_mesh: Optional = None,
     ):
         if not (hsdp_process_groups is None or hsdp_device_mesh is None):

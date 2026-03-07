@@ -2538,6 +2538,46 @@ class AOTAutogradCacheTests(InductorTestCase):
             x_view2.untyped_storage().data_ptr(), x2.untyped_storage().data_ptr()
         )
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_cache_hit_logs_aot_graphs(self):
+        """
+        Verify that TORCH_LOGS=aot_graphs prints graphs on cache hit, not just cache miss.
+        See https://github.com/pytorch/pytorch/issues/149060
+        """
+        from torch.testing._internal.logging_utils import logs_to_string
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # First call: cache miss — aot_graphs should be logged
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
+        )
+        with ctx():
+            compiled_fn(a, b)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertIn("Forward graph", log_stream.getvalue())
+
+        # Reset dynamo so guards force recompilation (but keep disk cache)
+        self._clear_dynamo_and_codecache()
+
+        # Second call: cache hit — aot_graphs should ALSO be logged.
+        # On cache hit the log comes from aot_autograd_result, not graph_capture.
+        log_stream2, ctx2 = logs_to_string(
+            "torch._functorch._aot_autograd.aot_autograd_result", "aot_graphs"
+        )
+        with ctx2():
+            compiled_fn(a, b)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertIn("Forward graph (from cache)", log_stream2.getvalue())
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):

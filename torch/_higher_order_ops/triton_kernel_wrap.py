@@ -931,6 +931,7 @@ def analyze_kernel_access(
     READ_OPS = {
         "tt.load": [0],
         "tt.load_tensor_descriptor": [0],
+        "tt.descriptor_load": [0],
     }
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
 

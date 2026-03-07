@@ -4194,7 +4194,6 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
         None,
         check=check,
     )
-
     values = expand(values, expected_vals_size)
     # all guards are set above during broadcast_tensors and expand
 
@@ -6444,7 +6443,8 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
 
 def use_two_step_variance(x, axis, keepdim):
-    # Instead of unrolling welford, just unroll the simpler two-step var
+    # two-step algorithm can get better performance in small reductions size
+    # while it can accumulate more numerical error than Welford algorithm.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -6452,9 +6452,16 @@ def use_two_step_variance(x, axis, keepdim):
 
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
+    device = x.get_device()
+    if not (device and device.type == "cpu"):
+        threshold = config.unroll_reductions_threshold
+    else:
+        # 1024 is a default value to pass all the UTs about accuracy.
+        # A larger threshold can still get performance benefits.
+        threshold = config.cpp.use_two_step_variance_threshold
     return (
         isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) < config.unroll_reductions_threshold
+        and int(reduction_numel) <= threshold
         and sympy_product(ranges) != 1
     )
 

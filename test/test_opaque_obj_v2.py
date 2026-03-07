@@ -5,7 +5,6 @@ import gc
 import random
 from contextlib import ExitStack
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -621,7 +620,7 @@ class TestOpaqueObject(TestCase):
             lib=self.lib,
         )
         def process_multiple_sizes_impl(
-            x: torch.Tensor, config: Optional[list[SizeStore]]
+            x: torch.Tensor, config: list[SizeStore] | None
         ) -> torch.Tensor:
             if config is None:
                 return x.clone()
@@ -635,7 +634,7 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::process_multiple_sizes", lib=self.lib
         )
         def process_multiple_sizes_fake(
-            x: torch.Tensor, config: Optional[list[SizeStore]]
+            x: torch.Tensor, config: list[SizeStore] | None
         ) -> torch.Tensor:
             return torch.empty_like(x)
 
