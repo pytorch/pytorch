@@ -13,16 +13,18 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Generic, Literal, NamedTuple, ParamSpec, TypeAlias, TypeVar, cast
+from typing import Any, Literal, NamedTuple, TypeAlias, TypeVar, cast
 from typing_extensions import NotRequired, Self, TypedDict
 
 import torch
 from torch import Tensor
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
-from torch._prims_common import DeviceLikeType
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import GetAttrKey, tree_map_only
+
+if typing.TYPE_CHECKING:
+    from torch._prims_common import DeviceLikeType
 
 
 # Private debug flag to disable internal compilation wrapping for debugging purposes.
@@ -73,7 +75,6 @@ _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 _Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
 
-_P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
@@ -445,7 +446,7 @@ def _closure_contents(fn: object) -> tuple[object, ...]:
     return tuple(cell.cell_contents for cell in closure)
 
 
-class _MaskModWrapper(Generic[_P, _R]):
+class _MaskModWrapper:
     """Wraps a mask_mod function with value-based equality.
 
     BlockMask stores an arbitrary callable (mask_mod) in its pytree context.
@@ -456,11 +457,13 @@ class _MaskModWrapper(Generic[_P, _R]):
 
     __slots__ = ("fn",)
 
-    def __init__(self, fn: Callable[_P, _R]) -> None:
+    def __init__(self, fn: _mask_mod_signature) -> None:
         self.fn = fn
 
-    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
-        return self.fn(*args, **kwargs)
+    def __call__(
+        self, b: Tensor, h: Tensor, q_idx: Tensor, kv_idx: Tensor
+    ) -> Tensor:
+        return self.fn(b, h, q_idx, kv_idx)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _MaskModWrapper):
@@ -958,7 +961,7 @@ class BlockMask:
 
         return "\n".join(total_vis)
 
-    def to(self, device: torch.device | str) -> "BlockMask":
+    def to(self, device: torch.device | str) -> BlockMask:
         """Moves the BlockMask to the specified device.
 
         Args:
