@@ -9015,6 +9015,97 @@ class TestNNMPS(NNTestCase):
 
         return l, n, s
 
+    def _ctc_loss_tolerances(self, dtype):
+        if dtype == torch.float32:
+            return 2e-4, 1e-4
+        if dtype == torch.float16:
+            return 2e-2, 5e-3
+        if dtype == torch.bfloat16:
+            return 3e-2, 1e-2
+        raise AssertionError(f"Unsupported dtype for CTC test: {dtype}")
+
+    def _run_ctc_loss_cpu_mps_parity(self, *, dtype, lengths_as_tensor, unbatched, include_zero_target=False):
+        torch.manual_seed(1234)
+        T, N, C = 40, 2, 20
+        target_max = 10
+
+        raw_log_probs = torch.randn(T, N, C, dtype=torch.float32).log_softmax(2)
+        # Compare MPS low-precision run against CPU run on the same quantized inputs.
+        log_probs_cpu = raw_log_probs.to(dtype).to(torch.float32).detach().requires_grad_()
+        log_probs_mps = raw_log_probs.to(dtype).to("mps").detach().requires_grad_()
+
+        targets_cpu = torch.randint(1, C, (N, target_max), dtype=torch.long)
+        target_lengths = [0, target_max - 1] if include_zero_target else [target_max, target_max - 1]
+        input_lengths = [T, T - 3]
+
+        if unbatched:
+            log_probs_cpu = log_probs_cpu[:, 0, :].detach().requires_grad_()
+            log_probs_mps = log_probs_mps[:, 0, :].detach().requires_grad_()
+            targets_cpu = targets_cpu[0, :target_lengths[0]]
+            input_lengths = input_lengths[0]
+            target_lengths = target_lengths[0]
+
+        targets_mps = targets_cpu.to("mps")
+        if lengths_as_tensor:
+            input_lengths_cpu = torch.as_tensor(input_lengths, dtype=torch.long)
+            target_lengths_cpu = torch.as_tensor(target_lengths, dtype=torch.long)
+            input_lengths_mps = input_lengths_cpu.to("mps")
+            target_lengths_mps = target_lengths_cpu.to("mps")
+        else:
+            input_lengths_cpu = input_lengths
+            target_lengths_cpu = target_lengths
+            input_lengths_mps = input_lengths
+            target_lengths_mps = target_lengths
+
+        loss_cpu = F.ctc_loss(
+            log_probs_cpu,
+            targets_cpu,
+            input_lengths_cpu,
+            target_lengths_cpu,
+            reduction="none",
+            zero_infinity=True,
+        )
+        loss_mps = F.ctc_loss(
+            log_probs_mps,
+            targets_mps,
+            input_lengths_mps,
+            target_lengths_mps,
+            reduction="none",
+            zero_infinity=True,
+        )
+        grad_out_cpu = torch.randn_like(loss_cpu)
+        grad_cpu = torch.autograd.grad(loss_cpu, log_probs_cpu, grad_out_cpu)[0]
+        grad_mps = torch.autograd.grad(loss_mps, log_probs_mps, grad_out_cpu.to("mps"))[0]
+
+        atol, rtol = self._ctc_loss_tolerances(dtype)
+        self.assertEqual(loss_cpu, loss_mps.float().cpu(), atol=atol, rtol=rtol)
+        self.assertEqual(grad_cpu, grad_mps.float().cpu(), atol=atol, rtol=rtol)
+        self.assertFalse(torch.isnan(loss_mps).any().item())
+        self.assertFalse(torch.isnan(grad_mps).any().item())
+
+    @parametrize("lengths_as_tensor", [False, True])
+    @parametrize("unbatched", [False, True])
+    def test_ctc_loss_matches_cpu_float32(self, lengths_as_tensor, unbatched):
+        self._run_ctc_loss_cpu_mps_parity(
+            dtype=torch.float32,
+            lengths_as_tensor=lengths_as_tensor,
+            unbatched=unbatched,
+        )
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_ctc_loss_low_precision_matches_cpu(self, dtype):
+        try:
+            _ = torch.zeros(1, device="mps", dtype=dtype)
+        except Exception as e:
+            self.skipTest(f"{dtype} is not supported on this MPS configuration: {e}")
+
+        self._run_ctc_loss_cpu_mps_parity(
+            dtype=dtype,
+            lengths_as_tensor=True,
+            unbatched=False,
+            include_zero_target=True,
+        )
+
     def test_requires_grad_(self):
         m = self._create_basic_net()[-1]
         if len(list(m.buffers())) <= 0:

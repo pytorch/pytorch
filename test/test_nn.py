@@ -10034,7 +10034,6 @@ class TestNNDeviceType(NNTestCase):
                     verify_reduction_scalars(input, reduction, output)
 
     # verify that bogus reduction strings are errors
-    @expectedFailureMPS  # CTCLoss unimplemented
     @onlyNativeDeviceTypes
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
@@ -11778,7 +11777,6 @@ class TestNNDeviceType(NNTestCase):
         for ele in list_to_compare:
             self.assertEqual(expected, ele, atol=atol, rtol=rtol)
 
-    @expectedFailureMPS  # NotImplementedError: aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("reduction", ['none', 'mean', 'sum'])
     @parametrize_test("use_module_form", [True, False])
     def test_CTCLoss_no_batch_dim(self, device, reduction, use_module_form):
@@ -12173,12 +12171,12 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
-    @expectedFailureMPS  # NotImplementedError aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     def test_CTCLoss_empty_target(self, device):
+        dtype = torch.float if self.device_type == "mps" else torch.double
         target_lengths = [0, 0, 0]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (0,), dtype=torch.long, device=device)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
+        log_probs = torch.randn(50, 3, 15, dtype=dtype, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
         self.assertEqual(-log_probs.sum(0)[:, 0], loss)
@@ -12186,7 +12184,7 @@ class TestNNDeviceType(NNTestCase):
         target_lengths = [0, 9, 0]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (9,), dtype=torch.long, device=device)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.double, device=device).log_softmax(2)
+        log_probs = torch.randn(50, 3, 15, dtype=dtype, device=device).log_softmax(2)
         loss = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
         self.assertTrue((loss >= 0).all().item())
         self.assertEqual(-log_probs.sum(0)[[0, 2], 0], loss[[0, 2]])
@@ -12194,8 +12192,9 @@ class TestNNDeviceType(NNTestCase):
     # Merge into OpInfo?
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
                           https://github.com/pytorch/pytorch/issues/34870""")
-    @expectedFailureMPS  # NotImplementedError aten::_ctc_loss https://github.com/pytorch/pytorch/issues/77764
     def test_ctc_loss(self, device):
+        if self.device_type == "mps":
+            self.skipTest("MPS CTC coverage is validated by dedicated non-gradcheck tests")
         batch_size = 64
         num_labels = 101
         target_length = 15
