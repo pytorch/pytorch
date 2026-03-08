@@ -2217,6 +2217,8 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
 def partition_fn(
     gm: GraphModule,
     joint_inputs: Sequence[object],
+    *,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
     cuda_context = get_cuda_device_context(gm)
@@ -2226,7 +2228,10 @@ def partition_fn(
         # in partitioning.
         inputs_devices = get_inputs_devices(joint_inputs, gm)
         gm = _recursive_joint_graph_passes(
-            gm, skip_invoke_subgraph=True, input_device=next(iter(inputs_devices))
+            gm,
+            skip_invoke_subgraph=True,
+            input_device=next(iter(inputs_devices)),
+            get_decomp_fn=get_decomp_fn,
         )
 
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
@@ -2977,7 +2982,9 @@ def _compile_fx_main(
                     bw_compiler=bw_compiler,
                     inference_compiler=inference_compiler,
                     decompositions=decompositions,
-                    partition_fn=partition_fn,
+                    partition_fn=functools.partial(
+                        partition_fn, get_decomp_fn=get_decomp_fn
+                    ),
                     keep_inference_input_mutations=True,
                     cudagraphs=compiler_config_extra.cudagraphs,
                     boxed_forward_device_index=compiler_config_extra.forward_device,
