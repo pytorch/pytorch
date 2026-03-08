@@ -1338,9 +1338,7 @@ def _sfdp_init(
         # (input_device, get_decomp_fn), so two compilations with different
         # get_decomp_fn values will both try to register the same SFDP patterns.
         # The second call must skip gracefully.
-        register_replacement_kwargs = {
-            **register_replacement_kwargs,
-            "skip_duplicates": True,
-            **({"get_decomp_fn": get_decomp_fn} if get_decomp_fn is not None else {}),
-        }
+        register_replacement_kwargs["skip_duplicates"] = True
+        if get_decomp_fn is not None:
+            register_replacement_kwargs["get_decomp_fn"] = get_decomp_fn
         gen_register_replacement(key, **register_replacement_kwargs)

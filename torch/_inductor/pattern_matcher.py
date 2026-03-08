@@ -1541,13 +1541,14 @@ def register_replacement(
                     # Later, when we actually do the replacement, the symbolic shape
                     # sizes will get re-traced and added to the graph.
 
-                    def search_fn_new(*args_new: Any) -> Any:
+                    def search_fn_new(*args_new: Any, **_: Any) -> Any:
                         return search_fn(*args_new[len(args_new) - len(args) :])
 
                     try:
-                        # pyrefly: ignore [bad-argument-type]
                         specific_graph = trace_fn(
-                            search_fn_new, sym_args + args, get_decomp_fn=get_decomp_fn
+                            search_fn_new,
+                            sym_args + args,
+                            get_decomp_fn=get_decomp_fn,
                         )
                     except RuntimeError as e:
                         log_trace_failure(search_fn, e)
@@ -2271,7 +2272,9 @@ def joint_fwd_bwd(
             # pyrefly: ignore[bad-argument-type]
             lambda gm, example_inputs: make_boxed_func(gm),
             partition_fn=record_joint_graph,
-            decompositions=get_decomp_fn() if get_decomp_fn is not None else select_decomp_table(),
+            decompositions=get_decomp_fn()
+            if get_decomp_fn is not None
+            else select_decomp_table(),
             keep_inference_input_mutations=True,
             enable_log=False,
         )(*args)
