@@ -424,7 +424,6 @@ used to create new DeviceMesh, with a mesh shape describing the device topology.
     :members:
 ```
 
-(distributed-p2p)=
 ## Point-to-point communication
 
 ```{eval-rst}
@@ -435,6 +434,8 @@ used to create new DeviceMesh, with a mesh shape describing the device topology.
 .. autofunction:: recv
 ```
 
+(distributed-p2p)=
+### Asynchronous point-to-point operations
 {func}`~torch.distributed.isend` and {func}`~torch.distributed.irecv`
 return distributed request objects when used. In general, the type of this object is unspecified
 as they should never be created manually, but they are guaranteed to support two methods:
@@ -447,7 +448,7 @@ as they should never be created manually, but they are guaranteed to support two
   is specified, or if `TORCH_NCCL_BLOCKING_WAIT=1`, `wait()` blocks the CPU thread until
   completion or timeout.
   Also see
-  [Synchronous and asynchronous collective operations](#synchronous-and-asynchronous-collective-operations).
+  [Synchronous and asynchronous collective operations](#distributed-async-collectives).
 
 ```{eval-rst}
 .. autofunction:: isend
@@ -473,6 +474,7 @@ as they should never be created manually, but they are guaranteed to support two
 .. autoclass:: P2POp
 ```
 
+(distributed-async-collectives)=
 ## Synchronous and asynchronous collective operations
 
 Every collective operation function supports the following two kinds of operations,
