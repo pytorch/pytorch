@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from inspect import currentframe
 from itertools import count
 from operator import attrgetter
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
@@ -535,7 +535,7 @@ def _recursive_joint_graph_passes(
     gm: GraphModule,
     skip_invoke_subgraph: bool = False,
     input_device: torch.device | None = None,
-    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> GraphModule:
     def _run_on_sub_graph_module(subgraph_name: str) -> None:
         subgraph = getattr(gm, subgraph_name)
@@ -2078,13 +2078,16 @@ def fw_compiler_freezing(
     cudagraphs: BoxedBool,
     graph_id: int,
     forward_device: BoxedDeviceIndex,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> Callable[[list[object]], Sequence[torch.Tensor]]:
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
     inputs_devices = get_inputs_devices(aot_example_inputs, aot_autograd_model)
     aot_autograd_model = _recursive_joint_graph_passes(
-        aot_autograd_model, input_device=next(iter(inputs_devices))
+        aot_autograd_model,
+        input_device=next(iter(inputs_devices)),
+        get_decomp_fn=get_decomp_fn,
     )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
@@ -2351,7 +2354,7 @@ def compile_fx_forward(
     compiler_config_extra: CompilerConfigExtra,
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     is_inference: bool = False,
-    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> OutputCode:
     """
     Compile the forward graph of the given graph module.
@@ -2604,7 +2607,7 @@ def compile_fx(
     config_patches: dict[str, Any] | None = None,
     decompositions: dict[OpOverload, Callable[..., Any]] | None = None,
     ignore_shape_env: bool = False,
-    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2728,7 +2731,7 @@ def _maybe_wrap_and_compile_fx_main(
     inner_compile: Callable[..., OutputCode],
     decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
-    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
     """
     Part of compile_fx, called after patching configs.
@@ -2777,7 +2780,7 @@ def _compile_fx_main(
     inner_compile: Callable[..., OutputCode],
     decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
-    get_decomp_fn: Optional[Callable[..., dict[Any, Callable[..., Any]]]] = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
     """
     Main part of compile_fx, called after wrapping is done.
@@ -2809,14 +2812,12 @@ def _compile_fx_main(
         gm_meta = model_.meta if isinstance(model_, GraphModule) else None
         compiler_config_extra = create_compiler_config_extra(config, gm_meta)
 
-        _user_provided_decompositions = (
-            decompositions is not None or get_decomp_fn is not None
-        )
+        _user_provided_decompositions_dict = decompositions is not None
         decompositions = (
             decompositions if decompositions is not None else select_decomp_table()
         )
 
-        if get_decomp_fn is None and _user_provided_decompositions:
+        if _user_provided_decompositions_dict and get_decomp_fn is select_decomp_table:
             _decomps_ref = decompositions
 
             def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
@@ -2857,6 +2858,7 @@ def _compile_fx_main(
                 cudagraphs=compiler_config_extra.cudagraphs,
                 graph_id=compiler_config_extra.graph_id,
                 forward_device=compiler_config_extra.forward_device,
+                get_decomp_fn=get_decomp_fn,
             )
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)

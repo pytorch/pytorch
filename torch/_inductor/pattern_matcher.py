@@ -1454,7 +1454,7 @@ def register_replacement(
     exclusive_arg_names: Sequence[str] = (),
     search_fn_pattern: PatternExpr | None = None,
     skip_duplicates: bool = False,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> bool:
     """
     Create a replacement rule based on example functions that get traced
@@ -1780,7 +1780,7 @@ def gen_register_replacement(
     scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
     skip_duplicates: bool = False,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> None:
     # Make sure the example_inputs is materialized.
     example_inputs = tuple(example_inputs)
@@ -2220,15 +2220,12 @@ def fwd_only(
     args: Sequence[Any],
     *,
     run_functional_passes: bool = True,
-    get_decomp_fn: Callable[..., Any] | None = None,
+    get_decomp_fn: Callable[..., Any] = select_decomp_table,
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher(), preserve_node_meta():
-        decompositions = (
-            get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
-        )
-        gm = make_fx(fn, decompositions, tracing_mode="real")(*args)
+        gm = make_fx(fn, get_decomp_fn(), tracing_mode="real")(*args)
 
     from .fx_passes.post_grad import remove_noop_ops
 
@@ -2253,7 +2250,7 @@ def joint_fwd_bwd(
     fn: Callable[..., Any],
     args: Sequence[Any],
     *,
-    get_decomp_fn: Callable[..., Any] | None = None,
+    get_decomp_fn: Callable[..., Any] = select_decomp_table,
 ) -> torch.fx.GraphModule:
     """Build a normalized training graph, for use with fx_to_pattern"""
     gm: torch.fx.GraphModule | None = None
@@ -2272,9 +2269,7 @@ def joint_fwd_bwd(
             # pyrefly: ignore[bad-argument-type]
             lambda gm, example_inputs: make_boxed_func(gm),
             partition_fn=record_joint_graph,
-            decompositions=get_decomp_fn()
-            if get_decomp_fn is not None
-            else select_decomp_table(),
+            decompositions=get_decomp_fn(),
             keep_inference_input_mutations=True,
             enable_log=False,
         )(*args)
@@ -2346,7 +2341,9 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(fn)
     def lazy_init(
         input_device: Any | None = None,
-        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+        get_decomp_fn: Callable[
+            ..., dict[Any, Callable[..., Any]]
+        ] = select_decomp_table,
     ) -> Any:
         counters_ref = counters[backend].copy()
 

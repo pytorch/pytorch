@@ -9,6 +9,7 @@ from typing import Any
 import torch
 
 from ..._dynamo.utils import counters
+from ..decomposition import select_decomp_table
 from ..pattern_matcher import (
     filter_nodes,
     fwd_only,
@@ -1331,7 +1332,7 @@ def _get_sfdp_patterns(input_device: torch.device | None = None):
 @functools.cache
 def _sfdp_init(
     input_device: torch.device | None = None,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ):
     for key, register_replacement_kwargs in _get_sfdp_patterns(input_device):
         # skip_duplicates=True is always needed: _sfdp_init is cached per
@@ -1339,6 +1340,5 @@ def _sfdp_init(
         # get_decomp_fn values will both try to register the same SFDP patterns.
         # The second call must skip gracefully.
         register_replacement_kwargs["skip_duplicates"] = True
-        if get_decomp_fn is not None:
-            register_replacement_kwargs["get_decomp_fn"] = get_decomp_fn
+        register_replacement_kwargs["get_decomp_fn"] = get_decomp_fn
         gen_register_replacement(key, **register_replacement_kwargs)

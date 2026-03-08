@@ -24,6 +24,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
+from ..decomposition import select_decomp_table
 from ..pattern_matcher import (
     Arg,
     CallFunction,
@@ -58,7 +59,7 @@ pass_patterns = [
 @init_once_fakemode
 def lazy_init(
     input_device: torch.device | None = None,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ):
     from .fuse_attention import _sfdp_init
     from .misc_patterns import _misc_patterns_init
@@ -624,7 +625,7 @@ def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
 def joint_graph_passes(
     graph: torch.fx.GraphModule,
     input_device: torch.device | None = None,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ):
     """
     Run FX transformations on the joint forwards+backwards graph.
