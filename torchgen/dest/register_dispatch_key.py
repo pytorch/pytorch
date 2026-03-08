@@ -393,16 +393,49 @@ class RegisterDispatchKey:
 
         out_sig = self.wrapper_kernel_sig(g.out)
         if k is SchemaKind.functional:
+            args = f.func.arguments
+            options_expr = ""
+
+            # 1. Highest Precedence: Explicit Factory Options
+            if args.tensor_options is not None:
+                to = args.tensor_options
+                options_expr = (
+                    f"at::TensorOptions().dtype({to.dtype.name})"
+                    f".layout({to.layout.name}).device({to.device.name})"
+                    f".pinned_memory({to.pin_memory.name})"
+                )
+            # 2. Second Precedence: The 'self' argument
+            elif (
+                args.self_arg is not None
+                and args.self_arg.argument.type.is_tensor_like()
+            ):
+                template = args.self_arg.argument
+                if template.type.is_nullable():
+                    options_expr = f"{template.name}.has_value() ? {template.name}->options() : at::TensorOptions()"
+                else:
+                    options_expr = f"{template.name}.options()"
+            # 3. Third Precedence: Any other tensor in the arguments
+            else:
+                tensor_template = next(
+                    (a for a in args.flat_non_out if a.type.is_tensor_like()), None
+                )
+                if tensor_template is not None:
+                    if tensor_template.type.is_nullable():
+                        options_expr = f"{tensor_template.name}.has_value() ? {tensor_template.name}->options() : at::TensorOptions()"
+                    else:
+                        options_expr = f"{tensor_template.name}.options()"
+                else:
+                    # 4. Fallback: Default options (context-aware)
+                    options_expr = "at::TensorOptions()"
+
             # For each return, create an empty tensor.
             # Note: We use at::empty_like or similar based on the first input.
             # For a more robust structured logic, we'd use meta-functions,
             # but this follows the 'unstructured' wrapper style.
             for i, ret in enumerate(f.func.returns):
                 out_name = f"out{i}" if len(f.func.returns) > 1 else "out"
-                # Use the first tensor argument as the template for options
-                template = f.func.arguments.flat_positional[0].name
                 allocation_logic += (
-                    f"  auto {out_name} = at::empty({{0}}, {template}.options());\n"
+                    f"  auto {out_name} = at::empty({{0}}, {options_expr});\n"
                 )
 
             # Translate arguments from functional signature to 'out' signature
