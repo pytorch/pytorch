@@ -72,6 +72,12 @@ install(FILES "${TORCH_SRC_DIR}/csrc/inductor/aoti_runtime/model.h"
   OPTIONAL
 )
 
+# Generated testing Python module (gitignored so not picked up by scikit-build-core
+# package scanning; install explicitly so it ends up in the wheel).
+install(FILES "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
+  DESTINATION "testing/_internal/generated"
+)
+
 # Dynamo data
 install(FILES "${TORCH_SRC_DIR}/_dynamo/graph_break_registry.json"
   DESTINATION "_dynamo"
