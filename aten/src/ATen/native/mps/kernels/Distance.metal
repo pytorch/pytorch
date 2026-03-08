@@ -154,7 +154,7 @@ kernel void pdist_backward_kernel(
   pdist_forward_kernel<DTYPE>(                                \
       device DTYPE * result [[buffer(0)]],                    \
       constant DTYPE * self [[buffer(1)]],                    \
-      constant PdistForwardParams& params [[buffer(2)]],      \
+      constant PdistForwardParams & params [[buffer(2)]],     \
       uint gid [[thread_position_in_grid]]);
 
 #define REGISTER_PDIST_BACKWARD_OP(DTYPE)                      \
@@ -164,7 +164,7 @@ kernel void pdist_backward_kernel(
       constant DTYPE * grad [[buffer(1)]],                     \
       constant DTYPE * self [[buffer(2)]],                     \
       constant DTYPE * dist [[buffer(3)]],                     \
-      constant PdistBackwardParams& params [[buffer(4)]],      \
+      constant PdistBackwardParams & params [[buffer(4)]],     \
       uint gid [[thread_position_in_grid]]);
 
 REGISTER_PDIST_FORWARD_OP(float);
