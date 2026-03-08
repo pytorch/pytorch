@@ -122,6 +122,7 @@ torch/_subclasses/fake_utils.py @aorenste
 
 # torch MPS
 test/test_mps.py @malfet
+c10/metal/ @malfet
 aten/src/ATen/mps/ @malfet
 aten/src/ATen/native/mps/ @malfet
 

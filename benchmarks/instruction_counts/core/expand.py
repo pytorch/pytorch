@@ -12,7 +12,7 @@ import os
 import re
 import textwrap
 import uuid
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -37,7 +37,7 @@ _ALL_MODES = tuple(
 )
 
 
-def _generate_torchscript_file(model_src: str, name: str) -> Optional[str]:
+def _generate_torchscript_file(model_src: str, name: str) -> str | None:
     """Returns the path a saved model if one can be constructed from `spec`.
 
     Because TorchScript requires actual source code in order to script a
@@ -99,7 +99,7 @@ def _get_stmt(
     runtime: RuntimeMode,
     autograd: AutogradMode,
     language: Language,
-) -> Optional[str]:
+) -> str | None:
     """Specialize a GroupedBenchmark for a particular configuration."""
     is_python = language == Language.PYTHON
 
@@ -143,7 +143,7 @@ def _get_setup(
     runtime: RuntimeMode,
     language: Language,
     stmt: str,
-    model_path: Optional[str],
+    model_path: str | None,
 ) -> str:
     """Specialize a GroupedBenchmark for a particular configuration.
 
@@ -234,7 +234,7 @@ def materialize(benchmarks: FlatIntermediateDefinition) -> FlatDefinition:
             if not isinstance(args, GroupedBenchmark):
                 raise AssertionError(f"Expected GroupedBenchmark, but got {type(args)}")
 
-            model_path: Optional[str] = None
+            model_path: str | None = None
             if args.py_model_setup and args.torchscript:
                 model_setup = (
                     f"{args.py_model_setup}\njit_model = torch.jit.script(model)"

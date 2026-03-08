@@ -1209,6 +1209,7 @@ class AutotuneProcessPool:
                 warmup_elapsed_time,
                 result,
             )
+            self._record_activity()
         except Exception as e:
             autotuning_log.error(
                 "AutotuneProcessPool warmup failed after %.4f seconds",

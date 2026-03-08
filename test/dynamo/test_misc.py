@@ -13373,6 +13373,52 @@ fn
         self.assertEqual(ref, res)
         self.assertEqual(ref, t + 10)
 
+    def test_property_setter(self):
+        class Box:
+            def __init__(self, value):
+                self._value = torch.tensor([value], dtype=torch.float32)
+
+            @property
+            def value(self):
+                return self._value + 1
+
+            @value.setter
+            def value(self, new_value):
+                self._value = new_value * 2
+
+        def fn(b):
+            b.value = 5
+            return b.value
+
+        b = Box(0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(Box(0))
+        res = opt_fn(b)
+        self.assertEqual(ref, res)
+
+    def test_property_setter_in_init(self):
+        class Clamped:
+            def __init__(self, val):
+                self.val = val
+
+            @property
+            def val(self):
+                return self._val
+
+            @val.setter
+            def val(self, v):
+                self._val = torch.clamp(v, 0, 100)
+
+        def fn(x):
+            obj = Clamped(x)
+            return obj.val
+
+        x = torch.tensor([200.0])
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
         with self.assertRaisesRegex(

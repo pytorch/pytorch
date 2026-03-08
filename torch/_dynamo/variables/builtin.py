@@ -2455,12 +2455,13 @@ class BuiltinVariable(VariableTracker):
         ):
             isinstance_type_tuple = isinstance_type
         else:
+            msg = VariableTracker.build(
+                tx, "isinstance() arg 2 must be a type, a tuple of types, or a union"
+            )
             raise_observed_exception(
                 TypeError,
                 tx,
-                args=[
-                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
-                ],
+                args=[msg],
             )
 
         try:

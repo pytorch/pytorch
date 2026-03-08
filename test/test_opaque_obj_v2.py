@@ -2412,6 +2412,23 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
     return (linear,)""",  # noqa: B950
         )
 
+    def test_hoist_no_recompile_on_different_string(self):
+        cnt = CompileCounter()
+
+        def f(x, label):
+            return op_with_string(x, HoistedString(label))
+
+        opt_f = torch.compile(f, backend=cnt, fullgraph=True)
+        x = torch.tensor(3.0)
+
+        res1 = opt_f(x, "double")
+        self.assertEqual(res1, f(x, "double"))
+        self.assertEqual(cnt.frame_count, 1)
+
+        res2 = opt_f(x, "square")
+        self.assertEqual(res2, f(x, "square"))
+        self.assertEqual(cnt.frame_count, 1)
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 

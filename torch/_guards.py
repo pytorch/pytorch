@@ -716,6 +716,16 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: list[GuardEnvExpr] = []
+        self.skip_install: bool = False
+
+    @contextlib.contextmanager
+    def skip_guard_install(self) -> Generator[None, None, None]:
+        old = self.skip_install
+        self.skip_install = True
+        try:
+            yield
+        finally:
+            self.skip_install = old
 
     def copy_graphstate(self) -> GuardsCheckpointState:
         return GuardsCheckpointState(OrderedSet(self.dynamo_guards.inner))

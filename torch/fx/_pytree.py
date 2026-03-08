@@ -7,11 +7,15 @@ import torch.return_types
 from torch.utils._pytree import PyTree, tree_flatten, TreeSpec
 
 
-FlattenFuncSpec = Callable[[PyTree, TreeSpec], list]
-FlattenFuncExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
+FlattenFnSpec = Callable[[PyTree, TreeSpec], list]
+FlattenFnExactMatchSpec = Callable[[PyTree, TreeSpec], bool]
 
-SUPPORTED_NODES: dict[type[Any], FlattenFuncSpec] = {}
-SUPPORTED_NODES_EXACT_MATCH: dict[type[Any], FlattenFuncExactMatchSpec | None] = {}
+# Keep deprecated alias for backward compatibility
+FlattenFuncSpec = FlattenFnSpec  # deprecated
+FlattenFuncExactMatchSpec = FlattenFnExactMatchSpec  # deprecated
+
+SUPPORTED_NODES: dict[type[Any], FlattenFnSpec] = {}
+SUPPORTED_NODES_EXACT_MATCH: dict[type[Any], FlattenFnExactMatchSpec | None] = {}
 
 _T = TypeVar("_T")
 _K = TypeVar("_K")
@@ -20,8 +24,8 @@ _V = TypeVar("_V")
 
 def register_pytree_flatten_spec(
     cls: type[Any],
-    flatten_fn_spec: FlattenFuncSpec,
-    flatten_fn_exact_match_spec: FlattenFuncExactMatchSpec | None = None,
+    flatten_fn_spec: FlattenFnSpec,
+    flatten_fn_exact_match_spec: FlattenFnExactMatchSpec | None = None,
 ) -> None:
     SUPPORTED_NODES[cls] = flatten_fn_spec
     SUPPORTED_NODES_EXACT_MATCH[cls] = flatten_fn_exact_match_spec

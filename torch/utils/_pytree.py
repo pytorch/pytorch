@@ -52,8 +52,8 @@ if TYPE_CHECKING:
 __all__ = [
     "PyTree",
     "Context",
-    "FlattenFunc",
-    "UnflattenFunc",
+    "FlattenFn",
+    "UnflattenFn",
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
@@ -125,15 +125,20 @@ class EnumEncoder(json.JSONEncoder):
 
 Context = Any
 PyTree = Any
-FlattenFunc = Callable[[PyTree], tuple[list[Any], Context]]
-UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
+FlattenFn = Callable[[PyTree], tuple[list[Any], Context]]
+UnflattenFn = Callable[[Iterable[Any], Context], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
-ToStrFunc = Callable[["TreeSpec", list[str]], str]
-MaybeFromStrFunc = Callable[[str], tuple[Any, Context, str] | None]
+ToStrFunc = Callable[["TreeSpec", list[str]], str]  # deprecated
+MaybeFromStrFunc = Callable[[str], tuple[Any, Context, str] | None]  # deprecated
 KeyPath = tuple[KeyEntry, ...]
-FlattenWithKeysFunc = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
+FlattenWithKeysFn = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
+
+# Keep deprecated alias for backward compatibility
+FlattenFunc = FlattenFn  # deprecated
+UnflattenFunc = UnflattenFn  # deprecated
+FlattenWithKeysFunc = FlattenWithKeysFn  # deprecated
 
 
 # A NodeDef holds two callables:
@@ -147,9 +152,9 @@ FlattenWithKeysFunc = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
 #   pytree and returns a list of (keypath, value) pairs and a context.
 class NodeDef(NamedTuple):
     type: type[Any]
-    flatten_fn: FlattenFunc
-    unflatten_fn: UnflattenFunc
-    flatten_with_keys_fn: FlattenWithKeysFunc | None
+    flatten_fn: FlattenFn
+    unflatten_fn: UnflattenFn
+    flatten_with_keys_fn: FlattenWithKeysFn | None
 
 
 _NODE_REGISTRY_LOCK = threading.RLock()
@@ -200,13 +205,13 @@ _cxx_pytree_pending_imports: list[Any] = []
 
 def register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
+    flatten_fn: FlattenFn,
+    unflatten_fn: UnflattenFn,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
     from_dumpable_context: FromDumpableContextFn | None = None,
-    flatten_with_keys_fn: FlattenWithKeysFunc | None = None,
+    flatten_with_keys_fn: FlattenWithKeysFn | None = None,
 ) -> None:
     """Register a container-like type as pytree node.
 
@@ -526,15 +531,15 @@ def _register_namedtuple(
 )
 def _register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
+    flatten_fn: FlattenFn,
+    unflatten_fn: UnflattenFn,
     to_str_fn: ToStrFunc | None = None,  # deprecated
     maybe_from_str_fn: MaybeFromStrFunc | None = None,  # deprecated
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
     from_dumpable_context: FromDumpableContextFn | None = None,
-    flatten_with_keys_fn: FlattenWithKeysFunc | None = None,
+    flatten_with_keys_fn: FlattenWithKeysFn | None = None,
 ) -> None:
     """Register a container-like type as pytree node for the Python pytree only.
 
@@ -595,13 +600,13 @@ def _deregister_pytree_node(
 
 def _private_register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
+    flatten_fn: FlattenFn,
+    unflatten_fn: UnflattenFn,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
     from_dumpable_context: FromDumpableContextFn | None = None,
-    flatten_with_keys_fn: FlattenWithKeysFunc | None = None,
+    flatten_with_keys_fn: FlattenWithKeysFn | None = None,
 ) -> None:
     """This is an internal function that is used to register a pytree node type
     for the Python pytree only. End-users should use :func:`register_pytree_node`

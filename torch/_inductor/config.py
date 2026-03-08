@@ -825,6 +825,10 @@ max_epilogue_benchmarked_choices = 1
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
+# Minimum overlap ratio to consider fusion beneficial when inputs are shared by no indices overlapped.
+# Valid range: [0, 1]. Default to not fusion.
+min_overlap_ratio = 1.1
+
 # how many nodes to attempt pairwise fusion with in a buffer group
 max_fusion_buffer_group_pairwise_attempts = 64
 

@@ -15089,6 +15089,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         inputs = (torch.randn(4, device=self.device),)
         self.common(Model(), inputs)
 
+    @skip_if_cpp_wrapper("skip cpp wrapper")
     @requires_gpu_and_triton
     def test_triton_kernel_bool_tensor_arg(self):
         if self.device != GPU_TYPE or self.device == "mps":

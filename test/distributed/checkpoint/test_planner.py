@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+from unittest.mock import patch
 
 import torch
 import torch.distributed.checkpoint as dcp
@@ -155,7 +156,13 @@ class TestSavePlan(TestCase):
         # First iteration, should create a new plan
         first_plan = planner.create_local_plan()
 
-        # Validate that the plan has been cached
+        # Plan should be pending, not yet in the class-level cache
+        self.assertNotIn(planner._cached_plans_key, SavePlanner._cached_save_plan)
+
+        # Promote the pending plan by calling finish_plan
+        planner.finish_plan(first_plan)
+
+        # Validate that the plan has been cached after finish_plan
         cached_plan = SavePlanner._cached_save_plan[planner._cached_plans_key]
         self.assertEqual(first_plan, cached_plan)
 
@@ -165,6 +172,11 @@ class TestSavePlan(TestCase):
         self.assertEqual(0, len(second_plan.items))
         self.assertIsNone(second_plan.planner_data)
         self.assertIsNone(second_plan.storage_data)
+
+        # Clean up class-level caches
+        key = planner._cached_plans_key
+        SavePlanner._cached_save_plan.pop(key, None)
+        SavePlanner._cached_final_save_plan.pop(key, None)
 
     def test_global_plan(self):
         def create_data(rank):
@@ -313,6 +325,14 @@ class TestSavePlan(TestCase):
         ]
         self.assertEqual(cached_global_plan, tensor_plan)
 
+        # Clean up class-level caches
+        key = planner._cached_plans_key
+        SavePlanner._cached_save_plan.pop(key, None)
+        SavePlanner._cached_final_save_plan.pop(key, None)
+        SavePlanner._cached_all_plans.pop(key, None)
+        SavePlanner._cached_global_plan.pop(key, None)
+        SavePlanner._cached_metadata.pop(key, None)
+
     def test_finish_plan_with_caching(self):
         planner = DefaultSavePlanner(enable_plan_caching=True)
         tensor = torch.rand(10)
@@ -333,6 +353,67 @@ class TestSavePlan(TestCase):
         # second iteration, should return the cached plan
         second_finished_plan = planner.finish_plan(SavePlan([], usable=False))
         self.assertEqual(second_finished_plan, first_finished_plan)
+
+        # Clean up class-level caches
+        key = planner._cached_plans_key
+        SavePlanner._cached_save_plan.pop(key, None)
+        SavePlanner._cached_final_save_plan.pop(key, None)
+
+    def test_caching_after_validation_failure(self):
+        def create_data(rank):
+            with with_dist(rank=rank, world_size=4):
+                planner = DefaultSavePlanner(enable_plan_caching=True)
+                tensor = torch.rand(10)
+                val = [1, 2, 3]
+                st = create_sharded_tensor(rank=rank, world_size=4, shards_per_rank=1)
+                state_dict = {"tensor": tensor, "value": val, "st": st}
+                planner.set_up_planner(state_dict, is_coordinator=(rank == 0))
+                return planner.create_local_plan()
+
+        planner = DefaultSavePlanner(enable_plan_caching=True)
+        key = planner._cached_plans_key
+
+        tensor = torch.rand(10)
+        val = [1, 2, 3]
+        state_dict = {"tensor": tensor, "value": val}
+        planner.set_up_planner(state_dict, is_coordinator=True)
+
+        local_plan = planner.create_local_plan()
+        self.assertTrue(local_plan.usable)
+        self.assertNotIn(key, SavePlanner._cached_save_plan)
+
+        all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+
+        with patch(
+            "torch.distributed.checkpoint.default_planner._validate_global_plan",
+            return_value=False,
+        ):
+            with self.assertRaises(ValueError):
+                planner.create_global_plan(all_plans)
+
+        self.assertNotIn(key, SavePlanner._cached_all_plans)
+        self.assertNotIn(key, SavePlanner._cached_global_plan)
+        self.assertNotIn(key, SavePlanner._cached_metadata)
+        self.assertNotIn(key, SavePlanner._cached_save_plan)
+
+        # Second save should succeed, not KeyError
+        planner.set_up_planner(state_dict, is_coordinator=True)
+        local_plan_2 = planner.create_local_plan()
+        self.assertTrue(local_plan_2.usable)
+
+        global_plan, metadata = planner.create_global_plan(all_plans)
+        self.assertIsNotNone(global_plan)
+        self.assertIsNotNone(metadata)
+        self.assertIn(key, SavePlanner._cached_all_plans)
+        self.assertIn(key, SavePlanner._cached_global_plan)
+        self.assertIn(key, SavePlanner._cached_metadata)
+
+        # Clean up class-level caches
+        SavePlanner._cached_save_plan.pop(key, None)
+        SavePlanner._cached_final_save_plan.pop(key, None)
+        SavePlanner._cached_all_plans.pop(key, None)
+        SavePlanner._cached_global_plan.pop(key, None)
+        SavePlanner._cached_metadata.pop(key, None)
 
     def test_local_load_plan(self):
         def create_state_dict(rank):
