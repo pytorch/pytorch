@@ -3116,6 +3116,51 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(0), fn(0))
         self.assertEqual(opt_fn(1), fn(1))
 
+    def test_operator_setitem(self):
+        def fn_list():
+            a = [1, 2, 3]
+            ret = operator.setitem(a, 1, 9)
+            return a, ret
+
+        def fn_dict():
+            a = {"x": 1, "y": 2}
+            ret = operator.setitem(a, "y", 9)
+            return a, ret
+
+        def fn_tensor(x):
+            y = x.clone()
+            ret = operator.setitem(y, 1, 9.0)
+            return y, ret
+
+        self.assertEqual(
+            torch.compile(fn_list, fullgraph=True, backend="eager")(), fn_list()
+        )
+        self.assertEqual(
+            torch.compile(fn_dict, fullgraph=True, backend="eager")(), fn_dict()
+        )
+        x = torch.tensor([1.0, 2.0, 3.0])
+        self.assertEqual(
+            torch.compile(fn_tensor, fullgraph=True, backend="eager")(x), fn_tensor(x)
+        )
+
+    def test_operator_delitem(self):
+        def fn_list():
+            a = [1, 2, 3]
+            ret = operator.delitem(a, 1)
+            return a, ret
+
+        def fn_dict():
+            a = {"x": 1, "y": 2}
+            ret = operator.delitem(a, "y")
+            return a, ret
+
+        self.assertEqual(
+            torch.compile(fn_list, fullgraph=True, backend="eager")(), fn_list()
+        )
+        self.assertEqual(
+            torch.compile(fn_dict, fullgraph=True, backend="eager")(), fn_dict()
+        )
+
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)

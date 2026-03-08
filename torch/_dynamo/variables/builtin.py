@@ -2370,6 +2370,22 @@ class BuiltinVariable(VariableTracker):
     ) -> VariableTracker:
         return args[0].call_method(tx, "__getitem__", list(args[1:]), kwargs)
 
+    def call_setitem(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        return args[0].call_method(tx, "__setitem__", list(args[1:]), kwargs)
+
+    def call_delitem(
+        self,
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        return args[0].call_method(tx, "__delitem__", list(args[1:]), kwargs)
+
     def call_isinstance(
         self,
         tx: "InstructionTranslator",
