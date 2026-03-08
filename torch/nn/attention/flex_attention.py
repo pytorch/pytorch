@@ -13,7 +13,7 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Literal, NamedTuple, TypeAlias, TypeVar, cast
+from typing import Any, cast, Literal, NamedTuple, TypeAlias, TypeVar
 from typing_extensions import NotRequired, Self, TypedDict
 
 import torch
@@ -22,7 +22,7 @@ from torch._higher_order_ops.flex_attention import flex_attention as flex_attent
 from torch._higher_order_ops.utils import setup_compilation_env
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import GetAttrKey, tree_map_only
-from torch.utils._typing_utils import copy_method_sig
+
 
 if typing.TYPE_CHECKING:
     from torch._prims_common import DeviceLikeType
@@ -249,7 +249,9 @@ class _ModificationType(Enum):
     UNKNOWN = 3
 
 
-def _get_mod_type(fn: _score_mod_signature | _mask_mod_signature | Callable[..., Any]) -> _ModificationType:
+def _get_mod_type(
+    fn: _score_mod_signature | _mask_mod_signature | Callable[..., Any],
+) -> _ModificationType:
     """Get the type of modification function.
     This function inspects the number of positional arguments of the function to determine
     the type of modification function. If the function has 5 positional arguments, it is
@@ -420,7 +422,9 @@ def _dense_to_ordered(dense_mask: Tensor) -> tuple[Tensor, Tensor]:
     )
 
 
-def _transpose_ordered(num_blocks_in_row: Tensor, col_indices: Tensor) -> tuple[Tensor, Tensor]:
+def _transpose_ordered(
+    num_blocks_in_row: Tensor, col_indices: Tensor
+) -> tuple[Tensor, Tensor]:
     dense = _ordered_to_dense(num_blocks_in_row, col_indices)
     return _dense_to_ordered(dense.transpose(-2, -1))
 
@@ -460,9 +464,8 @@ class _MaskModWrapper:
     def __init__(self, fn: _mask_mod_signature) -> None:
         self.fn = fn
 
-    @copy_method_sig(_mask_mod_signature)
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self.fn(*args, **kwargs)
+    def __call__(self, b: Tensor, h: Tensor, q_idx: Tensor, kv_idx: Tensor) -> Tensor:
+        return self.fn(b, h, q_idx, kv_idx)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _MaskModWrapper):
@@ -739,7 +742,9 @@ class BlockMask:
         s += "\n)"
         return s
 
-    def __getitem__(self, index: int | slice | Tensor | tuple[int | slice | Tensor, ...]) -> Self:
+    def __getitem__(
+        self, index: int | slice | Tensor | tuple[int | slice | Tensor, ...]
+    ) -> Self:
         """
         Returns a new BlockMask instance by getting the mask for the given index position.
 
@@ -894,7 +899,9 @@ class BlockMask:
             )
         return partial_dense
 
-    def to_string(self, grid_size: int | tuple[int, int] = (20, 20), limit: int = 4) -> str:
+    def to_string(
+        self, grid_size: int | tuple[int, int] = (20, 20), limit: int = 4
+    ) -> str:
         """Returns a string representation of the block mask. Quite nifty.
 
         If grid_size is -1, prints out an uncompressed version. Warning, it can be quite big!
@@ -1335,10 +1342,13 @@ def _apply_kernel_options(
     return_aux: AuxRequest | None = None,
 ) -> _KernelOptionsWithInternals:
     kernel_options = cast(
-        _KernelOptionsWithInternals, {} if kernel_options is None else dict(kernel_options)
+        _KernelOptionsWithInternals,
+        {} if kernel_options is None else dict(kernel_options),
     )
 
-    if "BACKEND" in kernel_options and kernel_options.get("FORCE_USE_FLEX_ATTENTION", False):
+    if "BACKEND" in kernel_options and kernel_options.get(
+        "FORCE_USE_FLEX_ATTENTION", False
+    ):
         # TODO: remove FORCE_USE_FLEX_ATTENTION once BACKEND is fully adopted.
         raise RuntimeError(
             "BACKEND cannot be combined with legacy FORCE_USE_FLEX_ATTENTION. "
