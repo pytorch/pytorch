@@ -625,7 +625,7 @@ struct ReduceJitOp {
     }
 
     bool should_store = config.should_store(output_idx);
-    if (should_store) {    
+    if (should_store) {
       uint32_t offset = config.staging_memory_offset(blockIdx.y);
 #ifndef USE_ROCM
       reduce_buffer[offset] = value;
