@@ -5415,7 +5415,8 @@ Tensor _cudnn_ctc_loss_backward(
     bool zero_infinity) {
   if (zero_infinity) {
     return at::where(
-        loss.unsqueeze(0).unsqueeze(2) == 0,
+        loss.unsqueeze(0).unsqueeze(2) ==
+            Scalar(std::numeric_limits<double>::infinity()),
         at::zeros({}, raw_grad.options()),
         raw_grad * grad_out.unsqueeze(0).unsqueeze(2));
   } else {
