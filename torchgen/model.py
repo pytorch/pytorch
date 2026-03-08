@@ -1372,7 +1372,7 @@ class BackendMetadata:
     # Note: This is an operator-level setting. A DeviceGuard is only generated
     # if both the global backend-level device_guard option and this
     # operator-specific metadata.device_guard are True.
-    device_guard: bool = False
+    device_guard: bool = True
 
     def supports_symint(self) -> bool:
         return "_symint" in self.kernel
