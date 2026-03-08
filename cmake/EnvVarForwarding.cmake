@@ -151,6 +151,17 @@ if(Python_EXECUTABLE)
         string(APPEND _rp_flags " -Wl,-rpath-link,${_d}")
       endif()
     endforeach()
+    # Intel oneAPI MKL SYCL (XPU): libmkl_sycl_lapack.so.5 and siblings require
+    # libmkl_core.so.2 from oneAPI MKL 2025.3+ which has new batch-strided LAPACK
+    # symbols (mkl_lapack_spotrf_batch_strided, etc.). Must appear before
+    # ENV{CMAKE_PREFIX_PATH} (conda) so the linker finds the oneAPI libmkl_core.so.2
+    # instead of conda's older version that lacks these symbols.
+    file(GLOB _mkl_lib_dirs "/opt/intel/oneapi/mkl/*/lib")
+    foreach(_d IN LISTS _mkl_lib_dirs)
+      if(IS_DIRECTORY "${_d}")
+        string(APPEND _rp_flags " -Wl,-rpath-link,${_d}")
+      endif()
+    endforeach()
     # ENV{CMAKE_PREFIX_PATH} entries (conda env, etc.).
     foreach(_prefix IN LISTS _env_prefix)
       foreach(_sub "lib" "lib64")
@@ -181,6 +192,10 @@ if(Python_EXECUTABLE)
         string(APPEND _rp_flags " -Wl,-rpath-link,${_cuda_root}/${_sub}")
       endif()
     endforeach()
+    # CUPTI (CUDA Profiling Tools Interface) lives in extras/CUPTI/lib64, not lib64.
+    if(IS_DIRECTORY "${_cuda_root}/extras/CUPTI/lib64")
+      string(APPEND _rp_flags " -Wl,-rpath-link,${_cuda_root}/extras/CUPTI/lib64")
+    endif()
     # MAGMA (ROCm): libmagma.so lives in MAGMA_HOME/lib, not in /opt/rocm/lib.
     if(DEFINED ENV{MAGMA_HOME} AND NOT "$ENV{MAGMA_HOME}" STREQUAL "")
       string(APPEND _rp_flags " -Wl,-rpath-link,$ENV{MAGMA_HOME}/lib")
@@ -194,13 +209,6 @@ if(Python_EXECUTABLE)
     # torch-xpu-ops sycltla libs (XPU): libtorch-xpu-ops-sycltla-mha_*.so are
     # built into the cmake binary dir's lib/ subdir during the build phase.
     string(APPEND _rp_flags " -Wl,-rpath-link,${CMAKE_BINARY_DIR}/lib")
-    # Intel oneAPI MKL SYCL (XPU): libmkl_sycl_blas.so.5, libmkl_sycl_dft.so.5,
-    # libmkl_sycl_lapack.so.5 are in the MKL component, not the compiler component
-    # that appears in CMAKE_PREFIX_PATH. Glob the standard install path.
-    file(GLOB _mkl_lib_dirs "/opt/intel/oneapi/mkl/*/lib")
-    foreach(_d IN LISTS _mkl_lib_dirs)
-      string(APPEND _rp_flags " -Wl,-rpath-link,${_d}")
-    endforeach()
     if(_rp_flags)
       string(APPEND CMAKE_EXE_LINKER_FLAGS "${_rp_flags}")
       string(APPEND CMAKE_SHARED_LINKER_FLAGS "${_rp_flags}")
