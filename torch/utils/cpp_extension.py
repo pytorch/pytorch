@@ -235,6 +235,17 @@ def _wrap_compiler(compiler: str | list[str]) -> list[str]:
     return compiler
 
 
+def _shell_join(cmd: list[str]) -> str:
+    """Concatenates the tokens and returns a shell escaped string.
+
+    This function does shell escaping in a platform specific fashion
+    similar to shlex.join.
+    """
+    if IS_WINDOWS:
+        return subprocess.list2cmdline(cmd)
+    return shlex.join(cmd)
+
+
 ABI_INCOMPATIBILITY_WARNING = (
     "                               !! WARNING !!"
     "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
@@ -1906,7 +1917,7 @@ def _check_and_build_extension_h_precompiler_headers(
     if b_is_gcc is False:
         return
 
-    compiler = shlex.join(_wrap_compiler(compiler))
+    compiler = _shell_join(_wrap_compiler(compiler))
 
     head_file = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h')
     head_file_pch = os.path.join(_TORCH_PATH, 'include', 'torch', 'extension.h.gch')
@@ -3057,7 +3068,7 @@ e.
 
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
-    config.append(f'cxx = {shlex.join(_wrap_compiler(compiler))}')
+    config.append(f'cxx = {_shell_join(_wrap_compiler(compiler))}')
     if with_cuda or cuda_dlink_post_cflags:
         if "PYTORCH_NVCC" in os.environ:
             nvcc = os.getenv("PYTORCH_NVCC")    # user can set nvcc compiler with ccache using the environment variable here
@@ -3066,7 +3077,7 @@ e.
                 nvcc = _get_hipcc_path()
             else:
                 nvcc = _join_cuda_home('bin', 'nvcc')
-            nvcc = shlex.join(_wrap_compiler(nvcc))
+            nvcc = _shell_join(_wrap_compiler(nvcc))
         config.append(f'nvcc = {nvcc}')
     if with_sycl or sycl_dlink_post_cflags:
         sycl = 'icx' if IS_WINDOWS else 'icpx'
