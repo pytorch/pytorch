@@ -51,9 +51,8 @@ from typing_extensions import (
 def _patch_skbuild_editable_rebuild() -> None:
     _MARKER = "SKBUILD_EDITABLE_SKIP"
     for _finder in sys.meta_path:
-        if (
-            type(_finder).__name__ == "ScikitBuildRedirectingFinder"
-            and getattr(_finder, "path", None)
+        if type(_finder).__name__ == "ScikitBuildRedirectingFinder" and getattr(
+            _finder, "path", None
         ):
             _orig = _finder.rebuild
             _path = _finder.path
