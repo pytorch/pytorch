@@ -499,8 +499,6 @@ def _thread_worker_loop(
     Sets up thread-local RNG state to avoid race conditions and shared state issues.
     """
     torch.multiprocessing._set_thread_name("pt_thread_data_worker")
-
-    # Set the thread name for better debugging
     threading.current_thread().name = f"DataLoader_thread_{worker_id}"
 
     # Thread-local RNG setup to avoid race conditions with global state

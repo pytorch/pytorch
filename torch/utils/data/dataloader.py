@@ -15,6 +15,7 @@ import logging
 import multiprocessing as python_multiprocessing
 import os
 import queue
+import sys
 import threading
 import warnings
 from collections.abc import Callable
@@ -137,6 +138,111 @@ def _share_dist_seed(generator, pg):
     if isinstance(pg, dist.ProcessGroup):
         dist.broadcast(_shared_seed, src=0, group=pg)
     return _shared_seed.item()
+
+
+def _check_file_descriptor_limit() -> None:
+    """
+    Check if we are close to the file descriptor limit.
+
+    This is specific to multiprocessing on Linux where DataLoader uses SHM files
+    for IPC. When file descriptors are exhausted, communication with workers
+    becomes impossible.
+
+    Raises:
+        RuntimeError: If we are close to the FDs limit (EMFILE error).
+
+    See NOTE [ DataLoader on Linux and open files limit ]
+    """
+    import errno
+    import tempfile
+
+    try:
+        # Raise an exception if we are this close to the FDs limit.
+        # Apparently, trying to open only one file is not a sufficient test.
+        fds_limit_margin = 10
+        with contextlib.ExitStack() as stack:
+            for _ in range(fds_limit_margin):
+                stack.enter_context(
+                    tempfile.NamedTemporaryFile()  # pyrefly: ignore [bad-argument-type]
+                )
+    except OSError as e:
+        if e.errno == errno.EMFILE:
+            raise RuntimeError(
+                "Too many open files. Communication with the"
+                " workers is no longer possible. Please increase the"
+                " limit using `ulimit -n` in the shell or change the"
+                " sharing strategy by calling"
+                " `torch.multiprocessing.set_sharing_strategy('file_system')`"
+                " at the beginning of your code"
+            ) from None
+        raise
+
+
+def _validate_dataloader_args(
+    num_workers: int,
+    timeout: float,
+    prefetch_factor: int | None,
+    persistent_workers: bool,
+    worker_method: str,
+    dataset,
+) -> None:
+    """
+    Validate DataLoader constructor arguments.
+
+    Args:
+        num_workers: Number of worker processes/threads.
+        timeout: Timeout for collecting a batch from workers.
+        prefetch_factor: Number of batches loaded in advance by each worker.
+        persistent_workers: Whether to keep workers alive between epochs.
+        worker_method: Either 'multiprocessing' or 'thread'.
+        dataset: The dataset being loaded.
+
+    Raises:
+        ValueError: If any argument is invalid.
+    """
+    if num_workers < 0:
+        raise ValueError(
+            "num_workers option should be non-negative; "
+            "use num_workers=0 to disable multiprocessing."
+        )
+
+    if timeout < 0:
+        raise ValueError("timeout option should be non-negative")
+
+    if num_workers == 0 and prefetch_factor is not None:
+        raise ValueError(
+            "prefetch_factor option could only be specified in multiprocessing. "
+            "let num_workers > 0 to enable multiprocessing, otherwise set prefetch_factor to None."
+        )
+    if prefetch_factor is not None and prefetch_factor < 0:
+        raise ValueError("prefetch_factor option should be non-negative")
+
+    if persistent_workers and num_workers == 0:
+        raise ValueError("persistent_workers option needs num_workers > 0")
+
+    if worker_method not in ["multiprocessing", "thread"]:
+        raise ValueError("worker_method should be either 'multiprocessing' or 'thread'")
+
+    if worker_method == "thread":
+        if isinstance(dataset, (IterDataPipe, MapDataPipe)):
+            raise ValueError(
+                "IterDataPipe and MapDataPipe are not supported with worker_method='thread'. "
+                "Use worker_method='multiprocessing' instead."
+            )
+
+        if sys.platform != "linux":
+            raise ValueError(
+                f"worker_method='thread' is only supported on Linux. "
+                f"Current platform: {sys.platform}. "
+                f"Use worker_method='multiprocessing' instead."
+            )
+
+        # Check for mobile builds (C10_MOBILE defined)
+        if "[mobile]" in torch.__config__.parallel_info():
+            raise ValueError(
+                "worker_method='thread' is not supported on mobile builds (C10_MOBILE). "
+                "Use worker_method='multiprocessing' instead."
+            )
 
 
 class DataLoader(Generic[_T_co]):
@@ -272,27 +378,18 @@ class DataLoader(Generic[_T_co]):
     ) -> None:
         torch._C._log_api_usage_once("python.data_loader")
 
-        if num_workers < 0:
-            raise ValueError(
-                "num_workers option should be non-negative; "
-                "use num_workers=0 to disable multiprocessing."
-            )
+        # Validate all arguments
+        _validate_dataloader_args(
+            num_workers=num_workers,
+            timeout=timeout,
+            prefetch_factor=prefetch_factor,
+            persistent_workers=persistent_workers,
+            worker_method=worker_method,
+            dataset=dataset,
+        )
 
-        if timeout < 0:
-            raise ValueError("timeout option should be non-negative")
-
-        if num_workers == 0 and prefetch_factor is not None:
-            raise ValueError(
-                "prefetch_factor option could only be specified in multiprocessing."
-                "let num_workers > 0 to enable multiprocessing, otherwise set prefetch_factor to None."
-            )
-        elif num_workers > 0 and prefetch_factor is None:
+        if num_workers > 0 and prefetch_factor is None:
             prefetch_factor = 2
-        elif prefetch_factor is not None and prefetch_factor < 0:
-            raise ValueError("prefetch_factor option should be non-negative")
-
-        if persistent_workers and num_workers == 0:
-            raise ValueError("persistent_workers option needs num_workers > 0")
 
         self.dataset = dataset
         self.num_workers = num_workers
@@ -301,11 +398,6 @@ class DataLoader(Generic[_T_co]):
         self.pin_memory_device = pin_memory_device
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
-
-        if worker_method not in ["multiprocessing", "thread"]:
-            raise ValueError(
-                "worker_method should be either 'multiprocessing' or 'thread'"
-            )
         self.worker_method = worker_method
         self.multiprocessing_context = multiprocessing_context
         self.in_order = in_order
@@ -841,7 +933,7 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         the worker method is multiprocessing. For threading, pinning
         is done in the worker processes.
         """
-        if self._pin_memory and self._worker_method == "multiprocessing":
+        if self._pin_memory:
             self._pin_memory_thread_done_event = threading.Event()
 
             # Queue is not type-annotated
@@ -914,13 +1006,36 @@ class _ParallelDataLoaderIter(_BaseDataLoaderIter):
         # Tries to fetch data from `self._data_queue` once for a given timeout.
         # This can also be used as inner loop of fetching without timeout, with
         # the sender status as the loop condition.
+
         if self._data_queue is None:
             raise AssertionError("Data queue not initialized")
         try:
             data = self._data_queue.get(timeout=timeout)
             return (True, data)
-        except queue.Empty:
-            return (False, None)
+        except Exception as e:
+            # At timeout and error, we manually check whether any worker has
+            # failed. Note that this is the only mechanism for Windows to detect
+            # worker failures (for multiprocessing).
+            failed_workers = []
+            for worker_id, w in enumerate(self._workers):
+                if self._workers_status[worker_id] and not w.is_alive():
+                    failed_workers.append(w)
+                    self._mark_worker_as_unavailable(worker_id)
+            if len(failed_workers) > 0:
+                raise RuntimeError(self._failed_worker_error_msg(failed_workers)) from e
+
+            if isinstance(e, queue.Empty):
+                return (False, None)
+
+            self._check_worker_exception()
+
+            raise
+
+    def _failed_worker_error_msg(self, failed_workers) -> str:
+        raise NotImplementedError
+
+    def _check_worker_exception(self) -> None:
+        pass
 
     def _get_data(self):
         # Fetches data from `self._data_queue`.
@@ -1179,9 +1294,13 @@ class _ThreadingDataLoaderIter(_ParallelDataLoaderIter):
             self._index_queues.append(index_queue)
             self._workers.append(w)
 
-        self._initialize_pin_memory()
+        self._data_queue = self._worker_result_queue
 
         self._reset(loader, first_iter=True)
+
+    def _failed_worker_error_msg(self, failed_workers) -> str:
+        thread_ids_str = ", ".join(str(w.ident) for w in failed_workers)
+        return f"DataLoader worker (thread(s) {thread_ids_str}) exited unexpectedly"
 
 
 class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
@@ -1582,65 +1701,13 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
         self._worker_pids_set = True
         self._reset(loader, first_iter=True)
 
-    def _try_get_data(self, timeout=_utils.STATUS_CHECK_INTERVAL):
-        # Tries to fetch data from `self._data_queue` once for a given timeout.
-        # This can also be used as inner loop of fetching without timeout, with
-        # the sender status as the loop condition.
-        #
-        # This raises a `RuntimeError` if any worker died expectedly. This error
-        # can come from either the SIGCHLD handler in `_utils/signal_handling.py`
-        # (only for non-Windows platforms), or the manual check below on errors
-        # and timeouts.
-        #
-        # Returns a 2-tuple:
-        #   (bool: whether successfully get data, any: data if successful else None)
-        if self._data_queue is None:
-            raise AssertionError("Data queue not initialized")
-        try:
-            data = self._data_queue.get(timeout=timeout)
-            return (True, data)
-        except Exception as e:
-            # At timeout and error, we manually check whether any worker has
-            # failed. Note that this is the only mechanism for Windows to detect
-            # worker failures.
-            failed_workers = []
-            for worker_id, w in enumerate(self._workers):
-                if self._workers_status[worker_id] and not w.is_alive():
-                    failed_workers.append(w)
-                    self._mark_worker_as_unavailable(worker_id)
-            if len(failed_workers) > 0:
-                pids_str = ", ".join(str(w.pid) for w in failed_workers)
-                raise RuntimeError(
-                    f"DataLoader worker (pid(s) {pids_str}) exited unexpectedly"
-                ) from e
-            if isinstance(e, queue.Empty):
-                return (False, None)
+    def _failed_worker_error_msg(self, failed_workers) -> str:
+        """Return error message with worker PIDs for failed workers."""
+        pids_str = ", ".join(str(w.pid) for w in failed_workers)
+        return f"DataLoader worker (pid(s) {pids_str}) exited unexpectedly"
 
-            import errno
-            import tempfile
-
-            try:
-                # Raise an exception if we are this close to the FDs limit.
-                # Apparently, trying to open only one file is not a sufficient
-                # test.
-                # See NOTE [ DataLoader on Linux and open files limit ]
-                fds_limit_margin = 10
-                with contextlib.ExitStack() as stack:
-                    for _ in range(fds_limit_margin):
-                        stack.enter_context(
-                            tempfile.NamedTemporaryFile()  # pyrefly: ignore [bad-argument-type]
-                        )
-            except OSError as e:
-                if e.errno == errno.EMFILE:
-                    raise RuntimeError(
-                        "Too many open files. Communication with the"
-                        " workers is no longer possible. Please increase the"
-                        " limit using `ulimit -n` in the shell or change the"
-                        " sharing strategy by calling"
-                        " `torch.multiprocessing.set_sharing_strategy('file_system')`"
-                        " at the beginning of your code"
-                    ) from None
-            raise
+    def _check_worker_exception(self) -> None:
+        _check_file_descriptor_limit()
 
     # NOTE [ DataLoader on Linux and open files limit ]
     #
@@ -1753,39 +1820,46 @@ class _MultiProcessingDataLoaderIter(_ParallelDataLoaderIter):
             return
 
         # Call parent class shutdown logic (common to both threading and multiprocessing)
-        super()._shutdown_workers()
-
+        # Check if already shutdown before calling parent (parent sets _shutdown = True)
+        already_shutdown = self._shutdown
         try:
-            if hasattr(self, "_pin_memory_thread"):
-                if self._worker_result_queue is None:
-                    raise AssertionError("Worker result queue not initialized")
-                # Multiprocessing queues have cancel_join_thread and close methods
-                self._worker_result_queue.cancel_join_thread()  # type: ignore[attr-defined]
-                self._worker_result_queue.close()  # type: ignore[attr-defined]
+            super()._shutdown_workers()
+        except Exception:
+            pass
 
-            for q in self._index_queues:
-                q.cancel_join_thread()
-                q.close()
-        finally:
-            # Even though we call `cancel_join_thread` on multiprocessing queues,
-            # weird things can happen when a worker is killed by a signal,
-            # e.g., hanging in `Event.set()`. So we need to guard this with SIGCHLD handler,
-            # and remove pids from the C side data structure only at the
-            # end.
-            #
-            # FIXME: Unfortunately, for Windows, we are missing a worker
-            #        error detection mechanism here in this function, as it
-            #        doesn't provide a SIGCHLD handler.
-            if self._worker_pids_set:
-                _utils.signal_handling._remove_worker_pids(id(self))
-                self._worker_pids_set = False
-            for w in self._workers:
-                if w.is_alive():
-                    # Existing mechanisms try to make the workers exit
-                    # peacefully, but in case that we unfortunately reach
-                    # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
-                    # we kill the worker.
-                    w.terminate()
+        # Only run multiprocessing-specific cleanup if this is the first shutdown call
+        if not already_shutdown:
+            try:
+                if hasattr(self, "_pin_memory_thread"):
+                    if self._worker_result_queue is None:
+                        raise AssertionError("Worker result queue not initialized")
+                    # Multiprocessing queues have cancel_join_thread and close methods
+                    self._worker_result_queue.cancel_join_thread()  # type: ignore[attr-defined]
+                    self._worker_result_queue.close()  # type: ignore[attr-defined]
+
+                for q in self._index_queues:
+                    q.cancel_join_thread()
+                    q.close()
+            finally:
+                # Even though we call `cancel_join_thread` on multiprocessing queues,
+                # weird things can happen when a worker is killed by a signal,
+                # e.g., hanging in `Event.set()`. So we need to guard this with SIGCHLD handler,
+                # and remove pids from the C side data structure only at the
+                # end.
+                #
+                # FIXME: Unfortunately, for Windows, we are missing a worker
+                #        error detection mechanism here in this function, as it
+                #        doesn't provide a SIGCHLD handler.
+                if self._worker_pids_set:
+                    _utils.signal_handling._remove_worker_pids(id(self))
+                    self._worker_pids_set = False
+                for w in self._workers:
+                    if w.is_alive():
+                        # Existing mechanisms try to make the workers exit
+                        # peacefully, but in case that we unfortunately reach
+                        # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
+                        # we kill the worker.
+                        w.terminate()
 
     # staticmethod is used to remove reference to `_MultiProcessingDataLoaderIter`
     @staticmethod

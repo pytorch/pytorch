@@ -3762,6 +3762,10 @@ class TestSlowIterableDataset(IterableDataset):
 
 
 @instantiate_parametrized_tests
+@unittest.skipIf(
+    IS_WINDOWS or IS_MACOS,
+    "Threading based data loading workers not supported on Windows and MacOS",
+)
 class TestOutOfOrderDataLoader(TestCase):
     @parametrize("worker_method", ["multiprocessing", "thread"])
     def test_in_order_index_ds(self, worker_method):
@@ -4437,6 +4441,42 @@ class TestThreadingDataLoader(TestCase):
         for w in worker_threads:
             self.assertFalse(w.is_alive())
 
+    def test_threading_double_shutdown(self):
+        """Test that calling _shutdown_workers() twice doesn't raise or hang."""
+        import concurrent.futures
+        import time
+
+        loader = DataLoader(
+            self.dataset,
+            batch_size=10,
+            num_workers=2,
+            worker_method="thread",
+        )
+
+        iterator = iter(loader)
+        next(iterator)
+
+        worker_threads = list(iterator._workers)
+
+        # First shutdown
+        iterator._shutdown_workers()
+
+        time.sleep(0.5)
+
+        for w in worker_threads:
+            self.assertFalse(w.is_alive())
+
+        # Second shutdown - should be a no-op, not raise or hang
+        # Use a thread with timeout to detect hangs
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(iterator._shutdown_workers)
+            try:
+                future.result(timeout=5)
+            except concurrent.futures.TimeoutError:
+                self.fail("Second _shutdown_workers() call hung")
+            except Exception as e:
+                self.fail(f"Second _shutdown_workers() call raised: {e}")
+
     @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
     def test_threading_shutdown_on_program_exit(self):
         """Case 4: Iterator did some work but not completely exhausted, program exits,
@@ -4492,6 +4532,34 @@ print("SUCCESS")
             result.stdout,
             f"Script did not complete successfully. stdout: {result.stdout}, stderr: {result.stderr}",
         )
+
+    def test_thread_worker_method_mobile_build_rejected(self):
+        """Test that worker_method='thread' raises ValueError on mobile builds."""
+        import unittest.mock as mock
+
+        dataset = TensorDataset(torch.randn(10, 2))
+
+        # Mock torch.__config__.parallel_info() to simulate mobile build
+        # Mobile builds have "[mobile]" in the "ATen parallel backend:" line
+        mock_parallel_info_output = (
+            "ATen/Parallel:\n"
+            "\tat::get_num_threads() : 1\n"
+            "\tat::get_num_interop_threads() : 1\n"
+            "ATen parallel backend: [mobile]\n"
+        )
+
+        with mock.patch("torch.__config__.parallel_info") as mock_parallel_info:
+            mock_parallel_info.return_value = mock_parallel_info_output
+
+            with self.assertRaises(ValueError) as ctx:
+                DataLoader(
+                    dataset,
+                    num_workers=2,
+                    worker_method="thread",
+                )
+
+            self.assertIn("C10_MOBILE", str(ctx.exception))
+            self.assertIn("worker_method='thread'", str(ctx.exception))
 
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
