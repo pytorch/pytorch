@@ -14,3 +14,4 @@ exclude:
   - "**/test_*.py"
   - "**/*_test.py"
   - "tools/**"
+  - "setup.py"
