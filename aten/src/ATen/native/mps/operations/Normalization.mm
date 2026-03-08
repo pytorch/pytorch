@@ -212,7 +212,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_mps(const Tensor& self, double epsil
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
-  return std::make_tuple(mean, invstd);
+  return std::make_tuple(std::move(mean), std::move(invstd));
 }
 
 // Inverse standard deviation now becomes variance (without epsilon)
