@@ -939,7 +939,7 @@ struct HelperInterpBase {
       idx_ptr_stride[i] = stride;
       wt_idx_ptr[i] = i * max_interp_size * weight_index_stride;
     }
-    return {output, max_interp_size, wt_max};
+    return {std::move(output), max_interp_size, wt_max};
   }
 
   /*
@@ -1029,7 +1029,7 @@ struct HelperInterpBase {
       }
     }
 
-    return {indices_weights, aligned_interp_size, weights_precision};
+    return {std::move(indices_weights), aligned_interp_size, weights_precision};
   }
 };
 
