@@ -1092,29 +1092,21 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_cuda
-    def test_argmax_keepdim_3d(self):
-        """Test argmax with keepdim=True on 3D tensor.
+    def test_argmax_argmin_keepdim_3d(self):
+        """Test arg-reductions with keepdim=True on 3D tensor."""
 
-        Regression test for https://github.com/pytorch/pytorch/issues/174719
-        The Pallas codegen previously produced incorrect reshape when reducing
-        argmax/argmin on a middle dimension of a 3D+ tensor.
-        """
+        for reduction_op in (torch.argmax, torch.argmin):
+            for dim in [0, 1, 2]:
 
-        for dim in [0, 1, 2]:
+                def fn(x, op=reduction_op, d=dim):
+                    return op(x, dim=d, keepdim=True)
 
-            def fn(x, d=dim):
-                return x.max(dim=d, keepdim=True)
+                compiled = self._compile(fn)
 
-            compiled = self._compile(fn)
-
-            x = torch.randint(0, 10, (4, 8, 16), device=self.DEVICE)
-            result_vals, result_idx = compiled(x)
-            expected_vals, expected_idx = fn(x)
-            self.assertEqual(result_vals, expected_vals)
-            self.assertEqual(result_idx, expected_idx)
-
-    @skip_if_cuda
-    @skip_if_tpu
+                x = torch.randint(0, 10, (4, 8, 16), device=self.DEVICE)
+                result = compiled(x)
+                expected = fn(x)
+                self.assertEqual(result, expected)
     def test_softmax_two_pass(self):
         """Test two-pass softmax (max reduction + sum reduction)."""
 
