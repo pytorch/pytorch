@@ -6116,9 +6116,15 @@ def meta__scaled_dot_product_attention_math_for_mps(
     q_, unsqueezed = ensure_4d(query)
     k_, _ = ensure_4d(key)
     v_, _ = ensure_4d(value)
+    mask_ = None
+    if attn_mask is not None:
+        mask_expanded_dims = list(query.shape)
+        mask_expanded_dims[-1] = k_.size(2)
+        mask_ = attn_mask.expand(mask_expanded_dims)
+        mask_, _ = ensure_4d(mask_)
 
-    batch_size, num_head, q_size, head_size = q_.shape
-    _, k_size, max_seq_length, _ = k_.shape
+    batch_size, num_head, q_size, query_head_size = q_.shape
+    _, k_size, max_seq_length, value_head_size = v_.shape
 
     def sdpa_vector_fast_mps():
         out = q_.new_empty(q_.shape)
@@ -6137,10 +6143,42 @@ def meta__scaled_dot_product_attention_math_for_mps(
     def sdpa_vector_2pass_mps():
         blocks = 32
         out = q_.new_empty(q_.shape)
-        intermediate = q_.new_empty((batch_size, num_head, q_size, blocks, head_size))
+        intermediate = q_.new_empty(
+            (batch_size, num_head, q_size, blocks, query_head_size)
+        )
         return out, intermediate
 
-    if (max_seq_length >= 1024) or (k_size < q_size and max_seq_length >= 4096):
+    def sdpa_general_mps():
+        out = q_.new_empty((batch_size, num_head, q_size, value_head_size))
+        attn = q_.new_empty((batch_size, num_head, q_size, max_seq_length))
+        if unsqueezed:
+            if query.dim() == 3:
+                out = out.squeeze(0)
+                attn = attn.squeeze(0)
+            else:
+                out_shape = list(query.shape[:-3]) + list(out.shape[1:4])
+                attn_shape = list(query.shape[:-3]) + list(attn.shape[1:4])
+                out = out.view(out_shape)
+                attn = attn.view(attn_shape)
+        return out, attn
+
+    query_head_dim = q_.size(3)
+    value_head_dim = v_.size(3)
+    sdpa_vector_supported_head_dim = (query_head_dim == value_head_dim) and (
+        query_head_dim == 64 or query_head_dim == 96 or query_head_dim == 128
+    )
+    query_seq_len = q_.size(2)
+    supports_sdpa_vector = (
+        (query_seq_len <= 8)
+        and (query_seq_len <= k_.size(2))
+        and ((mask_ is None) or (mask_.dtype == torch.bool))
+        and sdpa_vector_supported_head_dim
+    )
+    supports_fast_sdpa = (not is_causal) and supports_sdpa_vector
+
+    if not supports_fast_sdpa:
+        return sdpa_general_mps()
+    elif (max_seq_length >= 1024) or (k_size < q_size and max_seq_length >= 4096):
         return sdpa_vector_2pass_mps()
     else:
         return sdpa_vector_fast_mps()
