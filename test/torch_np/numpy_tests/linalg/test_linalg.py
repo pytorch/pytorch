@@ -12,10 +12,12 @@ from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import numpy
 import pytest
+
 try:
     from numpy.linalg._linalg import _multi_dot_matrix_chain_order
 except ImportError:
     from numpy.linalg.linalg import _multi_dot_matrix_chain_order
+
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
