@@ -1007,8 +1007,8 @@ class ShardingPropagator:
             dim = normalize(schema.args_schema[1])  # type: ignore[arg-type]
             target_dims = (dim,) if is_singleton(dim) else ()
         else:
-            dims = schema.args_schema[1]
-            target_dims = tuple(  # type: ignore[union-attr]  # pyrefly: ignore[not-iterable]
+            dims = cast(Sequence[int], schema.args_schema[1])
+            target_dims = tuple(  # type: ignore[union-attr]
                 normalize(d) for d in dims if is_singleton(d)
             )
 
