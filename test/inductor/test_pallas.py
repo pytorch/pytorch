@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import unittest
+from collections.abc import Callable
 
 import torch
 import torch._dynamo
@@ -100,28 +101,27 @@ def make_pallas(cls):
     return test_class
 
 
-def _skip_if(condition_fn, *, reason):
-    def decorator(fn):
-        @functools.wraps(fn)
-        def wrapper(self, *args, **kwargs):
-            if condition_fn(self):
-                self.skipTest(reason)
-            fn(self, *args, **kwargs)
+def _skip_if(condition_fn: Callable, default_reason: str) -> Callable:
+    def skip(fn: Callable | None = None, *, reason: str = default_reason) -> Callable:
+        def decorator(fn: Callable) -> Callable:
+            @functools.wraps(fn)
+            def wrapper(self, *args, **kwargs):
+                if condition_fn(self):
+                    self.skipTest(reason)
+                fn(self, *args, **kwargs)
 
-        return wrapper
+            return wrapper
 
-    return decorator
+        if fn is not None:
+            return decorator(fn)
+        return decorator
+
+    return skip
 
 
-skip_if_tpu = functools.partial(
-    _skip_if, lambda self: self.DEVICE == "tpu", reason="Not yet working on TPU"
-)
-skip_if_cpu = functools.partial(
-    _skip_if, lambda self: self.DEVICE == "cpu", reason="Not yet working on CPU"
-)
-skip_if_cuda = functools.partial(
-    _skip_if, lambda self: self.DEVICE == "cuda", reason="Not yet working on GPU"
-)
+skip_if_tpu = _skip_if(lambda self: self.DEVICE == "tpu", "Not yet working on TPU")
+skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
+skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
 
 
 class PallasTestsMixin:
