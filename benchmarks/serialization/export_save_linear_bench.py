@@ -157,9 +157,7 @@ def _measure_save_times_ms(
 
 def _status_for_exception(exc: BaseException) -> tuple[str, str]:
     message = (
-        str(exc).strip().splitlines()[0]
-        if str(exc).strip()
-        else type(exc).__name__
+        str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
     )
     lowered = message.lower()
     if (
@@ -253,12 +251,8 @@ def main() -> None:
     args = _parse_args()
     dtype = _dtype_from_name(args.dtype)
 
-    print(
-        "Benchmarking torch.export.save for a 5-layer LinearModel"
-    )
-    print(
-        f"dtype={args.dtype}, batch_size={args.batch_size}, repeats={args.repeats}"
-    )
+    print("Benchmarking torch.export.save for a 5-layer LinearModel")
+    print(f"dtype={args.dtype}, batch_size={args.batch_size}, repeats={args.repeats}")
 
     results = [
         _run_case(
@@ -270,17 +264,17 @@ def main() -> None:
         for num_params in args.num_params
     ]
 
-    print("")
+    print()
     print(
         "Note: This benchmark is highly sensitive to disk performance and OS "
         "behavior. Results for smaller parameter counts can be noisy or flaky."
     )
-    print("")
+    print()
     print(_format_table(results))
 
     failures = [result for result in results if result.error_detail is not None]
     if failures:
-        print("")
+        print()
         print("failed cases:")
         for result in failures:
             print(
