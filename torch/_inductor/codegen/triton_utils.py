@@ -160,6 +160,24 @@ def signature_to_meta(
     }
 
 
+def _get_buffer_layout(buf_name: str):
+    """Get the layout for a buffer, handling both scheduler buffers and graph inputs."""
+    if V.graph.scheduler:
+        try:
+            return V.graph.scheduler.get_buffer_layout(buf_name)
+        except (KeyError, AttributeError):
+            pass
+
+    buffer = V.graph.try_get_buffer(buf_name)
+    if buffer:
+        return buffer.get_layout()
+
+    if hasattr(V, "kernel") and V.kernel is not None and buf_name == V.kernel.output_node.name:
+        return V.kernel.output_node.layout
+
+    return None
+
+
 def is_unaligned_buffer(arg: TensorArg):
     buf_name = arg.buffer
     if buf_name in V.graph.unaligned_buffers:
@@ -175,17 +193,7 @@ def is_unaligned_buffer(arg: TensorArg):
         # all constants are assumed to be aligned
         return False
 
-    if V.graph.scheduler:
-        layout = V.graph.scheduler.get_buffer_layout(buf_name)
-    else:
-        buffer = V.graph.try_get_buffer(buf_name)
-        # output arg
-        if not buffer:
-            assert buf_name == V.kernel.output_node.name
-            layout = V.kernel.output_node.layout
-        else:
-            layout = buffer.get_layout()
-
+    layout = _get_buffer_layout(buf_name)
     if isinstance(layout, torch._inductor.ir.NonOwningLayout):
         return not layout.maybe_guard_aligned()
     else:
@@ -211,24 +219,6 @@ def equal_1_arg_indices(
     equal_to_1 = tuple(i for i, arg in zip(indices, args) if _arg_equals_1(arg))
 
     return equal_to_1
-
-
-def _get_buffer_layout(buf_name: str):
-    """Get the layout for a buffer, handling both scheduler buffers and graph inputs."""
-    if V.graph.scheduler:
-        try:
-            return V.graph.scheduler.get_buffer_layout(buf_name)
-        except (KeyError, AttributeError):
-            pass
-
-    buffer = V.graph.try_get_buffer(buf_name)
-    if buffer:
-        return buffer.get_layout()
-
-    if hasattr(V, "kernel") and V.kernel is not None and buf_name == V.kernel.output_node.name:
-        return V.kernel.output_node.layout
-
-    return None
 
 
 def _is_tensor_within_2gb(arg: TensorArg) -> bool:
