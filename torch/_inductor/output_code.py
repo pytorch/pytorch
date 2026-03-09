@@ -331,6 +331,8 @@ def cudagraph_partition_post_compile(
             log_cudagraph_skip_and_bump_counter("skipping cudagraphs as compiled_graph.partition_maps is None")
         else:
             log_cudagraph_skip_and_bump_counter("skipping cudagraphs as len(compiled_graph.partition_maps) == 0")
+        if V.config.inductor.cudagraph_or_error:
+            raise RuntimeError("Unable to find any CUDA graphable partitions")
         return
 
     assert compiled_graph.current_callable is not None
