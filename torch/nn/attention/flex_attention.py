@@ -1552,7 +1552,8 @@ def flex_attention(
 @overload
 @deprecated(
     "return_lse is deprecated and will be removed in v2.10. "
-    "Use return_aux=AuxRequest(lse=True) instead."
+    "Use return_aux=AuxRequest(lse=True) instead.",
+    category=FutureWarning,
 )
 def flex_attention(
     query: Tensor,
@@ -1586,10 +1587,6 @@ def flex_attention(
 
 
 @overload
-@deprecated(
-    "Passing both return_lse=True and return_aux is invalid and will raise at runtime. "
-    "Use return_aux=AuxRequest(lse=True) instead."
-)
 def flex_attention(
     query: Tensor,
     key: Tensor,
@@ -1873,7 +1870,7 @@ def flex_attention(
             key,
             value,
             score_mod,
-            block_mask.as_tuple(),  # type: ignore[union-attr]
+            block_mask.as_tuple(),
             scale,
             kernel_options,
         )
