@@ -13,8 +13,8 @@ import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, cast, Literal, NamedTuple, TypeAlias, TypeVar
-from typing_extensions import NotRequired, Self, TypedDict
+from typing import Any, cast, Literal, NamedTuple, overload, TypeAlias, TypeVar
+from typing_extensions import deprecated, Never, NotRequired, Self, TypedDict
 
 import torch
 from torch import Tensor
@@ -700,6 +700,42 @@ class BlockMask:
             BLOCK_SIZE=BLOCK_SIZE,
             mask_mod=mask_mod,
         )
+
+    @overload
+    def as_tuple(
+        self, flatten: Literal[True] = ...
+    ) -> tuple[
+        int,
+        int,
+        Tensor,
+        Tensor,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        int,
+        int,
+        _mask_mod_signature,
+    ]: ...
+
+    @overload
+    def as_tuple(
+        self, flatten: Literal[False]
+    ) -> tuple[
+        tuple[int, int],
+        Tensor,
+        Tensor,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        Tensor | None,
+        int | tuple[int, int],
+        _mask_mod_signature,
+    ]: ...
 
     def as_tuple(self, flatten: bool = True) -> tuple[Any, ...]:
         """
@@ -1495,6 +1531,78 @@ def _enforce_mem_layouts(
     if not is_col_major(value):
         value = value.transpose(-2, -1).contiguous().transpose(-2, -1)
     return query, key, value
+
+
+@overload
+def flex_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    score_mod: _score_mod_signature | None = ...,
+    block_mask: BlockMask | None = ...,
+    scale: float | None = ...,
+    enable_gqa: bool = ...,
+    return_lse: Literal[False] = ...,
+    kernel_options: FlexKernelOptions | None = ...,
+    *,
+    return_aux: None = ...,
+) -> Tensor: ...
+
+
+@overload
+@deprecated(
+    "return_lse is deprecated and will be removed in v2.10. "
+    "Use return_aux=AuxRequest(lse=True) instead."
+)
+def flex_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    score_mod: _score_mod_signature | None = ...,
+    block_mask: BlockMask | None = ...,
+    scale: float | None = ...,
+    enable_gqa: bool = ...,
+    return_lse: Literal[True] = ...,
+    kernel_options: FlexKernelOptions | None = ...,
+    *,
+    return_aux: None = ...,
+) -> tuple[Tensor, Tensor]: ...
+
+
+@overload
+def flex_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    score_mod: _score_mod_signature | None = ...,
+    block_mask: BlockMask | None = ...,
+    scale: float | None = ...,
+    enable_gqa: bool = ...,
+    return_lse: bool = ...,
+    kernel_options: FlexKernelOptions | None = ...,
+    *,
+    return_aux: AuxRequest,
+) -> tuple[Tensor, AuxOutput]: ...
+
+
+@overload
+@deprecated(
+    "Passing both return_lse=True and return_aux is invalid and will raise at runtime. "
+    "Use return_aux=AuxRequest(lse=True) instead."
+)
+def flex_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    score_mod: _score_mod_signature | None = ...,
+    block_mask: BlockMask | None = ...,
+    scale: float | None = ...,
+    enable_gqa: bool = ...,
+    return_lse: Literal[True] = ...,
+    kernel_options: FlexKernelOptions | None = ...,
+    *,
+    return_aux: AuxRequest,
+) -> Never: ...
 
 
 def flex_attention(
