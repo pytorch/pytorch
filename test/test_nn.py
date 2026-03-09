@@ -2927,6 +2927,29 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         )
         self.assertTrue(torch.isfinite(loss_true))
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_zero_infinity_cudnn_grad(self):
+        probs = torch.nn.functional.one_hot(torch.tensor([0], device='cuda'), num_classes=2).float()
+        log_probs = torch.log(probs).unsqueeze(1).requires_grad_()
+        targets = torch.tensor([1], device='cuda', dtype=torch.int32)
+        input_lengths = torch.tensor([1], device='cuda', dtype=torch.int32)
+        target_lengths = torch.tensor([1], device='cuda', dtype=torch.int32)
+
+        # The example inputs above should produce a divergent gradient, but the deterministic implementation
+        # of the cuDNN CTC loss (which is the only implementation reachable from the public API) returns a
+        # finite gradient. For this reason, the private, non-deterministic implementation is used here.
+        loss_false, _ = torch._cudnn_ctc_loss(
+            log_probs, targets, input_lengths, target_lengths, blank=0, deterministic=False, zero_infinity=False
+        )
+        grad_false, = torch.autograd.grad(loss_false, log_probs)
+        self.assertFalse(torch.isfinite(grad_false).all())
+
+        loss_true, _ = torch._cudnn_ctc_loss(
+            log_probs, targets, input_lengths, target_lengths, blank=0, deterministic=False, zero_infinity=True
+        )
+        grad_true, = torch.autograd.grad(loss_true, log_probs)
+        self.assertTrue(torch.isfinite(grad_true).all())
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)
