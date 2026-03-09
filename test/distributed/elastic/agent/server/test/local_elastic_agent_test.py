@@ -6,6 +6,8 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+from __future__ import annotations
+
 import json
 import multiprocessing as mp
 import os
@@ -16,8 +18,8 @@ import tempfile
 import time
 import unittest
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from unittest import mock
 from unittest.mock import Mock, patch
 
@@ -45,6 +47,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def init_rpc(name, backend):
