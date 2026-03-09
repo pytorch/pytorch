@@ -873,7 +873,9 @@ def to_dtype(
             use_compute_types=use_compute_types,
         )
 
-    return make_pointwise(_to_dtype, override_return_dtype=dtype, skip_emulation=not use_compute_types)(x)
+    return make_pointwise(
+        _to_dtype, override_return_dtype=dtype, skip_emulation=not use_compute_types
+    )(x)
 
 
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
