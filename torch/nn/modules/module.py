@@ -294,8 +294,8 @@ def register_module_forward_hook(
     _global_forward_hooks[handle.id] = hook
     global _noHookEverSet
     _noHookEverSet = False
-	global _atLeastOneGlobalHookSet
-	_atLeastOneGlobalHookSet = True
+    global _atLeastOneGlobalHookSet
+    _atLeastOneGlobalHookSet = True
     if with_kwargs:
         _global_forward_hooks_with_kwargs[handle.id] = True
     if always_call:
@@ -331,8 +331,8 @@ def register_module_backward_hook(
     _global_backward_hooks[handle.id] = hook
     global _noHookEverSet
     _noHookEverSet = False
-	global _atLeastOneGlobalHookSet
-	_atLeastOneGlobalHookSet = True
+    global _atLeastOneGlobalHookSet
+    _atLeastOneGlobalHookSet = True
     return handle
 
 
@@ -362,8 +362,8 @@ def register_module_full_backward_pre_hook(
     _global_backward_pre_hooks[handle.id] = hook
     global _noHookEverSet
     _noHookEverSet = False
-	global _atLeastOneGlobalHookSet
-	_atLeastOneGlobalHookSet = True
+    global _atLeastOneGlobalHookSet
+    _atLeastOneGlobalHookSet = True
     return handle
 
 
