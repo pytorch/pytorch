@@ -94,16 +94,6 @@ bool pointer_in_allocation(void* ptr, const NCCLAllocation& allocation) {
   auto base_ptr = reinterpret_cast<uintptr_t>(allocation.ptr);
   return ptr_int >= base_ptr && ptr_int < base_ptr + allocation.buffer_size;
 }
-NCCLAllocMap::iterator find_allocation_covering_linear(
-    void* ptr,
-    NCCLAllocMap& allocations) {
-  return std::find_if(
-      allocations.begin(),
-      allocations.end(),
-      [&](const auto& entry) {
-        return pointer_in_allocation(ptr, *entry.second);
-      });
-}
 
 NCCLAllocMap::iterator find_allocation_covering_linear(
     void* ptr,
@@ -123,7 +113,6 @@ NCCLAllocMap::iterator find_allocation_covering(
   if (alloc_it != allocations.end()) {
     return alloc_it;
   }
-  auto fallback_it = find_allocation_covering_linear(ptr, allocations);
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   CUdeviceptr base_ptr = 0;
