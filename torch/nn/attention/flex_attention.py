@@ -356,7 +356,7 @@ def _sliced_mask_mod_error(
     head: Tensor,
     token_q: Tensor,
     token_kv: Tensor,
-) -> Tensor:
+) -> Never:
     """
     Raises helpful error when using mask_mod from a sliced BlockMask.
 
