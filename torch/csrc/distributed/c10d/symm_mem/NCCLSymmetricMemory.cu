@@ -105,6 +105,17 @@ NCCLAllocMap::iterator find_allocation_covering_linear(
       });
 }
 
+NCCLAllocMap::iterator find_allocation_covering_linear(
+    void* ptr,
+    NCCLAllocMap& allocations) {
+  return std::find_if(
+      allocations.begin(),
+      allocations.end(),
+      [&](const auto& entry) {
+        return pointer_in_allocation(ptr, *entry.second);
+      });
+}
+
 NCCLAllocMap::iterator find_allocation_covering(
     void* ptr,
     NCCLAllocMap& allocations) {
@@ -112,6 +123,7 @@ NCCLAllocMap::iterator find_allocation_covering(
   if (alloc_it != allocations.end()) {
     return alloc_it;
   }
+  auto fallback_it = find_allocation_covering_linear(ptr, allocations);
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto driver_api = c10::cuda::DriverAPI::get();
   CUdeviceptr base_ptr = 0;
@@ -472,10 +484,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
     NCCLAllocation* allocation;
     {
-<<<<<<< HEAD
       std::lock_guard<std::mutex> lock(mutex_);
-=======
->>>>>>> de18d09796d (addressing comments)
       auto it = symm_mems_.find({ptr, *group_name});
       if (it != symm_mems_.end()) {
         return it->second;
