@@ -94,7 +94,6 @@ bool pointer_in_allocation(void* ptr, const NCCLAllocation& allocation) {
   auto base_ptr = reinterpret_cast<uintptr_t>(allocation.ptr);
   return ptr_int >= base_ptr && ptr_int < base_ptr + allocation.buffer_size;
 }
-
 NCCLAllocMap::iterator find_allocation_covering_linear(
     void* ptr,
     NCCLAllocMap& allocations) {
@@ -473,7 +472,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
     NCCLAllocation* allocation;
     {
+<<<<<<< HEAD
       std::lock_guard<std::mutex> lock(mutex_);
+=======
+>>>>>>> de18d09796d (addressing comments)
       auto it = symm_mems_.find({ptr, *group_name});
       if (it != symm_mems_.end()) {
         return it->second;
