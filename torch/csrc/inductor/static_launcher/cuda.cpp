@@ -101,7 +101,7 @@ CUdeviceptr getPointer(PyObject* obj) {
 
 #define SHARED_MEM_STATIC_MAX 49152 // 48 KB
 
-CUfunction loadKernel(
+std::pair<CUmodule, CUfunction> loadKernel(
     std::string filePath,
     const std::string& funcName,
     uint32_t sharedMemBytes,
@@ -199,7 +199,7 @@ CUfunction loadKernel(
         shared_optin - shared_static));
 #endif
   }
-  return func;
+  return {mod, func};
 }
 
 inline void launchKernel(
@@ -368,8 +368,7 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   }
 #endif
 
-  CUfunction func = nullptr;
-  func = loadKernel(filePath, funcName, sharedMemBytes, device);
+  auto [mod, func] = loadKernel(filePath, funcName, sharedMemBytes, device);
 
 #if defined(USE_ROCM)
   AT_CUDA_DRIVER_CHECK(
@@ -385,9 +384,13 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
 
 #endif
   n_spills /= 4;
-  // Return a tuple of CUFunction, n_regs, n_spills
+  // Return a tuple of CUmodule, CUfunction, n_regs, n_spills
   return Py_BuildValue(
-      "(Kii)", reinterpret_cast<uint64_t>(func), n_regs, n_spills);
+      "(KKii)",
+      reinterpret_cast<uint64_t>(mod),
+      reinterpret_cast<uint64_t>(func),
+      n_regs,
+      n_spills);
   END_HANDLE_TH_ERRORS
 }
 
@@ -556,7 +559,29 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
+/* Unload a previously loaded CUDA/HIP module to free GPU resources.
+   Without this, modules loaded by load_kernel accumulate indefinitely,
+   eventually exhausting the GPU driver's module table.
+   See: triton-lang/triton#9444, ROCm/triton#928 */
+PyObject* unload_kernel(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  uint64_t mod_ptr = 0;
+  if (!PyArg_ParseTuple(args, "K", &mod_ptr)) {
+    return nullptr;
+  }
+  CUmodule mod = reinterpret_cast<CUmodule>(mod_ptr);
+  if (mod) {
+#if defined(USE_ROCM)
+    AT_CUDA_DRIVER_CHECK(hipModuleUnload(mod));
+#else
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleUnload(mod));
+#endif
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+std::array<PyMethodDef, 3> StaticCudaLauncherMethods = {
     PyMethodDef{
         "_launch_kernel",
         launch_kernel,
@@ -566,7 +591,12 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
         "_load_kernel",
         load_kernel,
         METH_VARARGS,
-        "Load CUDA kernel from cubin file"}};
+        "Load CUDA kernel from cubin file"},
+    PyMethodDef{
+        "_unload_kernel",
+        unload_kernel,
+        METH_VARARGS,
+        "Unload CUDA/HIP module to free GPU resources"}};
 
 // Define a minimal type for StaticCudaLauncher.
 // We don't implement __new__ or __init__ because we're using it only as a

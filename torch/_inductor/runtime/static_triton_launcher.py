@@ -111,6 +111,7 @@ class StaticallyLaunchedTritonKernel:
         # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
         self.function: int | None = None  # Loaded by load_kernel(on the parent process)
+        self.module: int | None = None  # HIP/CUDA module handle for cleanup
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -141,12 +142,25 @@ class StaticallyLaunchedTritonKernel:
 
         assert hasattr(self, "cubin_path")
         assert self.cubin_path is not None
-        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
-            self.cubin_path, self.name, self.shared, device
+        (self.module, self.function, self.n_regs, self.n_spills) = (
+            self.C_impl._load_kernel(self.cubin_path, self.name, self.shared, device)
         )
-        # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
         self.cubin_raw = None
+
+    def __del__(self):
+        # Unload the HIP/CUDA module when this object is garbage-collected.
+        # Without this, loaded modules accumulate indefinitely, eventually
+        # exhausting the GPU driver's module table (hipErrorNoBinaryForGpu /
+        # CUDA driver error 209).  Mirrors triton-lang/triton#9444 which
+        # added the same cleanup to Triton's CompiledKernel.
+        mod = getattr(self, "module", None)
+        if mod is not None:
+            try:
+                self.C_impl._unload_kernel(mod)
+            except Exception:
+                pass
+            self.module = None
 
     @staticmethod
     @functools.lru_cache
