@@ -817,6 +817,7 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             "xccl",
             "fake",
             "cpu:gloo,xpu:xccl",
+            curr_backend,
         ]:
             raise RuntimeError(f"Backend {backend} not supported!")
 
