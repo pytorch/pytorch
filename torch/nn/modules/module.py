@@ -247,8 +247,8 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
     _global_forward_pre_hooks[handle.id] = hook
     global _noHookEverSet
     _noHookEverSet = False
-	global _atLeastOneGlobalHookSet
-	_atLeastOneGlobalHookSet = True
+    global _atLeastOneGlobalHookSet
+    _atLeastOneGlobalHookSet = True
     return handle
 
 
