@@ -1,7 +1,10 @@
 # Owner(s): ["module: inductor"]
 
+from types import SimpleNamespace
+
 import torch
 from torch._inductor import config
+from torch._inductor.fx_passes.post_grad import reorder_for_locality
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
@@ -256,6 +259,51 @@ class TestControlDeps(InductorTestCase):
 
             expected = fn(x, y)
             torch.testing.assert_close(result, expected)
+
+
+class TestReorderForLocality(InductorTestCase):
+    def _build_graph_with_device_put(
+        self, src_device: torch.device, dst_device: torch.device
+    ) -> tuple[torch.fx.Graph, dict[str, str]]:
+        g = torch.fx.Graph()
+        x = g.placeholder("x")
+        # reorder_for_locality reads `node.meta["val"].device`.
+        x.meta["val"] = SimpleNamespace(device=src_device)
+        put = g.call_function(torch.ops.prims.device_put.default, (x, dst_device, True))
+        token = g.call_function(torch.ops.prims._make_token.default, ())
+        cat = g.call_function(torch.ops.aten.cat.default, ([put],))
+        g.output(cat)
+        return g, {"put": put.name, "token": token.name}
+
+    @staticmethod
+    def _node_names(g: torch.fx.Graph) -> list[str]:
+        return [n.name for n in g.nodes]
+
+    def test_keeps_cuda_to_cpu_non_blocking_put_order(self):
+        g, names = self._build_graph_with_device_put(
+            torch.device("cuda"), torch.device("cpu")
+        )
+        before = self._node_names(g)
+        self.assertLess(before.index(names["put"]), before.index(names["token"]))
+
+        reorder_for_locality(g)
+
+        after = self._node_names(g)
+        # CUDA->CPU non_blocking device_put should not be moved by locality reordering.
+        self.assertLess(after.index(names["put"]), after.index(names["token"]))
+
+    def test_still_reorders_same_device_put(self):
+        g, names = self._build_graph_with_device_put(
+            torch.device("cpu"), torch.device("cpu")
+        )
+        before = self._node_names(g)
+        self.assertLess(before.index(names["put"]), before.index(names["token"]))
+
+        reorder_for_locality(g)
+
+        after = self._node_names(g)
+        # Same-device device_put remains eligible for locality reordering.
+        self.assertGreater(after.index(names["put"]), after.index(names["token"]))
 
 
 if __name__ == "__main__":

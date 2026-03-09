@@ -5,6 +5,7 @@ from typing import Any, Optional
 import torch
 from torch._dynamo.variables.dicts import ConstDictVariable
 from torch._dynamo.variables.lists import TupleVariable
+from torch._library.effects import EffectType
 from torch.fx import has_side_effect, Proxy
 
 from .. import graph_break_hints
@@ -155,6 +156,25 @@ def _(
 
 
 has_side_effect(torch.ops.streams.wait_event.default)
+
+
+@custom_op("streams::synchronize_event", mutates_args=())
+def synchronize_event(event_index: int) -> None:
+    event = _get_event_by_index(event_index)
+    event.synchronize()
+
+
+@synchronize_event.register_fake
+def _(
+    event_index: int,
+) -> None:
+    pass
+
+
+torch.library._register_effectful_op(
+    torch.ops.streams.synchronize_event.default,
+    EffectType.ORDERED,
+)
 
 
 @custom_op("streams::wait_stream", mutates_args=())
@@ -515,7 +535,10 @@ class EventVariable(VariableTracker):
             return CONSTANT_VARIABLE_NONE
         elif name == "synchronize":
             tx.output.create_proxy(
-                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                "call_function",
+                torch.ops.streams.synchronize_event,
+                (self.user_object_index,),
+                {},
             )
             return CONSTANT_VARIABLE_NONE
         elif name == "query":

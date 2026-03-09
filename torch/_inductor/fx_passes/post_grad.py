@@ -777,6 +777,26 @@ def reorder_for_locality(graph: torch.fx.Graph):
         def check():
             return True
 
+    def _is_non_blocking_src_device_to_dst_device_put(n: torch.fx.Node) -> bool:
+        if not (
+            n.op == "call_function" and n.target == torch.ops.prims.device_put.default
+        ):
+            return False
+        if len(n.args) < 3:
+            return False
+        dst_device = n.args[1]
+        non_blocking = n.args[2]
+        if not isinstance(dst_device, torch.device) or non_blocking is not True:
+            return False
+        src = n.args[0]
+        if not isinstance(src, torch.fx.Node):
+            return False
+        src_val = src.meta.get("val")
+        src_device = getattr(src_val, "device", None)
+        if not isinstance(src_device, torch.device):
+            return False
+        return src_device.type != dst_device.type
+
     def visit(other_node):
         if (
             other_node.op == "call_function"
@@ -786,6 +806,11 @@ def reorder_for_locality(graph: torch.fx.Graph):
             == get_mutation_region_id(graph, other_node)
             and check()
         ):
+            # Preserve eager-style ordering around async cross-device device_put
+            # (e.g. CUDA->CPU with non_blocking=True). Reordering these closer to
+            # consumers can float them across synchronization ops.
+            if _is_non_blocking_src_device_to_dst_device_put(other_node):
+                return
             # move node's producers right before it
             node.prepend(other_node)
 
