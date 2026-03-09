@@ -100,7 +100,7 @@ def make_pallas(cls):
     return test_class
 
 
-def _skip_if(condition_fn, reason):
+def _skip_if(condition_fn, *, reason):
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(self, *args, **kwargs):
@@ -113,9 +113,15 @@ def _skip_if(condition_fn, reason):
     return decorator
 
 
-skip_if_tpu = _skip_if(lambda self: self.DEVICE == "tpu", "Not yet working on TPU")
-skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
-skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
+skip_if_tpu = functools.partial(
+    _skip_if, lambda self: self.DEVICE == "tpu", reason="Not yet working on TPU"
+)
+skip_if_cpu = functools.partial(
+    _skip_if, lambda self: self.DEVICE == "cpu", reason="Not yet working on CPU"
+)
+skip_if_cuda = functools.partial(
+    _skip_if, lambda self: self.DEVICE == "cuda", reason="Not yet working on GPU"
+)
 
 
 class PallasTestsMixin:
@@ -245,10 +251,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_cuda(reason="sqrt primitive not implemented in Pallas Mosaic GPU")
     def test_sqrt(self):
         """Test sqrt operation."""
-        if self.DEVICE == "cuda":
-            self.skipTest("sqrt primitive not implemented in Pallas Mosaic GPU")
 
         def fn(x):
             return torch.sqrt(x)
@@ -392,12 +397,11 @@ class PallasTestsMixin:
                 expected = fn(x, y)
                 self.assertEqual(result, expected)
 
+    @skip_if_cuda(
+        reason="iteration variables not supported in Pallas GPU (Mosaic) backend"
+    )
     def test_different_shapes(self):
         """Test with different tensor shapes."""
-        if self.DEVICE == "cuda":
-            self.skipTest(
-                "iteration variables not supported in Pallas GPU (Mosaic) backend"
-            )
 
         def fn(x):
             return x * 2.0
@@ -464,10 +468,9 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_tpu
+    @skip_if_cuda(reason="strided access not supported in Pallas GPU (Mosaic) backend")
     def test_strided_int_pallas(self):
         """Test strided access patterns with the Pallas backend."""
-        if self.DEVICE == "cuda":
-            self.skipTest("strided access not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             # Access every other element (strided access)
@@ -481,10 +484,9 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_tpu
+    @skip_if_cuda(reason="strided access not supported in Pallas GPU (Mosaic) backend")
     def test_strided_offset_pallas(self):
         """Test strided access with offset."""
-        if self.DEVICE == "cuda":
-            self.skipTest("strided access not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             # Access every other element starting from index 1
@@ -724,10 +726,9 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_tpu
+    @skip_if_cuda(reason="gather not supported in Pallas GPU (Mosaic) backend")
     def test_complex_indexing_gather(self):
         """Test complex indexing with gather-like operations."""
-        if self.DEVICE == "cuda":
-            self.skipTest("gather not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x, indices):
             # Use indices to gather elements from x
@@ -745,14 +746,13 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_tpu
+    # Pallas Mosaic backend doesn't support gather operations with array indices
+    # This limitation is in the Pallas/Mosaic lowering, not our implementation
+    @skip_if_cuda(
+        reason="Multi-dimensional gather not supported on Pallas Mosaic (CUDA) backend"
+    )
     def test_complex_indexing_2d(self):
         """Test complex indexing on 2D tensors with integer array indexing."""
-        if self.DEVICE == "cuda":
-            # Pallas Mosaic backend doesn't support gather operations with array indices
-            # This limitation is in the Pallas/Mosaic lowering, not our implementation
-            self.skipTest(
-                "Multi-dimensional gather not supported on Pallas Mosaic (CUDA) backend"
-            )
 
         def fn(x, row_indices):
             # Select specific rows using integer array indexing
@@ -973,10 +973,9 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_cuda(reason="integer_pow primitive not implemented in Pallas Mosaic GPU")
     def test_reciprocal(self):
         """Test reciprocal operation."""
-        if self.DEVICE == "cuda":
-            self.skipTest("integer_pow primitive not implemented in Pallas Mosaic GPU")
 
         def fn(x):
             return torch.reciprocal(x)
@@ -1082,10 +1081,9 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_tpu
+    @skip_if_cuda(reason="reduce_prod primitive not implemented in Pallas Mosaic GPU")
     def test_prod_reduction(self):
         """Test prod reduction."""
-        if self.DEVICE == "cuda":
-            self.skipTest("reduce_prod primitive not implemented in Pallas Mosaic GPU")
 
         def fn(x):
             # Use smaller values to avoid overflow
@@ -1270,10 +1268,9 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     @skip_if_tpu
+    @skip_if_cuda(reason="arange not supported in Pallas GPU (Mosaic) backend")
     def test_arange_multi_output(self):
         """Test arange with view and multiple outputs."""
-        if self.DEVICE == "cuda":
-            self.skipTest("arange not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
