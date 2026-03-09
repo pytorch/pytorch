@@ -63,7 +63,7 @@ on:
       runs_on:
         required: true
         type: string
-        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
+        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.g4dn.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
     secrets:
       github-token:
         required: true

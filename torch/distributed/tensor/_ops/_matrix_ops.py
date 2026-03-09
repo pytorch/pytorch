@@ -41,6 +41,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.symbolic_shapes import guard_or_false
 
 
 aten = torch.ops.aten
@@ -273,7 +274,6 @@ from ._einsum_strategy import EinsumDims
 def gen_single_dim_einsum_strategies(
     equation: str,
     *,
-    linearity: bool = False,
     bias_shape: torch.Size | None = None,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """
@@ -293,10 +293,15 @@ def gen_single_dim_einsum_strategies(
         2.2: Shard on lhs only dim or rhs only dim: both output and lhs or rhs
         input should shard on this free dim.
 
-    3. Linearity (Partial): If enabled, set Partial on output and inputs over
-       the same device mesh dim.
+    3. Per-input linearity (Partial): Since matmul is linear in each input
+       independently, one input can remain Partial while others are Replicate,
+       producing a Partial output.
 
-    4. Bias input (optional): If bias_shape is provided, a bias placement
+    4. Batch-dimension linearity (all-Partial): When all dims are batch dims
+       (no contracting or free dims), the operation is element-wise and linear
+       in all inputs simultaneously, so all inputs can be Partial.
+
+    5. Bias input (optional): If bias_shape is provided, a bias placement
        is inserted after the output placement. The bias placement is derived from
        the output placement, accounting for broadcast semantics (based on ndim
        difference between output and bias). This is used for addmm-like ops
@@ -404,19 +409,35 @@ def gen_single_dim_einsum_strategies(
         ]
         strategies_over_one_mesh_dim.append(_maybe_add_bias(rhs_placement_list))
 
-    # linearity strategy
-    if linearity:
-        linearity_placement_list: list[Placement | _ShardingPlaceholder] = [Partial()]
-        for _ in input_dims:
-            linearity_placement_list.append(Partial())
-        strategies_over_one_mesh_dim.append(_maybe_add_bias(linearity_placement_list))
+    # Per-input linearity: matmul is linear in each input independently.
+    # One input Partial, the other Replicate → output Partial.
+    for reduce_op in Partial.LINEAR_REDUCE_OPS:
+        output_placement = Partial(reduce_op)
+        strategies_over_one_mesh_dim.append(
+            _maybe_add_bias([output_placement, Partial(reduce_op), Replicate()])
+        )
+        strategies_over_one_mesh_dim.append(
+            _maybe_add_bias([output_placement, Replicate(), Partial(reduce_op)])
+        )
+
+    # Batch-dimension linearity: when the einsum has no contracting dims and
+    # no free dims (all dims are batch dims), the operation is element-wise
+    # and linear in all inputs simultaneously. Add all-Partial strategies.
+    if (
+        not edims.contracting_dims
+        and not edims.lhs_out_only_dims
+        and not edims.rhs_out_only_dims
+    ):
+        for reduce_op in Partial.LINEAR_REDUCE_OPS:
+            linearity_placements: list[Placement | _ShardingPlaceholder] = [
+                Partial(reduce_op)
+            ] + [Partial(reduce_op) for _ in input_dims]
+            strategies_over_one_mesh_dim.append(_maybe_add_bias(linearity_placements))
 
     return strategies_over_one_mesh_dim
 
 
-# TODO enable in a separate PR along with more extensive validation.
-# currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
-# @register_single_dim_strategy(aten.mm.default)
+@register_single_dim_strategy(aten.mm.default, allow_unbacked_sharding=True)
 def mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -429,12 +450,13 @@ def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.addmm.default)
+@register_single_dim_strategy(aten.addmm.default, allow_unbacked_sharding=True)
 def addmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     bias_meta = args_schema[0]
-    assert isinstance(bias_meta, TensorMeta)
+    if not isinstance(bias_meta, TensorMeta):
+        raise AssertionError
     return gen_single_dim_einsum_strategies("mk,kn->mn", bias_shape=bias_meta.shape)
 
 
@@ -444,18 +466,26 @@ def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
+@register_single_dim_strategy(aten.bmm.default, allow_unbacked_sharding=True)
+def bmm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return gen_single_dim_einsum_strategies("bmk,bkn->bmn")
+
+
 @register_op_strategy(aten.baddbmm.default)
 def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_single_dim_strategy(aten.baddbmm.default)
+@register_single_dim_strategy(aten.baddbmm.default, allow_unbacked_sharding=True)
 def baddbmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     bias_meta = args_schema[0]
-    assert isinstance(bias_meta, TensorMeta)
+    if not isinstance(bias_meta, TensorMeta):
+        raise AssertionError
     return gen_single_dim_einsum_strategies("bmk,bkn->bmn", bias_shape=bias_meta.shape)
 
 
@@ -646,23 +676,52 @@ def scaled_dot_product_flash_attention_backward_strategy(
     )
 
 
-@register_op_strategy(aten.constant_pad_nd.default)
-def constant_pad_nd_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args(validate=False)
+@register_single_dim_strategy(
+    aten.constant_pad_nd.default, schema_info=RuntimeSchemaInfo(1)
+)
+def constant_pad_nd_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # Allow sharding on non-padded dimensions; ban sharding on dims
+    # that have non-zero padding (where the pad value must be inserted).
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+    ndim = len(input_meta.shape)
+    pad = args_schema[1]
+    if not isinstance(pad, (list, tuple)):
+        raise AssertionError(f"Expected list or tuple, got {type(pad)}")
 
-    # TODO(d4l3k); implement a more correct strategy for constant_pad_nd
-    return OpStrategy(
-        [
-            OpSpec(
-                output_specs=DTensorSpec(mesh, (Replicate(),)),
-                input_specs=(
-                    DTensorSpec(mesh, (Replicate(),)),
-                    DTensorSpec(mesh, (Replicate(),)),
-                ),
-                redistribute_cost=[[1]],
-            )
-        ]
-    )
+    # pad is [dim_{n-1}_left, dim_{n-1}_right, dim_{n-2}_left, ...] from
+    # the last dim backwards. Determine which dims have non-zero padding.
+    padded_dims = set()
+    for i in range(len(pad) // 2):
+        if not (
+            guard_or_false(pad[i * 2] == 0) and guard_or_false(pad[i * 2 + 1] == 0)
+        ):
+            padded_dims.add(ndim - 1 - i)
+
+    # Shard on any non-padded dim: output and input share the same placement.
+    # All-Replicate is added automatically by the framework.
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(ndim):
+        if dim not in padded_dims:
+            strategies.append([_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)])
+
+    # Partial rules: at padded positions every rank writes the same constant v,
+    # so reduce(v, v, ..., v) = v for avg/max/min (idempotent). P(sum) only
+    # works when v=0 since sum(v, ..., v) = N*v != v otherwise.
+    # When all pad amounts are zero the op is a no-op, so all reduce ops hold.
+    value = args_schema[2] if len(args_schema) > 2 else 0
+    no_padding = all(guard_or_false(pad[i] == 0) for i in range(len(pad)))
+    if no_padding or guard_or_false(value == 0):
+        reduce_ops = ("sum", "avg", "max", "min")
+    else:
+        reduce_ops = ("avg", "max", "min")
+    for reduce_op in reduce_ops:
+        strategies.append([Partial(reduce_op), Partial(reduce_op)])
+
+    return strategies
 
 
 def _scaled_dot_product_efficient_attention_base_strategies(

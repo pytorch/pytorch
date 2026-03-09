@@ -29,11 +29,11 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_bool,
     guard_float,
     guard_int,
+    guarding_hint_or_throw,
     GuardOnDataDependentSymNode,
     has_free_symbols,
     is_symbolic,
     ShapeEnv,
-    size_hint,
     StatelessSymbolicContext,
     statically_known_false,
     statically_known_true,
@@ -1121,6 +1121,88 @@ def forward(self, x_1):
         assert_not_optimized(torch.sym_max(mx3, 10))
         assert_not_optimized(torch.sym_max(mx3, s3 + s7))
         assert_not_optimized(torch.sym_max(mx3, s7 * 2))
+
+    def test_build_proxy_for_optimized_add(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles flattened
+        sympy.Add expressions with more than 2 arguments.
+
+        When sympy.Add operations are optimized by _optimized_add
+        (in torch/fx/experimental/sym_node.py), they can be flattened into a
+        single Add node with 3 or more arguments (e.g., Add(s0, s1, s2)
+        instead of Add(Add(s0, s1), s2)).
+
+        _build_proxy_for_sym_expr must handle this by using torch.sym_sum
+        (which natively supports n-ary addition) instead of operator.add
+        (which is binary and would either raise TypeError or silently drop
+        arguments via FX codegen's 2-placeholder format string).
+        """
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+
+        # This triggers _optimized_add and produces a flattened sympy.Add
+        # with 3 arguments: Add(s0_symbol, s1_symbol, s2_symbol)
+        optimized_sum = s0 + s1 + s2
+        self.assertTrue(optimized_sum.node._optimized_summation)
+        # Confirm the underlying sympy expression has 3 args (flattened).
+        self.assertEqual(len(optimized_sum.node.expr.args), 3)
+
+        # ------------------------------------------------------------------
+        # Case 1: out=None
+        #
+        # Previously this would call operator.add(a, b, c) and raise
+        # TypeError. Now uses torch.sym_sum which handles n-ary addition.
+        # ------------------------------------------------------------------
+        tracer_none = PythonKeyTracer()
+        for sym in [s0, s1, s2]:
+            tracer_none.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                proxy=sym, value=sym
+            )
+
+        result = _build_proxy_for_sym_expr(tracer_none, optimized_sum.node.expr)
+        self.assertEqual(int(result), 9)
+
+        # ------------------------------------------------------------------
+        # Case 2: out=optimized_sum  (the typical path from get_proxy_slot)
+        #
+        # Previously _sym_register would record operator.add with 3 args,
+        # and FX codegen's "{} + {}" format string would silently drop the
+        # third argument. Now uses torch.sym_sum which correctly handles
+        # all arguments.
+        # ------------------------------------------------------------------
+        tracer = PythonKeyTracer()
+        tracer.root = torch.nn.Module()
+        tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+
+        for sym, name in [(s0, "s0"), (s1, "s1"), (s2, "s2")]:
+            node = tracer.graph.placeholder(name)
+            proxy = fx.Proxy(node, tracer)
+            set_meta(proxy, sym)
+            tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                proxy=proxy, value=sym
+            )
+            tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+        _build_proxy_for_sym_expr(tracer, optimized_sum.node.expr, out=optimized_sum)
+
+        out_proxy = tracer.symnode_tracker[optimized_sum].force()
+        tracer.graph.output(out_proxy.node)
+
+        gm = fx.GraphModule(tracer.root, tracer.graph)
+
+        result = gm(2, 3, 4)  # should be 2 + 3 + 4 = 9
+        self.assertEqual(result, 9)
 
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
@@ -3079,16 +3161,24 @@ class TestGuardsExpressions(TestCase):
 
         guards = shape_env.produce_guards_expression([s0])
 
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s1)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s2)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s1)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s2)])
+        )
 
     def test_guards_float_print(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 3)
         guard_bool(2 / s0 == 2 / 3)
         guards = shape_env.produce_guards_expression([s0])
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3232,8 +3322,12 @@ class TestGuardsExpressions(TestCase):
 
         self.assertIn("math.trunc(", guards)
         self.assertIn("float(", guards)
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s1)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s1)])
+        )
 
     @unittest.skipIf(
         TEST_XPU, "Skipped on XPU"
@@ -3611,6 +3705,25 @@ class TestUnbacked(TestCase):
                 Exception, "Pending unbacked symbols.*not in returned outputs"
             ):
                 func_negative(x)
+
+    def test_meta_copy(self):
+        """
+        Test that meta_copy_ does not raise when self and src have different
+        unbacked symint sizes.
+        """
+        from torch._meta_registrations import meta_copy_
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+
+            self_tensor = torch.empty((u0, 256))
+            src_tensor = torch.empty((u1, 256))
+
+            meta_copy_(self_tensor, src_tensor)
 
 
 class TestUbackedOps(TestCase):
@@ -4608,6 +4721,32 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         res = f(x, start, 0)
         self.assertEqual(res.shape, torch.Size([0]))
 
+    @skipIfTorchDynamo("mark_unbacked not supported")
+    def test_unbacked_norm_no_dde(self):
+        def vector_norm(x):
+            return torch.linalg.vector_norm(x)
+
+        def dist_fn(x, y):
+            return torch.dist(x, y)
+
+        def norm_fro(x):
+            return torch.norm(x, p="fro")
+
+        x = torch.randn(4, 5)
+        y = torch.randn(4, 5)
+        for dim in range(x.ndim):
+            torch._dynamo.decorators.mark_unbacked(x, dim)
+            torch._dynamo.decorators.mark_unbacked(y, dim)
+
+        for fn, args in [
+            (vector_norm, (x,)),
+            (dist_fn, (x, y)),
+            (norm_fro, (x,)),
+        ]:
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, fullgraph=True, backend="eager")
+            compiled(*args)
+
     @skipIfTorchDynamo()
     @torch.fx.experimental._config.patch("backed_size_oblivious", True)
     def test_backed_size_oblivious_expand(self):
@@ -4711,15 +4850,21 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
     def test_hint_override_consistent_stride1(self):
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
-            a = torch.fx.experimental.symbolic_shapes.size_hint(x.size()[2])
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[1])
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.size()[2]
+            )
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[1]
+            )
             torch._check(a == b)
             torch._check(a == 6)
 
-            a = torch.fx.experimental.symbolic_shapes.size_hint(
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
                 x.size()[1] * x.size()[2]
             )
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[0])
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[0]
+            )
             torch._check(a == b)
             torch._check(a == 120)
 
@@ -4737,10 +4882,12 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
             # only one of the sizes has hint overridden.
-            a = torch.fx.experimental.symbolic_shapes.size_hint(
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
                 x.size()[1] * x.size()[2]
             )
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[0])
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[0]
+            )
             torch._check(a == b)
             torch._check(a == 24)
 
@@ -4753,20 +4900,20 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.mark_dynamic(x, 2, hint_override=6)
         func(x)
 
-    def test_size_hint(self):
+    def test_optimization_hint(self):
         @torch.compile(fullgraph=True)
         def func(x):
             u0 = x.item()
             a = torch.ones([u0])
             torch._check(
-                torch.fx.experimental.symbolic_shapes.size_hint(
+                torch.fx.experimental.symbolic_shapes.optimization_hint(
                     a.size()[0], fallback=300
                 )
                 == 300
             )
             b = torch.ones([x.item() * 2])
             torch._check(
-                torch.fx.experimental.symbolic_shapes.size_hint(
+                torch.fx.experimental.symbolic_shapes.optimization_hint(
                     b.size()[0], fallback=300
                 )
                 == 600
@@ -4776,13 +4923,16 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         func(torch.tensor([33]))
 
-    def test_size_hint_no_fallback(self):
+    def test_guarding_hint_or_throw(self):
         @torch.compile(fullgraph=True)
         def func(x):
             u0 = x.item()
             a = torch.ones([u0])
             torch._check(
-                torch.fx.experimental.symbolic_shapes.size_hint(a.size()[0]) == 300
+                torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                    a.size()[0]
+                )
+                == 300
             )
 
             return a * 10
@@ -5022,6 +5172,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             compiled_result = bug_module(key)
 
         self.assertEqual(compiled_result, eager_result)
+
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_view_as_complex_unbacked_no_dde(self):
         """
@@ -5066,8 +5217,118 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         result = compiled_func(x)
         result.backward()
 
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_mark_unbacked_view_input(self):
+        @torch.compile()
+        def fn(x):
+            return x * 100 + 1
+
+        x = torch.rand(10, 10)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        torch._dynamo.decorators.mark_unbacked(x, 1)
+        y = x[0:1, 0:1]  # y is a view, y._base is x
+        result = fn(y)
+        self.assertEqual(result.shape, (1, 1))
+
 
 instantiate_parametrized_tests(TestUnbacked)
+
+
+class TestMaybeFastEvalComparison(TestCase):
+    """Tests for _maybe_fast_eval_comparison fast path optimization."""
+
+    def test_sum_of_nonneg_ge_zero(self):
+        """Test that sum of non-negative symbols >= 0 returns True."""
+        shape_env = ShapeEnv()
+        # Create unbacked symbols and constrain them to be positive
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+        torch._check(u1 >= 0)
+
+        # u0 + u1 >= 0 should be True (both have range [0, inf])
+        expr = sympy.GreaterThan(u0.node.expr + u1.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_single_nonneg_symbol_ge_zero(self):
+        """Test that a single non-negative symbol >= 0 returns True."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 >= 0 should be True (u0 has range [0, inf])
+        expr = sympy.GreaterThan(u0.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_zero_le_sum_of_nonneg(self):
+        """Test that 0 <= sum of non-negative symbols returns True."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        u1 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+        torch._check(u1 >= 0)
+
+        # 0 <= u0 + u1 should be True
+        expr = sympy.Le(0, u0.node.expr + u1.node.expr)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_nonneg_constant_in_sum(self):
+        """Test that sum with non-negative constant >= 0 returns True."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 + 5 >= 0 should be True
+        expr = sympy.GreaterThan(u0.node.expr + 5, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertEqual(result, sympy.true)
+
+    def test_negative_constant_returns_none(self):
+        """Test that sum with negative constant returns None (undecidable)."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 - 5 >= 0 is undecidable (u0 could be 0, making it -5)
+        expr = sympy.GreaterThan(u0.node.expr - 5, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    def test_non_zero_rhs_returns_none(self):
+        """Test that comparison with non-zero RHS returns None."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # u0 >= 5 is not handled by this fast path
+        expr = sympy.GreaterThan(u0.node.expr, 5)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    def test_unhandled_expr_type_returns_none(self):
+        """Test that unhandled expression types return None."""
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check(u0 >= 0)
+
+        # Eq is not handled by the current fast path
+        expr = sympy.Eq(u0.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
+
+    def test_unbacked_symbol_with_default_range_returns_none(self):
+        """Test that unbacked symbols with default range [-inf, inf] return None."""
+        shape_env = ShapeEnv()
+        # Default unbacked symint has range [-int_oo, int_oo]
+        u0 = shape_env.create_unbacked_symint()
+
+        # u0 >= 0 is undecidable since u0 could be negative
+        expr = sympy.GreaterThan(u0.node.expr, 0)
+        result = shape_env._maybe_fast_eval_comparison(expr)
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

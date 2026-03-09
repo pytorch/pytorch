@@ -71,6 +71,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         "resize_as_",
         # This function is used as for testing purposes only.
         "_fill_mem_eff_dropout_mask_",
+        # Inference-only op called behind a custom op graph break.
+        "_flash_attention_forward_no_dropout_inplace",
     ]
 )
 

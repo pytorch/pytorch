@@ -388,6 +388,7 @@ def propagate_mm(mm_node: Node) -> _HandlerRetType:
         prims.convert_element_type.default,
         aten.exp.default,
         aten.log.default,
+        aten.tanh.default,
         aten.add.Tensor,
         aten.sub.Tensor,
         aten.div.Tensor,
@@ -583,6 +584,7 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
             return PropagateStatus.FAIL
 
         orig_chunk_dim = input_meta.chunk_dim
+        # pyrefly: ignore [bad-argument-type, bad-assignment]
         reverse_lookup: dict[int, int] = {v: k for k, v in enumerate(order)}
         new_chunk_dim = reverse_lookup[orig_chunk_dim]
 

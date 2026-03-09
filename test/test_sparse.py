@@ -450,6 +450,18 @@ class TestSparse(TestSparseBase):
         sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
         sparse_matrix = sparse_matrix.coalesce()
 
+    @dtypes(torch.float32)
+    @onlyCPU
+    # test_warn_on_sparse_tensor_invariant_checks_disabled must be called exactly once
+    def test_warn_on_sparse_tensor_invariant_checks_disabled(self, device, dtype):
+        indices = torch.tensor([[0, 1, 2], [2, 0, 1]])
+        values = torch.tensor([1, 2, 3])
+        shape = torch.Size([3, 3])
+        with torch.sparse.check_sparse_tensor_invariants(None):
+            msg = "Sparse invariant checks are implicitly disabled."
+            with self.assertWarnsRegex(UserWarning, msg):
+                x = torch.sparse_coo_tensor(indices, values, shape)
+
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
@@ -1513,12 +1525,16 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 20)
 
         a = torch.rand([10, 23, 32], dtype=dtype, device=device)
-        a[3] = torch.zeros(23, 32, dtype=dtype, device=device)
-        a[6] = torch.zeros(23, 32, dtype=dtype, device=device)
+        a[3].zero_()
+        a[6].zero_()
+        a[7].tril_()
+        a[8].zero_().diagonal().fill_(1)
         a = a.to_sparse()
         b = torch.rand([10, 32, 10], dtype=dtype, device=device)
-        b[4] = torch.zeros(32, 10, dtype=dtype, device=device)
-        b[6] = torch.zeros(32, 10, dtype=dtype, device=device)
+        b[4].zero_()
+        b[6].zero_()
+        b[7].tril_()
+        b[8].zero_().diagonal().fill_(1)
         ab = a.bmm(b)
         for mat_idx in range(ab.size(0)):
             ab_mat = ab[mat_idx]
@@ -1604,6 +1620,42 @@ class TestSparse(TestSparseBase):
                 RuntimeError,
                 "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
             ab = a.bmm(b)
+
+    @onlyCUDA
+    @unittest.skipIf(
+        IS_WINDOWS and TEST_CUDA,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)
+    def test_bmm_coo_row_index_alignment(self, device, dtype):
+        # See https://github.com/pytorch/pytorch/issues/167901
+        # cuSPARSE SpMV has a bug before cuda 13.1 which assumes
+        # 16-byte alignment for COO row index array.
+        batch = 5
+        nrows = 291105
+
+        m1 = torch.randn(batch, nrows, 1, device=device, dtype=dtype)
+        m2 = torch.randn(batch, 1, 1, device=device, dtype=dtype)
+        ref = torch.bmm(m1, m2)
+
+        m1_sparse = m1.to_sparse()
+        row_indices = m1_sparse.indices()[1]
+        del m1
+
+        # Row indices ptr for odd matrices should be 16-byte aligned
+        for i in range(1, batch, 2):
+            self.assertTrue(
+                (row_indices[i * nrows].data_ptr() % 16) == 0
+            )
+        # Row indices ptr for even matrices should be 8-byte aligned
+        for i in range(0, batch, 2):
+            self.assertTrue(
+                (row_indices[i * nrows].data_ptr() % 16) == 8
+            )
+
+        res = torch.bmm(m1_sparse, m2)
+        self.assertEqual(ref, res)
 
     @onlyCPU
     @coalescedonoff

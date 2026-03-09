@@ -192,7 +192,7 @@ class EnumTests(torch._dynamo.test_case.TestCase):
             else:
                 return y - 2
 
-        opt_f = torch.compile(fullgraph=True)(f)
+        opt_f = torch.compile(fullgraph=True, backend="eager")(f)
         args = [torch.zeros(1), Bool.TRUE]
         ref_out = f(*args)
         opt_out = opt_f(*args)
@@ -268,7 +268,7 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         # With custom metaclass, membership should always be False
         ref = fn(x, MyEnum.A)
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, MyEnum.A)
         self.assertEqual(ref, res)
         # Should return x - 1 since custom __contains__ returns False
@@ -291,7 +291,6 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure  # TODO: Support Enum.__iter__
     def test_enum_iter(self):
         """Test iterating over Enum class."""
 
@@ -304,6 +303,8 @@ class EnumTests(torch._dynamo.test_case.TestCase):
             total = 0
             for color in Color:
                 total += color.value
+            for color in Color.__iter__():
+                total += color.value
             return x + total
 
         x = torch.randn(4)
@@ -312,7 +313,6 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure  # TODO: Support Enum.__iter__ (list uses iter)
     def test_enum_list(self):
         """Test list(Enum) to get all members."""
 
@@ -351,7 +351,6 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.expectedFailure  # TODO: Support Enum.__reversed__
     def test_enum_reversed(self):
         """Test reversed() on Enum class."""
 
@@ -482,6 +481,75 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, Priority.LOW, Priority.HIGH)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, Priority.LOW, Priority.HIGH)
+        self.assertEqual(ref, res)
+
+    @unittest.expectedFailure
+    def test_metaclass_custom_call(self):
+        # When a class has a metaclass that overrides __call__, Python invokes
+        # the metaclass's __call__ instead of the default type.__call__
+        # (which does __new__ + __init__). Dynamo currently bypasses the
+        # metaclass __call__ and uses instantiate_user_defined_class_object
+        # (which mimics type.__call__), producing wrong results.
+        class ScalingMeta(type):
+            def __call__(cls, val):
+                obj = cls.__new__(cls)
+                obj.scaled = val * cls.scale_factor
+                return obj
+
+        class Scaled(metaclass=ScalingMeta):
+            scale_factor = 10
+
+            def __init__(self, val):
+                # type.__call__ would call this, but ScalingMeta.__call__
+                # deliberately skips it and sets scaled directly.
+                self.scaled = val
+
+        def fn(x, val):
+            obj = Scaled(val)
+            return x * obj.scaled
+
+        x = torch.tensor([1.0, 2.0])
+        # Python: ScalingMeta.__call__ sets scaled = 3 * 10 = 30
+        ref = fn(x, 3)
+        compiled_fn = torch.compile(fn, backend="eager")
+        res = compiled_fn(x, 3)
+        self.assertEqual(ref, res)
+
+    @unittest.expectedFailure
+    def test_enum_construction_no_extra_init(self):
+        # Real-world instance of the metaclass __call__ issue above.
+        # EnumMeta.__call__ only calls __new__ (value lookup), NOT __init__.
+        # Dynamo's instantiate_user_defined_class_object calls both, so the
+        # extra __init__ call produces wrong results.
+        init_count = [0]
+
+        class MyEnum(enum.Enum):
+            def __new__(cls, val):
+                obj = object.__new__(cls)
+                obj._value_ = val
+                return obj
+
+            def __init__(self, val):
+                init_count[0] += 1
+
+            A = 1
+            B = 2
+
+        init_count[0] = 0
+
+        def fn(x, val):
+            MyEnum(val)
+            return x * (1 + init_count[0])
+
+        x = torch.tensor([1.0, 2.0])
+        # Python: MyEnum(1) is a value lookup via EnumMeta.__call__, which
+        # only calls Enum.__new__ (lookup) — __init__ is NOT called.
+        # So init_count stays 0 and fn returns x * 1.
+        ref = fn(x, 1)
+        init_count[0] = 0
+
+        compiled_fn = torch.compile(fn, backend="eager")
+        res = compiled_fn(x, 1)
         self.assertEqual(ref, res)
 
 

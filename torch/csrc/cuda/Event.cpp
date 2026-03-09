@@ -1,9 +1,9 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Event.h>
 #include <torch/csrc/cuda/Module.h>
-#include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -127,9 +127,17 @@ static PyObject* THCPEvent_get_device(THCPEvent* self, void* unused) {
 static PyObject* THCPEvent_record(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS {
     auto self = (THCPEvent*)_self;
-    auto stream = (THCPStream*)_stream;
+    TORCH_CHECK(
+        THPStream_Check(_stream),
+        "expected stream to be a torch.Stream or torch.cuda.Stream object");
+    auto stream = (THPStream*)_stream;
+    c10::cuda::CUDAStream cuda_stream =
+        c10::cuda::CUDAStream(c10::Stream::unpack3(
+            stream->stream_id,
+            static_cast<c10::DeviceIndex>(stream->device_index),
+            static_cast<c10::DeviceType>(stream->device_type)));
     pybind11::gil_scoped_release no_gil{};
-    self->cuda_event.record(stream->cuda_stream);
+    self->cuda_event.record(cuda_stream);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -138,9 +146,17 @@ static PyObject* THCPEvent_record(PyObject* _self, PyObject* _stream) {
 static PyObject* THCPEvent_wait(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS {
     auto self = (THCPEvent*)_self;
-    auto stream = (THCPStream*)_stream;
+    TORCH_CHECK(
+        THPStream_Check(_stream),
+        "expected stream to be a torch.Stream or torch.cuda.Stream object");
+    auto stream = (THPStream*)_stream;
+    c10::cuda::CUDAStream cuda_stream =
+        c10::cuda::CUDAStream(c10::Stream::unpack3(
+            stream->stream_id,
+            static_cast<c10::DeviceIndex>(stream->device_index),
+            static_cast<c10::DeviceType>(stream->device_type)));
     pybind11::gil_scoped_release no_gil{};
-    self->cuda_event.block(stream->cuda_stream);
+    self->cuda_event.block(cuda_stream);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -156,6 +172,9 @@ static PyObject* THCPEvent_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THCPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
+  TORCH_CHECK(
+      THCPEvent_Check(_other),
+      "expected other to be a torch.cuda.Event object");
   auto other = (THCPEvent*)_other;
   return PyFloat_FromDouble(self->cuda_event.elapsed_time(other->cuda_event));
   END_HANDLE_TH_ERRORS

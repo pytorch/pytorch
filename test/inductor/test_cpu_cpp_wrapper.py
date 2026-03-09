@@ -104,7 +104,8 @@ def make_test_case(
         code_string_count = {}
 
     func = getattr(tests, test_name)
-    assert callable(func), "not a callable"
+    if not callable(func):
+        raise AssertionError("not a callable")
     func = slowTest(func) if slow else func
     new_test_name = f"{test_name}_separate" if test_build_separate else test_name
 
@@ -179,6 +180,26 @@ if RUN_CPU:
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
         BaseTest(
+            "test_conv2d_binary_inplace_fusion_failed",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
+            ],
+        ),
+        BaseTest(
+            "test_conv2d_binary_inplace_fusion_pass",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
+                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
+            ],
+        ),
+        BaseTest(
             "test_conv2d_unary",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcherGenericCPU(),
@@ -207,7 +228,7 @@ if RUN_CPU:
                 (
                     # skip for now since it's flaky:
                     # https://github.com/pytorch/pytorch/actions/runs/19916391966/job/57096613509?pr=169151
-                    # "test_linear_with_pointwise",
+                    "test_linear_with_pointwise",
                     "test_grouped_linear",
                 )
             )

@@ -408,6 +408,23 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_allocationTraceback(PyObject* _unused, PyObject* obj) {
+  HANDLE_TH_ERRORS
+  void* ptr = PyLong_AsVoidPtr(obj);
+  if (!ptr && PyErr_Occurred()) {
+    return nullptr;
+  }
+  auto ctx = c10::cuda::CUDACachingAllocator::getContextForPointer(ptr);
+  if (!ctx) {
+    Py_RETURN_NONE;
+  }
+  auto* tb = getCapturedTracebackFromContext(ctx);
+  std::vector<CapturedTraceback*> tbs = {tb};
+  auto frames = py_symbolize(tbs);
+  return frames.at(0).release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     PyObject* _unused,
     PyObject* obj) {
@@ -772,6 +789,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
+  py::str forward_frames_s = "forward_frames";
   py::str time_us_s = "time_us";
   py::str compile_context_s = "compile_context";
   py::str user_metadata_s = "user_metadata";
@@ -956,6 +974,17 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
     to_gather_dest.at(i)[frames_s] = frames.at(i);
+
+    // Add forward frames if available
+    auto* tb = to_gather_frames.at(i);
+    const auto& forward_tb = tb->forward_traceback();
+    if (forward_tb.has_value() && !forward_tb->empty()) {
+      py::list forward_list;
+      for (const auto& frame_str : *forward_tb) {
+        forward_list.append(py::str(frame_str));
+      }
+      to_gather_dest.at(i)[forward_frames_s] = forward_list;
+    }
   }
 
   return result.release().ptr();
@@ -2074,6 +2103,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_O,
      nullptr},
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_O, nullptr},
+    {"_cuda_allocationTraceback",
+     THCPModule_allocationTraceback,
+     METH_O,
+     nullptr},
     {"_cuda_attach_out_of_memory_observer",
      THCPModule_attachOutOfMemoryObserver,
      METH_O,

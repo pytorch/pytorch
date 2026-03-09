@@ -48,6 +48,7 @@ constexpr auto kETGlobalRankStride = "global_rank_stride";
 constexpr auto kETGroupSize = "pg_size";
 constexpr auto kETProcessGroupName = "pg_name";
 constexpr auto kETProcessGroupDesc = "pg_desc";
+constexpr auto kETIsAsynchronizedOp = "is_asynchronized_op";
 #endif // USE_DISTRIBUTED
 
 namespace torch::profiler::impl {
@@ -666,6 +667,8 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   addAttr(kProcessGroupDesc, kETProcessGroupDesc, "string");
 
   addAttr(kGroupSize, kETGroupSize, "uint64");
+
+  addAttr(kIsAsynchronizedOp, kETIsAsynchronizedOp, "string");
 
 #endif // USE_DISTRIBUTED
 

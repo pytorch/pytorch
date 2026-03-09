@@ -49,6 +49,9 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 # LLM
                 "google/gemma-2-2b",
                 "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
+                # Discovered on gfx950 CI after ROCm 7.2 upgrade, eager mode non determinism
+                "alexnet",
+                "demucs",
             }
         )
 

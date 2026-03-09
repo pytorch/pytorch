@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
@@ -83,8 +83,8 @@ class HopPartitionedGraph:
         bw_grads = bw_phs[-self.n_fw_outputs :]
 
         def _match_size_or_expr(
-            val1: Union[torch.SymInt, torch.Tensor],
-            val2: Union[torch.SymInt, torch.Tensor],
+            val1: torch.SymInt | torch.Tensor,
+            val2: torch.SymInt | torch.Tensor,
         ) -> bool:
             if type(val1) is not type(val2):
                 return False
@@ -312,7 +312,7 @@ class HopJointGraph:
 
 def create_hop_joint_graph(
     fw_fn: Callable,
-    fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...],
+    fw_args: tuple[torch.Tensor | torch.SymInt, ...],
     functionalize: bool,
 ) -> HopJointGraph:
     fw_gm = materialize_as_graph(fw_fn, fw_args, force_enable_grad=True)
@@ -357,7 +357,7 @@ class HopGraphMinCutPartitioner:
     @staticmethod
     def create_partitioned_graph(
         fw_fn: Callable,
-        fw_args: tuple[Union[torch.Tensor, torch.SymInt], ...],
+        fw_args: tuple[torch.Tensor | torch.SymInt, ...],
         *,
         always_recompute_complex_exprs: bool = False,
     ) -> HopPartitionedGraph:

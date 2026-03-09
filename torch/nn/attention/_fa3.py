@@ -99,6 +99,11 @@ def _fa3_register_kernels() -> Library:
         "_flash_attention_forward", _fa3_flash_attention_forward_impl_default, "CUDA"
     )
     lib.impl(
+        "_flash_attention_forward_no_dropout_inplace",
+        _fa3_flash_attention_forward_no_dropout_inplace_impl,
+        "CUDA",
+    )
+    lib.impl(
         "_scaled_dot_product_flash_attention",
         _fa3_scaled_dot_product_flash_attention_forward_impl_default,
         "CUDA",
@@ -260,6 +265,7 @@ def _fa3_run_forward(
     q_descale: torch.Tensor | None = None,
     k_descale: torch.Tensor | None = None,
     v_descale: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Run the FA3 forward pass by calling the C++ kernel directly.
@@ -280,6 +286,7 @@ def _fa3_run_forward(
     cu_seqlens_q = _maybe_contiguous(cu_seq_q)
     cu_seqlens_k = _maybe_contiguous(cu_seq_k)
     seqused_k = _maybe_contiguous(seqused_k)
+    block_table = _maybe_contiguous(block_table)
 
     out, softmax_lse, out_accum, softmax_lse_accum = _FA3_CUDA_FWD(
         q,
@@ -296,7 +303,7 @@ def _fa3_run_forward(
         seqused_k,  # seqused_k
         max_q,  # max_seqlen_q
         max_k,  # max_seqlen_k
-        None,  # page_table,
+        block_table,  # block_table,
         None,  # kv_batch_idx,
         None,  # leftpad_k,
         None,  # rotary_cos,
@@ -400,6 +407,8 @@ def _fa3_flash_attention_forward_impl(
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+    compute_auxiliary: bool = True,
 ):
     error = _fa3_forward_support_error(
         query,
@@ -433,11 +442,63 @@ def _fa3_flash_attention_forward_impl(
         q_descale,
         k_descale,
         v_descale,
+        block_table,
     )
-    rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
-    philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
-    debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+    if compute_auxiliary:
+        rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
+        philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
+        debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
+    else:
+        rng_state = None
+        philox_offset = None
+        debug_mask = None
     return out, lse, rng_state, philox_offset, debug_mask
+
+
+def _fa3_flash_attention_forward_no_dropout_inplace_impl(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cum_seq_q: torch.Tensor | None,
+    cum_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    *,
+    scale: float | None = None,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
+    seqused_k: torch.Tensor | None = None,
+    alibi_slopes: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+):
+    _, lse, _, _, _ = _fa3_flash_attention_forward_impl(
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        None,
+        None,
+        None,
+        scale=scale,
+        window_size_left=window_size_left,
+        window_size_right=window_size_right,
+        seqused_k=seqused_k,
+        alibi_slopes=alibi_slopes,
+        out=out,
+        block_table=block_table,
+        compute_auxiliary=False,
+    )
+    return lse
 
 
 def _fa3_flash_attention_forward_impl_default(
@@ -457,6 +518,7 @@ def _fa3_flash_attention_forward_impl_default(
     window_size_right: int = -1,
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
 ):
     return _fa3_flash_attention_forward_impl(
@@ -479,6 +541,7 @@ def _fa3_flash_attention_forward_impl_default(
         seqused_k=seqused_k,
         alibi_slopes=alibi_slopes,
         out=out,
+        block_table=block_table,
     )
 
 

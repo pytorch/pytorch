@@ -4,7 +4,6 @@ import re
 import threading
 import unittest
 from datetime import timedelta
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -636,7 +635,7 @@ class _DummyWork(dist.Work):
         super().__init__()
         self.pg = pg
 
-    def wait(self, timeout: Optional[timedelta] = None) -> bool:
+    def wait(self, timeout: timedelta | None = None) -> bool:
         self.pg.waits += 1
         return True
 
@@ -722,7 +721,7 @@ class CrossThreadWaitTest(TestCase):
         than where the collective was registered.
         """
         wait_called = False
-        exception_in_thread: Optional[BaseException] = None
+        exception_in_thread: BaseException | None = None
 
         class MyWork(dist.Work):
             def wait(self, _=None):
@@ -900,16 +899,18 @@ class CompileTest(TestCase):
         torch.accelerator.set_device_index(0)
         self.device = torch.accelerator.current_accelerator()
 
-        store = FakeStore()
-        dist.init_process_group(
-            backend="fake",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
+        if not dist.is_initialized():
+            store = FakeStore()
+            dist.init_process_group(
+                backend="fake",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+            )
 
     def tearDown(self):
-        dist.destroy_process_group()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1150,7 +1151,7 @@ class CompileTest(TestCase):
             FileCheck()
             .check(
                 "buf0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced"
-                ".default([arg3_1, arg2_1, arg1_1, arg0_1]"
+                ".default([arg0_1, arg1_1, arg2_1, arg3_1]"
             )
             .check("buf1 = buf0[0]")
             .check("buf2 = buf0[1]")

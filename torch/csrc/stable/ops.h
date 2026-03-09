@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <type_traits>
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/csrc/stable/c/shim.h>
@@ -768,6 +769,96 @@ inline torch::stable::Tensor from_blob(
   return torch::stable::Tensor(ath);
 }
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
+/// Creates a tensor from an existing data blob with a generic callable deleter.
+///
+/// This overload accepts any callable as the deleter, including capturing
+/// lambdas, which the from_blob above doesn't.
+///
+/// Minimum compatible version: PyTorch 2.12.
+///
+/// @tparam F The callable type. Must be invocable with (void*).
+/// @param data Pointer to the data buffer.
+/// @param sizes The size of each dimension of the tensor.
+/// @param strides The stride for each dimension.
+/// @param device The device where the data resides.
+/// @param dtype The scalar type of the data.
+/// @param deleter Callable to invoke when the tensor is deallocated.
+/// @param storage_offset The offset into the data buffer. Defaults to 0.
+/// @param layout The memory layout. Defaults to Strided.
+/// @return A tensor backed by the provided data.
+
+// The enable_if_t part below ensures that:
+// 1. The other, simpler from_blob is called if the deleter is compatible
+//    with it (i.e. if it can be converted to DeleterFnPtr).
+// 2. Non-callable types (like int) don't accidentally match this template
+//    when passed as storage_offset.
+template <
+    class F,
+    std::enable_if_t<
+        !std::is_convertible_v<F, DeleterFnPtr> &&
+            std::is_invocable_v<F, void*>,
+        int> = 0>
+inline torch::stable::Tensor from_blob(
+    void* data,
+    torch::headeronly::IntHeaderOnlyArrayRef sizes,
+    torch::headeronly::IntHeaderOnlyArrayRef strides,
+    torch::stable::Device device,
+    torch::headeronly::ScalarType dtype,
+    F deleter,
+    int64_t storage_offset = 0,
+    torch::headeronly::Layout layout = torch::headeronly::Layout::Strided) {
+  auto shim_dtype =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(dtype));
+  auto shim_device_type = torch::stable::detail::to<int32_t>(
+      torch::stable::detail::from(device.type()));
+  auto shim_layout =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(layout));
+
+  // The deleter we receive may be a capturing lambda, which is typically
+  // allocated on the stack. It needs to outlive the from_blob call and other
+  // stack frames, so we have to copy it into a heap object.
+  // This is a similar pattern that is used in InefficientStdFunctionContext.
+  F* heap_allocated_deleter = new F(std::move(deleter));
+
+  // Also, since F may be a capturing lambda, it cannot be passed to the C layer
+  // directly. We have to do type erasure and hide it behind two separate things
+  // that C understands:
+  // - a C-like callback (deleter_callback), which will eventually be called
+  //   within at::from_blob. Note that deleter_callback is also a lambda, but C
+  //   understands it because it can be implicitly cast to
+  //   void (*)(void*, void*).
+  // - a context associated to the callback. Here, the context is literally the
+  //   heap_allocated_deleter, which is called within the callback.
+  //
+  // Note that all of heap_allocated_deleter, deleter_ctx and func are all the
+  // exact same thing: the heap-allocated deleter.
+  auto deleter_callback = [](void* data, void* deleter_ctx) {
+    F* func = static_cast<F*>(deleter_ctx);
+    (*func)(data);
+    delete func;
+  };
+
+  AtenTensorHandle ath;
+  TORCH_ERROR_CODE_CHECK(torch_from_blob_v2(
+      data,
+      sizes.size(),
+      sizes.data(),
+      strides.data(),
+      storage_offset,
+      shim_dtype,
+      shim_device_type,
+      device.index(),
+      &ath,
+      shim_layout,
+      nullptr,
+      0,
+      deleter_callback,
+      static_cast<void*>(heap_allocated_deleter)));
+  return torch::stable::Tensor(ath);
+}
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_12_0
 
 /// Stable version of the to.dtype_layout op.
 ///

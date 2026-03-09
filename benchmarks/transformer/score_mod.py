@@ -10,7 +10,7 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial, wraps
-from typing import Literal, Optional, Union
+from typing import Literal
 
 import numpy as np
 from config_utils import heads_input_type, load_config_file, print_default_config
@@ -182,8 +182,8 @@ class Times:
 @dataclass(frozen=True)
 class ExperimentResults:
     fwd_time: float
-    bwd_time: Optional[float]
-    sparsity: Optional[float] = None
+    bwd_time: float | None
+    sparsity: float | None = None
 
 
 @dataclass(frozen=True)
@@ -270,7 +270,7 @@ def generate_jagged_inputs(
     B, Hq, M, Hkv, N, D = shape
 
     def offsets_to_lengths(
-        offsets: torch.Tensor, device: Union[str, torch.device]
+        offsets: torch.Tensor, device: str | torch.device
     ) -> torch.tensor:
         """Converts a list of offsets to a list of lengths. Reverse op of attn_gym.masks.document_mask.length_to_offsets
 
@@ -650,7 +650,7 @@ def get_average_speedups(results: list[Experiment], type: str, backend: str):
     return table_data
 
 
-def print_results(results: list[Experiment], save_path: Optional[str] = None):
+def print_results(results: list[Experiment], save_path: str | None = None):
     table_data = defaultdict(list)
     for experiment in results:
         backends = experiment.config.backends + ["flex"]
@@ -964,7 +964,7 @@ def generate_FA_callable(
         FA_kwargs["cu_seqlens_k"] = kwargs["offsets"].to(torch.int32)
 
         def offsets_to_lengths(
-            offsets: torch.Tensor, device: Union[str, torch.device]
+            offsets: torch.Tensor, device: str | torch.device
         ) -> torch.tensor:
             lengths = offsets[1:] - offsets[:-1]
             return lengths
@@ -1223,7 +1223,7 @@ def _output_json_for_dashboard(
     import math
     import platform
     from dataclasses import asdict, dataclass
-    from typing import Any, Optional
+    from typing import Any
 
     # Prepare headers and records for JSON output
     records = []
@@ -1269,7 +1269,7 @@ def _output_json_for_dashboard(
             @dataclass
             class BenchmarkInfo:
                 name: str
-                mode: Optional[str]
+                mode: str | None
                 dtype: str
                 extra_info: dict[str, Any]
 
@@ -1285,7 +1285,7 @@ def _output_json_for_dashboard(
                 name: str
                 unit: str
                 benchmark_values: list[float]
-                target_value: Optional[float]
+                target_value: float | None
 
             @dataclass
             class BenchmarkRecord:
@@ -1430,10 +1430,10 @@ def main(
     backend: list[Backend] | None = None,
     max_autotune: bool = False,
     decoding: bool = False,
-    kv_size: Optional[list[int]] = None,
+    kv_size: list[int] | None = None,
     throughput: bool = True,
-    save_path: Optional[str] = None,
-    output_json_for_dashboard: Optional[str] = None,
+    save_path: str | None = None,
+    output_json_for_dashboard: str | None = None,
     benchmark_name: str = "PyTorch operator microbenchmark",
 ) -> None:
     """Run sweep over sizes and score mods for flex attention.

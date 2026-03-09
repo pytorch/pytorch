@@ -184,6 +184,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
   # disable timeout due to shard not balance for xpu
   export NO_TEST_TIMEOUT=True
+elif [[ "$BUILD_ENVIRONMENT" == *pallas-tpu* ]]; then
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="tpu"
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -309,12 +311,6 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-if [[ "${TEST_CONFIG}" == "legacy_nvidia_driver" ]]; then
-  # Make sure that CUDA can be initialized
-  (cd test && python -c "import torch; torch.rand(2, 2, device='cuda')")
-  export USE_LEGACY_DRIVER=1
-fi
-
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
@@ -344,6 +340,7 @@ test_python() {
 
 test_python_smoke() {
   # Smoke tests for H100/B200
+  time python test/run_test.py --include inductor/test_flex_attention -k test_tma_with_customer_kernel_options $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
@@ -362,6 +359,7 @@ test_python_smoke_b200() {
       inductor/test_flex_flash \
       inductor/test_torchinductor \
       inductor/test_nv_universal_gemm \
+      inductor/test_fused_attention \
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -413,6 +411,15 @@ test_lazy_tensor_meta_reference_disabled() {
 test_dynamo_core() {
   time python test/run_test.py \
     --include-dynamo-core-tests \
+    --verbose \
+    --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_dynamo_cpython() {
+  time python test/run_test.py \
+    --include-cpython-tests \
+    --dynamo \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -578,7 +585,7 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro inductor/test_triton_kernels \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py --inductor \
@@ -586,7 +593,10 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
-
+  TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=0 python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_triton_kernels\
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     python test/run_test.py \
       --include inductor/test_mkldnn_pattern_matcher \
@@ -879,12 +889,6 @@ test_inductor_halide() {
 }
 
 test_inductor_pallas() {
-  # Set TPU target for TPU tests
-  if [[ "${TEST_CONFIG}" == *inductor-pallas-tpu* ]]; then
-    export PALLAS_TARGET_TPU=1
-    # Check if TPU backend is available
-    python -c "import jax; devices = jax.devices('tpu'); print(f'Found {len(devices)} TPU device(s)'); assert len(devices) > 0, 'No TPU devices found'"
-  fi
   python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
 }
@@ -1781,7 +1785,7 @@ test_linux_aarch64() {
        inductor/test_split_cat_fx_passes inductor/test_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
        inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
-       inductor/test_cpu_select_algorithm \
+       inductor/test_cpu_select_algorithm inductor/test_cpu_repro \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
@@ -1847,6 +1851,7 @@ test_attention_microbenchmark() {
 }
 
 test_openreg() {
+  git submodule update --init --depth 1 third_party/googletest
   python test/run_test.py --openreg --verbose
   assert_git_not_dirty
 }
@@ -1881,6 +1886,9 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     (cd .ci/lumen_cli && python -m pip install -e .)
 
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
+elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
+    (cd .ci/lumen_cli && python -m pip install -e .)
+    python -m cli.run test external torchtitan --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
@@ -1980,6 +1988,8 @@ elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
 elif [[ "${TEST_CONFIG}" == *dynamo_core* ]]; then
   test_dynamo_core
+elif [[ "${TEST_CONFIG}" == *dynamo_cpython* ]]; then
+  test_dynamo_cpython
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
   test_dynamo_wrapped_shard "${SHARD_NUMBER}"
