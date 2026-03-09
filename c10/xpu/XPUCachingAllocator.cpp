@@ -1,6 +1,7 @@
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/XPUFunctions.h>
 
 #include <deque>
 #include <mutex>
@@ -919,6 +920,20 @@ class DeviceCachingAllocator {
     } else {
       allocPrimitive(&ptr, size, p);
       if (!ptr) {
+        // When a direct allocation fails and the requested size exceeds the
+        // device's max_mem_alloc_size (Level Zero limit, typically ~4 GiB),
+        // fall back to expandable segments which use virtual memory with
+        // smaller physical memory chunks to bypass the per-allocation limit.
+        auto max_alloc = c10::xpu::get_raw_device(p.device())
+            .get_info<sycl::info::device::max_mem_alloc_size>();
+        if (size > max_alloc && !active_pool) {
+          p.block = try_allocate_expandable_block(
+              p.device(), p.queue(), p.pool, p.size());
+          if (p.block && p.pool->owner_PrivatePool) {
+            p.pool->owner_PrivatePool->allocation_count++;
+          }
+          return bool(p.block);
+        }
         return false;
       }
     }
