@@ -642,14 +642,14 @@ struct ReduceJitOp {
   #endif // [CMTSTRS]
     }
 
-  #ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]  
+  #ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
     __threadfence(); // make sure writes are globally visible
   #endif
     __syncthreads(); // if multiple warps in this block wrote to staging, make sure they're all done
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
-  #ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]   
+  #ifndef USE_ROCM // skip fence if store are committed [CMTSTRS]
       __threadfence(); //complete acquire pattern
   #endif
       value = ident;
