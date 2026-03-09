@@ -79,8 +79,7 @@ def export(
     # Dynamo only options
     external_data: bool = True,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
-    custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
-    | None = None,
+    custom_translation_table: dict[Callable, Callable] | None = None,
     report: bool = False,
     optimize: bool = True,
     verify: bool = False,

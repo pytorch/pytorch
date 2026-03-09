@@ -33,6 +33,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     skipCUDAIfNotRocm,
     skipMeta,
+    skipMPS,
     skipXPU,
 )
 from torch.testing._internal.common_dtype import (
@@ -60,6 +61,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     is_iterable_of_tensors,
     IS_SANDCASTLE,
+    MACOS_VERSION,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -78,7 +80,10 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 
-assert torch.get_default_dtype() == torch.float32
+if torch.get_default_dtype() != torch.float32:
+    raise AssertionError(
+        f"default dtype should be float32, got {torch.get_default_dtype()}"
+    )
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -230,7 +235,8 @@ class TestCommon(TestCase):
                 fmt_str = opinfo.utils.str_format_dynamic_dtype(op)
                 err_msg += "\n" + fmt_str
 
-            assert len(filtered_ops) == 0, err_msg
+            if len(filtered_ops) != 0:
+                raise AssertionError(err_msg)
 
     # Validates that each OpInfo works correctly on different CUDA devices
     @onlyOn(["cuda", "xpu"])
@@ -672,7 +678,10 @@ class TestCommon(TestCase):
             def _distance(a, b):
                 # Special-cases boolean comparisons
                 if prims.utils.is_boolean_dtype(a.dtype):
-                    assert b.dtype is torch.bool
+                    if b.dtype is not torch.bool:
+                        raise AssertionError(
+                            f"expected dtype torch.bool, got {b.dtype}"
+                        )
                     return (a ^ b).sum()
 
                 same = a == b
@@ -956,7 +965,8 @@ class TestCommon(TestCase):
             # Validates the op doesn't support out if it claims not to
             if not op.supports_out:
                 with self.assertRaises(Exception):
-                    assert op_out(out=expected) != NotImplemented
+                    if op_out(out=expected) == NotImplemented:
+                        raise AssertionError("op_out returned NotImplemented")
                 return
 
             # A wrapper around map that works with single tensors and always
@@ -1085,7 +1095,8 @@ class TestCommon(TestCase):
             # Validates the op doesn't support out if it claims not to
             if not op.supports_out:
                 with self.assertRaises(Exception):
-                    assert op_out(out=expected) != NotImplemented
+                    if op_out(out=expected) == NotImplemented:
+                        raise AssertionError("op_out returned NotImplemented")
                 return
 
             # A wrapper around map that works with single tensors and always
@@ -1560,6 +1571,7 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
     @skipXPU
+    @skipMPS
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
@@ -2215,7 +2227,8 @@ class TestMathBits(TestCase):
                 # view created in no_grad mode. Here it's ok to do so, so as a workaround we call conj
                 # before resetting the requires_grad field for input
                 input = math_op_view(input)
-                assert input.is_leaf
+                if not input.is_leaf:
+                    raise AssertionError("expected input to be a leaf tensor")
                 return input.requires_grad_(requires_grad)
 
             if isinstance(input, Sequence):
@@ -2382,7 +2395,8 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
             # Reference: https://github.com/pytorch/pytorch/issues/78759
             if func is not torch.ops.aten.resize_.default:
                 # TODO: use self.assertIn when we have separate tests for each tag
-                assert torch.Tag.inplace_view in func.tags
+                if torch.Tag.inplace_view not in func.tags:
+                    raise AssertionError(f"expected inplace_view tag in {func.tags}")
 
 
 # A mode that when enabled runs correctness checks to ensure
@@ -3022,7 +3036,9 @@ class TestForwardADWithScalars(TestCase):
                 )
 
 
-instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestCommon, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
+)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")

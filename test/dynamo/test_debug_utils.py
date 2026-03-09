@@ -236,23 +236,52 @@ class TestBackendOverrideIntegration(TestCase):
         return x
 
     def _run_with_override(self, device, override_config, default_backend="eager"):
-        from torch._dynamo.graph_id_filter import lookup_backend_with_mode
+        from torch._dynamo.graph_id_filter import (
+            _create_backend_router,
+            get_backend_override_for_compile_id,
+        )
 
         torch._dynamo.reset()
+        # Clear the router cache to ensure fresh routers for each test
+        _create_backend_router.cache_clear()
         self._backends_called.clear()
-        original_lookup = lookup_backend_with_mode
+        original_get_override = get_backend_override_for_compile_id
 
-        def tracking_lookup(backend_str):
-            self._backends_called.append(backend_str)
-            return original_lookup(backend_str)
+        # Pre-parse the config to build a mapping of graph_id -> backend_str
+        # by using the same parsing logic but extracting the original strings
+        backend_str_map: dict[int, str] = {}
+        if override_config:
+            for rule_str in override_config.split(";"):
+                rule_str = rule_str.strip()
+                if not rule_str or ":" not in rule_str:
+                    continue
+                colon_idx = rule_str.find(":")
+                filter_str = rule_str[:colon_idx].strip()
+                backend_str = rule_str[colon_idx + 1 :].strip()
+                # Parse the filter to extract graph IDs
+                from torch._dynamo.graph_id_filter import GraphIdFilter
+
+                gf = GraphIdFilter(filter_str)
+                # Store the backend_str for any graph that matches this filter
+                for graph_id in range(100):  # Check first 100 graphs
+                    if graph_id in gf and graph_id not in backend_str_map:
+                        backend_str_map[graph_id] = backend_str
+
+        def tracking_get_override(compile_id, config_str):
+            result = original_get_override(compile_id, config_str)
+            if result is not None:
+                graph_id = compile_id.frame_id
+                if graph_id in backend_str_map:
+                    self._backends_called.append(backend_str_map[graph_id])
+            return result
 
         with (
             patch.object(
                 torch._dynamo.config, "debug_backend_override", override_config
             ),
             patch(
-                "torch._dynamo.graph_id_filter.lookup_backend_with_mode",
-                tracking_lookup,
+                "torch._dynamo.output_graph.get_backend_override_for_compile_id",
+                tracking_get_override,
             ),
         ):
             compiled_fn = torch.compile(self._fn_with_4_graphs, backend=default_backend)
@@ -319,6 +348,274 @@ class TestBackendOverrideIntegration(TestCase):
 
 instantiate_device_type_tests(
     TestBackendOverrideIntegration, globals(), only_for=["cpu", "cuda"]
+)
+
+
+class TestInductorConfigOverrideIntegration(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch._dynamo.reset()
+
+    def tearDown(self):
+        torch._dynamo.reset()
+        super().tearDown()
+
+    def test_config_router_single_graph(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter("0:triton.cudagraph_skip_dynamic_graphs=False")
+        self.assertEqual(
+            router.get_value_for_graph(0),
+            {"triton.cudagraph_skip_dynamic_graphs": False},
+        )
+        self.assertIsNone(router.get_value_for_graph(1))
+
+    def test_config_router_multiple_options(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter(
+            "0:triton.cudagraphs=False,triton.cudagraph_trees=False"
+        )
+        self.assertEqual(
+            router.get_value_for_graph(0),
+            {"triton.cudagraphs": False, "triton.cudagraph_trees": False},
+        )
+
+    def test_config_router_comparison(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter(">1:triton.cudagraphs=True")
+        self.assertIsNone(router.get_value_for_graph(0))
+        self.assertIsNone(router.get_value_for_graph(1))
+        self.assertEqual(router.get_value_for_graph(2), {"triton.cudagraphs": True})
+
+    def test_config_router_range(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter("1-3:triton.cudagraphs=False")
+        self.assertIsNone(router.get_value_for_graph(0))
+        self.assertEqual(router.get_value_for_graph(1), {"triton.cudagraphs": False})
+        self.assertEqual(router.get_value_for_graph(2), {"triton.cudagraphs": False})
+        self.assertEqual(router.get_value_for_graph(3), {"triton.cudagraphs": False})
+        self.assertIsNone(router.get_value_for_graph(4))
+
+    def test_config_router_value_types(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter(
+            "0:bool_opt=True,int_opt=42,float_opt=3.14,str_opt=hello,none_opt=None"
+        )
+        config = router.get_value_for_graph(0)
+        self.assertEqual(config["bool_opt"], True)
+        self.assertEqual(config["int_opt"], 42)
+        self.assertAlmostEqual(config["float_opt"], 3.14)
+        self.assertEqual(config["str_opt"], "hello")
+        self.assertIsNone(config["none_opt"])
+
+    def test_get_inductor_config_override_empty(self, device):
+        from torch._dynamo.graph_id_filter import (
+            get_inductor_config_override_for_compile_id,
+        )
+
+        result = get_inductor_config_override_for_compile_id(None, "")
+        self.assertIsNone(result)
+
+    def test_combined_backend_and_config_override(self, device):
+        """
+        Test combining backend override with config override.
+
+        Scenario: Default backend is eager, but override all graphs to use
+        inductor:reduce-overhead (cudagraphs enabled), and additionally
+        override graph 1 to use cudagraph_skip_dynamic_graphs=False.
+        """
+        from torch._dynamo.graph_id_filter import (
+            _create_backend_router,
+            _create_config_router,
+        )
+
+        torch._dynamo.reset()
+        _create_backend_router.cache_clear()
+        _create_config_router.cache_clear()
+
+        backends_used: list[str] = []
+        configs_applied: list[dict] = []
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x * 2
+            torch._dynamo.graph_break()
+            x = x - 1
+            return x
+
+        from torch._dynamo import output_graph
+
+        original_wrap = output_graph._wrap_with_inductor_config
+
+        def tracking_wrap(compiler_fn, config_patches):
+            configs_applied.append(config_patches)
+            return original_wrap(compiler_fn, config_patches)
+
+        # Build backend tracking map from config
+        backend_override = ">=0:inductor:reduce-overhead"
+        backend_str_map: dict[int, str] = {}
+        from torch._dynamo.graph_id_filter import GraphIdFilter
+
+        for rule_str in backend_override.split(";"):
+            if ":" not in rule_str:
+                continue
+            colon_idx = rule_str.find(":")
+            filter_str = rule_str[:colon_idx].strip()
+            backend_str = rule_str[colon_idx + 1 :].strip()
+            gf = GraphIdFilter(filter_str)
+            for gid in range(10):
+                if gid in gf and gid not in backend_str_map:
+                    backend_str_map[gid] = backend_str
+
+        from torch._dynamo.graph_id_filter import get_backend_override_for_compile_id
+
+        original_get_backend = get_backend_override_for_compile_id
+
+        def tracking_get_backend(compile_id, config_str):
+            result = original_get_backend(compile_id, config_str)
+            if result is not None and compile_id.frame_id in backend_str_map:
+                backends_used.append(backend_str_map[compile_id.frame_id])
+            return result
+
+        # Use both overrides:
+        # - Backend: all graphs use inductor:reduce-overhead
+        # - Config: graph 1 uses cudagraph_skip_dynamic_graphs=False
+        with (
+            patch.object(
+                torch._dynamo.config,
+                "debug_backend_override",
+                backend_override,
+            ),
+            patch.object(
+                torch._dynamo.config,
+                "debug_inductor_config_override",
+                "1:triton.cudagraph_skip_dynamic_graphs=False",
+            ),
+            patch(
+                "torch._dynamo.output_graph.get_backend_override_for_compile_id",
+                tracking_get_backend,
+            ),
+            patch.object(output_graph, "_wrap_with_inductor_config", tracking_wrap),
+        ):
+            compiled_fn = torch.compile(fn, backend="eager")
+            compiled_fn(torch.randn(10, device=device))
+
+        self.assertEqual(len(backends_used), 3)
+        self.assertEqual(
+            backends_used,
+            [
+                "inductor:reduce-overhead",
+                "inductor:reduce-overhead",
+                "inductor:reduce-overhead",
+            ],
+        )
+
+        self.assertEqual(len(configs_applied), 1)
+        self.assertEqual(
+            configs_applied[0], {"triton.cudagraph_skip_dynamic_graphs": False}
+        )
+
+    def test_multiple_config_overrides_with_backend(self, device):
+        """
+        Test multiple config overrides applied to different graphs with backend override.
+
+        Scenario: Default backend is eager, override graphs 0,2 to use inductor,
+        and apply different config overrides to each.
+        """
+        from torch._dynamo.graph_id_filter import (
+            _create_backend_router,
+            _create_config_router,
+        )
+
+        torch._dynamo.reset()
+        _create_backend_router.cache_clear()
+        _create_config_router.cache_clear()
+
+        backends_used: list[str] = []
+        configs_applied: list[dict] = []
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x * 2
+            torch._dynamo.graph_break()
+            x = x - 1
+            torch._dynamo.graph_break()
+            x = x / 2
+            return x
+
+        from torch._dynamo import output_graph
+
+        original_wrap = output_graph._wrap_with_inductor_config
+
+        def tracking_wrap(compiler_fn, config_patches):
+            configs_applied.append(config_patches)
+            return original_wrap(compiler_fn, config_patches)
+
+        # Build backend tracking map
+        backend_override = "0,2:inductor"
+        backend_str_map: dict[int, str] = {}
+        from torch._dynamo.graph_id_filter import GraphIdFilter
+
+        for rule_str in backend_override.split(";"):
+            if ":" not in rule_str:
+                continue
+            colon_idx = rule_str.find(":")
+            filter_str = rule_str[:colon_idx].strip()
+            backend_str = rule_str[colon_idx + 1 :].strip()
+            gf = GraphIdFilter(filter_str)
+            for gid in range(10):
+                if gid in gf and gid not in backend_str_map:
+                    backend_str_map[gid] = backend_str
+
+        from torch._dynamo.graph_id_filter import get_backend_override_for_compile_id
+
+        original_get_backend = get_backend_override_for_compile_id
+
+        def tracking_get_backend(compile_id, config_str):
+            result = original_get_backend(compile_id, config_str)
+            if result is not None and compile_id.frame_id in backend_str_map:
+                backends_used.append(backend_str_map[compile_id.frame_id])
+            return result
+
+        # Use both overrides:
+        # - Backend: graphs 0,2 use inductor (graphs 1,3 stay with eager)
+        # - Config: graph 0 disables cudagraphs, graph 2 disables skip_dynamic_graphs
+        with (
+            patch.object(
+                torch._dynamo.config,
+                "debug_backend_override",
+                backend_override,
+            ),
+            patch.object(
+                torch._dynamo.config,
+                "debug_inductor_config_override",
+                "0:triton.cudagraphs=False;2:triton.cudagraph_skip_dynamic_graphs=False",
+            ),
+            patch(
+                "torch._dynamo.output_graph.get_backend_override_for_compile_id",
+                tracking_get_backend,
+            ),
+            patch.object(output_graph, "_wrap_with_inductor_config", tracking_wrap),
+        ):
+            compiled_fn = torch.compile(fn, backend="eager")
+            compiled_fn(torch.randn(10, device=device))
+
+        self.assertEqual(len(backends_used), 2)
+        self.assertEqual(backends_used, ["inductor", "inductor"])
+
+        self.assertEqual(len(configs_applied), 2)
+        self.assertIn({"triton.cudagraphs": False}, configs_applied)
+        self.assertIn({"triton.cudagraph_skip_dynamic_graphs": False}, configs_applied)
+
+
+instantiate_device_type_tests(
+    TestInductorConfigOverrideIntegration, globals(), only_for=["cpu", "cuda"]
 )
 
 

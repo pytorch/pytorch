@@ -47,7 +47,7 @@ from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import MI350_ARCH, skipIfRocmArch, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
@@ -351,6 +351,8 @@ def run_hf_bert_ddp(self, model, inputs, backend):
 
 
 class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -363,6 +365,8 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         model = FakeDDP(model)
         run_hf_bert_ddp(self, model, inputs, "inductor")
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @patch.object(config, "optimize_ddp", True)
     def test_hf_bert_ddp_aot_eager(self):
         model, inputs = get_hf_bert(0)
@@ -597,6 +601,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "inductor")
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -605,6 +611,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_hf_bert_ddp_inductor(self):
         self._test_hf_bert_ddp_inductor(static_graph=False)
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -619,12 +627,16 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     def test_hf_bert_ddp_aot_eager(self):
         self._test_hf_bert_aot_eager(static_graph=False)
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
@@ -796,6 +808,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
+    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @config.patch(enable_compiler_collectives=True)
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -843,6 +856,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 find_first_node(cnt.graphs[0], tag_activation_checkpoint) is not None
             )
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
@@ -888,6 +903,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 )
                 self.assertTrue(same(correct_results, opt_results))
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
@@ -1479,6 +1496,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
+    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_inductor(self):
@@ -1492,7 +1510,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
         """
         Just ensures that the appropriate number of splits happen (based on
         bucket size and model parameters) - verifies the number of times
@@ -1684,10 +1703,12 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model(hidden_states)
         torch.accelerator.synchronize()
 
+    @skipIfRocmArch(MI350_ARCH)  # regression in ROCm 7.2
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
         """
         Same as above, but using inductor backend.
         We observed issues with inductor/fx interface in the past.
@@ -1707,7 +1728,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     )
     @patch.object(config, "optimize_ddp", True)
     def _test_graph_split_inductor_layout_optimizations_impl(self, context):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
         channel_dim = 512
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
 
@@ -1767,7 +1789,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_transpose(self):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
 
         B = 100
         N = 30
@@ -2219,6 +2242,104 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         f(_maybe_wrap_tensor(torch.randn(12)))
 
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_compiled_all_reduce_returns_none(self):
+        def fn(x, w):
+            result = dist.all_reduce(x, async_op=False)
+            assert result is None  # noqa: S101
+            return x @ w
+
+        x = torch.randn(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        expected = x @ w
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(x, w)
+        self.assertEqual(actual, expected)
+
+    def test_compiled_all_gather_into_tensor_returns_none(self):
+        def fn(output, input, w):
+            result = dist.all_gather_into_tensor(output, input, async_op=False)
+            assert result is None  # noqa: S101
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+    def test_compiled_reduce_scatter_tensor_returns_none(self):
+        def fn(output, input, w):
+            result = dist.reduce_scatter_tensor(output, input, async_op=False)
+            assert result is None  # noqa: S101
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+    def test_compiled_all_to_all_single_returns_none(self):
+        def fn(output, input, w):
+            result = dist.all_to_all_single(output, input, async_op=False)
+            assert result is None  # noqa: S101
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+    def test_compiled_all_gather_returns_none(self):
+        def fn(tensor_list, tensor, w):
+            result = dist.all_gather(tensor_list, tensor, async_op=False)
+            assert result is None  # noqa: S101
+            return tensor_list[0] @ w
+
+        tensor = torch.randn(4, 4, device=self.device)
+        tensor_list = [torch.empty(4, 4, device=self.device)]
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(tensor_list, tensor, w)
+        self.assertEqual(actual, tensor @ w)
+
+    def test_compiled_reduce_scatter_base_returns_none(self):
+        def fn(output, input, w):
+            result = dist._reduce_scatter_base(output, input, async_op=False)
+            assert result is None  # noqa: S101
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+    def test_compiled_all_gather_base_returns_none(self):
+        def fn(output, input, w):
+            result = dist._all_gather_base(output, input, async_op=False)
+            assert result is None  # noqa: S101
+            return output @ w
+
+        input = torch.randn(4, 4, device=self.device)
+        output = torch.empty(4, 4, device=self.device)
+        w = torch.randn(4, 4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
+
+        input = torch.ones(4, device=self.device)
+        output = torch.empty(4, device=self.device)
+        w = torch.ones(4, device=self.device)
+        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        actual = compiled_fn(output, input, w)
+        self.assertEqual(actual, input @ w)
 
 
 if __name__ == "__main__":

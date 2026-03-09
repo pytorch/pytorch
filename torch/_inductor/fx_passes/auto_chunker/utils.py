@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.fx import Graph, GraphModule, Node
@@ -42,7 +42,7 @@ def compute_tensor_size(*args: Any, count_bytes: bool = True, **kwargs: Any) -> 
 
 def get_fake_tensor_from_node_arg(
     node: torch.fx.node.Argument,
-) -> Optional[torch.Tensor]:
+) -> torch.Tensor | None:
     if (
         not hasattr(node, "meta")
         or ("val" not in node.meta)  # type: ignore[union-attr]
@@ -93,7 +93,7 @@ def has_any_chunking_meta(*node_list: Node) -> bool:
     return any(get_chunking_meta(node) for node in node_list)
 
 
-def get_first_chunking_meta(*node_list: Node) -> Optional[ChunkingMeta]:
+def get_first_chunking_meta(*node_list: Node) -> ChunkingMeta | None:
     """
     Get the first non-none chunking metadata if there is any.
     """
@@ -106,7 +106,7 @@ def get_first_chunking_meta(*node_list: Node) -> Optional[ChunkingMeta]:
     return None
 
 
-def get_scale_by_from_metas(*metas: ChunkingMeta) -> Optional[Node]:
+def get_scale_by_from_metas(*metas: ChunkingMeta) -> Node | None:
     """
     If there are multiple ChunkingMeta having the scale_by field,
     raise a CantChunk exception.
@@ -128,7 +128,7 @@ def get_scale_by_from_metas(*metas: ChunkingMeta) -> Optional[Node]:
     return scale_by_list[0] if len(scale_by_list) == 1 else None
 
 
-def get_scale_by_from_node(node: Node) -> Optional[Node]:
+def get_scale_by_from_node(node: Node) -> Node | None:
     from .core import get_chunking_meta
 
     meta = get_chunking_meta(node)

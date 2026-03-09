@@ -55,7 +55,11 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
-device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 

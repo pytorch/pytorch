@@ -96,9 +96,10 @@ class SubgraphMatcher:
 
         for node in pattern.nodes:
             if node.op != "output" and not node.is_impure():
-                assert len(node.users) > 0, (
-                    "SubgraphMatcher cannot be initialized with an pattern with dead code"
-                )
+                if len(node.users) == 0:
+                    raise AssertionError(
+                        "SubgraphMatcher cannot be initialized with an pattern with dead code"
+                    )
 
         # TODO: assert pattern is a connected graph
 
@@ -121,8 +122,10 @@ class SubgraphMatcher:
 
     def _match_attributes(self, pn: Node, gn: Node) -> bool:
         # Attributes matching is complicated. Right now we only support matching constant tensor
-        assert isinstance(pn.target, str), f"pn.target {pn.target} must be a string."
-        assert isinstance(gn.target, str), f"gn.target {gn.target} must be a string."
+        if not isinstance(pn.target, str):
+            raise AssertionError(f"pn.target {pn.target} must be a string.")
+        if not isinstance(gn.target, str):
+            raise AssertionError(f"gn.target {gn.target} must be a string.")
 
         pn_value = torch.fx.graph_module._get_attr(pn.graph.owning_module, pn.target)
         gn_value = torch.fx.graph_module._get_attr(gn.graph.owning_module, gn.target)
@@ -135,6 +138,7 @@ class SubgraphMatcher:
             return isinstance(gn_value, torch.Tensor)
         else:
             raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
+        # pyrefly: ignore [unreachable]
         return False
 
     def _nodes_are_equal(self, pn: Node, gn: Node, node_name_match: str = "") -> bool:
@@ -195,9 +199,8 @@ class SubgraphMatcher:
         return non_overlapping_matches
 
     def _match_literals(self, pn: Any, gn: Any, match: InternalMatch) -> bool:
-        assert not (isinstance(pn, Node) and isinstance(gn, Node)), (
-            "pn and gn cannot both be Node"
-        )
+        if isinstance(pn, Node) and isinstance(gn, Node):
+            raise AssertionError("pn and gn cannot both be Node")
 
         if isinstance(pn, Node) and not isinstance(gn, Node):
             if pn.op == "placeholder":
@@ -220,9 +223,8 @@ class SubgraphMatcher:
     ) -> bool:
         logger.info("  matching %s to %s", pn, gn)
 
-        assert isinstance(pn, Node) and isinstance(gn, Node), str(
-            f"pn and gn must be Node, pn: {pn}, gn: {gn}"
-        )
+        if not (isinstance(pn, Node) and isinstance(gn, Node)):
+            raise AssertionError(f"pn and gn must be Node, pn: {pn}, gn: {gn}")
 
         # Check if we've already matched these nodes in the current
         # traversal

@@ -144,10 +144,13 @@ class CompositeMHA(torch.nn.Module):
 
 
 def build_composite_mha_from_nn_mha(pt):
-    assert pt._qkv_same_embed_dim
+    if not pt._qkv_same_embed_dim:
+        raise AssertionError("pt._qkv_same_embed_dim must be True")
     in_proj_weight = pt.in_proj_weight
-    assert in_proj_weight is not None
-    assert pt.batch_first
+    if in_proj_weight is None:
+        raise AssertionError("pt.in_proj_weight must not be None")
+    if not pt.batch_first:
+        raise AssertionError("pt.batch_first must be True")
     return CompositeMHA(pt.num_heads, pt.in_proj_weight, pt.in_proj_bias, pt.out_proj)
 
 
@@ -200,9 +203,15 @@ def assert_close_tensors(tensor_a, tensor_b):
     # First order sanity check. Not a replacement for rigorous tests.
     if tensor_a.is_nested and tensor_b.is_nested:
         for a, b in zip(tensor_a.unbind(), tensor_b.unbind()):
-            assert torch.allclose(a, b, atol=1e-2, rtol=1e-2)
+            if not torch.allclose(a, b, atol=1e-2, rtol=1e-2):
+                raise AssertionError(
+                    f"Nested tensors not close: max diff = {(a - b).abs().max()}"
+                )
     else:
-        assert torch.allclose(tensor_a, tensor_b, atol=1e-3, rtol=1e-3)
+        if not torch.allclose(tensor_a, tensor_b, atol=1e-3, rtol=1e-3):
+            raise AssertionError(
+                f"Tensors not close: max diff = {(tensor_a - tensor_b).abs().max()}"
+            )
 
 
 def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:

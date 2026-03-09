@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This module dispatches the graphs to either the forward-only or joint compilation
 pathways, taking into account the AOTConfig and the collected ViewAndMutationMetadata.
@@ -6,7 +5,8 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 
 import contextlib
 import dataclasses
-from typing import Any, Optional
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -54,12 +54,45 @@ from .utils import (
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
+def _extract_tangent_source_stack_traces(
+    fx_g: torch.fx.GraphModule,
+    fw_metadata: ViewAndMutationMeta,
+) -> None:
+    from .descriptors import PlainAOTOutput, TangentAOTInput
+
+    if not fw_metadata.traced_tangents_descs:
+        return
+
+    output_node = list(fx_g.graph.nodes)[-1]
+    all_outputs = output_node.args[0]
+
+    stack_traces: list[str | None] = []
+    got_one = False
+
+    for desc in fw_metadata.traced_tangents_descs:
+        stack_trace = None
+
+        if isinstance(desc, TangentAOTInput):
+            output_desc = desc.output
+            if isinstance(output_desc, PlainAOTOutput) and output_desc.idx < len(
+                all_outputs
+            ):
+                output_arg = all_outputs[output_desc.idx]
+                if isinstance(output_arg, torch.fx.Node):
+                    stack_trace = output_arg.meta.get("stack_trace", None)
+                    got_one = True
+
+        stack_traces.append(stack_trace)
+
+    if got_one:
+        fw_metadata.tangent_source_stack_traces = stack_traces
+
+
 def _create_graph(
-    f,
+    f: Callable[..., Any],
     args: list[torch.Tensor],
-    args_descs: Optional[
-        list[AOTInput]
-    ] = None,  # keep compat with old clients; maybe we should split into two impls
+    args_descs: list[AOTInput]
+    | None = None,  # keep compat with old clients; maybe we should split into two impls
     *,
     aot_config: AOTConfig,
 ) -> torch.fx.GraphModule:
@@ -72,9 +105,10 @@ def _create_graph(
     else:
 
         @simple_wraps(f)
-        def inner_f(*args):
+        def inner_f(*args: Any) -> Any:
             nonlocal out_descs
-            assert out_descs is None
+            if out_descs is not None:
+                raise AssertionError("out_descs must be None")
             out, out_descs = call_and_expect_output_descs(f, args)
             return out
 
@@ -133,11 +167,12 @@ def _create_graph(
                         n.meta["desc"] = BackwardTokenAOTInput(j)
                         j += 1
                     else:
-                        assert i < len(flat_args_descs), (
-                            (fn_wrappers(inner_f)),
-                            [n for n in fx_g.graph.nodes if n.op == "placeholder"],
-                            flat_args_descs,
-                        )
+                        if i >= len(flat_args_descs):
+                            raise AssertionError(
+                                f"i={i} >= len(flat_args_descs)={len(flat_args_descs)}: "
+                                f"fn_wrappers={fn_wrappers(inner_f)}, "
+                                f"placeholders={[n for n in fx_g.graph.nodes if n.op == 'placeholder']}"
+                            )
                         n.meta["desc"] = flat_args_descs[i]
                         i += 1
                 elif n.op == "output":
@@ -147,9 +182,10 @@ def _create_graph(
 
 
 # TODO: Refactor the following code so detach() persists item_memo
-def _detach_and_copy_item_memo(t):
+def _detach_and_copy_item_memo(t: torch.Tensor) -> torch.Tensor:
     detached_t = t.detach()
     if hasattr(t, "item_memo"):
+        # pyrefly: ignore[missing-attribute]
         detached_t.item_memo = t.item_memo
     return detached_t
 
@@ -161,7 +197,7 @@ def aot_dispatch_base_graph(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> tuple[torch.fx.GraphModule, list[FxValue], list[AOTInput], Optional[SubclassMeta]]:
+) -> tuple[torch.fx.GraphModule, list[FxValue], list[AOTInput], SubclassMeta | None]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -297,7 +333,10 @@ def aot_dispatch_base_graph(
         fw_module.recompile()
         copy_count2 = assert_functional_graph(fw_module.graph)
         propagate_input_mutation_stacktraces(fw_module.graph)
-        assert copy_count == copy_count2
+        if copy_count != copy_count2:
+            raise AssertionError(
+                f"copy_count={copy_count} != copy_count2={copy_count2}"
+            )
     else:
         fw_module.graph.eliminate_dead_code()
 
@@ -358,9 +397,10 @@ def aot_dispatch_base_graph(
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.
     if aot_config.is_export:
-        assert maybe_subclass_meta is None, (
-            "aot_export_module does not support tensor subclass inputs for now."
-        )
+        if maybe_subclass_meta is not None:
+            raise AssertionError(
+                "aot_export_module does not support tensor subclass inputs for now."
+            )
     return (
         fw_module,
         saved_updated_flat_args_subclasses_desugared,
@@ -384,7 +424,7 @@ def aot_dispatch_autograd_graph(
     torch.fx.GraphModule,
     tuple[list[Any], list[Any]],
     tuple[list[AOTInput], list[AOTInput]],
-    Optional[SubclassMeta],
+    SubclassMeta | None,
 ]:
     # NB: flat_fn here is the original user function (as far as
     # aot_module_simplified is concerned)
@@ -404,6 +444,7 @@ def aot_dispatch_autograd_graph(
     joint_fn_to_trace = create_joint(
         fn_prepared_for_autograd, flat_args_descs, aot_config=aot_config
     )
+    # pyrefly: ignore[missing-attribute]
     joint_fn_handle = joint_fn_to_trace.handle
 
     if aot_config.disable_functionalization:
@@ -503,6 +544,9 @@ def aot_dispatch_autograd_graph(
     # NB: This needs to be done after the above stream assignments
     populate_fw_metadata_with_stream_indices(fx_g, fw_metadata)
 
+    # this helps users identify which forward output to call .detach() on.
+    _extract_tangent_source_stack_traces(fx_g, fw_metadata)
+
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:
         # There should be *NO* mutating ops in the graph at this point.
@@ -514,9 +558,10 @@ def aot_dispatch_autograd_graph(
     # when we need to manually detach() some inputs in the forward.
     # Higher order ops might eventually need to do the same.
     if aot_config.is_export:
-        assert maybe_subclass_meta is None, (
-            "aot_export_module does not support tensor subclass inputs for now."
-        )
+        if maybe_subclass_meta is not None:
+            raise AssertionError(
+                "aot_export_module does not support tensor subclass inputs for now."
+            )
     return (
         fx_g,
         saved_updated_joint_inputs,

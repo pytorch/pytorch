@@ -124,6 +124,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.max_unpool3d.default": {},
     "aten.median.default": {},
     "aten.mm.out": {},
+    "aten.mm.dtype_out": {},
     "aten.mode.default": {},
     "aten.mul.Scalar": {},
     "aten.mul.Tensor": {},

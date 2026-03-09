@@ -191,6 +191,33 @@ class FakeTensorTest(TestCase):
             x = torch.empty(2, 2, device="meta")
             self.assertEqual(repr(x), "FakeTensor(..., device='meta', size=(2, 2))")
 
+    def test_fake_device_property_normalization(self):
+        """Test that fake_device property normalizes device on assignment."""
+        with FakeTensorMode() as mode:
+            # Test CPU device - should remain unchanged
+            cpu_tensor = torch.empty(2, 2, device="meta")
+            fake_cpu = FakeTensor(mode, cpu_tensor, torch.device("cpu"))
+            self.assertEqual(fake_cpu.fake_device, torch.device("cpu"))
+
+            # Test device with explicit index - should remain unchanged
+            cuda_device_with_index = torch.device("cuda:0")
+            fake_cuda = FakeTensor(mode, cpu_tensor, cuda_device_with_index)
+            self.assertEqual(fake_cuda.fake_device, torch.device("cuda:0"))
+
+            # Test MPS device without index - should normalize to mps:0
+            mps_device = torch.device("mps")
+            fake_mps = FakeTensor(mode, cpu_tensor, mps_device)
+            self.assertEqual(fake_mps.fake_device, torch.device("mps:0"))
+
+            # Test property setter normalization with MPS
+            fake_tensor = FakeTensor(mode, cpu_tensor, torch.device("cpu"))
+            fake_tensor.fake_device = torch.device("mps")
+            self.assertEqual(fake_tensor.fake_device, torch.device("mps:0"))
+
+            # Test property setter normalization with CUDA
+            fake_tensor.fake_device = torch.device("cuda")
+            self.assertEqual(fake_tensor.fake_device, torch.device("cuda:0"))
+
     def test_convert_fake_to_real(self):
         x = torch.ones([20])
         with FakeTensorMode(allow_non_fake_inputs=True) as m:
@@ -318,8 +345,10 @@ class FakeTensorTest(TestCase):
         with FakeTensorMode():
             x = torch.rand([8, 8], device="cpu")
             y = torch.rand([8, 8], device="cuda")
-            assert x.copy_(y).device.type == "cpu"
-            assert y.copy_(x).device.type == "cuda"
+            if x.copy_(y).device.type != "cpu":
+                raise AssertionError("expected cpu device")
+            if y.copy_(x).device.type != "cuda":
+                raise AssertionError("expected cuda device")
 
     def test_fake_device(self):
         t = torch.ones(3)
@@ -538,7 +567,8 @@ class FakeTensorTest(TestCase):
         # does not fail
         with FakeTensorMode():
             out = str(x)
-        assert "FakeTensor" not in out
+        if "FakeTensor" in out:
+            raise AssertionError("FakeTensor should not be in output")
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_upsample_bilinear_small_channels(self):
@@ -1419,7 +1449,8 @@ class FakeTensorConverterTest(TestCase):
         x_conv = converter.from_real_tensor(mode, x)
         self.assertEqual(len(converter.tensor_memo), 1)
         x_conv2 = converter.from_real_tensor(mode, x)
-        assert x_conv2 is x_conv
+        if x_conv2 is not x_conv:
+            raise AssertionError("expected x_conv2 is x_conv")
         del x
         del x_conv
         del x_conv2
@@ -1463,8 +1494,10 @@ class FakeTensorConverterTest(TestCase):
         y_weak = weakref.ref(mode)
         del mode
         del y
-        assert mode_weak() is None
-        assert y_weak() is None
+        if mode_weak() is not None:
+            raise AssertionError("expected mode_weak() is None")
+        if y_weak() is not None:
+            raise AssertionError("expected y_weak() is None")
 
 
 make_propagate_real_tensors_cls(FakeTensorConverterTest)
@@ -1474,7 +1507,8 @@ class FakeTensorOperatorInvariants(TestCase):
     def get_aten_op(self, schema):
         namespace, name = schema.name.split("::")
         overload = schema.overload_name if schema.overload_name else "default"
-        assert namespace == "aten"
+        if namespace != "aten":
+            raise AssertionError(f"expected namespace 'aten', got {namespace!r}")
         return getattr(getattr(torch.ops.aten, name), overload)
 
     def get_all_aten_schemas(self):
@@ -2452,7 +2486,8 @@ class FakeTensorDispatchCache(TestCase):
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-                assert meta is None
+                if meta is not None:
+                    raise AssertionError(f"expected meta is None, got {meta}")
                 return DifferentDeviceTensor(inner_tensors["inner_tensor"])
 
             @classmethod
@@ -2479,7 +2514,10 @@ class FakeTensorDispatchCache(TestCase):
             fake_wrapped_a = fake_mode.from_tensor(wrapped_a)
 
         self.assertTrue(fake_wrapped_a.is_cpu)
-        assert isinstance(fake_wrapped_a, DifferentDeviceTensor)
+        if not isinstance(fake_wrapped_a, DifferentDeviceTensor):
+            raise AssertionError(
+                f"expected DifferentDeviceTensor, got {type(fake_wrapped_a)}"
+            )
         self.assertFalse(fake_wrapped_a.inner_tensor.is_cpu)
 
     def test__upsample_bilinear2d_aa_backward_dynamic_shapes(self):

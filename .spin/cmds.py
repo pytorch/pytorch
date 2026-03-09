@@ -408,6 +408,7 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     if write_json_output:
         Path(tee_file).write_text(json_output_all + json_output_changed)
     if lint_found:
+        click.secho("Lint failed!", fg="red")
         raise SystemExit(1)
 
 

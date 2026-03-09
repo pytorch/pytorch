@@ -169,8 +169,8 @@ def varlen_attn(
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """
-    Compute variable-length attention using Flash Attention.
+    r"""Compute variable-length attention using Flash Attention.
+
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
 

@@ -360,7 +360,10 @@ class TestBundledInputs(TestCase):
 
         def condensed(t):
             ret = torch.empty_like(t).flatten()[0].clone().expand(t.shape)
-            assert ret.storage().size() == 1
+            if ret.storage().size() != 1:
+                raise AssertionError(
+                    f"storage size must be 1, got {ret.storage().size()}"
+                )
             # ret.storage()[0] = 0
             return ret
 

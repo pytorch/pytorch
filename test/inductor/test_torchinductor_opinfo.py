@@ -107,11 +107,14 @@ START = os.getenv("PYTORCH_TEST_RANGE_START", None)
 END = os.getenv("PYTORCH_TEST_RANGE_END", None)
 
 if START is not None or END is not None:
-    assert END is not None
-    assert START is not None
+    if END is None:
+        raise AssertionError("END must be set when START is set")
+    if START is None:
+        raise AssertionError("START must be set when END is set")
     START = int(START)
     END = int(END)
-    assert START < END
+    if START >= END:
+        raise AssertionError(f"START ({START}) must be less than END ({END})")
 else:
     START = 0
     END = len(op_db)
@@ -231,9 +234,6 @@ inductor_skips["xpu"] = {}
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "_softmax_backward_data": {
-        f16
-    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
@@ -990,42 +990,11 @@ inductor_one_sample["xpu"] = {
 
 # TODO: Fix these so strides match.
 inductor_skip_exact_stride = {
-    "complex",
-    "empty_permuted",
-    "fft.irfftn",
-    "fft.irfft2",
-    "linalg.diagonal",
-    "linalg.eigvals",  # Fails for ROCM
-    "linalg.lu",
-    "linalg.lu_factor",
     "linalg.matrix_norm",
-    "linalg.norm",
-    "linalg.norm.subgradients_at_zero",
-    "linalg.pinv.singular",
-    "linalg.svdvals",
-    "linalg.solve",
-    "linalg.solve_ex",
-    "linalg.qr",
-    "matmul",
-    "__rmatmul__",
-    "nn.functional.adaptive_avg_pool1d",
-    "nn.functional.group_norm",
-    "nn.functional.linear",
-    "nn.functional.max_pool2d",
-    "nn.functional.unfold",
     "ormqr",
-    "pca_lowrank",
-    "polar",
-    "prod",
-    "qr",
     "rot90",
-    "stack",
     "sum",
     "tensordot",
-    "tril_indices",
-    "triu_indices",
-    "unbind",
-    "unbind_copy",
 }
 
 # On XPU, Inductor may apply additional layout optimizations that can change
@@ -1070,14 +1039,18 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
         exact_stride=False,
     ):
         if is_argsort:
-            assert isinstance(x, torch.Tensor)
-            assert isinstance(y, torch.Tensor)
+            if not isinstance(x, torch.Tensor):
+                raise AssertionError(f"Expected torch.Tensor, got {type(x)}")
+            if not isinstance(y, torch.Tensor):
+                raise AssertionError(f"Expected torch.Tensor, got {type(y)}")
         else:
             # The first tensor is the sorted values and can be asserted via
             # the usual means
             for t in (x, y):
-                assert isinstance(t, tuple)
-                assert len(t) == 2
+                if not isinstance(t, tuple):
+                    raise AssertionError(f"Expected tuple, got {type(t)}")
+                if len(t) != 2:
+                    raise AssertionError(f"Expected tuple of length 2, got {len(t)}")
 
             test_case_inst.assertEqual(
                 x[0],
@@ -1096,7 +1069,8 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
         if exact_dtype and (x.dtype != y.dtype):
             raise AssertionError(f"The dtypes do not match: {x.dtype} != {y.dtype}.")
 
-        assert x.shape == y.shape
+        if x.shape != y.shape:
+            raise AssertionError(f"Shape mismatch: {x.shape} != {y.shape}")
 
         if exact_stride and (x.stride() != y.stride()):
             raise AssertionError(
@@ -1109,7 +1083,8 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
             for cur_dim in reversed(range(x.dim())):
                 indices[cur_dim] = el % x.shape[cur_dim]
                 el //= x.shape[cur_dim]
-            assert None not in indices
+            if None in indices:
+                raise AssertionError("indices contains None")
             return indices
 
         def get_val_by_ids(t, ids):
@@ -1214,7 +1189,8 @@ class TestInductorOpInfo(TestCase):
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
 
-        assert device_type in (GPU_TYPE, "cpu")
+        if device_type not in (GPU_TYPE, "cpu"):
+            raise AssertionError(f"Unexpected device_type: {device_type}")
 
         torch._dynamo.reset()
         with torch.no_grad():

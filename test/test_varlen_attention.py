@@ -9,7 +9,7 @@ from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import parametrize, run_tests, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -195,9 +195,6 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
-    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_basic_functionality(self, device, dtype):
         torch.manual_seed(42)
@@ -243,9 +240,6 @@ class TestVarlenAttention(NNTestCase):
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_custom_op_compliance(self, device, dtype):
@@ -304,9 +298,6 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
-    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_custom_op_registration(self, device, dtype):
         torch.manual_seed(42)
@@ -350,13 +341,11 @@ class TestVarlenAttention(NNTestCase):
         custom_ops_called = any(
             "torch_attn._varlen_attn" in op for op in called_ops
         ) and any("torch_attn._varlen_attn_backward" in op for op in called_ops)
-        assert custom_ops_called
+        if not custom_ops_called:
+            raise AssertionError("custom varlen attention ops should have been called")
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("scale", [None, 0.1])
@@ -507,9 +496,6 @@ class TestVarlenAttention(NNTestCase):
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(

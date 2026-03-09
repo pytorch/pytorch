@@ -77,6 +77,10 @@ class Node(abc.ABC):
         r"""Return the metadata."""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def _sequence_nr(self) -> int:
+        raise NotImplementedError
+
     @property
     @abc.abstractmethod
     def _input_metadata(self) -> list[Any]:
@@ -351,9 +355,18 @@ class save_on_cpu(saved_tensors_hooks):
     Use this context-manager to trade compute for GPU memory usage (e.g.
     when your model doesn't fit in GPU memory during training).
 
+    .. warning::
+
+        When ``pin_memory=True``, the GPU to CPU copy during packing is
+        asynchronous. Accessing saved tensors on CPU (e.g. via
+        ``grad_fn._saved_self``) before the CUDA stream has finished may
+        yield incorrect data. Call :func:`torch.cuda.synchronize` first
+        if you need to read them.
+
     Args:
         pin_memory (bool): If ``True`` tensors will be saved to CPU pinned memory
-                           during packing and copied to GPU asynchronously during unpacking.
+                           during packing and copied to GPU asynchronously during both
+                           packing and unpacking.
                            Defaults to ``False``.
                            Also see :ref:`cuda-memory-pinning`.
 
@@ -387,13 +400,14 @@ class save_on_cpu(saved_tensors_hooks):
         def pack_to_cpu(tensor: torch.Tensor) -> tuple[torch.device, torch.Tensor]:
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
+            is_pinnable = device_module.is_available() and not tensor.is_sparse
             packed = torch.empty(
                 tensor.size(),
                 dtype=tensor.dtype,
                 layout=tensor.layout,
-                pin_memory=(device_module.is_available() and not tensor.is_sparse),
+                pin_memory=is_pinnable,
             )
-            packed.copy_(tensor)
+            packed.copy_(tensor, non_blocking=is_pinnable)
             return (tensor.device, packed)
 
         def unpack_from_cpu(packed: tuple[torch.device, torch.Tensor]) -> torch.Tensor:

@@ -180,10 +180,11 @@ def stft(
     n_win = symbolic_helper._get_tensor_dim_size(window, dim=0)
     if n_win is not None:
         win_length_default = win_length if win_length else n_fft
-        assert n_win == win_length_default, (
-            "Analysis window size must equal `win_length` or `n_fft`. "
-            f"Please, set `win_length` or `n_fft` to match `window` size ({n_win})",
-        )
+        if n_win != win_length_default:
+            raise AssertionError(
+                "Analysis window size must equal `win_length` or `n_fft`. "
+                f"Please, set `win_length` or `n_fft` to match `window` size ({n_win})"
+            )
 
         # Center window around zeros if needed (required by ONNX's STFT)
         if n_win < n_fft:
@@ -211,7 +212,10 @@ def stft(
         else:
             # Rectangle window
             torch_window = torch.ones(n_fft)
-        assert torch_window.shape[0] == n_fft
+        if torch_window.shape[0] != n_fft:
+            raise AssertionError(
+                f"torch_window.shape[0]={torch_window.shape[0]} != n_fft={n_fft}"
+            )
         window = g.op("Constant", value_t=torch_window)
     window = g.op(
         "Cast",

@@ -1050,7 +1050,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, grad_output):
                 x, weight = ctx.saved_tensors
                 grad_x = grad_output.matmul(weight)
-                assert grad_x.is_contiguous()
+                assert grad_x.is_contiguous()  # noqa: S101
                 grad_weight = grad_output.transpose(0, 1).matmul(x)
 
                 return grad_x, grad_weight
@@ -1086,7 +1086,7 @@ class GraphModule(torch.nn.Module):
 
             @staticmethod
             def backward(ctx, grad_output):
-                assert grad_output.is_contiguous()
+                assert grad_output.is_contiguous()  # noqa: S101
                 x, weight = ctx.saved_tensors
                 grad_x = grad_output.matmul(weight)
                 grad_weight = grad_output.transpose(0, 1).matmul(x)
@@ -1419,7 +1419,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, grad_out):
                 return grad_out
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def foo(x):
             return Foo.apply(x)
 
@@ -1575,6 +1575,131 @@ class GraphModule(torch.nn.Module):
         loss = z.sum()
         loss.backward()
         self.assertEqual(x + y, z)
+
+    @requires_gpu
+    def test_triton_kernel_backward_mutation_with_aliased_output(self):
+        """Test autograd function where backward triton kernel mutates a buffer
+        that is also returned as a forward output aliasing an input.
+
+        This triggers a specific partitioner case where a forward output depends
+        on backward nodes (the mutation) but should be replaced with the original
+        input.
+        """
+        import triton.language as tl
+
+        @triton.jit
+        def mul_and_mutate_kernel(
+            grad_out_ptr,
+            x_ptr,
+            grad_x_ptr,
+            buffer_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            grad_out = tl.load(grad_out_ptr + offsets, mask=mask)
+            tl.store(grad_x_ptr + offsets, grad_out, mask=mask)
+            buf = tl.load(buffer_ptr + offsets, mask=mask)
+            tl.store(buffer_ptr + offsets, buf + grad_out, mask=mask)
+
+        class TritonAddWithBuffer(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                n_elements = x.numel()
+                out = torch.empty_like(x)
+                buffer = x
+
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+                add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024)
+
+                ctx.save_for_backward(x, buffer)
+                ctx.n_elements = n_elements
+                return out, buffer
+
+            @staticmethod
+            def backward(ctx, grad_out, grad_buffer):
+                x, buffer = ctx.saved_tensors
+                n_elements = ctx.n_elements
+                grad_x = torch.empty_like(x)
+
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+                mul_and_mutate_kernel[grid](
+                    grad_out, x, grad_x, buffer, n_elements, BLOCK_SIZE=1024
+                )
+
+                return grad_x, grad_x.clone()
+
+        @torch.compile(backend="aot_eager")
+        def compiled_f(x, y):
+            return TritonAddWithBuffer.apply(x, y)
+
+        x = torch.randn(1024, device=device_type, requires_grad=False)
+        y = torch.randn(1024, device=device_type, requires_grad=True)
+
+        out_compiled, buffer_compiled = compiled_f(x, y)
+        loss_compiled = out_compiled.sum()
+        loss_compiled.backward()
+
+    @requires_gpu
+    def test_triton_kernel_backward_readonly_passthrough_output(self):
+        """Test autograd function where backward triton kernel takes a read-only
+        tensor (e.g. seq_offsets) that is also a forward output.
+
+        The functional wrapper for capture_triton returns all kwargs as outputs
+        including read-only ones. When the wrapper is backward-only, a getitem
+        extracting the read-only tensor is invalid in the forward graph but still
+        listed as a forward output. The partitioner must replace it with the
+        original input node.
+        """
+        import triton.language as tl
+
+        @triton.jit
+        def bwd_kernel(
+            grad_out_ptr,
+            offsets_ptr,
+            grad_x_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            block_start = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = block_start < n_elements
+            grad_out = tl.load(grad_out_ptr + block_start, mask=mask)
+            # Read offsets (read-only, not written back)
+            _offsets_val = tl.load(offsets_ptr + 0)  # noqa: F841
+            tl.store(grad_x_ptr + block_start, grad_out, mask=mask)
+
+        class FnWithReadOnlyBwdInput(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, offsets):
+                ctx.save_for_backward(offsets)
+                ctx.n_elements = x.numel()
+                return x.clone(), offsets
+
+            @staticmethod
+            def backward(ctx, grad_out, grad_offsets):
+                (offsets,) = ctx.saved_tensors
+                n_elements = ctx.n_elements
+                grad_x = torch.empty_like(grad_out)
+
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+                bwd_kernel[grid](grad_out, offsets, grad_x, n_elements, BLOCK_SIZE=1024)
+
+                return grad_x, None
+
+        @torch.compile(backend="aot_eager")
+        def compiled_f(x, offsets):
+            return FnWithReadOnlyBwdInput.apply(x, offsets)
+
+        x = torch.randn(1024, device=device_type, requires_grad=True)
+        offsets = torch.tensor([0, 512, 1024], device=device_type)
+
+        out, offsets_out = compiled_f(x, offsets)
+        loss = out.sum()
+        loss.backward()
+        self.assertIsNotNone(x.grad)
 
     def test_nonlocal_list_mutation_in_autograd_function(self):
         """Test that nonlocal list mutation in autograd.Function forward is handled correctly."""
@@ -2007,6 +2132,123 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True, backend=backend)
         res = opt_fn(input_data, x)
         self.assertEqual(ref, res)
+
+
+class AutogradFunctionFunctorchTests(torch._dynamo.test_case.TestCase):
+    """Tests for autograd.Function compatibility with torch.func transforms.
+
+    See https://github.com/pytorch/pytorch/issues/174067
+    """
+
+    def test_new_style_autograd_function_with_grad_no_compile(self):
+        """Baseline: new-style autograd.Function works with torch.func.grad."""
+
+        class NewStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return NewStyleOp.apply(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        result = torch.func.grad(fn)(x)
+        self.assertEqual(result, torch.tensor([2.0, 2.0]))
+
+    def test_old_style_autograd_function_with_grad_no_compile(self):
+        """Baseline: old-style autograd.Function fails with torch.func.grad."""
+
+        class OldStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return OldStyleOp.apply(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "must override the setup_context staticmethod"
+        ):
+            torch.func.grad(fn)(x)
+
+    def test_new_style_autograd_function_with_grad_compiled(self):
+        """New-style autograd.Function compiled should work with torch.func.grad.
+
+        This is the main bug from https://github.com/pytorch/pytorch/issues/174067.
+        torch.compile wraps autograd.Function in ApplyTemplate which lacks
+        setup_context, breaking torch.func compatibility.
+        """
+
+        class NewStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return NewStyleOp.apply(x)
+
+        compiled_fn = torch.compile(fn, backend="eager")
+
+        def loss_fn(x):
+            return compiled_fn(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        result = torch.func.grad(loss_fn)(x)
+        self.assertEqual(result, torch.tensor([2.0, 2.0]))
+
+    def test_old_style_autograd_function_with_grad_compiled(self):
+        """Old-style autograd.Function compiled should work with torch.func.grad.
+
+        Even though the original function is old-style, the compiled version
+        (ApplyTemplate) can support torch.func transforms because it uses
+        traced graphs.
+        """
+
+        class OldStyleOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            return OldStyleOp.apply(x)
+
+        compiled_fn = torch.compile(fn, backend="eager")
+
+        def loss_fn(x):
+            return compiled_fn(x).sum()
+
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        result = torch.func.grad(loss_fn)(x)
+        self.assertEqual(result, torch.tensor([2.0, 2.0]))
 
 
 if __name__ == "__main__":

@@ -97,7 +97,8 @@ class TestObserver(QuantizationTestCase):
                                                     reduce_range=reduce_range)]
 
         def _get_ref_params(reduce_range, qscheme, dtype, input_scale, min_val, max_val):
-            assert dtype in _INT_DTYPES, f"Not supported dtype: {dtype}, supported dtypes are {_INT_DTYPES}"
+            if dtype not in _INT_DTYPES:
+                raise AssertionError(f"Not supported dtype: {dtype}, supported dtypes are {_INT_DTYPES}")
             eps = torch.tensor([tolerance])
             if dtype in [torch.qint8, torch.int8]:
                 if reduce_range:
@@ -520,7 +521,8 @@ class _ReferenceHistogramObserver(HistogramObserver):
             norm = density * (integral_{begin, end} x^2)
                  = density * (end^3 - begin^3) / 3
             """
-            assert norm_type == "L2", "Only L2 norms are currently supported"
+            if norm_type != "L2":
+                raise AssertionError("Only L2 norms are currently supported")
             norm = 0.0
             if norm_type == "L2":
                 norm = (
@@ -581,7 +583,8 @@ class _ReferenceHistogramObserver(HistogramObserver):
                     norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
             return norm
 
-        assert self.histogram.size()[0] == self.bins, "bins mismatch"
+        if self.histogram.size()[0] != self.bins:
+            raise AssertionError("bins mismatch")
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
@@ -867,8 +870,10 @@ class TestFakeQuantize(TestCase):
         X.requires_grad_()
         fq_module = FakeQuantize(default_per_channel_weight_observer, quant_min, quant_max, ch_axis=axis).to(device)
         Y_prime = fq_module(X)
-        assert fq_module.scale is not None
-        assert fq_module.zero_point is not None
+        if fq_module.scale is None:
+            raise AssertionError("fq_module.scale should not be None")
+        if fq_module.zero_point is None:
+            raise AssertionError("fq_module.zero_point should not be None")
         Y = _fake_quantize_per_channel_affine_reference(X, fq_module.scale,
                                                         fq_module.zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(Y.cpu().detach().numpy(), Y_prime.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
@@ -962,7 +967,10 @@ class TestFusedModuleScriptable(QuantizationTestCase):
                 quantizable_model = torch.ao.quantization.quantize_fx.prepare_qat_fx(fused_model,
                                                                                      qconfig_mapping,
                                                                                      example_inputs=None)
-                assert isinstance(quantizable_model.conv, torch.ao.nn.intrinsic.qat.ConvBn2d)
+                if not isinstance(quantizable_model.conv, torch.ao.nn.intrinsic.qat.ConvBn2d):
+                    raise AssertionError(
+                        f"Expected quantizable_model.conv to be ConvBn2d, got {type(quantizable_model.conv)}"
+                    )
 
                 # jit script
                 scripted_model = torch.jit.script(quantizable_model)
@@ -999,7 +1007,10 @@ class TestFusedModuleScriptable(QuantizationTestCase):
                 # convert to QAT
                 fused_model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 torch.ao.quantization.prepare_qat(fused_model, inplace=True)
-                assert isinstance(fused_model.conv, torch.ao.nn.intrinsic.qat.ConvBn2d)
+                if not isinstance(fused_model.conv, torch.ao.nn.intrinsic.qat.ConvBn2d):
+                    raise AssertionError(
+                        f"Expected fused_model.conv to be ConvBn2d, got {type(fused_model.conv)}"
+                    )
 
                 # Test jit script fails
                 # Prepared eager module fails due to observer hooks not being scriptable
