@@ -5259,10 +5259,11 @@ class BytesIOContext(io.BytesIO):
 # For more information see https://github.com/pytorch/pytorch/issues/56202
 GRADCHECK_NONDET_TOL = 1e-12
 
-# Default gradcheck parameters. Backends without native float64 support
-# should override these to float32-appropriate values in their overlay.
-# With eps=1e-6 on float32, the finite difference noise floor (~0.06)
-# exceeds the default tolerance (atol=1e-5) by 4 orders of magnitude.
+# Default gradcheck parameters — these match the values already used by
+# torch.autograd.gradcheck (see torch/autograd/gradcheck.py).
+# Extracting them as constants lets privateuse1 backends override them
+# with dtype-appropriate values (e.g. wider tolerances for float32-only
+# hardware) in their test overlay.
 GRADCHECK_DEFAULT_EPS = 1e-6
 GRADCHECK_DEFAULT_ATOL = 1e-5
 GRADCHECK_DEFAULT_RTOL = 1e-3
