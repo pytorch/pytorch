@@ -732,6 +732,7 @@
   structured: True
   dispatch:
     CPU, CUDA: all_dims_out
+    MPS: all_dims_out_mps
     CompositeExplicitAutograd: all_dims_out_default
   cpp_no_default_args: ['dim']
   tags: reduction
@@ -779,6 +780,7 @@
   structured: True
   dispatch:
     CPU, CUDA: any_dims_out
+    MPS: any_dims_out_mps
     CompositeExplicitAutograd: any_dims_out_default
   cpp_no_default_args: ['dim']
   tags: reduction

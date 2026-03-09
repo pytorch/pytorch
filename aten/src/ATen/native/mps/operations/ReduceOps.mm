@@ -4,6 +4,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/ReduceOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/irange.h>
 
@@ -28,6 +29,7 @@
 #include <ATen/ops/min_native.h>
 #include <ATen/ops/nanmedian_native.h>
 #include <ATen/ops/nansum_native.h>
+#include <ATen/ops/ne.h>
 #include <ATen/ops/norm_native.h>
 #include <ATen/ops/prod_native.h>
 #include <ATen/ops/std_mean_native.h>
@@ -1428,6 +1430,164 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
     auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
+}
+
+// Block type used to pass the specific reduction operation
+// (logical AND for all, logical OR for any)
+typedef MPSGraphTensor* (^MultiDimReductionOpBlock)(MPSGraph*, MPSGraphTensor*, NSArray<NSNumber*>*);
+
+static void all_any_dims_common_impl_mps(const Tensor& input_t,
+                                         OptionalIntArrayRef opt_dims,
+                                         bool keepdim,
+                                         const Tensor& output_t,
+                                         MultiDimReductionOpBlock reduction_op,
+                                         const std::string& op_name) {
+  using CachedGraph = MPSUnaryCachedGraph;
+
+  // Handle empty tensor cases
+  // By definition:
+  //   all(empty) = true
+  //   any(empty) = false
+  if (output_t.numel() == 0 || input_t.numel() == 0) {
+    if (op_name == "all") {
+      output_t.fill_(1);
+    } else {
+      output_t.zero_();
+    }
+    return;
+  }
+
+  // dim=None means reduce across all dimensions
+  // Delegate to the existing global reduction kernels
+  if (!opt_dims.has_value()) {
+    Tensor scalar_result = at::empty({}, input_t.options().dtype(at::kBool));
+
+    if (op_name == "all") {
+      at::_ops::all_all_out::call(input_t, scalar_result);
+    } else {
+      at::_ops::any_all_out::call(input_t, scalar_result);
+    }
+
+    // Expand scalar result to match the expected output tensor
+    output_t.copy_(scalar_result.expand_as(output_t));
+    return;
+  }
+
+  IntArrayRef dims = opt_dims.value();
+
+  // dim=[] means no reduction. Return boolean interpretation of input
+  if (dims.empty()) {
+    if (input_t.scalar_type() == kByte) {
+      auto tmp = at::ne(input_t, 0);
+      output_t.copy_(tmp);
+    } else {
+      output_t.copy_(input_t.to(at::kBool));
+    }
+    return;
+  }
+
+  // MPSGraph reduction APIs have issues with tensors of rank > 4
+  // Fall back to the default implementation for correctness
+  if (input_t.ndimension() > 4) {
+    if (op_name == "all") {
+      at::native::all_dims_out_default(input_t, opt_dims, keepdim, const_cast<Tensor&>(output_t));
+    } else {
+      at::native::any_dims_out_default(input_t, opt_dims, keepdim, const_cast<Tensor&>(output_t));
+    }
+    return;
+  }
+
+  // Normalize and validate reduction dimensions
+  IntArrayRef input_shape = input_t.sizes();
+  const int64_t num_input_dims = input_shape.size();
+
+  std::vector<int64_t> wrapped_dims;
+  wrapped_dims.reserve(dims.size());
+  for (const auto d : dims) {
+    const int64_t dim_ = maybe_wrap_dim(d, num_input_dims);
+    native::zero_numel_check_dims(input_t, dim_, op_name.c_str());
+    wrapped_dims.push_back(dim_);
+  }
+
+  // Build the output shape assuming keepdim=True
+  // Reduced dimensions become size 1
+  NSMutableArray<NSNumber*>* apparent_out_shape =
+      [NSMutableArray arrayWithCapacity:num_input_dims];
+
+  for (const auto i : c10::irange(num_input_dims)) {
+    const bool is_reduce_dim =
+        std::find(wrapped_dims.begin(), wrapped_dims.end(), static_cast<int64_t>(i)) != wrapped_dims.end();
+    [apparent_out_shape addObject:(is_reduce_dim ? @1 : @(input_shape[i]))];
+  }
+
+  @autoreleasepool {
+    // Build a cache key so identical graphs can be reused
+    std::string dims_str;
+    for (const auto d : wrapped_dims) {
+      dims_str += std::to_string(d) + ",";
+    }
+
+    std::string key = op_name + "_dims_out_mps:" + dims_str + ":" +
+                      getTensorsStringKey(input_t) + ":" + std::to_string(keepdim);
+
+    auto cachedGraph =
+        LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
+
+      auto castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t);
+
+      // Convert reduction dimensions into NSArray for MPSGraph
+      NSMutableArray<NSNumber*>* axes =
+          [NSMutableArray arrayWithCapacity:wrapped_dims.size()];
+      for (const auto d : wrapped_dims) {
+        [axes addObject:@(d)];
+      }
+
+      // Perform the reduction across the specified axes
+      MPSGraphTensor* outputTensor = reduction_op(mpsGraph, castInputTensor, axes);
+
+      // Ensure the result tensor has boolean type
+      if (MPSDataTypeBool != [outputTensor dataType]) {
+        outputTensor = castMPSTensor(mpsGraph, outputTensor, MPSDataTypeBool);
+      }
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
+
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
+    auto outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
+
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+}
+
+TORCH_IMPL_FUNC(all_dims_out_mps)
+(const Tensor& input_t, OptionalIntArrayRef dim, bool keepdim, const Tensor& output_t) {
+  all_any_dims_common_impl_mps(
+      input_t,
+      dim,
+      keepdim,
+      output_t,
+      ^MPSGraphTensor*(MPSGraph* graph, MPSGraphTensor* tensor, NSArray<NSNumber*>* axes) {
+        return [graph reductionAndWithTensor:tensor axes:axes name:nil];
+      },
+      "all");
+}
+
+TORCH_IMPL_FUNC(any_dims_out_mps)
+(const Tensor& input_t, OptionalIntArrayRef dim, bool keepdim, const Tensor& output_t) {
+  all_any_dims_common_impl_mps(
+      input_t,
+      dim,
+      keepdim,
+      output_t,
+      ^MPSGraphTensor*(MPSGraph* graph, MPSGraphTensor* tensor, NSArray<NSNumber*>* axes) {
+        return [graph reductionOrWithTensor:tensor axes:axes name:nil];
+      },
+      "any");
 }
 
 //-----------------------------------------------------------------------

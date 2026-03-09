@@ -13385,6 +13385,836 @@ class TestMetalLibrary(TestCaseMPS):
         for i in [0, 5, 6, 7, 63, 64]:
             self.assertEqual(out[i], 0)
 
+class TestAllAnyDimsMPS(TestCaseMPS):
+    def test_all_dims_basic(self):
+        # Test 2D tensor
+        cpu_x = torch.tensor([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=torch.bool)
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Single dimension
+        y_0 = torch.all(x, dim=0)
+        refy_0 = torch.all(cpu_x, dim=0)
+        self.assertEqual(y_0, refy_0)
+        
+        y_1 = torch.all(x, dim=1)
+        refy_1 = torch.all(cpu_x, dim=1)
+        self.assertEqual(y_1, refy_1)
+        
+        # Multiple dimensions
+        y_0_list = torch.all(x, dim=[0])
+        refy_0_list = torch.all(cpu_x, dim=[0])
+        self.assertEqual(y_0_list, refy_0_list)
+        
+        y_1_list = torch.all(x, dim=[1])
+        refy_1_list = torch.all(cpu_x, dim=[1])
+        self.assertEqual(y_1_list, refy_1_list)
+        
+        y_01 = torch.all(x, dim=[0, 1])
+        refy_01 = torch.all(cpu_x, dim=[0, 1])
+        self.assertEqual(y_01, refy_01)
+        
+        # With keepdim
+        y_0dim = torch.all(x, dim=[0], keepdim=True)
+        refy_0dim = torch.all(cpu_x, dim=[0], keepdim=True)
+        self.assertEqual(y_0dim, refy_0dim)
+        
+        y_1dim = torch.all(x, dim=[1], keepdim=True)
+        refy_1dim = torch.all(cpu_x, dim=[1], keepdim=True)
+        self.assertEqual(y_1dim, refy_1dim)
+        
+        y_01dim = torch.all(x, dim=[0, 1], keepdim=True)
+        refy_01dim = torch.all(cpu_x, dim=[0, 1], keepdim=True)
+        self.assertEqual(y_01dim, refy_01dim)
+        
+        # Without keepdim
+        y_0_no_keep = torch.all(x, dim=[0], keepdim=False)
+        refy_0_no_keep = torch.all(cpu_x, dim=[0], keepdim=False)
+        self.assertEqual(y_0_no_keep, refy_0_no_keep)
+        
+        y_1_no_keep = torch.all(x, dim=[1], keepdim=False)
+        refy_1_no_keep = torch.all(cpu_x, dim=[1], keepdim=False)
+        self.assertEqual(y_1_no_keep, refy_1_no_keep)
+        
+        y_01_no_keep = torch.all(x, dim=[0, 1], keepdim=False)
+        refy_01_no_keep = torch.all(cpu_x, dim=[0, 1], keepdim=False)
+        self.assertEqual(y_01_no_keep, refy_01_no_keep)
+
+    def test_any_dims_basic(self):
+        # Test 2D tensor
+        cpu_x = torch.tensor([[0, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=torch.bool)
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Single dimension
+        y_0 = torch.any(x, dim=0)
+        refy_0 = torch.any(cpu_x, dim=0)
+        self.assertEqual(y_0, refy_0)
+        
+        y_1 = torch.any(x, dim=1)
+        refy_1 = torch.any(cpu_x, dim=1)
+        self.assertEqual(y_1, refy_1)
+        
+        # Multiple dimensions
+        y_0_list = torch.any(x, dim=[0])
+        refy_0_list = torch.any(cpu_x, dim=[0])
+        self.assertEqual(y_0_list, refy_0_list)
+        
+        y_1_list = torch.any(x, dim=[1])
+        refy_1_list = torch.any(cpu_x, dim=[1])
+        self.assertEqual(y_1_list, refy_1_list)
+        
+        y_01 = torch.any(x, dim=[0, 1])
+        refy_01 = torch.any(cpu_x, dim=[0, 1])
+        self.assertEqual(y_01, refy_01)
+        
+        # With keepdim
+        y_0dim = torch.any(x, dim=[0], keepdim=True)
+        refy_0dim = torch.any(cpu_x, dim=[0], keepdim=True)
+        self.assertEqual(y_0dim, refy_0dim)
+        
+        y_1dim = torch.any(x, dim=[1], keepdim=True)
+        refy_1dim = torch.any(cpu_x, dim=[1], keepdim=True)
+        self.assertEqual(y_1dim, refy_1dim)
+        
+        y_01dim = torch.any(x, dim=[0, 1], keepdim=True)
+        refy_01dim = torch.any(cpu_x, dim=[0, 1], keepdim=True)
+        self.assertEqual(y_01dim, refy_01dim)
+        
+        # Without keepdim
+        y_0_no_keep = torch.any(x, dim=[0], keepdim=False)
+        refy_0_no_keep = torch.any(cpu_x, dim=[0], keepdim=False)
+        self.assertEqual(y_0_no_keep, refy_0_no_keep)
+        
+        y_1_no_keep = torch.any(x, dim=[1], keepdim=False)
+        refy_1_no_keep = torch.any(cpu_x, dim=[1], keepdim=False)
+        self.assertEqual(y_1_no_keep, refy_1_no_keep)
+        
+        y_01_no_keep = torch.any(x, dim=[0, 1], keepdim=False)
+        refy_01_no_keep = torch.any(cpu_x, dim=[0, 1], keepdim=False)
+        self.assertEqual(y_01_no_keep, refy_01_no_keep)
+
+    def test_all_dims_none(self):
+        shapes = [(2, 3), (2, 3, 4), (1, 1, 1), (3, 4, 5, 2)]
+        
+        for shape in shapes:
+            # All True
+            cpu_x = torch.ones(shape, dtype=torch.bool)
+            x = cpu_x.detach().clone().to('mps')
+            y = torch.all(x, dim=None)
+            ref_y = torch.all(cpu_x, dim=None)
+            self.assertEqual(y, ref_y)
+            
+            y_keepdim = torch.all(x, dim=None, keepdim=True)
+            refy_keepdim = torch.all(cpu_x, dim=None, keepdim=True)
+            self.assertEqual(y_keepdim, refy_keepdim)
+            
+            y_no_keepdim = torch.all(x, dim=None, keepdim=False)
+            refy_no_keepdim = torch.all(cpu_x, dim=None, keepdim=False)
+            self.assertEqual(y_no_keepdim, refy_no_keepdim)
+            
+            # All False
+            cpu_x = torch.zeros(shape, dtype=torch.bool)
+            x = cpu_x.detach().clone().to('mps')
+            y = torch.all(x, dim=None)
+            ref_y = torch.all(cpu_x, dim=None)
+            self.assertEqual(y, ref_y)
+            
+            # Mixed
+            cpu_x = torch.ones(shape, dtype=torch.bool)
+            if cpu_x.numel() > 0:
+                cpu_x.view(-1)[0] = False
+            x = cpu_x.detach().clone().to('mps')
+            if x.numel() > 0:
+                x.view(-1)[0] = False
+            y = torch.all(x, dim=None)
+            ref_y = torch.all(cpu_x, dim=None)
+            self.assertEqual(y, ref_y)
+
+    def test_any_dims_none(self):
+        shapes = [(2, 3), (2, 3, 4), (1, 1, 1), (3, 4, 5, 2)]
+        
+        for shape in shapes:
+            # All False
+            cpu_x = torch.zeros(shape, dtype=torch.bool)
+            x = cpu_x.detach().clone().to('mps')
+            y = torch.any(x, dim=None)
+            ref_y = torch.any(cpu_x, dim=None)
+            self.assertEqual(y, ref_y)
+            
+            y_keepdim = torch.any(x, dim=None, keepdim=True)
+            refy_keepdim = torch.any(cpu_x, dim=None, keepdim=True)
+            self.assertEqual(y_keepdim, refy_keepdim)
+            
+            y_no_keepdim = torch.any(x, dim=None, keepdim=False)
+            refy_no_keepdim = torch.any(cpu_x, dim=None, keepdim=False)
+            self.assertEqual(y_no_keepdim, refy_no_keepdim)
+            
+            # All True
+            cpu_x = torch.ones(shape, dtype=torch.bool)
+            x = cpu_x.detach().clone().to('mps')
+            y = torch.any(x, dim=None)
+            ref_y = torch.any(cpu_x, dim=None)
+            self.assertEqual(y, ref_y)
+            
+            # Mixed
+            cpu_x = torch.zeros(shape, dtype=torch.bool)
+            if cpu_x.numel() > 0:
+                cpu_x.view(-1)[0] = True
+            x = cpu_x.detach().clone().to('mps')
+            if x.numel() > 0:
+                x.view(-1)[0] = True
+            y = torch.any(x, dim=None)
+            ref_y = torch.any(cpu_x, dim=None)
+            self.assertEqual(y, ref_y)
+
+    def test_all_dims_empty_list(self):
+        shapes = [(2, 3), (2, 3, 4), (1, 1, 1)]
+        
+        for shape in shapes:
+            cpu_x = torch.ones(shape, dtype=torch.bool)
+            x = cpu_x.detach().clone().to('mps')
+            
+            y = torch.all(x, dim=[])
+            ref_y = torch.all(cpu_x, dim=[])
+            self.assertEqual(y, ref_y)
+            self.assertEqual(y.shape, x.shape)
+            
+            y_keepdim = torch.all(x, dim=[], keepdim=True)
+            refy_keepdim = torch.all(cpu_x, dim=[], keepdim=True)
+            self.assertEqual(y_keepdim, refy_keepdim)
+            
+            y_no_keepdim = torch.all(x, dim=[], keepdim=False)
+            refy_no_keepdim = torch.all(cpu_x, dim=[], keepdim=False)
+            self.assertEqual(y_no_keepdim, refy_no_keepdim)
+
+    def test_any_dims_empty_list(self):
+        shapes = [(2, 3), (2, 3, 4), (1, 1, 1)]
+        
+        for shape in shapes:
+            cpu_x = torch.zeros(shape, dtype=torch.bool)
+            x = cpu_x.detach().clone().to('mps')
+            
+            y = torch.any(x, dim=[])
+            ref_y = torch.any(cpu_x, dim=[])
+            self.assertEqual(y, ref_y)
+            self.assertEqual(y.shape, x.shape)
+            
+            y_keepdim = torch.any(x, dim=[], keepdim=True)
+            refy_keepdim = torch.any(cpu_x, dim=[], keepdim=True)
+            self.assertEqual(y_keepdim, refy_keepdim)
+            
+            y_no_keepdim = torch.any(x, dim=[], keepdim=False)
+            refy_no_keepdim = torch.any(cpu_x, dim=[], keepdim=False)
+            self.assertEqual(y_no_keepdim, refy_no_keepdim)
+
+    def test_all_dims_3d(self):
+        cpu_x = torch.ones(2, 3, 4, dtype=torch.bool)
+        cpu_x[0, 1, 2] = False  # One False element
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Test various dimension combinations
+        dims_list = [
+            [0],
+            [1],
+            [2],
+            [0, 1],
+            [0, 2],
+            [1, 2],
+            [0, 1, 2],
+        ]
+        
+        for dims in dims_list:
+            for keepdim in [True, False]:
+                y = torch.all(x, dim=dims, keepdim=keepdim)
+                ref_y = torch.all(cpu_x, dim=dims, keepdim=keepdim)
+                self.assertEqual(y, ref_y, f"Failed for dims={dims}, keepdim={keepdim}")
+
+    def test_any_dims_3d(self):
+        cpu_x = torch.zeros(2, 3, 4, dtype=torch.bool)
+        cpu_x[0, 1, 2] = True  # One True element
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Test various dimension combinations
+        dims_list = [
+            [0],
+            [1],
+            [2],
+            [0, 1],
+            [0, 2],
+            [1, 2],
+            [0, 1, 2],
+        ]
+        
+        for dims in dims_list:
+            for keepdim in [True, False]:
+                y = torch.any(x, dim=dims, keepdim=keepdim)
+                ref_y = torch.any(cpu_x, dim=dims, keepdim=keepdim)
+                self.assertEqual(y, ref_y, f"Failed for dims={dims}, keepdim={keepdim}")
+
+    def test_all_dims_4d(self):
+        cpu_x = torch.ones(2, 3, 4, 5, dtype=torch.bool)
+        cpu_x[0, 1, 2, 3] = False
+        x = cpu_x.detach().clone().to('mps')
+        
+        dims_list = [
+            [0],
+            [1],
+            [2],
+            [3],
+            [0, 1],
+            [0, 2],
+            [1, 2],
+            [2, 3],
+            [0, 1, 2],
+            [1, 2, 3],
+        ]
+        
+        for dims in dims_list:
+            for keepdim in [True, False]:
+                y = torch.all(x, dim=dims, keepdim=keepdim)
+                ref_y = torch.all(cpu_x, dim=dims, keepdim=keepdim)
+                self.assertEqual(y, ref_y, f"Failed for dims={dims}, keepdim={keepdim}")
+
+    def test_any_dims_4d(self):
+        cpu_x = torch.zeros(2, 3, 4, 5, dtype=torch.bool)
+        cpu_x[0, 1, 2, 3] = True
+        x = cpu_x.detach().clone().to('mps')
+        
+        dims_list = [
+            [0],
+            [1],
+            [2],
+            [3],
+            [0, 1],
+            [0, 2],
+            [1, 2],
+            [2, 3],
+            [0, 1, 2],
+            [1, 2, 3],
+        ]
+        
+        for dims in dims_list:
+            for keepdim in [True, False]:
+                y = torch.any(x, dim=dims, keepdim=keepdim)
+                ref_y = torch.any(cpu_x, dim=dims, keepdim=keepdim)
+                self.assertEqual(y, ref_y, f"Failed for dims={dims}, keepdim={keepdim}")
+
+    def test_all_dims_negative_dims(self):
+        cpu_x = torch.ones(2, 3, 4, dtype=torch.bool)
+        cpu_x[0, 1, 2] = False
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Test negative dimensions
+        y_neg1 = torch.all(x, dim=[-1])
+        refy_neg1 = torch.all(cpu_x, dim=[-1])
+        self.assertEqual(y_neg1, refy_neg1)
+        
+        y_neg2 = torch.all(x, dim=[-2])
+        refy_neg2 = torch.all(cpu_x, dim=[-2])
+        self.assertEqual(y_neg2, refy_neg2)
+        
+        y_neg3 = torch.all(x, dim=[-3])
+        refy_neg3 = torch.all(cpu_x, dim=[-3])
+        self.assertEqual(y_neg3, refy_neg3)
+        
+        y_neg12 = torch.all(x, dim=[-1, -2])
+        refy_neg12 = torch.all(cpu_x, dim=[-1, -2])
+        self.assertEqual(y_neg12, refy_neg12)
+        
+        y_neg23 = torch.all(x, dim=[-2, -3])
+        refy_neg23 = torch.all(cpu_x, dim=[-2, -3])
+        self.assertEqual(y_neg23, refy_neg23)
+        
+        y_neg123 = torch.all(x, dim=[-1, -2, -3])
+        refy_neg123 = torch.all(cpu_x, dim=[-1, -2, -3])
+        self.assertEqual(y_neg123, refy_neg123)
+
+    def test_any_dims_negative_dims(self):
+        cpu_x = torch.zeros(2, 3, 4, dtype=torch.bool)
+        cpu_x[0, 1, 2] = True
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Test negative dimensions
+        y_neg1 = torch.any(x, dim=[-1])
+        refy_neg1 = torch.any(cpu_x, dim=[-1])
+        self.assertEqual(y_neg1, refy_neg1)
+        
+        y_neg2 = torch.any(x, dim=[-2])
+        refy_neg2 = torch.any(cpu_x, dim=[-2])
+        self.assertEqual(y_neg2, refy_neg2)
+        
+        y_neg3 = torch.any(x, dim=[-3])
+        refy_neg3 = torch.any(cpu_x, dim=[-3])
+        self.assertEqual(y_neg3, refy_neg3)
+        
+        y_neg12 = torch.any(x, dim=[-1, -2])
+        refy_neg12 = torch.any(cpu_x, dim=[-1, -2])
+        self.assertEqual(y_neg12, refy_neg12)
+        
+        y_neg23 = torch.any(x, dim=[-2, -3])
+        refy_neg23 = torch.any(cpu_x, dim=[-2, -3])
+        self.assertEqual(y_neg23, refy_neg23)
+        
+        y_neg123 = torch.any(x, dim=[-1, -2, -3])
+        refy_neg123 = torch.any(cpu_x, dim=[-1, -2, -3])
+        self.assertEqual(y_neg123, refy_neg123)
+
+    def test_all_dims_dtypes(self):
+        shapes = [(2, 3), (2, 3, 4)]
+        dtypes = [torch.bool, torch.uint8, torch.int, torch.float32]
+        
+        for shape in shapes:
+            for dtype in dtypes:
+                if dtype == torch.bool:
+                    cpu_x = torch.ones(shape, dtype=dtype)
+                    cpu_x[0, 0] = False
+                elif dtype == torch.uint8:
+                    cpu_x = torch.ones(shape, dtype=dtype)
+                    cpu_x[0, 0] = 0
+                else:
+                    cpu_x = torch.ones(shape, dtype=dtype)
+                    cpu_x[0, 0] = 0
+                
+                x = cpu_x.detach().clone().to('mps')
+                
+                # Convert to bool for comparison (uint8 returns uint8)
+                y = torch.all(x, dim=[0])
+                ref_y = torch.all(cpu_x, dim=[0])
+                
+                # For uint8, the result is also uint8, so we need to handle that
+                if dtype == torch.uint8:
+                    y = y.bool()
+                    ref_y = ref_y.bool()
+                
+                self.assertEqual(y, ref_y, f"Failed for shape={shape}, dtype={dtype}")
+
+    def test_any_dims_dtypes(self):
+        shapes = [(2, 3), (2, 3, 4)]
+        dtypes = [torch.bool, torch.uint8, torch.int, torch.float32]
+        
+        for shape in shapes:
+            for dtype in dtypes:
+                if dtype == torch.bool:
+                    cpu_x = torch.zeros(shape, dtype=dtype)
+                    cpu_x[0, 0] = True
+                elif dtype == torch.uint8:
+                    cpu_x = torch.zeros(shape, dtype=dtype)
+                    cpu_x[0, 0] = 1
+                else:
+                    cpu_x = torch.zeros(shape, dtype=dtype)
+                    cpu_x[0, 0] = 1
+                
+                x = cpu_x.detach().clone().to('mps')
+                
+                y = torch.any(x, dim=[0])
+                ref_y = torch.any(cpu_x, dim=[0])
+                
+                # For uint8, the result is also uint8, so we need to handle that
+                if dtype == torch.uint8:
+                    y = y.bool()
+                    ref_y = ref_y.bool()
+                
+                self.assertEqual(y, ref_y, f"Failed for shape={shape}, dtype={dtype}")
+
+    def test_all_dims_out_variant(self):
+        cpu_x = torch.ones(2, 3, 4, dtype=torch.bool)
+        cpu_x[0, 1, 2] = False
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Test out variant
+        out_mps = torch.empty((3, 4), device='mps', dtype=torch.bool)
+        out_cpu = torch.empty((3, 4), dtype=torch.bool)
+        
+        torch.all(x, dim=[0], out=out_mps)
+        torch.all(cpu_x, dim=[0], out=out_cpu)
+        self.assertEqual(out_mps, out_cpu)
+        
+        # Test with keepdim
+        out_mps = torch.empty((1, 3, 4), device='mps', dtype=torch.bool)
+        out_cpu = torch.empty((1, 3, 4), dtype=torch.bool)
+        
+        torch.all(x, dim=[0], keepdim=True, out=out_mps)
+        torch.all(cpu_x, dim=[0], keepdim=True, out=out_cpu)
+        self.assertEqual(out_mps, out_cpu)
+
+    def test_any_dims_out_variant(self):
+        cpu_x = torch.zeros(2, 3, 4, dtype=torch.bool)
+        cpu_x[0, 1, 2] = True
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Test out variant
+        out_mps = torch.empty((3, 4), device='mps', dtype=torch.bool)
+        out_cpu = torch.empty((3, 4), dtype=torch.bool)
+        
+        torch.any(x, dim=[0], out=out_mps)
+        torch.any(cpu_x, dim=[0], out=out_cpu)
+        self.assertEqual(out_mps, out_cpu)
+        
+        # Test with keepdim
+        out_mps = torch.empty((1, 3, 4), device='mps', dtype=torch.bool)
+        out_cpu = torch.empty((1, 3, 4), dtype=torch.bool)
+        
+        torch.any(x, dim=[0], keepdim=True, out=out_mps)
+        torch.any(cpu_x, dim=[0], keepdim=True, out=out_cpu)
+        self.assertEqual(out_mps, out_cpu)
+
+    def test_all_dims_empty_tensor(self):
+        # Empty tensor
+        cpu_x = torch.empty(0, dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Empty tensor should return True for all()
+        self.assertEqual(torch.all(x, dim=None), torch.all(cpu_x, dim=None))
+        self.assertEqual(torch.all(x, dim=[]), torch.all(cpu_x, dim=[]))
+        
+        # Empty tensor with specific shape
+        cpu_x = torch.empty(2, 0, 3, dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        
+        y = torch.all(x, dim=[1])
+        ref_y = torch.all(cpu_x, dim=[1])
+        self.assertEqual(y, ref_y)
+
+    def test_any_dims_empty_tensor(self):
+        # Empty tensor
+        cpu_x = torch.empty(0, dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Empty tensor should return False for any()
+        self.assertEqual(torch.any(x, dim=None), torch.any(cpu_x, dim=None))
+        self.assertEqual(torch.any(x, dim=[]), torch.any(cpu_x, dim=[]))
+        
+        # Empty tensor with specific shape
+        cpu_x = torch.empty(2, 0, 3, dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        
+        y = torch.any(x, dim=[1])
+        ref_y = torch.any(cpu_x, dim=[1])
+        self.assertEqual(y, ref_y)
+
+    def test_all_dims_single_element(self):
+        # Single element - True
+        cpu_x = torch.tensor([True], dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.all(x, dim=None), torch.all(cpu_x, dim=None))
+        self.assertEqual(torch.all(x, dim=[]), torch.all(cpu_x, dim=[]))
+        
+        # Single element - False
+        cpu_x = torch.tensor([False], dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.all(x, dim=None), torch.all(cpu_x, dim=None))
+        self.assertEqual(torch.all(x, dim=[]), torch.all(cpu_x, dim=[]))
+
+    def test_any_dims_single_element(self):
+        # Single element - True
+        cpu_x = torch.tensor([True], dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.any(x, dim=None), torch.any(cpu_x, dim=None))
+        self.assertEqual(torch.any(x, dim=[]), torch.any(cpu_x, dim=[]))
+        
+        # Single element - False
+        cpu_x = torch.tensor([False], dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.any(x, dim=None), torch.any(cpu_x, dim=None))
+        self.assertEqual(torch.any(x, dim=[]), torch.any(cpu_x, dim=[]))
+
+    def test_all_dims_1d(self):
+        cpu_x = torch.tensor([True, True, False, True], dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        
+        self.assertEqual(torch.all(x, dim=[0]), torch.all(cpu_x, dim=[0]))
+        self.assertEqual(torch.all(x, dim=[0], keepdim=True), torch.all(cpu_x, dim=[0], keepdim=True))
+        self.assertEqual(torch.all(x, dim=None), torch.all(cpu_x, dim=None))
+
+    def test_any_dims_1d(self):
+        cpu_x = torch.tensor([False, False, True, False], dtype=torch.bool)
+
+        x = cpu_x.detach().clone().to('mps')
+        
+        self.assertEqual(torch.any(x, dim=[0]), torch.any(cpu_x, dim=[0]))
+        self.assertEqual(torch.any(x, dim=[0], keepdim=True), torch.any(cpu_x, dim=[0], keepdim=True))
+        self.assertEqual(torch.any(x, dim=None), torch.any(cpu_x, dim=None))
+
+    def test_all_dims_non_contiguous(self):
+        cpu_x = torch.ones(3, 4, 5, dtype=torch.bool)
+        cpu_x[0, 1, 2] = False
+        cpu_x = cpu_x.transpose(0, 1)  # Make non-contiguous
+        x = cpu_x.detach().clone().to('mps')
+        
+        y_0 = torch.all(x, dim=[0])
+        refy_0 = torch.all(cpu_x, dim=[0])
+        self.assertEqual(y_0, refy_0)
+        
+        y_1 = torch.all(x, dim=[1])
+        refy_1 = torch.all(cpu_x, dim=[1])
+        self.assertEqual(y_1, refy_1)
+        
+        y_01 = torch.all(x, dim=[0, 1])
+        refy_01 = torch.all(cpu_x, dim=[0, 1])
+        self.assertEqual(y_01, refy_01)
+
+    def test_any_dims_non_contiguous(self):
+        cpu_x = torch.zeros(3, 4, 5, dtype=torch.bool)
+        cpu_x[0, 1, 2] = True
+        cpu_x = cpu_x.transpose(0, 1)  # Make non-contiguous
+        x = cpu_x.detach().clone().to('mps')
+        
+        y_0 = torch.any(x, dim=[0])
+        refy_0 = torch.any(cpu_x, dim=[0])
+        self.assertEqual(y_0, refy_0)
+        
+        y_1 = torch.any(x, dim=[1])
+        refy_1 = torch.any(cpu_x, dim=[1])
+        self.assertEqual(y_1, refy_1)
+        
+        y_01 = torch.any(x, dim=[0, 1])
+        refy_01 = torch.any(cpu_x, dim=[0, 1])
+        self.assertEqual(y_01, refy_01)
+
+    def test_all_dims_high_rank(self):
+        # 5D tensor - should fallback to default implementation
+        cpu_x = torch.ones(2, 2, 2, 2, 2, dtype=torch.bool)
+        cpu_x[0, 0, 0, 0, 0] = False
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Should still work (fallback to default implementation)
+        y_0 = torch.all(x, dim=[0])
+        refy_0 = torch.all(cpu_x, dim=[0])
+        self.assertEqual(y_0, refy_0)
+        
+        y_01 = torch.all(x, dim=[0, 1])
+        refy_01 = torch.all(cpu_x, dim=[0, 1])
+        self.assertEqual(y_01, refy_01)
+
+    def test_any_dims_high_rank(self):
+        # 5D tensor - should fallback to default implementation
+        cpu_x = torch.zeros(2, 2, 2, 2, 2, dtype=torch.bool)
+        cpu_x[0, 0, 0, 0, 0] = True
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Should still work (fallback to default implementation)
+        y_0 = torch.any(x, dim=[0])
+        refy_0 = torch.any(cpu_x, dim=[0])
+        self.assertEqual(y_0, refy_0)
+        
+        y_01 = torch.any(x, dim=[0, 1])
+        refy_01 = torch.any(cpu_x, dim=[0, 1])
+        self.assertEqual(y_01, refy_01)
+
+    def test_all_dims_duplicate_dims(self):
+        cpu_x = torch.tensor([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=torch.bool)
+        x = cpu_x.detach().clone().to('mps')
+        
+        error_msg = r'appears multiple times in the list of dims'
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.all(x, dim=[1, 1])
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.all(cpu_x, dim=[1, 1])
+        
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.all(x, dim=[0, 0])
+        
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.all(x, dim=[1, 1, 1])
+        
+        # Test with keepdim
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.all(x, dim=[1, 1], keepdim=True)
+        
+        # Test on 3D tensor
+        cpu_x = torch.ones(2, 3, 4, dtype=torch.bool)
+        x = cpu_x.detach().clone().to('mps')
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.all(x, dim=[0, 0, 1])
+
+    def test_any_dims_duplicate_dims(self):
+        cpu_x = torch.tensor([[0, 0, 0], [0, 1, 0], [0, 0, 0]], dtype=torch.bool)
+        x = cpu_x.detach().clone().to('mps')
+        
+        error_msg = r'appears multiple times in the list of dims'
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.any(x, dim=[1, 1])
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.any(cpu_x, dim=[1, 1])
+        
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.any(x, dim=[0, 0])
+        
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.any(x, dim=[1, 1, 1])
+        
+        # Test with keepdim
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.any(x, dim=[1, 1], keepdim=True)
+        
+        # Test on 3D tensor
+        cpu_x = torch.zeros(2, 3, 4, dtype=torch.bool)
+        x = cpu_x.detach().clone().to('mps')
+        with self.assertRaisesRegex(RuntimeError, error_msg):
+            torch.any(x, dim=[0, 0, 1])
+
+    def test_all_dims_unsorted_dims(self):
+        cpu_x = torch.ones(3, 4, 5, dtype=torch.bool)
+        cpu_x[0, 1, 2] = False
+        x = cpu_x.detach().clone().to('mps')
+        
+        # Unsorted dims should work correctly
+        y_20 = torch.all(x, dim=[2, 0])
+        refy_20 = torch.all(cpu_x, dim=[2, 0])
+        self.assertEqual(y_20, refy_20)
+        
+        y_102 = torch.all(x, dim=[1, 0, 2])
+        refy_102 = torch.all(cpu_x, dim=[1, 0, 2])
+        self.assertEqual(y_102, refy_102)
+        
+        y_210 = torch.all(x, dim=[2, 1, 0])
+        refy_210 = torch.all(cpu_x, dim=[2, 1, 0])
+        self.assertEqual(y_210, refy_210)
+        
+        for keepdim in [True, False]:
+            y = torch.all(x, dim=[2, 0], keepdim=keepdim)
+            ref_y = torch.all(cpu_x, dim=[2, 0], keepdim=keepdim)
+            self.assertEqual(y, ref_y)
+        
+        # Test on 4D tensor
+        cpu_x = torch.ones(2, 3, 4, 5, dtype=torch.bool)
+        cpu_x[0, 1, 2, 3] = False
+        x = cpu_x.detach().clone().to('mps')
+        y_310 = torch.all(x, dim=[3, 1, 0])
+        refy_310 = torch.all(cpu_x, dim=[3, 1, 0])
+        self.assertEqual(y_310, refy_310)
+
+    def test_any_dims_unsorted_dims(self):
+        cpu_x = torch.zeros(3, 4, 5, dtype=torch.bool)
+        cpu_x[0, 1, 2] = True
+        x = cpu_x.detach().clone().to('mps')
+        
+        y_20 = torch.any(x, dim=[2, 0])
+        refy_20 = torch.any(cpu_x, dim=[2, 0])
+        self.assertEqual(y_20, refy_20)
+        
+        y_102 = torch.any(x, dim=[1, 0, 2])
+        refy_102 = torch.any(cpu_x, dim=[1, 0, 2])
+        self.assertEqual(y_102, refy_102)
+        
+        y_210 = torch.any(x, dim=[2, 1, 0])
+        refy_210 = torch.any(cpu_x, dim=[2, 1, 0])
+        self.assertEqual(y_210, refy_210)
+        
+        for keepdim in [True, False]:
+            y = torch.any(x, dim=[2, 0], keepdim=keepdim)
+            ref_y = torch.any(cpu_x, dim=[2, 0], keepdim=keepdim)
+            self.assertEqual(y, ref_y)
+        
+        # Test on 4D tensor
+        cpu_x = torch.zeros(2, 3, 4, 5, dtype=torch.bool)
+        cpu_x[0, 1, 2, 3] = True
+        x = cpu_x.detach().clone().to('mps')
+        y_310 = torch.any(x, dim=[3, 1, 0])
+        refy_310 = torch.any(cpu_x, dim=[3, 1, 0])
+        self.assertEqual(y_310, refy_310)
+
+    def test_all_dims_random(self):
+        torch.manual_seed(42)
+        
+        # Test with different sizes
+        for shape in [(5, 6), (3, 4, 5), (2, 3, 4, 5)]:
+            cpu_x = torch.randint(0, 2, shape, dtype=torch.bool)
+
+            x = cpu_x.detach().clone().to('mps')
+            
+            # Test various dimension combinations
+            if len(shape) == 2:
+                dims_list = [[0], [1], [0, 1]]
+            elif len(shape) == 3:
+                dims_list = [[0], [1], [2], [0, 1], [1, 2], [0, 1, 2]]
+            else:  # len(shape) == 4
+                dims_list = [[0], [1], [2], [3], [0, 1], [1, 2], [2, 3], [0, 1, 2], [1, 2, 3]]
+            
+            for dims in dims_list:
+                for keepdim in [True, False]:
+                    self.assertEqual(
+                        torch.all(x, dim=dims, keepdim=keepdim),
+                        torch.all(cpu_x, dim=dims, keepdim=keepdim),
+                        f"Failed for shape={shape}, dims={dims}, keepdim={keepdim}"
+                    )
+
+    def test_any_dims_random(self):
+        torch.manual_seed(42)
+        
+        for shape in [(5, 6), (3, 4, 5), (2, 3, 4, 5)]:
+            cpu_x = torch.randint(0, 2, shape, dtype=torch.bool)
+
+            x = cpu_x.detach().clone().to('mps')
+            
+            if len(shape) == 2:
+                dims_list = [[0], [1], [0, 1]]
+            elif len(shape) == 3:
+                dims_list = [[0], [1], [2], [0, 1], [1, 2], [0, 1, 2]]
+            else:  # len(shape) == 4
+                dims_list = [[0], [1], [2], [3], [0, 1], [1, 2], [2, 3], [0, 1, 2], [1, 2, 3]]
+            
+            for dims in dims_list:
+                for keepdim in [True, False]:
+                    self.assertEqual(
+                        torch.any(x, dim=dims, keepdim=keepdim),
+                        torch.any(cpu_x, dim=dims, keepdim=keepdim),
+                        f"Failed for shape={shape}, dims={dims}, keepdim={keepdim}"
+                    )
+
+    def test_all_dims_truthiness(self):
+        # Integer: negative, zero, positive
+        cpu_x = torch.tensor([[-1, 0, 2], [1, -1, 0], [0, 0, 0]], dtype=torch.int)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.all(x, dim=[0]), torch.all(cpu_x, dim=[0]))
+        self.assertEqual(torch.all(x, dim=[1]), torch.all(cpu_x, dim=[1]))
+        self.assertEqual(torch.all(x, dim=[0, 1]), torch.all(cpu_x, dim=[0, 1]))
+        
+        # Float: negative, zero, positive
+        cpu_x = torch.tensor([[-1.5, 0.0, 2.3], [0.0, 0.0, 0.0]], dtype=torch.float32)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.all(x, dim=[1]), torch.all(cpu_x, dim=[1]))
+        self.assertEqual(torch.all(x, dim=[0]), torch.all(cpu_x, dim=[0]))
+        
+        # Test with keepdim
+        cpu_x = torch.tensor([[-1, 0, 2], [1, -1, 0]], dtype=torch.int)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.all(x, dim=[0], keepdim=True), torch.all(cpu_x, dim=[0], keepdim=True))
+        self.assertEqual(torch.all(x, dim=[1], keepdim=True), torch.all(cpu_x, dim=[1], keepdim=True))
+
+    def test_any_dims_truthiness(self):
+        # Integer
+        cpu_x = torch.tensor([[-1, 0, 2], [0, 0, 0]], dtype=torch.int)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.any(x, dim=[0]), torch.any(cpu_x, dim=[0]))
+        self.assertEqual(torch.any(x, dim=[1]), torch.any(cpu_x, dim=[1]))
+        self.assertEqual(torch.any(x, dim=[0, 1]), torch.any(cpu_x, dim=[0, 1]))
+        
+        # Float
+        cpu_x = torch.tensor([[-1.5, 0.0, 2.3], [0.0, 0.0, 0.0]], dtype=torch.float32)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.any(x, dim=[1]), torch.any(cpu_x, dim=[1]))
+        self.assertEqual(torch.any(x, dim=[0]), torch.any(cpu_x, dim=[0]))
+        
+        # Test with keepdim
+        cpu_x = torch.tensor([[-1, 0, 2], [0, 0, 0]], dtype=torch.int)
+
+        x = cpu_x.detach().clone().to('mps')
+        self.assertEqual(torch.any(x, dim=[0], keepdim=True), torch.any(cpu_x, dim=[0], keepdim=True))
+        self.assertEqual(torch.any(x, dim=[1], keepdim=True), torch.any(cpu_x, dim=[1], keepdim=True))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
