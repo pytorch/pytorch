@@ -602,6 +602,8 @@ def _package_exported_programs(
             ep,
             opset_version,
             pickle_protocol,
+            serialize_state_dict=False,
+            serialize_constants=False,
         )
 
         archive_writer.write_bytes(
