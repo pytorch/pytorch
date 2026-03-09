@@ -2215,11 +2215,15 @@ class InstructionTranslatorBase(
                 f"raised exception {val}", real_stack=python_stack
             )
 
-        unimplemented(
-            gb_type="Failed to raise exception",
-            context=str(exc),
-            explanation="Attempted to raise a non-Exception type/value.",
-            hints=[*graph_break_hints.USER_ERROR],
+        exc.raise_observed_exception(
+            TypeError,
+            self,
+            args=[
+                VariableTracker.build(
+                    self,
+                    f"exceptions must derive from BaseException, not {val.python_type_name()}",
+                )
+            ],
         )
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
