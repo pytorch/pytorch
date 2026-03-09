@@ -177,7 +177,9 @@ void* getCurrentCUDASolverDnHandleLazy() {
       getTorchLinalgLibrary().sym("at_cuda_getCurrentCUDASolverDnHandle"));
   TORCH_CHECK(
       fn != nullptr,
-      "Can't find at_cuda_getCurrentCUDASolverDnHandle");
+      "Failed to resolve at_cuda_getCurrentCUDASolverDnHandle from "
+      "libtorch_cuda_linalg.so. This usually indicates a version mismatch "
+      "or a build missing torch_cuda_linalg.");
   return fn();
 }
 

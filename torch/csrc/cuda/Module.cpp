@@ -26,7 +26,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
-#include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
@@ -53,6 +52,10 @@
 #include <sstream>
 #include <thread>
 #include <unordered_map>
+
+namespace at::native {
+void* getCurrentCUDASolverDnHandleLazy();
+}
 
 using namespace torch;
 
