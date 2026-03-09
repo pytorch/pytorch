@@ -344,8 +344,7 @@ class CuteDSLTemplateKernel(Kernel):
                 # pyrefly: ignore [bad-argument-type]
                 unpacking_lines.append(f"{buffer_name} = {buffer_list_name}[{i}]")
 
-            indent = " " * indent_width
-            return "\n" + indent + ("\n" + indent).join(unpacking_lines)
+            return "\n".join(unpacking_lines)
 
         # Register the hook and return placeholder
         placeholder = "<UNPACK_BUFFERS>"

@@ -529,8 +529,19 @@ class InductorChoices:
             - config.triton.tiling_prevents_reduction_fusion
             - config.aggressive_fusion (will cause this function to be called more times)
         """
-        if shared_data_score == 0 and (
-            not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
+        # When node1 or node2 is a template, skip this heuristic: prologue
+        # fusion (pointwise → template) and epilogue fusion (template →
+        # pointwise) both have shared_data_score==0 by design and are gated
+        # separately by check_prologue_fusion_heuristics_fusable / can_fuse.
+        if (
+            shared_data_score == 0
+            and not node1.is_template()
+            and not node2.is_template()
+            and (
+                not config.aggressive_fusion
+                or node1.is_reduction()
+                or node2.is_reduction()
+            )
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
                 common_buf_names: OrderedSet[str] = (

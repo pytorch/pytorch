@@ -1920,19 +1920,28 @@ class FusedSchedulerNode(BaseSchedulerNode):
             # of the template node and its epilogue requires the same type of dependencies
             assert isinstance(node2.node, MultiOutput)
             assert len(node2.read_writes.writes) == 1
-            assert isinstance(next(iter(node2.read_writes.writes)), StarDep)
-            name = next(iter(node2.read_writes.writes)).name
-            template_nodes = [node for node in node1.get_nodes() if node.is_template()]
-            assert len(template_nodes) == 1
-            template_node = template_nodes[0]
-            assert len(template_node.read_writes.writes) == 1
-            write = next(iter(template_node.read_writes.writes))
-            assert isinstance(write, MemoryDep)
+            star_dep = next(iter(node2.read_writes.writes))
+            assert isinstance(star_dep, StarDep)
+            name = star_dep.name
+            # MultiOutput nodes (ExternKernel subclass) produce a StarDep
+            # write, but score_fusion_memory() requires a MemoryDep with real
+            # index expressions to compute a positive score.  Build one from
+            # the MultiOutput child's FixedLayout so that can_fuse_vertical()
+            # can decide to fuse a downstream epilogue.
+            from torch._inductor.dependencies import index_vars_squeeze
+
+            mo_size = node2.node.get_size()
+            (mo_vars,), var_ranges = index_vars_squeeze(mo_size, prefix="d")
+            mo_index = node2.node.get_layout().make_indexer()(mo_vars)
             node2.read_writes.writes = OrderedSet(
                 [
                     MemoryDep(
-                        name, write.index, write.var_names, write.size, write.mode
-                    ),
+                        name,
+                        mo_index,
+                        tuple(var_ranges.keys()),
+                        tuple(var_ranges.values()),
+                        None,
+                    )
                 ]
             )
         else:
@@ -5803,11 +5812,10 @@ class Scheduler:
                 return False
 
             template = node2.get_template_node_or_throw()
-            if not isinstance(template, ir.TritonTemplateBuffer):
-                why("prologue fusion only supported for TritonTemplates")
-                return False
-
             allowed_prologue_inps = template.get_allowed_prologue_inps()
+            if not allowed_prologue_inps:
+                why("template has no allowed prologue inputs")
+                return False
 
             unsupported_prologue_args = (
                 OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
@@ -5851,13 +5859,21 @@ class Scheduler:
             if not self.check_prologue_fusion_heuristics_fusable(node1, node2, why):
                 return False
 
-        if node1.is_template() and (
-            node2.has_aliasing_or_mutation()
-            or node2.is_reduction()
-            or not config.epilogue_fusion
-        ):
-            why("template epilogue not satisfied")
-            return False
+        if node1.is_template():
+            if (
+                node2.has_aliasing_or_mutation()
+                or node2.is_reduction()
+                or not config.epilogue_fusion
+            ):
+                why("template epilogue not satisfied")
+                return False
+            template_buf = node1.get_template_node()
+            assert template_buf is not None
+            if template_buf.is_multi_outputs_template() and not isinstance(
+                node2.node, ir.ComputedBuffer
+            ):
+                why("multi-output template epilogue requires ComputedBuffer")
+                return False
 
         if (node1.get_buffer_names() & V.graph.no_fuse_buffer_names) or (
             node2.get_buffer_names() & V.graph.no_fuse_buffer_names
@@ -7419,16 +7435,20 @@ class BaseScheduling:  # noqa: docstring_linter
         and node2 corresponds to one of its outputs. If so, we further check if
         backend supports this fusion.
 
-        Delegates to ``TemplateBuffer.can_fuse_multi_output_epilogue`` which
-        TemplateBuffer subclasses may override to allow fusion of additional node types.
         """
         template_buf = node1.get_template_node()
         if not isinstance(template_buf, ir.TemplateBuffer):
             return False
         if not template_buf.is_multi_outputs_template():
             return False
-        if template_buf.can_fuse_multi_output_epilogue(node2):
-            return True
+
+        if isinstance(node2.node, ir.MultiOutput):
+            return (
+                len(node2.node.inputs) == 1
+                and isinstance(node2.node.inputs[0], ir.IRNode)
+                and node2.node.inputs[0].get_name() == template_buf.get_name()
+            )
+
         return False
 
     def fuse(

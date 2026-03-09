@@ -5204,10 +5204,91 @@ class ComputedBuffer(OperationBuffer):
         return self.data.constant_to_device(device)
 
 
+@dataclasses.dataclass
+class EpilogueSpec:
+    """Describes one kernel output that has an epilogue fused into it.
+
+    Example: a matmul kernel outputs buf3 via param "result", and the
+    epilogue stores to buf5.  If buf3 has no other consumers, the fused
+    kernel can write directly to buf5 (can_remove_output=True) and buf3
+    is elided from allocation.
+    """
+
+    # Name of the kernel parameter that produces this output (e.g. "result").
+    kernel_output_param: str
+    # Inductor buffer name for the kernel's original output (e.g. "buf3").
+    kernel_output_buf: str
+    # Buffer that the epilogue ultimately stores into (e.g. "buf5").
+    # None when there is no store in the epilogue subgraph.
+    store_target: str | None
+    # Kernel parameter name for store_target (e.g. "out_ptr0").
+    # None when store_target is None.
+    store_target_param: str | None
+    # Dtype of kernel_output_buf.  When this is float16/bfloat16, the
+    # fused epilogue may need to upcast to float32 before computation.
+    output_dtype: torch.dtype
+    # True when kernel_output_buf has no consumers outside the epilogue,
+    # meaning the fused kernel can skip writing it entirely and write
+    # directly to store_target instead.
+    can_remove_output: bool
+
+
+@dataclasses.dataclass
+class PrologueSpec:
+    """Describes one kernel input that has a prologue fused into it.
+
+    Example: a matmul kernel reads input param "A" from buf3, but buf3
+    is computed by relu(buf1).  After prologue fusion the kernel reads
+    buf1 directly, so source_buffer="buf1".
+    """
+
+    # Name of the kernel parameter for this input (e.g. "A").
+    input_param: str
+    # Inductor buffer name for the *original* data the prologue reads
+    # from (e.g. "buf1" if the prologue is relu(buf1) → buf3).
+    # Used to resolve the correct call argument for the fused kernel.
+    # None when the source cannot be determined.
+    source_buffer: str | None
+
+
+@dataclasses.dataclass
+class TemplateFusionSpec:
+    """All metadata an external backend needs to produce fused kernel source."""
+
+    epilogue_specs: list[EpilogueSpec]
+    prologue_specs: list[PrologueSpec]
+    # Buffers that the fused kernel reads but that are not among the
+    # template's original inputs or outputs.  These arise when an epilogue
+    # reads from a buffer other than the kernel output (e.g. a bias add
+    # where the bias tensor is neither A nor B), or when a prologue has
+    # multiple source buffers.
+    # Mapping: Inductor buffer name → kernel parameter name.
+    extra_inputs: dict[str, str]
+
+
+@dataclasses.dataclass
+class TemplateFusionOutput:
+    """Everything Inductor needs to define and call the fused kernel."""
+
+    # Complete kernel source code (may still contain render-hook
+    # placeholders like _STORE_OUTPUT_0 that get resolved later).
+    source: str
+    # Ordered argument names for the kernel call, e.g.
+    # ["buf0", "buf1", "out_ptr0", ...].
+    call_args: list[str]
+    # Lines emitted before the kernel call, e.g.
+    # reinterpret_tensor() calls for ReinterpretView inputs.
+    call_preamble: list[str]
+    # Buffers that the fused kernel no longer needs allocated
+    # (their writes were redirected to store_target).
+    removed_buffers: OrderedSet[str]
+
+
 class TemplateBuffer(OperationBuffer):
     """
-    Represents a Triton (in the future other type) of template operator
-    that we can fuse an epilogue onto.
+    Base class for template operators that support epilogue and prologue fusion.
+    Subclasses: TritonTemplateBuffer (built-in Triton templates),
+    HelionTemplateBuffer (Helion kernels), etc.
     """
 
     def __init__(
@@ -5215,6 +5296,9 @@ class TemplateBuffer(OperationBuffer):
         layout: OutputSpec,
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any] | None,
+        mutated_inputs: Iterable[IRNode] | None = None,
+        allowed_prologue_inps: OrderedSet[str] | None = None,
+        named_inputs: dict[str, IRNode] | None = None,
     ) -> None:
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
@@ -5224,10 +5308,83 @@ class TemplateBuffer(OperationBuffer):
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self.annotations: dict[str, Any] = {}
 
+        # Output buffer names eligible for epilogue fusion.
+        # Maps buffer name → kernel parameter name (e.g. "buf3" → "result").
+        self.epilogue_fusable_outputs: dict[str, str] = {}
+        # All output buffers: [self] plus any MutationOutput entries.
+        self.outputs: list[Buffer] = [self]
+        # For multi-output kernels: maps child buffer name → MultiOutput
+        # node.  Used by call_kernel to emit tuple-unpacking lines.
+        self._multi_output_children: dict[str, MultiOutput] = {}
+        # Maps kernel parameter name → IRNode for each tensor input.
+        # Used by ExternalTritonTemplateKernel to set up prologue fusion and
+        # by HelionTemplateBuffer to resolve call arguments.
+        self._named_inputs: dict[str, IRNode] = (
+            dict(named_inputs) if named_inputs else {}
+        )
+
+        # Inputs that the kernel mutates in-place.
+        self.mutated_inputs = mutated_inputs
+        if mutated_inputs is not None:
+            first_input = self.inputs[0]
+            assert isinstance(first_input, IRNode), type(first_input)
+            device = first_input.get_device()
+            self.outputs += [
+                MutationOutput(NoneLayout(device=device), buf, self)
+                for buf in mutated_inputs
+            ]
+        # Input buffer names eligible for prologue fusion (pointwise
+        # ops that feed into this template can be absorbed).
+        self.allowed_prologue_inps: OrderedSet[str] = (
+            allowed_prologue_inps or OrderedSet()
+        )
+
     def get_read_writes(self) -> dependencies.ReadWrites:
         return self.extract_read_writes(normalize=True)
 
+    def _read_deps_from_inputs(self, normalize: bool) -> OrderedSet[dependencies.Dep]:
+        """Build read dependencies from all inputs."""
+        reads: OrderedSet[dependencies.Dep] = OrderedSet()
+        for inp_raw in self.inputs:
+            assert isinstance(inp_raw, (ReinterpretView, Buffer)), type(inp_raw)
+            inp: ReinterpretView | Buffer = inp_raw
+            assert isinstance(inp.layout, Layout), type(inp.layout)
+            inp_indexer = inp.layout.make_indexer()
+
+            def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
+                assert len(rindex) == 0
+                return ops.load(inp.get_name(), inp_indexer(index))
+
+            reads |= dependencies.extract_read_writes(
+                dummy, inp.get_size(), (), normalize=normalize
+            ).reads
+        return reads
+
     def extract_read_writes(self, normalize: bool = False) -> dependencies.ReadWrites:
+        """Extract read/write dependencies for this TemplateBuffer.
+
+        When the layout is MultiOutputLayout (multi-output templates), the
+        buffer itself has no data layout, so we cannot build an indexer.
+        Instead, synthesize a trivial write dep and derive read deps from
+        the named tensor inputs (``_named_inputs``).  For single-output
+        templates with a concrete layout, fall through to the standard path.
+        """
+        if isinstance(self.layout, MultiOutputLayout):
+            writes: OrderedSet[dependencies.Dep] = OrderedSet(
+                [
+                    dependencies.MemoryDep(
+                        self.get_name(), sympy.Integer(0), var_names=(), size=()
+                    ),
+                ]
+            )
+            return dependencies.ReadWrites(
+                reads=self._read_deps_from_inputs(normalize),
+                writes=writes,
+                index_exprs=OrderedSet(),
+                range_vars=None,
+                var_ranges=None,
+            )
+
         name = self.get_name()
         indexer = self.get_layout().make_indexer()
 
@@ -5238,22 +5395,7 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
-
-        for inp in self.inputs:
-            assert isinstance(inp, (ReinterpretView, Buffer)), type(inp)
-            assert isinstance(inp.layout, Layout), type(inp.layout)
-
-            indexer = inp.layout.make_indexer()
-
-            def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
-                assert len(rindex) == 0
-                # pyrefly: ignore [missing-attribute]
-                return ops.load(inp.get_name(), indexer(index))
-
-            deps.reads |= dependencies.extract_read_writes(
-                dummy, inp.get_size(), (), normalize=normalize
-            ).reads
-
+        deps.reads |= self._read_deps_from_inputs(normalize)
         return deps
 
     def get_reduction_size(self) -> Sequence[Expr]:
@@ -5282,14 +5424,77 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def can_fuse_multi_output_epilogue(self, snode: object) -> bool:
-        """Whether scheduler node can be fused as an epilogue of this multi-output template.
+    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
+        return self.allowed_prologue_inps
 
-        Returns ``False`` by default.  Subclasses may override to support
-        additional fusion patterns (e.g. epilogue fusion with multi-output
-        extraction and pointwise operations).
+    def get_outputs(self) -> list[Buffer]:
+        return self.outputs
+
+    def fuse(self, spec: TemplateFusionSpec) -> TemplateFusionOutput:
+        """Entry point for external template fusion.
+
+        Called by ``ExternalTritonTemplateKernel.codegen_template_body``
+        with captured prologue/epilogue code snippets.  Override in
+        subclasses to splice them into the backend's kernel source.
+        Returns everything Inductor needs to emit the fused kernel.
         """
-        return False
+        raise NotImplementedError
+
+    @classmethod
+    def realize_template_input(cls, tb: TensorBox) -> IRNode:
+        """Realize a TensorBox, preserving MultiOutput layout (unlike ExternKernel.realize_input)."""
+        if isinstance(tb, TensorBox) and isinstance(tb.data, MultiOutput):
+            return tb.data
+        result = ExternKernel.realize_input(tb)
+        if isinstance(result, StorageBox):
+            result = result.data
+        if isinstance(result.layout, FlexibleLayout):  # type: ignore[union-attr]
+            result.freeze_layout()
+        return result
+
+    @classmethod
+    def build_multi_outputs(
+        cls,
+        template_buf: TemplateBuffer,
+        structured: object,
+        *,
+        direct_alias_at_leaf: dict[int, IRNode] | None = None,
+        on_tensor_leaf: Callable[[str, MultiOutput, list[tuple[type, int]], int], None]
+        | None = None,
+        on_non_tensor_leaf: Callable[[int], None] | None = None,
+    ) -> tuple[TensorBox, ...]:
+        """Walk a structured output tree, creating MultiOutput nodes for tensor leaves."""
+        seen_outputs: dict[int, TensorBox] = {}
+        leaf_counter = itertools.count()
+
+        def walk(output: object, indices: list[tuple[type, int]]) -> list[TensorBox]:
+            if isinstance(output, (list, tuple)):
+                results: list[TensorBox] = []
+                for i, item in enumerate(output):
+                    results.extend(walk(item, [*indices, (type(output), i)]))
+                return results
+            leaf_idx = next(leaf_counter)
+            if isinstance(output, torch.Tensor):
+                if direct_alias_at_leaf and leaf_idx in direct_alias_at_leaf:
+                    return [TensorBox.create(direct_alias_at_leaf[leaf_idx])]
+                tid = id(output)
+                if tid in seen_outputs:
+                    return [seen_outputs[tid]]
+                mo = MultiOutput(
+                    FallbackKernel.tensor_to_layout(output), template_buf, indices
+                )
+                template_buf._multi_output_children[mo.get_name()] = mo
+                if on_tensor_leaf is not None:
+                    on_tensor_leaf(mo.get_name(), mo, indices, leaf_idx)
+                tb = TensorBox(mo)
+                seen_outputs[tid] = tb
+                return [tb]
+            # Non-tensor leaf (int, SymInt, None, etc.)
+            if on_non_tensor_leaf is not None:
+                on_non_tensor_leaf(leaf_idx)
+            return []
+
+        return tuple(walk(structured, []))
 
 
 class TritonTemplateBuffer(TemplateBuffer):
@@ -5310,21 +5515,17 @@ class TritonTemplateBuffer(TemplateBuffer):
         We work around this by creating an extra input buffer during the lowering
         and we mark them as mutated inputs.
         """
-        super().__init__(layout, inputs, make_kernel_render)
-        self.mutated_inputs = mutated_inputs
-        self.outputs: list[Buffer] = [self]
-        if mutated_inputs is not None:
-            assert isinstance(self.inputs[0], IRNode), type(self.inputs[0])
-            device = self.inputs[0].get_device()
-            self.outputs += [
-                MutationOutput(NoneLayout(device=device), buf, self)
-                for buf in mutated_inputs
-            ]
-
-        self.allowed_prologue_inps = (
-            allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
+        super().__init__(
+            layout,
+            inputs,
+            make_kernel_render,
+            mutated_inputs=mutated_inputs,
+            allowed_prologue_inps=allowed_prologue_inps,
         )
+        assert self.name is not None
+        self.epilogue_fusable_outputs = {self.name: self.name}
 
+        # Triton-specific subgraph state.
         self.subgraph_inps: list[IRNode | sympy.Expr | None] | None = None
         self.subgraph_outs: list[IRNode | None] | None = None
 
@@ -5351,12 +5552,6 @@ class TritonTemplateBuffer(TemplateBuffer):
                 assert out is None
 
         return res
-
-    def get_outputs(self) -> list[Buffer]:
-        return self.outputs
-
-    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
-        return self.allowed_prologue_inps
 
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout})"
@@ -5576,12 +5771,18 @@ class CppTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
         self.choice = choice
-        self.outputs: list[Buffer] | None = None
+
+    def get_outputs(self) -> list[Buffer]:
+        # The grouped GEMM lowering sets self.outputs to MultiOutput
+        # children (used by the template rendering code).  But for the
+        # scheduler, we must return [self] so that the parent buffer name
+        # is registered in name_to_buf — MultiOutput children depend on
+        # it via StarDep.
+        return [self]
 
     def get_layout(self) -> Layout:
         if isinstance(self.layout, MultiOutputLayout):
             assert isinstance(self.outputs, Iterable), type(self.outputs)
-
             first_output = self.outputs[0]
             assert isinstance(first_output, Buffer), type(first_output)
             layout = first_output.layout
