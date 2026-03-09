@@ -25,7 +25,9 @@ from torch._inductor.ir import FixedLayout
 from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
+    ExternalTritonTemplateKernel,
     ExternKernelChoice,
+    PartialRender,
     TritonTemplate,
     TritonTemplateKernel,
 )
@@ -897,6 +899,192 @@ class TestTemplateRender(TestCase):
             FileCheck().check("triton_meta=").check(str(custom_triton_meta)).run(
                 kernels[0]
             )
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch(cuda_backend="triton")
+    def test_external_template_prologue_epilogue_fusion(self):
+        """
+        Tests prologue fusion, epilogue fusion, and extra inputs through the
+        ExternalTritonTemplateKernel render()-based path.
+
+        Compiled function: relu(template_add(a, sigmoid(b))) * bias
+          - Prologue: sigmoid(b) fused into template as <LOAD_INPUT_B>
+          - Epilogue: relu(...) * bias fused into template as <STORE_OUTPUT_0>
+          - Extra inputs: bias is read by the epilogue but is not among the
+            template's original inputs, exercising kernel._extra_inputs
+        """
+        import torch._inductor.ir as ir
+        from torch._inductor.ir import OrderedSet
+        from torch._inductor.utils import Placeholder, run_and_get_code
+
+        XBLOCK = 128
+        render_called = [False]
+
+        class _MockExternalTemplateBuffer(ir.TemplateBuffer):
+            def __init__(self, layout, inputs):
+                tb_self = self
+
+                def _make_kernel_render(out_node, hint_override=None):
+                    kernel = ExternalTritonTemplateKernel(tb_self)
+
+                    def render():
+                        return tb_self._render(kernel)
+
+                    return kernel, render
+
+                super().__init__(
+                    layout,
+                    inputs,
+                    _make_kernel_render,
+                    named_inputs={"A": inputs[0], "B": inputs[1]},
+                )
+                # Allow prologue fusion on input B (sigmoid(b) can be
+                # absorbed so the template reads b directly)
+                self.allowed_prologue_inps = OrderedSet([inputs[1].get_name()])
+                self.epilogue_fusable_outputs = {self.name: "result"}
+
+            def _render(self, kernel):
+                render_called[0] = True
+                epilogues = kernel._eligible_epilogues
+                prologue_sources = kernel._prologue_sources
+
+                # Mark prologue buffers
+                for pro_buf, source_bufs in prologue_sources.items():
+                    kernel.store_buffer_names.add(pro_buf)
+                    if not source_bufs:
+                        kernel.removed_buffers.add(pro_buf)
+
+                # Set up epilogue/prologue render hooks
+                for epi_idx in range(len(self.epilogue_fusable_outputs)):
+                    epi = epilogues[epi_idx] if epi_idx < len(epilogues) else None
+                    kernel._setup_epilogue_hook(
+                        output_buf=epi[1] if epi else None,
+                        output_param=epi[2] if epi else None,
+                    )
+                for param_name in self._named_inputs:
+                    kernel._setup_prologue_hook(
+                        param_name, prologue_sources=prologue_sources
+                    )
+                kernel.render_hooks["<DEF_KERNEL>"] = lambda: ""
+
+                # --- Prologue handling for B ---
+                b_arg = self.inputs[1].get_name()
+                prologue_load_b = "    b = tl.load(B + xindex, mask=xmask)\n"
+                if kernel._prologue_source_buffers.get("B") is not None:
+                    b_arg = kernel._prologue_source_buffers["B"]
+                    prologue_load_b = (
+                        "    _prologue_B_xindex = xindex\n"
+                        "    _prologue_B_xmask = xmask\n"
+                        "    <LOAD_INPUT_B>\n"
+                        "    b = _prologue_B_result\n"
+                    )
+
+                call_args = [self.inputs[0].get_name(), b_arg]
+
+                # --- Epilogue handling ---
+                out_param = "result"
+                out_arg = self.name
+                if epilogues:
+                    _, _, _, store_target = epilogues[0]
+                    if store_target is not None:
+                        # Pre-register and use store target param
+                        kernel.args.output(store_target)
+                        st_param = kernel.args.output_buffers.get(store_target)
+                        if st_param is not None:
+                            out_param = st_param
+                            out_arg = store_target
+
+                call_args.append(out_arg)
+
+                # --- Extra inputs ---
+                extra_params = []
+                for buf_name, param_name in kernel._extra_inputs.items():
+                    extra_params.append(param_name)
+                    call_args.append(buf_name)
+
+                numel = self.get_size()[0]
+                call_args.append(str(numel))
+
+                # Build the inner kernel signature
+                extra_sig = (
+                    ", " + ", ".join(extra_params) if extra_params else ""
+                )
+
+                kn = str(Placeholder.KERNEL_NAME)
+                source = (
+                    "import triton\n"
+                    "import triton.language as tl\n"
+                    "import torch\n"
+                    "from torch._inductor.runtime import triton_helpers\n"
+                    "\n"
+                    "@triton.jit\n"
+                    f"def _mock_inner_add(A, B, {out_param}"
+                    f"{extra_sig},"
+                    " numel, XBLOCK: tl.constexpr):\n"
+                    "    xoffset = tl.program_id(0) * XBLOCK\n"
+                    "    xindex = xoffset + tl.arange(0, XBLOCK)\n"
+                    "    xmask = xindex < numel\n"
+                    "    a = tl.load(A + xindex, mask=xmask)\n"
+                    + prologue_load_b
+                    + "    _kernel_val_0 = a + b\n"
+                    "    x_epilogue0_0 = xindex\n"
+                    "    _tile_mask_0 = xmask\n"
+                    "    <STORE_OUTPUT_0>\n"
+                    "\n"
+                    f"def {kn}(A, B, {out_param}"
+                    f"{extra_sig}, numel):\n"
+                    f"    grid = ((numel + {XBLOCK} - 1) // {XBLOCK},)\n"
+                    f"    _mock_inner_add[grid]("
+                    f"A, B, {out_param}"
+                    f"{extra_sig}, numel, XBLOCK={XBLOCK})\n"
+                    f"    return {out_param}\n"
+                )
+
+                # Store call state on kernel
+                kernel._call_preamble = []
+                kernel._call_args = call_args
+
+                return PartialRender(source, kernel.render_hooks)
+
+        def add_override(a, b, alpha=None):
+            layout = FixedLayout(a.get_device(), a.get_dtype(), a.get_size())
+            a = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(a))
+            b = ir.ExternKernel.require_stride1(ir.ExternKernel.realize_input(b))
+            return ir.TensorBox.create(_MockExternalTemplateBuffer(layout, [a, b]))
+
+        with patch_lowering(
+            {
+                torch.ops.aten.add.Tensor: (
+                    add_override,
+                    True,
+                    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+                    False,
+                )
+            }
+        ):
+
+            @torch.compile
+            def f(a, b, bias):
+                # Use * for bias so it doesn't trigger add_override again
+                return torch.relu(a + torch.sigmoid(b)) * bias
+
+            a = torch.randn(32, device=GPU_TYPE)
+            b = torch.randn(32, device=GPU_TYPE)
+            bias = torch.randn(32, device=GPU_TYPE)
+
+            result, (code,) = run_and_get_code(f, a, b, bias)
+            expected = torch.relu(a + torch.sigmoid(b)) * bias
+            torch.testing.assert_close(result, expected)
+
+            # Verify render() was called (new protocol)
+            self.assertTrue(render_called[0])
+            # Verify template kernel was used
+            self.assertIn("_mock_inner_add", code)
+            # Verify epilogue fusion: relu fused via hook
+            self.assertIn("triton_helpers.maximum", code)
+            # Verify prologue fusion: sigmoid fused via hook
+            self.assertIn("tl.sigmoid", code)
 
 
 if __name__ == "__main__":
