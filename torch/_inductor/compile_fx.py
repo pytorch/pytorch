@@ -2625,6 +2625,10 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
+    if decompositions is not None and get_decomp_fn is select_decomp_table:
+        _decomps_ref = decompositions
+        get_decomp_fn = lambda: _decomps_ref  # noqa: E731
+
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
 
@@ -2641,7 +2645,6 @@ def compile_fx(
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
-                decompositions=decompositions,
                 ignore_shape_env=ignore_shape_env,
                 get_decomp_fn=get_decomp_fn,
             )
@@ -2684,7 +2687,6 @@ def compile_fx(
                         cpp_wrapper=cpp_wrapper_config,
                         fx_wrapper=fx_wrapper_config,
                     ),
-                    decompositions=decompositions,
                     ignore_shape_env=ignore_shape_env,
                     get_decomp_fn=get_decomp_fn,
                 )
@@ -2693,7 +2695,6 @@ def compile_fx(
         model_,
         example_inputs_,
         inner_compile,
-        decompositions,
         ignore_shape_env,
         get_decomp_fn=get_decomp_fn,
     )
@@ -2734,7 +2735,6 @@ def _maybe_wrap_and_compile_fx_main(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
-    decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
@@ -2750,7 +2750,6 @@ def _maybe_wrap_and_compile_fx_main(
     compile_gm = functools.partial(
         _maybe_wrap_and_compile_fx_main,
         inner_compile=inner_compile,
-        decompositions=decompositions,
         ignore_shape_env=ignore_shape_env,
         get_decomp_fn=get_decomp_fn,
     )
@@ -2773,7 +2772,6 @@ def _maybe_wrap_and_compile_fx_main(
         model_,
         example_inputs_,
         inner_compile,
-        decompositions,
         ignore_shape_env,
         get_decomp_fn=get_decomp_fn,
     )
@@ -2783,7 +2781,6 @@ def _compile_fx_main(
     model_: GraphModule,
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
-    decompositions: dict[OpOverload, Callable[..., Any]] | None,
     ignore_shape_env: bool,
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
@@ -2817,16 +2814,7 @@ def _compile_fx_main(
         gm_meta = model_.meta if isinstance(model_, GraphModule) else None
         compiler_config_extra = create_compiler_config_extra(config, gm_meta)
 
-        _user_provided_decompositions_dict = decompositions is not None
-        decompositions = (
-            decompositions if decompositions is not None else select_decomp_table()
-        )
-
-        if _user_provided_decompositions_dict and get_decomp_fn is select_decomp_table:
-            _decomps_ref = decompositions
-
-            def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
-                return _decomps_ref
+        decompositions = get_decomp_fn()
 
         def fw_compiler_base(
             gm: GraphModule,
