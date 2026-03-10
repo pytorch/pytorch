@@ -14114,6 +14114,28 @@ fn
         res = opt_f(x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_new_tensor_break(self):
+        def torch_tensor(a):
+            num_nonzero = a.nonzero().squeeze(-1).numel()
+            return torch.tensor([num_nonzero])
+
+        def new_tensor(a):
+            num_nonzero = a.nonzero().squeeze(-1).numel()
+            return a.new_tensor([num_nonzero])
+
+        a = torch.tensor([1, 0, 0, 5])
+
+        self.assertEqual(
+            torch.compile(torch_tensor, fullgraph=True, backend="eager")(a),
+            torch_tensor(a),
+        )
+        self.assertEqual(
+            torch.compile(new_tensor, fullgraph=True, backend="eager")(a), new_tensor(a)
+        )
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_builtin_bool_on_tensor(self):
         def f_all(mask):
