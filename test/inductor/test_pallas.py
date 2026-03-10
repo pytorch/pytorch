@@ -4,7 +4,6 @@ import os
 import re
 import sys
 import unittest
-from collections.abc import Callable
 
 import torch
 import torch._dynamo
@@ -101,13 +100,13 @@ def make_pallas(cls):
     return test_class
 
 
-def _skip_if(condition_fn: Callable, default_reason: str) -> Callable:
-    def skip(fn: Callable | None = None, *, reason: str = default_reason) -> Callable:
-        def decorator(fn: Callable) -> Callable:
+def _skip_if(condition_fn):
+    def skip(fn=None, *, reason=None):
+        def decorator(fn):
             @functools.wraps(fn)
             def wrapper(self, *args, **kwargs):
                 if condition_fn(self):
-                    self.skipTest(reason)
+                    self.skipTest(reason or f"Not yet working on {self.DEVICE}")
                 fn(self, *args, **kwargs)
 
             return wrapper
@@ -119,9 +118,9 @@ def _skip_if(condition_fn: Callable, default_reason: str) -> Callable:
     return skip
 
 
-skip_if_tpu = _skip_if(lambda self: self.DEVICE == "tpu", "Not yet working on TPU")
-skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu", "Not yet working on CPU")
-skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda", "Not yet working on GPU")
+skip_if_tpu = _skip_if(lambda self: self.DEVICE == "tpu")
+skip_if_cpu = _skip_if(lambda self: self.DEVICE == "cpu")
+skip_if_cuda = _skip_if(lambda self: self.DEVICE == "cuda")
 
 
 class PallasTestsMixin:
