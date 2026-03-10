@@ -19,7 +19,6 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 from sympy import Expr
-from triton.language.core import dtype as triton_dtype
 
 import torch
 import torch._ops
@@ -330,6 +329,8 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     import triton
     from triton import JITFunction  # type: ignore[name-defined, attr-defined]
     from triton.language import constexpr  # type: ignore[name-defined]
+    from triton.language.core import dtype as triton_dtype
+
 
     # global constexpr vars handled above
     symbols_included = OrderedSet([kernel.__name__])
