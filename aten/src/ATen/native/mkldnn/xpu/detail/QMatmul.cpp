@@ -396,22 +396,6 @@ struct ScaleSpec {
         arg_type);
     return 0;
   }
-
-  // Normalize scale tensor to contiguous format for oneDNN.
-  //
-  // XPU uses natural scale shapes that match matrix dimensions:
-  //   - A: [M, K] -> scale_a: [M, K//128] or [M//128, K//128]
-  //   - B: [K, N] -> scale_b: [K//128, N] or [K//128, N//128]
-  at::Tensor normalize(const at::Tensor& scale) const {
-    TORCH_INTERNAL_ASSERT(
-        dtype == dnnl::memory::data_type::f32,
-        "tensor scale currently must be f32, but got scale dtype: ",
-        scale.scalar_type());
-
-    at::Tensor scale_f32 = scale.to(at::kFloat);
-
-    return scale_f32.contiguous();
-  }
 };
 
 // This function defines how to set scales mask and groups according to:
@@ -582,7 +566,6 @@ sycl::event scaled_matmul(
   }
 
   // Prepare scale memory for oneDNN.
-  // The normalize() function handles conversion to contiguous format.
   auto make_scale_mem_from_spec =
       [&](const ScaleSpec& spec,
           int64_t expected_numel,
@@ -611,13 +594,11 @@ sycl::event scaled_matmul(
     args.insert({DNNL_ARG_BIAS, b_usr_m});
   }
 
-  at::Tensor src_sc_tensor = src_spec.normalize(scale_a);
   auto src_sc_mem = make_scale_mem_from_spec(
-      src_spec, src_spec.expected_numel(M, K, "src"), src_sc_tensor);
+      src_spec, src_spec.expected_numel(M, K, "src"), scale_a);
 
-  at::Tensor wei_sc_tensor = wei_spec.normalize(scale_b);
   auto wei_sc_mem = make_scale_mem_from_spec(
-      wei_spec, wei_spec.expected_numel(N, K, "wei"), wei_sc_tensor);
+      wei_spec, wei_spec.expected_numel(N, K, "wei"), scale_b);
 
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_mem});
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_sc_mem});
