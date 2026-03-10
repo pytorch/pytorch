@@ -4427,17 +4427,15 @@ class TestAsArray(TestCase):
                 else:
                     self.assertEqual(data, tensor)
 
-    @skipMeta
     @onlyAccelerator
     def test_device_without_index(self, device):
-        device_type = torch.device(device).type  # e.g., "cuda" or "cpu"
-        original = torch.arange(5, device=device_type)
+        original = torch.arange(5, device=device)
 
-        tensor = torch.asarray(original, device=device_type)
+        tensor = torch.asarray(original, device=device)
         # The storage pointers should be equal
         self.assertEqual(original.data_ptr(), tensor.data_ptr())
 
-        tensor = torch.asarray(original, copy=True, device=device_type)
+        tensor = torch.asarray(original, copy=True, device=device)
         # The storage pointers should not be equal
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 
