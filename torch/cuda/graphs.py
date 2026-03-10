@@ -52,18 +52,16 @@ class _TrackedTensorInfo:
         self.data_ptr = tensor.data_ptr()
         self.device_index = tensor.device.index
 
-        def on_release(_: weakref.ref[Tensor]) -> None:
+        def on_release(_: weakref.ref[torch.UntypedStorage]) -> None:
             try:
                 self.deletion_traceback_py = "".join(traceback.format_stack()[:-1])
             except Exception:
                 pass  # don't raise under GC
 
-        # Track the base tensor that owns the storage, not the view.
-        # A view being deleted doesn't free memory if the base is alive.
-        base = tensor
-        while base._base is not None:
-            base = base._base
-        self.weakref: weakref.ref[Tensor] = weakref.ref(base, on_release)
+        storage = tensor.untyped_storage()
+        self.weakref: weakref.ref[torch.UntypedStorage] = weakref.ref(
+            storage, on_release
+        )
 
     def is_alive(self) -> bool:
         return self.weakref() is not None
@@ -167,21 +165,22 @@ class CUDAGraph(_CUDAGraph):
         if data_ptr not in self._external_inputs:
             self._internal_outputs.add(data_ptr)
 
-    def _start_input_tracking(self) -> None:
-        from torch.utils._cuda_debug import _TensorTrackingMode
-
-        self._external_inputs.clear()
-        self._internal_outputs.clear()
-        self._memory_snapshot = None
-        # Note that this call causes a circular reference. We use the __del__
-        # method to release the ref to the tracker.
-        self._tracking_mode = _TensorTrackingMode(self)
-        self._tracking_mode.__enter__()
-
     def _stop_input_tracking(self) -> None:
         if self._tracking_mode is not None:
             self._tracking_mode.__exit__(None, None, None)
             self._tracking_mode = None
+
+    def _reset_tracking_state(self) -> None:
+        self._stop_input_tracking()
+        self._external_inputs.clear()
+        self._internal_outputs.clear()
+        self._memory_snapshot = None
+
+    def _start_input_tracking(self) -> None:
+        from torch.utils._cuda_debug import _TensorTrackingMode
+
+        self._tracking_mode = _TensorTrackingMode(self)
+        self._tracking_mode.__enter__()
 
     def _get_memory_snapshot(self, capture_pool: _POOL_HANDLE) -> list[dict[str, Any]]:
         if self._memory_snapshot is None:
@@ -192,10 +191,7 @@ class CUDAGraph(_CUDAGraph):
 
     def __del__(self) -> None:
         try:
-            # Release all the input tracking state
-            self._external_inputs.clear()
-            self._internal_outputs.clear()
-            self._stop_input_tracking()
+            self._reset_tracking_state()
         except Exception:
             pass  # don't raise under GC
 
@@ -275,6 +271,7 @@ class CUDAGraph(_CUDAGraph):
                     Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
                     tracked by this mechanism.
         """  # noqa: B950
+        self._reset_tracking_state()
         super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
         if check_input_liveness:
             self._start_input_tracking()
@@ -309,6 +306,7 @@ class CUDAGraph(_CUDAGraph):
 
     def reset(self) -> None:
         r"""Delete the graph currently held by this instance."""
+        self._reset_tracking_state()
         super().reset()
 
     def pool(self) -> _POOL_HANDLE:

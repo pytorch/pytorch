@@ -242,6 +242,42 @@ class TestCUDAGraphDebugInputs(TestCase):
         g1.replay()
         g2.replay()
 
+    def test_alive_storage_dead_tensor_ok(self):
+        a = torch.randn(100, device="cuda")
+        b = torch.empty(100, device="cuda")
+        b.set_(a.untyped_storage())
+        g = torch.cuda.CUDAGraph()
+
+        _warmup_op(lambda: a * 2)
+
+        with torch.cuda.graph(g, check_input_liveness=True):
+            y = a * 2
+
+        del a
+
+        g.replay()
+        self.assertEqual(y, b * 2)
+
+        del b
+
+        with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
+            g.replay()
+
+    def test_dead_storage_raises(self):
+        x = torch.randn(100, device="cuda")
+        g = torch.cuda.CUDAGraph()
+
+        _warmup_op(lambda: x * 2)
+
+        with torch.cuda.graph(g, check_input_liveness=True):
+            y = x * 2
+
+        other = torch.randn(100, device="cuda")
+        x.set_(other.untyped_storage())
+
+        with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
+            g.replay()
+
     def test_pinned_memory_tensor_tracked(self):
         pinned = torch.randn(100).pin_memory()
         cuda_dest = torch.empty(100, device="cuda")
@@ -268,6 +304,28 @@ class TestCUDAGraphDebugInputs(TestCase):
         # This should raise
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
+
+    def test_recapture_without_clears_stale_state(self):
+        g = torch.cuda.CUDAGraph()
+
+        x = torch.randn(32, device="cuda")
+        _warmup_op(lambda: x * 2)
+        with torch.cuda.graph(g, check_input_liveness=True):
+            y = x * 2
+
+        del x
+
+        with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
+            g.replay()
+
+        g.reset()
+
+        x2 = torch.randn(32, device="cuda")
+        _warmup_op(lambda: x2 * 3)
+        with torch.cuda.graph(g, check_input_liveness=True):
+            y2 = x2 * 3
+
+        g.replay()
 
 
 class TestCUDAGraphDebugBacktraces(TestCase):
