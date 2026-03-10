@@ -144,12 +144,15 @@ def is_bound_tensor_method(value: object) -> bool:
 # are common keys.
 all_tensor_attrs = torch._C.TensorBase.__dict__ | torch.Tensor.__dict__
 
-def _contains_unspec_tensor_data(x):
+
+def _contains_unspec_tensor_data(x: VariableTracker) -> bool:
+    """Check if x is or contains a SymNodeVariable (unbacked SymInt)."""
     if x.is_tensor() or isinstance(x, SymNodeVariable):
         return True
     if isinstance(x, (ListVariable, TupleVariable)):
         return any(_contains_unspec_tensor_data(y) for y in x.items)
     return False
+
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
@@ -1876,8 +1879,22 @@ class TensorVariable(VariableTracker):
             return self.call_method(tx, "new_empty", args, kwargs)
         return None
 
-    def method_new_tensor(self, *args, **kwargs):
+    def method_new_tensor(
+        self: "TensorVariable",
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
         if len(args) != 1 or not _contains_unspec_tensor_data(args[0]):
+            return None
+
+        data_arg = args[0]
+
+        if not isinstance(data_arg, (ListVariable, TupleVariable)):
+            return None
+        if len(data_arg.items) != 1 or not isinstance(
+            data_arg.items[0], SymNodeVariable
+        ):
             return None
 
         layout = kwargs.get("layout")
@@ -1887,16 +1904,20 @@ class TensorVariable(VariableTracker):
             if layout.as_python_constant() != torch.strided:
                 return None
 
-        from ..symbolic_convert import InstructionTranslator
+        symnode_var = data_arg.items[0]
 
-        tx = InstructionTranslator.current_tx()
-        new_kwargs = dict(kwargs)
-        new_kwargs.pop("layout", None)
-        new_kwargs.setdefault("dtype", self.var_getattr(tx, "dtype"))
-        new_kwargs.setdefault("device", self.var_getattr(tx, "device"))
-        return variables.TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
-            tx, [args[0]], new_kwargs
-        )
+        new_kwargs = {}
+        new_kwargs["dtype"] = kwargs.get("dtype", self.var_getattr(tx, "dtype"))
+        new_kwargs["device"] = kwargs.get("device", self.var_getattr(tx, "device"))
+
+        # Build scalar_tensor
+        scalar = variables.TorchInGraphFunctionVariable(
+            torch.scalar_tensor
+        ).call_function(tx, [symnode_var], new_kwargs)
+
+        # unsqueeze(0) to get shape [1] matching new_tensor([x])
+        zero = variables.ConstantVariable.create(0)
+        return scalar.call_method(tx, "unsqueeze", [zero], {})
 
     def method_untyped_storage(
         self, tx: "InstructionTranslator"
