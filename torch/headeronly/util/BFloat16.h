@@ -48,6 +48,7 @@ struct alignas(2) BFloat16 {
   explicit inline C10_HOST_DEVICE operator bool() const {
     return x != 0;
   }
+  explicit inline C10_HOST_DEVICE BFloat16(uint8_t value);
 #else
   uint16_t x;
   BFloat16() = default;
@@ -156,6 +157,11 @@ inline C10_HOST_DEVICE BFloat16::BFloat16(float value)
 #endif
 {
 }
+
+#if defined(__HIPCC__)
+inline C10_HOST_DEVICE BFloat16::BFloat16(uint8_t value)
+    : x(detail::round_to_nearest_even(static_cast<float>(value))) {}
+#endif
 
 /// Implicit conversions
 inline C10_HOST_DEVICE BFloat16::operator float() const {
