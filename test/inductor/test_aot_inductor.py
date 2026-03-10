@@ -5504,6 +5504,52 @@ class AOTInductorTestsTemplate:
 
             self.check_model(Model(N, K, self.device), example_inputs)
 
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_repeated_kernel_numel(self):
+        # When enable_kernel_profile is on, each kernel call is wrapped in its
+        # own {} scope block. If the same kernel is called multiple times with
+        # symbolic numel, the int64_t declaration must be emitted each time
+        # (not just on first use) since prior declarations go out of scope.
+        class Model(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.cat([x, y, z], dim=0)
+
+        example_inputs = tuple(torch.randn(4, 8, device=self.device) for _ in range(3))
+        dim0 = Dim("dim0", min=1, max=32)
+        dynamic_shapes = {"x": {0: dim0}, "y": {0: dim0}, "z": {0: dim0}}
+
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile,
+                Model(),
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
+            # When profiling is enabled, every kernel numel variable must have
+            # the int64_t type declaration since each kernel call lives in its
+            # own scope block. Verify no bare assignment (without int64_t)
+            # appears for numel variables.
+            if self.device == GPU_TYPE:
+                # Match bare numel assignments like "foo_xnumel = expr;"
+                # but not declarations like "int64_t foo_xnumel = expr;"
+                bare_numel_assign = re.compile(r"^\s*(\w+_[xr]numel)\s*=\s*.+;$")
+                for line in code.splitlines():
+                    m = bare_numel_assign.match(line)
+                    if m:
+                        self.fail(
+                            f"Found numel assignment without int64_t declaration "
+                            f"in profiling mode: {line.strip()}"
+                        )
+
+            self.check_model(
+                Model(),
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
+
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":
             raise unittest.SkipTest("requires GPU")
