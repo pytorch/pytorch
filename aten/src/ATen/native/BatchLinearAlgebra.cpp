@@ -1995,6 +1995,9 @@ Tensor& linalg_solve_out(const Tensor& A,
                          const Tensor& B,
                          bool left,
                          Tensor& result) {
+  if (A.layout() == kSparseCsr) {
+    return at::_spsolve_out(result, A, B, left);
+  }
   auto info = B.new_empty({0}, kInt);
   at::linalg_solve_ex_out(result, info, A, B, left);
   at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);

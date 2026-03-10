@@ -815,9 +815,15 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   return result;
 }
 
-Tensor _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool left) {
+static Tensor _sparse_csr_linear_solve_impl(const Tensor& A, const Tensor& b, const bool left, Tensor* out_opt) {
   TORCH_CHECK(b.numel() > 0, "Expected non-empty other tensor, but found empty tensor");
-  Tensor out = at::empty(b.sizes(), b.options());
+  Tensor out;
+  if (out_opt != nullptr) {
+    out = *out_opt;
+    at::native::resize_output(out, b.sizes());
+  } else {
+    out = at::empty(b.sizes(), b.options());
+  }
   if (b.dim() == 2) {
     // cuDSS expects column-major dense matrices. Convert the row-major contiguous
     // RHS to a column-major strided view backed by a contiguous transpose.
@@ -828,7 +834,23 @@ Tensor _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool lef
     return out;
   }
   Tensor b_copy = b.contiguous();
-  _apply_sparse_csr_linear_solve(A, b_copy, left, out);
+  if (out.layout() == kStrided && out.device() == b.device() && out.scalar_type() == b.scalar_type() &&
+      out.dim() == 1 && out.stride(0) == 1) {
+    _apply_sparse_csr_linear_solve(A, b_copy, left, out);
+  } else {
+    Tensor x = at::empty(b.sizes(), b.options());
+    _apply_sparse_csr_linear_solve(A, b_copy, left, x);
+    out.copy_(x);
+  }
+  return out;
+}
+
+Tensor _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool left) {
+  return _sparse_csr_linear_solve_impl(A, b, left, nullptr);
+}
+
+Tensor& _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool left, Tensor& out) {
+  at::native::_sparse_csr_linear_solve_impl(A, b, left, &out);
   return out;
 }
 

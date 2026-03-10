@@ -3516,8 +3516,12 @@ class TestSparseCSR(TestCase):
                 continue
 
             expect = torch.linalg.solve(sample.input, *sample.args, **sample.kwargs)
-            out_sparse = torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
-            self.assertEqual(expect, out_sparse)
+            actual = torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
+            self.assertEqual(expect, actual)
+
+            solve_out = torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+            self.assertIs(solve_out, out)
+            self.assertEqual(expect, out)
 
 
 def skipIfNoTriton(cls):
