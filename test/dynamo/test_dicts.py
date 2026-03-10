@@ -1499,15 +1499,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         def fn(t: torch.Tensor, d, apply_not: bool):
             if apply_not:
-                if not d:
-                    return t.sin(), True
-                else:
-                    return t.sin(), False
+                return t.sin(), bool(not d)
             else:
-                if d:
-                    return t.sin(), True
-                else:
-                    return t.sin(), False
+                return t.sin(), bool(d)
 
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
