@@ -671,7 +671,6 @@ def make_pointwise(
     allow_alpha=False,
     use_fma_for_alpha=False,
     triton_fallback=None,
-    skip_emulation=False,
 ):
     """Wraps a pointwise fn and returns a function representing the pointwise in
     the define-by-run IR."""
@@ -718,8 +717,7 @@ def make_pointwise(
         # during decompositions are not annotated.
         low_pr_fp = (torch.bfloat16, torch.float16)
         emulate_precision_casts = (
-            not skip_emulation
-            and V.graph is not None
+            V.graph is not None
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
@@ -866,16 +864,21 @@ def to_dtype(
         return clone(x) if copy else x
 
     def _to_dtype(x):
-        return ops.to_dtype(
+        result = ops.to_dtype(
             x,
             dtype,
             src_dtype=src_dtype,
             use_compute_types=use_compute_types,
         )
+        low_pr_fp = (torch.bfloat16, torch.float16)
+        if not use_compute_types and dtype in low_pr_fp:
+            # Upcast back to compute type so fused consumers see a compute-type
+            # value. Without this, a raw low-precision value gets a redundant
+            # downcast from the consumer's input emulation.
+            result = ops.to_dtype(result, dtype)
+        return result
 
-    return make_pointwise(
-        _to_dtype, override_return_dtype=dtype, skip_emulation=not use_compute_types
-    )(x)
+    return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
 @register_lowering(torch._higher_order_ops._foreach_map, type_promotion_kind=None)
