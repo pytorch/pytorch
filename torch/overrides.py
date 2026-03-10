@@ -119,6 +119,8 @@ def get_ignored_functions() -> set[Callable]:
     >>> torch.add in torch.overrides.get_ignored_functions()
     False
     """
+    import torch.nn.attention.flex_attention as flex_attention_mod
+
     Tensor = torch.Tensor
     functions = {
         torch.typename,
@@ -278,6 +280,11 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.init.orthogonal,
         torch.nn.init.sparse,
         torch.nested.to_padded_tensor,
+        flex_attention_mod.flex_attention,
+        flex_attention_mod.create_mask,
+        flex_attention_mod.or_masks,
+        flex_attention_mod.and_masks,
+        flex_attention_mod.noop_mask,
         has_torch_function,
         handle_torch_function,
         torch.set_autocast_enabled,
@@ -439,6 +446,8 @@ def get_testing_overrides() -> dict[Callable, Callable]:
     >>> inspect.signature(my_add)
     <Signature (input, other, out=None)>
     """
+    import torch.nn.attention.flex_attention as flex_attention_mod
+
     # Every function in the PyTorchAPI that can be overridden needs an entry
     # in this dict.
     #
@@ -990,6 +999,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.silu: lambda input, inplace=False: -1,
         torch.nn.functional.mish: lambda input, inplace=False: -1,
         torch.nn.functional.scaled_dot_product_attention: lambda query, key, value, attn_mask=None, dropout_p=0.0: -1,
+        flex_attention_mod.create_block_mask: lambda mask_mod, B, H, Q_LEN, KV_LEN, device=None, BLOCK_SIZE=128, _compile=False: -1,
         torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction="mean", beta=1.0: -1,  # noqa: B950
         torch.nn.functional.huber_loss: lambda input, target, reduction="mean", delta=1.0, weight=None: -1,
         torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction="mean": -1,  # noqa: B950
@@ -1832,6 +1842,8 @@ def _get_overridable_functions() -> tuple[
 ]:
     overridable_funcs = collections.defaultdict(list)
     index = {}
+    import torch.nn.attention.flex_attention as flex_attention_mod
+
     tested_namespaces = [
         ("torch", torch, torch.__all__),
         ("torch.functional", torch.functional, torch.functional.__all__),
@@ -1841,6 +1853,11 @@ def _get_overridable_functions() -> tuple[
         ("torch.linalg", torch.linalg, dir(torch.linalg)),
         ("torch.fft", torch.fft, dir(torch.fft)),
         ("torch.special", torch.special, dir(torch.special)),
+        (
+            "torch.nn.attention.flex_attention",
+            flex_attention_mod,
+            flex_attention_mod.__all__,
+        ),
     ]
     for namespace_str, namespace, ns_funcs in tested_namespaces:
         for func_name in ns_funcs:

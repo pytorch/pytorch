@@ -20,6 +20,7 @@ from torch._higher_order_ops.flex_attention import flex_attention as flex_attent
 from torch._higher_order_ops.utils import setup_compilation_env
 from torch._prims_common import DeviceLikeType
 from torch.nn.attention._utils import _validate_sdpa_input
+from torch.overrides import handle_torch_function, has_torch_function
 from torch.utils._pytree import GetAttrKey, tree_map_only
 
 
@@ -1247,6 +1248,19 @@ def create_block_mask(
             value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
+    if has_torch_function((B, H, Q_LEN, KV_LEN)):
+        return handle_torch_function(
+            create_block_mask,
+            (B, H, Q_LEN, KV_LEN),
+            mask_mod,
+            B,
+            H,
+            Q_LEN,
+            KV_LEN,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+            _compile=_compile,
+        )
     if device is None:
         device = torch.accelerator.current_accelerator() or "cpu"
     mod_type = _get_mod_type(mask_mod)
