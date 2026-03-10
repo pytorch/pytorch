@@ -331,7 +331,6 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     from triton.language import constexpr  # type: ignore[name-defined]
     from triton.language.core import dtype as triton_dtype
 
-
     # global constexpr vars handled above
     symbols_included = OrderedSet([kernel.__name__])
 
