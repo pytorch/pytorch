@@ -2310,6 +2310,60 @@ class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
         result = fn(obj)
         self.assertEqual(result, [("a", 1), ("b", 2), ("c", 3)])
 
+    def test_dict_torch_size_dynamic_key(self):
+        import torch
+        import torch.nn as nn
+
+        class DynamicShapeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_configs = {
+                    torch.Size([32, 64]): nn.Linear(32, 64),
+                    torch.Size([64, 128]): nn.Linear(64, 128),
+                    torch.Size([128, 256]): nn.Linear(128, 256),
+                }
+                self.activation_functions = {
+                    torch.Size([32]): nn.ReLU(),
+                    torch.Size([64]): nn.Tanh(),
+                    torch.Size([128]): nn.Sigmoid(),
+                }
+
+            def forward(self, x):
+                current_shape = torch.tensor(x.shape[1:])
+                shape_key = torch.Size([current_shape[0], 64])
+                if shape_key in self.layer_configs:
+                    x = self.layer_configs[shape_key](x)
+
+                activation_shape = torch.Size([x.shape[1]])
+                if activation_shape in self.activation_functions:
+                    x = self.activation_functions[activation_shape](x)
+                return x
+
+        model = DynamicShapeModel().eval()
+
+        for features in [32, 64, 128]:
+            x = torch.randn(4, features)
+            eager_out = model(x)
+
+            torch._dynamo.reset()
+            compiled_model = torch.compile(model, backend="eager")
+            with torch.no_grad():
+                compiled_out = compiled_model(x)
+
+            self.assertEqual(eager_out.shape, compiled_out.shape)
+            self.assertTrue(torch.allclose(eager_out, compiled_out, atol=1e-6))
+
+        x = torch.randn(4, 16)
+        eager_out = model(x)
+
+        torch._dynamo.reset()
+        compiled_model = torch.compile(model, backend="eager")
+        with torch.no_grad():
+            compiled_out = compiled_model(x)
+
+        self.assertEqual(eager_out.shape, compiled_out.shape)
+        self.assertEqual(compiled_out.shape, torch.Size([4, 16]))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
