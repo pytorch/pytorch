@@ -49,6 +49,7 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
         LOG(ERROR)
             << "IntraNodeComm: getNvlMesh: rsmi_is_P2P_accessible returned error ret="
             << ret;
+        amdsmi_shut_down();
         return {};
       }
 
@@ -57,6 +58,7 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
       }
     }
   }
+  amdsmi_shut_down();
   return nvlMesh;
 #endif
 }
@@ -88,11 +90,13 @@ IntraNodeComm::IntraNodeComm(
     c10::intrusive_ptr<c10d::Store> store,
     size_t rank,
     size_t worldSize,
-    std::optional<size_t> bufferSize)
+    std::optional<size_t> bufferSize,
+    std::string groupName)
     : store_(std::move(store)),
       rank_(rank),
       worldSize_(worldSize),
-      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize) {}
+      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize),
+      groupName_(std::move(groupName)) {}
 
 IntraNodeComm::~IntraNodeComm() {
   if (!isInitialized_) {
@@ -214,11 +218,13 @@ bool IntraNodeComm::rendezvous() {
     return false;
   }
 
-  auto groupName = "IntraNodeComm" + std::to_string(intraNodeCommIdx++);
+  const std::string name = groupName_.empty()
+      ? "IntraNodeComm" + std::to_string(intraNodeCommIdx++)
+      : groupName_;
   set_group_info(
-      groupName, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
+      name, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
-  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, groupName);
+  symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, name);
   symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_, std::nullopt);
   isInitialized_ = true;
   return true;
