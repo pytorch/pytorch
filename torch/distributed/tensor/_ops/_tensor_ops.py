@@ -121,6 +121,7 @@ def _partial_needs_reduce_for_dtype_cast(
     aten._to_copy.default,
     schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"]),
     allow_unbacked_sharding=True,
+    allow_uneven_sharding=True,
 )
 def _to_copy_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
