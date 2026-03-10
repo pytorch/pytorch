@@ -1286,6 +1286,8 @@ class CachingAutotuner(KernelInterface):
             launcher.shared,
         )
 
+        TritonBundler.put_winner(launcher.cache_hash)
+
         if self.save_cache_hook:
             self.save_cache_hook(
                 launcher.config,
@@ -1466,6 +1468,7 @@ class CachingAutotuner(KernelInterface):
             )
 
         if best_config not in config2launcher:
+
             # On a Coordesc cache hit, we might not have loaded the launcher
             # This can happen because PyCodeCache saves CachingAutotuners in memory,
             # even for separate compile IDs (which can have different inputs without changing output code)
@@ -1473,11 +1476,14 @@ class CachingAutotuner(KernelInterface):
                 best_config
             ).make_launcher()
 
+        winner = config2launcher[best_config]
+        TritonBundler.put_winner(winner.cache_hash)
+
         fn_hash = generate_lookup_hash_from_source_code(
             str(self.size_hints), self.fn.src
         )
         log.debug("Function hash %s has best config %s", fn_hash, best_config)
-        return config2launcher[best_config]
+        return winner
 
     def get_profiler_kwargs(self, stream, launcher):
         kernel_kwargs_str = ",".join(
