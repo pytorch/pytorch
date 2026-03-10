@@ -475,7 +475,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     NCCLSymmMemKey key{ptr, *group_name};
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      auto it = symm_mems_.find({ptr, *group_name});
+      auto it = symm_mems_.find(key);
       if (it != symm_mems_.end()) {
         return it->second;
       }
