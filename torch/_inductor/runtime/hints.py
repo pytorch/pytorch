@@ -47,6 +47,7 @@ if has_triton_package():
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
+            pointer_range_32=None,
         ):
             # Prepare the arguments for AttrsDescriptor
             kwargs = {
@@ -69,6 +70,7 @@ if has_triton_package():
         def AttrsDescriptorWrapper(
             divisible_by_16=None,
             equal_to_1=None,
+            pointer_range_32=None,
         ):
             # Prepare the arguments for AttrsDescriptor
             kwargs = {
@@ -107,8 +109,8 @@ else:
     AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
         # pyrefly: ignore [invalid-argument]
         "AttrsDescriptor",
-        ["divisible_by_16", "equal_to_1"],
-        defaults=[(), ()],
+        ["divisible_by_16", "equal_to_1", "pointer_range_32"],
+        defaults=[(), (), ()],
     )
 
 

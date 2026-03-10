@@ -15,9 +15,14 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.virtualized import V
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU, HAS_GPU_AND_TRITON
+from torch._inductor.virtualized import V
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    HAS_GPU_AND_TRITON,
+)
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.value_ranges import ValueRanges
 

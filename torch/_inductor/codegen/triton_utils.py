@@ -227,7 +227,16 @@ def _is_tensor_within_2gb(arg: TensorArg) -> bool:
     """
     MAX_BYTES = 2**31 - 1
     try:
-        layout = _get_buffer_layout(arg.buffer)
+        # Graph inputs aren't tracked by the scheduler; get their layout
+        # from the graph_inputs dict to avoid KeyError in get_buffer_layout.
+        if arg.buffer in V.graph.graph_inputs:
+            inp = V.graph.graph_inputs[arg.buffer]
+            if hasattr(inp, "get_layout"):
+                layout = inp.get_layout()
+            else:
+                return False
+        else:
+            layout = _get_buffer_layout(arg.buffer)
         storage_bytes = layout.storage_size() * arg.dtype.itemsize
         return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
     except Exception:
