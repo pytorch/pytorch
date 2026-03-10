@@ -472,6 +472,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
     NCCLAllocation* allocation;
+    NCCLSymmMemKey key{ptr, *group_name};
     {
       std::lock_guard<std::mutex> lock(mutex_);
       auto it = symm_mems_.find({ptr, *group_name});
