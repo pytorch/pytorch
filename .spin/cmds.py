@@ -7,6 +7,7 @@ from tempfile import mktemp
 import click
 import spin
 
+
 CWD = Path(__file__).absolute().parent.parent
 sys.path.insert(0, str(CWD))  # this only affects the current process
 from tools.clean import clean as _clean

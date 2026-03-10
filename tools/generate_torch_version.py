@@ -110,7 +110,6 @@ def get_torch_version(sha: str | None = None) -> str:
     return version
 
 
-
 def strtobool(val: str) -> bool:
     """Convert a string representation of truth to true (1) or false (0).
 

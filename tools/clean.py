@@ -1,8 +1,8 @@
 import glob
 import os
 import shutil
-
 from pathlib import Path
+
 
 def clean():
     """Clean, that is remove all files in .gitignore except in the NOT-CLEAN-FILES section."""
