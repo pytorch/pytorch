@@ -722,6 +722,7 @@ void _apply_sparse_csr_linear_solve(
   TORCH_CHECK(x.layout() == kStrided, "x must be a strided tensor");
   // dim check
   TORCH_CHECK(b.dim() == 1 || b.dim() == 2, "b must be a 1D or 2D tensor");
+  TORCH_CHECK(b.size(0) > 0, "Expected non-empty other tensor, but found empty tensor");
   TORCH_CHECK(b.stride(0) == 1, "b must be a column major tensor");
   TORCH_CHECK(b.size(0) == A.size(0), "linear system size mismatch.");
 
