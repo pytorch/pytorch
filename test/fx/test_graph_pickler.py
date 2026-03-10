@@ -896,7 +896,10 @@ class TestIgnoreRawNode(TestCase):
                 return x + 1
 
         gm = symbolic_trace(M())
-        call_node = next(n for n in gm.graph.nodes if n.op == "call_function")
+        call_node = next(
+            (n for n in gm.graph.nodes if n.op == "call_function"), None
+        )
+        self.assertIsNotNone(call_node)
         # Store a raw Node reference in meta – this is the problematic case.
         call_node.meta["raw_ref"] = call_node
         return gm
@@ -918,8 +921,9 @@ class TestIgnoreRawNode(TestCase):
         restored = self.GraphPickler.loads(data, self.fake_mode)
         self.assertIsInstance(restored, torch.fx.GraphModule)
         call_node = next(
-            n for n in restored.graph.nodes if n.op == "call_function"
+            (n for n in restored.graph.nodes if n.op == "call_function"), None
         )
+        self.assertIsNotNone(call_node)
         self.assertIsNone(call_node.meta.get("raw_ref"))
 
 
