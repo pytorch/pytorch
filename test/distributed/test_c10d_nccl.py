@@ -23,6 +23,7 @@ import torch
 import torch.distributed as c10d
 import torch.distributed._functional_collectives as _functional_collectives
 from torch.distributed.distributed_c10d import SHRINK_ABORT as NCCL_SHRINK_ABORT
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 
 
 if not c10d.is_available() or not c10d.is_nccl_available():
@@ -5347,6 +5348,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices")
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_broadcast_float8(self, float8_dtype):
         device = torch.device(f"cuda:{self.rank}")
