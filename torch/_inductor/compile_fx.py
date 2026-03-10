@@ -2603,7 +2603,6 @@ def compile_fx(
     config_patches: dict[str, Any] | None = None,
     decompositions: dict[OpOverload, Callable[..., Any]] | None = None,
     ignore_shape_env: bool = False,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
     """
     Main entry point for compiling given FX graph.  Despite the fact that this
@@ -2616,9 +2615,13 @@ def compile_fx(
     NB: This function TAKES OWNERSHIP of the input ``model_`` and can potentially
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
-    if decompositions is not None and get_decomp_fn is select_decomp_table:
+    if decompositions is not None:
         _decomps_ref = decompositions
-        get_decomp_fn = lambda: _decomps_ref  # noqa: E731
+        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = (
+            lambda: _decomps_ref  # noqa: E731
+        )
+    else:
+        get_decomp_fn = select_decomp_table
 
     # Some arguments trigger a recursive call to compile_fx.  Handle these
     # short circuits first, before anything else
@@ -2636,8 +2639,8 @@ def compile_fx(
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
+                decompositions=decompositions,
                 ignore_shape_env=ignore_shape_env,
-                get_decomp_fn=get_decomp_fn,
             )
 
     # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
