@@ -634,7 +634,7 @@ class _SplitterBase:
         This method detects overlapping groups via union-find and merges
         them into single groups before dep propagation.
         """
-        if os.environ.get("_SPLITTER_MERGE_OVERLAPPING_FUSIONS", "0") != "1":
+        if os.environ.get("_SPLITTER_MERGE_OVERLAPPING_FUSIONS", "1") != "1":
             return
 
         if not self.fusions:
