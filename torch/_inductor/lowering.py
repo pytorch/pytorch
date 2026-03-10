@@ -3042,12 +3042,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 # we can make them expanded by setting the stride equal to 0
                 if i in expanded_dims:
                     if V.graph.sizevars.statically_known_equals(
-                        out_strides[i + 1] % ALIGNMENT, 0
+                        Mod(out_strides[i + 1], ALIGNMENT), 0
                     ):
                         out_strides[i] = 0
                         continue
 
-                if not V.graph.sizevars.statically_known_equals(stride % ALIGNMENT, 0):
+                if not V.graph.sizevars.statically_known_equals(
+                    Mod(stride, ALIGNMENT), 0
+                ):
                     stride = ceildiv(stride, ALIGNMENT) * ALIGNMENT
 
                 out_strides[i] = stride
