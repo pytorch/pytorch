@@ -496,7 +496,11 @@ class OpDispatcher:
                 # the inplace argument's tensor meta. Here we choose to special case
                 # this op because as far as I know this is the only inplace op that
                 # has such as behavior. We can extend this special case if necessary.
-                if op_call == aten.squeeze_.dim:
+                if op_call in (
+                    aten.squeeze_.dim,
+                    aten.squeeze_.default,
+                    aten.squeeze_.dims,
+                ):
                     # update the spec to handle tensor meta changes
                     args[0]._spec = output_spec
                     # use return_and_correct_aliasing to match the outer and the inner

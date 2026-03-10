@@ -414,7 +414,6 @@ dtensor_fails_no_strategy = {
     xfail("nn.functional.avg_pool1d"),
     xfail("nn.functional.avg_pool2d"),
     xfail("nn.functional.avg_pool3d"),
-    xfail("nn.functional.batch_norm"),
     xfail("nn.functional.bilinear"),
     xfail("nn.functional.grid_sample"),
     xfail("nn.functional.group_norm"),
