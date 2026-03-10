@@ -319,6 +319,11 @@ dtensor_compiled_fails = {
     xfail("lu_unpack"),
     xfail("scatter"),
     xfail("scatter_add"),
+    # batch_norm variants decompose through squeeze.dims → as_strided under
+    # compilation, and DTensor has no as_strided strategy.
+    xfail("_native_batch_norm_legit"),
+    xfail("native_batch_norm"),
+    xfail("nn.functional.batch_norm"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.margin_ranking_loss"),
@@ -404,7 +409,6 @@ dtensor_fails_no_strategy = {
     xfail("multinomial"),
     xfail("nanquantile"),
     xfail("nansum"),
-    xfail("native_batch_norm"),
     xfail("nn.functional.adaptive_avg_pool1d"),
     xfail("nn.functional.adaptive_avg_pool2d"),
     xfail("nn.functional.adaptive_avg_pool3d"),
@@ -812,6 +816,7 @@ ops_unbacked_dtensor_dde = {
     xfail("__rmatmul__"),
     xfail("_segment_reduce", "lengths"),
     xfail("_segment_reduce", "offsets"),
+    xfail("_native_batch_norm_legit"),
     xfail("_unsafe_masked_index"),
     xfail("addmm"),
     xfail("addmm", "decomposed"),
@@ -863,7 +868,9 @@ ops_unbacked_dtensor_dde = {
     xfail("new_empty_strided"),
     xfail("new_full"),
     xfail("new_ones"),
+    xfail("native_batch_norm"),
     xfail("new_zeros"),
+    xfail("nn.functional.batch_norm"),
     xfail("nn.functional.celu"),
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
