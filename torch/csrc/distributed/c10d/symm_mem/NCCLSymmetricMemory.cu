@@ -66,7 +66,7 @@ struct NCCLSymmMemKey {
   void* ptr;
   std::string group_name;
 
-  bool operator==(const NCCLSymmMemKey& other) const {
+  bool operator==(const NCCLSymmMemKey& other) const noexcept {
     return ptr == other.ptr && group_name == other.group_name;
   }
 };
