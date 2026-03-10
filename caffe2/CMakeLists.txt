@@ -954,6 +954,12 @@ if(USE_ROCM)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
 
+  # IntraNodeComm loads libamd_smi at runtime via dlopen (avoids linking amd_smi
+  # which would cause bus errors if Python amdsmi loads a different copy).
+  if(USE_DISTRIBUTED)
+    target_link_libraries(torch_hip PRIVATE ${CMAKE_DL_LIBS})
+  endif()
+
   if(USE_PRECOMPILED_HEADERS)
     target_precompile_headers(torch_hip PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")

@@ -4,6 +4,9 @@
 
 #if defined(USE_ROCM)
 #include <amd_smi/amdsmi.h>
+#include <dlfcn.h>
+#include <cstdlib>
+#include <string>
 #endif
 
 namespace c10d::intra_node_comm {
@@ -35,73 +38,99 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
   }
   return nvlMesh;
 #else
+  // Load libamd_smi at runtime to avoid linking it into torch_hip (double-load
+  // with Python amdsmi causes bus errors). Types/constants from amdsmi.h only.
+  struct AmdsmiApi {
+    amdsmi_status_t (*init)(uint64_t);
+    amdsmi_status_t (*get_socket_handles)(uint32_t*, amdsmi_socket_handle*);
+    amdsmi_status_t (*get_processor_handles)(amdsmi_socket_handle, uint32_t*, amdsmi_processor_handle*);
+    amdsmi_status_t (*is_P2P_accessible)(amdsmi_processor_handle, amdsmi_processor_handle, bool*);
+  };
+  static void* amdsmi_handle = nullptr;
+  static AmdsmiApi amdsmi = {};
+  static bool amdsmi_resolved = false;
+
+  if (!amdsmi_resolved) {
+    amdsmi_resolved = true;
+    const char* rocm = std::getenv("ROCM_PATH");
+    std::string path = rocm ? std::string(rocm) + "/lib/libamd_smi.so" : "libamd_smi.so";
+    amdsmi_handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!amdsmi_handle) {
+      amdsmi_handle = dlopen("libamd_smi.so", RTLD_NOW | RTLD_LOCAL);
+    }
+    if (!amdsmi_handle) {
+      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: dlopen libamd_smi.so failed: " << dlerror();
+      return {};
+    }
+    amdsmi.init = reinterpret_cast<decltype(amdsmi.init)>(dlsym(amdsmi_handle, "amdsmi_init"));
+    amdsmi.get_socket_handles = reinterpret_cast<decltype(amdsmi.get_socket_handles)>(dlsym(amdsmi_handle, "amdsmi_get_socket_handles"));
+    amdsmi.get_processor_handles = reinterpret_cast<decltype(amdsmi.get_processor_handles)>(dlsym(amdsmi_handle, "amdsmi_get_processor_handles"));
+    amdsmi.is_P2P_accessible = reinterpret_cast<decltype(amdsmi.is_P2P_accessible)>(dlsym(amdsmi_handle, "amdsmi_is_P2P_accessible"));
+    if (!amdsmi.init || !amdsmi.get_socket_handles || !amdsmi.get_processor_handles || !amdsmi.is_P2P_accessible) {
+      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: dlsym amdsmi failed";
+      return {};
+    }
+  }
+
   NvlMesh nvlMesh = {};
   const auto worldSize = rankToDeviceIdx.size();
 
-  auto ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    LOG(ERROR) << "IntraNodeComm:: rendezvous failed in amdsmi_init, ret=" << static_cast<int>(ret);
-    return {};
-  }
-
-  //First find number of sockets
   uint32_t socket_count = 0;
-  ret = amdsmi_get_socket_handles(&socket_count, nullptr);
+  amdsmi_status_t ret = amdsmi.get_socket_handles(&socket_count, nullptr);
+  if (ret == AMDSMI_STATUS_NOT_INIT) {
+    ret = amdsmi.init(AMDSMI_INIT_AMD_GPUS);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_init failed, ret=" << static_cast<int>(ret);
+      return {};
+    }
+    socket_count = 0;
+    ret = amdsmi.get_socket_handles(&socket_count, nullptr);
+  }
   if (ret != AMDSMI_STATUS_SUCCESS) {
-    LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_get_socket_handles returned error ret=" << static_cast<int>(ret);
+    LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_get_socket_handles failed, ret=" << static_cast<int>(ret);
     return {};
   }
 
-  //Then get the socket handles
   std::vector<amdsmi_socket_handle> socket_handles(socket_count);
-  ret = amdsmi_get_socket_handles(&socket_count, &socket_handles[0]);
+  ret = amdsmi.get_socket_handles(&socket_count, &socket_handles[0]);
   if (ret != AMDSMI_STATUS_SUCCESS) {
-    LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_get_socket_handles returned error ret=" << static_cast<int>(ret);
+    LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_get_socket_handles (buffer) failed, ret=" << static_cast<int>(ret);
     return {};
   }
 
   std::vector<amdsmi_processor_handle> processor_handles;
   for (size_t i = 0; i < socket_count; ++i) {
-    // For each socket, find number of devices
     uint32_t device_count = 0;
-    ret = amdsmi_get_processor_handles(socket_handles[i], &device_count, nullptr);
+    ret = amdsmi.get_processor_handles(socket_handles[i], &device_count, nullptr);
     if (ret != AMDSMI_STATUS_SUCCESS) {
-      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_get_device_count returned error ret=" << static_cast<int>(ret);
+      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_get_processor_handles (count) failed, ret=" << static_cast<int>(ret);
       return {};
     }
-    // Then get the processor handles for all the devices on this socket
     std::vector<amdsmi_processor_handle> _processor_handles(device_count);
-    ret = amdsmi_get_processor_handles(socket_handles[i], &device_count, &_processor_handles[0]);
+    ret = amdsmi.get_processor_handles(socket_handles[i], &device_count, &_processor_handles[0]);
     if (ret != AMDSMI_STATUS_SUCCESS) {
-      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_get_processor_handles returned error ret=" << static_cast<int>(ret);
+      LOG(ERROR) << "IntraNodeComm:: getNvlMesh: amdsmi_get_processor_handles (buffer) failed, ret=" << static_cast<int>(ret);
       return {};
     }
-    // Add the processor handles for all the devices on this socket to the list of processor handles
     processor_handles.insert(processor_handles.end(), _processor_handles.begin(), _processor_handles.end());
   }
 
-  // For each device, loop over devices connected to it
+
   for (size_t idx = 0; idx < worldSize; ++idx) {
     for (size_t link = 0; link < kMaxDevices; ++link) {
       if (idx == link)
         continue;
-
       bool conn = false;
-      auto ret = amdsmi_is_P2P_accessible(processor_handles[idx], processor_handles[link], &conn);
+      ret = amdsmi.is_P2P_accessible(processor_handles[idx], processor_handles[link], &conn);
       if (ret != AMDSMI_STATUS_SUCCESS) {
-        LOG(ERROR)
-            << "IntraNodeComm: getNvlMesh: amdsmi_is_P2P_accessible returned error ret="
-            << ret;
-        amdsmi_shut_down();
+        LOG(ERROR) << "IntraNodeComm: getNvlMesh: amdsmi_is_P2P_accessible failed, ret=" << static_cast<int>(ret);
         return {};
       }
-
       if (conn) {
         nvlMesh[idx][link] += 1;
       }
     }
   }
-  amdsmi_shut_down();
   return nvlMesh;
 #endif
 }
