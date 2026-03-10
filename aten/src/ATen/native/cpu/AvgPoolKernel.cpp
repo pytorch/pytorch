@@ -949,6 +949,7 @@ void cpu_avg_pool3d_backward(
             id0 = std::max(id0, (int64_t) 0);
             ih0 = std::max(ih0, (int64_t) 0);
             iw0 = std::max(iw0, (int64_t) 0);
+            id1 = std::min(id1, input_depth);
             ih1 = std::min(ih1, input_height);
             iw1 = std::min(iw1, input_width);
 
