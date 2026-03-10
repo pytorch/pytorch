@@ -22,27 +22,6 @@ namespace {
 using ActivityTypeMap =
     std::unordered_map<libkineto::ActivityType, std::string>;
 
-// Given a named activity type map and a set of requested name strings,
-// return the matching subset of activity types.
-std::unordered_set<libkineto::ActivityType> filterActivities(
-    const ActivityTypeMap& defaults,
-    const std::unordered_set<std::string>& requested) {
-  std::unordered_set<libkineto::ActivityType> result;
-  for (const auto& name : requested) {
-    bool found = false;
-    for (const auto& [type, type_name] : defaults) {
-      if (type_name == name) {
-        result.insert(type);
-        found = true;
-        break;
-      }
-    }
-    TORCH_CHECK(
-        found, "Unknown or non-member activity type name: '", name, "'");
-  }
-  return result;
-}
-
 // clang-format off
 const ActivityTypeMap kCpuTypes{
     {libkineto::ActivityType::CPU_OP,                "CPU_OP"},
@@ -98,6 +77,28 @@ const ActivityTypeMap kPrivateUse1Types{
     {libkineto::ActivityType::PRIVATEUSE1_DRIVER,    "PRIVATEUSE1_DRIVER"},
 };
 // clang-format on
+
+// Given a named activity type map and a set of requested name strings,
+// return the matching subset of activity types.
+std::unordered_set<libkineto::ActivityType> filterActivities(
+    const ActivityTypeMap& defaults,
+    const std::unordered_set<std::string>& requested) {
+  std::unordered_set<libkineto::ActivityType> result;
+  for (const auto& name : requested) {
+    bool found = false;
+    for (const auto& [type, type_name] : defaults) {
+      if (type_name == name) {
+        result.insert(type);
+        found = true;
+        break;
+      }
+    }
+    TORCH_CHECK(
+        found, "Unknown or non-member activity type name: '", name, "'");
+  }
+  return result;
+}
+
 } // namespace
 #endif // USE_KINETO
 

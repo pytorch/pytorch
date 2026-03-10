@@ -144,7 +144,7 @@ class _KinetoProfile:
 
             Each item can be a ``ProfilerActivity`` enum (collects all default
             activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
-            to a list of individual libkineto activity type names to collect, e.g.
+            to a list of individual activity type names to collect, e.g.
             ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
@@ -658,7 +658,7 @@ class profile(_KinetoProfile):
 
             Each item can be a ``ProfilerActivity`` enum (collects all default
             activity types for that group) or a ``dict`` mapping a ``ProfilerActivity``
-            to a list of individual libkineto activity type names to collect, e.g.
+            to a list of individual activity type names to collect, e.g.
             ``{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}``.
             An empty list (e.g. ``{ProfilerActivity.CUDA: []}``) means collect
             nothing for that group.
