@@ -528,6 +528,21 @@ Tensor& _scaled_block1x128_block1x128(
     const bool use_fast_accum,
     Tensor& out) {
   // A: [M, K], B: [K, N] are FP8, scales are fp32
+  //
+  //          |  shape    | stride
+  //  --------|-----------|--------
+  //  A       | [M, K]    | row-major
+  //  B       | [K, N]    | col-major
+  //
+  // Scale layout vs CUDA:
+  //            |  CUDA shape   | CUDA stride | XPU shape   | XPU stride
+  //  ----------|---------------|-------------|-------------|------------
+  //  scale_a   | [M, K//128]   | (1, M)      | [M, K//128] | (K//128, 1)
+  //  scale_b   | [N, K//128]   | (1, N)      | [K//128, N] | (N, 1)
+  //
+  // Both represent the same K//128 x N grid of scale values.
+  // CUDA orders scale_b axes as [N, K//128] col-major;
+  // XPU uses [K//128, N] row-major.
 
   // check types
   TORCH_CHECK_VALUE(
@@ -540,7 +555,7 @@ Tensor& _scaled_block1x128_block1x128(
   const int64_t K = mat_a.sizes()[1];
   const int64_t N = mat_b.sizes()[1];
 
-  // scale_a shape: [M, K//128]
+  // scale_a: [M, K//128], row-major stride (K//128, 1)
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
           scale_a.scalar_type() == kFloat,
@@ -550,13 +565,13 @@ Tensor& _scaled_block1x128_block1x128(
       ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_a.sizes());
-  // scale_a stride: K-contiguous (stride(1) == 1)
   TORCH_CHECK_VALUE(
       scale_a.stride(1) == 1,
-      "scale_a must be K-contiguous (stride(1) == 1); got: ",
+      "scale_a must be row-major (stride(1) == 1); got: ",
       scale_a.strides());
 
-  // scale_b shape: [K//128, N]
+  // scale_b: [K//128, N], row-major stride (N, 1) — same K//128 x N grid as
+  // CUDA's [N, K//128], axes swapped to match row-major layout
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) && scale_b.size(1) == N &&
           scale_b.scalar_type() == kFloat,
@@ -566,10 +581,9 @@ Tensor& _scaled_block1x128_block1x128(
       N,
       " Float elements, got ",
       scale_b.sizes());
-  // scale_b stride: K-contiguous (stride(0) can vary, stride(1) == 1)
   TORCH_CHECK_VALUE(
       scale_b.stride(1) == 1,
-      "scale_b must be K-contiguous (stride(1) == 1); got: ",
+      "scale_b must be row-major (stride(1) == 1); got: ",
       scale_b.strides());
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
@@ -599,11 +613,20 @@ Tensor& _scaled_block128x128_block1x128(
     const bool use_fast_accum,
     Tensor& out) {
   // A: [M, K], B: [K, N] are FP8, scales are fp32
-
-  // [Note:] Unlike cuBLAS, XPU does not use L4 padding nor swizzling
-  // XPU uses natural scale shapes that match matrix dimensions:
-  // A: [M, K] -> scale_a: [M//128, K//128]
-  // B: [K, N] -> scale_b: [K//128, N]
+  //
+  //          |  shape    | stride
+  //  --------|-----------|--------
+  //  A       | [M, K]    | row-major
+  //  B       | [K, N]    | col-major
+  //
+  // Scale layout vs CUDA:
+  //   CUDA (col-major, scale_a L4-padded on K-block dim):
+  //     scale_a: [round_up(K//128,4), M//128]  stride (1, round_up(K//128,4))
+  //     scale_b: [N, K//128]                   stride (1, N)
+  //   XPU (row-major, no L4 padding):
+  //     scale_a: [M//128, K//128]  stride (K//128, 1)
+  //     scale_b: [K//128, N]       stride (N, 1)
+  // scale_b: same K//128 x N values; axis order differs per backend.
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
@@ -614,7 +637,7 @@ Tensor& _scaled_block128x128_block1x128(
   const int64_t K = mat_a.sizes()[1];
   const int64_t N = mat_b.sizes()[1];
 
-  // scale_a shape: [M//128, K//128]
+  // scale_a: [M//128, K//128], row-major stride (K//128, 1)
   TORCH_CHECK_VALUE(
       scale_a.size(0) == ceil_div<int64_t>(M, 128) &&
           scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
@@ -625,13 +648,13 @@ Tensor& _scaled_block128x128_block1x128(
       ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_a.sizes());
-  // scale_a stride: K-contiguous (stride(1) == 1)
   TORCH_CHECK_VALUE(
       scale_a.stride(1) == 1,
-      "scale_a must be K-contiguous (stride(1) == 1); got: ",
+      "scale_a must be row-major (stride(1) == 1); got: ",
       scale_a.strides());
 
-  // scale_b shape: [K//128, N].
+  // scale_b: [K//128, N], row-major stride (N, 1) — same K//128 x N grid as
+  // CUDA's [N, K//128], axes swapped to match row-major layout
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) && scale_b.size(1) == N &&
           scale_b.scalar_type() == kFloat,
@@ -641,11 +664,9 @@ Tensor& _scaled_block128x128_block1x128(
       N,
       " Float elements, got ",
       scale_b.sizes());
-  // scale_b stride:
-  // Note that this is different with CUDA. CUDA has col-major scales.
   TORCH_CHECK_VALUE(
       scale_b.stride(1) == 1,
-      "scale_b must be K-contiguous (stride(1) == 1); got: ",
+      "scale_b must be row-major (stride(1) == 1); got: ",
       scale_b.strides());
 
   auto scaling_choice_a = ScalingType::BlockWise128x128;
@@ -674,14 +695,21 @@ Tensor& _scaled_block1x128_block128x128(
     const c10::ScalarType out_dtype,
     const bool use_fast_accum,
     Tensor& out) {
-  // Restrictions:
   // A: [M, K], B: [K, N] are FP8, scales are fp32
-  // As: [M x K // 128]
-  // Bs: [K // 128 x N // 128]
-
-  // XPU uses natural scale shapes that match matrix dimensions:
-  // A: [M, K] -> scale_a: [M, K//128]
-  // B: [K, N] -> scale_b: [K//128, N//128]
+  //
+  //          |  shape    | stride
+  //  --------|-----------|--------
+  //  A       | [M, K]    | row-major
+  //  B       | [K, N]    | col-major
+  //
+  // Scale layout vs CUDA:
+  //   CUDA (col-major, scale_b L4-padded on K-block dim):
+  //     scale_a: [M, K//128]                   stride (1, M)
+  //     scale_b: [round_up(K//128,4), N//128]  stride (1, round_up(K//128,4))
+  //   XPU (row-major, no L4 padding):
+  //     scale_a: [M, K//128]       stride (K//128, 1)
+  //     scale_b: [K//128, N//128]  stride (N//128, 1)
+  // scale_a: same [M, K//128] shape; CUDA col-major stride, XPU row-major.
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
@@ -692,7 +720,7 @@ Tensor& _scaled_block1x128_block128x128(
   int64_t K = mat_a.size(1);
   int64_t N = mat_b.size(1);
 
-  // scale_a shape: [M, K//128]
+  // scale_a: [M, K//128], row-major stride (K//128, 1)
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
           scale_a.scalar_type() == kFloat,
@@ -702,12 +730,12 @@ Tensor& _scaled_block1x128_block128x128(
       ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_a.sizes());
-  // scale_a stride: K-contiguous (stride(1) == 1)
   TORCH_CHECK_VALUE(
       scale_a.stride(1) == 1,
-      "scale_a must be K-contiguous (stride(1) == 1); got: ",
+      "scale_a must be row-major (stride(1) == 1); got: ",
       scale_a.strides());
-  // scale_b shape: [K//128, N//128]
+  // scale_b: [K//128, N//128], row-major stride (N//128, 1) — no L4 padding vs
+  // CUDA's [round_up(K//128, 4), N//128]
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_b.size(1) == ceil_div<int64_t>(N, 128) &&
@@ -718,10 +746,9 @@ Tensor& _scaled_block1x128_block128x128(
       ceil_div<int64_t>(N, 128),
       " Float elements, got ",
       scale_b.sizes());
-  // scale_b stride: K-contiguous (stride(1) == 1)
   TORCH_CHECK_VALUE(
       scale_b.stride(1) == 1,
-      "scale_b must be K-contiguous (stride(1) == 1); got: ",
+      "scale_b must be row-major (stride(1) == 1); got: ",
       scale_b.strides());
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
