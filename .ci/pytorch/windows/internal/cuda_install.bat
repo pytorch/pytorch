@@ -216,18 +216,44 @@ goto set_cuda_env_vars
 :: Set the correct cuDNN variables for the CUDA version, then install if needed.
 
 set CUDNN_LIB_FOLDER="lib"
-if %CUDA_VER% EQU 126 set CUDNN_FOLDER=cudnn-windows-x86_64-9.10.2.21_cuda12-archive
-if %CUDA_VER% EQU 128 set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda12-archive
-if %CUDA_VER% EQU 129 set CUDNN_FOLDER=cudnn-windows-x86_64-9.17.1.4_cuda12-archive
-if %CUDA_VER% EQU 130 set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda13-archive
+if %CUDA_VER% EQU 126 (
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.10.2.21_cuda12-archive
+    set EXPECTED_CUDNN_VERSION=9.10.2
+)
+if %CUDA_VER% EQU 128 (
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda12-archive
+    set EXPECTED_CUDNN_VERSION=9.19.0
+)
+if %CUDA_VER% EQU 129 (
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.17.1.4_cuda12-archive
+    set EXPECTED_CUDNN_VERSION=9.17.1
+)
+if %CUDA_VER% EQU 130 (
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.19.0
+)
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 
-if exist "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\cudnn.h" (
-    echo cuDNN already installed at %ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%
+set "CUDNN_VERSION_FILE=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\cudnn_version.h"
+
+if not exist "%CUDNN_VERSION_FILE%" (
+    echo cuDNN not found, installing %CUDNN_FOLDER%...
+    goto install_cudnn
+)
+
+for /f "tokens=3" %%a in ('findstr /C:"#define CUDNN_MAJOR " "%CUDNN_VERSION_FILE%"') do set INSTALLED_MAJOR=%%a
+for /f "tokens=3" %%a in ('findstr /C:"#define CUDNN_MINOR " "%CUDNN_VERSION_FILE%"') do set INSTALLED_MINOR=%%a
+for /f "tokens=3" %%a in ('findstr /C:"#define CUDNN_PATCHLEVEL " "%CUDNN_VERSION_FILE%"') do set INSTALLED_PATCHLEVEL=%%a
+set "INSTALLED_CUDNN_VERSION=%INSTALLED_MAJOR%.%INSTALLED_MINOR%.%INSTALLED_PATCHLEVEL%"
+
+if "%INSTALLED_CUDNN_VERSION%" == "%EXPECTED_CUDNN_VERSION%" (
+    echo cuDNN %INSTALLED_CUDNN_VERSION% already installed at %ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%
     goto set_cuda_env_vars
 )
 
-echo cuDNN not found, installing %CUDNN_FOLDER%...
+echo cuDNN version mismatch: installed %INSTALLED_CUDNN_VERSION%, expected %EXPECTED_CUDNN_VERSION%. Reinstalling...
+
+:install_cudnn
 
 if not exist "%SRC_DIR%\temp_build" mkdir "%SRC_DIR%\temp_build"
 
