@@ -2569,9 +2569,9 @@ def compile_fx(
     """
     if decompositions is not None:
         _decomps_ref = decompositions
-        get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = (
-            lambda: _decomps_ref  # noqa: E731
-        )
+
+        def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
+            return _decomps_ref
     else:
         get_decomp_fn = select_decomp_table
 
