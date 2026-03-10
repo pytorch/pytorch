@@ -294,5 +294,5 @@ def config_of(
             if isinstance(arg, TensorArg) and _is_tensor_within_2gb(arg)
         )
 
-    # pyrefly: ignore [bad-argument-type]
+    # pyrefly: ignore [bad-argument-count]
     return AttrsDescriptorWrapper(divisible_by_16, equal_to_1, pointer_range_32)
