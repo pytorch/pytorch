@@ -724,16 +724,11 @@ void _apply_sparse_csr_linear_solve(
   TORCH_CHECK(b.dim() == 1 || b.dim() == 2, "b must be a 1D or 2D tensor");
   TORCH_CHECK(b.stride(0) == 1, "b must be a column major tensor");
   TORCH_CHECK(b.size(0) == A.size(0), "linear system size mismatch.");
-  if (b.dim() == 2 && b.size(1) > 1) {
-    TORCH_CHECK(b.stride(1) >= b.size(0), "b must be a column major tensor");
-  }
 
   TORCH_CHECK(x.dim() == b.dim(), "x must have the same number of dimensions as b");
   TORCH_CHECK(x.stride(0) == 1, "x must be a column major tensor");
   TORCH_CHECK(x.size(0) == A.size(1), "linear system size mismatch.");
-  if (x.dim() == 2 && x.size(1) > 1) {
-    TORCH_CHECK(x.stride(1) >= x.size(0), "x must be a column major tensor");
-  }
+
   if (b.dim() == 2) {
     TORCH_CHECK(b.size(1) == x.size(1), "x columns count must be the same as b");
   }
@@ -816,7 +811,6 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
 }
 
 static Tensor _sparse_csr_linear_solve_impl(const Tensor& A, const Tensor& b, const bool left, Tensor* out_opt) {
-  TORCH_CHECK(b.numel() > 0, "Expected non-empty other tensor, but found empty tensor");
   Tensor out;
   if (out_opt != nullptr) {
     out = *out_opt;
