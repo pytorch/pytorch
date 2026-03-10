@@ -797,21 +797,6 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn({}, x), opt_fn({}, x))
         self.assertEqual(fn({"a": 1}, x), opt_fn({"a": 1}, x))
 
-    def test_no_recompile_on_setitem_side_effect(self):
-        d = {"a": 5, "b": 2}
-
-        @torch.compile(backend="eager")
-        def fn(x, d):
-            d["c"] = 3
-            return x * d["a"]
-
-        x = torch.randn(4)
-        fn(x, d)
-        # Second call should not recompile despite __setitem__ adding a new
-        # key (changing len) on the previous call.
-        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
-            self.assertEqual(fn(x, d), x * 5)
-
     def test_udf_dict_reconstruction(self):
         class MyDict(dict):
             pass
@@ -1301,8 +1286,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         from typing import Union
 
         def fn(x):
-            d = {Union[int, str]: x * 2, Union[float, bool]: x * 3}
-            return d[Union[int, str]] + d[Union[float, bool]]
+            d = {Union[int, str]: x * 2, Union[float, bool]: x * 3}  # noqa: UP007
+            return d[Union[int, str]] + d[Union[float, bool]]  # noqa: UP007
 
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -2200,6 +2185,130 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         p = self.thetype({"a": 1, "b": 2, "c": 3})
         p.move_to_end("a")
         self.assertEqual(list(p.keys()), list("bc"))
+
+
+class DunderDictVariableTests(torch._dynamo.test_case.TestCase):
+    """Tests for DunderDictVariable (object.__dict__ handling in Dynamo)"""
+
+    def test_dunder_dict_items_includes_mutations(self):
+        """Test that __dict__.items() includes both original and mutated keys"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            items = dict(obj.__dict__.items())
+            return items
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, {"a": 1, "b": 2, "c": 3})
+
+    def test_dunder_dict_keys_includes_mutations(self):
+        """Test that __dict__.keys() includes both original and mutated keys"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            obj.d = 4
+            keys = sorted(obj.__dict__.keys())
+            return keys
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, ["a", "b", "c", "d"])
+
+    def test_dunder_dict_values_includes_mutations(self):
+        """Test that __dict__.values() includes both original and mutated values"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            values = sorted(obj.__dict__.values())
+            return values
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, [1, 2, 3])
+
+    def test_dunder_dict_comprehension_with_mutations(self):
+        """Test dict comprehension over __dict__ with mutations (scheduler use case)"""
+
+        class SimpleScheduler:
+            def __init__(self):
+                self.base_lrs = [0.1]
+                self.last_epoch = 0
+
+            def state_dict(self):
+                state = dict(self.__dict__.items())
+                return state
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(scheduler):
+            scheduler.last_epoch = 5
+            scheduler.new_attr = "test"
+            return scheduler.state_dict()
+
+        scheduler = SimpleScheduler()
+        result = fn(scheduler)
+        self.assertEqual(result["base_lrs"], [0.1])
+        self.assertEqual(result["last_epoch"], 5)
+        self.assertEqual(result["new_attr"], "test")
+
+    def test_dunder_dict_multiple_mutations(self):
+        """Test __dict__ operations with multiple mutations"""
+
+        class MyClass:
+            def __init__(self):
+                self.x = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.y = 2
+            obj.z = 3
+            obj.y = 20
+            items = dict(obj.__dict__.items())
+            keys = set(obj.__dict__.keys())
+            return items, keys
+
+        obj = MyClass()
+        items, keys = fn(obj)
+        self.assertEqual(items, {"x": 1, "y": 20, "z": 3})
+        self.assertEqual(keys, {"x", "y", "z"})
+
+    def test_dunder_dict_items_iteration(self):
+        """Test iterating over __dict__.items() with mutations"""
+
+        class MyClass:
+            def __init__(self):
+                self.a = 1
+                self.b = 2
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.c = 3
+            result = []
+            for k, v in obj.__dict__.items():
+                result.append((k, v))
+            return sorted(result)
+
+        obj = MyClass()
+        result = fn(obj)
+        self.assertEqual(result, [("a", 1), ("b", 2), ("c", 3)])
 
 
 if __name__ == "__main__":

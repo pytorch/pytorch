@@ -388,6 +388,7 @@ def propagate_mm(mm_node: Node) -> _HandlerRetType:
         prims.convert_element_type.default,
         aten.exp.default,
         aten.log.default,
+        aten.tanh.default,
         aten.add.Tensor,
         aten.sub.Tensor,
         aten.div.Tensor,

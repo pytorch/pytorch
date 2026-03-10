@@ -559,6 +559,55 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
                 opt_gn = torch.compile(gn, backend="eager", fullgraph=True)
                 opt_gn(torch.ones(3))
 
+    def test_as_python_constant_super_delegation_no_false_positive(self):
+        """Passing a reference-type opaque object to a value-type constructor
+        should NOT produce a false 'self-referential' error.
+
+        When OpaqueObjectClassVariable.call_function evaluates constructor args
+        via as_python_constant(), a reference-type TorchScriptObjectVariable's
+        as_python_constant delegates to UserDefinedObjectVariable's via super().
+        The _add_call_once_guard must key on id(original_method) rather than the
+        method name string, so that this super() delegation is not mistaken for
+        a self-referential call.
+        """
+        from torch._library.opaque_object import OpaqueBase, register_opaque_type
+
+        class _Counter(OpaqueBase):
+            def __init__(self, start, end):
+                self.start = start
+                self.end = end
+
+        register_opaque_type(_Counter, typ="reference")
+
+        class _ValueWrapper(OpaqueBase):
+            def __init__(self, inner):
+                self.inner = inner
+
+            def __eq__(self, other):
+                return isinstance(other, _ValueWrapper) and self.inner == other.inner
+
+            def __hash__(self):
+                return hash(id(self.inner))
+
+            def __fx_repr__(self):
+                return "_ValueWrapper(inner=None)", {"_ValueWrapper": _ValueWrapper}
+
+        register_opaque_type(_ValueWrapper, typ="value")
+
+        counter = _Counter(0, 10)
+
+        @torch.compile(backend="eager", fullgraph=False)
+        def f(c):
+            return _ValueWrapper(c)
+
+        # Counter is a reference-type opaque object. Passing it to a value-type
+        # constructor triggers as_python_constant() on the TSOV, which delegates
+        # via super() to UDOV. This should fail because reference types are not
+        # constants, but the error must NOT be "self-referential".
+        with self.assertRaises(RuntimeError) as ctx:
+            f(counter)
+        self.assertNotIn("self-referential", str(ctx.exception))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

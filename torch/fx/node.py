@@ -24,7 +24,7 @@ __all__ = ["Node", "map_arg", "map_aggregate", "has_side_effect"]
 
 log = logging.getLogger(__name__)
 
-BaseArgumentTypes = Union[
+BaseArgumentTypes = Union[  # noqa: UP007
     str,
     int,
     float,
@@ -42,9 +42,9 @@ BaseArgumentTypes = Union[
 ]
 base_types = typing.get_args(BaseArgumentTypes)
 
-Target: TypeAlias = Union[Callable[..., Any], str]
+Target: TypeAlias = Callable[..., Any] | str
 
-Argument = Optional[
+Argument = Optional[  # noqa: UP007, UP045
     Union[
         tuple["Argument", ...],
         Sequence["Argument"],
@@ -269,9 +269,9 @@ class Node(_NodeBase):
     target: "Target"
     _input_nodes: dict["Node", None]
     users: dict["Node", None]
-    type: Optional[Any]
+    type: Any | None
     _sort_key: Any
-    _repr_fn: Optional[Callable[["Node"], str]]
+    _repr_fn: Callable[["Node"], str] | None
     meta: dict[str, Any]
 
     # Properties implemented in C++ (_NodeBase) - type stubs in torch/_C/__init__.pyi
@@ -280,7 +280,7 @@ class Node(_NodeBase):
     next: "Node"
     prev: "Node"
     all_input_nodes: list["Node"]
-    stack_trace: Optional[str]
+    stack_trace: str | None
 
     @staticmethod
     def _pretty_print_target(target: object) -> str:
@@ -311,11 +311,11 @@ class Node(_NodeBase):
 # Helper function for format_node, called from C++
 def _format_node_impl(
     node: Node,
-    placeholder_names: Optional[list[str]] = None,
-    maybe_return_typename: Optional[list[str]] = None,
+    placeholder_names: list[str] | None = None,
+    maybe_return_typename: list[str] | None = None,
     *,
     include_tensor_metadata: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """
     Return a descriptive string representation of ``node``.
 

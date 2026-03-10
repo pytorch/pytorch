@@ -64,8 +64,8 @@ class _BucketCapacityConfig:
     @classmethod
     def create(
         cls,
-        bucket_cap_mb: Optional[int],
-        bucket_cap_mb_list: Optional[list[int]],
+        bucket_cap_mb: int | None,
+        bucket_cap_mb_list: list[int] | None,
         use_python_reducer: bool,
     ) -> "_BucketCapacityConfig":
         """Factory method to create a BucketCapacityConfig from user inputs.
@@ -807,7 +807,7 @@ class DistributedDataParallel(Module, Joinable):
         mixed_precision: _MixedPrecision | None = None,
         device_mesh=None,
         skip_all_reduce_unused_params=False,
-        bucket_cap_mb_list: Optional[list[int]] = None,
+        bucket_cap_mb_list: list[int] | None = None,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -908,12 +908,13 @@ class DistributedDataParallel(Module, Joinable):
             or self.is_multi_device_module
         ):
             if device_ids or output_device:
+                devices = {p.device for p in self._module_parameters}
                 self._log_and_throw(
                     ValueError,
                     "DistributedDataParallel device_ids and output_device arguments "
                     "only work with single-device/multiple-device GPU modules or CPU modules, "
                     f"but got device_ids {device_ids}, output_device {output_device}, "
-                    f"and module parameters { ({p.device for p in self._module_parameters}) }.",
+                    f"and module parameters {devices}.",
                 )
 
             self.device_ids = None

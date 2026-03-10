@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import platform
 import uuid
@@ -6,6 +8,7 @@ import warnings
 import weakref
 from collections import defaultdict
 from typing import *  # noqa: F403
+from typing_extensions import Self
 import enum
 from weakref import ReferenceType
 
@@ -14,6 +17,7 @@ import torch.fx.traceback as fx_traceback
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch._C._autograd import _make_saved_tensor, SavedTensor
 from typing import NoReturn
 
 __all__ = [
@@ -38,11 +42,11 @@ __all__ = [
 
 _DEFAULT_DETERMINISM_MODE = "default"
 
-_checkpoint_debug_enabled: Optional[bool] = None
+_checkpoint_debug_enabled: bool | None = None
 
 
 @contextlib.contextmanager
-def set_checkpoint_debug_enabled(enabled: Optional[bool]):
+def set_checkpoint_debug_enabled(enabled: bool | None):
     """
     Context manager that sets whether checkpoint should print additional debug
     information when running. See the ``debug`` flag for
@@ -106,7 +110,7 @@ class DefaultDeviceType:
     to save and restore for recomputation.
     """
 
-    _default_device_type: Optional[str] = None
+    _default_device_type: str | None = None
 
     @staticmethod
     def set_device_type(device: str = "cuda") -> None:
@@ -349,7 +353,7 @@ def noop_context_fn():
 def checkpoint(
     function,
     *args,
-    use_reentrant: Optional[bool] = None,
+    use_reentrant: bool | None = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
@@ -748,7 +752,7 @@ def _internal_assert(cond) -> None:
 #    by holder=None. We skip over them. We still save x at (4) (since its holder
 #    is still alive.)
 
-_enable_checkpoint_early_stop: Optional[bool] = None
+_enable_checkpoint_early_stop: bool | None = None
 
 
 @contextlib.contextmanager
@@ -788,51 +792,13 @@ class _Handle:
 
 class _Holder:
     def __init__(self) -> None:
-        self.handles: Dict[int, Optional[_Handle]] = {}
-
-
-class _NoopSaveInputs(torch.autograd.Function):
-    @staticmethod
-    # pyrefly: ignore [bad-override]
-    def forward(*args):
-        return torch.empty((0,))
-
-    @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
-        # Only tensors can be saved with ctx.save_for_backward, everything else
-        # is captured by get_args, which is saved directly on ctx
-        tensor_indices, tensors = zip(
-            *[(i, o) for i, o in enumerate(inputs) if isinstance(o, torch.Tensor)], strict=False
-        )
-        idx2saved_idx = {b: a for a, b in enumerate(tensor_indices)}
-        # args but with tensors replaced with None as placeholders
-        args = [None if isinstance(o, torch.Tensor) else o for o in inputs]
-
-        def get_args(saved_tensors):
-            # restore the placeholders with the original tensors grabbed from
-            # ctx.saved_tensors (which may be saved on a parent checkpoint if
-            # this checkpoint is nested, and that would trigger a recursive
-            # unpack!)
-            ret = [
-                saved_tensors[idx2saved_idx[i]] if i in tensor_indices else o
-                for i, o in enumerate(args)
-            ]
-            # grab the tail since we also saved the dummy to avoid having to explicitly
-            # handle the case where there are no tensor inputs
-            return ret[1:]
-
-        ctx.get_args = get_args
-        ctx.save_for_backward(*tensors)
-
-    @staticmethod
-    def backward(ctx, *grad_outputs) -> NoReturn:
-        raise AssertionError("Did not expect to backward on this graph")
+        self.handles: dict[int, _Handle | None] = {}
 
 
 class _CheckpointFrame:
     def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn) -> None:
         self.recompute_fn = recompute_fn
-        self.input_saver = None
+        self.saved_args: List[Any] = []
         self.weak_holders: List[ReferenceType] = []
         # We store this as a weakkeydictionary so that in the case of a partial
         # backward, the entries in the dict are cleared alongside the Holder
@@ -854,6 +820,19 @@ class _CheckpointFrame:
         self.x_metadatas = []
         self.forward_completed = False
         self.ignore_saved_mismatch = False
+
+    def save_inputs(self, *args):
+        self.saved_args = [
+            _make_saved_tensor(arg, is_output=False)
+            if isinstance(arg, torch.Tensor) else arg
+            for arg in args
+        ]
+
+    def get_inputs(self):
+        return [
+            arg.unpack() if isinstance(arg, SavedTensor) else arg
+            for arg in self.saved_args
+        ]
 
     def check_recomputed_tensors_match(self, gid) -> None:
         if self.ignore_saved_mismatch:
@@ -1078,7 +1057,7 @@ class _StopRecomputationError(Exception):
 
 
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
-    def __init__(self, target_frame_ref: ReferenceType, gid: Union["GraphExecGroup", int]) -> None:
+    def __init__(self, target_frame_ref: ReferenceType, gid: GraphExecGroup | int) -> None:
         def pack_hook(x):
             x = x.detach() if x.requires_grad else x
             target_frame = target_frame_ref()
@@ -1152,7 +1131,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
         def unpack_hook(holder):
             # First check if we're inside a GraphExecGroup context
-            gid: Union[GraphExecGroup, None, int] = GraphExecGroup._get_current_group()
+            gid: GraphExecGroup | None | int = GraphExecGroup._get_current_group()
             if gid is None:
                 # Fallback to using the current graph task id
                 gid = torch._C._current_graph_task_id()
@@ -1161,8 +1140,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                     gid = int(uuid.uuid4())
 
             if not frame.is_recomputed[gid]:
-                ctx = frame.input_saver.grad_fn
-                args = ctx.get_args(ctx.saved_tensors)
+                args = frame.get_inputs()
 
                 try:
                     with _recomputation_hook(
@@ -1215,8 +1193,8 @@ def _is_compiling(func, args, kwargs):
 class _VersionWrapper:
     # Check that cached tensors are not mutated.
     def __init__(self, val) -> None:
-        self.val: Union[torch.Tensor, Any] = val
-        self.version: Optional[int] = val._version if isinstance(val, torch.Tensor) else None
+        self.val: torch.Tensor | Any = val
+        self.version: int | None = val._version if isinstance(val, torch.Tensor) else None
 
     def get_val(self, allow_cache_entry_mutation):
         if self.version is not None and not allow_cache_entry_mutation:
@@ -1584,8 +1562,7 @@ def _checkpoint_without_reentrant_generator(
         contextlib.nullcontext(),
     )
 
-    def recompute_fn(*inputs) -> None:
-        kwargs, *args = inputs
+    def recompute_fn(*args) -> None:
         # This will be called later during recomputation. This wrapping enables
         # the necessary global state to be captured.
         rng_devices = []
@@ -1611,13 +1588,12 @@ def _checkpoint_without_reentrant_generator(
         unpack_error_cb,
         metadata_fn
     )
-    dummy = torch.empty((0,), requires_grad=True)
-    new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
 
-    # When ambient grad_mode is False
-    if new_frame.input_saver.grad_fn is None:
+    if not torch.is_grad_enabled():
         yield
         return
+
+    new_frame.save_inputs(*args)
 
     with _checkpoint_hook(new_frame), forward_context:
         yield
@@ -1651,7 +1627,7 @@ class GraphExecGroup:
         is a no-op otherwise.
     """
 
-    def __enter__(self) -> "GraphExecGroup":
+    def __enter__(self) -> Self:
         if torch._C._get_graph_exec_group() is not None:
             raise RuntimeError(
                 "GraphExecGroup contexts cannot be nested. "
@@ -1664,7 +1640,7 @@ class GraphExecGroup:
         torch._C._set_graph_exec_group(None)
 
     @classmethod
-    def _get_current_group(cls) -> Optional["GraphExecGroup"]:
+    def _get_current_group(cls) -> GraphExecGroup | None:
         # Private API to be used by utils like AC
         return torch._C._get_graph_exec_group()
 

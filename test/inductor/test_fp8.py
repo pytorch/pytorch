@@ -2,7 +2,6 @@
 
 import functools
 import unittest
-from typing import Union
 
 import torch
 from torch import Tensor
@@ -56,8 +55,8 @@ def _is_cuda_device(device) -> bool:
 
 
 def _fix_fp8_dtype_for_rocm(
-    dtype: Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]], device
-) -> Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]]:
+    dtype: torch.dtype | list[torch.dtype] | tuple[torch.dtype], device
+) -> torch.dtype | list[torch.dtype] | tuple[torch.dtype]:
     # This function is used to change FP8 data types
     # with MI300 supported FP8 types if device is GPU:
     #    e4m3fn -> e4m3fnuz

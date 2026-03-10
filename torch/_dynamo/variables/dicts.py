@@ -47,7 +47,12 @@ from ..utils import (
     raise_args_mismatch,
     specialize_symnode,
 )
-from .base import ValueMutationExisting, ValueMutationNew, VariableTracker
+from .base import (
+    AttributeMutationExisting,
+    AttributeMutationNew,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .constant import (
     CONSTANT_VARIABLE_FALSE,
     CONSTANT_VARIABLE_NONE,
@@ -461,9 +466,8 @@ class ConstDictVariable(VariableTracker):
                     f"Debug representation of the key is {arg.debug_repr()!r}"
                 )
             except Exception:
-                error_message = VariableTracker.build(
-                    tx, f"Dict key lookup failed for {str(arg)}"
-                )
+                error_message = f"Dict key lookup failed for {str(arg)}"
+            error_message = VariableTracker.build(tx, error_message)
             raise_observed_exception(KeyError, tx, args=[error_message])
         return self.items[key]
 
@@ -636,9 +640,7 @@ class ConstDictVariable(VariableTracker):
             if not arg_hashable:
                 raise_unhashable(args[0], tx)
 
-            # No dict guard needed here - we already guard on args[0], and
-            # lazy dict guarding will insert len/dict_keys_match guards
-            # elsewhere if needed.
+            self.install_dict_keys_match_guard()
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
                     tx,
@@ -895,9 +897,10 @@ class ConstDictVariable(VariableTracker):
                 new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
                 return new_dict_vt
             else:
-                err_msg = (
+                err_msg = VariableTracker.build(
+                    tx,
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
-                    f"and '{other.python_type().__name__}'"
+                    f"and '{other.python_type().__name__}'",
                 )
                 raise_observed_exception(TypeError, tx, args=[err_msg])
         elif name == "__ior__":
@@ -1967,12 +1970,16 @@ class DunderDictVariable(ConstDictVariable):
 
     @classmethod
     def create(
-        cls, tx: "InstructionTranslator", vt: VariableTracker
+        cls,
+        tx: "InstructionTranslator",
+        vt: VariableTracker,
+        dict_proxy: dict[str, VariableTracker],
     ) -> "DunderDictVariable":
-        mutation = ValueMutationExisting() if vt.source else ValueMutationNew()
+        mutation = AttributeMutationExisting() if vt.source else AttributeMutationNew()
         source = vt.source and AttrSource(vt.source, "__dict__")
         return cls(
             vt,
+            dict_proxy=types.MappingProxyType(dict_proxy),
             side_effects=tx.output.side_effects,
             mutation_type=mutation,
             source=source,
@@ -1981,29 +1988,137 @@ class DunderDictVariable(ConstDictVariable):
     def __init__(
         self,
         vt: VariableTracker,
+        dict_proxy: types.MappingProxyType[str, VariableTracker],  # object __dict__
         side_effects: "SideEffects",
         **kwargs: Any,
     ) -> None:
         super().__init__({}, **kwargs)
         self.items = SideEffectsProxyDict(vt, side_effects)
+        # Saves a "proxy" dict to the original __dict__ of the object
+        # This allows track mutations on __dict__ (using side effects) without
+        # modifying the original __dict__
+        self.dict_proxy = dict_proxy
 
     def setitem(self, name: str, value: VariableTracker) -> None:
         self.items[name] = value
 
     def getitem(self, name: str) -> VariableTracker:
-        return self.items[name]
+        if name in self.items:
+            return self.items[name]
+        else:
+            return self.dict_proxy[name]
 
     def contains(self, name: str) -> bool:
-        return name in self.items
+        return name in self.items or name in self.dict_proxy
 
     def getitem_or_default(
         self,
         name: str,
         default: Callable[[], VariableTracker],
     ) -> VariableTracker:
-        if name in self.items:
-            return self.items[name]
+        if self.contains(name):
+            return self.getitem(name)
         else:
             value = default()
             self.items[name] = value
             return value
+
+    # We need to overload the three functions below:
+    # - __contains__
+    # - getitem_const
+    # - maybe_getitem_const
+    # - getitem_const_raise_exception_if_absent
+    # because the default implementation in ConstDictVariable will directly look
+    # up the name in self.items, which might add undesired guards.
+    def __contains__(self, vt: VariableTracker) -> bool:
+        name = vt.as_python_constant()
+        return self.contains(name)
+
+    def getitem_const(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker:
+        name = arg.as_python_constant()
+        if self.contains(name):
+            return self.getitem(name)
+        return super().getitem_const(tx, arg)
+
+    def maybe_getitem_const(self, arg: VariableTracker) -> Optional[VariableTracker]:
+        name = arg.as_python_constant()
+        if self.contains(name):
+            return self.getitem(name)
+        return None
+
+    def getitem_const_raise_exception_if_absent(self, tx, arg):
+        name = arg.as_python_constant()
+        if self.contains(name):
+            return self.getitem(name)
+        return super().getitem_const_raise_exception_if_absent(tx, arg)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("items", "keys", "values"):
+            if args or kwargs:
+                raise_args_mismatch(
+                    tx,
+                    name,
+                    "0 args and 0 kwargs",
+                    f"{len(args)} args and {len(kwargs)} kwargs",
+                )
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source)
+            merged_items = self._get_merged_dict(tx)
+            merged_dict = ConstDictVariable(merged_items, user_cls=dict)
+
+            if name == "items":
+                return DictItemsVariable(merged_dict)
+            elif name == "keys":
+                return DictKeysVariable(merged_dict)
+            elif name == "values":
+                return DictValuesVariable(merged_dict)
+        elif name == "get":
+            if len(args) not in (1, 2):
+                raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
+            name = args[0].as_python_constant()
+            if self.contains(name):
+                return self.getitem(name)
+            return CONSTANT_VARIABLE_NONE if len(args) == 1 else args[1]
+        return super().call_method(tx, name, args, kwargs)
+
+    def _get_merged_dict(
+        self, tx: "InstructionTranslator"
+    ) -> dict[VariableTracker, VariableTracker]:
+        """Get all items as a proper dict, merging dict_proxy and side effects."""
+        Hasher = ConstDictVariable._HashableTracker
+
+        def make_key(k):
+            return Hasher(VariableTracker.build(tx, k))
+
+        merged = {}
+
+        for k, v in self.dict_proxy.items():
+            merged[make_key(k)] = v
+
+        d = self.items.side_effects.store_attr_mutations.get(self.items.item, {})
+        for k, v in d.items():
+            if isinstance(v, variables.DeletedVariable):
+                key_obj = make_key(k)
+                merged.pop(key_obj, None)
+            else:
+                merged[make_key(k)] = v
+
+        return merged
+
+    # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
+    # so we don't need to install guards. Guard installation is overridden to no-op.
+    def install_dict_keys_match_guard(self) -> None:
+        pass
+
+    def install_dict_contains_guard(
+        self, tx: "InstructionTranslator", args: list[VariableTracker]
+    ) -> None:
+        pass

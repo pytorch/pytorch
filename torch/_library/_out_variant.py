@@ -62,6 +62,12 @@ def _has_valid_out_variant_returns(
     return True
 
 
+def get_out_arg_names(out_op: torch._ops.OpOverload) -> list[str]:
+    """Get the names of out arguments for an out variant op."""
+    schema = out_op._schema
+    return [arg.name for arg in schema.arguments if _is_mutable_arg(arg)]
+
+
 def to_out_variant(op: torch._ops.OpOverload) -> torch._ops.OpOverload | None:
     """
     Given a functional operator overload, return its corresponding out variant.

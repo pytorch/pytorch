@@ -14,7 +14,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
-from typing import Optional, TypeVar, Union
+from typing import TypeVar
 from unittest import expectedFailure, mock, skip, skipUnless
 from unittest.mock import patch
 
@@ -96,7 +96,7 @@ M = TypeVar("M", bound=Callable)
 
 
 def large_tensor_test_class(
-    size: str, device: Optional[Union[torch.device, str]] = None
+    size: str, device: torch.device | str | None = None
 ) -> Callable[[type[T]], type[T]]:
     def decorator(cls: type[T]) -> type[T]:
         for name, method in list(cls.__dict__.items()):
@@ -427,7 +427,7 @@ def query_key_value_clones(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ):
     """Clones the query, key, and value tensors and moves them to the specified dtype."""
     if dtype is None:
@@ -462,7 +462,7 @@ class TestFlexAttention(InductorTestCase):
         ref_out: torch.Tensor,
         compiled_out: torch.Tensor,
         fudge_factor: float,
-        tensor_name: Optional[str] = None,
+        tensor_name: str | None = None,
         fudge_atol: float = 0,
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
@@ -548,11 +548,11 @@ class TestFlexAttention(InductorTestCase):
         Q_H: int = H,
         Q_S: int = S,
         Q_D: int = D,
-        KV_B: Optional[int] = None,
-        KV_H: Optional[int] = None,
-        KV_S: Optional[int] = None,
-        V_D: Optional[int] = None,
-        block_mask: Optional[BlockMask] = None,
+        KV_B: int | None = None,
+        KV_H: int | None = None,
+        KV_S: int | None = None,
+        V_D: int | None = None,
+        block_mask: BlockMask | None = None,
     ):
         requires_grad = device in DEVICE_SUPPORTS_BACKWARDS
         if KV_B is None:
@@ -639,7 +639,7 @@ class TestFlexAttention(InductorTestCase):
 
     def preprocess_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Callable | None,
         q: Tensor,
         k: Tensor,
         v: Tensor,
@@ -730,14 +730,14 @@ class TestFlexAttention(InductorTestCase):
 
     def run_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Callable | None,
         q: Tensor,
         k: Tensor,
         v: Tensor,
         dtype: torch.dtype,
         device: str,
-        block_mask: Optional[BlockMask] = None,
-        kernel_options: Optional[dict] = None,
+        block_mask: BlockMask | None = None,
+        kernel_options: dict | None = None,
     ) -> tuple[Tensor, Tensor]:
         B, Q_H, Q_S, KV_H, KV_S = (
             q.shape[0],
@@ -792,7 +792,7 @@ class TestFlexAttention(InductorTestCase):
 
     def run_test_with_paged_attention(
         self,
-        score_mod: Optional[Callable],
+        score_mod: Callable | None,
         dtype: torch.dtype,
         device,
         Q_B: int = B,
@@ -803,7 +803,7 @@ class TestFlexAttention(InductorTestCase):
         KV_H: int = H,
         KV_S: int = S,
         V_D: int = D,
-        block_mask: Optional[BlockMask] = None,
+        block_mask: BlockMask | None = None,
     ):
         if Q_H % KV_H != 0:
             raise AssertionError(
@@ -1370,7 +1370,7 @@ class TestFlexAttention(InductorTestCase):
         device,
         dtype: torch.dtype,
         score_mod: Callable,
-        BLOCK_SIZE: Union[int, tuple[int, int]],
+        BLOCK_SIZE: int | tuple[int, int],
     ):
         block_mask = create_block_mask(
             noop_mask, B, H, S, S, BLOCK_SIZE=BLOCK_SIZE, device=device
@@ -5643,7 +5643,7 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("BLOCK_SIZE", [32, 64, 128, 256, (32, 64), (64, 32)])
-    def test_block_size_changes(self, device, BLOCK_SIZE: Union[int, tuple[int, int]]):
+    def test_block_size_changes(self, device, BLOCK_SIZE: int | tuple[int, int]):
         B, H, Q_LEN, KV_LEN = 4, 2, 2048, 2048
 
         if isinstance(BLOCK_SIZE, int):
@@ -6096,9 +6096,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 torch.arange(len(counts), device=device, dtype=torch.int32), counts
             )
 
-        def length_to_offsets(
-            lengths: list[int], device: Union[str, torch.device]
-        ) -> Tensor:
+        def length_to_offsets(lengths: list[int], device: str | torch.device) -> Tensor:
             offsets = [0]
             offsets.extend(lengths)
             offsets = torch.tensor(offsets, device=device, dtype=torch.int32)
@@ -6695,7 +6693,7 @@ class TestPagedAttention(InductorTestCase):
         ref_out: torch.Tensor,
         compiled_out: torch.Tensor,
         fudge_factor: float,
-        tensor_name: Optional[str] = None,
+        tensor_name: str | None = None,
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
@@ -7117,7 +7115,7 @@ class Params:
     seq_length: int
     head_dim: int
     dtype: torch.dtype
-    config_str: Optional[str] = None
+    config_str: str | None = None
 
     def __str__(self):
         return f"batch:{self.batch_size}_head:{self.num_heads}_seq_len:{self.seq_length}_headdim:{self.head_dim}_dtype:{str(self.dtype).split('.')[-1]}"
@@ -7738,8 +7736,10 @@ class TestLearnableBiases(InductorTestCase):
         loss = torch.nn.functional.mse_loss(attn_output, random_target)
         loss.backward()
 
-        assert bias.grad, "No gradient computed for bias"  # noqa: S101
-        assert torch.any(bias.grad != 0), "Gradient for bias is 0"  # noqa: S101
+        if bias.grad is None:
+            raise AssertionError("No gradient computed for bias")
+        if not torch.any(bias.grad != 0):
+            raise AssertionError("Gradient for bias is 0")
 
     @skip_on_cpu
     def test_backprop_error_case(self, device):

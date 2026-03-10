@@ -730,7 +730,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             a.add_(w)
             return a
 
-        fn_opt = torch.compile(fn)
+        fn_opt = torch.compile(fn, backend="eager")
 
         res_exp = fn(x, wrapped)
         res_act = fn_opt(y, wrapped2)
@@ -1817,7 +1817,7 @@ s50 > 3""",
         self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
             "Tensor subclass method __metadata_guard__ must take exactly two subclass metadata arguments",
-            lambda: torch.compile(lambda x: x * x)(x),
+            lambda: torch.compile(lambda x: x * x, backend="eager")(x),
         )
 
     def test_tensor_subclass_ctx_custom_guards_error_not_classmethod(self):
@@ -1831,7 +1831,7 @@ s50 > 3""",
         self.assertRaisesRegex(
             torch._dynamo.exc.InternalTorchDynamoError,
             "Tensor subclass method __metadata_guard__ must be a classmethod",
-            lambda: torch.compile(lambda x: x * x)(x),
+            lambda: torch.compile(lambda x: x * x, backend="eager")(x),
         )
 
     def test_subclass_constructor_proxying(self):
@@ -1905,7 +1905,7 @@ s50 > 3""",
                 )
                 return return_and_correct_aliasing(func, args, kwargs, out)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def f1(x):
             meta = SubclassTensorArgs(
                 x.shape, x.device, SubclassTensorArgs(x.shape, x.device, None)
@@ -1916,7 +1916,7 @@ s50 > 3""",
         x = torch.randn(3, 3)
         f1(x)
 
-        @torch.compile(fullgraph=True)
+        @torch.compile(fullgraph=True, backend="eager")
         def f1(x):
             meta = SubclassTensorArgs2(
                 x.shape, x.device, SubclassTensorArgs2(x.shape, x.device, None)
@@ -1988,7 +1988,7 @@ s50 > 3""",
                 )
                 return output
 
-        @torch.compile(dynamic=True)
+        @torch.compile(dynamic=True, backend="eager")
         def f(x):
             return x.unflatten(-1, [2, 5])
 
@@ -2170,7 +2170,7 @@ class GraphModule(torch.nn.Module):
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
         from collections.abc import Callable
-        from typing import Any, Optional
+        from typing import Any
 
         from torch._dynamo.decorators import mark_static_address
         from torch._inductor.compile_fx import compile_fx
@@ -2184,16 +2184,16 @@ class GraphModule(torch.nn.Module):
         def inner_compile(
             gm: torch.fx.GraphModule,
             example_inputs: list[torch.Tensor],
-            cudagraphs: Optional[BoxedBool] = None,
-            static_input_idxs: Optional[list[int]] = None,
+            cudagraphs: BoxedBool | None = None,
+            static_input_idxs: list[int] | None = None,
             is_backward: bool = False,
-            graph_id: Optional[int] = None,
+            graph_id: int | None = None,
             cpp_wrapper: bool = False,
             aot_mode: bool = False,
             is_inference: bool = False,
-            boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-            layout_opt: Optional[bool] = None,
-            extern_node_serializer: Optional[Callable[[list[Any]], Any]] = None,
+            boxed_forward_device_index: BoxedDeviceIndex | None = None,
+            layout_opt: bool | None = None,
+            extern_node_serializer: Callable[[list[Any]], Any] | None = None,
         ):
             if dynamic:
                 self.assertEqual(static_input_idxs, [2, 3, 4])
@@ -2212,7 +2212,7 @@ class GraphModule(torch.nn.Module):
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_subclass_parameters_are_static_under_training(self):
         from collections.abc import Callable
-        from typing import Any, Optional
+        from typing import Any
 
         from torch._inductor.compile_fx import compile_fx
         from torch._inductor.cudagraph_utils import BoxedDeviceIndex
@@ -2221,16 +2221,16 @@ class GraphModule(torch.nn.Module):
         def inner_compile(
             gm: torch.fx.GraphModule,
             example_inputs: list[torch.Tensor],
-            cudagraphs: Optional[BoxedBool] = None,
-            static_input_idxs: Optional[list[int]] = None,
+            cudagraphs: BoxedBool | None = None,
+            static_input_idxs: list[int] | None = None,
             is_backward: bool = False,
-            graph_id: Optional[int] = None,
+            graph_id: int | None = None,
             cpp_wrapper: bool = False,
             aot_mode: bool = False,
             is_inference: bool = False,
-            boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-            layout_opt: Optional[bool] = None,
-            extern_node_serializer: Optional[Callable[[list[Any]], Any]] = None,
+            boxed_forward_device_index: BoxedDeviceIndex | None = None,
+            layout_opt: bool | None = None,
+            extern_node_serializer: Callable[[list[Any]], Any] | None = None,
         ):
             # Important bit: there are 3 params: linear.weight.a, linear.weight.b, linear.bias,
             # which are the first 3 args of the graph.
@@ -3081,7 +3081,7 @@ class GraphModule(torch.nn.Module):
                     assert outer_stride is not None  # noqa: S101
                 return TT(a, b, outer_size, outer_stride)
 
-        @torch.compile(dynamic=True)
+        @torch.compile(dynamic=True, backend="eager")
         def f(x, y):
             tmp1 = x.sin()
             tmp2 = y.sin()
@@ -3692,7 +3692,7 @@ class GraphModule(torch.nn.Module):
                 values, t.offsets(), max_seqlen=t._maybe_max_seqlen
             )
 
-        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True, backend="eager")
         values = torch.randn(10, 5)
         offsets = torch.tensor([0, 2, 4, 7, 10])
         max_seqlen = 5

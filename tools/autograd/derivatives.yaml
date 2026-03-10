@@ -3210,6 +3210,10 @@
   self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
 
+- name: narrow_copy(Tensor self, int dim, SymInt start, SymInt length) -> Tensor
+  self: slice_backward_wrapper(grad, self.sym_sizes(), dim, start, start + length, 1)
+  result: auto_linear
+
 # note(crcrpar): `torchgen/api/autograd` logic would unwantedly replace substrings of `self` and `other` of function names.
 - name: _foreach_div.List(Tensor[] self, Tensor[] other) -> Tensor[]
   self: div_tensor_self_backward(grads[i], other[i], self[i].scalar_type())

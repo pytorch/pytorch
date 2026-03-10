@@ -23,7 +23,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 import torch._logging.structured as structured
@@ -95,7 +95,7 @@ class SymNode:
         expr,
         shape_env,
         pytype,
-        hint: Optional[Union[int, float, bool]],
+        hint: HintType | object,
         constant=None,
         fx_node=None,
         optimized_summation=False,
@@ -167,7 +167,7 @@ class SymNode:
         else:
             hint = compute_hint()
         self._hint = hint
-        self.constant: Optional[Union[int, float, bool]] = constant
+        self.constant: int | float | bool | None = constant
 
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
@@ -216,32 +216,6 @@ class SymNode:
 
     def has_hint(self):
         return self._hint is not None
-
-    def require_hint(self, fallback=None):
-        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-
-        if self._hint is None:
-            if fallback is not None:
-                # Say we have some expr like 2*u0 + s0
-                # The hint will be None, since the expr contains at least 1 unbacked.
-                # We will:
-                # - replace every backed free symbol with its corresponding hint
-                # - replace every unbacked free symbol with the fallback
-                # - regenerate the expression with those symbol replacements
-                # Note: this is not really complete either, since right now
-                # this logic does not take into account any value ranges
-                # for the unbacked symints, we may need to beef it up at some point.
-                unbacked_symbols = free_unbacked_symbols(self.expr)
-                replacements = {
-                    s: fallback
-                    if s in unbacked_symbols
-                    else self.shape_env.backed_var_to_val[s]
-                    for s in self.expr.free_symbols
-                }
-                return int(self.expr.xreplace(replacements))
-            # NB: we expect this to raise
-            return self.shape_env.size_hint(self.expr)
-        return self._hint
 
     def maybe_as_int(self):
         if self.expr.is_number:
@@ -523,7 +497,7 @@ class SymNode:
         out = sympy.Add(*exprs)
 
         size_hints = []
-        out_hint = None
+        out_hint: object = _NO_HINT
         for a in args:
             if a.hint is None:
                 break
@@ -1363,7 +1337,7 @@ def _make_node_magic(method, func):
                 else:
                     arguments = [self]
 
-                def get_id(sym_node) -> Optional[int]:
+                def get_id(sym_node) -> int | None:
                     # We don't want to return an ID if the input is a constant
                     import sympy
 
@@ -1752,7 +1726,7 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
-    def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+    def get_constant(x: SymInt | int | SymFloat | float | SymBool | bool):
         if isinstance(x, (int, float, bool)):
             return x
         if isinstance(x, SymInt):

@@ -680,6 +680,33 @@ class TestDillSerializationFeatures(TestCase):
             self.assertIn("nested_closure", node.meta)
             self.assertEqual(node.meta["nested_closure"](3), 3 + 5 + 20)
 
+    def test_node_with_slice(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def foo(x):
+            return x[0 : x.shape[0]]
+
+        gm = torch.fx.symbolic_trace(foo)
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    getattr_1 = x.shape
+    getitem = getattr_1[0];  getattr_1 = None
+    getitem_1 = x[slice(0, getitem, None)];  x = getitem = None
+    return getitem_1""",
+        )
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+        deserialized.recompile()
+
+        self.assertEqual(gm.code, deserialized.code)
+
     def test_lambda_with_default_arguments(self):
         """
         Test that lambdas with default arguments can be serialized. Standard

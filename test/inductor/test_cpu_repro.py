@@ -32,6 +32,9 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
+    IS_CPU_CAPABILITY_SVE256,
+    IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
     MI200_ARCH,
@@ -39,6 +42,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
+    xfailIf,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -2815,6 +2819,47 @@ class CPUReproTests(TestCase):
         actual = torch.compile(fn)(x)
         self.assertEqual(expected, actual, atol=1e-4, rtol=1e-4)
 
+    def test_two_step_variance(self):
+        M = 64
+        N = 1024
+
+        class L(torch.nn.Module):
+            def __init__(self, normalized_shape=N, eps=1e-5):
+                super().__init__()
+                self.layernorm = torch.nn.LayerNorm(normalized_shape, eps=eps)
+
+            def forward(self, x):
+                return self.layernorm(x)
+
+        mod = L().eval()
+        for mean, std in [
+            (0, 1e10),
+            (1e10, 10),
+            (1e10, 1e10),
+            (0, 1),
+            (0, 0.5),
+            (0.5, 1),
+            (0, 2),
+        ]:
+            x = torch.randn(M, N)
+            row_means = x.mean(dim=1, keepdim=True)
+            row_stds = x.std(dim=1, keepdim=True, unbiased=True)
+            x_norm = (x - row_means) / (row_stds + 1e-5)
+            x = x_norm * std + mean
+            input = (x,)
+            output_eager = mod(*input)
+            with torch.no_grad():
+                m = torch.compile(mod)
+                output_compiled = m(*input)
+            if mean == 1e10 or std == 1e10:
+                self.assertTrue(
+                    torch.allclose(output_eager, output_compiled, atol=1, rtol=1e-4)
+                )
+            else:
+                self.assertTrue(
+                    torch.allclose(output_eager, output_compiled, atol=1e-4, rtol=1e-4)
+                )
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -3428,6 +3473,8 @@ class CPUReproTests(TestCase):
                 3,
             )
 
+    @xfailIf(IS_ARM64 and not IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/142231
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
@@ -3764,8 +3811,10 @@ class CPUReproTests(TestCase):
                     metrics.reset()
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
-                    check_metrics_vec_kernel_count(6)
+                    check_metrics_vec_kernel_count(8)
 
+    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/169958
     @requires_vectorization
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_copy(self):
@@ -4013,6 +4062,8 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(2)
 
+    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/170877
     def test_transpose_mxn_16_16_bf16_fp16(self):
         def fn(a, b):
             c = a * b
@@ -4657,6 +4708,7 @@ class CPUReproTests(TestCase):
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
+    @xfailIf(IS_ARM64)  # see https://github.com/pytorch/pytorch/issues/168972
     def test_float32_to_uint8(self):
         # https://github.com/pytorch/pytorch/issues/156788
         @torch.compile
@@ -4785,7 +4837,7 @@ class CPUReproTests(TestCase):
             _, code = run_and_get_cpp_code(opt_m, x)
             self.assertTrue(same(m(x), opt_m(x)))
             # Two kernels: one for reduction, one pointwises
-            check_metrics_vec_kernel_count(2)
+            check_metrics_vec_kernel_count(4)
             FileCheck().check_count(
                 "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
@@ -5352,6 +5404,9 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
+    @xfailIf(
+        IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED
+    )  # see https://github.com/pytorch/pytorch/issues/142134
     @parametrize("is_inference", (True, False))
     def test_disabled_amp(self, is_inference):
         class M(torch.nn.Module):
@@ -5808,6 +5863,62 @@ class CPUReproTests(TestCase):
             ):
                 check_use_full_bits(func, shapes, dtype, mixed, check_vecn)
 
+    @requires_vectorization
+    def test_full_bits_fp8_e4m3fn(self):
+        """
+        Test VecConvert<float,2,Float8_e4m3fn,1> and VecConvert<Float8_e4m3fn,1,float,2>
+        are emitted when fp8 and bf16 tensors are mixed in the same kernel.
+
+        A pure fp8 cast alone uses a 16-element loop (convert<float,1,...>).
+        Only when fp8 is combined with bf16 does the loop widen to 32 elements,
+        triggering convert<float,2,Float8_e4m3fn,1> and
+        convert<Float8_e4m3fn,1,float,2>.
+
+        Sub-cases:
+          func0 - fp8 dequant * bf16: tests convert<float,2,Float8_e4m3fn,1>
+          func1 - float * bf16 → fp8: tests convert<Float8_e4m3fn,1,float,2>
+        """
+        fp8_dtype = torch.float8_e4m3fn
+        deq_scale = 0.15
+
+        # func0: fp8 dequant * bf16
+        # Tests convert<float,2,Float8_e4m3fn,1>
+        def func0(arg0_fp8, arg1_bf16):
+            x = arg0_fp8.to(torch.float) * deq_scale
+            y = arg1_bf16.to(torch.float)
+            return x * y
+
+        # func1: float * bf16 -> fp8
+        # Tests convert<Float8_e4m3fn,1,float,2>
+        def func1(arg0_float, arg1_bf16):
+            y = arg1_bf16.to(torch.float)
+            z = arg0_float * y
+            return z.to(fp8_dtype)
+
+        large_shape = (10, 32, 20, 20)
+
+        # func0: verify fp8 dequant wide path
+        torch._dynamo.reset()
+        x_fp8 = torch.randn(large_shape).to(fp8_dtype)
+        x_bf16 = torch.randn(large_shape, dtype=torch.bfloat16)
+        _, code0 = run_and_get_cpp_code(torch.compile()(func0), x_fp8, x_bf16)
+        self.assertIn(
+            "at::vec::convert<float,2,at::Float8_e4m3fn,1>",
+            code0,
+            "Expected convert<float,2,at::Float8_e4m3fn,1> in generated code for func0",
+        )
+
+        # func1: verify fp8 quant wide path
+        torch._dynamo.reset()
+        x_float = torch.randn(large_shape)
+        x_bf16 = torch.randn(large_shape, dtype=torch.bfloat16)
+        _, code1 = run_and_get_cpp_code(torch.compile()(func1), x_float, x_bf16)
+        self.assertIn(
+            "at::vec::convert<at::Float8_e4m3fn,1,float,2>",
+            code1,
+            "Expected convert<at::Float8_e4m3fn,1,float,2> in generated code for func1",
+        )
+
     @config.patch("cpp.simdlen", 256)
     @requires_vectorization
     def test_avx2_bool_constant_pad_nd(self):
@@ -5881,7 +5992,7 @@ class CPUReproTests(TestCase):
         with torch.no_grad():
             metrics.reset()
             torch.compile(model)(*example_batch)
-            check_metrics_vec_kernel_count(3)
+            check_metrics_vec_kernel_count(5)
 
     def test_dropout(self):
         class Model(nn.Module):
@@ -5999,6 +6110,7 @@ class CPUReproTests(TestCase):
 
         torch.compile(fn)(torch.randn(2, 2))
 
+    @xfailIf(IS_ARM64)  # https://github.com/pytorch/pytorch/issues/176285
     @skipIfRocmArch(MI200_ARCH)
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @requires_vectorization

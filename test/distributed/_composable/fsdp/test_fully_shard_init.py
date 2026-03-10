@@ -2,7 +2,7 @@
 
 import copy
 import itertools
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -1207,7 +1207,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
     def test_init_1d_transformer_shard_largest_dim(self):
         model, ref_model = self._init_models()
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
                 if dim_size > largest_dim_size:
@@ -1238,7 +1238,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
     def test_init_1d_transformer_shard_dim_neg1(self):
         model, ref_model = self._init_models()
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             # Check that FSDP will normalize this dim to non-negative
             return Shard(-1)
 
@@ -1260,7 +1260,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         )
         model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             if isinstance(param, DTensor):
                 for placement in param.placements:
                     if isinstance(placement, Shard):
@@ -1308,7 +1308,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
         torch.manual_seed(42)
         model = nn.Sequential(nn.Linear(16, 17), nn.Linear(17, 8))
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             largest_dim = -1
             largest_dim_size = -1
             for dim, dim_size in enumerate(param.shape):
@@ -1333,7 +1333,7 @@ class TestFullyShardShardPlacementFn(FSDPTestMultiThread):
     def test_invalid_shard_dim(self):
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 8))
 
-        def shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+        def shard_placement_fn(param: nn.Parameter) -> Shard | None:
             return Shard(1)
 
         # Shard(1) is invalid for 1D bias parameters

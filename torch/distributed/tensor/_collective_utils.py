@@ -108,7 +108,8 @@ def mesh_scatter(
     if output.is_meta:
         return None
     dim_group = mesh.get_group(mesh_dim)
-    assert isinstance(dim_group, ProcessGroup)
+    if not isinstance(dim_group, ProcessGroup):
+        raise AssertionError
 
     if group_src == get_rank(dim_group):
         fut = scatter(
@@ -168,7 +169,8 @@ def mesh_broadcast(
     if tensor.is_meta:
         return None
     dim_group = mesh.get_group(mesh_dim)
-    assert isinstance(dim_group, ProcessGroup)
+    if not isinstance(dim_group, ProcessGroup):
+        raise AssertionError
 
     return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
@@ -234,7 +236,8 @@ def check_tensor_meta(
 
 
 def spec_to_bytes(spec: "dtensor_spec.DTensorSpec") -> int:
-    assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
+    if spec.tensor_meta is None:
+        raise AssertionError("spec should have tensor meta defined!")
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
 
 
@@ -420,7 +423,8 @@ def one_step_redistribute_cost(
     if mesh_dim == -1:
         return 0.0
 
-    assert current_placement is not None and target_placement is not None
+    if current_placement is None or target_placement is None:
+        raise AssertionError
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     comm_bytes_gb = (
@@ -502,9 +506,8 @@ def redistribute_cost(
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
     for transform_info in transform_infos:
-        assert current_spec.tensor_meta is not None, (
-            "spec should have tensor meta defined!"
-        )
+        if current_spec.tensor_meta is None:
+            raise AssertionError("spec should have tensor meta defined!")
         current = transform_info.src_dst_placements[0]
         target = transform_info.src_dst_placements[1]
         mesh_dim = transform_info.mesh_dim

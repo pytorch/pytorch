@@ -54,6 +54,7 @@ def _varlen_attn(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -71,6 +72,10 @@ def _varlen_attn(
             raise RuntimeError(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
             )
+        if seqused_k is not None:
+            # TODO: cuDNN supports per-sequence KV lengths via SEQ_LEN_KV + padding_mask,
+            # but _cudnn_attention_forward doesn't expose it yet.
+            raise RuntimeError("seqused_k is not yet supported with the cuDNN backend.")
         result = torch.ops.aten._cudnn_attention_forward(
             query,
             key,
@@ -104,6 +109,7 @@ def _varlen_attn(
             scale=scale,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
+            seqused_k=seqused_k,
         )
 
     rng_state_ = torch.zeros(
@@ -124,6 +130,7 @@ def _varlen_attn_fake(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -140,16 +147,18 @@ def _varlen_attn_fake(
     # For varlen path: logsumexp shape is (num_heads, total_q)
     total_q = query.size(0)
     num_heads = query.size(1)
+    logsumexp = torch.empty(
+        (num_heads, total_q), dtype=torch.float, device=query.device
+    )
+
     if torch.version.hip:
-        # ROCm uses batched format: [batch_size, num_heads, max_q]
-        batch_size = cu_seq_q.size(0) - 1
-        logsumexp = torch.empty(
-            (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
-        )
-    else:
-        logsumexp = torch.empty(
-            (num_heads, total_q), dtype=torch.float, device=query.device
-        )
+        preferred = torch._C._get_rocm_fa_preferred_backend()
+        if preferred == torch._C._ROCmFABackend.AOTriton:
+            # AOTriton ROCm path uses batched 3D
+            batch_size = cu_seq_q.size(0) - 1
+            logsumexp = torch.empty(
+                (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+            )
 
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
 
@@ -168,6 +177,7 @@ def varlen_attn(
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
+    seqused_k: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     r"""Compute variable-length attention using Flash Attention.
 
@@ -187,6 +197,10 @@ def varlen_attn(
         window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
             Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
             or (W, 0) for causal attention with sliding window of size W.
+        seqused_k (Tensor, optional): Number of valid KV tokens per batch element; shape :math:`(N,)`.
+            When set, only the first ``seqused_k[i]`` tokens in the key/value sequence for batch
+            element *i* participate in attention. Useful for KV-cache decoding where the cache slot
+            is larger than the actual sequence. Inference-only (not supported in backward).
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
@@ -246,6 +260,7 @@ def varlen_attn(
         is_causal,
         scale,
         list(window_size),
+        seqused_k,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -264,8 +279,12 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         is_causal,
         scale,
         window_size,
+        seqused_k,
     ) = inputs
     out, lse, rng_state = output
+
+    if seqused_k is not None:
+        raise RuntimeError("seqused_k is an inference-only parameter.")
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
@@ -401,7 +420,10 @@ def _backward(
         scale,
         window_size,
     )
-    return dq, dk, dv, None, None, None, None, None, None, None
+    num_params = (
+        8  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k
+    )
+    return (dq, dk, dv, *((None,) * num_params))
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)

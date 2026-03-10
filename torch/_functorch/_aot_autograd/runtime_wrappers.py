@@ -37,9 +37,11 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
+from torch._opaque_base import OpaqueBase
 from torch._ops import OpOverload
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -79,6 +81,7 @@ from .schemas import (
     InputAliasInfo,
     MemoryFormatMeta,
     MutationType,
+    OpaqueMeta,
     OutputType,
     PlainTensorMeta,
     SubclassCreationMeta,
@@ -2192,6 +2195,7 @@ def _backward_epilogue_functional(
     maybe_subclass_metadata: SubclassMeta | None,
     out: Any,
     *,
+    ctx_opaque_objects: Sequence[Any] = (),
     make_subclass_override: Callable[..., Any] | None = None,
 ) -> tuple[Any, ...]:
     # Toss out the backward output tokens
@@ -2204,6 +2208,23 @@ def _backward_epilogue_functional(
         metadata, out, offset_index=len(out) - 1
     )
     out = tuple(out)
+
+    # Replace compile-time opaque constants in the backward output with the
+    # real runtime opaques saved from the forward pass. During joint graph
+    # tracing, backward output opaques come from tangent constants (baked at
+    # compile time). At runtime we need the actual opaque objects that were
+    # saved for backward from the forward pass.
+    if ctx_opaque_objects:
+        opaque_iter = iter(ctx_opaque_objects)
+        out = tuple(
+            next(opaque_iter) if isinstance(v, FakeScriptObject) else v for v in out
+        )
+        remaining = list(opaque_iter)
+        if remaining:
+            raise AssertionError(
+                f"ctx_opaque_objects had {len(remaining)} leftover entries "
+                "(expected all to be consumed by FakeScriptObject slots in backward output)"
+            )
 
     # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
     if maybe_subclass_metadata is not None:
@@ -2484,6 +2505,10 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
             )
         leaves = []
         for attr, attr_meta in meta.attrs.items():
+            if isinstance(attr_meta, OpaqueMeta):
+                # Opaques aren't differentiable but occupy a flat arg slot.
+                leaves.append(getattr(x, attr))
+                continue
             elem = getattr(x, attr)
             new_elem, elem_leaves = AOTDispatchAutograd.process_runtime_tangent(
                 elem, attr_meta
@@ -2684,7 +2709,10 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                 opaque_object_outs = fw_outs[
                     CompiledFunction.metadata.opaque_objects_saved_for_backwards_slice
                 ]
-                if not all(is_opaque_type(type(obj)) for obj in opaque_object_outs):
+                if not all(
+                    is_opaque_type(type(obj)) or isinstance(obj, OpaqueBase)
+                    for obj in opaque_object_outs
+                ):
                     raise AssertionError(
                         f"expected all opaque_object_outs to be opaque types, "
                         f"got types: {[type(obj) for obj in opaque_object_outs]}"

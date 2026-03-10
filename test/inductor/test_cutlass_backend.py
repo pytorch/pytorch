@@ -11,7 +11,6 @@ import unittest.mock as mock
 from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._inductor.codegen.cutlass.serialization import (
@@ -733,6 +732,67 @@ class TestCutlassBackend(TestCase):
                 torch.testing.assert_close(actual, expected)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_addmm_input_reorder(self):
+        """
+        Without input_reorder on the CUTLASS call in tuned_addmm, the CUTLASS
+        C kernel's argument order doesn't match the benchmark tensor order,
+        causing illegal memory access during autotuning.
+
+        NOTE: Uses ATEN+CUTLASS (not CUTLASS-only) because the existing addmm test
+        has a pre-existing CUTLASS accuracy issue at all shapes. Also verifies that neither ATen nor CUTLASS
+        choices get inf timings (which would indicate benchmark failures).
+        """
+        from torch._inductor.select_algorithm import (
+            AlgorithmSelectorCache,
+            ExternKernelCaller,
+        )
+
+        original_benchmark_choices = AlgorithmSelectorCache.benchmark_choices
+        timings_by_type: dict[str, list[float]] = {"aten": [], "cutlass": []}
+
+        @classmethod
+        def tracking_benchmark_choices(cls, choices, autotune_args, **kwargs):
+            result = original_benchmark_choices.__func__(
+                cls, choices, autotune_args, **kwargs
+            )
+            for choice, timing in result.items():
+                if isinstance(choice, ExternKernelCaller):
+                    timings_by_type["aten"].append(timing)
+                else:
+                    timings_by_type["cutlass"].append(timing)
+            return result
+
+        AlgorithmSelectorCache.benchmark_choices = tracking_benchmark_choices
+        try:
+            M, K, N = 256, 3520, 2048
+            bias = torch.randn(N, device="cuda", dtype=torch.bfloat16)
+            x = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+            w = torch.randn(K, N, device="cuda", dtype=torch.bfloat16)
+
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "ATEN,CUTLASS",
+                    "cutlass.cutlass_max_profiling_configs": 2,
+                }
+            ):
+                expected = torch.addmm(bias, x, w)
+                actual = torch.compile(torch.addmm)(bias, x, w)
+                torch.testing.assert_close(actual, expected)
+
+            self.assertTrue(
+                all(t != float("inf") for t in timings_by_type["aten"]),
+                f"ATen benchmark failed: {timings_by_type['aten']}",
+            )
+            self.assertTrue(
+                all(t != float("inf") for t in timings_by_type["cutlass"]),
+                f"CUTLASS benchmark failed: {timings_by_type['cutlass']}",
+            )
+        finally:
+            AlgorithmSelectorCache.benchmark_choices = original_benchmark_choices
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
@@ -900,8 +960,8 @@ class TestCutlassBackend(TestCase):
         max_autotune_gemm_backends: str = "CUTLASS",
         fp16=True,
         expected_fuse_count=0,
-        mm: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
-        batch_size: Optional[int] = None,
+        mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
+        batch_size: int | None = None,
     ):
         # Note: The ops that are available
         # also depend on the alignment of the shapes

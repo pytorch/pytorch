@@ -92,6 +92,7 @@ from .constant import (
     CONSTANT_VARIABLE_TRUE,
     ConstantVariable,
 )
+from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -393,7 +394,15 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
         if self.dict_vt is None:
-            self.dict_vt = variables.DunderDictVariable.create(tx, self)
+            dict_proxy: dict[str, VariableTracker] = {}
+            if hasattr(self, "fn"):  # Use `.get_function()` instead?
+                dict_proxy = {
+                    name: VariableTracker.build(
+                        tx, value, source=self.source and AttrSource(self.source, name)
+                    )
+                    for name, value in self.fn.__dict__.items()
+                }
+            self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
         return self.dict_vt
 
     def call_method(
@@ -1689,7 +1698,24 @@ def invoke_and_store_as_constant(
     def convert(x: VariableTracker) -> Any:
         if x.is_tensor():
             return cast("TensorVariable", x).get_real_value()
-        return x.as_python_constant()
+        if isinstance(x, UserDefinedObjectVariable):
+            if x.source is not None:
+                install_guard(x.make_guard(GuardBuilder.ID_MATCH))
+            return x.value
+        try:
+            return x.as_python_constant()
+        except AsPythonConstantNotImplementedError:
+            unimplemented(
+                gb_type="assume_constant_result argument conversion failed",
+                context=f"function {name}, variable type {type(x).__name__}",
+                explanation=f"Cannot convert argument of type {type(x).__name__} to a Python constant "
+                f"for function {name} marked with torch._dynamo.assume_constant_result. "
+                f"The variable tracker does not support constant conversion.",
+                hints=[
+                    "Remove torch._dynamo.assume_constant_result from this function",
+                    "Ensure all arguments passed to the function can be converted to constants",
+                ],
+            )
 
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
@@ -2242,7 +2268,12 @@ class SkipFunctionVariable(VariableTracker):
                 )
                 # pyrefly: ignore [implicit-any]
                 hints = []
-            reason = self.reason if self.reason else "<missing reason>"
+            if self.reason:
+                reason = self.reason
+            else:
+                from ..trace_rules import get_skip_reason
+
+                reason = get_skip_reason(self.value)
             unimplemented(
                 gb_type="Attempted to call function marked as skipped",
                 context=f"module: {module_name}, qualname: {qualname}, skip reason: {reason}",

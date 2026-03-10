@@ -504,21 +504,20 @@ class PrepareModuleInput(ParallelStyle):
         )
         self.use_local_output = use_local_output
         if self.input_layouts is not None:
-            assert self.desired_input_layouts is not None, (
-                "desired module inputs should not be None!"
-            )
-            assert len(self.input_layouts) == len(self.desired_input_layouts), (
-                "input_layouts and desired_input_layouts should have same length!"
-            )
+            if self.desired_input_layouts is None:
+                raise AssertionError("desired module inputs should not be None!")
+            if len(self.input_layouts) != len(self.desired_input_layouts):
+                raise AssertionError(
+                    "input_layouts and desired_input_layouts should have same length!"
+                )
         self.with_kwargs = input_kwarg_layouts is not None
         self.input_kwarg_layouts = input_kwarg_layouts or {}
         self.desired_input_kwarg_layouts = desired_input_kwarg_layouts or {}
         if self.with_kwargs:
-            assert len(self.input_kwarg_layouts) == len(
-                self.desired_input_kwarg_layouts
-            ), (
-                "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
-            )
+            if len(self.input_kwarg_layouts) != len(self.desired_input_kwarg_layouts):
+                raise AssertionError(
+                    "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
+                )
 
     def _prepare_input_arg(
         self,
@@ -533,9 +532,8 @@ class PrepareModuleInput(ParallelStyle):
                 # assert inp.placements[0] == input_layout
                 dt_inp = input
             else:
-                assert isinstance(input, torch.Tensor), (
-                    "expecting input to be a torch.Tensor!"
-                )
+                if not isinstance(input, torch.Tensor):
+                    raise AssertionError("expecting input to be a torch.Tensor!")
                 dt_inp = DTensor.from_local(
                     input, mesh, (input_layout,), run_check=False
                 )
@@ -556,9 +554,8 @@ class PrepareModuleInput(ParallelStyle):
         if len(inputs) != len(self.input_layouts):
             raise ValueError("module inputs and input_layouts should have same length!")
 
-        assert self.desired_input_layouts is not None, (
-            "desired module inputs should not be None!"
-        )
+        if self.desired_input_layouts is None:
+            raise AssertionError("desired module inputs should not be None!")
 
         for inp, input_layout, desired_layout in zip(
             inputs, self.input_layouts, self.desired_input_layouts
@@ -663,9 +660,10 @@ class PrepareModuleOutput(ParallelStyle):
             else desired_output_layouts
         )
         self.use_local_output = use_local_output
-        assert len(self.output_layouts) == len(self.desired_output_layouts), (
-            "output_layouts and desired_output_layouts should have same length!"
-        )
+        if len(self.output_layouts) != len(self.desired_output_layouts):
+            raise AssertionError(
+                "output_layouts and desired_output_layouts should have same length!"
+            )
 
     def _prepare_out_fn(self, outputs, device_mesh):
         prepared_outputs = []

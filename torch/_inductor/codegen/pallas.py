@@ -429,7 +429,8 @@ class PallasKernelOverrides(OpOverrides):
     # Sign operations
     @staticmethod
     def sign(x: str) -> str:
-        return f"jnp.sign({x})"
+        # PyTorch returns 0 for NaN, JAX returns NaN
+        return f"jnp.where(jnp.isnan({x}), 0.0, jnp.sign({x}))"
 
     @staticmethod
     def signbit(x: str) -> str:
@@ -1216,6 +1217,22 @@ class PallasKernel(SIMDKernel):
             return int(val)
         except (TypeError, ValueError):
             return None
+
+    def _zero_dim_output_flags(self, ctx: _CodegenContext) -> tuple[bool, bool]:
+        """Return whether an output has a zero or unknown dimension."""
+        has_unknown_dim = False
+        for buf_name in ctx.output_buffer_lookup.values():
+            buf = V.graph.try_get_buffer(buf_name)
+            if buf is None:
+                has_unknown_dim = True
+                continue
+            for dim in buf.get_size():
+                dim_int = self._safe_int(dim)
+                if dim_int == 0:
+                    return True, has_unknown_dim
+                if dim_int is None:
+                    has_unknown_dim = True
+        return False, has_unknown_dim
 
     def _compute_prefix_numel(self, prefixes: OrderedSet) -> int | None:
         """Compute total numel for given prefixes (e.g., pointwise prefixes)."""
@@ -2966,62 +2983,79 @@ class PallasKernel(SIMDKernel):
         alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
         ctx.alias_pairs = alias_pairs
 
+        has_zero_dim, has_unknown_dim = self._zero_dim_output_flags(ctx)
+
+        zero_dim_return = (
+            "results = tuple(jnp.empty(s, dtype=dt) "
+            "for s, dt in zip(out_shapes, out_dtypes))",
+            "return results if len(results) > 1 else results[0]",
+        )
+
         with code.indent():
-            # Pallas requires >= 1-d tensors; promote 0-d to (1,)
-            code.writeline(
-                "_pallas_out_shapes = tuple("
-                "s if len(s) > 0 else (1,) for s in out_shapes)"
-            )
-            # Reshape aliased inputs to match promoted output shapes
-            for input_idx, out_idx in alias_pairs:
-                param = ctx.kernel_input_params[input_idx]
-                code.writeline(
-                    f"{param} = {param}.reshape(_pallas_out_shapes[{out_idx}])"
-                )
-            code.writeline("out_shapes_pallas = tuple(")
-            code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
-            code.writeline(
-                "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
-            )
-            code.writeline(")")
-            if self.tile_cpu_tpu:
-                self._codegen_tiled_specs(ctx)
+            if has_zero_dim:
+                code.writelines(zero_dim_return)
             else:
-                code.writeline("indexer = lambda n: lambda i: [jnp.int32(i)] * n")
-                code.writeline("out_specs_pallas = tuple(")
-                code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+                if has_unknown_dim:
+                    code.writeline("if any(0 in shape for shape in out_shapes):")
+                    with code.indent():
+                        code.writelines(zero_dim_return)
+                # Pallas requires >= 1-d tensors; promote 0-d to (1,)
+                code.writeline(
+                    "_pallas_out_shapes = tuple("
+                    "s if len(s) > 0 else (1,) for s in out_shapes)"
+                )
+                # Reshape aliased inputs to match promoted output shapes
+                for input_idx, out_idx in alias_pairs:
+                    param = ctx.kernel_input_params[input_idx]
+                    code.writeline(
+                        f"{param} = {param}.reshape(_pallas_out_shapes[{out_idx}])"
+                    )
+                code.writeline("out_shapes_pallas = tuple(")
+                code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
                 code.writeline(
                     "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
                 )
                 code.writeline(")")
-                code.writeline("in_specs_pallas = tuple(")
-                code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
-                code.writeline(
-                    "    for i in [" + ", ".join(ctx.kernel_input_params) + "]"
+                if self.tile_cpu_tpu:
+                    self._codegen_tiled_specs(ctx)
+                else:
+                    code.writeline("indexer = lambda n: lambda i: [jnp.int32(i)] * n")
+                    code.writeline("out_specs_pallas = tuple(")
+                    code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+                    code.writeline(
+                        "    for shape, dtype in zip(_pallas_out_shapes, out_dtypes)"
+                    )
+                    code.writeline(")")
+                    code.writeline("in_specs_pallas = tuple(")
+                    code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+                    code.writeline(
+                        "    for i in [" + ", ".join(ctx.kernel_input_params) + "]"
+                    )
+                    code.writeline(")")
+
+                # Wrap kernel with functools.partial to pass scalar arguments (size variables)
+                partial_args = []
+                for sv_param in ctx.size_var_params:
+                    partial_args.append(f"{sv_param}={sv_param}")
+
+                if partial_args:
+                    kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
+                else:
+                    kernel_arg = f"{kernel_name}_kernel,"
+
+                use_tma = (
+                    self.is_gpu
+                    and self.use_emit_pipeline
+                    and self._can_use_tma_approach()
                 )
-                code.writeline(")")
-
-            # Wrap kernel with functools.partial to pass scalar arguments (size variables)
-            partial_args = []
-            for sv_param in ctx.size_var_params:
-                partial_args.append(f"{sv_param}={sv_param}")
-
-            if partial_args:
-                kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
-            else:
-                kernel_arg = f"{kernel_name}_kernel,"
-
-            use_tma = (
-                self.is_gpu and self.use_emit_pipeline and self._can_use_tma_approach()
-            )
-            if use_tma:
-                self._codegen_jit_wrapper_tma(ctx, kernel_arg)
-            elif self.is_gpu:
-                self._codegen_jit_wrapper_legacy_gpu(ctx, kernel_arg)
-            else:
-                self._codegen_jit_wrapper_cpu_tpu(
-                    ctx, kernel_arg, alias_pairs, alias_map_literal
-                )
+                if use_tma:
+                    self._codegen_jit_wrapper_tma(ctx, kernel_arg)
+                elif self.is_gpu:
+                    self._codegen_jit_wrapper_legacy_gpu(ctx, kernel_arg)
+                else:
+                    self._codegen_jit_wrapper_cpu_tpu(
+                        ctx, kernel_arg, alias_pairs, alias_map_literal
+                    )
 
         self._codegen_main_entry(ctx, jit_wrapper_name)
         return code.getvalue()
@@ -3397,10 +3431,11 @@ from torch._inductor.runtime.runtime_utils import (
         transpose_literal = "True" if self.tile_has_transpose else "False"
 
         skip_n = self.tile_skip_last_n
+        is_tpu_literal = "True" if ctx.is_tpu else "False"
         code.writeline(
             f"_tile, _grid, _ax2g = pallas_compute_tiling("
             f"out_shapes[0], transpose={transpose_literal}, "
-            f"skip_last_n={skip_n}, exact_only=True)"
+            f"skip_last_n={skip_n}, exact_only=True, is_tpu={is_tpu_literal})"
         )
         code.writeline("_ng = len(_grid)")
         code.writeline("_ref = out_shapes[0]")
@@ -3493,7 +3528,6 @@ from torch._inductor.runtime.runtime_utils import (
             f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
         )
         with code.indent():
-            code.writeline("jax.config.update('jax_enable_x64', True)")
             code.writeline("jax.clear_caches()")
 
             # Build JAX placeholders for all inputs

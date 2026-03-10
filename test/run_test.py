@@ -21,7 +21,7 @@ from contextlib import ExitStack
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, cast, NamedTuple, Optional, Union
+from typing import Any, cast, NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -988,6 +988,15 @@ def test_openreg(test_module, test_directory, options):
     if return_code != 0:
         return return_code
 
+    # Run the openreg C++ unit tests (gtest) built by cmake.
+    ortests_bin = os.path.join(
+        openreg_dir, "build", "third_party", "openreg", "ortests"
+    )
+    if os.path.isfile(ortests_bin):
+        return_code = shell([ortests_bin], cwd=openreg_dir)
+        if return_code != 0:
+            return return_code
+
     with extend_python_path([install_dir]):
         cmd = [
             sys.executable,
@@ -1627,7 +1636,7 @@ def exclude_tests(
     return selected_tests
 
 
-def must_serial(file: Union[str, ShardedTest]) -> bool:
+def must_serial(file: str | ShardedTest) -> bool:
     if isinstance(file, ShardedTest):
         file = file.name
     return (
@@ -1933,7 +1942,7 @@ class TestFailure(NamedTuple):
 
 def run_test_module(
     test: ShardedTest, test_directory: str, options
-) -> Optional[TestFailure]:
+) -> TestFailure | None:
     try:
         maybe_set_hip_visible_devies()
 
@@ -1999,7 +2008,7 @@ def run_tests(
         ):
             shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
-    def handle_complete(failure: Optional[TestFailure]):
+    def handle_complete(failure: TestFailure | None):
         failed = failure is not None
         if IS_CI and options.upload_artifacts_while_running:
             parse_xml_and_upload_json()

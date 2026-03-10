@@ -124,20 +124,22 @@ class FlexAttentionModel(torch.nn.Module):
 def strict_export_and_aot_export_joint_with_descriptors(model, args, kwargs=None):
     if kwargs is None:
         kwargs = {}
-    # needed for stric export
+    # needed for strict export; must be cleaned up to avoid polluting global state
     torch.utils._pytree.register_constant(DTensorSpec)
+    try:
+        # install_free_tensors is required for dynamo to work
+        with torch._dynamo.config.patch(
+            install_free_tensors=True, inline_inbuilt_nn_modules=True
+        ):
+            with torch._export.utils._disable_aten_to_metadata_assertions():
+                ep = torch.export.export(model, args, kwargs, strict=True)
 
-    # install_free_tensors is required for dynamo to work
-    with torch._dynamo.config.patch(
-        install_free_tensors=True, inline_inbuilt_nn_modules=True
-    ):
-        with torch._export.utils._disable_aten_to_metadata_assertions():
-            ep = torch.export.export(model, args, kwargs, strict=True)
-
-    # joint_gm produced here is missing the backward region, due to incompatiblility
-    # between ep.module() and aot_export_joint_with_descriptors.
-    # Keeping this here to show the issue.
-    return aot_export_joint_with_descriptors_alone(ep.module(), args, kwargs)
+        # joint_gm produced here is missing the backward region, due to incompatiblility
+        # between ep.module() and aot_export_joint_with_descriptors.
+        # Keeping this here to show the issue.
+        return aot_export_joint_with_descriptors_alone(ep.module(), args, kwargs)
+    finally:
+        torch.utils._pytree._deregister_pytree_node(DTensorSpec)
 
 
 def graph_capture_and_aot_export_joint_with_descriptors_v2(model, args, kwargs=None):

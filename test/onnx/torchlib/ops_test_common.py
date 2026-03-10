@@ -13,7 +13,7 @@ import sys
 import unittest
 import warnings
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 import error_reproduction
 import numpy as np
@@ -68,15 +68,15 @@ class DecorateMeta:
     op_name: str
     variant_name: str
     decorator: Callable[..., Any]
-    dtypes: Optional[Collection[torch.dtype]]
-    device_type: Optional[str]
+    dtypes: Collection[torch.dtype] | None
+    device_type: str | None
     reason: str
     test_behavior: str
-    matcher: Optional[Callable[[Any], bool]] = None
+    matcher: Callable[[Any], bool] | None = None
     enabled_if: bool = True
     # The test_class_name to apply the decorator to. If None, the decorator is
     # applied to all test classes.
-    test_class_name: Optional[str] = None
+    test_class_name: str | None = None
 
 
 def xfail(
@@ -84,11 +84,11 @@ def xfail(
     variant_name: str = "",
     *,
     reason: str,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-    device_type: Optional[str] = None,
-    matcher: Optional[Callable[[Any], Any]] = None,
+    dtypes: Collection[torch.dtype] | None = None,
+    device_type: str | None = None,
+    matcher: Callable[[Any], Any] | None = None,
     enabled_if: bool = True,
-    test_class_name: Optional[str] = None,
+    test_class_name: str | None = None,
 ) -> DecorateMeta:
     """Expects an OpInfo test to fail.
 
@@ -123,11 +123,11 @@ def skip(
     variant_name: str = "",
     *,
     reason: str,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-    device_type: Optional[str] = None,
-    matcher: Optional[Callable[[Any], Any]] = None,
+    dtypes: Collection[torch.dtype] | None = None,
+    device_type: str | None = None,
+    matcher: Callable[[Any], Any] | None = None,
     enabled_if: bool = True,
-    test_class_name: Optional[str] = None,
+    test_class_name: str | None = None,
 ) -> DecorateMeta:
     """Skips an OpInfo test.
 
@@ -630,7 +630,7 @@ def graph_executor(
 
 @contextlib.contextmanager
 def normal_xfail_skip_test_behaviors(
-    test_behavior: Optional[str] = None, reason: Optional[str] = None
+    test_behavior: str | None = None, reason: str | None = None
 ):
     """This context manager is used to handle the different behaviors of xfail and skip.
 

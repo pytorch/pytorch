@@ -1,3 +1,7 @@
+# PR Review
+
+When asked to review a PR, always use the /pr-review skill.
+
 # Environment
 
 If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
@@ -23,6 +27,8 @@ if __name__ == "__main__":
 ```
 
 To test Tensor equality, use assertEqual.
+For tests over multiple inputs, use the `@parametrize` decorator.
+For any test that checks numerics of the on-device implementation, use `instantiate_device_type_tests` to write device-generic tests.
 
 # Linting
 

@@ -291,7 +291,8 @@ def bucketize_single_dim_strategy(
        result as bucketizing the reduced input values.
     """
     input_meta, _boundaries_meta = args_schema
-    assert isinstance(input_meta, TensorMeta)
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     strategies: list[list[Placement | _ShardingPlaceholder]] = []
     for dim in range(len(input_meta.shape)):
         strategies.append(
@@ -782,7 +783,8 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
         raise AssertionError(f"Expected TupleStrategy, got {input_tuple_strategy}")
     input_strategies: list[OpStrategy] = []
     for child in input_tuple_strategy.children:
-        assert isinstance(child, OpStrategy), f"Expected OpStrategy, got {child}"
+        if not isinstance(child, OpStrategy):
+            raise AssertionError(f"Expected OpStrategy, got {child}")
         input_strategies.append(child)
     first_input_strategy = input_strategies[0]
     common_input_ndim = first_input_strategy.ndim
@@ -831,19 +833,23 @@ def cat_single_dim_strategy(
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     input_list = args_schema[0]
     # unfortunate naming, but yes it's a TensorList input, and we represent it as a tuple of TensorMeta
-    assert isinstance(input_list, (tuple, list)), type(input_list)
-    assert all(isinstance(tm, TensorMeta) for tm in input_list)
+    if not isinstance(input_list, (tuple, list)):
+        raise AssertionError(type(input_list))
+    if not all(isinstance(tm, TensorMeta) for tm in input_list):
+        raise AssertionError
 
     if isinstance(input_list, list):
         input_list = tuple(input_list)
 
     num_inputs = len(input_list)
     ndim_set = {len(meta.shape) for meta in input_list}
-    assert len(ndim_set) in (1, 2), (
-        "Expected all cat inputs to be the same ndim, except empty tensors"
-    )
+    if len(ndim_set) not in (1, 2):
+        raise AssertionError(
+            "Expected all cat inputs to be the same ndim, except empty tensors"
+        )
     if len(ndim_set) == 2:
-        assert 0 in ndim_set
+        if 0 not in ndim_set:
+            raise AssertionError
     common_ndim = max(ndim_set)
     cat_dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
     cat_dim = normalize_dim(cat_dim, common_ndim)
@@ -932,40 +938,37 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_prop_rule(aten.index_select.default, schema_info=RuntimeSchemaInfo(1))
-def prop_index_select(op_schema: OpSchema) -> OutputSharding:
-    values_spec, dim, indices_spec = op_schema.args_schema
-
-    if not isinstance(values_spec, DTensorSpec):
-        raise AssertionError(f"Expected DTensorSpec, got {type(values_spec)}")
+@register_single_dim_strategy(
+    aten.index_select.default, schema_info=RuntimeSchemaInfo(1)
+)
+def index_select_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    values_meta, dim, index_meta = args_schema
+    if not isinstance(values_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(values_meta)}")
     if not isinstance(dim, int):
         raise AssertionError(f"Expected int, got {type(dim)}")
-    if not isinstance(indices_spec, DTensorSpec):
-        raise AssertionError(f"Expected DTensorSpec, got {type(indices_spec)}")
+    dim = normalize_dim(dim, len(values_meta.shape))
 
-    all_indices_spec: list[DTensorSpec | None] = [
-        indices_spec if dim == i else None for i in range(values_spec.ndim)
-    ]
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
 
-    result = prop_index(
-        OpSchema(
-            op=op_schema.op,
-            args_schema=(values_spec, all_indices_spec),
-            kwargs_schema=op_schema.kwargs_schema,
+    # Shard values on any non-indexed dim (output has same ndim)
+    for d in range(len(values_meta.shape)):
+        if d == dim:
+            continue
+        strategies.append(
+            [_ShardingPlaceholder(d), _ShardingPlaceholder(d), Replicate()]
         )
-    )
-    if result.redistribute_schema:
-        schema_suggestion = result.redistribute_schema
-        result.redistribute_schema = OpSchema(
-            op=op_schema.op,
-            args_schema=(
-                schema_suggestion.args_schema[0],
-                dim,
-                schema_suggestion.args_schema[1][dim],  # type: ignore[index]
-            ),
-            kwargs_schema=op_schema.kwargs_schema,
-        )
-    return result
+
+    # Shard index → output sharded on the indexed dim
+    strategies.append([_ShardingPlaceholder(dim), Replicate(), _ShardingPlaceholder(0)])
+
+    # Partial passthrough from values
+    for reduce_op in Partial.ALL_REDUCE_OPS:
+        strategies.append([Partial(reduce_op), Partial(reduce_op), Replicate()])
+
+    return strategies
 
 
 @register_single_dim_strategy(
@@ -1294,9 +1297,8 @@ def eye_out_strategy(op_schema: OpSchema) -> OpStrategy:
     # eye.m_out has signature: eye(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
     # The out kwarg is a DTensor that determines the sharding
     out_spec = op_schema.kwargs_schema["out"]
-    assert isinstance(out_spec, OpStrategy), (
-        f"Expected OpStrategy for out, got {type(out_spec)}"
-    )
+    if not isinstance(out_spec, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy for out, got {type(out_spec)}")
 
     return OpStrategy(
         [
@@ -1333,7 +1335,8 @@ def roll_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     input_meta = args_schema[0]
-    assert isinstance(input_meta, TensorMeta)
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     ndim = len(input_meta.shape)
     raw_dims = cast(list[int], args_schema[2]) if len(args_schema) > 2 else []
     # When dims is empty, roll flattens the tensor — all dims are active
@@ -1348,7 +1351,8 @@ def flip_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     input_meta = args_schema[0]
-    assert isinstance(input_meta, TensorMeta)
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     ndim = len(input_meta.shape)
     raw_dims = cast(list[int], args_schema[1])
     active_dims = {normalize_dim(d, ndim) for d in raw_dims}
@@ -1363,7 +1367,8 @@ def fft_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     input_meta = args_schema[0]
-    assert isinstance(input_meta, TensorMeta)
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
     ndim = len(input_meta.shape)
     raw_dims = cast(list[int], args_schema[1])
     active_dims = {normalize_dim(d, ndim) for d in raw_dims}

@@ -3,7 +3,7 @@ import contextlib
 import math
 import sys
 import warnings
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -91,14 +91,14 @@ Functional collectives can accept any of these types to describe the ranks parti
 
 The different types will be desugared to a canonical format
 """
-RANK_TYPES = Union[
-    list[int],
-    list[list[int]],
-    dist.ProcessGroup,
-    DeviceMesh,
-    tuple["dist.tensor.DeviceMesh", int],
-    c10d.GroupName,
-]
+RANK_TYPES = (
+    list[int]
+    | list[list[int]]
+    | dist.ProcessGroup
+    | DeviceMesh
+    | tuple["dist.tensor.DeviceMesh", int]
+    | c10d.GroupName
+)
 
 
 from torch._utils import _chunk_or_narrow_cat  # noqa: F401
@@ -1720,27 +1720,38 @@ from torch.distributed.distributed_c10d import (
 # fn.__name__ as a module attribute — a def's __name__ matches its variable name
 # automatically, whereas a closure's would not.
 def _remapped_allgather(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_allgather should only be called during tracing")
     all_gather_tensor_inplace(*args, **kwargs)
 
 
 def _remapped_reducescatter(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_reducescatter should only be called during tracing"
+        )
     reduce_scatter_tensor_inplace(*args, **kwargs)
 
 
 def _remapped_allreduce(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_allreduce should only be called during tracing")
     all_reduce_inplace(*args, **kwargs)
 
 
 def _remapped_all_to_all_single(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_all_to_all_single should only be called during tracing"
+        )
     all_to_all_inplace(*args, **kwargs)
 
 
 def _remapped_all_gather(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_all_gather should only be called during tracing"
+        )
     all_gather_inplace(*args, **kwargs)
 
 

@@ -14,7 +14,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
 
 from common_utils import (
@@ -424,8 +424,8 @@ class TestAOTAutograd(AOTTestCase):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -463,11 +463,11 @@ class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, list[Any]],
+        inp_: Callable | list[Any],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[dict] = None,
+        decompositions: dict | None = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
@@ -4676,6 +4676,58 @@ def forward(self, tangents_1):
         counters.clear()
         torch._dynamo.reset()
 
+    def test_compute_outer_size_and_stride_bug(self):
+        import dataclasses
+
+        from torch._functorch._aot_autograd.schemas import (
+            PlainTensorMeta,
+            SubclassCreationMeta,
+        )
+
+        # Simulate a 2D TwoTensor(4, 6), contiguous, with dynamic shapes.
+        # After make_runtime_safe(), outer_size=(None, None), outer_stride=(None, 1).
+        # The packed symints in all_args at curr_start_idx are: [4, 6, 6]
+        # (2 size symints for the two None entries, 1 stride symint for the first None).
+        meta = object.__new__(SubclassCreationMeta)
+        for f in dataclasses.fields(SubclassCreationMeta):
+            setattr(meta, f.name, f.default)
+        meta.flat_tensor_start_idx = 0
+        meta.arg_count = 2
+        meta.included_subclass_symints = True
+        meta.attrs = {
+            "a": PlainTensorMeta(unwrapped_idx=0),
+            "b": PlainTensorMeta(unwrapped_idx=1),
+        }
+        meta.outer_size = (None, None)
+        meta.outer_stride = (None, 1)
+        meta.meta = None
+        meta.original_subclass = None
+        meta.original_subclass_type = TwoTensor
+        meta.memory_format = None
+
+        # all_args: [tensor_a, tensor_b, 4, 6, 6]
+        # curr_start_idx = 2 (after the two inner tensors)
+        a = torch.randn(4, 6)
+        b = torch.randn(4, 6)
+        all_args = [a, b, 4, 6, 6]
+
+        outer_size, outer_stride = meta.compute_outer_size_and_stride(
+            all_args, curr_start_idx=2
+        )
+        self.assertEqual(outer_size, (4, 6))
+        self.assertEqual(outer_stride, (6, 1))
+
+    def test_subclass_dynamic_stride(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def f(x):
+            return x.sin()
+
+        a = torch.randn(4, 6)
+        b = torch.randn(4, 6)
+        inp = TwoTensor(a, b)
+        out = f(inp)
+        self.assertEqual(out.stride(), inp.stride())
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -6732,6 +6784,65 @@ def forward(self, primals_1, tangents_1):
                 must_save_count,
                 tensor_getitem_count,
                 f"all {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
+            )
+        finally:
+            handle.destroy()
+
+    def test_static_input_indices_with_effect_tokens(self):
+        """Test that static_input_indices are correctly offset when effect tokens are prepended."""
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.graph_capture_wrappers import (
+            handle_effect_tokens_fn,
+        )
+        from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_static_idx_op", mutates_args=())
+        def effectful_static_idx_op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @effectful_static_idx_op.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_static_idx_op, EffectType.ORDERED)
+
+        try:
+            meta = ViewAndMutationMeta(
+                input_info=[],
+                output_info=[],
+                num_intermediate_bases=0,
+                keep_input_mutations=False,
+                traced_tangents=[],
+                subclass_inp_meta=[],
+                subclass_fw_graph_out_meta=[],
+                subclass_tangent_meta=[],
+                is_train=False,
+                traced_tangents_descs=[],
+            )
+            meta.tokens = {EffectType.ORDERED: torch.tensor([])}
+            # Simulate: params at indices 1, 2 before token insertion
+            meta.static_input_indices = [1, 2]
+
+            args = [torch.randn(4, 3), torch.randn(2, 3), torch.randn(2)]
+            args_descs = [PlainAOTInput(i) for i in range(3)]
+
+            _, new_args, _ = handle_effect_tokens_fn(
+                lambda *a: (torch.randn(1), []),
+                args,
+                args_descs,
+                meta=meta,
+                trace_joint=False,
+            )
+
+            num_tokens = len(meta.tokens)
+            self.assertGreater(num_tokens, 0)
+            # After prepending tokens, args grow and indices must be offset
+            self.assertEqual(len(new_args), len(args) + num_tokens)
+            self.assertEqual(
+                meta.static_input_indices,
+                [1 + num_tokens, 2 + num_tokens],
             )
         finally:
             handle.destroy()
@@ -8901,8 +9012,8 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -9125,8 +9236,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -9148,11 +9259,11 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, list[Any]],
+        inp_: Callable | list[Any],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[dict] = None,
+        decompositions: dict | None = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
