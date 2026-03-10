@@ -2094,46 +2094,54 @@ torch.cuda.synchronize()
                         # some implementations do not support dilation
                         fn(x, 6, stride=2, padding=0)
 
-    @onlyCUDA
-    def test_pooling_bfloat16(self, device):
-        _test_bfloat16_ops(
-            self,
-            torch.nn.AvgPool1d(3, stride=2),
-            device,
-            inp_dims=(8, 4, 16),
-            prec=0.05,
-        )
-        _test_bfloat16_ops(
-            self,
-            torch.nn.AvgPool2d(3, stride=2),
-            device,
-            inp_dims=(8, 4, 16, 16),
-            prec=0.05,
-        )
-        _test_bfloat16_ops(
-            self,
-            torch.nn.AvgPool3d(3, stride=2),
-            device,
-            inp_dims=(8, 4, 16, 16, 16),
-            prec=0.05,
-        )
-        _test_bfloat16_ops(
-            self, torch.nn.AdaptiveAvgPool1d(3), device, inp_dims=(8, 4, 16), prec=0.05
-        )
-        _test_bfloat16_ops(
-            self,
-            torch.nn.AdaptiveAvgPool2d((3, 5)),
-            device,
-            inp_dims=(8, 4, 16, 16),
-            prec=0.05,
-        )
-        _test_bfloat16_ops(
-            self,
-            torch.nn.AdaptiveAvgPool3d((3, 5, 7)),
-            device,
-            inp_dims=(8, 4, 16, 16, 16),
-            prec=0.05,
-        )
+    def test_pooling_bfloat16(self):
+        device_list = ["cpu"]
+        if TEST_CUDA:
+            device_list.append("cuda")
+
+        for device in device_list:
+            _test_bfloat16_ops(
+                self,
+                torch.nn.AvgPool1d(3, stride=2),
+                device,
+                inp_dims=(8, 4, 16),
+                prec=0.05,
+            )
+            _test_bfloat16_ops(
+                self,
+                torch.nn.AvgPool2d(3, stride=2),
+                device,
+                inp_dims=(8, 4, 16, 16),
+                prec=0.05,
+            )
+            _test_bfloat16_ops(
+                self,
+                torch.nn.AvgPool3d(3, stride=2),
+                device,
+                inp_dims=(8, 4, 16, 16, 16),
+                prec=0.05,
+            )
+            _test_bfloat16_ops(
+                self,
+                torch.nn.AdaptiveAvgPool1d(3),
+                device,
+                inp_dims=(8, 4, 16),
+                prec=0.05,
+            )
+            _test_bfloat16_ops(
+                self,
+                torch.nn.AdaptiveAvgPool2d((3, 5)),
+                device,
+                inp_dims=(8, 4, 16, 16),
+                prec=0.05,
+            )
+            _test_bfloat16_ops(
+                self,
+                torch.nn.AdaptiveAvgPool3d((3, 5, 7)),
+                device,
+                inp_dims=(8, 4, 16, 16, 16),
+                prec=0.05,
+            )
 
     def test_maxpool3d_non_square_backward(self, device):
         # previous CUDA routine of this backward calculates kernel launch grid size
