@@ -517,7 +517,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         return it->second;
       }
       symm_mems_[key] = symm_mem;
-      symm_mem_keys_by_alloc_[allocation->ptr].insert(key);
+      symm_mem_keys_by_alloc_[allocation->ptr].insert(std::move(key));
     }
     return symm_mem;
   }
