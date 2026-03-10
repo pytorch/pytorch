@@ -510,7 +510,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         reinterpret_cast<uintptr_t>(ptr) -
         reinterpret_cast<uintptr_t>(allocation->ptr);
     auto symm_mem = c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
-    NCCLSymmMemKey key{ptr, *group_name};
     {
       std::lock_guard<std::mutex> lock(mutex_);
       auto it = symm_mems_.find(key);
