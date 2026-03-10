@@ -15865,6 +15865,8 @@ op_db: list[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           allow_cow_input_materialize_forward=[0],
+           allow_cow_input_materialize_backward=[0, 'output grad 0'],
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
@@ -15880,8 +15882,6 @@ op_db: list[OpInfo] = [
                    'TestConsistency', 'test_output_grad_match', device_type='mps'),
            ),
            skips=(
-               # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
            )),
