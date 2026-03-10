@@ -535,14 +535,12 @@ Tensor& _scaled_block1x128_block1x128(
   //  B       | [K, N]    | col-major
   //
   // Scale layout vs CUDA:
-  //            |  CUDA shape   | CUDA stride | XPU shape   | XPU stride
-  //  ----------|---------------|-------------|-------------|------------
-  //  scale_a   | [M, K//128]   | (1, M)      | [M, K//128] | (K//128, 1)
-  //  scale_b   | [N, K//128]   | (1, N)      | [K//128, N] | (N, 1)
-  //
-  // Both represent the same K//128 x N grid of scale values.
-  // CUDA orders scale_b axes as [N, K//128] col-major;
-  // XPU uses [K//128, N] row-major.
+  //   CUDA (col-major, mirrors cuBLAS col-major A/B convention):
+  //     scale_a: [M, K//128]   stride (1, M)   <- scale_a[:,kb] contiguous
+  //     scale_b: [N, K//128]   stride (1, N)   <- scale_b[:,kb] contiguous
+  //   XPU (row-major, PyTorch-native convention):
+  //     scale_a: [M, K//128]   stride (K//128, 1)
+  //     scale_b: [K//128, N]   stride (N, 1)
 
   // check types
   TORCH_CHECK_VALUE(
@@ -620,13 +618,12 @@ Tensor& _scaled_block128x128_block1x128(
   //  B       | [K, N]    | col-major
   //
   // Scale layout vs CUDA:
-  //   CUDA (col-major, scale_a L4-padded on K-block dim):
+  //   CUDA (col-major, mirrors cuBLAS col-major A/B convention):
   //     scale_a: [round_up(K//128,4), M//128]  stride (1, round_up(K//128,4))
   //     scale_b: [N, K//128]                   stride (1, N)
-  //   XPU (row-major, no L4 padding):
+  //   XPU (row-major, PyTorch-native convention, no L4 padding):
   //     scale_a: [M//128, K//128]  stride (K//128, 1)
   //     scale_b: [K//128, N]       stride (N, 1)
-  // scale_b: same K//128 x N values; axis order differs per backend.
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
@@ -703,13 +700,12 @@ Tensor& _scaled_block1x128_block128x128(
   //  B       | [K, N]    | col-major
   //
   // Scale layout vs CUDA:
-  //   CUDA (col-major, scale_b L4-padded on K-block dim):
+  //   CUDA (col-major, mirrors cuBLAS col-major A/B convention):
   //     scale_a: [M, K//128]                   stride (1, M)
   //     scale_b: [round_up(K//128,4), N//128]  stride (1, round_up(K//128,4))
-  //   XPU (row-major, no L4 padding):
+  //   XPU (row-major, PyTorch-native convention, no L4 padding):
   //     scale_a: [M, K//128]       stride (K//128, 1)
   //     scale_b: [K//128, N//128]  stride (N//128, 1)
-  // scale_a: same [M, K//128] shape; CUDA col-major stride, XPU row-major.
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
