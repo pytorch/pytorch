@@ -1452,6 +1452,18 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.__repr__()
 
+    def test_repr_key_order(self):
+        param = Parameter(torch.randn(2, 3))
+        optimizer = SGD([param], lr=0.1)
+        repr_str = repr(optimizer)
+        keys = [
+            line.split(":")[0].strip()
+            for line in repr_str.splitlines()
+            if ":" in line and "Parameter Group" not in line
+        ]
+        group_keys = [k for k in optimizer.param_groups[0] if k != "params"]
+        self.assertEqual(keys, group_keys)
+
     @parametrize("is_named_optim0", [True, False])
     @parametrize("is_named_optim1", [True, False])
     @optims(optim_db, dtypes=[torch.float32])

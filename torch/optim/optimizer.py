@@ -438,7 +438,7 @@ class Optimizer:
         for i, group in enumerate(self.param_groups):
             format_string += "\n"
             format_string += f"Parameter Group {i}\n"
-            for key in sorted(group.keys()):
+            for key in group:
                 if key != "params":
                     format_string += f"    {key}: {group[key]}\n"
         format_string += ")"
