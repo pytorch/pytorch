@@ -160,22 +160,19 @@ def signature_to_meta(
     }
 
 
-def _get_buffer_layout(buf_name: str):
+def _get_buffer_layout(buf_name: str) -> "torch._inductor.ir.Layout":
     """Get the layout for a buffer, handling both scheduler buffers and graph inputs."""
     if V.graph.scheduler:
-        try:
-            return V.graph.scheduler.get_buffer_layout(buf_name)
-        except (KeyError, AttributeError):
-            pass
-
-    buffer = V.graph.try_get_buffer(buf_name)
-    if buffer:
-        return buffer.get_layout()
-
-    if hasattr(V, "kernel") and V.kernel is not None and buf_name == V.kernel.output_node.name:
-        return V.kernel.output_node.layout
-
-    return None
+        layout = V.graph.scheduler.get_buffer_layout(buf_name)
+    else:
+        buffer = V.graph.try_get_buffer(buf_name)
+        # output arg
+        if not buffer:
+            assert buf_name == V.kernel.output_node.name
+            layout = V.kernel.output_node.layout
+        else:
+            layout = buffer.get_layout()
+    return layout
 
 
 def is_unaligned_buffer(arg: TensorArg):
@@ -231,9 +228,6 @@ def _is_tensor_within_2gb(arg: TensorArg) -> bool:
     MAX_BYTES = 2**31 - 1
     try:
         layout = _get_buffer_layout(arg.buffer)
-        if layout is None:
-            return False
-
         storage_bytes = layout.storage_size() * arg.dtype.itemsize
         return V.graph.sizevars.statically_known_true(storage_bytes <= MAX_BYTES)
     except Exception:
