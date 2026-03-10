@@ -375,6 +375,24 @@ class TestPoolingNN(NNTestCase):
         self.assertFalse(torch.isinf(out).any())
         self.assertFalse(torch.isnan(out).any())
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @largeTensorTest("1GB", device="cuda")
+    def test_adaptive_avg_pooling_index_overflow(self):
+        # See https://github.com/pytorch/pytorch/issues/176784
+        # START_IND macro int32 overflow when osizeH * isizeH > INT_MAX
+        # Use arange so every input element is unique and any index
+        # miscalculation produces a detectably wrong value.
+        x = torch.arange(47, dtype=torch.float32).reshape(1, 1, 47, 1)
+        pool = torch.nn.AdaptiveAvgPool2d((67108864, 1))
+        expected = pool(x)
+        actual = pool(x.cuda())
+        self.assertEqual(actual.cpu(), expected)
+
+        # Also overflow in the width dimension
+        x_w = x.permute(0, 1, 3, 2)  # (1, 1, 1, 47)
+        pool_w = torch.nn.AdaptiveAvgPool2d((1, 67108864))
+        self.assertEqual(pool_w(x_w.cuda()).cpu(), pool_w(x_w))
+
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)
