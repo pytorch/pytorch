@@ -57,6 +57,16 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         detached_mat = mat.detach()
         self.assertFalse(detached_mat is mat)
 
+    def test_detach_(self):
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+
+        tensor_to_detach = torch.randn(12, 8, requires_grad=True)
+        mat = distribute_tensor(tensor_to_detach, device_mesh, shard_spec)
+        self.assertTrue(mat.requires_grad)
+        mat.detach_()
+        self.assertFalse(mat.requires_grad)
+
     def test_clone(self):
         device_mesh = self.build_device_mesh()
         specs = [[Replicate()], [Shard(0)]]
