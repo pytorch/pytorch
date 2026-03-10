@@ -535,12 +535,11 @@ def _recursive_joint_graph_passes(
     gm: GraphModule,
     skip_invoke_subgraph: bool = False,
     input_device: torch.device | None = None,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> GraphModule:
     def _run_on_sub_graph_module(subgraph_name: str) -> None:
         subgraph = getattr(gm, subgraph_name)
         new_subgraph = _recursive_joint_graph_passes(
-            subgraph, skip_invoke_subgraph, input_device, get_decomp_fn=get_decomp_fn
+            subgraph, skip_invoke_subgraph, input_device
         )
         setattr(gm, subgraph_name, new_subgraph)
 
@@ -562,7 +561,7 @@ def _recursive_joint_graph_passes(
         for subgraph_name in old_subgraph_names:
             _run_on_sub_graph_module(subgraph_name)
 
-        out_gm = joint_graph_passes(gm, input_device, get_decomp_fn=get_decomp_fn)
+        out_gm = joint_graph_passes(gm, input_device)
 
         # Some joint graph passes may create new sub graph module. Run one round
         # for the newly created graph modules.
@@ -2078,7 +2077,6 @@ def fw_compiler_freezing(
     cudagraphs: BoxedBool,
     graph_id: int,
     forward_device: BoxedDeviceIndex,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> Callable[[list[object]], Sequence[torch.Tensor]]:
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
@@ -2087,7 +2085,6 @@ def fw_compiler_freezing(
     aot_autograd_model = _recursive_joint_graph_passes(
         aot_autograd_model,
         input_device=next(iter(inputs_devices)),
-        get_decomp_fn=get_decomp_fn,
     )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
@@ -2217,8 +2214,6 @@ def get_cuda_device_context(gm: torch.fx.GraphModule) -> AbstractContextManager[
 def partition_fn(
     gm: GraphModule,
     joint_inputs: Sequence[object],
-    *,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
     **kwargs: object,
 ) -> tuple[GraphModule, GraphModule]:
     cuda_context = get_cuda_device_context(gm)
@@ -2231,7 +2226,6 @@ def partition_fn(
             gm,
             skip_invoke_subgraph=True,
             input_device=next(iter(inputs_devices)),
-            get_decomp_fn=get_decomp_fn,
         )
 
     static_lifetime_input_indices: list[int] | None = kwargs.pop(  # type: ignore[assignment]
@@ -2359,7 +2353,6 @@ def compile_fx_forward(
     compiler_config_extra: CompilerConfigExtra,
     inner_compile: Callable[..., OutputCode] = compile_fx_inner,
     is_inference: bool = False,
-    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> OutputCode:
     """
     Compile the forward graph of the given graph module.
@@ -2405,9 +2398,7 @@ def compile_fx_forward(
         _recursive_record_original_output_strides(gm)
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
-        gm = _recursive_joint_graph_passes(
-            gm, input_device=next(iter(inputs_devices)), get_decomp_fn=get_decomp_fn
-        )
+        gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
 
         trace_structured(
             "artifact",
@@ -2834,7 +2825,6 @@ def _compile_fx_main(
                     compiler_config_extra=compiler_config_extra,
                     inner_compile=inner_compile,
                     is_inference=is_inference,
-                    get_decomp_fn=get_decomp_fn,
                 )
 
         fw_compiler: Callable[[GraphModule, Sequence[InputType]], OutputCode] = (
@@ -2851,7 +2841,6 @@ def _compile_fx_main(
                 cudagraphs=compiler_config_extra.cudagraphs,
                 graph_id=compiler_config_extra.graph_id,
                 forward_device=compiler_config_extra.forward_device,
-                get_decomp_fn=get_decomp_fn,
             )
         else:
             inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
@@ -2970,9 +2959,7 @@ def _compile_fx_main(
                     bw_compiler=bw_compiler,
                     inference_compiler=inference_compiler,
                     decompositions=decompositions,
-                    partition_fn=functools.partial(
-                        partition_fn, get_decomp_fn=get_decomp_fn
-                    ),
+                    partition_fn=partition_fn,
                     keep_inference_input_mutations=True,
                     cudagraphs=compiler_config_extra.cudagraphs,
                     boxed_forward_device_index=compiler_config_extra.forward_device,
