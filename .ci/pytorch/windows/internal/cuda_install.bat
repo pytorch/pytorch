@@ -20,8 +20,8 @@ set CUDA_VERSION_STR=%CUDA_VER_MAJOR%.%CUDA_VER_MINOR%
 set CUDNN_FOLDER="cuda"
 set CUDNN_LIB_FOLDER="lib\x64"
 
-:: Skip all of this if we already have cuda installed
-if exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\nvcc.exe" goto set_cuda_env_vars
+:: If CUDA is already installed, skip CUDA installation but still verify cuDNN
+if exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\nvcc.exe" goto check_cudnn
 
 if %CUDA_VER% EQU 126 goto cuda126
 if %CUDA_VER% EQU 128 goto cuda128
@@ -210,6 +210,42 @@ if not exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_
 )
 
 goto set_cuda_env_vars
+
+:check_cudnn
+:: When CUDA is pre-installed on the AMI, cuDNN may still be missing.
+:: Set the correct cuDNN variables for the CUDA version, then install if needed.
+
+set CUDNN_LIB_FOLDER="lib"
+if %CUDA_VER% EQU 126 set CUDNN_FOLDER=cudnn-windows-x86_64-9.10.2.21_cuda12-archive
+if %CUDA_VER% EQU 128 set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda12-archive
+if %CUDA_VER% EQU 129 set CUDNN_FOLDER=cudnn-windows-x86_64-9.17.1.4_cuda12-archive
+if %CUDA_VER% EQU 130 set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda13-archive
+set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
+
+if exist "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\cudnn.h" (
+    echo cuDNN already installed at %ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%
+    goto set_cuda_env_vars
+)
+
+echo cuDNN not found, installing %CUDNN_FOLDER%...
+
+if not exist "%SRC_DIR%\temp_build" mkdir "%SRC_DIR%\temp_build"
+
+curl -k -L "http://s3.amazonaws.com/ossci-windows/%CUDNN_INSTALL_ZIP%" --output "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%"
+if errorlevel 1 exit /b 1
+
+7z x "%SRC_DIR%\temp_build\%CUDNN_INSTALL_ZIP%" -o"%SRC_DIR%\temp_build\cudnn"
+xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin"
+xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\lib\x64"
+xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include"
+
+echo Installing ZLIB dlls
+curl -k -L "http://s3.amazonaws.com/ossci-windows/zlib123dllx64.zip" --output "%SRC_DIR%\temp_build\zlib123dllx64.zip"
+7z x "%SRC_DIR%\temp_build\zlib123dllx64.zip" -o"%SRC_DIR%\temp_build\zlib"
+xcopy /Y "%SRC_DIR%\temp_build\zlib\dll_x64\*.dll" "C:\Windows\System32"
+
+echo Cleaning temp files
+rd /s /q "%SRC_DIR%\temp_build" || ver > nul
 
 :set_cuda_env_vars
 
