@@ -2179,7 +2179,6 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
     @make_logging_test()
     def test_pattern_match_debug_multiple_nodes(self, records):
-
         def pattern_add(x, y):
             return x + y
 
@@ -2220,15 +2219,13 @@ class TestPatternMatcherLogging(LoggingTestCase):
             compiled_fn = torch.compile(
                 fn, options={"post_grad_custom_post_pass": custom_pass}
             )
-            result = compiled_fn(x, y)
-
+            _ = compiled_fn(x, y)
 
         self.assertTrue(self.hasRecord(records, "Specific pattern match: add"))
         self.assertTrue(self.hasRecord(records, "Specific pattern match: sub"))
 
     @make_logging_test()
     def test_pattern_match_debug_all_nodes(self, records):
-
         def pattern_add(x, y):
             return x + y
 
@@ -2268,7 +2265,7 @@ class TestPatternMatcherLogging(LoggingTestCase):
             compiled_fn = torch.compile(
                 fn, options={"post_grad_custom_post_pass": custom_pass}
             )
-            result = compiled_fn(x, y)
+            _ = compiled_fn(x, y)
 
         self.assertTrue(self.hasRecord(records, "Specific pattern match: add"))
         self.assertTrue(self.hasRecord(records, "Specific pattern match: sub"))

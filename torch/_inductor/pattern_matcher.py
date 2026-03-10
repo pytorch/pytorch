@@ -1159,7 +1159,9 @@ class ReplacementPatternEntry(PatternEntry):
     """
 
     normalize_args: Callable[..., list[Any]]
-    pattern_name: Optional[str] = None  # Unique identifier for per-pattern telemetry
+    pattern_name: typing.Optional[str] = (
+        None  # Unique identifier for per-pattern telemetry
+    )
 
     @staticmethod
     def replace_with_graph(
@@ -1464,7 +1466,7 @@ def register_replacement(
     exclusive_arg_names: Sequence[str] = (),
     search_fn_pattern: PatternExpr | None = None,
     skip_duplicates: bool = False,
-    pattern_name: Union[str, None] = None,
+    pattern_name: str | None = None,
 ) -> bool:
     """
     Create a replacement rule based on example functions that get traced
