@@ -362,19 +362,12 @@ struct ScaleSpec {
     int64_t group_k = groups[1];
 
     // For RowWise: groups={1, K} for SRC, {K, 1} for WEI
-    // This gives outer_dim scales (M for SRC, N for WEI)
-    if ((group_m == 1 && group_k == inner_dim) ||
-        (group_m == inner_dim && group_k == 1)) {
-      return outer_dim;
-    }
-
+    //     This gives outer_dim scales (M for SRC, N for WEI)
     // For blockwise 1x128: groups = {1, 128} for SRC, {128, 1} for WEI
-    // scale shape: [outer_dim, ceil_div(inner_dim, 128)]
+    //     scale shape: [outer_dim, ceil_div(inner_dim, 128)]
     if (group_m == 1 && group_k > 1) {
-      // Blockwise 1xK for SRC: groups = {1, block_size}
       return outer_dim * at::ceil_div(inner_dim, group_k);
     } else if (group_m > 1 && group_k == 1) {
-      // Blockwise Kx1 for WEI: groups = {block_size, 1}
       return outer_dim * at::ceil_div(inner_dim, group_m);
     }
 
