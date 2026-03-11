@@ -297,6 +297,7 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
       unset(_omp_clang_lib)
     endif()
 
+    # Use OpenMP_PREFIX if defined, skipped on MSVC
     # cl.exe links the OpenMP runtime matching its -openmp flag by itself (vcomp
     # for -openmp[:experimental]), so on MSVC this search must not add one. It
     # would find the libomp.lib shipped with Visual Studio, and with two runtimes
@@ -304,22 +305,12 @@ function(_OPENMP_GET_FLAGS LANG FLAG_MODE OPENMP_FLAG_VAR OPENMP_LIB_NAMES_VAR)
     # at::parallel_for runs the whole range on each thread (#193784). The compiler
     # id is checked rather than MSVC because clang-cl sets MSVC too but emits
     # __kmpc_* calls and does need libomp.
-    if ((NOT OpenMP_libomp_LIBRARY) AND (NOT CMAKE_${LANG}_COMPILER_ID STREQUAL "MSVC"))
-      find_library(OpenMP_libomp_LIBRARY
-        NAMES omp gomp iomp5
-        HINTS ${CMAKE_${LANG}_IMPLICIT_LINK_DIRECTORIES}
-        DOC "libomp location for OpenMP"
-      )
-      mark_as_advanced(OpenMP_libomp_LIBRARY)
-    endif()
-
-    # Use OpenMP_PREFIX if defined. Skipped on MSVC for the same reason as above:
-    # setting a prefix must not bring libomp in next to vcomp.
-    if ((NOT OpenMP_libomp_LIBRARY) AND (NOT "${OpenMP_PREFIX}" STREQUAL "") AND (NOT CMAKE_${LANG}_COMPILER_ID STREQUAL "MSVC"))
+    if ((NOT "${OpenMP_PREFIX}" STREQUAL "") AND (NOT CMAKE_${LANG}_COMPILER_ID STREQUAL "MSVC"))
       find_library(OpenMP_libomp_LIBRARY
         NAMES omp gomp iomp5
         HINTS "${OpenMP_PREFIX}/lib"
         DOC "libomp location for OpenMP"
+        NO_DEFAULT_PATH
       )
       mark_as_advanced(OpenMP_libomp_LIBRARY)
     endif()
