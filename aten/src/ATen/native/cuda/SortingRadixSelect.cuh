@@ -521,6 +521,7 @@ __device__ __forceinline__ void countRadixAggregateCounts(
   for (uint32_t i = 0; i < RadixSize; ++i) {
     counts[i] = smem[buffer_offset + i];
   }
+  __syncthreads(); // Wait for all threads to finish reading the final counts.
 }
 
 // This function counts the distribution of all input values in a
