@@ -1265,6 +1265,45 @@ class DecompOneOffTests(TestCase):
         )
 
 
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_unfold_backward(self, device):
+        # Regression test: aten.unfold_backward must be a functional decomposition
+        # that produces correct gradients matching eager mode.
+        def _check(x, size, step, dim):
+            x_ref = x.detach().clone().requires_grad_(True)
+            x_test = x.detach().clone().requires_grad_(True)
+            # Eager (uses ATen kernel directly)
+            x_ref.unfold(dim, size, step).sum().backward()
+            # Decomposition path (forces the registered decomposition)
+            from torch.fx.experimental.proxy_tensor import make_fx
+            from torch._decomp import decomposition_table
+
+            def fn(t):
+                return t.unfold(dim, size, step).sum()
+
+            decomp_fn = make_fx(fn, decomposition_table=decomposition_table)(x_test)
+            # Run the traced decomposition and verify grads match eager
+            x_test2 = x.detach().clone().requires_grad_(True)
+            decomp_fn(x_test2).backward()
+            self.assertEqual(x_ref.grad, x_test2.grad)
+
+        # 1D, step=1
+        _check(torch.randn(10, device=device), size=3, step=1, dim=0)
+        # 1D, step > 1
+        _check(torch.randn(10, device=device), size=3, step=2, dim=0)
+        # Negative dim
+        _check(torch.randn(10, device=device), size=3, step=1, dim=-1)
+        # 2D tensor, non-zero dim
+        _check(torch.randn(4, 10, device=device), size=3, step=2, dim=1)
+        # 2D tensor, dim=0
+        _check(torch.randn(8, 4, device=device), size=2, step=3, dim=0)
+        # Zero windows (size larger than input length)
+        _check(torch.randn(2, device=device), size=3, step=1, dim=0)
+        # fp64
+        _check(torch.randn(10, device=device, dtype=torch.float64), size=4, step=2, dim=0)
+
+
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
 
