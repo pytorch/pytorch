@@ -341,6 +341,23 @@ class TestCUDAGraphDebugInputs(TestCase):
 
         g.replay()
 
+    def test_higher_order_op_during_capture(self):
+        from torch._higher_order_ops.wrap import wrap
+
+        def inner_fn(x):
+            return x * 2
+
+        x = torch.randn(32, device="cuda")
+        g = torch.cuda.CUDAGraph()
+
+        _warmup_op(lambda: wrap(inner_fn, x))
+
+        with torch.cuda.graph(g, check_input_liveness=True):
+            y = wrap(inner_fn, x)
+
+        g.replay()
+        self.assertEqual(y, x * 2)
+
 
 class TestCUDAGraphDebugBacktraces(TestCase):
     def test_error_message_contains_all_tracebacks(self):

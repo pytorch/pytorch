@@ -7,6 +7,8 @@ from torch.utils._pytree import tree_iter
 
 
 class _TensorTrackingMode(TorchDispatchMode):
+    supports_higher_order_operators = True
+
     def __init__(self, cuda_graph: torch.cuda.CUDAGraph) -> None:
         self._graph = cuda_graph
 
