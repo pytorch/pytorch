@@ -18,12 +18,18 @@ Scalar _local_scalar_dense_cuda(const Tensor& self) {
   TORCH_CHECK(self.numel() > 0, "_local_scalar_dense: Empty tensor not supported");
     AT_DISPATCH_V2(
       self.scalar_type(), "_local_scalar_dense_cuda", AT_WRAP([&] {
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && (ROCM_VERSION >= 70200)
           // If this is a large BAR device, we can just read directly from VRAM
           if (at::cuda::getCurrentDeviceProperties()->isLargeBar) {
             cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-            at::cuda::stream_synchronize(stream);
-            r = Scalar(*self.const_data_ptr<scalar_t>());
+            hipStreamCaptureStatus captureStatus;
+            C10_CUDA_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+            if (C10_LIKELY(captureStatus == hipStreamCaptureStatusNone)) {
+              at::cuda::stream_synchronize(stream);
+              r = Scalar(*self.const_data_ptr<scalar_t>());
+            } else {
+              C10_CUDA_CHECK(hipErrorStreamCaptureUnsupported);
+            }
           } else {
 #endif
           // Create pinned memory for the scalar value to avoid implicit
