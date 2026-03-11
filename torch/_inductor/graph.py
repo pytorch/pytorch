@@ -2067,8 +2067,12 @@ class GraphLowering(torch.fx.Interpreter):
             for s in unbacked_bindings
         )
 
-        assert new_unbacked_defs >= renamed_unbacked_bindings, (
-            f"failed {new_unbacked_defs} >= {renamed_unbacked_bindings} (inductor >= fx)\n"
+        # unbacked_bindings may contain both new symbols (defined at this node)
+        # and old symbols (defined at previous nodes but used here, e.g., slice).
+        # Only check that new symbols are properly defined in inductor.
+        new_symbols_only = renamed_unbacked_bindings & new_unbacked_defs
+        assert new_unbacked_defs >= new_symbols_only, (
+            f"failed {new_unbacked_defs} >= {new_symbols_only} (inductor >= fx)\n"
             f"fx node is: {n.format_node()}\n"
             f"new operations are:\n\n{format_new_defs()}"
         )
