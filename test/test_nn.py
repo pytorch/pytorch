@@ -2671,31 +2671,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         devices = ['cpu'] + (['cuda'] if TEST_CUDA else [])
         for device in devices:
             for reduction in ['mean', 'sum', 'none']:
-                with self.subTest(device=device, reduction=reduction):
-                    x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True, device=device)
-                    y = torch.tensor([1.5, 2.5], dtype=torch.float64, requires_grad=True, device=device)
-                    loss = F.mse_loss(x, y, reduction=reduction)
-                    if reduction == 'mean':
-                        expected_loss = torch.tensor(0.25, dtype=torch.float64, device=device)
-                        expected_grad_x = torch.tensor([-0.5, -0.5], dtype=torch.float32, device=device)
-                        expected_grad_y = torch.tensor([0.5, 0.5], dtype=torch.float64, device=device)
-                    elif reduction == 'sum':
-                        expected_loss = torch.tensor(0.5, dtype=torch.float64, device=device)
-                        expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
-                        expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
-                    else:  # 'none'
-                        expected_loss = torch.tensor([0.25, 0.25], dtype=torch.float64, device=device)
-                        expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
-                        expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
-                    self.assertEqual(loss, expected_loss, atol=1e-6, rtol=0)
-                    grad = torch.ones_like(loss) if reduction == 'none' else None
-                    loss.backward(grad)
-                    self.assertIsNotNone(x.grad)
-                    self.assertIsNotNone(y.grad)
-                    self.assertEqual(x.grad.dtype, torch.float32)
-                    self.assertEqual(y.grad.dtype, torch.float64)
-                    self.assertEqual(x.grad, expected_grad_x, atol=1e-6, rtol=0)
-                    self.assertEqual(y.grad, expected_grad_y, atol=1e-6, rtol=0)
+                x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True, device=device)
+                y = torch.tensor([1.5, 2.5], dtype=torch.float64, requires_grad=True, device=device)
+                loss = F.mse_loss(x, y, reduction=reduction)
+                if reduction == 'mean':
+                    expected_loss = torch.tensor(0.25, dtype=torch.float64, device=device)
+                    expected_grad_x = torch.tensor([-0.5, -0.5], dtype=torch.float32, device=device)
+                    expected_grad_y = torch.tensor([0.5, 0.5], dtype=torch.float64, device=device)
+                elif reduction == 'sum':
+                    expected_loss = torch.tensor(0.5, dtype=torch.float64, device=device)
+                    expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
+                    expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
+                else:  # 'none'
+                    expected_loss = torch.tensor([0.25, 0.25], dtype=torch.float64, device=device)
+                    expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
+                    expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
+                self.assertEqual(loss, expected_loss, atol=1e-6, rtol=0)
+                grad = torch.ones_like(loss) if reduction == 'none' else None
+                loss.backward(grad)
+                self.assertEqual(x.grad, expected_grad_x, atol=1e-6, rtol=0)
+                self.assertEqual(y.grad, expected_grad_y, atol=1e-6, rtol=0)
 
     def test_weighted_l1_loss_with_weights(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
