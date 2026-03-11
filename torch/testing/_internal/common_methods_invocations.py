@@ -16067,6 +16067,9 @@ op_db: list[OpInfo] = [
                    'TestCompositeCompliance', 'test_forward_ad', device_type='cuda',
                    active_if=TEST_CUDNN),
                DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=2e-05), }),
+                   'TestCompositeCompliance', 'test_backward', device_type='xpu'),
+               DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-4, rtol=1e-4)}),
                    "TestMathBits", "test_conj_view", device_type='cuda'),
                DecorateInfo(
