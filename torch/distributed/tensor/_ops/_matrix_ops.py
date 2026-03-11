@@ -1293,10 +1293,10 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
                     f"Expected TensorMeta, got {type(spec.output_specs.tensor_meta)}"
                 )
             meta: TensorMeta = spec.output_specs.tensor_meta
-            local_stride = compute_local_stride(meta.stride, mesh, placements)
             local_shape, _ = compute_local_shape_and_global_offset(
                 meta.shape, mesh, placements, skip_offset=True
             )
+            local_stride = compute_local_stride(meta.stride, local_shape)
             return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
 
         # pyrefly: ignore [missing-attribute]
