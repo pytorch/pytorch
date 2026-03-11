@@ -485,11 +485,11 @@ class TestProfiler(TestCase):
         self.assertEqual(len(observed_during_run), worker_threads)
         self.assertEqual(len(observed_during_run), len(set(observed_during_run)))
 
-    def payload(self, use_cuda=False):
-        x = torch.randn(10, 10)
+    def payload(self, use_cuda=False, tensor_size=10):
+        x = torch.randn(tensor_size, tensor_size)
         if use_cuda:
             x = x.cuda()
-        y = torch.randn(10, 10)
+        y = torch.randn(tensor_size, tensor_size)
         if use_cuda:
             y = y.cuda()
         z = torch.mm(x, y)
@@ -2452,7 +2452,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                     disable_external_correlation=disable_external_correlation
                 ),
             ) as prof:
-                self.payload(use_cuda=True)
+                self.payload(use_cuda=True, tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
@@ -2815,6 +2815,27 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             x = torch.randn(10, 10).to("cuda")
             y = torch.mm(x, x)
         self.assertEqual(len(p.events()), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_kineto_kernel_metadata_in_trace(self):
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            self.payload(use_cuda=True)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+            events = trace["traceEvents"]
+            kernel_events = [e for e in events if e.get("cat", "") == "kernel"]
+            self.assertGreater(
+                len(kernel_events), 0, "Error: No kernel events in trace"
+            )
+            for ke in kernel_events:
+                args = ke.get("args", {})
+                name = ke.get("name", "<unknown>")
+                for key in ["device", "stream", "correlation", "grid", "block"]:
+                    self.assertIn(key, args, f"kernel '{name}' missing '{key}'")
 
 
 class SimpleNet(nn.Module):
