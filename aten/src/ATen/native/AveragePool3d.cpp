@@ -63,6 +63,7 @@ TORCH_META_FUNC(avg_pool3d) (
   const int64_t odepth = pooling_output_shape<int64_t>(idepth, kD, padD, dD, 1, ceil_mode);
   const int64_t oheight = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
   const int64_t owidth = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
+  auto memory_format = input.suggest_memory_format();
 
   pool3d_shape_check(
     input,
@@ -81,7 +82,11 @@ TORCH_META_FUNC(avg_pool3d) (
     set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, input.options());
   }
   else {
-    set_output_raw_strided(0, {nbatch, nslices, odepth, oheight, owidth}, {}, input.options());
+    set_output_raw_strided(
+        0,
+        {nbatch, nslices, odepth, oheight, owidth},
+        {},
+        input.options().memory_format(memory_format));
   }
 }
 
@@ -130,6 +135,7 @@ TORCH_META_FUNC(avg_pool3d_backward) (
   const int64_t odepth_for_shape_check = pooling_output_shape<int64_t>(idepth, kD, padD, dD, 1, ceil_mode);
   const int64_t oheight_for_shape_check = pooling_output_shape<int64_t>(iheight, kH, padH, dH, 1, ceil_mode);
   const int64_t owidth_for_shape_check = pooling_output_shape<int64_t>(iwidth, kW, padW, dW, 1, ceil_mode);
+  auto memory_format = input.suggest_memory_format();
 
   avg_pool3d_backward_shape_check(
     input,
@@ -143,7 +149,11 @@ TORCH_META_FUNC(avg_pool3d_backward) (
     "avg_pool3d_backward()");
 
   /* resize output */
-  set_output_raw_strided(0, input.sizes(), {}, input.options());
+  set_output_raw_strided(
+      0,
+      input.sizes(),
+      {},
+      input.options().memory_format(memory_format));
 }
 
 } // namespace at::meta

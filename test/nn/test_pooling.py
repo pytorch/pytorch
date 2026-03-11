@@ -1518,6 +1518,38 @@ torch.cuda.synchronize()
         helper(1, 19, 20, 10, 8, 2, torch.contiguous_format)
         helper(1, 19, 20, 10, 8, 2, torch.channels_last)
 
+    @onlyCPU
+    @dtypes(torch.half, torch.bfloat16)
+    def test_avg_pool3d_reduced_floating(self, device, dtype):
+        atol, rtol = 0.05, 0.01
+
+        def helper(n, c, d, h, w, kernel_size, stride, memory_format):
+            input = torch.randn(n, c, d, h, w, dtype=torch.float32, device=device).to(
+                dtype=dtype
+            )
+            input = input.to(memory_format=memory_format).requires_grad_()
+            pool = torch.nn.AvgPool3d(kernel_size, stride).to(device)
+
+            input2 = input.detach().clone().float().requires_grad_(True)
+
+            out = pool(input)
+            out.sum().backward()
+            out2 = pool(input2)
+            out2.sum().backward()
+
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype), atol=atol, rtol=rtol)
+            self.assertEqual(
+                input.grad, input2.grad.to(dtype=dtype), atol=atol, rtol=rtol
+            )
+
+        helper(2, 30, 8, 8, 8, 3, 1, torch.contiguous_format)
+        helper(2, 65, 8, 8, 8, 3, 1, torch.channels_last_3d)
+        helper(1, 19, 10, 10, 10, 8, 2, torch.contiguous_format)
+        helper(1, 19, 10, 9, 14, 8, 2, torch.channels_last_3d)
+
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)
     @expectedFailureMPS  # test_adaptive_pooling_max_nhwc currently fails on MPS - ISSUE#

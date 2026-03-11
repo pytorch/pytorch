@@ -780,8 +780,8 @@ void cpu_avg_pool3d_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<BFloat16>();
-  auto output_data = output.data_ptr<BFloat16>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
   int64_t channels = input.size(1);
@@ -792,7 +792,7 @@ void cpu_avg_pool3d_channels_last(
   int64_t output_height = output.size(3);
   int64_t output_width = output.size(4);
 
-  using bVec = vec::Vectorized<BFloat16>;
+  using bVec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * output_depth * output_height * output_width, 0, [&](int64_t begin, int64_t end) {
@@ -803,7 +803,7 @@ void cpu_avg_pool3d_channels_last(
     data_index_init(begin, n, nbatch, od, output_depth, oh, output_height, ow, output_width);
 
     // temp buffer for sum, use float as accumulation type
-    // can't reuse output buffer to store sum since it is BFloat16
+    // can't reuse output buffer to store sum since it is BFloat16/Half
     auto sum_arr = std::make_unique<float []>(channels);
     float* sum = sum_arr.get();
 
@@ -835,7 +835,7 @@ void cpu_avg_pool3d_channels_last(
         }
       }
 
-      BFloat16* out = output_data + i * channels;
+      scalar_t* out = output_data + i * channels;
 
       // Pass I: zero the out lane
       int64_t d1 = 0;
@@ -862,13 +862,13 @@ void cpu_avg_pool3d_channels_last(
       for (const auto id : c10::irange(id0, id1)) {
         for (const auto ih : c10::irange(ih0, ih1)) {
           for (const auto iw : c10::irange(iw0, iw1)) {
-            BFloat16* in = input_data + n * input_depth * input_height * input_width * channels +
+            const scalar_t* in = input_data + n * input_depth * input_height * input_width * channels +
                 id * input_height * input_width * channels + ih * input_width * channels + iw * channels;
 
             int64_t d2 = 0;
             for (; d2 < size - (size % bVec::size()); d2 += bVec::size()) {
               bVec data_bvec = bVec::loadu(in + d2);
-              auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
+              auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
 
               fVec sum_fvec0 = fVec::loadu(sum + d2) + data_fvec0;
               fVec sum_fvec1 = fVec::loadu(sum + d2 + fVec::size()) + data_fvec1;
@@ -888,11 +888,11 @@ void cpu_avg_pool3d_channels_last(
         fVec out_fvec0 = fVec::loadu(sum + d3) / fVec(float(divide_factor));
         fVec out_fvec1 = fVec::loadu(sum + d3 + fVec::size()) / fVec(float(divide_factor));
 
-        bVec out_bvec = convert_float_bfloat16(out_fvec0, out_fvec1);
+        bVec out_bvec = convert_from_float<scalar_t>(out_fvec0, out_fvec1);
         out_bvec.store(out + d3);
       }
       for (; d3 < size; d3++) {
-        out[d3] = BFloat16(sum[d3] / divide_factor);
+        out[d3] = scalar_t(sum[d3] / divide_factor);
       }
 
       // move on to next output index
