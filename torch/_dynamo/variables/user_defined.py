@@ -1016,7 +1016,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     [self, *args],
                     kwargs,
                 )
-
+        elif issubclass(self.value, BaseException):
+            return variables.ExceptionVariable(self.value, tuple(args), kwargs)
+        
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self) -> bool:
@@ -2407,7 +2409,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         ctor = self.python_type()
         return ctor(*args, **kwargs)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name in self.fields:
             return self.fields[name]
         return super().var_getattr(tx, name)

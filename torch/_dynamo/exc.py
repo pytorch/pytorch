@@ -31,6 +31,7 @@ import logging
 import re
 import textwrap
 import typing
+from dataclasses import FrozenInstanceError
 from enum import auto, Enum
 from functools import lru_cache
 from pathlib import Path
@@ -399,6 +400,10 @@ class ObservedTypeError(ObservedException):
     # A TypeError exception to be raised from inside Dynamo tracing. This can happen on generator.send(..) method
     pass
 
+class ObservedFrozenInstanceError(ObservedException):
+    # A FrozenInstanceError exception to be raised from inside Dynamo tracing. This can happen on a frozen dataclass __getattr__ or __delattr__.
+    pass
+
 
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
@@ -410,6 +415,7 @@ observed_exception_map = {
     RuntimeError: ObservedRuntimeError,
     NotImplementedError: ObservedNotImplementedError,
     TypeError: ObservedTypeError,
+    FrozenInstanceError: ObservedFrozenInstanceError,
 }
 
 
