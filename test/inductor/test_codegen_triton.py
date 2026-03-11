@@ -189,7 +189,6 @@ class TestCodegenTriton(InductorTestCase):
             sympy.Float(0.5) + TruncToFloat(s0),
         )
 
-
     @unittest.skipUnless(
         torch.version.hip is not None, "pointer_range_32 is HIP-only"
     )

@@ -96,7 +96,7 @@ if has_triton_package():
             # Build attr dict merging divisibility and pointer_range per arg index,
             # since a single arg can carry both attributes.
             result = {(x,): [["tt.divisibility", 16]] for x in (divisible_by_16 or ())}
-            for x in (pointer_range_32 or ()):
+            for x in pointer_range_32 or ():
                 key = (x,)
                 if key in result:
                     result[key].append(["tt.pointer_range", 32])

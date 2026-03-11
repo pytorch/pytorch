@@ -295,13 +295,17 @@ def config_of(
 
     # On AMD/HIP, tag tensor args whose storage fits in 2GB so Triton
     # can use 32-bit pointer offsets and emit buffer load/store ops.
+    # Exclude mutated buffers (e.g. atomic scatter targets from index_put_
+    # with accumulate) since buffer ops don't support atomics on ROCm.
     pointer_range_32: tuple[int, ...] = ()
     if torch.version.hip is not None:
         pointer_range_32 = tuple(
             i
             for i, arg in zip(indices, args)
-            if isinstance(arg, TensorArg) and _is_tensor_within_2gb(arg)
+            if isinstance(arg, TensorArg)
+            and _is_tensor_within_2gb(arg)
+            and arg.buffer not in V.graph.mutated_buffers
         )
 
-    # pyrefly: ignore [bad-argument-count]
+    # pyrefly: ignore [bad-argument-count, bad-argument-type]
     return AttrsDescriptorWrapper(divisible_by_16, equal_to_1, pointer_range_32)
