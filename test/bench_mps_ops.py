@@ -250,6 +250,32 @@ def main() -> None:
             rc.extend(bench_grid_sampler_2d(dtype=dtype))
         Compare(rc).print()
 
+    def bench_all_any_dims_ops():
+        rc = []
+        test_cases = [
+            ((1024, 1024), [0, 1]),
+            ((4096, 4096), [0, 1]),
+            ((256, 256, 256), [0, 1, 2]),
+            ((128, 128, 128, 128), [0, 1, 2, 3]),
+        ]
+        
+        for op in [torch.all, torch.any]:
+            for keepdim in [False, True]:
+                for shape, dims in test_cases:
+                    x = torch.testing.make_tensor(shape, device="mps", dtype=torch.bool)
+                    
+                    def f(t):
+                        return op(t, dim=tuple(dims), keepdim=keepdim)
+                    
+                    shape_str = "x".join(map(str, shape))
+                    dims_str = str(dims).replace(" ", "")
+                    keepdim_str = "-keepdim" if keepdim else ""
+                    f.__name__ = f"{op.__name__}-{shape_str}-dims{dims_str}{keepdim_str}"
+                    
+                    rc.append(bench_unary_op(f, x, "dims-reduction"))
+        
+        Compare(rc).print()
+
     benchmarks = {
         "index": bench_index_ops,
         "unary": bench_unary_ops,
@@ -258,6 +284,7 @@ def main() -> None:
         "scan_with_indices": bench_scan_with_indices_ops,
         "binary": bench_binary_ops,
         "grid_sampler_2d": bench_grid_sampler_2d_ops,
+        "all_any_dims": bench_all_any_dims_ops,
     }
 
     selected = sys.argv[1:]
