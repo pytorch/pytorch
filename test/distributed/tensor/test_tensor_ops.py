@@ -1386,6 +1386,30 @@ class TestNewEmptyStridedUneven(DTensorTestBase):
             torch.full_like(dt.grad._local_tensor, 2.0),
         )
 
+    @with_comms
+    def test_backward_channels_last(self):
+        """Backward preserves channels-last stride order for unevenly-sharded DTensor."""
+        mesh = self.build_device_mesh()
+        placement = (Shard(2),)
+        # H=2*world_size+1 ensures uneven sharding on dim 2
+        x = torch.randn(2, 3, self.world_size * 2 + 1, 4).to(
+            memory_format=torch.channels_last
+        )
+        x.requires_grad_(True)
+        dt = distribute_tensor(x, mesh, placement)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            (dt.to_local() * 2).sum().backward()
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(dt.grad.placements, placement)
+        self.assertTrue(
+            dt.grad._local_tensor.is_contiguous(memory_format=torch.channels_last)
+        )
+        self.assertEqual(
+            dt.grad._local_tensor,
+            torch.full_like(dt.grad._local_tensor, 2.0),
+        )
+
 
 if __name__ == "__main__":
     run_tests()
