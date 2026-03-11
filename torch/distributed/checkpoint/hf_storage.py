@@ -64,7 +64,7 @@ class HuggingFaceStorageWriter(FileSystemWriter):
         Initialize the huggingface writer pointing to path.
 
         Args:
-            path: directory where the checkpoint will be read from.
+            path: directory where the checkpoint will be written to.
             fqn_to_index_mapping: A mapping from tensor FQN to the index of the file that the tensor should be written to.
                               Indices are from 1 to N, where N is the number of files. If not provided,
                               the tensors will be written to a single file. If none, then all the tensors on the
