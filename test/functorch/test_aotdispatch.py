@@ -8843,9 +8843,7 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.fractional_max_pool3d", ""
     ),  # rand() received an invalid combination of arguments - g...
-    xfail(
-        "quantile", ""
-    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail("quantile", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "nanquantile", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
