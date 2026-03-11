@@ -368,7 +368,7 @@ class TestLinalg(TestCase):
 
                 def scipy_ref(a, b):
                     return scipy.linalg.lstsq(a, b, lapack_driver=driver, cond=cond)
-                check_correctness_ref(a, b, res, scipy_ref, driver=driver)
+                check_correctness_ref(a.cpu(), b.cpu(), res, scipy_ref, driver=driver)
 
         def check_correctness_numpy(a, b, res, driver, rcond):
             # NumPy uses only gelsd routine
