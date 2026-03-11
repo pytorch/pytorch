@@ -80,9 +80,11 @@ template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type<
     dest_t,
     src_t,
-    typename std::enable_if<std::is_floating_point<src_t>::value && std::is_signed<dest_t>::value &&
-                            std::is_integral<dest_t>::value>::type> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(src_t src) {
+    typename std::enable_if<
+        std::is_floating_point<src_t>::value && std::is_signed<dest_t>::value &&
+        std::is_integral<dest_t>::value>::type> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline dest_t apply(
+      src_t src) {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     auto r = maybe_real<real, src_t>::apply(src);
     if (r >= static_cast<src_t>(std::numeric_limits<dest_t>::max())) {
@@ -126,7 +128,10 @@ struct static_cast_with_inter_type<uint8_t, src_t, void> {
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::BFloat16, void> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::BFloat16,
+    void> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::BFloat16 src) {
@@ -135,7 +140,10 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::BFloat16, void>
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2, void> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e5m2,
+    void> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::Float8_e5m2 src) {
@@ -144,7 +152,10 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2, vo
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2fnuz, void> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e5m2fnuz,
+    void> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::Float8_e5m2fnuz src) {
@@ -153,7 +164,10 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2fnuz
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e4m3fn, void> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e4m3fn,
+    void> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::Float8_e4m3fn src) {
@@ -162,7 +176,10 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e4m3fn, 
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e4m3fnuz, void> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e4m3fnuz,
+    void> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::Float8_e4m3fnuz src) {
@@ -173,7 +190,10 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e4m3fnuz
 // TODO(#146647): Can we make all these template specialization happen
 // based off our apply macros?
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e8m0fnu, void> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e8m0fnu,
+    void> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::Float8_e8m0fnu src) {
@@ -191,7 +211,10 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Half, void> {
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::complex<double>, void> {
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::complex<double>,
+    void> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::complex<double> src) {
