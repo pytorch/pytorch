@@ -1,0 +1,169 @@
+name: Test Runners
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # ===========================================================================
+  # CPU Runner — clone pytorch with cache and verify submodules
+  # ===========================================================================
+  test-cpu:
+    name: Test CPU Runner
+    runs-on: l-x86iavx512-8-16
+    container:
+      image: ghcr.io/actions/actions-runner:latest
+
+    steps:
+      - name: System info
+        run: |
+          echo "=== CPU ==="
+          lscpu | grep -E "^(Architecture|CPU\(s\)|Model name|Thread|Core)"
+          echo ""
+          echo "=== Memory ==="
+          free -h
+
+      - name: Check git cache status
+        run: |
+          echo "=== Git version ==="
+          git --version
+          echo ""
+          echo "=== CHECKOUT_GIT_CACHE_DIR ==="
+          echo "${CHECKOUT_GIT_CACHE_DIR:-(not set)}"
+          echo ""
+
+          cache_dir="${CHECKOUT_GIT_CACHE_DIR:-/opt/git-cache/pytorch}"
+          echo "=== Cache warmth check ==="
+          for name in pytorch test-infra.git; do
+            dir="${cache_dir}/${name}"
+            if [ -d "$dir/.git" ]; then
+              # Non-bare clone
+              obj_dir="$dir/.git/objects"
+              mod_dir="$dir/.git/modules"
+              mod_count=$(find "$mod_dir" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+              size=$(du -sh "$dir/.git" 2>/dev/null | cut -f1)
+              echo "$name: ${size} (non-bare, ${mod_count} submodule(s) cached)"
+            elif [ -d "$dir/objects" ]; then
+              # Bare repo
+              size=$(du -sh "$dir" 2>/dev/null | cut -f1)
+              packs=$(find "$dir/objects/pack" -name "*.pack" 2>/dev/null | wc -l)
+              echo "$name: ${size} (bare, ${packs} pack(s))"
+            else
+              echo "$name: NOT FOUND"
+            fi
+          done
+
+      - name: "Clone pytorch/pytorch with cache"
+        uses: jeanschmidt/checkout@main
+        with:
+          repository: pytorch/pytorch
+          path: pytorch
+          submodules: recursive
+          submodule-fetch-jobs: '4'
+
+      - name: Verify submodules initialized
+        run: |
+          cd pytorch
+          echo "=== Submodule summary ==="
+          total=$(git submodule status --recursive | wc -l)
+          initialized=$(git submodule status --recursive | grep -c '^ ' || true)
+          uninitialized=$(git submodule status --recursive | grep -c '^-' || true)
+          modified=$(git submodule status --recursive | grep -c '^+' || true)
+
+          echo "Total submodules:       $total"
+          echo "Initialized:            $initialized"
+          echo "Uninitialized:          $uninitialized"
+          echo "Modified (hash drift):  $modified"
+          echo ""
+
+          if [ "$uninitialized" -gt 0 ]; then
+            echo "FAIL: $uninitialized submodule(s) not initialized:"
+            git submodule status --recursive | grep '^-'
+            exit 1
+          fi
+
+          echo "All $total submodules initialized."
+          echo ""
+
+          echo "=== Checkout .git size ==="
+          du -sh .git
+          echo ""
+
+          echo "=== Alternates check (should be empty after dissociate) ==="
+          alt_file=".git/objects/info/alternates"
+          if [ -f "$alt_file" ]; then
+            echo "WARN: alternates file still exists (dissociate may have failed):"
+            cat "$alt_file"
+          else
+            echo "OK: no alternates file — successfully dissociated"
+          fi
+
+  # ===========================================================================
+  # GPU Runner
+  # ===========================================================================
+  test-gpu:
+    name: Test GPU Runner
+    runs-on: l-x86iavx512-16-64-t4
+    container:
+      image: nvidia/cuda:12.0.0-base-ubuntu22.04
+
+    steps:
+      - name: Check GPU availability
+        run: |
+          echo "=== NVIDIA GPU ==="
+          nvidia-smi
+          echo ""
+          nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+
+      - name: Verify CUDA
+        run: nvcc --version || echo "NVCC not found in PATH"
+
+      - name: Test complete
+        run: |
+          echo "GPU runner test completed successfully!"
+          echo "Runner: a.linux.b200.2"
+
+  test-gpu-b200:
+    name: Test GPU Runner
+    runs-on: a.linux.b200.2
+    container:
+      image: nvidia/cuda:12.0.0-base-ubuntu22.04
+
+    steps:
+      - name: Check GPU availability
+        run: |
+          echo "=== NVIDIA GPU ==="
+          nvidia-smi
+          echo ""
+          nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+
+      - name: Verify CUDA
+        run: nvcc --version || echo "NVCC not found in PATH"
+
+      - name: Test complete
+        run: |
+          echo "GPU runner test completed successfully!"
+          echo "Runner: a.linux.b200.2"
+
+  # ===========================================================================
+  # BuildKit
+  # ===========================================================================
+  build-amd64:
+    name: Build test image (amd64)
+    uses: ./.github/workflows/build-image.yml
+    with:
+      context: docker/test-buildkit
+      image_name: ci-test/test-buildkit
+      image_tag: "amd64-${{ github.run_id }}"
+      architecture: amd64
+
+  build-arm64:
+    name: Build test image (arm64)
+    uses: ./.github/workflows/build-image.yml
+    with:
+      context: docker/test-buildkit
+      image_name: ci-test/test-buildkit
+      image_tag: "arm64-${{ github.run_id }}"
+      architecture: arm64

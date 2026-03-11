@@ -1,0 +1,71 @@
+name: Build Image (BuildKit)
+
+# Reusable workflow: builds a container image via the in-cluster BuildKit
+# service and pushes it to the Harbor registry.
+#
+# Uses docker/setup-buildx-action with driver: remote to connect to the
+# BuildKit daemon — no local Docker or buildctl installation needed.
+#
+# Usage:
+#   jobs:
+#     build:
+#       uses: ./.github/workflows/build-image.yml
+#       with:
+#         context: docker/my-image
+#         image_name: ci-test/my-image
+#         image_tag: latest
+#         architecture: amd64
+
+on:
+  workflow_call:
+    inputs:
+      context:
+        description: "Build context directory (relative to repo root). Must contain a Dockerfile."
+        type: string
+        default: "."
+      image_name:
+        description: "Image name within Harbor (e.g., ci-test/my-image). No registry host or tag."
+        required: true
+        type: string
+      image_tag:
+        description: "Image tag"
+        type: string
+        default: "latest"
+      architecture:
+        description: "Target architecture: arm64 or amd64"
+        required: true
+        type: string
+
+env:
+  HARBOR_REGISTRY: harbor.harbor-system.svc.cluster.local
+
+jobs:
+  build:
+    name: Build ${{ inputs.image_name }}:${{ inputs.image_tag }} (${{ inputs.architecture }})
+    runs-on: l-x86iavx512-2-4
+    container:
+      image: ghcr.io/actions/actions-runner:latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Throwaway test credentials — will be replaced with ghcr.io auth.
+      # docker/login-action tries HTTPS which fails against HTTP-only Harbor,
+      # so we write the config manually. BuildKit forwards these via session.
+      - name: Configure registry credentials
+        run: |
+          mkdir -p "${HOME}/.docker"
+          echo '{"auths":{"${{ env.HARBOR_REGISTRY }}":{"auth":"'$(printf 'ci:Ci12345678' | base64)'"}}}' > "${HOME}/.docker/config.json"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: remote
+          endpoint: tcp://buildkitd-${{ inputs.architecture }}.buildkit:1234
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          push: true
+          tags: ${{ env.HARBOR_REGISTRY }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
