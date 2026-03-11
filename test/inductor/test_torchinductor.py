@@ -17607,11 +17607,11 @@ if RUN_GPU:
             torch.testing.assert_close(result, fn(inp))
 
         def test_3d_reductions_with_max_tiles_3(self):
-            # Inductor only supports at most two reduction iteration ranges, R0 and R1.
-            # When max_tiles=3, SIMDScheduling.create_tiling incorrectly allows the tiling of
-            # the reduction in 3D, spreading one of the reduction dimensions over X, despite there
-            # being no pointwise component of the kernel. This leads to a valid kernel that
-            # generates an invalid result.
+            # Inductor only supports at most two reduction iteration ranges, R0 and R1, which the
+            # reduction component of the kernel can be tiled across.
+            # When max_tiles>=3, SIMDScheduling.create_tiling would previously incorrectly allow the
+            # tiling of the kernel in three dimensions, despite there being no pointwise component
+            # of the kernel.
 
             @torch._inductor.config.patch(
                 {
