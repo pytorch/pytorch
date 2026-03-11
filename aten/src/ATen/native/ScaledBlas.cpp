@@ -218,10 +218,12 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
   IntArrayRef mat2_sizes = mat2_cont.sizes();
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
 
+  const auto out_dtype_ = out_dtype.value_or(c10::ScalarType::BFloat16);
+
   float output_scale = 1.0f;
   if (scale_result.has_value() &&
-      (*out_dtype == ScalarType::Float8_e4m3fn ||
-       *out_dtype == ScalarType::Float8_e5m2)) {
+      (out_dtype_ == ScalarType::Float8_e4m3fn ||
+       out_dtype_ == ScalarType::Float8_e5m2)) {
     output_scale = scale_result.value().item<float>();
   }
 
@@ -240,8 +242,8 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
   if (bias) {
     out_tmp.add_(bias.value());
   }
-  if (*out_dtype == ScalarType::Float8_e4m3fn ||
-      *out_dtype == ScalarType::Float8_e5m2) {
+  if (out_dtype_ == ScalarType::Float8_e4m3fn ||
+      out_dtype_ == ScalarType::Float8_e5m2) {
     out_tmp = at::mul(out_tmp, 1 / output_scale);
   }
   out_tmp = out_tmp.to(out.scalar_type());
