@@ -278,6 +278,20 @@ class TestCUDAGraphDebugInputs(TestCase):
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
+    def test_resize_larger_detected(self):
+        x = torch.randn(100, device="cuda")
+        g = torch.cuda.CUDAGraph()
+
+        _warmup_op(lambda: x * 2)
+
+        with torch.cuda.graph(g, check_input_liveness=True):
+            y = x * 2
+
+        x.resize_(100000)
+
+        with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
+            g.replay()
+
     def test_pinned_memory_tensor_tracked(self):
         pinned = torch.randn(100).pin_memory()
         cuda_dest = torch.empty(100, device="cuda")

@@ -41,6 +41,7 @@ class _TrackedTensorInfo:
         "deletion_traceback_py",
         "data_ptr",
         "device_index",
+        "_storage_data_ptr",
     )
 
     def __init__(self, tensor: Tensor) -> None:
@@ -59,12 +60,16 @@ class _TrackedTensorInfo:
                 pass  # don't raise under GC
 
         storage = tensor.untyped_storage()
+        self._storage_data_ptr = storage.data_ptr()
         self.weakref: weakref.ref[torch.UntypedStorage] = weakref.ref(
             storage, on_release
         )
 
     def is_alive(self) -> bool:
-        return self.weakref() is not None
+        storage = self.weakref()
+        if storage is None:
+            return False
+        return storage.data_ptr() == self._storage_data_ptr
 
 
 __all__ = [
