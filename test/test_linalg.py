@@ -7691,11 +7691,15 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         for c in (V, V.unsqueeze(0), M):
             self._test_addmm_addmv(func, c, m1, m2, beta=1, activation=activation)
 
-        # Test 0-strided
-        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
-        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
-        m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
+        # Test 0-strided bias and m1
+        for b in (
+            b1 := torch.randn(25, device=device, dtype=dtype), b1.unsqueeze(0),
+            torch.randn(10, 1, device=device, dtype=dtype),
+            torch.randn(1, 1, device=device, dtype=dtype).expand(10, 25),
+        ):
+            m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
+            m2 = torch.randn(50, 25, device=device).to(dtype)
+            self._test_addmm_addmv(func, b, m1, m2, activation=activation)
 
         # Test beta=0, M=nan
         M = torch.full((10, 25), math.nan, device=device).to(dtype)
@@ -7762,6 +7766,54 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @reduced_f32_on_and_off(0.05)
     def test_addmm_gelu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "gelu", device, dtype)
+
+    @dtypesIfCUDA(*floating_types_and(torch.bfloat16, torch.half))
+    @dtypes(*floating_types_and(torch.bfloat16))
+    def test_addmm_layout_variants_correctness(self, device, dtype):
+        m = 3
+        k = 5
+        n = 4
+
+        activation_variants = (None, "relu", "gelu")
+
+        bias_variants = (
+            torch.randn(n, device=device, dtype=dtype),
+            torch.randn(1, device=device, dtype=dtype).expand(n),
+            torch.randn(1, 1, device=device, dtype=dtype).expand(m, 1),
+            torch.randn(1, 1, device=device, dtype=dtype).expand(m, n),
+        )
+
+        def gen_matrix_layouts(m, n):
+            buffer = torch.randn(2 * m * n, device=device, dtype=dtype)
+            layouts = (
+                buffer.as_strided((m, n), (n, 1)),  # row-major
+                buffer.as_strided((m, n), (2 * n, 1)),  # row-major with a stride
+                buffer.as_strided((m, n), (1, m)),  # col-major
+                buffer.as_strided((m, n), (1, 2 * m)),  # col-major with a stride
+            )
+            yield from layouts
+
+        beta_variants = ({}, {"beta": 0}, {"beta": 1.4})
+
+        for out, m1, m2, bias, activation, beta in itertools.product(
+            gen_matrix_layouts(m, n),
+            gen_matrix_layouts(m, k),
+            gen_matrix_layouts(k, n),
+            itertools.chain(
+                bias_variants,
+                gen_matrix_layouts(m, 1),
+                gen_matrix_layouts(1, n),
+                gen_matrix_layouts(m, n),
+            ),
+            activation_variants,
+            beta_variants,
+        ):
+            # Contiguous input is canonical and well-tested.
+            # We use it here as a reference to avoid atol/rtol tweaks.
+            expected = torch.addmm(bias.contiguous(), m1.contiguous(), m2.contiguous(), **beta)
+            actual = torch.addmm(bias, m1, m2, **beta, out=out)
+            self.assertEqual(actual, out, atol=0.0, rtol=0.0)
+            self.assertEqual(expected, actual)
 
     @skipIfRocmArch(MI300_ARCH)
     @dtypes(torch.float, torch.double)
