@@ -2015,6 +2015,10 @@ def _wrap_bound_method(fn: Any, argnames: list[str]) -> Any:
 
 
 class PatternMatcherPass:
+    """
+    Registry of patterns to match and replace in FX graphs.
+    """
+
     def __init__(
         self,
         pass_name: str | None = None,
