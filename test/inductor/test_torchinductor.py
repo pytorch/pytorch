@@ -17628,8 +17628,12 @@ if RUN_GPU:
             shape = (2, 2, 4)
             strides = (32, 8, 1)
 
-            arg0_1_orig = torch.arange(math.prod(shape), device=GPU_TYPE, dtype=torch.int32).view(shape)
-            arg0_1 = torch.empty_strided(shape, strides, device=GPU_TYPE, dtype=torch.int32)
+            arg0_1_orig = torch.arange(
+                math.prod(shape), device=GPU_TYPE, dtype=torch.int32
+            ).view(shape)
+            arg0_1 = torch.empty_strided(
+                shape, strides, device=GPU_TYPE, dtype=torch.int32
+            )
             arg0_1.copy_(arg0_1_orig)
 
             actual, code = run_and_get_code(sum, arg0_1)
@@ -17641,7 +17645,6 @@ if RUN_GPU:
             # There's no pointwise work to do, so xnumel should be 1...
             fc.check("xnumel = 1")
             fc.run(code[0])
-
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
