@@ -7,6 +7,7 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/irange.h>
+#include <fmt/ranges.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1522,13 +1523,11 @@ static void all_any_dims_common_impl_mps(const Tensor& input_t,
 
   @autoreleasepool {
     // Build a cache key so identical graphs can be reused
-    std::string dims_str;
-    for (const auto d : wrapped_dims) {
-      dims_str += std::to_string(d) + ",";
-    }
+    std::string dims_str = fmt::to_string(fmt::join(wrapped_dims, ","));
 
-    std::string key = op_name + "_dims_out_mps:" + dims_str + ":" +
-                      getTensorsStringKey(input_t) + ":" + std::to_string(keepdim);
+    std::string key = fmt::format("{}_dims_out_mps:{}:{}:{}",
+                                  op_name, dims_str,
+                                  getTensorsStringKey(input_t), keepdim);
 
     auto cachedGraph =
         LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
