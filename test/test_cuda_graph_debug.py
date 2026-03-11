@@ -21,54 +21,39 @@ def _warmup_op(op, n=3):
             op()
 
 
+def _capture_graph(op, **graph_kwargs):
+    g = torch.cuda.CUDAGraph()
+    _warmup_op(op)
+    graph_kwargs.setdefault("check_input_liveness", True)
+    with torch.cuda.graph(g, **graph_kwargs):
+        out = op()
+    return g, out
+
+
 class TestCUDAGraphDebugInputs(TestCase):
     def test_nothing_dead_ok(self):
         x = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: x * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = x * 2
-
+        g, y = _capture_graph(lambda: x * 2)
         g.replay()
         self.assertEqual(y, x * 2)
 
     def test_dead_input_tensor(self):
         x = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: x * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = x * 2
-
+        g, y = _capture_graph(lambda: x * 2)
         del x
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
     def test_dead_intermediate_tensors_ok(self):
         x = torch.randn(100, device="cuda")
         g = torch.cuda.CUDAGraph()
-
-        def op():
-            tmp = x * 2
-            return tmp + 1
-
-        _warmup_op(op)
-
         with torch.cuda.graph(g, check_input_liveness=True):
             tmp = x * 2
             y = tmp + 1
-
         del tmp
-
         g.replay()
         self.assertEqual(y, x * 2 + 1)
-
         del y
-
         g.replay()
 
     def test_model_weight_dead(self):
@@ -87,17 +72,12 @@ class TestCUDAGraphDebugInputs(TestCase):
         model = SimpleMLP(width=64, depth=5).cuda()
         x = torch.randn(8, 64, device="cuda")
         g = torch.cuda.CUDAGraph()
-
         _warmup_op(lambda: model(x))
-
         with torch.no_grad(), torch.cuda.graph(g, check_input_liveness=True):
             y = model(x)
-
         g.replay()
         self.assertEqual(y, model(x))
-
         del model.layers[2].weight
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
@@ -105,63 +85,38 @@ class TestCUDAGraphDebugInputs(TestCase):
         model = nn.Linear(32, 16).cuda()
         x = torch.randn(8, 32, device="cuda")
         static_grad = torch.randn(8, 16, device="cuda")
-
         with warnings.catch_warnings():
             # First cuBLAS backward triggers "no current CUDA context" warning
             warnings.simplefilter("ignore", UserWarning)
             for _ in range(3):
                 model(x).backward(static_grad)
-
         g = torch.cuda.CUDAGraph()
         model.zero_grad()
         with torch.cuda.graph(g, check_input_liveness=True):
             out = model(x)
             out.backward(static_grad)
-
         g.replay()
-
         # out's grad_fn retains weight as a saved tensor from forward
         del out
         del model.weight
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
     def test_view_tensor(self):
         base = torch.randn(100, device="cuda")
         view = base[10:50]
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: view * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = view * 2
-
+        g, y = _capture_graph(lambda: view * 2)
         del view
-
-        # should be ok, the base tensor's memory is still alive
         g.replay()
-
         del base
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
     def test_nested_structure_inputs(self):
         xs = [torch.randn(10, device="cuda") for _ in range(3)]
         ys = [torch.randn(10, device="cuda") for _ in range(3)]
-        g = torch.cuda.CUDAGraph()
-
-        def op():
-            return torch._foreach_add(xs, ys)
-
-        _warmup_op(op)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            result = torch._foreach_add(xs, ys)
-
+        g, result = _capture_graph(lambda: torch._foreach_add(xs, ys))
         del ys[1]
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
@@ -169,32 +124,20 @@ class TestCUDAGraphDebugInputs(TestCase):
         x = torch.randn(100, device="cuda")
         empty = torch.empty(0, device="cuda")
         g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: x * 2)
-
         with torch.cuda.graph(g, check_input_liveness=True):
             y = x * 2
             z = empty.view(0)
-
         self.assertEqual(empty.data_ptr(), 0)
         self.assertNotIn(empty.data_ptr(), g._external_inputs)
-
         del empty
-
         g.replay()
 
     def test_non_capturing_stream_inputs_not_tracked(self):
         capture_stream = torch.cuda.Stream()
         other_stream = torch.cuda.Stream()
-
         x = torch.randn(100, device="cuda")
         y = torch.randn(100, device="cuda")
-
-        with torch.cuda.stream(capture_stream):
-            _warmup_op(lambda: x * 2)
-
         g = torch.cuda.CUDAGraph()
-
         with torch.cuda.stream(capture_stream):
             with torch.cuda.graph(
                 g, capture_error_mode="relaxed", check_input_liveness=True
@@ -202,42 +145,28 @@ class TestCUDAGraphDebugInputs(TestCase):
                 result = x * 2
                 with torch.cuda.stream(other_stream):
                     other_result = y * 3
-
         self.assertIn(x.data_ptr(), g._external_inputs)
         self.assertNotIn(y.data_ptr(), g._external_inputs)
-
         del y
-
         g.replay()
         self.assertEqual(result, x * 2)
 
     def test_shared_pool_tensor_not_tracked(self):
         pool = torch.cuda.graph_pool_handle()
-
         x = torch.randn(100, device="cuda")
         g1 = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: x + 1)
-
         with torch.cuda.graph(g1, pool=pool):
             y = x + 1
             w = torch.randn(100, device="cuda")
-
         external_input = torch.randn(100, device="cuda")
         g2 = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: y * 2 + external_input)
-
         with torch.cuda.graph(g2, pool=pool, check_input_liveness=True):
             z = y * 2 + external_input
             p = w + 1
-
         del y
-
         g1.replay()
         g2.replay()
         self.assertEqual(z, (x + 1) * 2 + external_input)
-
         del w
         g1.replay()
         g2.replay()
@@ -246,49 +175,25 @@ class TestCUDAGraphDebugInputs(TestCase):
         a = torch.randn(100, device="cuda")
         b = torch.empty(100, device="cuda")
         b.set_(a.untyped_storage())
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: a * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = a * 2
-
+        g, y = _capture_graph(lambda: a * 2)
         del a
-
         g.replay()
         self.assertEqual(y, b * 2)
-
         del b
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
     def test_dead_storage_raises(self):
         x = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: x * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = x * 2
-
-        other = torch.randn(100, device="cuda")
-        x.set_(other.untyped_storage())
-
+        g, y = _capture_graph(lambda: x * 2)
+        x.set_(torch.randn(100, device="cuda").untyped_storage())
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
     def test_resize_larger_detected(self):
         x = torch.randn(100, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: x * 2)
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = x * 2
-
+        g, y = _capture_graph(lambda: x * 2)
         x.resize_(100000)
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
@@ -301,44 +206,30 @@ class TestCUDAGraphDebugInputs(TestCase):
             cuda_dest.copy_(pinned, non_blocking=True)
             return cuda_dest * 2
 
-        _warmup_op(op)
-
         with torch.cuda.graph(g, check_input_liveness=True):
             cuda_dest.copy_(pinned, non_blocking=True)
             y = cuda_dest * 2
-
         self.assertIn(pinned.data_ptr(), g._external_inputs)
         self.assertIn(cuda_dest.data_ptr(), g._external_inputs)
-
         # This should be OK
         g.replay()
-
         del pinned
-
         # This should raise
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
     def test_recapture_without_clears_stale_state(self):
         g = torch.cuda.CUDAGraph()
-
         x = torch.randn(32, device="cuda")
-        _warmup_op(lambda: x * 2)
         with torch.cuda.graph(g, check_input_liveness=True):
             y = x * 2
-
         del x
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
-
         g.reset()
-
         x2 = torch.randn(32, device="cuda")
-        _warmup_op(lambda: x2 * 3)
         with torch.cuda.graph(g, check_input_liveness=True):
             y2 = x2 * 3
-
         g.replay()
 
     def test_higher_order_op_during_capture(self):
@@ -348,13 +239,7 @@ class TestCUDAGraphDebugInputs(TestCase):
             return x * 2
 
         x = torch.randn(32, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: wrap(inner_fn, x))
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = wrap(inner_fn, x)
-
+        g, y = _capture_graph(lambda: wrap(inner_fn, x))
         g.replay()
         self.assertEqual(y, x * 2)
 
@@ -364,9 +249,6 @@ class TestCUDAGraphDebugBacktraces(TestCase):
         a = torch.randn(100, device="cuda")
         b = torch.randn(100, device="cuda")
         g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: a + b)
-
         with torch.cuda.graph(g, check_input_liveness=True):
             y = a + b
 
@@ -375,7 +257,6 @@ class TestCUDAGraphDebugBacktraces(TestCase):
             del a, b
 
         delete_tensors()
-
         with self.assertRaises(RuntimeError) as ctx:
             g.replay()
         error_msg = str(ctx.exception).lower()
@@ -405,14 +286,9 @@ class TestCUDAGraphDebugExternalOps(TestCase):
         x = torch.randn(100, device="cuda")
         scale = torch.tensor(2.0, device="cuda")
         g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: ScaleOp.apply(x, scale))
-
         with torch.no_grad(), torch.cuda.graph(g, check_input_liveness=True):
             y = ScaleOp.apply(x, scale)
-
         del scale
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
@@ -427,15 +303,8 @@ class TestCUDAGraphDebugExternalOps(TestCase):
 
         x = torch.randn(100, device="cuda")
         scale = torch.tensor(3.0, device="cuda")
-        g = torch.cuda.CUDAGraph()
-
-        _warmup_op(lambda: scale_op(x, scale))
-
-        with torch.cuda.graph(g, check_input_liveness=True):
-            y = scale_op(x, scale)
-
+        g, y = _capture_graph(lambda: scale_op(x, scale))
         del scale
-
         with self.assertRaisesRegex(RuntimeError, "dead.*tensor"):
             g.replay()
 
