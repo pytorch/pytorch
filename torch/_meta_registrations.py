@@ -2223,6 +2223,10 @@ def meta_pad3d_backward(grad_output, input, padding):
 @out_wrapper()
 def meta__pdist_forward(self: Tensor, p: float = 2) -> Tensor:
     torch._check(
+        self.dim() == 2,
+        lambda: f"_pdist_forward only supports 2D tensors, got: {self.dim()}D",
+    )
+    torch._check(
         self.is_contiguous(), lambda: "_pdist_forward requires contiguous input"
     )
     n = self.size(0)

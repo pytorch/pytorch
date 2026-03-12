@@ -2495,6 +2495,14 @@ class TestTorchDeviceType(TestCase):
         x = torch.randn(shape, device=device)
         self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
+    @onlyNativeDeviceTypes
+    def test_pdist_forward_invalid_dim(self, device):
+        x = torch.randn((11, 15, 0), device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, r"_pdist_forward only supports 2D tensors, got: 3D"
+        ):
+            torch.ops.aten._pdist_forward(x.contiguous(), p=2.0)
+
     def test_cdist_empty(self, device):
         x = torch.randn((0, 5), device=device)
         y = torch.randn((4, 5), device=device)
