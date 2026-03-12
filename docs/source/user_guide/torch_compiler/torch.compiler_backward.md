@@ -40,6 +40,17 @@ See [#153044](https://github.com/pytorch/pytorch/issues/153044) for details.
 ```
 
 The options are either:
+- `"off"` (default). We assume that the backward of the torch.compile'd region will
+  not be run under any autocast context managers.
+  This matches the recommended PyTorch usage where autocast wraps only the forward
+  pass. Use this if your code looks like the following:
+  ```py
+  with torch.amp.autocast(...):
+      y = torch.compile(region)(x)
+      ...
+  # Backward pass runs under no autocast.
+  z.backward()
+  ```
 - `"same_as_forward"`.
   We assume that the backward of the ``torch.compile``'ed region
   will be run under the same autocast context manager that the region was run
@@ -50,16 +61,6 @@ The options are either:
       ...
       # backward pass run under the same autocast context as the compiled region
       z.backward()
-  ```
-- `"off"`. We assume that the backward of the torch.compile'd region will
-  not be run under any autocast context managers.
-  Use this if your code looks like the following:
-  ```py
-  with torch.amp.autocast(...):
-      y = torch.compile(region)(x)
-      ...
-  # Backward pass runs under no autocast.
-  z.backward()
   ```
 - There is a third option. If you set ``torch._functorch.config.backward_pass_autocast``
   to a list of kwargs, we will assume the backward pass runs under an autocast context

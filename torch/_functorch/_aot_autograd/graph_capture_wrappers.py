@@ -417,20 +417,7 @@ def create_joint(
             ):
                 backward_pass_autocast = torch._functorch.config.backward_pass_autocast
                 if backward_pass_autocast == "default":
-                    if torch._C._is_any_autocast_enabled():
-                        warnings.warn(
-                            "The default value of torch._functorch.config.backward_pass_autocast "
-                            "is changing from 'same_as_forward' to 'off' in a future version of "
-                            "PyTorch. This means the backward pass of torch.compile'd regions "
-                            "will no longer inherit the forward pass's autocast context. "
-                            "To silence this warning, explicitly set "
-                            "torch._functorch.config.backward_pass_autocast to "
-                            "'same_as_forward' (current behavior) or 'off' (future default, "
-                            "recommended). See https://github.com/pytorch/pytorch/issues/153044",
-                            FutureWarning,
-                            stacklevel=2,
-                        )
-                    backward_pass_autocast = "same_as_forward"
+                    backward_pass_autocast = "off"
 
                 if backward_pass_autocast == "same_as_forward":
                     # Use the ambient autocast mode(s)
