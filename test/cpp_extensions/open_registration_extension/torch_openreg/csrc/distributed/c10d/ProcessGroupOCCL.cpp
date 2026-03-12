@@ -8,60 +8,76 @@
 #include "ProcessGroupOCCL.hpp"
 namespace {
 
-void checkTensorDevice(
-    const at::Tensor& tensor,
-    c10::string_view opName,
-    c10::string_view argName) {
-  if (!tensor.defined()) {
-    return;
-  }
+#define CHECK_TENSOR(tensor)                                                    \
+  do {                                                                          \
+    if (tensor.defined()) {                                                     \
+      TORCH_CHECK(                                                              \
+          tensor.device().type() == c10::DeviceType::PrivateUse1,               \
+          "ProcessGroupOCCL only supports OpenReg (PrivateUse1) tensors. Got ", \
+          tensor.device().type(),                                               \
+          " for argument '",                                                    \
+          #tensor,                                                              \
+          "' in ",                                                              \
+          __func__,                                                             \
+          ".");                                                                 \
+    }                                                                           \
+  } while (0)
 
-  TORCH_CHECK(
-      tensor.device().type() == c10::DeviceType::PrivateUse1,
-      "ProcessGroupOCCL only supports OpenReg (PrivateUse1) tensors. Got ",
-      tensor.device().type(),
-      " for argument '",
-      argName,
-      "' in ",
-      opName,
-      ".");
-}
+#define CHECK_TENSOR_LIST(tensorList)                                             \
+  do {                                                                            \
+    for (const auto& tensor : tensorList) {                                       \
+      if (tensor.defined()) {                                                     \
+        TORCH_CHECK(                                                              \
+            tensor.device().type() == c10::DeviceType::PrivateUse1,               \
+            "ProcessGroupOCCL only supports OpenReg (PrivateUse1) tensors. Got ", \
+            tensor.device().type(),                                               \
+            " for argument '",                                                    \
+            #tensorList,                                                          \
+            "' in ",                                                              \
+            __func__,                                                             \
+            ".");                                                                 \
+      }                                                                           \
+    }                                                                             \
+  } while (0)
 
-void checkTensorList(
-    const std::vector<at::Tensor>& tensors,
-    c10::string_view opName,
-    c10::string_view argName) {
-  for (const auto& tensor : tensors) {
-    checkTensorDevice(tensor, opName, argName);
-  }
-}
-
-void checkTensorListOfLists(
-    const std::vector<std::vector<at::Tensor>>& tensorLists,
-    c10::string_view opName,
-    c10::string_view argName) {
-  for (const auto& tensors : tensorLists) {
-    checkTensorList(tensors, opName, argName);
-  }
-}
+#define CHECK_TENSOR_LIST_OF_LISTS(tensorListOfLists)                               \
+  do {                                                                              \
+    for (const auto& tensor_list : tensorListOfLists) {                             \
+      for (const auto& tensor : tensor_list) {                                      \
+        if (tensor.defined()) {                                                     \
+          TORCH_CHECK(                                                              \
+              tensor.device().type() == c10::DeviceType::PrivateUse1,               \
+              "ProcessGroupOCCL only supports OpenReg (PrivateUse1) tensors. Got ", \
+              tensor.device().type(),                                               \
+              " for argument '",                                                    \
+              #tensorListOfLists,                                                   \
+              "' in ",                                                              \
+              __func__,                                                             \
+              ".");                                                                 \
+        }                                                                           \
+      }                                                                             \
+    }                                                                               \
+  } while (0)
 
 } // namespace
 
 /**
-    @brief Currently, a no-op OCCL ProcessGroup stub for registration, tests and educational purposes.
+    @brief Currently, a no-op OCCL ProcessGroup stub for registration, tests and
+   educational purposes.
 
-    This translation unit provides a minimal ProcessGroup backend named "OCCL" (short
-    for OpenReg Collective Communications Library) that only validates input shapes/devices
-    and immediately returns a completed Work object without performing any actual communication.
-    It is intended for:
+    This translation unit provides a minimal ProcessGroup backend named "OCCL"
+   (short for OpenReg Collective Communications Library) that only validates
+   input shapes/devices and immediately returns a completed Work object without
+   performing any actual communication. It is intended for:
         - Out-of-tree custom CCL backend registration and linkage tests
         - API surface validation and call-site integration
 
     All collective point-to-point and synchronization calls are implemented as
     immediate, successful completions (unless a precondition check fails and an
     exception is thrown). As a result, these calls do not exchange data, do not
-    synchronize ranks, and do not modify input/output tensors. OCCL is for testing
-    and educational purposes only; it does not provide any real distributed functionality.
+    synchronize ranks, and do not modify input/output tensors. OCCL is for
+   testing and educational purposes only; it does not provide any real
+   distributed functionality.
 
     ------------------------------------------------------------------------------
     Class: ProcessGroupOCCL::DummyWork
@@ -74,8 +90,8 @@ void checkTensorListOfLists(
     - wait(timeout): returns immediately; the Future is already complete.
     - synchronize(): no-op; there is no associated device or stream work.
     - abort(): attempts to set an error only if the Future is not completed;
-                         has no effect in the current implementation since the Future is
-                         completed in the constructor.
+                         has no effect in the current implementation since the
+   Future is completed in the constructor.
     - getFuture(): returns the already-completed Future.
 
     Notes:
@@ -85,15 +101,16 @@ void checkTensorListOfLists(
     ------------------------------------------------------------------------------
     Class: ProcessGroupOCCL
 
-    @brief A stub ProcessGroup backend whose collectives validate inputs and then
-                 return a DummyWork that is already complete.
+    @brief A stub ProcessGroup backend whose collectives validate inputs and
+   then return a DummyWork that is already complete.
 
     General behavior across all methods below:
     - Input validation: Methods call internal helpers (e.g., checkTensorList,
         checkTensorListOfLists, checkTensorDevice) to validate that inputs are
         defined, have expected dtypes/devices, and adhere to basic invariants.
-        This is for building connection with out-of-tree accelerator backend (OpenReg)
-        and as a guard for blocking any changes from upstream that will break the compatibility.
+        This is for building connection with out-of-tree accelerator backend
+   (OpenReg) and as a guard for blocking any changes from upstream that will
+   break the compatibility.
     - No communication: No data movement or cross-rank coordination occurs.
     - Options ignored: All options/attributes (e.g., reduce ops, tags, counts,
         timeouts) are accepted but not used to affect behavior.
@@ -105,14 +122,16 @@ void checkTensorListOfLists(
     - Does not guarantee any semantic property of real collectives (e.g., data
         equivalence across ranks, synchronization, ordering).
     - Barrier does not synchronize ranks; it simply returns a completed Work.
-    - Safe for use in unit tests only where communication effects are not required.
+    - Safe for use in unit tests only where communication effects are not
+   required.
 
     ------------------------------------------------------------------------------
     Factory:
 
-    @fn createProcessGroupOCCL(const c10::intrusive_ptr<c10d::Store>& store, int rank, int size, const std::chrono::duration<float>& timeout)
-            Constructs a ProcessGroupOCCL using the given rank and size. The store and
-            timeout are accepted for API parity but are not used to affect behavior.
+    @fn createProcessGroupOCCL(const c10::intrusive_ptr<c10d::Store>& store, int
+   rank, int size, const std::chrono::duration<float>& timeout) Constructs a
+   ProcessGroupOCCL using the given rank and size. The store and timeout are
+   accepted for API parity but are not used to affect behavior.
             - @param store: Process group store (ignored).
             - @param rank: This process rank.
             - @param size: World size.
@@ -149,22 +168,23 @@ bool ProcessGroupOCCL::DummyWork::isSuccess() const {
   return !future_->hasError();
 }
 
-bool ProcessGroupOCCL::DummyWork::wait(std::chrono::milliseconds /* timeout */) {
+bool ProcessGroupOCCL::DummyWork::wait(
+    std::chrono::milliseconds /* timeout */) {
   future_->wait();
   return !future_->hasError();
 }
 
-void ProcessGroupOCCL::DummyWork::synchronize() {
-
-}
+void ProcessGroupOCCL::DummyWork::synchronize() {}
 
 void ProcessGroupOCCL::DummyWork::abort() {
   if (!future_->completed()) {
-    future_->setError(std::make_exception_ptr(std::runtime_error("OCCL work aborted")));
+    future_->setError(
+        std::make_exception_ptr(std::runtime_error("OCCL work aborted")));
   }
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupOCCL::DummyWork::getFuture() {
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupOCCL::DummyWork::
+    getFuture() {
   return future_;
 }
 
@@ -183,35 +203,35 @@ ProcessGroupOCCL::~ProcessGroupOCCL() = default;
 c10::intrusive_ptr<Work> ProcessGroupOCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& /* opts */) {
-  checkTensorList(tensors, "broadcast", "tensors");
+  CHECK_TENSOR_LIST(tensors);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupOCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& /* opts */) {
-  checkTensorList(tensors, "allreduce", "tensors");
+  CHECK_TENSOR_LIST(tensors);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupOCCL::allreduce_sparse(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& /* opts */) {
-  checkTensorList(tensors, "allreduce_sparse", "tensors");
+  CHECK_TENSOR_LIST(tensors);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupOCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& /* opts */) {
-  checkTensorList(tensors, "allreduce_coalesced", "tensors");
+  CHECK_TENSOR_LIST(tensors);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupOCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& /* opts */) {
-  checkTensorList(tensors, "reduce", "tensors");
+  CHECK_TENSOR_LIST(tensors);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -219,8 +239,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::_reduce_scatter_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& /* opts */) {
-  checkTensorDevice(outputTensor, "_reduce_scatter_base", "outputTensor");
-  checkTensorDevice(inputTensor, "_reduce_scatter_base", "inputTensor");
+  CHECK_TENSOR(outputTensor);
+  CHECK_TENSOR(inputTensor);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -228,8 +248,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::_allgather_base(
     at::Tensor& output_tensor,
     at::Tensor& input_tensor,
     const AllgatherOptions& /* opts */) {
-  checkTensorDevice(output_tensor, "_allgather_base", "output_tensor");
-  checkTensorDevice(input_tensor, "_allgather_base", "input_tensor");
+  CHECK_TENSOR(output_tensor);
+  CHECK_TENSOR(input_tensor);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -237,8 +257,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& /* opts */) {
-  checkTensorListOfLists(outputs, "allgather", "outputs");
-  checkTensorList(inputs, "allgather", "inputs");
+  CHECK_TENSOR_LIST_OF_LISTS(outputs);
+  CHECK_TENSOR_LIST(inputs);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -246,8 +266,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& output_lists,
     std::vector<at::Tensor>& input_list,
     const AllgatherOptions& /* opts */) {
-  checkTensorListOfLists(output_lists, "allgather_coalesced", "output_lists");
-  checkTensorList(input_list, "allgather_coalesced", "input_list");
+  CHECK_TENSOR_LIST_OF_LISTS(output_lists);
+  CHECK_TENSOR_LIST(input_list);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -255,8 +275,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::allgather_into_tensor_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& /* opts */) {
-  checkTensorList(outputs, "allgather_into_tensor_coalesced", "outputs");
-  checkTensorList(inputs, "allgather_into_tensor_coalesced", "inputs");
+  CHECK_TENSOR_LIST(outputs);
+  CHECK_TENSOR_LIST(inputs);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -264,8 +284,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::gather(
     std::vector<std::vector<at::Tensor>>& outputs,
     std::vector<at::Tensor>& inputs,
     const GatherOptions& /* opts */) {
-  checkTensorListOfLists(outputs, "gather", "outputs");
-  checkTensorList(inputs, "gather", "inputs");
+  CHECK_TENSOR_LIST_OF_LISTS(outputs);
+  CHECK_TENSOR_LIST(inputs);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -273,8 +293,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ScatterOptions& /* opts */) {
-  checkTensorList(outputs, "scatter", "outputs");
-  checkTensorListOfLists(inputs, "scatter", "inputs");
+  CHECK_TENSOR_LIST(outputs);
+  CHECK_TENSOR_LIST_OF_LISTS(inputs);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -282,8 +302,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::reduce_scatter(
     std::vector<at::Tensor>& outputs,
     std::vector<std::vector<at::Tensor>>& inputs,
     const ReduceScatterOptions& /* opts */) {
-  checkTensorList(outputs, "reduce_scatter", "outputs");
-  checkTensorListOfLists(inputs, "reduce_scatter", "inputs");
+  CHECK_TENSOR_LIST(outputs);
+  CHECK_TENSOR_LIST_OF_LISTS(inputs);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -291,8 +311,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ReduceScatterOptions& /* opts */) {
-  checkTensorList(outputTensors, "reduce_scatter_tensor_coalesced", "outputTensors");
-  checkTensorList(inputTensors, "reduce_scatter_tensor_coalesced", "inputTensors");
+  CHECK_TENSOR_LIST(outputTensors);
+  CHECK_TENSOR_LIST(inputTensors);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -302,8 +322,8 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::alltoall_base(
     std::vector<int64_t>& /* outputCounts */,
     std::vector<int64_t>& /* inputCounts */,
     const AllToAllOptions& /* opts */) {
-  checkTensorDevice(outputTensor, "alltoall_base", "outputTensor");
-  checkTensorDevice(inputTensor, "alltoall_base", "inputTensor");
+  CHECK_TENSOR(outputTensor);
+  CHECK_TENSOR(inputTensor);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -311,7 +331,7 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::send(
     std::vector<at::Tensor>& tensors,
     int /* dstRank */,
     int /* tag */) {
-  checkTensorList(tensors, "send", "tensors");
+  CHECK_TENSOR_LIST(tensors);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
@@ -319,14 +339,14 @@ c10::intrusive_ptr<Work> ProcessGroupOCCL::recv(
     std::vector<at::Tensor>& tensors,
     int /* srcRank */,
     int /* tag */) {
-  checkTensorList(tensors, "recv", "tensors");
+  CHECK_TENSOR_LIST(tensors);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupOCCL::recvAnysource(
     std::vector<at::Tensor>& tensors,
     int /* tag */) {
-  checkTensorList(tensors, "recvAnysource", "tensors");
+  CHECK_TENSOR_LIST(tensors);
   return c10::make_intrusive<ProcessGroupOCCL::DummyWork>();
 }
 
