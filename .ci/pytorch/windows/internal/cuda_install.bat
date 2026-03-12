@@ -17,8 +17,8 @@ set /a CUDA_VER=%CUDA_VERSION%
 set CUDA_VER_MAJOR=%CUDA_VERSION:~0,-1%
 set CUDA_VER_MINOR=%CUDA_VERSION:~-1,1%
 set CUDA_VERSION_STR=%CUDA_VER_MAJOR%.%CUDA_VER_MINOR%
-set CUDNN_FOLDER="cuda"
-set CUDNN_LIB_FOLDER="lib\x64"
+set CUDNN_FOLDER=cuda
+set CUDNN_LIB_FOLDER=lib\x64
 
 :: If CUDA is already installed, skip CUDA installation but still verify cuDNN
 if exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\nvcc.exe" goto check_cudnn
@@ -59,7 +59,7 @@ goto cuda_download
 
 :: Common download logic for CUDA toolkit, cuDNN, and ZLIB
 :cuda_download
-set CUDNN_LIB_FOLDER="lib"
+set CUDNN_LIB_FOLDER=lib
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 
 if not exist "%SRC_DIR%\temp_build\%CUDA_INSTALL_EXE%" (
@@ -126,9 +126,9 @@ if not exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_
 
     echo Installing cuDNN...
     7z x %CUDNN_SETUP_FILE% -o"%SRC_DIR%\temp_build\cudnn"
-    xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin"
-    xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\lib\x64"
-    xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include"
+    xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\"
+    xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\lib\x64\"
+    xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\"
 
     echo Installing GPU driver DLLs
     7z x %SRC_DIR%\temp_build\gpu_driver_dlls.zip -o"C:\Windows\System32"
@@ -152,7 +152,7 @@ goto set_cuda_env_vars
 :: When CUDA is pre-installed on the AMI, cuDNN may still be missing.
 :: Set the correct cuDNN variables for the CUDA version, then install if needed.
 
-set CUDNN_LIB_FOLDER="lib"
+set CUDNN_LIB_FOLDER=lib
 if %CUDA_VER% EQU 126 (
     set CUDNN_FOLDER=cudnn-windows-x86_64-9.10.2.21_cuda12-archive
     set EXPECTED_CUDNN_VERSION=9.10.2
@@ -202,9 +202,11 @@ if errorlevel 1 (
     echo Failed to extract cuDNN archive %CUDNN_INSTALL_ZIP%
     exit /b 1
 )
-xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin"
-xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\lib\x64"
-xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include"
+echo Listing extracted cuDNN archive contents:
+dir /S /B "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%"
+xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\"
+xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\lib\x64\"
+xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\"
 
 call :install_zlib
 
