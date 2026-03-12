@@ -45,7 +45,8 @@ jobs:
           if [ "$PUSH_RESULT" = "Everything up-to-date" ]; then
             echo "No update pushed"
           elif [ "${LATEST_SHA}" == "None" ]; then
-            echo "No viable/strict candidate found"
+            echo "❌ No viable/strict candidate found"
+            exit 1
           else
             echo "{\"sha\": \"${LATEST_SHA}\", \"repository\":\"pytorch/pytorch\", \"timestamp\": ${TIME}}" > "/tmp/${LATEST_SHA}.json"
             pip install awscli==1.29.40
