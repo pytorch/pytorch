@@ -4484,6 +4484,14 @@
   dispatch:
     CPU: narrow_copy_dense_cpu_out
 
+- func: narrow_scatter(Tensor self, Tensor src, int dim, SymInt start, SymInt length) -> Tensor
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: narrow_scatter_symint
+  tags: view_copy
+
 - func: narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)
   variants: function, method
   device_check: NoCheck

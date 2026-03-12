@@ -1583,6 +1583,11 @@
   src: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
+- name: narrow_scatter(Tensor self, Tensor src, int dim, SymInt start, SymInt length) -> Tensor
+  self: narrow_scatter_symint(grad, zeros_like(src), dim, start, length)
+  src: grad.narrow_symint(dim, start, length)
+  result: auto_linear
+
 - name: select_scatter(Tensor self, Tensor src, int dim, SymInt index) -> Tensor
   self: select_scatter_symint(grad, zeros_like(src), dim, index)
   src: grad.select_symint(dim, index)

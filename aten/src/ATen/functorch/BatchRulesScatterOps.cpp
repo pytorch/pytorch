@@ -940,6 +940,15 @@ Tensor slice_scatter_decomp(const Tensor &self, const Tensor &src,
   return at::scatter(self, dim, idx, src);
 }
 
+Tensor narrow_scatter_decomp(
+    const Tensor &self, const Tensor &src,
+    int64_t dim, c10::SymInt start, c10::SymInt length)
+{
+  c10::SymInt end = start + length;
+  return at::slice_scatter_symint(
+      self, src, dim, std::make_optional(start), std::make_optional(end), 1);
+}
+
 Tensor select_scatter_decomp(
     const Tensor &self, const Tensor &source,
     int64_t dim, int64_t index)
@@ -1286,6 +1295,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("index_put", index_put_plumbing);
   m.impl("_index_put_impl_", _index_put_impl__plumbing);
   m.impl("slice_scatter", slice_scatter_decomp);
+  m.impl("narrow_scatter", narrow_scatter_decomp);
   m.impl("select_scatter", select_scatter_decomp);
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);

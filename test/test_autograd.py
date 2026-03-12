@@ -3951,6 +3951,18 @@ class TestAutograd(TestCase):
         expected[3:5] = v_expanded
         self.assertEqual(result, expected)
 
+    def test_narrow_scatter_gradcheck(self):
+        x = torch.randn(10, 10, dtype=torch.double, requires_grad=True)
+        src = torch.randn(5, 10, dtype=torch.double, requires_grad=True)
+        self.assertTrue(
+            gradcheck(lambda x, s: torch.narrow_scatter(x, s, 0, 2, 5), (x, src))
+        )
+
+        src2 = torch.randn(10, 4, dtype=torch.double, requires_grad=True)
+        self.assertTrue(
+            gradcheck(lambda x, s: torch.narrow_scatter(x, s, 1, 3, 4), (x, src2))
+        )
+
     def test_unused_output(self):
         x = torch.randn(10, 10, requires_grad=True)
         outputs = x.chunk(5)

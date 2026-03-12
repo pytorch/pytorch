@@ -3810,6 +3810,14 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     )
 
 
+@register_lowering(aten.narrow_scatter, type_promotion_kind=None)
+def narrow_scatter(x, src, dim, start, length):
+    # narrow_scatter(x, src, dim, start, length) is equivalent to
+    # slice_scatter(x, src, dim, start, start+length, step=1)
+    end = start + length
+    return slice_scatter(x, src, dim, start, end, step=1)
+
+
 def _unwrap(x):
     if isinstance(x, (list, tuple)) and len(x) > 0:
         return _unwrap(x[0])

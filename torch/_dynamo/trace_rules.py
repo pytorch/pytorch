@@ -2161,6 +2161,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nansum",
         "torch.narrow_copy",
         "torch.narrow",
+        "torch.narrow_scatter",
         "torch.native_batch_norm",
         "torch.native_channel_shuffle",
         "torch.native_dropout",

@@ -1147,6 +1147,19 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
     return False
 
 
+@register_noop_decomp(aten.narrow_scatter, 1)
+def narrow_scatter_noop(self, src, dim, start, length):
+    # If the narrow region covers the entire dimension, just return src
+    narrow_dim_size = self.shape[dim]
+    if (
+        self.shape == src.shape
+        and start == 0
+        and statically_known_true(length >= narrow_dim_size)
+    ):
+        return True
+    return False
+
+
 @register_noop_decomp(aten.repeat)
 def repeat_noop(self, repeats):
     return all(r == 1 for r in repeats)

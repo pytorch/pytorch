@@ -136,6 +136,7 @@
 #include <ATen/ops/narrow_copy.h>
 #include <ATen/ops/narrow_copy_native.h>
 #include <ATen/ops/narrow_native.h>
+#include <ATen/ops/narrow_scatter_native.h>
 #include <ATen/ops/new_empty_native.h>
 #include <ATen/ops/new_ones_native.h>
 #include <ATen/ops/numpy_T_native.h>
@@ -158,6 +159,7 @@
 #include <ATen/ops/slice_copy_native.h>
 #include <ATen/ops/slice_inverse_native.h>
 #include <ATen/ops/slice_native.h>
+#include <ATen/ops/slice_scatter.h>
 #include <ATen/ops/slice_scatter_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
@@ -4888,6 +4890,16 @@ at::Tensor select_scatter_symint(
       slice.sizes());
   slice.copy_(src);
   return output;
+}
+at::Tensor narrow_scatter_symint(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    int64_t dim,
+    c10::SymInt start,
+    c10::SymInt length) {
+  c10::SymInt end = start + length;
+  return at::slice_scatter_symint(
+      self, src, dim, std::make_optional(start), std::make_optional(end), 1);
 }
 at::Tensor diagonal_scatter(
     const at::Tensor& self,

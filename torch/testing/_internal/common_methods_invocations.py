@@ -5837,6 +5837,24 @@ def error_inputs_narrow_narrow_copy(op_info, device, *, is_narrow, is_ref):
                          error_regex=r"start must be an 0-dim integral Tensor\.")
 
 
+def sample_inputs_narrow_scatter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # (input_shape, src_shape, (dim, start, length))
+    # narrow_scatter(input, src, dim, start, length) where src.shape == input.narrow(dim, start, length).shape
+    cases = (((L, M, S), (L // 2, M, S), (0, L // 4, L // 2)),
+             ((L, M, S), (1, M, S), (0, L // 2, 1)),
+             ((L, M, S), (L, M // 2, S), (1, M // 4, M // 2)),
+             ((L, M, S), (L, M, S // 2), (2, S // 4, S // 2)),
+             ((L, M, S), (L, M, S), (0, 0, L)),
+             )
+
+    for input_shape, src_shape, args in cases:
+        input_ = make_arg(input_shape)
+        src = make_arg(src_shape)
+        yield SampleInput(input_, args=(src, *args))
+
+
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
     y_shape_x_shape_and_kwargs = [
         ((2, 3), (2, 3), {}),
@@ -18392,6 +18410,15 @@ op_db: list[OpInfo] = [
                             device_type='cuda'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
            )),
+    OpInfo('narrow_scatter',
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           backward_dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_narrow_scatter,
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True),
     OpInfo('view_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            ref=lambda x, newshape: np.reshape(x, newshape).copy(),
