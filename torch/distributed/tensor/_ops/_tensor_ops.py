@@ -1584,3 +1584,54 @@ def searchsorted_single_dim_strategy(
     return strategies
 
 
+@register_single_dim_strategy(
+    [
+        aten.nonzero.default,
+        aten._unique2.default,
+        aten.unique_dim.default,
+        aten.unique_dim_consecutive.default,
+        aten.unique_consecutive.default,
+        aten.to_sparse.default,
+        aten.to_sparse.sparse_dim,
+        aten.stft.default,
+        aten.stft.center,
+        aten.histogram.bin_ct,
+        aten.histogram.bins_tensor,
+        aten.histogramdd.default,
+        aten.allclose.default,
+        aten.block_diag.default,
+        aten.pdist.default,
+    ],
+)
+def replicate_only_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return []
+
+
+@register_single_dim_strategy(
+    [
+        aten.linspace.Tensor_Tensor,
+        aten.linspace.Tensor_Scalar,
+        aten.linspace.Scalar_Tensor,
+        aten.logspace.Tensor_Tensor,
+        aten.logspace.Tensor_Scalar,
+        aten.logspace.Scalar_Tensor,
+    ],
+)
+def linspace_logspace_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return []
+
+
+@register_single_dim_strategy(aten.im2col.default)
+def im2col_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    self_meta = cast(TensorMeta, args_schema[0])
+    if len(self_meta.shape) < 1:
+        return []
+    return [[_ShardingPlaceholder(0), _ShardingPlaceholder(0)]]
+
+
