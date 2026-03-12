@@ -1538,3 +1538,17 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
         keep_dim=keep_dim,
         reduction_linear=False,
     )
+
+
+@register_single_dim_strategy(
+    [
+        aten.multi_margin_loss.default,
+        aten.multilabel_margin_loss_forward.default,
+    ],
+)
+def margin_loss_single_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return []
