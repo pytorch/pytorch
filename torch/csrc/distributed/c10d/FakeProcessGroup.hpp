@@ -97,6 +97,9 @@ class FakeProcessGroup : public Backend {
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
     checkCollectiveError();
     for (auto& tensor : outputTensors[0]) {
+      if (tensor.size(0) != inputTensors[0].size(0)) {
+        continue;
+      }
       tensor.copy_(inputTensors[0]);
     }
     return c10::make_intrusive<FakeWork>();

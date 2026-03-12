@@ -57,6 +57,17 @@ class TestFakePG(TestCase):
         for out_tensor in output_tensors:
             self.assertEqual(tuple(out_tensor.shape), (3, 3))
 
+    def test_allgather_uneven(self):
+        dist.init_process_group(backend="fake", rank=0, world_size=2)
+
+        # Uneven allgather: mismatched output tensors are skipped, not crashed
+        input_tensor = torch.ones(5, 3)
+        output_tensors = [torch.empty(5, 3), torch.empty(4, 3)]
+        dist.all_gather(output_tensors, input_tensor)
+        self.assertEqual(tuple(output_tensors[0].shape), (5, 3))
+        self.assertEqual(output_tensors[0], input_tensor)
+        self.assertEqual(tuple(output_tensors[1].shape), (4, 3))
+
     def test_reduce_scatter(self):
         store = FakeStore()
         dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
