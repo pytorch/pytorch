@@ -23,7 +23,10 @@ from torch.distributed.tensor._op_schema import (
     OutputSpecType,
 )
 from torch.distributed.tensor._random import is_rng_supported_mesh
-from torch.distributed.tensor._redistribute import redistribute_local_tensor
+from torch.distributed.tensor._redistribute import (
+    redistribute_local_tensor,
+    redistribute_local_tensors,
+)
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor._tp_conv import (
     convolution_backward_handler,
@@ -565,37 +568,25 @@ class OpDispatcher:
         else:
             flatten_args_schema_to_reshard = suggested_input_schema.args_schema
 
+        # First pass: identify args that need redistribution.
+        # Most ops need zero redistributions, so we keep the common path
+        # cheap by only allocating the requests list when needed.
         new_local_args: list[object] = []
+        reshard_requests: (
+            list[tuple[int, torch.Tensor, DTensorSpec, DTensorSpec]] | None
+        ) = None
+
         for i, arg_spec in enumerate(op_info.flat_args_schema):
             reshard_arg_spec = flatten_args_schema_to_reshard[i]
             if isinstance(arg_spec, DTensorSpec):
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
-                    redistribute_context = (
-                        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
-                            i, arg_spec, reshard_arg_spec
-                        )
-                        if debug_mode is not None
-                        else contextlib.nullcontext()
+                    if reshard_requests is None:
+                        reshard_requests = []
+                    reshard_requests.append(
+                        (i, local_tensor, arg_spec, cast(DTensorSpec, reshard_arg_spec))
                     )
-
-                    ExplicitRedistributionContext.observe_redistribution(
-                        arg_spec,
-                        # pyrefly: ignore [bad-argument-type]
-                        reshard_arg_spec,
-                        LazyString(
-                            _format_implicit_redistribution_msg,
-                            op_info.schema or suggested_input_schema.op,
-                        ),
-                    )
-                    with redistribute_context:
-                        resharded_local_tensor = redistribute_local_tensor(
-                            local_tensor,
-                            arg_spec,
-                            # pyrefly: ignore [bad-argument-type]
-                            reshard_arg_spec,
-                        )
-                    new_local_args.append(resharded_local_tensor)
+                    new_local_args.append(None)  # placeholder, filled below
                 else:
                     new_local_args.append(local_tensor)
             else:
@@ -612,6 +603,60 @@ class OpDispatcher:
                 len(op_info.flat_args_schema), len(flatten_args_schema_to_reshard)
             ):
                 new_local_args.append(flatten_args_schema_to_reshard[i])
+
+        if reshard_requests is None:
+            op_info.local_args = tuple(new_local_args)
+            return
+
+        lazy_msg = LazyString(
+            _format_implicit_redistribution_msg,
+            op_info.schema  # pyrefly: ignore [bad-argument-type]
+            or suggested_input_schema.op,
+        )
+
+        if len(reshard_requests) == 1:
+            # Single redistribution: preserve original debug nesting by running
+            # the redistribute inside the record_redistribute_calls context.
+            idx, local_tensor, arg_spec, reshard_arg_spec = reshard_requests[0]
+            ExplicitRedistributionContext.observe_redistribution(
+                arg_spec,
+                reshard_arg_spec,
+                lazy_msg,
+            )
+            redistribute_context = (
+                debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+                    idx, arg_spec, reshard_arg_spec
+                )
+                if debug_mode is not None
+                else contextlib.nullcontext()
+            )
+            with redistribute_context:
+                new_local_args[idx] = redistribute_local_tensor(
+                    local_tensor,
+                    arg_spec,
+                    reshard_arg_spec,
+                )
+        else:
+            resharded = redistribute_local_tensors(
+                [(t, src, dst) for _, t, src, dst in reshard_requests]
+            )
+            for (idx, _, arg_spec, reshard_arg_spec), result in zip(
+                reshard_requests, resharded
+            ):
+                ExplicitRedistributionContext.observe_redistribution(
+                    arg_spec,
+                    reshard_arg_spec,
+                    lazy_msg,
+                )
+                if debug_mode is not None:
+                    # Records that a redistribute happened (src→dst placements).
+                    # Collectives already executed inside redistribute_local_tensors,
+                    # so they won't appear nested under this entry.
+                    with debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+                        idx, arg_spec, reshard_arg_spec
+                    ):
+                        pass
+                new_local_args[idx] = result
 
         op_info.local_args = tuple(new_local_args)
 
