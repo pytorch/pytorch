@@ -1348,8 +1348,16 @@ PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(const std::vector<u
       dispatch_data_create(data.data(), data.size(), dispatch_get_main_queue(), DISPATCH_DATA_DESTRUCTOR_DEFAULT);
   library = [device newLibraryWithData:dd error:&error];
   dispatch_release(dd);
-  TORCH_CHECK(
-      library, "Failed to load metallib: ", error ? [[error description] UTF8String] : "unknown error");
+  TORCH_CHECK(library, "Failed to load metallib: ", error ? [[error description] UTF8String] : "unknown error");
+}
+
+PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(const std::string& path)
+    : MetalShaderLibrary("") {
+  auto device = MPSDevice::getInstance()->device();
+  NSError* error = nil;
+  NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
+  library = [device newLibraryWithURL:url error:&error];
+  TORCH_CHECK(library, "Failed to load metallib from '", path, "': ", error ? [[error description] UTF8String] : "unknown error");
 }
 
 PrecompiledMetalShaderLibrary::~PrecompiledMetalShaderLibrary() {

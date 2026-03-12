@@ -497,7 +497,8 @@ void initModule(PyObject* module) {
           &MetalKernelFunction::getStaticThreadGroupMemoryLength);
   py::class_<
       PrecompiledMetalShaderLibrary,
-      std::shared_ptr<PrecompiledMetalShaderLibrary>>(m, "_mps_PrecompiledShaderLibrary")
+      std::shared_ptr<PrecompiledMetalShaderLibrary>>(
+      m, "_mps_PrecompiledShaderLibrary")
       .def(
           "__getattr__",
           [](PrecompiledMetalShaderLibrary& self, const std::string& name) {
@@ -510,6 +511,9 @@ void initModule(PyObject* module) {
     auto sv = static_cast<std::string_view>(data);
     std::vector<uint8_t> bytes(sv.begin(), sv.end());
     return std::make_shared<PrecompiledMetalShaderLibrary>(bytes);
+  });
+  m.def("_mps_loadMetallibFromPath", [](const std::string& path) {
+    return std::make_shared<PrecompiledMetalShaderLibrary>(path);
   });
   m.def("_mps_compileShader", [](const std::string& source) {
     return std::make_shared<DynamicMetalShaderLibrary>(source);
