@@ -157,7 +157,6 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
   Tensor save_mean, save_var;
 
   if (training) {
-    int64_t num_features = input_t.size(1);
     save_mean = at::empty({num_features}, weight_t.options());
     save_var = at::empty({num_features}, weight_t.options());
 

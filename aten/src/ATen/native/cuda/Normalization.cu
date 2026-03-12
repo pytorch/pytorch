@@ -29,6 +29,8 @@
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/miopen_batch_norm.h>
 #include <ATen/ops/miopen_batch_norm_backward.h>
+#include <ATen/ops/hipdnn_batch_norm.h>
+#include <ATen/ops/hipdnn_batch_norm_backward.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
 #include <ATen/ops/scalar_tensor.h>
@@ -499,6 +501,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_cuda(
     reserve = at::empty({0}, input.options().dtype(kByte));
     std::tie(output, save_mean, save_var) =
         at::miopen_batch_norm(input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
+  } else if (backend == BatchNormBackend::Hipdnn) {
+    reserve = at::empty({0}, input.options().dtype(kByte));
+    std::tie(output, save_mean, save_var) =
+        at::hipdnn_batch_norm(
+            input, weight, bias, running_mean, running_var,
+            /*training*/true, momentum, eps);
   } else {
     reserve = at::empty({0}, input.options().dtype(kByte));
     std::tie(output, save_mean, save_var) =
@@ -523,6 +531,11 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_cuda_out(
   } else if (backend == BatchNormBackend::Miopen) {
     std::tie(out, save_mean, save_var) =
         at::miopen_batch_norm_out(out, save_mean, save_var, input, weight, bias, running_mean, running_var, /*training*/true, momentum, eps);
+  } else if (backend == BatchNormBackend::Hipdnn) {
+    std::tie(out, save_mean, save_var) =
+        at::hipdnn_batch_norm_out(out, save_mean, save_var,
+            input, weight, bias, running_mean, running_var,
+            /*training*/true, momentum, eps);
   } else {
     std::tie(out, save_mean, save_var) =
       batch_norm_cuda_out(input, weight_opt, bias_opt, running_mean, running_var, /*update*/true, momentum, eps, out, save_mean, save_var);
@@ -563,6 +576,8 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_cuda(
     return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps, reserve);
   } else if (backend == BatchNormBackend::Miopen) {
     return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps);
+  } else if (backend == BatchNormBackend::Hipdnn) {
+    return at::hipdnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps);
   } else {
     return batch_norm_backward_cuda(grad_output, input, weight, running_mean, running_var, save_mean, save_var, update, eps, grad_input_mask);
   }
