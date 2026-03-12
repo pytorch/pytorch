@@ -1885,13 +1885,13 @@ class TensorVariable(VariableTracker):
                 return None
             if layout.as_python_constant() != torch.strided:
                 return None
+        fwd_kwargs = dict(kwargs)
+        fwd_kwargs.setdefault("dtype", self.var_getattr(tx, "dtype"))
+        fwd_kwargs.setdefault("device", self.var_getattr(tx, "device"))
         return variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
             tx,
             [data_arg],
-            {
-                "dtype": kwargs.get("dtype", self.var_getattr(tx, "dtype")),
-                "device": kwargs.get("device", self.var_getattr(tx, "device")),
-            },
+            fwd_kwargs,
         )
 
     def method_untyped_storage(
