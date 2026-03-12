@@ -3,8 +3,7 @@
 
 #include <ATen/ATen.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 hipdnn_frontend::DataType getHipdnnDataType(const at::Tensor& tensor) {
   switch (tensor.scalar_type()) {
@@ -15,11 +14,11 @@ hipdnn_frontend::DataType getHipdnnDataType(const at::Tensor& tensor) {
     case at::kBFloat16:
       return hipdnn_frontend::DataType::BFLOAT16;
     default:
-      std::string msg("getHipdnnDataType() not supported for ");
-      msg += toString(tensor.scalar_type());
-      throw std::runtime_error(msg);
+      TORCH_CHECK(
+          false,
+          "getHipdnnDataType() not supported for ",
+          toString(tensor.scalar_type()));
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
