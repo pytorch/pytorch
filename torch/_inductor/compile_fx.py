@@ -2616,10 +2616,9 @@ def compile_fx(
     mutate it!  Make a copy if you need to preserve the original GraphModule.
     """
     if decompositions is not None:
-        _decomps_ref = decompositions
 
         def get_decomp_fn() -> dict[Any, Callable[..., Any]]:
-            return _decomps_ref
+            return decompositions  # pyrefly: ignore[bad-return]
     else:
         get_decomp_fn = select_decomp_table
 
@@ -2730,6 +2729,7 @@ def _maybe_wrap_and_compile_fx_main(
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
     ignore_shape_env: bool,
+    *,
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
     """
