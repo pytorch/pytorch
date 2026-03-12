@@ -4220,15 +4220,12 @@ Tensor linalg_qr_piv_backward(
     const Tensor& R,
     const Tensor& P,
     const std::string_view mode) {
-    // The formulas for the backward derivative with pivoting can be derived similar to
-    // "Auto-Differentiating Linear Algebra" by M. Seeger, A. Hetzel, Z. Dai, E. Meissner, N. D. Lawrence,
-    // arXiv:1710.08717 [cs.MS] https://doi.org/10.48550/arXiv.1710.08717
-    // Using that (dA)P=(dQ)R + Q(dR)
-    // and following the derivation on page 25, section gelqf in the appendix of above cited article,
-    // one finds the gradient for the pivoted QR decomposition as A = gA0 * P^T,
-    // where gA0 is the gradient calculated without pivoting and P^T is the transposed pivot matrix.
+    // The backward formulas for QR with column pivoting follow from the standard QR case
+    // by substituting A -> A P. Using (dA) P = (dQ) R + Q (dR), the gradient becomes
+    // gA = gA0 * P^T, where gA0 is the gradient for the non-pivoted QR and P^T is the
+    // transpose of the permutation matrix.
 
-    auto [compute_q, reduced] = at::native::_parse_qr_mode(mode);
+    auto [compute_q, reduced] = at::native::_parse_qr_piv_mode(mode);
 
     TORCH_CHECK(
       compute_q,
