@@ -367,6 +367,7 @@ def expand_to_full_mesh_op_strategy(
         [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
+    different_mesh_args: list[int] | None = None,
 ) -> OpStrategy:
     """
     Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
@@ -476,6 +477,40 @@ def expand_to_full_mesh_op_strategy(
                 f"input_specs({len(input_specs)}) != strategies({len(input_args_strategy)}: "
                 f"{len(args_strategy)} args + {len(kwargs_strategy)} kwargs)"
             )
+
+        # Note on different_mesh_args:
+        #
+        # Some ops have args that live on a different mesh than the op's
+        # compute mesh.  These args must be Replicate — you cannot
+        # meaningfully Shard a tensor across a mesh it doesn't belong to.
+        # We preserve the original mesh/placement here so the propagator
+        # doesn't try to redistribute them onto the compute mesh.
+        #
+        # Currently used by fused optimizer ops (e.g. _fused_adam_) where
+        # state_steps is a scalar counter on a smaller sub-mesh (e.g. 1D
+        # DP) while params/grads are on a larger mesh (e.g. 2D DP+TP).
+        #
+        # This is distinct from the element_mesh handling in
+        # single_dim_strategy.py, which deals with foreach ops where
+        # different *elements* in a tensor list may live on different
+        # sub-meshes (e.g. param group A on 2D mesh, param group B on
+        # 1D mesh).
+        if different_mesh_args is not None:
+            for idx in different_mesh_args:
+                if idx < len(input_args_strategy):
+                    cross_mesh_input = input_args_strategy[idx]
+                    original_spec = cross_mesh_input.strategies[0].output_spec
+                    if original_spec.mesh != mesh:
+                        if not all(p == Replicate() for p in original_spec.placements):
+                            raise RuntimeError(
+                                f"Cross-mesh input at index {idx} must be Replicate, "
+                                f"but got {original_spec.placements}"
+                            )
+                        input_specs[idx] = DTensorSpec(
+                            mesh=original_spec.mesh,
+                            placements=original_spec.placements,
+                            tensor_meta=original_spec.tensor_meta,
+                        )
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
         redistribute_input = self_spec.placements != input_specs[0].placements
