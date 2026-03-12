@@ -23,19 +23,21 @@ SCRIPT_DIR = Path(__file__).absolute().parent
 REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
-CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0"]
+CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0", "13.2"]
 CUDA_STABLE = "12.8"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
     "12.9": "12.9.1",
     "13.0": "13.0.2",
+    "13.2": "13.2.0",
 }
 CUDA_ARCHES_CUDNN_VERSION = {
     "12.6": "9",
     "12.8": "9",
     "12.9": "9",
     "13.0": "9",
+    "13.2": "9",
 }
 
 ROCM_ARCHES = ["7.1", "7.2"]
@@ -46,7 +48,7 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "12.9-aarch64", "13.0-aarch64"]
+CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "12.9-aarch64", "13.0-aarch64", "13.2-aarch64"]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
@@ -80,6 +82,14 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
         "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux' | "
+        "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
+    ),
+    "13.2": (
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.0; platform_system == 'Linux' | "  # noqa: B950
+        "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.19.0.56; platform_system == 'Linux' | "
+        "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
@@ -417,7 +427,7 @@ def generate_wheels_matrix(
             # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
-                arch_version in ["13.0", "12.9", "12.8", "12.6"]
+                arch_version in ["13.2", "13.0", "12.9", "12.8", "12.6"]
                 and os == "linux"
                 or arch_version in CUDA_AARCH64_ARCHES
             ):
