@@ -88,6 +88,15 @@ OcclTransport::~OcclTransport() {
   }
 }
 
+static void setSocketTimeout(int fd, int timeoutSec) {
+  struct timeval tv{};
+  tv.tv_sec = timeoutSec;
+  ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
+
+static constexpr int kDataTimeoutSec = 300; // 5 minutes
+
 void OcclTransport::send(
     const void* data,
     size_t nbytes,
@@ -95,7 +104,26 @@ void OcclTransport::send(
     uint8_t dtype,
     uint64_t numel,
     uint32_t tag) {
-  TORCH_CHECK(false, "OcclTransport::send not yet implemented");
+  TORCH_CHECK(
+      dstRank >= 0 && dstRank < worldSize_ && dstRank != rank_,
+      "Invalid dstRank: ", dstRank);
+
+  ensureConnected(dstRank);
+
+  auto& conn = peers_[dstRank];
+  std::lock_guard<std::mutex> lock(conn.mutex);
+
+  setSocketTimeout(conn.fd, kDataTimeoutSec);
+
+  WireHeader hdr{};
+  hdr.tag = tag;
+  hdr.dtype = dtype;
+  hdr.numel = numel;
+  sendAll(conn.fd, &hdr, sizeof(hdr));
+
+  if (nbytes > 0) {
+    sendAll(conn.fd, data, nbytes);
+  }
 }
 
 void OcclTransport::recv(
@@ -105,7 +133,37 @@ void OcclTransport::recv(
     uint8_t dtype,
     uint64_t numel,
     uint32_t tag) {
-  TORCH_CHECK(false, "OcclTransport::recv not yet implemented");
+  TORCH_CHECK(
+      srcRank >= 0 && srcRank < worldSize_ && srcRank != rank_,
+      "Invalid srcRank: ", srcRank);
+
+  ensureConnected(srcRank);
+
+  auto& conn = peers_[srcRank];
+  std::lock_guard<std::mutex> lock(conn.mutex);
+
+  setSocketTimeout(conn.fd, kDataTimeoutSec);
+
+  WireHeader hdr{};
+  recvAll(conn.fd, &hdr, sizeof(hdr));
+
+  TORCH_CHECK(
+      hdr.tag == tag,
+      "Tag mismatch from rank ", srcRank,
+      ": expected ", tag, " but got ", hdr.tag);
+  TORCH_CHECK(
+      hdr.dtype == dtype,
+      "Dtype mismatch from rank ", srcRank,
+      ": expected ", static_cast<int>(dtype),
+      " but got ", static_cast<int>(hdr.dtype));
+  TORCH_CHECK(
+      hdr.numel == numel,
+      "Numel mismatch from rank ", srcRank,
+      ": expected ", numel, " but got ", hdr.numel);
+
+  if (nbytes > 0) {
+    recvAll(conn.fd, data, nbytes);
+  }
 }
 
 void OcclTransport::ensureConnected(int peerRank) {
@@ -205,7 +263,14 @@ void OcclTransport::sendAll(int fd, const void* buf, size_t len) {
   size_t sent = 0;
   while (sent < len) {
     auto n = ::send(fd, ptr + sent, len - sent, 0);
-    TORCH_CHECK(n > 0, "sendAll failed: ", strerror(errno));
+    if (n <= 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        C10_THROW_ERROR(DistBackendError, "OCCL send timed out");
+      }
+      C10_THROW_ERROR(
+          DistBackendError,
+          std::string("OCCL send failed: ") + strerror(errno));
+    }
     sent += static_cast<size_t>(n);
   }
 }
@@ -215,7 +280,17 @@ void OcclTransport::recvAll(int fd, void* buf, size_t len) {
   size_t received = 0;
   while (received < len) {
     auto n = ::recv(fd, ptr + received, len - received, 0);
-    TORCH_CHECK(n > 0, "recvAll failed: ", strerror(errno));
+    if (n <= 0) {
+      if (n == 0) {
+        C10_THROW_ERROR(DistBackendError, "OCCL recv: peer closed connection");
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        C10_THROW_ERROR(DistBackendError, "OCCL recv timed out");
+      }
+      C10_THROW_ERROR(
+          DistBackendError,
+          std::string("OCCL recv failed: ") + strerror(errno));
+    }
     received += static_cast<size_t>(n);
   }
 }
