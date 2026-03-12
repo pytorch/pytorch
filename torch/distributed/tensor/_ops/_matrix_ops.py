@@ -489,6 +489,16 @@ def baddbmm_single_dim_strategy(
     return gen_single_dim_einsum_strategies("bmk,bkn->bmn", bias_shape=bias_meta.shape)
 
 
+@register_single_dim_strategy(aten.addbmm.default, allow_unbacked_sharding=True)
+def addbmm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    bias_meta = args_schema[0]
+    if not isinstance(bias_meta, TensorMeta):
+        raise AssertionError
+    return gen_single_dim_einsum_strategies("bnm,bmp->np", bias_shape=bias_meta.shape)
+
+
 @register_op_strategy(aten._scaled_mm.default)
 def scaled_mm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()

@@ -1635,3 +1635,113 @@ def im2col_single_dim_strategy(
     return [[_ShardingPlaceholder(0), _ShardingPlaceholder(0)]]
 
 
+@register_single_dim_strategy(aten._cdist_forward.default, schema_info=RuntimeSchemaInfo(2))
+def cdist_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # _cdist_forward(x1, x2, p, compute_mode) -> output
+    # x1: (B*, P, M), x2: (B*, R, M), output: (B*, P, R)
+    x1_meta = args_schema[0]
+    if not isinstance(x1_meta, TensorMeta):
+        raise AssertionError
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(len(x1_meta.shape) - 2):
+        strategies.append([_ShardingPlaceholder(d), _ShardingPlaceholder(d), _ShardingPlaceholder(d)])
+    return strategies
+
+
+@register_single_dim_strategy(aten.isin.Tensor_Tensor)
+def isin_tensor_tensor_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    elements_meta = args_schema[0]
+    if not isinstance(elements_meta, TensorMeta):
+        raise AssertionError
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(len(elements_meta.shape)):
+        strategies.append([_ShardingPlaceholder(d), _ShardingPlaceholder(d), Replicate()])
+    return strategies
+
+
+@register_single_dim_strategy(aten.isin.Tensor_Scalar)
+def isin_tensor_scalar_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    elements_meta = args_schema[0]
+    if not isinstance(elements_meta, TensorMeta):
+        raise AssertionError
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(len(elements_meta.shape)):
+        strategies.append([_ShardingPlaceholder(d), _ShardingPlaceholder(d)])
+    return strategies
+
+
+@register_single_dim_strategy(aten.isin.Scalar_Tensor)
+def isin_scalar_tensor_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return []
+
+
+@register_single_dim_strategy(aten.renorm.default, schema_info=RuntimeSchemaInfo(2))
+def renorm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # renorm normalizes each slice along `dim` independently. Sharding ON
+    # `dim` is safe (each shard has complete slices); sharding on other dims
+    # splits a slice across ranks, making local norm computation incorrect.
+    self_meta = args_schema[0]
+    dim = args_schema[2]
+    if not isinstance(self_meta, TensorMeta):
+        raise AssertionError
+    if not isinstance(dim, int):
+        raise AssertionError
+    dim = normalize_dim(dim, len(self_meta.shape))
+    return [[_ShardingPlaceholder(dim), _ShardingPlaceholder(dim)]]
+
+
+@register_single_dim_strategy(
+    [
+        aten.reflection_pad1d.default,
+        aten.reflection_pad2d.default,
+        aten.reflection_pad3d.default,
+        aten.replication_pad1d.default,
+        aten.replication_pad2d.default,
+        aten.replication_pad3d.default,
+    ],
+)
+def pad_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # Shard on batch dim (dim 0) only. Channel dim (dim 1) is unsafe for
+    # unbatched inputs where dim 1 is spatial.
+    self_meta = args_schema[0]
+    if not isinstance(self_meta, TensorMeta):
+        raise AssertionError
+    if len(self_meta.shape) < 1:
+        return []
+    return [[_ShardingPlaceholder(0), _ShardingPlaceholder(0)]]
+
+
+@register_single_dim_strategy(
+    [
+        aten.upsample_nearest1d.default,
+        aten.upsample_nearest1d.vec,
+        aten.upsample_nearest2d.default,
+        aten.upsample_nearest2d.vec,
+        aten.upsample_nearest3d.default,
+        aten.upsample_nearest3d.vec,
+    ],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def upsample_nearest_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # Shard on batch dim (dim 0) only.
+    self_meta = args_schema[0]
+    if not isinstance(self_meta, TensorMeta):
+        raise AssertionError
+    if len(self_meta.shape) < 1:
+        return []
+    return [[_ShardingPlaceholder(0), _ShardingPlaceholder(0)]]
+
