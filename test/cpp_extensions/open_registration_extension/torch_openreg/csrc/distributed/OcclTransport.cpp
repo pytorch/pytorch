@@ -24,7 +24,46 @@ OcclTransport::OcclTransport(
   TORCH_CHECK(rank >= 0 && rank < worldSize, "Invalid rank: ", rank);
   TORCH_CHECK(worldSize > 0, "Invalid worldSize: ", worldSize);
 
-  // TODO: Create listening socket, publish address, start accept thread
+  // Create listening socket on ephemeral port
+  listenFd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+  TORCH_CHECK(listenFd_ >= 0, "Failed to create listen socket: ", strerror(errno));
+
+  int optval = 1;
+  ::setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+  struct sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  addr.sin_port = 0; // ephemeral port
+  TORCH_CHECK(
+      ::bind(listenFd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0,
+      "Failed to bind listen socket: ", strerror(errno));
+
+  TORCH_CHECK(
+      ::listen(listenFd_, worldSize) == 0,
+      "Failed to listen: ", strerror(errno));
+
+  // Learn the assigned port
+  socklen_t addrLen = sizeof(addr);
+  TORCH_CHECK(
+      ::getsockname(listenFd_, reinterpret_cast<struct sockaddr*>(&addr), &addrLen) == 0,
+      "Failed to get listen port: ", strerror(errno));
+  listenPort_ = ntohs(addr.sin_port);
+
+  // Publish our address and read peers' addresses
+  publishAddress();
+  for (int i = 0; i < worldSize_; ++i) {
+    if (i == rank_) {
+      continue;
+    }
+    std::string peerAddr = getPeerAddress(i);
+    auto colonPos = peerAddr.rfind(':');
+    TORCH_CHECK(colonPos != std::string::npos, "Malformed peer address: ", peerAddr);
+    peers_[i].host = peerAddr.substr(0, colonPos);
+    peers_[i].port = std::stoi(peerAddr.substr(colonPos + 1));
+  }
+
+  // TODO: Start accept thread
 }
 
 OcclTransport::~OcclTransport() {
@@ -74,11 +113,16 @@ void OcclTransport::ensureConnected(int peerRank) {
 }
 
 void OcclTransport::publishAddress() {
-  TORCH_CHECK(false, "OcclTransport::publishAddress not yet implemented");
+  // Use localhost — OCCL is single-machine only
+  std::string addr = "127.0.0.1:" + std::to_string(listenPort_);
+  std::vector<uint8_t> data(addr.begin(), addr.end());
+  store_->set("addr/" + std::to_string(rank_), data);
 }
 
 std::string OcclTransport::getPeerAddress(int peerRank) {
-  TORCH_CHECK(false, "OcclTransport::getPeerAddress not yet implemented");
+  // Blocks until the peer has published its address
+  auto data = store_->get("addr/" + std::to_string(peerRank));
+  return std::string(data.begin(), data.end());
 }
 
 void OcclTransport::acceptLoop() {

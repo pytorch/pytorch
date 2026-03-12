@@ -75,6 +75,8 @@ class OcclTransport {
 
  private:
   struct Connection {
+    std::string host;
+    int port = 0;
     int fd = -1;
     std::mutex mutex;
   };
