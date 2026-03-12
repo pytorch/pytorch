@@ -477,6 +477,7 @@ class ComboKernel(Kernel):
         features: SIMDKernelFeatures,
         optimize_mask: bool,
         triton_kernel_cls: type[TritonKernel],
+        override_persistent_reduction: bool | None = None,
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
@@ -499,6 +500,7 @@ class ComboKernel(Kernel):
             is_combo_kernel=True,
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction=False,
+            override_persistent_reduction=override_persistent_reduction,
         )
 
     def codegen_static_numels_sub_kernel(

@@ -2383,6 +2383,9 @@ class SIMDScheduling(BaseScheduling):
                     features, cooperative_reduction=False
                 )
             )
+            if features.contains_op("sort"):
+                is_persistent_reduction = True
+
             node_schedule_map[pn] = NodeInfo(
                 node_schedule=node_schedule,
                 tiling=tiling,
@@ -2419,6 +2422,9 @@ class SIMDScheduling(BaseScheduling):
                     kernel = self.kernel_type(
                         node_info.tiling,
                         features=node_info.features,
+                        override_persistent_reduction=True
+                        if node_info.is_persistent_reduction
+                        else None,
                     )
                     self.process_kernel(
                         kernel, node_info.node_schedule, only_gen_src_code
@@ -2436,11 +2442,16 @@ class SIMDScheduling(BaseScheduling):
                 )
                 for pn in node_group:
                     node_info = node_schedule_map[pn]
+                    extra_kwargs = {}
+                    if node_info.features.contains_op("sort"):
+                        extra_kwargs["override_persistent_reduction"] = True
+
                     subkernel = ComboKernel.create_triton_kernel(
                         node_info.tiling,
                         features=node_info.features,
                         optimize_mask=not mixed_sizes,
                         triton_kernel_cls=self.kernel_type,
+                        **extra_kwargs,
                     )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
@@ -3218,9 +3229,16 @@ class SIMDScheduling(BaseScheduling):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
             tiling = self.select_tiling(node_schedule, numel, rnumel)
+            features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+
+            kernel_kwargs = {}
+            if features.contains_op("sort"):
+                kernel_kwargs["override_persistent_reduction"] = True
+
             kernel = self.kernel_type(
                 tiling,
-                features=SIMDKernelFeatures(node_schedule, numel, rnumel),
+                features=features,
+                **kernel_kwargs,
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
             # Collect config_patches from operations
