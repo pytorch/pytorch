@@ -365,10 +365,10 @@ class TestLinalg(TestCase):
             a_3d = a.view(batch_size, m, n)
             b_3d = b.view(batch_size, m, nrhs)
 
-            solution_3d = res.solution.cpu().view(batch_size, n, nrhs)
-            residuals_2d = apply_if_not_empty(res.residuals.cpu(), lambda t: t.view(-1, nrhs))
-            rank_1d = apply_if_not_empty(res.rank.cpu(), lambda t: t.view(-1))
-            singular_values_2d = res.singular_values.cpu().view(batch_size, res.singular_values.shape[-1])
+            solution_3d = res.solution.view(batch_size, n, nrhs)
+            residuals_2d = apply_if_not_empty(res.residuals, lambda t: t.view(-1, nrhs))
+            rank_1d = apply_if_not_empty(res.rank, lambda t: t.view(-1))
+            singular_values_2d = res.singular_values.view(batch_size, res.singular_values.shape[-1])
 
             if a.numel() > 0:
                 for i in range(batch_size):
@@ -480,6 +480,66 @@ class TestLinalg(TestCase):
             # because NumPy and SciPy do not implement this driver
             if driver == 'gels' and rcond is None:
                 check_solution_correctness(a, b, sol)
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @skipIfTorchDynamo("flaky, needs investigation")
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_linalg_lstsq_gelsd_rank_deficient(self, device, dtype):
+        from torch.testing._internal.common_utils import random_well_conditioned_matrix
+
+        def make_rank_deficient(a, effective_rank):
+            """Zero out singular values beyond effective_rank by modifying the matrix."""
+            # a is (..., m, n). Compute SVD and set smallest singular values to zero.
+            m, n = a.size(-2), a.size(-1)
+            min_mn = min(m, n)
+            if effective_rank >= min_mn:
+                return a
+            U, S, Vh = torch.linalg.svd(a, full_matrices=False)
+            S[..., effective_rank:] = 0
+            return (U * S) @ Vh
+
+        # Check solution equals pinverse @ b (minimum-norm least-squares solution)
+        def check_solution(a, b, res, rank_ref, atol=1e-5, rtol=1e-5):
+            sol_ref = a.pinverse() @ b
+            self.assertEqual(res.solution, sol_ref, atol=atol, rtol=rtol)
+            self.assertEqual(res.rank, rank_ref)
+            m, n = a.size(-2), a.size(-1)
+            self.assertEqual(res.singular_values.shape, (*a.shape[:-2], min(m, n)))
+
+        # Case 1: one column zero
+        m, n = 6, 4
+        a = random_well_conditioned_matrix(m, n, dtype=dtype, device=device)
+        a[..., -1] = 0
+        b = torch.rand(m, dtype=dtype, device=device)
+        res = torch.linalg.lstsq(a, b, driver='gelsd')
+        check_solution(a, b, res, rank_ref=3)
+        self.assertLessEqual(res.rank.item(), n - 1)
+
+        # Case 2: compare against NumPy
+        a = random_well_conditioned_matrix(5, 4, dtype=dtype, device=device)
+        b = torch.rand(5, 2, dtype=dtype, device=device)
+        expected_sol, _, expected_rank, expected_sv = np.linalg.lstsq(a.cpu(), b.cpu(), rcond=None)
+        res = torch.linalg.lstsq(a, b, driver='gelsd')
+        self.assertEqual(res.solution, expected_sol, atol=1e-5, rtol=1e-5)
+        self.assertEqual(res.rank.item(), expected_rank)
+        self.assertEqual(res.singular_values, expected_sv, atol=1e-5, rtol=1e-5)
+
+        # a.pinverse uses different tolerance than torch.linalg.lstsq so only checking double types.
+        if dtype in (torch.double, torch.cdouble):
+            # Case 3: matrix with effective_rank = 2 (m >= n)
+            a = random_well_conditioned_matrix(5, 4, dtype=dtype, device=device)
+            a = make_rank_deficient(a, 2)
+            b = torch.rand(5, 2, dtype=dtype, device=device)
+            res = torch.linalg.lstsq(a, b, driver='gelsd')
+            check_solution(a, b, res, rank_ref=2)
+
+            # Case 4: batched with one rank-deficient
+            a = random_well_conditioned_matrix(2, 5, 4, dtype=dtype, device=device)
+            a[0, :, :] = make_rank_deficient(a[0, :, :], 3)
+            b = torch.rand(2, 5, 3, dtype=dtype, device=device)
+            res = torch.linalg.lstsq(a, b, driver='gelsd')
+            check_solution(a, b, res, rank_ref=(3, 4))
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack

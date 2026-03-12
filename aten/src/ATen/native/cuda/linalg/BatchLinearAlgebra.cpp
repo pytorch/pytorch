@@ -37,6 +37,7 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/reciprocal.h>
 #include <ATen/ops/sub.h>
+#include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
@@ -1481,20 +1482,24 @@ void linalg_lstsq_gelsd(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singul
 
   Tensor tol;
   if (rcond > 0 && rcond < 1) {
-    auto s_max = singular_values.select(-1, 0).unsqueeze(-1).expand(singular_values.sizes());
+    auto s_max = singular_values.select(-1, 0);
     tol = at::mul(s_max, rcond);
   } else {
-    tol = at::full_like(singular_values, _get_epsilon(real_dtype) * static_cast<double>(std::max(m, n)));
+    tol = at::scalar_tensor(_get_epsilon(real_dtype) * static_cast<double>(std::max(m, n)), at::device(A.device()));
   }
 
-  Tensor above_tol = singular_values.gt(tol);
-  rank.copy_((above_tol).sum(-1).to(at::kLong));
-  Tensor S_pinv = at::where(above_tol, at::reciprocal(singular_values), at::zeros_like(singular_values));
+  Tensor above_tol = singular_values.gt(tol.unsqueeze(-1));
+  rank.copy_((above_tol).sum(-1));
 
+  // Avoid dividing by zero by masking singular values that are not above the tolerance
+  Tensor S_safe = singular_values.mul(above_tol).add_(above_tol.logical_not());
   auto B_narrowed = B.narrow(-2, 0, m);
   Tensor UhB = at::matmul(U.mH(), B_narrowed);
-  Tensor Spinv_expanded = S_pinv.unsqueeze(-1).to(A.scalar_type());
-  Tensor SpinvUhB = at::mul(Spinv_expanded, UhB);
+  Tensor S_safe_expanded = S_safe.unsqueeze(-1).to(A.scalar_type());
+  Tensor SpinvUhB = UhB.div(S_safe_expanded);
+  // Zero out contributions from singular values below tolerance
+  SpinvUhB = at::where(above_tol.unsqueeze(-1), SpinvUhB, 0.0);
+
   auto X = at::matmul(Vh.mH(), SpinvUhB);
   if (m > n)
   {
