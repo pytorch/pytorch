@@ -9439,19 +9439,35 @@ class TestPad(TestCaseMPS):
         self.assertEqual(output_mps, input_mps)
 
 class TestLinalgMPS(TestCaseMPS):
-    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
+    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None):
         dtype = t.dtype
         numpy_dtype = dtype
         alpha = 1.2 if alpha is None else alpha
         beta = 0.8 if beta is None else beta
-        res1 = f(t, m, v, alpha=alpha, beta=beta)
+        if activation == "gelu":
+            res1 = f(t, m, v, alpha=alpha, beta=beta, use_gelu=True)
+        else:
+            res1 = f(t, m, v, alpha=alpha, beta=beta)
         res2 = torch.full_like(res1, math.nan)
         if transpose_out:
             res2 = res2.t().clone(memory_format=torch.contiguous_format).t()
-        f(t, m, v, alpha=alpha, beta=beta, out=res2)
+        if activation == "gelu":
+            f(t, m, v, alpha=alpha, beta=beta, out=res2, use_gelu=True)
+        else:
+            f(t, m, v, alpha=alpha, beta=beta, out=res2)
         res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
         if beta != 0:
             res3 += (torch.mul(t, beta)).to(numpy_dtype).cpu().numpy()
+        if activation == "relu":
+            res3 = res3 * (res3 > 0)
+        elif activation == "gelu":
+            res3_t = torch.from_numpy(res3).to(dtype)
+            approximate = "tanh" if t.is_cuda else "none"
+            res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
+            res3 = res3_t.to(numpy_dtype).cpu().numpy()
+        else:
+            if activation is not None:
+                raise AssertionError(f"unsupported activation {activation}")
         res3 = torch.from_numpy(res3).to(dtype)
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
@@ -9479,6 +9495,51 @@ class TestLinalgMPS(TestCaseMPS):
         m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
         m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
         self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
+
+    def _test_addmm_impl(self, func, activation, device, dtype):
+        M = torch.randn(10, 25, device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
+
+        # vector (or with 1-len dims in shape[:-1])/matrix-shaped bias
+        # and beta=1 result in epilogue fusion in CUDA
+        V = torch.randn(25, device=device).to(dtype)
+        for c in (V, V.unsqueeze(0), M):
+            self._test_addmm_addmv(func, c, m1, m2, beta=1, activation=activation)
+
+        # Test 0-strided
+        M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
+        m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
+
+        # Test beta=0, M=nan
+        M = torch.full((10, 25), math.nan, device=device).to(dtype)
+        m1 = torch.randn(10, 50, device=device).to(dtype)
+        m2 = torch.randn(50, 25, device=device).to(dtype)
+        self._test_addmm_addmv(func, M, m1, m2, beta=0, activation=activation)
+
+        # Test transpose
+        for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
+            def maybe_transpose(cond, m):
+                if not cond:
+                    return m
+                return m.t().clone(memory_format=torch.contiguous_format).t()
+
+            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
+            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
+            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
+
+            for c, beta in itertools.product((M, V, V.unsqueeze(0)), (0, 1)):
+                # beta=1 to test epilogue fusions with either vector or matrix input
+                self._test_addmm_addmv(func, c, m1, m2, beta=beta, transpose_out=t4, activation=activation)
+
+    def test_addmm_gelu(self, device="mps", dtype=torch.float32):
+        self._test_addmm_impl(torch._addmm_activation, "gelu", device, dtype)
+
+    def test_addmm_relu(self, device="mps", dtype=torch.float32):
+        self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
     def _test_addr(self, f, t, m, v, alpha=None, beta=None):
         dtype = t.dtype

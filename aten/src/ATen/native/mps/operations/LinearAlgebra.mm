@@ -1,5 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 
+#include <ATen/TensorMeta.h>
+#include <ATen/core/TensorBody.h>
+#include <ATen/ops/gelu.h>
+#include <ATen/ops/relu.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BatchLinearAlgebra.h>
@@ -17,6 +21,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
@@ -946,6 +951,22 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   return output;
 }
 
+static Tensor& _addmm_activation_out_mps_impl(const Tensor& self,
+                                              const Tensor& mat1,
+                                              const Tensor& mat2,
+                                              const Scalar& beta,
+                                              const Scalar& alpha,
+                                              bool use_gelu,
+                                              Tensor& result) {
+  addmm_out_mps_impl(self, mat1, mat2, beta, alpha, result);
+  if (use_gelu) {
+    at::gelu_(const_cast<Tensor&>(result));
+  } else {
+    at::relu_(const_cast<Tensor&>(result));
+  }
+  return result;
+}
+
 static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
     using namespace mps;
@@ -1692,6 +1713,17 @@ TORCH_IMPL_FUNC(addmm_out_mps)
  const Scalar& alpha,
  const Tensor& result) {
   mps::addmm_out_mps_impl(self, mat1, mat2, beta, alpha, const_cast<Tensor&>(result));
+}
+
+TORCH_IMPL_FUNC(addmm_activation_out_mps)
+(const Tensor& self,
+ const Tensor& mat1,
+ const Tensor& mat2,
+ const Scalar& beta,
+ const Scalar& alpha,
+ bool use_gelu,
+ const Tensor& result) {
+  mps::_addmm_activation_out_mps_impl(self, mat1, mat2, beta, alpha, use_gelu, const_cast<Tensor&>(result));
 }
 
 TORCH_IMPL_FUNC(bmm_out_mps)(const Tensor& batch1, const Tensor& batch2, const Tensor& result) {
