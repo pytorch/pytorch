@@ -871,3 +871,36 @@ def view_as_complex_single_dim_strategy(op, args_schema, kwargs_schema):
 
 
 register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)
+
+
+@register_single_dim_strategy(
+    [aten.as_strided.default, aten.as_strided_copy.default, aten.as_strided_scatter.default],
+)
+def as_strided_single_dim_strategy(op, args_schema, kwargs_schema):
+    return []
+
+
+@register_single_dim_strategy(
+    [aten.unfold.default, aten.unfold_copy.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def unfold_single_dim_strategy(op, args_schema, kwargs_schema):
+    self_meta = args_schema[0]
+    if not isinstance(self_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(self_meta)}")
+    ndim = len(self_meta.shape)
+    dim = normalize_dim(cast(int, args_schema[1]), ndim)
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d != dim:
+            strategies.append([_ShardingPlaceholder(d), _ShardingPlaceholder(d)])
+    return strategies
+
+
+register_op_strategy_map(aten.squeeze_copy.default, torch.squeeze)
+register_op_strategy_map(
+    aten.squeeze_copy.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
+    aten.squeeze_copy.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
