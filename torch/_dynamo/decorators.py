@@ -13,6 +13,7 @@ from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
+from torch._opaque_base import OpaqueBase
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1031,9 +1032,16 @@ def _apply_func_to_inner_tensors_of_same_dim(
     attrs, _ctx = t.__tensor_flatten__()
     assert isinstance(t, torch.Tensor)
     for attr in attrs:
-        inner = getattr(t, attr)
-        if inner.dim() == t.dim():
-            func(inner, *args, **kwargs)
+        match getattr(t, attr):
+            case torch.Tensor() as inner:
+                if inner.dim() == t.dim():
+                    func(inner, *args, **kwargs)
+            case OpaqueBase():
+                pass
+            case unexpected:
+                raise AssertionError(
+                    f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1057,6 +1065,8 @@ def mark_unbacked(
     strict: bool = False,
     specialize_on: list[Any] | None = None,
     shape_id: str | None = None,
+    min: int | None = None,
+    max: int | None = None,
 ) -> None:
     """
     Mark a tensor as having an unbacked dimension. This changes the semantics of operations:
@@ -1081,6 +1091,10 @@ def mark_unbacked(
             All unbacked dimensions with the same shape_id will share the same unbacked symbol. This is useful when multiple tensors
             are known to have the same batch size at runtime. A runtime assertion is added
             to ensure this property at runtime.
+        min (Optional[int], default=None): Minimum value constraint for this dimension.
+            If provided, a runtime check will be added to ensure the dimension is >= min.
+        max (Optional[int], default=None): Maximum value constraint for this dimension.
+            If provided, a runtime check will be added to ensure the dimension is <= max.
     """
     if torch.distributed.is_available() and isinstance(
         t, torch.distributed.tensor.DTensor
@@ -1114,6 +1128,12 @@ def mark_unbacked(
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override
 
+        if min is not None or max is not None:
+            if not hasattr(t, "_dynamo_unbacked_bounds"):
+                # pyrefly: ignore [implicit-any]
+                t._dynamo_unbacked_bounds = {}
+            t._dynamo_unbacked_bounds[index] = (min, max)
+
         if shape_id is not None:
             if not hasattr(t, "_dynamo_shape_ids"):
                 # pyrefly: ignore [implicit-any]
@@ -1131,7 +1151,7 @@ def mark_unbacked(
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_unbacked(t, i, shape_id=shape_id)
+        mark_unbacked(t, i, shape_id=shape_id, min=min, max=max)
 
 
 @forbid_in_graph

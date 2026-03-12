@@ -25,7 +25,7 @@ import tempfile
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -1788,7 +1788,7 @@ class BenchmarkRunner:
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
-        self.optimizer: Optional[torch.optim.Optimizer] = None
+        self.optimizer: torch.optim.Optimizer | None = None
         self._args = None
 
     def setup_amp(self, current_device=None):
@@ -3640,7 +3640,6 @@ def parse_args(args=None):
             "int8dynamic",
             "int8weightonly",
             "int4weightonly",
-            "autoquant",
             "noquant",
         ],
         default=None,
@@ -4617,7 +4616,7 @@ def run(runner, args, original_dir=None):
                             # Use duck_shape_id="batch" so all batch dimensions
                             # share the same unbacked symbol
                             torch._dynamo.decorators.mark_unbacked(
-                                t, i, shape_id="batch", hint_override=batch_size
+                                t, i, shape_id="batch", hint_override=batch_size, min=1
                             )
                         else:
                             torch._dynamo.maybe_mark_dynamic(t, i)

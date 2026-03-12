@@ -1456,6 +1456,16 @@
       ]
     }
   ],
+  "GB4695": [
+    {
+      "Gb_type": "torch.jit.script/freeze modules unsupported",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support tracing into torch.jit.script or torch.jit.freeze modules because they execute in the TorchScript runtime, not Python. Replace the ScriptModule submodule with the original eager nn.Module.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0124": [
     {
       "Gb_type": "Unsupported Tensor.item() call with capture_scalar_outputs=False",

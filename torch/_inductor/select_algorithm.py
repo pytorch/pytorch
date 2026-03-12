@@ -3102,8 +3102,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         inputs_key = create_inputs_key(input_nodes)
 
-        if config.autotune_in_subproc:
-            # Initialize the suprocess pool so it will warmup early.
+        has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
+        if config.autotune_in_subproc or has_cutlass:
+            # Warmup the subprocess pool early so it's ready for benchmarking
             torch._inductor.autotune_process.get_tuning_process_pool()
 
         precompile_fn = self.make_precompile_fn(
@@ -3270,9 +3271,26 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # if we got any timings at all, pick the best of those
         best_choice = min(timings, key=timings.__getitem__)
+        best_time = timings[best_choice]
+
+        # All benchmarks failed; fall back to ATen if available (#171094)
+        if math.isinf(best_time):
+            extern_choices = [c for c in choices if isinstance(c, ExternKernelCaller)]
+            if extern_choices:
+                best_choice = extern_choices[0]
+                log.warning(
+                    "All autotuning benchmarks failed (timing=inf). Falling back to ExternKernelCaller: %s",
+                    getattr(best_choice, "name", "<unknown>"),
+                )
+            else:
+                log.warning(
+                    "All autotuning benchmarks failed (timing=inf) and no ExternKernelCaller fallback available. "
+                    "Selected kernel %s may cause runtime errors.",
+                    getattr(best_choice, "name", "<unknown>"),
+                )
 
         # Apply min_speedup_threshold: only pick non-fallback if it beats fallback by threshold
-        if min_speedup_threshold > 1.0:
+        elif min_speedup_threshold > 1.0:
 
             def is_fallback(c: ChoiceCaller) -> bool:
                 return isinstance(c, ExternKernelCaller) and getattr(
@@ -3282,7 +3300,6 @@ class AlgorithmSelectorCache(PersistentCache):
             fallback_choices = [c for c in timings if is_fallback(c)]
             if fallback_choices and not is_fallback(best_choice):
                 fallback_time = min(timings[c] for c in fallback_choices)
-                best_time = timings[best_choice]
                 speedup = fallback_time / best_time if best_time > 0 else 0
 
                 if speedup < min_speedup_threshold:
@@ -3885,12 +3902,21 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 if needed_size > current_size:
                     # Create a new base tensor with sufficient storage
-                    new_base = torch.randn(
-                        needed_size,
-                        dtype=base.dtype,
-                        device=base.device,
-                        requires_grad=base.requires_grad,
-                    )
+                    if base.dtype == torch.float4_e2m1fn_x2:
+                        new_base = torch.randint(
+                            0,
+                            256,
+                            (needed_size,),
+                            dtype=torch.uint8,
+                            device=base.device,
+                        ).view(torch.float4_e2m1fn_x2)
+                    else:
+                        new_base = torch.randn(
+                            needed_size,
+                            dtype=base.dtype,
+                            device=base.device,
+                            requires_grad=base.requires_grad,
+                        )
                     base = new_base.as_strided(
                         base.size(), base.stride(), base.storage_offset()
                     )
@@ -3912,12 +3938,21 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if needed_out_size > current_out_size:
             # Create a new base tensor with sufficient storage
-            new_out_base = torch.randn(
-                needed_out_size,
-                dtype=out_base.dtype,
-                device=out_base.device,
-                requires_grad=out_base.requires_grad,
-            )
+            if out_base.dtype == torch.float4_e2m1fn_x2:
+                new_out_base = torch.randint(
+                    0,
+                    256,
+                    (needed_out_size,),
+                    dtype=torch.uint8,
+                    device=out_base.device,
+                ).view(torch.float4_e2m1fn_x2)
+            else:
+                new_out_base = torch.randn(
+                    needed_out_size,
+                    dtype=out_base.dtype,
+                    device=out_base.device,
+                    requires_grad=out_base.requires_grad,
+                )
             out_base = new_out_base.as_strided(
                 out_base.size(), out_base.stride(), out_base.storage_offset()
             )
@@ -4093,6 +4128,23 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Benchmark a list of choices and return timing dict.
         """
+        from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
+
+        # Reorder only when CUTLASS is present: benchmark ATen/cuBLAS before
+        # CUTLASS to collect valid fallback timings before any CUTLASS kernel
+        # can corrupt the CUDA context (#171094)
+        if any(isinstance(c, CUTLASSTemplateCaller) for c in choices):
+
+            def choice_priority(c: ChoiceCaller) -> int:
+                if isinstance(c, ExternKernelCaller):
+                    return 0  # ATen/cuBLAS first
+                elif isinstance(c, CUTLASSTemplateCaller):
+                    return 2  # CUTLASS last
+                else:
+                    return 1  # Triton and others in the middle
+
+            choices = sorted(choices, key=choice_priority)
+
         if is_collective:
             import torch.distributed as dist
 
@@ -4117,8 +4169,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 else:
                     timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
-                from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
-
                 if not isinstance(choice, CUTLASSTemplateCaller):
                     log.exception(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
@@ -4128,8 +4178,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cutlass.kernel import CUTLASSTemplateCaller
-
                 msg = str(e)
                 if "invalid argument" in msg:
                     msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
@@ -4179,6 +4227,23 @@ class AlgorithmSelectorCache(PersistentCache):
                 timings.update({c: float("inf") for c in choices if c not in timings})
                 break
 
+            # Skip remaining CUTLASS choices after first failure (#171094)
+            if not math.isfinite(timing) and isinstance(choice, CUTLASSTemplateCaller):
+                has_valid_fallback = any(
+                    math.isfinite(t) and not isinstance(c, CUTLASSTemplateCaller)
+                    for c, t in timings.items()
+                )
+                if has_valid_fallback:
+                    log.warning(
+                        "CUTLASS choice %s failed during benchmarking. "
+                        "Skipping remaining CUTLASS choices to avoid CUDA context corruption.",
+                        getattr(choice, "name", "<unknown>"),
+                    )
+                    for c in choices:
+                        if c not in timings and isinstance(c, CUTLASSTemplateCaller):
+                            timings[c] = float("inf")
+                    break
+
         return timings
 
     @classmethod
@@ -4210,16 +4275,23 @@ class AlgorithmSelectorCache(PersistentCache):
         hint_override: int | None = None,
     ):
         from . import autotune_process
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
 
-        # only benchmark triton kernel in sub process for now.
-        # ATen/Extern kernel are still benchmarked in the current process.
+        # ATen/Extern kernels are safe to benchmark in the current process.
         extern = [c for c in choices if cls._is_extern(c)]
-        triton = [c for c in choices if not cls._is_extern(c)]
+        non_cutlass = [
+            c
+            for c in choices
+            if not cls._is_extern(c) and not isinstance(c, CUTLASSTemplateCaller)
+        ]
+        cutlass = [c for c in choices if isinstance(c, CUTLASSTemplateCaller)]
 
         timings = cls.benchmark_in_current_process(
             extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
         )
-        timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
+        # Order Triton before CUTLASS so valid Triton timings are collected
+        # before any CUTLASS kernel can crash the subprocess (#171094)
+        timings.update(autotune_process.benchmark_in_sub_process(non_cutlass + cutlass))  # type: ignore[arg-type]
         return timings
 
     @classmethod
@@ -4232,11 +4304,15 @@ class AlgorithmSelectorCache(PersistentCache):
         hint_override: int | None = None,
         is_collective=False,
     ):
+        from .codegen.cutlass.kernel import CUTLASSTemplateCaller
+
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
+        has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
+
         # Collective ops must use current process
-        if is_collective or not config.autotune_in_subproc:
+        if is_collective:
             return functools.partial(
                 cls.benchmark_in_current_process,
                 input_nodes=input_nodes,
@@ -4245,9 +4321,19 @@ class AlgorithmSelectorCache(PersistentCache):
                 hint_override=hint_override,
                 is_collective=is_collective,
             )
-        else:
+        # CUTLASS kernels can cause sticky CUDA errors that permanently corrupt
+        # the CUDA context, so always benchmark them in a subprocess (#171094)
+        elif config.autotune_in_subproc or has_cutlass:
             return functools.partial(
                 cls.benchmark_in_sub_process,
+                input_nodes=input_nodes,
+                layout=layout,
+                input_gen_fns=input_gen_fns,
+                hint_override=hint_override,
+            )
+        else:
+            return functools.partial(
+                cls.benchmark_in_current_process,
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
@@ -4311,6 +4397,10 @@ class AlgorithmSelectorCache(PersistentCache):
         # skip prescreening if the number of candidates is too small
         if len(candidates) < 10:
             return []
+
+        # Include ATen in prescreening as fallback (#171094)
+        extern_choices = [c for c in choices if isinstance(c, ExternKernelCaller)]
+        candidates = extern_choices + candidates
 
         return candidates  # type: ignore[return-value]
 

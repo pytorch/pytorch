@@ -247,45 +247,6 @@ def torch_dtype_to_jax(dtype: torch.dtype) -> str:
     return f"jnp.{dtype_name}"
 
 
-def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int) -> Any:
-    """
-    Helper for partial reductions in Pallas kernels.
-
-    Reduces over contiguous axes whose product matches *red_numel* in the
-    original (un-tiled) tensor, returning the result with keepdims-style
-    shape for proper in-kernel broadcasting.
-
-    When running inside a tiled pallas_call the actual tile shape may differ
-    from ``(pw_numel, red_numel)``, so we reduce directly over the discovered
-    axes instead of reshaping to exact sizes.
-
-    Args:
-        reduce_fn: The reduction function to apply (e.g., jnp.sum, jnp.max)
-        v: The input array to reduce
-        pw_numel: The number of pointwise elements (used for axis detection)
-        red_numel: The number of reduction elements (used for axis detection)
-
-    Returns:
-        Reduced array with keepdims-style shape
-    """
-    shape = tuple(v.shape)
-    # Find contiguous axes whose product = red_numel (search from right)
-    red_axes = None
-    for i in range(len(shape) - 1, -1, -1):
-        prod = 1
-        for j in range(i, -1, -1):
-            prod *= shape[j]
-            if prod == red_numel:
-                red_axes = list(range(j, i + 1))
-                break
-        if red_axes is not None:
-            break
-    if red_axes is None:
-        red_axes = [len(shape) - 1]
-    result = reduce_fn(v, axis=tuple(red_axes), keepdims=True)
-    return result
-
-
 def pallas_gpu_pad_inputs(inputs: list[Any], alignment: int = 128) -> list[Any]:
     """Flatten and pad each input JAX array to a multiple of alignment."""
     import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
@@ -358,12 +319,29 @@ _TPU_ALIGN_LAST = 128
 _TPU_ALIGN_SECOND_LAST = 8
 
 
-def _pallas_tile_size(dim: int, alignment: int, max_tile: int = 1024) -> int:
+def _pallas_tile_size(
+    dim: int, alignment: int, max_tile: int = 1024, is_tpu: bool = False
+) -> int:
     """Pick the largest aligned tile size <= max_tile for *dim*.
 
     If *dim* is already <= alignment the full dimension is used (no tiling
     on this axis).
     """
+    if dim == 0:
+        # Tile size >= 1 avoids division by zero in JAX's _pad_to_block_dimension
+        return alignment if is_tpu else 1
+
+    if is_tpu:
+        # On TPU, Mosaic requires block dimensions to perfectly align to hardware
+        # registers (128 for inner, 8 for outer). We MUST pad the block spec up to
+        # the next alignment boundary (Mosaic handles the OOB masking).
+        if dim <= alignment:
+            return alignment
+        t = min(max_tile, dim)
+        # Use ceiling division to ensure the tile covers the dimension or aligns upward
+        t = ((t + alignment - 1) // alignment) * alignment
+        return t
+
     if dim <= alignment:
         return dim
     t = min(max_tile, dim)
@@ -376,6 +354,7 @@ def pallas_compute_tiling(
     transpose: bool = False,
     skip_last_n: int = 0,
     exact_only: bool = False,
+    is_tpu: bool = False,
 ) -> tuple[tuple[int, ...], tuple[int, ...], dict[int, int]]:
     """Compute tile shape, grid and axis→grid-dim mapping for CPU/TPU.
 
@@ -419,36 +398,53 @@ def pallas_compute_tiling(
     def _align(ax: int) -> int:
         return _TPU_ALIGN_LAST if ax == nd - 1 else _TPU_ALIGN_SECOND_LAST
 
-    def _can_tile_ax(dim: int, t: int) -> bool:
+    def _can_tile_ax(ax: int, dim: int, t: int) -> bool:
         """Check if tiling dim to t is valid."""
         if t >= dim:
+            # For TPU padding, we allow tiles >= dimension for the aligned axes
+            if _align(ax) == _TPU_ALIGN_LAST or _align(ax) == _TPU_ALIGN_SECOND_LAST:
+                return True
             return False
         if exact_only and dim % t != 0:
+            if _align(ax) == _TPU_ALIGN_LAST or _align(ax) == _TPU_ALIGN_SECOND_LAST:
+                # TPU DMA `#tpu.element_window` natively masks out-of-bounds remainder tiles
+                return True
             return False
         return True
 
-    if transpose and tileable_nd >= 2:
-        # Square tile for both last-2 tileable dims
+    if transpose and tileable_nd >= 2 and not is_tpu:
+        # For non-TPU platforms (or when alignment isn't critical), square tiles
+        # simplify transposed mapping. However, TPU Mosaic requires specific alignments
+        # and benefits from large, independent 1D tiles to maximize pipeline throughput
+        # (e.g. 1024x128 for a 3215x23 array, leveraging OOB DMA masking).
+        # Therefore we skip the square heuristic for TPU and fall through to 1D tiling.
         ax_last = tileable_nd - 1
         ax_second = tileable_nd - 2
         min_dim = min(ref_shape[ax_last], ref_shape[ax_second])
-        t = _pallas_tile_size(min_dim, max(_align(ax_last), _align(ax_second)))
+        t = _pallas_tile_size(
+            min_dim, max(_align(ax_last), _align(ax_second)), is_tpu=is_tpu
+        )
 
-        if _can_tile_ax(ref_shape[ax_second], t):
+        if _can_tile_ax(ax_second, ref_shape[ax_second], t):
             tile[ax_second] = t
             axis_to_grid[ax_second] = len(grid_parts)
-            grid_parts.append(ref_shape[ax_second] // t)
+            grid_parts.append((ref_shape[ax_second] + t - 1) // t)
 
-        if _can_tile_ax(ref_shape[ax_last], t):
+        if _can_tile_ax(ax_last, ref_shape[ax_last], t):
             tile[ax_last] = t
             axis_to_grid[ax_last] = len(grid_parts)
-            grid_parts.append(ref_shape[ax_last] // t)
-    else:
+            grid_parts.append((ref_shape[ax_last] + t - 1) // t)
+
+        grid = tuple(grid_parts) if grid_parts else (1,)
+        return tuple(tile), grid, axis_to_grid
+
+    # Compute independent 1D tiling bounds if square heuristic was skipped/violated
+    if tileable_nd > 0:
         # Second-to-last tileable dim (added first so it becomes grid dim 0)
         if tileable_nd >= 2:
             ax = tileable_nd - 2
-            t = _pallas_tile_size(ref_shape[ax], _align(ax))
-            if _can_tile_ax(ref_shape[ax], t):
+            t = _pallas_tile_size(ref_shape[ax], _align(ax), is_tpu=is_tpu)
+            if _can_tile_ax(ax, ref_shape[ax], t):
                 tile[ax] = t
                 axis_to_grid[ax] = len(grid_parts)
                 grid_parts.append((ref_shape[ax] + t - 1) // t)
@@ -456,8 +452,8 @@ def pallas_compute_tiling(
         # Last tileable dim
         if tileable_nd >= 1:
             ax = tileable_nd - 1
-            t = _pallas_tile_size(ref_shape[ax], _align(ax))
-            if _can_tile_ax(ref_shape[ax], t):
+            t = _pallas_tile_size(ref_shape[ax], _align(ax), is_tpu=is_tpu)
+            if _can_tile_ax(ax, ref_shape[ax], t):
                 tile[ax] = t
                 axis_to_grid[ax] = len(grid_parts)
                 grid_parts.append((ref_shape[ax] + t - 1) // t)

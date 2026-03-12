@@ -333,17 +333,43 @@ class TestBackendOverrideIntegration(TestCase):
         result = self._run_with_override(device, "0:aot_eager;>=2:inductor")
         self.assertEqual(result, ["aot_eager", "inductor", "inductor"])
 
-    def test_inductor_with_mode(self, device):
-        result = self._run_with_override(device, ">=0:inductor:reduce-overhead")
-        self.assertEqual(
-            result,
-            [
-                "inductor:reduce-overhead",
-                "inductor:reduce-overhead",
-                "inductor:reduce-overhead",
-                "inductor:reduce-overhead",
-            ],
+    def test_override_with_backward(self, device):
+        """Verify that backend override works when backward compilation occurs."""
+        from torch._dynamo.graph_id_filter import (
+            _create_backend_router,
+            get_backend_override_for_compile_id,
         )
+
+        torch._dynamo.reset()
+        _create_backend_router.cache_clear()
+        overrides_applied = []
+        original_get_override = get_backend_override_for_compile_id
+
+        def tracking_get_override(compile_id, config_str):
+            result = original_get_override(compile_id, config_str)
+            if result is not None:
+                overrides_applied.append(compile_id.frame_id)
+            return result
+
+        def fn(x):
+            return (x * 2 + 1).sum()
+
+        with (
+            patch.object(
+                torch._dynamo.config, "debug_backend_override", ">=0:aot_eager"
+            ),
+            patch(
+                "torch._dynamo.output_graph.get_backend_override_for_compile_id",
+                tracking_get_override,
+            ),
+        ):
+            compiled_fn = torch.compile(fn, backend="eager")
+            x = torch.randn(10, device=device, requires_grad=True)
+            result = compiled_fn(x)
+            result.backward()
+
+        self.assertEqual(overrides_applied, [0])
+        self.assertIsNotNone(x.grad)
 
 
 instantiate_device_type_tests(
@@ -412,6 +438,36 @@ class TestInductorConfigOverrideIntegration(TestCase):
         self.assertEqual(config["str_opt"], "hello")
         self.assertIsNone(config["none_opt"])
 
+    def test_config_router_aggregation(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter("0:a=1;>=0:b=2")
+        # Graph 0 matches both rules, configs are merged
+        self.assertEqual(router.get_value_for_graph(0), {"a": 1, "b": 2})
+        # Graph 1 matches only the second rule
+        self.assertEqual(router.get_value_for_graph(1), {"b": 2})
+
+    def test_config_router_conflict_raises(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        with self.assertRaisesRegex(ValueError, "Conflicting config override"):
+            GraphConfigRouter("0:a=1;>=0:a=2")
+
+    def test_config_router_same_value_no_conflict(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter("0:a=1;>=0:a=1")
+        self.assertEqual(router.get_value_for_graph(0), {"a": 1})
+        self.assertEqual(router.get_value_for_graph(1), {"a": 1})
+
+    def test_config_router_aggregation_multiple_rules(self, device):
+        from torch._dynamo.graph_id_filter import GraphConfigRouter
+
+        router = GraphConfigRouter("0:a=1;1:b=2;>=0:c=3")
+        self.assertEqual(router.get_value_for_graph(0), {"a": 1, "c": 3})
+        self.assertEqual(router.get_value_for_graph(1), {"b": 2, "c": 3})
+        self.assertEqual(router.get_value_for_graph(2), {"c": 3})
+
     def test_get_inductor_config_override_empty(self, device):
         from torch._dynamo.graph_id_filter import (
             get_inductor_config_override_for_compile_id,
@@ -425,8 +481,8 @@ class TestInductorConfigOverrideIntegration(TestCase):
         Test combining backend override with config override.
 
         Scenario: Default backend is eager, but override all graphs to use
-        inductor:reduce-overhead (cudagraphs enabled), and additionally
-        override graph 1 to use cudagraph_skip_dynamic_graphs=False.
+        inductor with cudagraphs enabled, and additionally override graph 1
+        to use cudagraph_skip_dynamic_graphs=False.
         """
         from torch._dynamo.graph_id_filter import (
             _create_backend_router,
@@ -456,35 +512,21 @@ class TestInductorConfigOverrideIntegration(TestCase):
             configs_applied.append(config_patches)
             return original_wrap(compiler_fn, config_patches)
 
-        # Build backend tracking map from config
-        backend_override = ">=0:inductor:reduce-overhead"
-        backend_str_map: dict[int, str] = {}
-        from torch._dynamo.graph_id_filter import GraphIdFilter
-
-        for rule_str in backend_override.split(";"):
-            if ":" not in rule_str:
-                continue
-            colon_idx = rule_str.find(":")
-            filter_str = rule_str[:colon_idx].strip()
-            backend_str = rule_str[colon_idx + 1 :].strip()
-            gf = GraphIdFilter(filter_str)
-            for gid in range(10):
-                if gid in gf and gid not in backend_str_map:
-                    backend_str_map[gid] = backend_str
-
+        backend_override = ">=0:inductor"
         from torch._dynamo.graph_id_filter import get_backend_override_for_compile_id
 
         original_get_backend = get_backend_override_for_compile_id
 
         def tracking_get_backend(compile_id, config_str):
             result = original_get_backend(compile_id, config_str)
-            if result is not None and compile_id.frame_id in backend_str_map:
-                backends_used.append(backend_str_map[compile_id.frame_id])
+            if result is not None:
+                backends_used.append("inductor")
             return result
 
         # Use both overrides:
-        # - Backend: all graphs use inductor:reduce-overhead
-        # - Config: graph 1 uses cudagraph_skip_dynamic_graphs=False
+        # - Backend: all graphs use inductor
+        # - Config: all graphs enable cudagraphs, graph 1 also disables
+        #   cudagraph_skip_dynamic_graphs
         with (
             patch.object(
                 torch._dynamo.config,
@@ -494,7 +536,7 @@ class TestInductorConfigOverrideIntegration(TestCase):
             patch.object(
                 torch._dynamo.config,
                 "debug_inductor_config_override",
-                "1:triton.cudagraph_skip_dynamic_graphs=False",
+                "1:triton.cudagraph_skip_dynamic_graphs=False;>=0:triton.cudagraphs=True",
             ),
             patch(
                 "torch._dynamo.output_graph.get_backend_override_for_compile_id",
@@ -506,19 +548,19 @@ class TestInductorConfigOverrideIntegration(TestCase):
             compiled_fn(torch.randn(10, device=device))
 
         self.assertEqual(len(backends_used), 3)
-        self.assertEqual(
-            backends_used,
-            [
-                "inductor:reduce-overhead",
-                "inductor:reduce-overhead",
-                "inductor:reduce-overhead",
-            ],
-        )
+        self.assertEqual(backends_used, ["inductor", "inductor", "inductor"])
 
-        self.assertEqual(len(configs_applied), 1)
+        # All matching rules are aggregated. Graph 1 matches both rules.
+        self.assertEqual(len(configs_applied), 3)
+        self.assertEqual(configs_applied[0], {"triton.cudagraphs": True})
         self.assertEqual(
-            configs_applied[0], {"triton.cudagraph_skip_dynamic_graphs": False}
+            configs_applied[1],
+            {
+                "triton.cudagraph_skip_dynamic_graphs": False,
+                "triton.cudagraphs": True,
+            },
         )
+        self.assertEqual(configs_applied[2], {"triton.cudagraphs": True})
 
     def test_multiple_config_overrides_with_backend(self, device):
         """
@@ -612,6 +654,108 @@ class TestInductorConfigOverrideIntegration(TestCase):
         self.assertEqual(len(configs_applied), 2)
         self.assertIn({"triton.cudagraphs": False}, configs_applied)
         self.assertIn({"triton.cudagraph_skip_dynamic_graphs": False}, configs_applied)
+
+    def test_config_override_backward_propagation(self, device):
+        """
+        Verify that inductor config overrides are active at inductor compile
+        time for both forward and backward, across multiple graph breaks.
+        """
+        import torch._functorch.config
+        from torch._dynamo.graph_id_filter import _create_config_router
+        from torch._inductor import (
+            compile_fx as compile_fx_mod,
+            config as inductor_config,
+        )
+
+        torch._dynamo.reset()
+        _create_config_router.cache_clear()
+
+        TRACKED_CONFIGS = [
+            "triton.cudagraphs",
+            "triton.dense_indexing",
+            "triton.cudagraph_skip_dynamic_graphs",
+        ]
+
+        def _read_config(key):
+            obj = inductor_config
+            for part in key.split("."):
+                obj = getattr(obj, part)
+            return obj
+
+        baseline = {k: _read_config(k) for k in TRACKED_CONFIGS}
+        configs_at_compile: dict[tuple[int, bool], dict] = {}
+
+        original_compile_fx = compile_fx_mod.compile_fx
+        original_inner_compile = compile_fx_mod.compile_fx_inner
+
+        def tracking_inner_compile(gm, example_inputs, **kwargs):
+            compile_id = torch._guards.CompileContext.current_compile_id()
+            is_backward = kwargs.get("is_backward", False)
+            snapshot = {k: _read_config(k) for k in TRACKED_CONFIGS}
+            configs_at_compile[(compile_id.frame_id, is_backward)] = snapshot
+            return original_inner_compile(gm, example_inputs, **kwargs)
+
+        def tracking_compile_fx(model_, example_inputs_, *args, **kwargs):
+            # Inject tracking inner_compile so compile_fx's config.patch
+            # wrapping covers it for both forward and backward.
+            if "inner_compile" not in kwargs:
+                kwargs["inner_compile"] = tracking_inner_compile
+            return original_compile_fx(model_, example_inputs_, *args, **kwargs)
+
+        def fn(x):
+            y = x * 2 + 1
+            torch._dynamo.graph_break()
+            z = y.sin()
+            torch._dynamo.graph_break()
+            return z.exp().sum()
+
+        # Overlapping rules (all three configs default to False):
+        config_override = (
+            ">=1:triton.cudagraphs=True;"
+            "0-1:triton.dense_indexing=True;"
+            "1:triton.cudagraph_skip_dynamic_graphs=True"
+        )
+        expected_overrides = {
+            0: {"triton.dense_indexing": True},
+            1: {
+                "triton.cudagraphs": True,
+                "triton.dense_indexing": True,
+                "triton.cudagraph_skip_dynamic_graphs": True,
+            },
+            2: {
+                "triton.cudagraphs": True,
+            },
+        }
+
+        with (
+            patch.object(
+                torch._dynamo.config,
+                "debug_inductor_config_override",
+                config_override,
+            ),
+            patch.object(compile_fx_mod, "compile_fx", tracking_compile_fx),
+            patch.object(torch._functorch.config, "enable_autograd_cache", False),
+        ):
+            compiled_fn = torch.compile(fn)
+            x = torch.randn(10, device=device, requires_grad=True)
+            result = compiled_fn(x)
+            result.backward()
+
+        # Verify each graph has fwd+bwd, correct overrides, no cross-graph
+        # leak, and identical configs for forward and backward.
+        for gid in range(3):
+            self.assertIn((gid, False), configs_at_compile, f"graph {gid} fwd missing")
+            self.assertIn((gid, True), configs_at_compile, f"graph {gid} bwd missing")
+            expected = {**baseline, **expected_overrides[gid]}
+            for is_bw in [False, True]:
+                phase = "backward" if is_bw else "forward"
+                self.assertEqual(
+                    configs_at_compile[(gid, is_bw)],
+                    expected,
+                    f"graph {gid} {phase}: config mismatch",
+                )
+
+        self.assertIsNotNone(x.grad)
 
 
 instantiate_device_type_tests(

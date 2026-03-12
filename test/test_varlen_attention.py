@@ -1,19 +1,35 @@
 # Owner(s): ["module: sdpa"]
 import unittest
 from collections import namedtuple
+from contextlib import contextmanager
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.attention.varlen import varlen_attn
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_CK_SDPA,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+from torch.nn.attention import (
+    activate_flash_attention_impl,
+    restore_flash_attention_impl,
 )
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.nn.attention.varlen import varlen_attn, varlen_attn_out
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import parametrize, run_tests, TEST_WITH_ROCM
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+@contextmanager
+def use_fa3():
+    try:
+        activate_flash_attention_impl("FA3")
+    except (ModuleNotFoundError, RuntimeError) as err:
+        raise unittest.SkipTest(
+            "FA3 backend not available (flash_attn_interface missing)"
+        ) from err
+    try:
+        yield
+    finally:
+        restore_flash_attention_impl()
 
 
 VarlenShape = namedtuple(
@@ -198,15 +214,8 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @parametrize(
-        "sdpa_backend",
-        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
-    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    def test_basic_functionality(self, device, dtype, sdpa_backend=None):
-        if TEST_WITH_ROCM:
-            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
-
+    def test_basic_functionality(self, device, dtype):
         torch.manual_seed(42)
 
         shape = VarlenShape(batch_size=2, max_seq_len=512, embed_dim=1024, num_heads=16)
@@ -233,6 +242,19 @@ class TestVarlenAttention(NNTestCase):
         self.assertEqual(output.device, torch.device(device))
         self.assertEqual(output.dtype, dtype)
 
+        # varlen_attn_out should produce the same result and write into the buffer
+        with torch.no_grad():
+            q, k, v = attention_block.get_varlen_qkv(x_packed)
+            expected = varlen_attn(
+                q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len
+            )
+            out_buf = torch.empty_like(expected)
+            actual = varlen_attn_out(
+                out_buf, q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len
+            )
+            self.assertEqual(actual.data_ptr(), out_buf.data_ptr())
+            self.assertEqual(out_buf, expected)
+
         varlen_grad_out = torch.ones_like(output)
 
         varlen_grad = torch.autograd.grad(
@@ -251,14 +273,8 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @parametrize(
-        "sdpa_backend",
-        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
-    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    def test_custom_op_compliance(self, device, dtype, sdpa_backend=None):
-        if TEST_WITH_ROCM:
-            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+    def test_custom_op_compliance(self, device, dtype):
         torch.manual_seed(42)
 
         shape = VarlenShape(batch_size=2, max_seq_len=512, embed_dim=1024, num_heads=16)
@@ -311,17 +327,29 @@ class TestVarlenAttention(NNTestCase):
             test_utils=["test_schema", "test_faketensor"],
         )
 
+        # opcheck for _varlen_attn_out (no backward)
+        out_buf = torch.empty_like(q)
+        torch.library.opcheck(
+            torch.ops.torch_attn._varlen_attn_out,
+            (
+                out_buf,
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                shape.max_seq_len,
+                shape.max_seq_len,
+                False,
+            ),
+            test_utils=["test_schema", "test_faketensor"],
+        )
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @parametrize(
-        "sdpa_backend",
-        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
-    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    def test_custom_op_registration(self, device, dtype, sdpa_backend=None):
-        if TEST_WITH_ROCM:
-            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+    def test_custom_op_registration(self, device, dtype):
         torch.manual_seed(42)
 
         shape = VarlenShape(batch_size=2, max_seq_len=512, embed_dim=1024, num_heads=16)
@@ -366,12 +394,23 @@ class TestVarlenAttention(NNTestCase):
         if not custom_ops_called:
             raise AssertionError("custom varlen attention ops should have been called")
 
+        # Also verify _varlen_attn_out dispatches correctly under compile
+        q, k, v = attention_block.get_varlen_qkv(x_packed.detach())
+
+        def run_varlen_out(q, k, v, cu_seq, max_len):
+            out_buf = torch.empty_like(q)
+            varlen_attn_out(out_buf, q, k, v, cu_seq, cu_seq, max_len, max_len)
+            return out_buf
+
+        compiled_out = torch.compile(run_varlen_out, backend="eager", fullgraph=True)
+        with OpLoggingMode() as out_mode:
+            compiled_out(q, k, v, cu_seq, shape.max_seq_len)
+
+        if not any("torch_attn._varlen_attn_out" in op for op in out_mode.called_ops):
+            raise AssertionError("custom _varlen_attn_out op should have been called")
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
-    )
-    @parametrize(
-        "sdpa_backend",
-        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("scale", [None, 0.1])
@@ -391,10 +430,7 @@ class TestVarlenAttention(NNTestCase):
             (1025, 1025),
         ],
     )
-    def test_varlen_vs_sdpa(self, device, dtype, scale, window_size, sdpa_backend=None):
-        if TEST_WITH_ROCM:
-            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
-
+    def test_varlen_vs_sdpa(self, device, dtype, scale, window_size):
         torch.manual_seed(42)
 
         shape = VarlenShape(
@@ -526,10 +562,6 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @parametrize(
-        "sdpa_backend",
-        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
-    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
         "window_size",
@@ -548,12 +580,7 @@ class TestVarlenAttention(NNTestCase):
         ],
     )
     @parametrize("num_perms", [1, 3, 5])
-    def test_batch_invariance(
-        self, device, dtype, window_size, num_perms, sdpa_backend=None
-    ):
-        if TEST_WITH_ROCM:
-            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
-
+    def test_batch_invariance(self, device, dtype, window_size, num_perms):
         torch.manual_seed(42)
 
         batch_size, max_seq_len = 4, 128
@@ -672,6 +699,281 @@ class TestVarlenAttention(NNTestCase):
                     perm_seq_grad = permuted_grad[perm_start:perm_end]
 
                     self.assertEqual(orig_seq_grad, perm_seq_grad)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support seqused_k")
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "actual_kv_lens",
+        [
+            [32, 64, 96, 48],
+            [1, 1, 1, 1],
+            [128, 128, 128, 128],
+            [1, 128, 1, 128],
+            [127, 63, 33, 17],
+        ],
+    )
+    def test_seqused_k_kv_cache(self, device, dtype, actual_kv_lens):
+        torch.manual_seed(42)
+
+        batch_size = 4
+        num_heads = 8
+        head_dim = 64
+        cache_size = 128
+
+        q_seqs = [
+            torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(batch_size)
+        ]
+        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+
+        k_seqs = [
+            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
+            for kv_len in actual_kv_lens
+        ]
+        v_seqs = [
+            torch.randn(kv_len, num_heads, head_dim, device=device, dtype=dtype)
+            for kv_len in actual_kv_lens
+        ]
+
+        k_cache_slots = []
+        v_cache_slots = []
+        for i in range(batch_size):
+            k_slot = torch.full(
+                (cache_size, num_heads, head_dim),
+                float("nan"),
+                device=device,
+                dtype=dtype,
+            )
+            v_slot = torch.full(
+                (cache_size, num_heads, head_dim),
+                float("nan"),
+                device=device,
+                dtype=dtype,
+            )
+            k_slot[: actual_kv_lens[i]] = k_seqs[i]
+            v_slot[: actual_kv_lens[i]] = v_seqs[i]
+            k_cache_slots.append(k_slot)
+            v_cache_slots.append(v_slot)
+
+        k_cache_packed = torch.cat(k_cache_slots, dim=0)
+        v_cache_packed = torch.cat(v_cache_slots, dim=0)
+        cu_seq_k_cache = torch.arange(
+            0,
+            (batch_size + 1) * cache_size,
+            cache_size,
+            device=device,
+            dtype=torch.int32,
+        )
+        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
+
+        with torch.no_grad():
+            output_cached = varlen_attn(
+                q_packed,
+                k_cache_packed,
+                v_cache_packed,
+                cu_seq_q,
+                cu_seq_k_cache,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+            )
+
+        k_real_packed, cu_seq_k_real, max_k_real = pack_sequences(k_seqs, device)
+        v_real_packed = torch.cat(v_seqs, dim=0)
+
+        with torch.no_grad():
+            output_reference = varlen_attn(
+                q_packed,
+                k_real_packed,
+                v_real_packed,
+                cu_seq_q,
+                cu_seq_k_real,
+                max_q,
+                max_k_real,
+            )
+
+        self.assertFalse(output_cached.isnan().any())
+        self.assertEqual(output_cached, output_reference)
+
+        # varlen_attn_out with seqused_k should match
+        with torch.no_grad():
+            out_buf = torch.empty_like(q_packed)
+            output_out = varlen_attn_out(
+                out_buf,
+                q_packed,
+                k_cache_packed,
+                v_cache_packed,
+                cu_seq_q,
+                cu_seq_k_cache,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+            )
+            self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
+            self.assertEqual(out_buf, output_cached)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support seqused_k")
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("page_size", [32, 64, 128, 256])
+    @parametrize("compile", [False, True])
+    @parametrize(
+        "actual_kv_lens",
+        [
+            [32, 64, 96, 48],
+            [1, 1, 1, 1],
+            [128, 128, 128, 128],
+            [1, 128, 1, 128],
+            [127, 63, 33, 17],
+        ],
+    )
+    def test_block_table_kv_cache(
+        self, device, dtype, page_size, compile, actual_kv_lens
+    ):
+        torch.manual_seed(42)
+
+        batch_size = 4
+        num_heads = 8
+        head_dim = 64
+        max_kv = max(actual_kv_lens)
+        max_pages_per_seq = (max_kv + page_size - 1) // page_size
+        cache_size = max_pages_per_seq * page_size
+        total_pages = batch_size * max_pages_per_seq
+
+        q_seqs = [
+            torch.randn(1, num_heads, head_dim, device=device, dtype=dtype)
+            for _ in range(batch_size)
+        ]
+        q_packed, cu_seq_q, max_q = pack_sequences(q_seqs, device)
+
+        k_pages = torch.randn(
+            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+        v_pages = torch.randn(
+            total_pages, page_size, num_heads, head_dim, device=device, dtype=dtype
+        )
+        block_table = torch.randperm(
+            total_pages, device=device, dtype=torch.int32
+        ).view(batch_size, max_pages_per_seq)
+        seqused_k = torch.tensor(actual_kv_lens, device=device, dtype=torch.int32)
+
+        idx = (
+            block_table.long()
+            .view(-1, 1, 1, 1)
+            .expand(-1, page_size, num_heads, head_dim)
+        )
+        k_gathered = k_pages.gather(0, idx).view(
+            batch_size, cache_size, num_heads, head_dim
+        )
+        v_gathered = v_pages.gather(0, idx).view(
+            batch_size, cache_size, num_heads, head_dim
+        )
+        k_seqs = [k_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
+        v_seqs = [v_gathered[i, : actual_kv_lens[i]] for i in range(batch_size)]
+
+        k_real_packed, cu_seq_k_real, max_k_real = pack_sequences(k_seqs, device)
+        v_real_packed = torch.cat(v_seqs, dim=0)
+
+        attn_fn = torch.compile(varlen_attn, fullgraph=True) if compile else varlen_attn
+
+        with torch.no_grad():
+            output_reference = varlen_attn(
+                q_packed,
+                k_real_packed,
+                v_real_packed,
+                cu_seq_q,
+                cu_seq_k_real,
+                max_q,
+                max_k_real,
+            )
+
+        cu_seq_k = torch.arange(
+            0,
+            (batch_size + 1) * cache_size,
+            cache_size,
+            device=device,
+            dtype=torch.int32,
+        )
+
+        # FA2 path: paged KV with block_table (page_size % 256 == 0)
+        if page_size % 256 == 0:
+            with torch.no_grad():
+                output_fa2 = attn_fn(
+                    q_packed,
+                    k_pages,
+                    v_pages,
+                    cu_seq_q,
+                    cu_seq_k,
+                    max_q,
+                    cache_size,
+                    seqused_k=seqused_k,
+                    block_table=block_table,
+                )
+
+            self.assertEqual(output_fa2, output_reference)
+
+        # FA3 path: paged KV with block_table
+        with use_fa3(), torch.no_grad():
+            output_fa3 = attn_fn(
+                q_packed,
+                k_pages,
+                v_pages,
+                cu_seq_q,
+                None,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+                block_table=block_table,
+            )
+
+        self.assertEqual(output_fa3, output_reference)
+
+        # varlen_attn_out with paged KV cache should match
+        with use_fa3(), torch.no_grad():
+            out_buf = torch.empty_like(q_packed)
+            output_out = varlen_attn_out(
+                out_buf,
+                q_packed,
+                k_pages,
+                v_pages,
+                cu_seq_q,
+                None,
+                max_q,
+                cache_size,
+                seqused_k=seqused_k,
+                block_table=block_table,
+            )
+            self.assertEqual(output_out.data_ptr(), out_buf.data_ptr())
+            self.assertEqual(out_buf, output_fa3)
+
+        # compile the lower level aten op, will cause graph break
+        if compile:
+            compiled_aten_op = torch.compile(
+                torch.ops.aten._flash_attention_forward_no_dropout_inplace
+            )
+            with use_fa3(), torch.no_grad():
+                out_buf = torch.empty_like(q_packed)
+                compiled_aten_op(
+                    out_buf,
+                    q_packed,
+                    k_pages,
+                    v_pages,
+                    cu_seq_q,
+                    None,
+                    max_q,
+                    cache_size,
+                    0.0,
+                    False,
+                    False,
+                    seqused_k=seqused_k,
+                    block_table=block_table,
+                )
+            self.assertEqual(out_buf, output_reference)
 
 
 device_types = ("cuda",)

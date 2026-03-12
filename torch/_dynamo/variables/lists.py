@@ -135,9 +135,8 @@ class BaseListVariable(VariableTracker):
             try:
                 return self.items[index]
             except IndexError:
-                raise_observed_exception(
-                    IndexError, tx, args=["list index out of range"]
-                )
+                error_message = VariableTracker.build(tx, "list index out of range")
+                raise_observed_exception(IndexError, tx, args=[error_message])
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         return list(self.items)
@@ -401,7 +400,10 @@ class BaseListVariable(VariableTracker):
                     op_str = cmp_name_to_op_str_mapping[name]
                     left_ty = left.python_type_name()
                     right_ty = right.python_type_name()
-                    msg = f"{op_str} not supported between instances of '{left_ty}' and '{right_ty}'"
+                    msg = VariableTracker.build(
+                        tx,
+                        f"{op_str} not supported between instances of '{left_ty}' and '{right_ty}'",
+                    )
                     raise_observed_exception(TypeError, tx, args=[msg])
 
             return SourcelessBuilder.create(tx, polyfills.list_cmp).call_function(
@@ -1276,9 +1278,10 @@ class DequeVariable(CommonListMethodsVariable):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             if maxlen is not None and len(self.items) == maxlen:
-                raise_observed_exception(
-                    IndexError, tx, args=["deque already at its maximum size"]
+                error_message = VariableTracker.build(
+                    tx, "deque already at its maximum size"
                 )
+                raise_observed_exception(IndexError, tx, args=[error_message])
             result = super().call_method(tx, name, args, kwargs)
         else:
             result = super().call_method(tx, name, args, kwargs)

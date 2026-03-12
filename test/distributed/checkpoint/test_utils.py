@@ -2,7 +2,6 @@
 
 import io
 import sys
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -259,7 +258,7 @@ class TestDistWrapper(DTensorTestBase):
 
         rank = dist.get_rank()
         # only local rank 1 supplies the payload
-        payload: Optional[int] = rank if rank == 1 else None
+        payload: int | None = rank if rank == 1 else None
 
         result = dist_wrapper.broadcast_object(payload)
         # every rank should receive the value from global rank 1
@@ -281,7 +280,7 @@ class TestDistWrapper(DTensorTestBase):
         rank = mesh_2d.get_rank()
 
         # only the local coordinator in each subgroup provides payload
-        payload: Optional[int] = rank if dist_wrapper.is_coordinator else None
+        payload: int | None = rank if dist_wrapper.is_coordinator else None
         got = dist_wrapper.broadcast_object(payload)
 
         # ensure we broadcast from the *global* coordinator rank,

@@ -7,7 +7,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from types import MethodType
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import pytest
 from _pytest.config import Config, filename_arg
@@ -170,7 +170,7 @@ class LogXMLReruns(LogXML):
         else:
             if report.longrepr is None:
                 raise AssertionError("Expected report.longrepr to not be None")
-            reprcrash: Optional[ReprFileLocation] = getattr(
+            reprcrash: ReprFileLocation | None = getattr(
                 report.longrepr, "reprcrash", None
             )
             if reprcrash is not None:
@@ -191,8 +191,8 @@ class LogXMLReruns(LogXML):
                 reason = f"{report.nodeid}: {_get_raw_skip_reason(report)}"
                 report.longrepr = (fspath, lineno, reason)
 
-    def node_reporter(self, report: Union[TestReport, str]) -> _NodeReporterReruns:
-        nodeid: Union[str, TestReport] = getattr(report, "nodeid", report)
+    def node_reporter(self, report: TestReport | str) -> _NodeReporterReruns:
+        nodeid: str | TestReport = getattr(report, "nodeid", report)
         # Local hack to handle xdist report order.
         workernode = getattr(report, "node", None)
 
@@ -315,7 +315,7 @@ class StepcurrentPlugin:
         self.cache: pytest.Cache = config.cache
         directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
         self.lastrun_location = f"{directory}/lastrun"
-        self.lastrun: Optional[str] = self.cache.get(self.lastrun_location, None)
+        self.lastrun: str | None = self.cache.get(self.lastrun_location, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
@@ -351,7 +351,7 @@ class StepcurrentPlugin:
                 del items[1:]
             config.hook.pytest_deselected(items=deselected)
 
-    def pytest_report_collectionfinish(self) -> Optional[str]:
+    def pytest_report_collectionfinish(self) -> str | None:
         if self.config.getoption("verbose") >= 0 and self.report_status:
             return f"stepcurrent: {self.report_status}"
         return None

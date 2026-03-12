@@ -4,7 +4,7 @@
 import itertools
 import math
 import unittest
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.nn.functional as F
@@ -612,7 +612,7 @@ class DistMatrixOpsTest(DTensorTestBase):
             batch_2_placements: list[Placement],
             beta: int,
             alpha: int,
-            batch_1_grad: Optional[torch.Tensor],
+            batch_1_grad: torch.Tensor | None,
         ) -> None:
             tensor_dt = distribute_tensor(tensor, device_mesh, tensor_placements)
             batch_1_dt = distribute_tensor(batch_1, device_mesh, batch_1_placements)

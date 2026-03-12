@@ -14,7 +14,7 @@ import torch
 
 log = logging.getLogger(__name__)
 
-__all__ = ["varlen_attn", "AuxRequest"]
+__all__ = ["varlen_attn", "varlen_attn_out", "AuxRequest"]
 
 
 def _normalize_window_size(window_size: list[int] | None) -> list[int]:
@@ -48,12 +48,14 @@ def _varlen_attn(
     key: torch.Tensor,
     value: torch.Tensor,
     cu_seq_q: torch.Tensor,
-    cu_seq_k: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
     max_q: int,
     max_k: int,
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -71,6 +73,13 @@ def _varlen_attn(
             raise RuntimeError(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
             )
+        if seqused_k is not None or block_table is not None:
+            # TODO: cuDNN supports per-sequence KV lengths via SEQ_LEN_KV + padding_mask,
+            # but _cudnn_attention_forward doesn't expose it yet.
+            raise RuntimeError(
+                "seqused_k/block_table is not yet supported with the cuDNN backend."
+            )
+
         result = torch.ops.aten._cudnn_attention_forward(
             query,
             key,
@@ -104,6 +113,8 @@ def _varlen_attn(
             scale=scale,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
+            seqused_k=seqused_k,
+            block_table=block_table,
         )
 
     rng_state_ = torch.zeros(
@@ -118,12 +129,14 @@ def _varlen_attn_fake(
     key: torch.Tensor,
     value: torch.Tensor,
     cu_seq_q: torch.Tensor,
-    cu_seq_k: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
     max_q: int,
     max_k: int,
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -140,18 +153,16 @@ def _varlen_attn_fake(
     # For varlen path: logsumexp shape is (num_heads, total_q)
     total_q = query.size(0)
     num_heads = query.size(1)
-    logsumexp = torch.empty(
-        (num_heads, total_q), dtype=torch.float, device=query.device
-    )
-
     if torch.version.hip:
-        preferred = torch._C._get_rocm_fa_preferred_backend()
-        if preferred == torch._C._ROCmFABackend.AOTriton:
-            # AOTriton ROCm path uses batched 3D
-            batch_size = cu_seq_q.size(0) - 1
-            logsumexp = torch.empty(
-                (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
-            )
+        # ROCm uses batched format: [batch_size, num_heads, max_q]
+        batch_size = cu_seq_q.size(0) - 1
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+        )
+    else:
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
 
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
 
@@ -163,13 +174,15 @@ def varlen_attn(
     key: torch.Tensor,
     value: torch.Tensor,
     cu_seq_q: torch.Tensor,
-    cu_seq_k: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
     max_q: int,
     max_k: int,
     *,
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
+    seqused_k: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     r"""Compute variable-length attention using Flash Attention.
 
@@ -178,8 +191,10 @@ def varlen_attn(
 
     Args:
         query (Tensor): Query tensor; shape :math:`(T_q, H, D)`
-        key (Tensor): Key tensor; shape :math:`(T_k, H, D)`
-        value (Tensor): Value tensor; shape :math:`(T_k, H, D)`
+        key (Tensor): Key tensor; shape :math:`(T_k, H, D)`, or
+            :math:`(\text{total\_pages}, \text{page\_size}, H, D)` when ``block_table`` is provided.
+        value (Tensor): Value tensor; shape :math:`(T_k, H, D)`, or
+            :math:`(\text{total\_pages}, \text{page\_size}, H, D)` when ``block_table`` is provided.
         cu_seq_q (Tensor): Cumulative sequence positions for queries; shape :math:`(N+1,)`
         cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
         max_q (int): Maximum query sequence length in the batch.
@@ -189,6 +204,21 @@ def varlen_attn(
         window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
             Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
             or (W, 0) for causal attention with sliding window of size W.
+        seqused_k (Tensor, optional): Number of valid KV tokens per batch element; shape :math:`(N,)`.
+            When set, only the first ``seqused_k[i]`` tokens in the key/value sequence for batch
+            element *i* participate in attention. Useful for KV-cache decoding where the cache slot
+            is larger than the actual sequence. Inference-only (not supported in backward).
+        block_table (Tensor, optional): Block table for paged KV cache; shape
+            :math:`(N, \text{max\_pages\_per\_seq})`, dtype ``int32``.
+            Requires ``seqused_k``. Inference-only (not supported in backward).
+
+            When ``block_table`` is provided, ``key`` and ``value`` are a "pool" of
+            pages of tokens of KV data and the pages belong to any sequence/order.
+            The ``block_table`` is what maps each sequence's logical chunks
+            back to physical pages in this pool.
+
+            ``seqused_k[i]`` tells the kernel how many tokens in sequence *i* are
+            actually valid, since the last page is typically only partially filled.
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
@@ -236,6 +266,7 @@ def varlen_attn(
         ...     query, key, value, cu_seq, cu_seq, max_len, max_len
         ... )
     """
+
     is_causal = window_size == (-1, 0)
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query,
@@ -248,6 +279,138 @@ def varlen_attn(
         is_causal,
         scale,
         list(window_size),
+        seqused_k,
+        block_table,
+    )
+    if return_aux is not None and return_aux.lse:
+        return out, lse
+    return out
+
+
+@torch.library.custom_op("torch_attn::_varlen_attn_out", mutates_args={"out"})
+def _varlen_attn_out(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
+    is_causal: bool = False,
+    scale: float | None = None,
+    window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """
+    Private custom op for variable-length attention with pre-allocated output.
+    Same as _varlen_attn but writes the attention output into the provided out tensor.
+    """
+    window_size = _normalize_window_size(window_size)
+
+    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
+
+    if use_cudnn:
+        # TODO: look into this
+        raise RuntimeError("cuDNN backend does not support out variant.")
+
+    log.info("Using Flash Attention backend for varlen_attn_out")
+    softmax_lse = torch.ops.aten._flash_attention_forward_no_dropout_inplace(
+        out,
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        0.0,  # dropout_p hardcoded to 0.0
+        is_causal,
+        False,  # return_debug_mask
+        scale=scale,
+        window_size_left=window_size[0],
+        window_size_right=window_size[1],
+        seqused_k=seqused_k,
+        block_table=block_table,
+    )
+
+    return softmax_lse
+
+
+@_varlen_attn_out.register_fake
+def _varlen_attn_out_fake(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
+    is_causal: bool = False,
+    scale: float | None = None,
+    window_size: list[int] | None = None,
+    seqused_k: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """
+    Fake implementation for meta tensor computation and tracing.
+    """
+    total_q = query.size(0)
+    num_heads = query.size(1)
+    logsumexp = torch.empty(
+        (num_heads, total_q), dtype=torch.float, device=query.device
+    )
+
+    if torch.version.hip:
+        preferred = torch._C._get_rocm_fa_preferred_backend()
+        if preferred == torch._C._ROCmFABackend.AOTriton:
+            batch_size = cu_seq_q.size(0) - 1
+            logsumexp = torch.empty(
+                (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+            )
+
+    return logsumexp
+
+
+def varlen_attn_out(
+    out: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    cu_seq_k: torch.Tensor | None,
+    max_q: int,
+    max_k: int,
+    *,
+    return_aux: AuxRequest | None = None,
+    scale: float | None = None,
+    window_size: tuple[int, int] = (-1, -1),
+    seqused_k: torch.Tensor | None = None,
+    block_table: torch.Tensor | None = None,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    r"""Compute variable-length attention using Flash Attention with a pre-allocated output tensor.
+
+    Same as :func:`varlen_attn` but writes the attention output into the provided ``out`` tensor
+    instead of allocating a new one.
+
+    """
+    is_causal = window_size == (-1, 0)
+    lse = torch.ops.torch_attn._varlen_attn_out(
+        out,
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        is_causal,
+        scale,
+        list(window_size),
+        seqused_k,
+        block_table,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -266,8 +429,15 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         is_causal,
         scale,
         window_size,
+        seqused_k,
+        block_table,
     ) = inputs
     out, lse, rng_state = output
+
+    if seqused_k is not None:
+        raise RuntimeError("seqused_k is an inference-only parameter.")
+    if block_table is not None:
+        raise RuntimeError("block_table is an inference-only parameter.")
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
@@ -403,7 +573,12 @@ def _backward(
         scale,
         window_size,
     )
-    return dq, dk, dv, None, None, None, None, None, None, None
+    num_params = 9  # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, seqused_k, block_table
+    return (dq, dk, dv, *((None,) * num_params))
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
+
+torch._dynamo.disallow_in_graph(
+    torch.ops.aten._flash_attention_forward_no_dropout_inplace
+)

@@ -752,6 +752,38 @@ class MixOrderReductionTest(TestBase):
         compile_metrics = torch._dynamo.utils._compilation_metrics
         self.assertEqual(len(compile_metrics), 1, "Don't recompile")
 
+    def test_additive_rnumel(self):
+        """
+        Fix https://github.com/pytorch/pytorch/issues/176375
+        """
+        x = torch.randn(32768, 300, device=GPU_TYPE)
+        y = torch.randn(32768, 200, device=GPU_TYPE)
+        w = torch.randn(550, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(y, 1)
+
+        def f(x, y, w):
+            z = torch.cat((x, y), dim=1)
+
+            # Slice w_pool to match dynamic dim. This avoids a guard that would
+            # resolve s0+s1 to a concrete value (640), which is essential for
+            # keeping rnumel symbolic in the generated code.
+            w = w[: z.shape[-1]]  # [s0+s1], no concrete-equality guard
+            z = z * w
+            scale = z.sum()
+            z = z + scale
+            return z.sum(dim=0), z.sum(dim=1)
+
+        ref = f(x, y, w)
+        act = torch.compile(f)(x, y, w)
+
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+
     def test_additive_num_splits(self):
         """
         When the `num_splits` is an additive expression, a pair of

@@ -27,7 +27,7 @@ import traceback
 import types
 import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import torch._C
@@ -123,6 +123,8 @@ class SubgraphTracingInfo:
     # User code stack at the point where the first externally-visible side
     # effect was detected.  None means no side effect was observed.
     side_effect_stack: traceback.StackSummary | None = None
+    # All sources accessed via VariableBuilder during the subgraph trace.
+    traced_sources: OrderedSet[Any] = field(default_factory=OrderedSet)
 
 
 # This function is a syntax sugar for creating a dummy new subtracer so that
@@ -1632,14 +1634,15 @@ def speculate_subgraph_with_auto_output_flattening(
         )
 
     try:
-        # ensure guards on args get installed in parent subgraph
-        f, sub_args, sub_kwargs = LazyVariableTracker.realize_all(
-            (f, sub_args, sub_kwargs),
-        )
-
         with tx.output.subtracer(source_target, tracer, description) as subtracer:
             args = get_hop_args(
-                tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
+                tx,
+                f,
+                subtracer,
+                list(sub_args),
+                sub_kwargs,
+                set_subgraph_inputs,
+                description,
             )
 
             # Special case - if users uses
@@ -1799,6 +1802,7 @@ def speculate_subgraph_with_auto_output_flattening(
             # - `tracing_info`: Properties observed during subgraph tracing
             tracing_info = SubgraphTracingInfo(
                 side_effect_stack=subtracer.side_effect_stack,
+                traced_sources=subtracer.traced_sources,
             )
 
             return (

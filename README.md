@@ -135,7 +135,7 @@ This enables you to train bigger deep learning models than before.
 
 ### Extensions Without Pain
 
-Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
+Writing new neural network modules, or interfacing with PyTorch's Tensor API, was designed to be straightforward
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API

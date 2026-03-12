@@ -327,17 +327,18 @@ class profile:
                 )
             self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
-            if (
-                not use_kineto
-                or ProfilerActivity.PrivateUse1 not in _supported_activities()
-            ):
+            if use_kineto:
+                # Native tracing mode: use KINETO_PRIVATEUSE1 with registered IActivityProfiler
+                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
+                if ProfilerActivity.PrivateUse1 in _supported_activities():
+                    self.kineto_activities.add(ProfilerActivity.PrivateUse1)
+            else:
+                # Marker-only mode: use fallback state
                 if not self.use_cpu:
                     raise AssertionError(
-                        "Legacy custombackend profiling requires use_cpu=True"
+                        "Legacy privateuse1 profiling requires use_cpu=True"
                     )
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
-            else:
-                self.kineto_activities.add(ProfilerActivity.PrivateUse1)
 
         if len(self.kineto_activities) == 0:
             raise AssertionError("No activities specified for the profiler")

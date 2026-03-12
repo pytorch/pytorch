@@ -253,6 +253,37 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_rendezvous_many_allocations(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        tensors = [
+            symm_mem.empty(1, dtype=torch.float, device=self.device) for _ in range(256)
+        ]
+
+        # Rendezvous a subset twice so the repeated lookup path is covered
+        # while many allocations are still live.
+        sampled_tensors = tensors[::16]
+        for tensor in sampled_tensors:
+            handle = symm_mem.rendezvous(tensor, group=group_name)
+            self.assertEqual(handle.rank, self.rank)
+            self.assertEqual(handle.world_size, self.world_size)
+        for tensor in sampled_tensors:
+            symm_mem.rendezvous(tensor, group=group_name)
+
+        result = torch.ops.symm_mem.one_shot_all_reduce(
+            tensors[-1].fill_(self.rank), "sum", group_name
+        )
+        self.assertEqual(
+            result, torch.full_like(result, (self.world_size - 1) * self.world_size / 2)
+        )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
         (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
     )

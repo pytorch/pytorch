@@ -915,6 +915,31 @@ def forward(self):
         o1_2 = opt_model(x2, 2)
         self.assertEqual(o1_2_ref, o1_2)
 
+    def test_float_guard_source_on_recompile(self):
+        # Regression test: when a float attribute triggers recompilation and
+        # becomes dynamic, the guard produced by produce_guards_verbose should
+        # have a proper source annotation, not "(unknown source)".
+        cache = {}
+
+        class Module(torch.nn.Module):
+            def __init__(self, key: float):
+                super().__init__()
+                self.key = key
+                cache[key] = torch.randn(16)
+
+            def forward(self, x):
+                return x + cache[self.key]
+
+        x = torch.randn(16)
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with ctx():
+            for key in [1.0, 2.0, 3.0]:
+                model = torch.compile(Module(key))
+                model(x)
+
+        guard_log = log_stream.getvalue()
+        self.assertNotIn("unknown source", guard_log)
+
 
 class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
     def test_builtin_functions_on_device(self, device):

@@ -4002,7 +4002,7 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     B_grad = B_grad_X;
   }
 
-  return std::make_tuple(A_grad, B_grad);
+  return std::make_tuple(std::move(A_grad), std::move(B_grad));
 }
 
 std::tuple<Tensor, Tensor> linalg_qr_jvp(
@@ -4590,7 +4590,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     Tensor G_A = left ? -at::matmul(G_B, X_H) : -at::matmul(X_H, G_B);
     G_A = upper ? G_A.triu(static_cast<int>(unitriangular))
                 : G_A.tril(-static_cast<int>(unitriangular));
-    return std::make_tuple(G_A, B_requires_grad ? G_B : Tensor{});
+    return std::make_tuple(std::move(G_A), B_requires_grad ? G_B : Tensor{});
   } else {
     return std::make_tuple(Tensor{}, G_B);
   }
@@ -5132,7 +5132,7 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
     }
   }
 
-  return std::make_tuple(dX, dgamma);
+  return std::make_tuple(std::move(dX), std::move(dgamma));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
@@ -5220,7 +5220,7 @@ infinitely_differentiable_native_group_norm_backward(
     dbeta = db.sum(0).reshape_as(toNonOptTensor(gamma));
   }
 
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
@@ -5754,7 +5754,8 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
   Tensor self_grad, tau_grad, other_grad;
 
   if (!grad.defined()) {
-    return std::make_tuple(self_grad, tau_grad, other_grad);
+    return std::make_tuple(
+        std::move(self_grad), std::move(tau_grad), std::move(other_grad));
   }
 
   const auto self_requires_grad = grad_output_mask[0];
@@ -5813,7 +5814,7 @@ std::tuple<Tensor, Tensor> polar_backward(
     auto result_mul_1_j = result * Scalar(c10::complex<double>{0.0, 1.0});
     grad_angle = at::real(grad_conj * result_mul_1_j);
   }
-  return std::make_tuple(grad_abs, grad_angle);
+  return std::make_tuple(std::move(grad_abs), std::move(grad_angle));
 }
 
 Tensor i1_backward(
@@ -7453,7 +7454,14 @@ mkldnn_rnn_layer_differentiable_backward(
   }
 
   auto cat_layer_dx = at::cat(layer_dx, 0);
-  return std::make_tuple(cat_layer_dx, dWx, dWh, db, db, dprev_h, dprev_c);
+  return std::make_tuple(
+      std::move(cat_layer_dx),
+      std::move(dWx),
+      std::move(dWh),
+      db,
+      db,
+      std::move(dprev_h),
+      std::move(dprev_c));
 }
 
 Tensor values_backward(const Tensor& grad, const Tensor& self) {

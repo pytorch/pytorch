@@ -1525,7 +1525,7 @@ class TestProfiler(TestCase):
             torch.cuda.synchronize()
             torch.add(t1, t2)
 
-        def trace_and_check(exp_config: Optional[_ExperimentalConfig]) -> None:
+        def trace_and_check(exp_config: _ExperimentalConfig | None) -> None:
             with _profile(
                 use_kineto=True,
                 use_device="cuda",
@@ -3559,6 +3559,62 @@ aten::mm""",
         n1 = names(prof1)
         n2 = names(prof2)
         self.assertEqual(n1, n2)
+
+
+class TestPrivateUse1ProfilerState(TestCase):
+    """Tests for PrivateUse1 profiler state selection logic."""
+
+    def test_kineto_privateuse1_state_with_use_kineto_true(self):
+        """Test that KINETO_PRIVATEUSE1 state is selected when use_kineto=True."""
+        from unittest.mock import patch
+
+        from torch._C._profiler import ProfilerState
+
+        with patch(
+            "torch.autograd.profiler._get_privateuse1_backend_name",
+            return_value="custom_backend",
+        ):
+            prof = _profile(
+                use_cpu=True,
+                use_device="custom_backend",
+                use_kineto=True,
+            )
+            self.assertEqual(prof.profiler_kind, ProfilerState.KINETO_PRIVATEUSE1)
+
+    def test_kineto_privateuse1_fallback_state_with_use_kineto_false(self):
+        """Test that KINETO_PRIVATEUSE1_FALLBACK is selected when use_kineto=False."""
+        from unittest.mock import patch
+
+        from torch._C._profiler import ProfilerState
+
+        with patch(
+            "torch.autograd.profiler._get_privateuse1_backend_name",
+            return_value="custom_backend",
+        ):
+            prof = _profile(
+                use_cpu=True,
+                use_device="custom_backend",
+                use_kineto=False,
+            )
+            self.assertEqual(
+                prof.profiler_kind, ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
+            )
+
+    def test_privateuse1_fallback_requires_use_cpu(self):
+        """Test that KINETO_PRIVATEUSE1_FALLBACK requires use_cpu=True."""
+        from unittest.mock import patch
+
+        with patch(
+            "torch.autograd.profiler._get_privateuse1_backend_name",
+            return_value="custom_backend",
+        ):
+            # When use_kineto=False and use_cpu=False, should raise AssertionError
+            with self.assertRaises(AssertionError):
+                _profile(
+                    use_cpu=False,
+                    use_device="custom_backend",
+                    use_kineto=False,
+                )
 
 
 if __name__ == "__main__":

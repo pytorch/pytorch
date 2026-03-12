@@ -1980,7 +1980,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
     }
   }
 
-  return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
+  return std::tuple<Tensor,Tensor,Tensor>{std::move(ggO), std::move(gI), std::move(gW)};
 }
 
 static std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_backend(
@@ -2325,7 +2325,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     }
   }
 
-  return std::make_tuple(backend_grad_input, backend_grad_weight, backend_grad_bias);
+  return std::make_tuple(std::move(backend_grad_input), std::move(backend_grad_weight), std::move(backend_grad_bias));
 }
 
 void _cudnn_set_conv_benchmark_empty_cache(bool enable) {

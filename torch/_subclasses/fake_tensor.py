@@ -25,6 +25,7 @@ from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedte
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.fake_profile import MissingOpProfile
 from torch._logging import dtrace_structured
+from torch._opaque_base import OpaqueBase
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -205,12 +206,22 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
         return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
-        flattened_tensors = [getattr(x, attr) for attr in attrs]
-        all_fake = all(is_fake(x) for x in flattened_tensors)
-        any_fake = any(is_fake(x) for x in flattened_tensors)
-        if all_fake != any_fake:
-            raise AssertionError("got mixed fake and real tensors!")
-        return all_fake
+        got_fake: bool | None = None
+        for attr in attrs:
+            match getattr(x, attr):
+                case Tensor() as v:
+                    fake = is_fake(v)
+                    if got_fake is None:
+                        got_fake = fake
+                    elif got_fake != fake:
+                        raise AssertionError("got mixed fake and real tensors!")
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
+        return got_fake or False
     elif isinstance(x, FunctionalTensor):
         return is_fake(x.elem)
     elif isinstance(x, Tensor) and torch._is_functional_tensor(x):
@@ -230,13 +241,22 @@ def maybe_get_fake_mode(t: object) -> FakeTensorMode | None:
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
         inner_tensor_names, _ = t.__tensor_flatten__()
-        modes = [
-            maybe_get_fake_mode(getattr(t, t_name)) for t_name in inner_tensor_names
-        ]
-        m = modes[0]
-        if not all(m is x for x in modes):
-            raise AssertionError("All fake tensor modes must be the same")
-        return m
+        mode: FakeTensorMode | None = None
+        for t_name in inner_tensor_names:
+            match getattr(t, t_name):
+                case Tensor() as v:
+                    m = maybe_get_fake_mode(v)
+                    if mode is None:
+                        mode = m
+                    elif mode is not m:
+                        raise AssertionError("All fake tensor modes must be the same")
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
+        return mode
     elif isinstance(t, FunctionalTensor):
         return maybe_get_fake_mode(t.elem)
     elif isinstance(t, Tensor) and torch._is_functional_tensor(t):
@@ -2973,7 +2993,9 @@ class FakeTensorMode(TorchDispatchMode):
                 )
                 if not allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
-                        raise AssertionError("Mixing fake modes NYI")
+                        raise AssertionError(
+                            f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
+                        )
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise AssertionError(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "

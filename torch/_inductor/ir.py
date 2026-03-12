@@ -1329,13 +1329,13 @@ class Reduction(Loops):
         reduction_numel: Expr,
         input_node: IRNode | None = None,
     ) -> tuple[ReductionHint, _IntLike]:
-        # TODO Laith support unbacked!
-        reduction_numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            reduction_numel
-        )
-        numel_hint = V.graph.sizevars.replace_backed_symbols_with_hints(
-            sympy_product(ranges)
-        )
+        # Use optimization_hint when all unbacked symbols have explicit hints,
+        # otherwise fall back conservatively.
+        exprs = [reduction_numel, sympy_product(ranges)]
+        if not V.graph.sizevars.all_unbacked_explicitly_hinted(exprs):
+            return ReductionHint.DEFAULT, 1
+        reduction_numel_hint = V.graph.sizevars.optimization_hint(reduction_numel)
+        numel_hint = V.graph.sizevars.optimization_hint(sympy_product(ranges))
 
         should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
@@ -1346,10 +1346,6 @@ class Reduction(Loops):
             )
             and config.split_reductions
         )
-
-        if not (_is_static(reduction_numel_hint) and _is_static(numel_hint)):
-            # We don't support unbacked symints
-            return ReductionHint.DEFAULT, 1
 
         if reduction_type == "dot":
             # Don't split when doing native matmul
@@ -5206,8 +5202,9 @@ class ComputedBuffer(OperationBuffer):
 
 class TemplateBuffer(OperationBuffer):
     """
-    Represents a Triton (in the future other type) of template operator
-    that we can fuse an epilogue onto.
+    Base class for template operators that support epilogue and prologue fusion.
+    Subclasses: TritonTemplateBuffer (built-in Triton templates),
+    HelionTemplateBuffer (Helion kernels), etc.
     """
 
     def __init__(
@@ -5215,6 +5212,8 @@ class TemplateBuffer(OperationBuffer):
         layout: OutputSpec,
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any] | None,
+        mutated_inputs: Iterable[IRNode] | None = None,
+        allowed_prologue_inps: OrderedSet[str] | None = None,
     ) -> None:
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
@@ -5224,8 +5223,42 @@ class TemplateBuffer(OperationBuffer):
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self.annotations: dict[str, Any] = {}
 
+        # Inputs that the kernel mutates in-place
+        self.mutated_inputs = mutated_inputs
+        self.mutation_outputs: list[MutationOutput] = []
+        if mutated_inputs is not None:
+            first_input = self.inputs[0]
+            assert isinstance(first_input, IRNode), type(first_input)
+            device = first_input.get_device()
+            self.mutation_outputs = [
+                MutationOutput(NoneLayout(device=device), buf, self)
+                for buf in mutated_inputs
+            ]
+        # Input buffer names eligible for prologue fusion.
+        self.allowed_prologue_inps: OrderedSet[str] = (
+            allowed_prologue_inps or OrderedSet()
+        )
+
     def get_read_writes(self) -> dependencies.ReadWrites:
         return self.extract_read_writes(normalize=True)
+
+    def _read_deps_from_inputs(self, normalize: bool) -> OrderedSet[dependencies.Dep]:
+        """Build read dependencies from all inputs."""
+        reads: OrderedSet[dependencies.Dep] = OrderedSet()
+        for inp_raw in self.inputs:
+            assert isinstance(inp_raw, (ReinterpretView, Buffer)), type(inp_raw)
+            inp: ReinterpretView | Buffer = inp_raw
+            assert isinstance(inp.layout, Layout), type(inp.layout)
+            inp_indexer = inp.layout.make_indexer()
+
+            def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
+                assert len(rindex) == 0
+                return ops.load(inp.get_name(), inp_indexer(index))
+
+            reads |= dependencies.extract_read_writes(
+                dummy, inp.get_size(), (), normalize=normalize
+            ).reads
+        return reads
 
     def extract_read_writes(self, normalize: bool = False) -> dependencies.ReadWrites:
         name = self.get_name()
@@ -5238,22 +5271,7 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
-
-        for inp in self.inputs:
-            assert isinstance(inp, (ReinterpretView, Buffer)), type(inp)
-            assert isinstance(inp.layout, Layout), type(inp.layout)
-
-            indexer = inp.layout.make_indexer()
-
-            def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
-                assert len(rindex) == 0
-                # pyrefly: ignore [missing-attribute]
-                return ops.load(inp.get_name(), indexer(index))
-
-            deps.reads |= dependencies.extract_read_writes(
-                dummy, inp.get_size(), (), normalize=normalize
-            ).reads
-
+        deps.reads |= self._read_deps_from_inputs(normalize)
         return deps
 
     def get_reduction_size(self) -> Sequence[Expr]:
@@ -5282,14 +5300,8 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def can_fuse_multi_output_epilogue(self, snode: object) -> bool:
-        """Whether scheduler node can be fused as an epilogue of this multi-output template.
-
-        Returns ``False`` by default.  Subclasses may override to support
-        additional fusion patterns (e.g. epilogue fusion with multi-output
-        extraction and pointwise operations).
-        """
-        return False
+    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
+        return self.allowed_prologue_inps
 
 
 class TritonTemplateBuffer(TemplateBuffer):
@@ -5310,19 +5322,12 @@ class TritonTemplateBuffer(TemplateBuffer):
         We work around this by creating an extra input buffer during the lowering
         and we mark them as mutated inputs.
         """
-        super().__init__(layout, inputs, make_kernel_render)
-        self.mutated_inputs = mutated_inputs
-        self.outputs: list[Buffer] = [self]
-        if mutated_inputs is not None:
-            assert isinstance(self.inputs[0], IRNode), type(self.inputs[0])
-            device = self.inputs[0].get_device()
-            self.outputs += [
-                MutationOutput(NoneLayout(device=device), buf, self)
-                for buf in mutated_inputs
-            ]
-
-        self.allowed_prologue_inps = (
-            allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
+        super().__init__(
+            layout,
+            inputs,
+            make_kernel_render,
+            mutated_inputs=mutated_inputs,
+            allowed_prologue_inps=allowed_prologue_inps,
         )
 
         self.subgraph_inps: list[IRNode | sympy.Expr | None] | None = None
@@ -5353,10 +5358,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         return res
 
     def get_outputs(self) -> list[Buffer]:
-        return self.outputs
-
-    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
-        return self.allowed_prologue_inps
+        return [self, *self.mutation_outputs]
 
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout})"
@@ -7553,6 +7555,11 @@ class UserDefinedTritonKernel(ExternKernel):
 
     @override
     def get_read_writes(self) -> dependencies.ReadWrites:
+        # Limit the new `get_read_writes` to `epilogue_fusion_user_defined_triton_kernel`
+        # to avoid potential regression to existing models.
+        if not config.epilogue_fusion_user_defined_triton_kernel:
+            return super().get_read_writes()
+
         # maps formal arg name to actual arg name
         read_renames = {
             formal_arg_dep.name: self.kernel_args[formal_arg_dep.name].get_name()
@@ -8597,21 +8604,33 @@ class FallbackKernel(ExternKernelAlloc):
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        # Try to lower functional custom ops to their out-variant via
-        # ExternKernelOut for buffer reuse. Only affects ops with the
-        # torch.Tag.out_variant tag (custom ops / symm_mem), not aten ops.
+        # Try to lower single output functional custom ops to their out-variant.
         if isinstance(kernel, torch._ops.OpOverload):
-            from .custom_op_out_lowering import try_lower_to_out_variant
-
-            result = try_lower_to_out_variant(
-                kernel,
-                example_output,
-                tensor_args,
-                non_tensor_args,
-                kwargs,
+            from torch._library._out_variant import (
+                _is_functional,
+                get_out_arg_names,
+                to_out_variant,
             )
-            if result is not None:
-                return result  # type: ignore[return-value]
+
+            if _is_functional(kernel._schema) and isinstance(
+                example_output, torch.Tensor
+            ):
+                out_op = to_out_variant(kernel)
+                if out_op is not None and len(get_out_arg_names(out_op)) == 1:
+                    layout = FixedLayout(
+                        device=example_output.device,
+                        dtype=example_output.dtype,
+                        size=[*example_output.shape],
+                        stride=[*example_output.stride()],
+                    )
+                    return ExternKernelOut(  # type: ignore[return-value]
+                        layout=layout,
+                        inputs=list(tensor_args),
+                        constant_args=list(non_tensor_args),
+                        kwargs=kwargs,
+                        python_kernel_name=_make_out_variant_kernel_name(out_op),
+                        op_overload=out_op,
+                    )
 
         # We need this extra check for input alignment since the example
         # inputs we created are always aligned.
@@ -8625,6 +8644,26 @@ class FallbackKernel(ExternKernelAlloc):
             or kernel is torch.ops.higher_order.print
         ):
             device = torch.device("cpu")
+
+        # Try multi-output .out() lowering for ops with out_variant tag.
+        if (
+            isinstance(kernel, torch._ops.OpOverload)
+            and not V.graph.cpp_wrapper
+            and device
+        ):
+            out_result = ExternKernelMultiOut.try_create(
+                kernel,
+                example_output,
+                device,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                kwargs,
+                unbacked_bindings=unbacked_bindings,
+                has_unaligned_input=has_unaligned_input,
+            )
+            if out_result is not None:
+                return out_result  # type: ignore[return-value]
 
         if example_output is None:
             packed = cls(
@@ -8800,6 +8839,159 @@ class MultiOutput(ExternKernel):
             if isinstance(inp, FallbackKernel)
             and len(inp.get_inputs_that_alias_output()) > 0
         ]
+
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        # Reads: StarDep on parent (we don't know which elements of the
+        # packed output we index into — conservative is correct).
+        reads: OrderedSet[dependencies.Dep] = OrderedSet()
+        for inp in self.inputs:
+            if isinstance(inp, IRNode):
+                reads.add(dependencies.StarDep(inp.get_name()))
+
+        # Writes: build proper MemoryDep from our FixedLayout so the
+        # scheduler can match our write with downstream epilogue reads.
+        name = self.get_name()
+        indexer = self.get_layout().make_indexer()
+
+        def dummy(index: Sequence[Any], rindex: Sequence[Any]) -> Any:
+            assert len(rindex) == 0
+            return ops.store(name, indexer(index), "fake")
+
+        write_rw = dependencies.extract_read_writes(dummy, self.get_size(), ())
+        return dependencies.ReadWrites(
+            reads=reads,
+            writes=write_rw.writes,
+            index_exprs=OrderedSet(),
+        )
+
+
+class AllocatingMultiOutput(MultiOutput):
+    """MultiOutput with Inductor-controlled allocation for .out() variant ops.
+
+    Overrides should_allocate()=True so Inductor allocates the output buffer,
+    and skips tuple-indexing codegen since .out() writes directly into these buffers.
+    """
+
+    def should_allocate(self) -> bool:
+        return True
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        if not self.skip_size_stride_alignment_checks:
+            self.codegen_size_asserts(wrapper)
+            self.codegen_alignment_asserts(wrapper)
+
+
+def _make_out_variant_kernel_name(out_op: torch._ops.OpOverload) -> str:
+    """Build fully-qualified kernel name for an out-variant op."""
+    ns = out_op.namespace
+    op_name = out_op._schema.name.split("::")[1]
+    overload = out_op._overloadname
+    return f"torch.ops.{ns}.{op_name}.{overload}"
+
+
+class ExternKernelMultiOut(FallbackKernel):
+    """Multi-output .out() variant lowering.
+
+    Subclass of FallbackKernel that emits .out() calls with pre-allocated
+    output buffers. Uses AllocatingMultiOutput child nodes for each output.
+    """
+
+    out_arg_names: list[str]
+    out_variant_output_nodes: list[AllocatingMultiOutput]
+
+    def __init__(
+        self,
+        *args: Any,
+        out_op: torch._ops.OpOverload,
+        out_arg_names: list[str],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.out_arg_names = out_arg_names
+        self.out_variant_output_nodes = []
+        self.python_kernel_name = _make_out_variant_kernel_name(out_op)
+        self.op_overload = out_op
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        self.codegen_comment(wrapper)
+        wrapper.generate_extern_kernel_multi_out(self)
+
+    @classmethod
+    def try_create(
+        cls,
+        kernel: torch._ops.OpOverload,
+        example_output: Any,
+        device: torch.device,
+        tensor_args: Sequence[IRNode],
+        non_tensor_args: Sequence[Any],
+        unflatten_args: Callable[..., Any],
+        kwargs: dict[str, Any] | None,
+        *,
+        unbacked_bindings: dict[sympy.Symbol, pytree.KeyPath] | None = None,
+        has_unaligned_input: bool = False,
+    ) -> Sequence[AllocatingMultiOutput] | None:
+        """Create an ExternKernelMultiOut if the op has a matching .out() variant."""
+        from torch._library._out_variant import (
+            _is_functional,
+            get_out_arg_names,
+            to_out_variant,
+        )
+
+        if not _is_functional(kernel._schema):
+            return None
+
+        if not isinstance(example_output, (tuple, list)):
+            return None
+
+        out_op = to_out_variant(kernel)
+        if out_op is None:
+            return None
+
+        out_arg_names = get_out_arg_names(out_op)
+        if not all(isinstance(t, torch.Tensor) for t in example_output):
+            return None
+        if len(example_output) != len(out_arg_names):
+            return None
+
+        packed = cls(
+            MultiOutputLayout(device=device),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            kwargs=kwargs,
+            unbacked_bindings=unbacked_bindings,
+            out_op=out_op,
+            out_arg_names=out_arg_names,
+        )
+
+        outputs: list[AllocatingMultiOutput] = []
+        for i, tensor_out in enumerate(example_output):
+            layout = FixedLayout(
+                device=tensor_out.device,
+                dtype=tensor_out.dtype,
+                size=[*tensor_out.shape],
+                stride=[*tensor_out.stride()],
+            )
+            multi_out = AllocatingMultiOutput(
+                layout=layout,
+                input=packed,
+                indices=[(type(example_output), i)],
+            )
+            if (
+                config.assume_unaligned_fallback_output
+                or has_unaligned_input
+                or not tensor_is_aligned(tensor_out)
+            ):
+                V.graph.unaligned_buffers.add(multi_out.name)  # type: ignore[arg-type]
+            outputs.append(multi_out)
+
+        packed.out_variant_output_nodes = outputs
+        packed.outputs = outputs
+
+        if isinstance(example_output, tuple):
+            return tuple(outputs)  # type: ignore[return-value]
+        return list(outputs)
 
 
 # We just use a normal dataclass for MutableBox/TensorBox/StorageBox since

@@ -58,12 +58,17 @@ class FusionScore:
     template_score: int
     node_type_score: bool
     memory_score: int
+    buffer_overlap_score: int
     proximity_score: int
 
     def __lt__(self, other):
         """
         node_type_score has higher priority than memory_score unless
-        the memory_score differs too much
+        the memory_score differs too much.
+
+        buffer_overlap_score is prioritized below memory_score so that
+        strict global memory savings (exact dep matches) are preferred
+        over buffer overlap scoring (same buffer, different indexing).
         """
         threshold = 16
         if self.template_score != other.template_score:
@@ -75,9 +80,15 @@ class FusionScore:
         ):
             return self.memory_score < other.memory_score
 
-        return (self.node_type_score, self.memory_score, self.proximity_score) < (
+        return (
+            self.node_type_score,
+            self.memory_score,
+            self.buffer_overlap_score,
+            self.proximity_score,
+        ) < (
             other.node_type_score,
             other.memory_score,
+            other.buffer_overlap_score,
             other.proximity_score,
         )
 
@@ -229,6 +240,11 @@ class InductorChoices:
         Returns:
             True if we need to fix the layout, False otherwise
         """
+        # TLX force mode uses Triton templates which require fixed layouts
+        # This check is independent of max_autotune
+        if config.is_fbcode() and config.triton.tlx_mode == "force":
+            return True
+
         # TODO: debug and fix
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization
@@ -632,8 +648,8 @@ class InductorChoices:
         - Fusions closer together in original graph order
         """
 
-        memory_score, is_mix_order_reduction = typing.cast(
-            tuple[int, bool],
+        memory_score, buffer_overlap_score, is_mix_order_reduction = typing.cast(
+            tuple[int, int, bool],
             scheduler.score_fusion_memory(
                 node1, node2, return_is_mix_order_reduction=True
             ),
@@ -658,5 +674,6 @@ class InductorChoices:
             template_score,
             type_score,
             memory_score,
+            buffer_overlap_score,
             proximity_score,
         )

@@ -14,7 +14,7 @@ static int64_t g_lambda_deleter_call_count = 0;
 
 // Wrapper for from_blob with a capturing-lambda deleter.
 // The lambda captures a pointer to the global counter and increments it,
-// which exercises the torch_from_blob_v2 code path (deleter + context).
+// which exercises the capturing-lambda code path in torch_from_blob.
 Tensor my_from_blob_with_lambda_deleter(
     int64_t data_ptr,
     torch::headeronly::HeaderOnlyArrayRef<int64_t> sizes,
@@ -60,7 +60,7 @@ STABLE_TORCH_LIBRARY_IMPL(
 #ifdef LAE_USE_CUDA
 
 // Same as my_from_blob_with_cuda_deleter (from 2.11) but uses a non-capturing
-// lambda deleter, exercising the from_blob_v2 code path.
+// lambda deleter.
 Tensor my_from_blob_with_cuda_lambda_deleter(
     int64_t numel,
     torch::stable::Device device) {

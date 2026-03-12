@@ -883,6 +883,16 @@ class _TorchDynamoContext:
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
+            if type(fn) is torch.jit._script.RecursiveScriptModule:
+                raise RuntimeError(
+                    "torch.compile does not support compiling torch.jit.script or "
+                    "torch.jit.freeze models directly.\n\n"
+                    "Workaround: compile the original eager module instead:\n"
+                    "  model = torch.nn.Linear(3, 3)\n"
+                    "  compiled_model = torch.compile(model)  # compile the eager module\n\n"
+                    "torch.jit.script and torch.jit.freeze are deprecated in favor of "
+                    "torch.compile. See https://pytorch.org/docs/main/jit.html for details."
+                )
             mod = fn
             new_mod = OptimizedModule(mod, self)
             # Save the function pointer to find the original callable while nesting

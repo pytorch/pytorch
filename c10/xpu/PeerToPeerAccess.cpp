@@ -1,11 +1,8 @@
-#include <ATen/xpu/PeerToPeerAccess.h>
-#include <ATen/xpu/XPUContext.h>
-
-#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <c10/xpu/PeerToPeerAccess.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
-namespace at::xpu {
+namespace c10::xpu {
 
 // p2pAccessEnabled_ is a flattened 2D matrix of size [num_devices x
 // num_devices].
@@ -35,8 +32,6 @@ void init_p2p_access_cache(c10::DeviceIndex num_devices) {
 } // namespace detail
 
 bool get_p2p_access(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
-  at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
-
   check_device_index(dev);
   check_device_index(dev_to_access);
 
@@ -60,4 +55,4 @@ bool get_p2p_access(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
   return static_cast<bool>(cache);
 }
 
-} // namespace at::xpu
+} // namespace c10::xpu

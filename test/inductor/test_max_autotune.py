@@ -12,7 +12,6 @@ import tempfile
 import time
 import unittest
 from collections.abc import Callable
-from typing import Optional
 from unittest import mock
 from unittest.mock import patch
 
@@ -2943,8 +2942,8 @@ class TestMaxAutotunePrecompile(TestCase):
             op: str,
             inputs: str,
             benchmark: Callable[[Any], dict[ChoiceCaller, float]],
-            hint_override: Optional[int] = None,
-        ) -> Optional[dict[ChoiceCaller, float]]:
+            hint_override: int | None = None,
+        ) -> dict[ChoiceCaller, float] | None:
             if benchmark is not None:
                 return benchmark(choices)
 
@@ -3294,7 +3293,7 @@ class _TestTritonTemplateCaller(TritonTemplateCaller):
 
 
 class TestTuningProcess(TestCase):
-    def check_healthy(self, p: TuningProcess, device: Optional[int] = None):
+    def check_healthy(self, p: TuningProcess, device: int | None = None):
         result = random.random()
         bmreq = _TestBenchmarkRequest(result, device=device)
         p.put(bmreq.benchmark)
@@ -4697,6 +4696,27 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         future = pool_instance.submit(simple_fn)
         result = future.result()
         self.assertEqual(result, 42)
+        self.assertIsNotNone(pool_instance._pool)
+
+        time.sleep(5)
+
+        self.assertIsNone(pool_instance._pool)
+        self.assertIsNone(pool_instance._timer)
+        self.assertTrue(AutotuneProcessPool._shutdown_for_inactivity)
+
+    @patch(
+        "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
+        2,
+    )
+    def test_autotune_process_pool_inactivity_shutdown_warmup_only(self):
+        """Test that the pool shuts down from inactivity even when only warmup is called."""
+        AutotuneProcessPool.shutdown_instance()
+        AutotuneProcessPool._shutdown_for_inactivity = False
+
+        pool_instance = AutotuneProcessPool.get_instance()
+        warmup_future = pool_instance.warm_up()
+        warmup_future.result()
+
         self.assertIsNotNone(pool_instance._pool)
 
         time.sleep(5)
