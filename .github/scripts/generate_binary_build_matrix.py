@@ -48,7 +48,13 @@ CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 CPU_S390X_ARCH = ["cpu-s390x"]
 
-CUDA_AARCH64_ARCHES = ["12.6-aarch64", "12.8-aarch64", "12.9-aarch64", "13.0-aarch64", "13.2-aarch64"]
+CUDA_AARCH64_ARCHES = [
+    "12.6-aarch64",
+    "12.8-aarch64",
+    "12.9-aarch64",
+    "13.0-aarch64",
+    "13.2-aarch64",
+]
 
 
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
@@ -323,6 +329,7 @@ def generate_libtorch_matrix(
             # in 2.10
             windows_cuda_arches = CUDA_ARCHES.copy()
             windows_cuda_arches.remove("12.9")
+            windows_cuda_arches.remove("13.2")
             arches += windows_cuda_arches
     if libtorch_variants is None:
         libtorch_variants = [
@@ -391,6 +398,7 @@ def generate_wheels_matrix(
             # in 2.10
             windows_cuda_arches = CUDA_ARCHES.copy()
             windows_cuda_arches.remove("12.9")
+            windows_cuda_arches.remove("13.2")
             arches += windows_cuda_arches + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
