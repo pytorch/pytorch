@@ -1066,7 +1066,6 @@ if(USE_ROCM)
     string(JOIN " " HIP_HIPCC_FLAGS_STR ${HIP_HIPCC_FLAGS})
     set(HIP_HIPCC_FLAGS ${HIP_HIPCC_FLAGS_STR})
     set(CMAKE_HIP_FLAGS ${HIP_HIPCC_FLAGS})
-    message(WARNING "PG printing HIP_HIPCC_FLAGS: ${HIP_HIPCC_FLAGS}")
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
     list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
