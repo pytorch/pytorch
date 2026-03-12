@@ -2897,7 +2897,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(g1, g2, atol=1e-4, rtol=0)
         self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_CTCLoss_zero_infinity_cudnn(self):
         # Example where model is confidently wrong (probability concentrated on wrong output),
         # producing divergent loss
@@ -2927,7 +2927,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         )
         self.assertTrue(torch.isfinite(loss_true))
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_CTCLoss_zero_infinity_cudnn_grad(self):
         probs = torch.nn.functional.one_hot(torch.tensor([0], device='cuda'), num_classes=2).float()
         log_probs = torch.log(probs).unsqueeze(1).requires_grad_()
