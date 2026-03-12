@@ -1,6 +1,8 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <c10/util/SmallVector.h>
+#include <algorithm>
 #include <unordered_set>
 
 namespace torch::autograd {
@@ -165,7 +167,7 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
     forward_level->insert(shared_from_this());
 
     std::lock_guard<std::mutex> lock(mutex_);
-    content_.insert({level, value});
+    content_.push_back({level, value});
   }
 
   // This function removes the tangent for a given level from this ForwardGrad
@@ -177,14 +179,14 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
     }
 
     std::unique_lock<std::mutex> lock(mutex_);
-    const auto& it = content_.find(level);
+    auto it = find_level(level);
     TORCH_INTERNAL_ASSERT(
         it != content_.end(), "Resetting a non-existent level.");
     // Keep the Tensor alive until we have released the lock
     // This is needed as we can be in a case where this function is called by
     // ForwardADLevel destructor
-    auto t = (*it).second;
-    content_.erase(level);
+    auto t = std::move(it->second);
+    content_.erase(it);
     lock.unlock();
   }
 
@@ -192,7 +194,7 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
 
   bool contains(uint64_t level) {
     std::lock_guard<std::mutex> lock(mutex_);
-    return content_.count(level) > 0;
+    return find_level(level) != content_.end();
   }
 
   bool empty() const {
@@ -202,8 +204,17 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
   static const at::Tensor& undef_grad();
 
  private:
-  // TODO(albanD): replace this with a SmallVector
-  std::unordered_map<uint64_t, at::Tensor> content_;
+  auto find_level(uint64_t level) {
+    return std::find_if(content_.begin(), content_.end(),
+        [level](const auto& p) { return p.first == level; });
+  }
+  auto find_level(uint64_t level) const {
+    return std::find_if(content_.begin(), content_.end(),
+        [level](const auto& p) { return p.first == level; });
+  }
+
+  c10::SmallVector<std::pair<uint64_t, at::Tensor>, EXPECTED_MAX_LEVEL>
+      content_;
   mutable std::mutex mutex_;
 };
 

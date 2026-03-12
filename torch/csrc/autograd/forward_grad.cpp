@@ -67,8 +67,8 @@ ForwardADLevel::~ForwardADLevel() {
 
 const at::Tensor& ForwardGrad::value(uint64_t level) const {
   std::lock_guard<std::mutex> lock(mutex_);
-  const auto& it = content_.find(level);
-  return it == content_.end() ? singleton_undefined_tensor : (*it).second;
+  auto it = find_level(level);
+  return it == content_.end() ? singleton_undefined_tensor : it->second;
 }
 
 const at::Tensor& ForwardGrad::undef_grad() {
