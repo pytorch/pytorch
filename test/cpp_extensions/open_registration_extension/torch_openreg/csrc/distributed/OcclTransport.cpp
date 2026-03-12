@@ -63,7 +63,7 @@ OcclTransport::OcclTransport(
     peers_[i].port = std::stoi(peerAddr.substr(colonPos + 1));
   }
 
-  // TODO: Start accept thread
+  acceptThread_ = std::thread(&OcclTransport::acceptLoop, this);
 }
 
 OcclTransport::~OcclTransport() {
@@ -109,7 +109,41 @@ void OcclTransport::recv(
 }
 
 void OcclTransport::ensureConnected(int peerRank) {
-  TORCH_CHECK(false, "OcclTransport::ensureConnected not yet implemented");
+  auto& conn = peers_[peerRank];
+  std::unique_lock<std::mutex> lock(conn.mutex);
+
+  if (conn.fd >= 0) {
+    return;
+  }
+
+  if (rank_ < peerRank) {
+    // Lower rank initiates the connection
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    TORCH_CHECK(fd >= 0, "Failed to create socket: ", strerror(errno));
+
+    int optval = 1;
+    ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
+
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(static_cast<uint16_t>(conn.port));
+    TORCH_CHECK(
+        ::inet_pton(AF_INET, conn.host.c_str(), &addr.sin_addr) == 1,
+        "Invalid peer address: ", conn.host);
+
+    TORCH_CHECK(
+        ::connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0,
+        "Failed to connect to rank ", peerRank, ": ", strerror(errno));
+
+    // Handshake: send our rank so the peer knows who connected
+    int32_t myRank = rank_;
+    sendAll(fd, &myRank, sizeof(myRank));
+
+    conn.fd = fd;
+  } else {
+    // Higher rank waits for the accept thread to fill in the fd
+    conn.cv.wait(lock, [&conn] { return conn.fd >= 0; });
+  }
 }
 
 void OcclTransport::publishAddress() {
@@ -126,15 +160,64 @@ std::string OcclTransport::getPeerAddress(int peerRank) {
 }
 
 void OcclTransport::acceptLoop() {
-  // TODO: Accept incoming connections from peers
+  // Set a timeout on the listening socket so we can check stop_ periodically
+  struct timeval tv{};
+  tv.tv_sec = 1;
+  ::setsockopt(listenFd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+  while (!stop_.load()) {
+    struct sockaddr_in peerAddr{};
+    socklen_t peerAddrLen = sizeof(peerAddr);
+    int fd = ::accept(listenFd_, reinterpret_cast<struct sockaddr*>(&peerAddr), &peerAddrLen);
+
+    if (fd < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+        continue; // timeout or interrupt — check stop_ and retry
+      }
+      if (stop_.load()) {
+        break; // listenFd_ was closed during shutdown
+      }
+      break;
+    }
+
+    int optval = 1;
+    ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
+
+    // Read handshake: the connecting rank's identity
+    int32_t connectingRank = -1;
+    recvAll(fd, &connectingRank, sizeof(connectingRank));
+
+    TORCH_CHECK(
+        connectingRank >= 0 && connectingRank < worldSize_,
+        "Invalid connecting rank in handshake: ", connectingRank);
+
+    auto& conn = peers_[connectingRank];
+    {
+      std::lock_guard<std::mutex> lock(conn.mutex);
+      conn.fd = fd;
+    }
+    conn.cv.notify_one();
+  }
 }
 
 void OcclTransport::sendAll(int fd, const void* buf, size_t len) {
-  TORCH_CHECK(false, "OcclTransport::sendAll not yet implemented");
+  auto ptr = static_cast<const char*>(buf);
+  size_t sent = 0;
+  while (sent < len) {
+    auto n = ::send(fd, ptr + sent, len - sent, 0);
+    TORCH_CHECK(n > 0, "sendAll failed: ", strerror(errno));
+    sent += static_cast<size_t>(n);
+  }
 }
 
 void OcclTransport::recvAll(int fd, void* buf, size_t len) {
-  TORCH_CHECK(false, "OcclTransport::recvAll not yet implemented");
+  auto ptr = static_cast<char*>(buf);
+  size_t received = 0;
+  while (received < len) {
+    auto n = ::recv(fd, ptr + received, len - received, 0);
+    TORCH_CHECK(n > 0, "recvAll failed: ", strerror(errno));
+    received += static_cast<size_t>(n);
+  }
 }
 
 } // namespace c10d::openreg

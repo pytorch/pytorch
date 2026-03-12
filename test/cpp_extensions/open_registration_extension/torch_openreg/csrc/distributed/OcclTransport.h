@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -79,6 +80,7 @@ class OcclTransport {
     int port = 0;
     int fd = -1;
     std::mutex mutex;
+    std::condition_variable cv;
   };
 
   // Ensure we have a connection to the given peer, establishing one
