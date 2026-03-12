@@ -1886,6 +1886,7 @@ class TensorVariable(VariableTracker):
             if layout.as_python_constant() != torch.strided:
                 return None
         fwd_kwargs = dict(kwargs)
+        fwd_kwargs.pop("layout", None)
         fwd_kwargs.setdefault("dtype", self.var_getattr(tx, "dtype"))
         fwd_kwargs.setdefault("device", self.var_getattr(tx, "device"))
         return variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
