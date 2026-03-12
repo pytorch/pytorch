@@ -12,7 +12,7 @@ namespace {
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::detail;
 
-void createHipdnnHandle(hipdnnHandle_t *handle) {
+void createHipdnnHandle(hipdnnHandle_t* handle) {
   HIPDNN_CHECK(hipdnnCreate(handle));
 }
 

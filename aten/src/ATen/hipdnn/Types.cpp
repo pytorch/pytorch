@@ -3,11 +3,11 @@
 
 #include <ATen/ATen.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 hipdnn_frontend::DataType getHipdnnDataType(const at::Tensor& tensor) {
-  switch (tensor.scalar_type())
-  {
+  switch (tensor.scalar_type()) {
     case at::kFloat:
       return hipdnn_frontend::DataType::FLOAT;
     case at::kHalf:
@@ -21,4 +21,5 @@ hipdnn_frontend::DataType getHipdnnDataType(const at::Tensor& tensor) {
   }
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

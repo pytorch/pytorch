@@ -36,9 +36,7 @@ def flags(
 
 
 class HipdnnModule(PropModule):
-    enabled = ContextProp(
-        torch._C._get_hipdnn_enabled, torch._C._set_hipdnn_enabled
-    )
+    enabled = ContextProp(torch._C._get_hipdnn_enabled, torch._C._set_hipdnn_enabled)
 
 
 sys.modules[__name__] = HipdnnModule(sys.modules[__name__], __name__)

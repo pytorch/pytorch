@@ -6,6 +6,7 @@
 
 namespace at::native {
 
-TORCH_CUDA_CPP_API hipdnn_frontend::DataType getHipdnnDataType(const at::Tensor& tensor);
+TORCH_CUDA_CPP_API hipdnn_frontend::DataType getHipdnnDataType(
+    const at::Tensor& tensor);
 
 } // namespace at::native

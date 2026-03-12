@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
+#include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -8,8 +8,8 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
-#include <ATen/ops/hipdnn_batch_norm_native.h>
 #include <ATen/ops/hipdnn_batch_norm_backward_native.h>
+#include <ATen/ops/hipdnn_batch_norm_native.h>
 #endif
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
@@ -23,84 +23,114 @@ namespace at::native {
 // See Note [ATen preprocessor philosophy]
 
 std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
-    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
-    bool training, double exponential_average_factor, double epsilon) {
+    const Tensor& input,
+    const Tensor& weight,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    bool training,
+    double exponential_average_factor,
+    double epsilon) {
   TORCH_CHECK(false, "hipdnn_batch_norm: ATen not compiled with ROCM support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
-    const Tensor& input, const Tensor& grad_output, const Tensor& weight, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
+    const Tensor& input,
+    const Tensor& grad_output,
+    const Tensor& weight,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_opt,
+    const std::optional<Tensor>& save_var_opt,
     double epsilon) {
-  TORCH_CHECK(false, "hipdnn_batch_norm_backward: ATen not compiled with ROCM support");
+  TORCH_CHECK(
+      false, "hipdnn_batch_norm_backward: ATen not compiled with ROCM support");
 }
 
-}  // namespace at::native
+} // namespace at::native
 
 #elif !defined(USE_HIPDNN) // AT_ROCM_ENABLED but no hipDNN
 
 namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
-    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
-    bool training, double exponential_average_factor, double epsilon) {
+    const Tensor& input,
+    const Tensor& weight,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    bool training,
+    double exponential_average_factor,
+    double epsilon) {
   TORCH_CHECK(false, "hipdnn_batch_norm: not compiled with hipDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
-    const Tensor& input, const Tensor& grad_output, const Tensor& weight, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
+    const Tensor& input,
+    const Tensor& grad_output,
+    const Tensor& weight,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_opt,
+    const std::optional<Tensor>& save_var_opt,
     double epsilon) {
-  TORCH_CHECK(false, "hipdnn_batch_norm_backward: not compiled with hipDNN support");
+  TORCH_CHECK(
+      false, "hipdnn_batch_norm_backward: not compiled with hipDNN support");
 }
 
-}  // namespace at::native
+} // namespace at::native
 
 #else // AT_ROCM_ENABLED && USE_HIPDNN
 
-#include <hipdnn_frontend.hpp>
-#include <ATen/hipdnn/Types.h>
-#include <ATen/hipdnn/Handle.h>
 #include <ATen/hipdnn/Exceptions.h>
+#include <ATen/hipdnn/Handle.h>
+#include <ATen/hipdnn/Types.h>
+#include <hipdnn_frontend.hpp>
 
 #include <ATen/TensorUtils.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
 Tensor expandScale(const Tensor& t, int64_t dim) {
-  std::vector<int64_t> size{ 1, t.numel() };
+  std::vector<int64_t> size{1, t.numel()};
   while (static_cast<int64_t>(size.size()) < dim) {
     size.emplace_back(1);
   }
   return t.view(size);
 }
 
-}  // namespace
+} // namespace
 
 inline std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
-    createTensorAttributes(const Tensor& t)
-{
-    auto tensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    tensor->set_dim(t.sizes().vec()).set_data_type(getHipdnnDataType(t));
-    tensor->set_stride(t.strides().vec());
-    return tensor;
+createTensorAttributes(const Tensor& t) {
+  auto tensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+  tensor->set_dim(t.sizes().vec()).set_data_type(getHipdnnDataType(t));
+  tensor->set_stride(t.strides().vec());
+  return tensor;
 }
 
 std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
-    const Tensor& input_t, const Tensor& weight_t, const std::optional<Tensor>& bias_t_opt, const std::optional<Tensor>& running_mean_t_opt, const std::optional<Tensor>& running_var_t_opt,
-    bool training, double exponential_average_factor, double epsilon)
-{
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const std::optional<Tensor>& bias_t_opt,
+    const std::optional<Tensor>& running_mean_t_opt,
+    const std::optional<Tensor>& running_var_t_opt,
+    bool training,
+    double exponential_average_factor,
+    double epsilon) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
+  c10::MaybeOwned<Tensor> bias_t_maybe_owned =
+      at::borrow_from_optional_tensor(bias_t_opt);
   const Tensor& bias_t = *bias_t_maybe_owned;
   const Tensor& running_mean_t = running_mean_t_opt.value_or(Tensor());
   const Tensor& running_var_t = running_var_t_opt.value_or(Tensor());
 
-  TensorArg input{ input_t, "input", 1 },
-            weight{ weight_t, "weight", 2 },
-            bias{ bias_t, "bias", 3 },
-            running_mean{ running_mean_t, "running_mean", 4 },
-            running_var{ running_var_t, "running_var", 5 };
+  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2},
+      bias{bias_t, "bias", 3}, running_mean{running_mean_t, "running_mean", 4},
+      running_var{running_var_t, "running_var", 5};
   CheckedFrom c = "hipdnn_batch_norm";
 
   checkAllDefined(c, {input, weight, bias});
@@ -108,7 +138,8 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
     checkAllDefined(c, {running_mean, running_var});
   }
   checkAllSameGPU(c, {input, weight, bias, running_mean, running_var});
-  if (input->scalar_type() == ScalarType::Half || input->scalar_type() == ScalarType::BFloat16) {
+  if (input->scalar_type() == ScalarType::Half ||
+      input->scalar_type() == ScalarType::BFloat16) {
     checkScalarType(c, weight, ScalarType::Float);
   } else {
     checkAllSameType(c, {input, weight});
@@ -124,8 +155,9 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
     }
   }
 
-  auto output_t = at::empty_like(input_t, input_t.options(), input_t.suggest_memory_format());
-  TensorArg output{ output_t, "output", 0 };
+  auto output_t = at::empty_like(
+      input_t, input_t.options(), input_t.suggest_memory_format());
+  TensorArg output{output_t, "output", 0};
 
   auto handle = getHipdnnHandle();
   auto inputType = getHipdnnDataType(*input);
@@ -134,8 +166,8 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
 
   if (training) {
     int64_t num_features = input_t.size(1);
-    save_mean = at::empty({ num_features }, weight_t.options());
-    save_var = at::empty({ num_features }, weight_t.options());
+    save_mean = at::empty({num_features}, weight_t.options());
+    save_var = at::empty({num_features}, weight_t.options());
 
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_io_data_type(inputType)
@@ -143,11 +175,13 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto input_attr = createTensorAttributes(*input);
-    auto weight_attr = createTensorAttributes(expandScale(*weight, input->dim()));
+    auto weight_attr =
+        createTensorAttributes(expandScale(*weight, input->dim()));
     auto bias_attr = createTensorAttributes(expandScale(*bias, input->dim()));
 
     auto bnAttributes = hipdnn_frontend::graph::BatchnormAttributes();
-    auto epsilon_attr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    auto epsilon_attr =
+        std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon_attr->set_value(epsilon);
     bnAttributes.set_epsilon(epsilon_attr);
 
@@ -155,11 +189,15 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
     std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> prev_var_attr;
 
     if (running_mean->defined()) {
-      prev_mean_attr = createTensorAttributes(expandScale(*running_mean, input->dim()));
-      prev_var_attr = createTensorAttributes(expandScale(*running_var, input->dim()));
-      auto momentum_attr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+      prev_mean_attr =
+          createTensorAttributes(expandScale(*running_mean, input->dim()));
+      prev_var_attr =
+          createTensorAttributes(expandScale(*running_var, input->dim()));
+      auto momentum_attr =
+          std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
       momentum_attr->set_value(exponential_average_factor);
-      bnAttributes.set_previous_running_stats(prev_mean_attr, prev_var_attr, momentum_attr);
+      bnAttributes.set_previous_running_stats(
+          prev_mean_attr, prev_var_attr, momentum_attr);
     }
 
     auto [y, savedMean, savedInvVar, nextMean, nextVar] =
@@ -176,7 +214,8 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
 
     int64_t workspace_size = 0;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspace_size));
-    auto workspace = at::empty({workspace_size}, input_t.options().dtype(at::kByte));
+    auto workspace =
+        at::empty({workspace_size}, input_t.options().dtype(at::kByte));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[input_attr->get_uid()] = input->data_ptr();
@@ -204,23 +243,35 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
     auto input_attr = createTensorAttributes(*input);
-    auto weight_attr = createTensorAttributes(expandScale(*weight, input->dim()));
+    auto weight_attr =
+        createTensorAttributes(expandScale(*weight, input->dim()));
     auto bias_attr = createTensorAttributes(expandScale(*bias, input->dim()));
-    auto mean_attr = createTensorAttributes(expandScale(*running_mean, input->dim()));
-    auto variance_attr = createTensorAttributes(expandScale(*running_var, input->dim()));
-    auto epsilon_attr = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    auto mean_attr =
+        createTensorAttributes(expandScale(*running_mean, input->dim()));
+    auto variance_attr =
+        createTensorAttributes(expandScale(*running_var, input->dim()));
+    auto epsilon_attr =
+        std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
     epsilon_attr->set_value(epsilon);
 
-    auto bnAttributes = hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt();
+    auto bnAttributes =
+        hipdnn_frontend::graph::BatchnormInferenceAttributesVarianceExt();
     auto output_attr = graph->batchnorm_inference_variance_ext(
-        input_attr, mean_attr, variance_attr, weight_attr, bias_attr, epsilon_attr, bnAttributes);
+        input_attr,
+        mean_attr,
+        variance_attr,
+        weight_attr,
+        bias_attr,
+        epsilon_attr,
+        bnAttributes);
     output_attr->set_output(true);
 
     HIPDNN_FE_CHECK(graph->build(handle));
 
     int64_t workspace_size = 0;
     HIPDNN_FE_CHECK(graph->get_workspace_size(workspace_size));
-    auto workspace = at::empty({workspace_size}, input_t.options().dtype(at::kByte));
+    auto workspace =
+        at::empty({workspace_size}, input_t.options().dtype(at::kByte));
 
     std::unordered_map<int64_t, void*> variantPack;
     variantPack[input_attr->get_uid()] = input->data_ptr();
@@ -247,7 +298,6 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
     const std::optional<Tensor>& save_mean_t_opt,
     const std::optional<Tensor>& save_var_t_opt,
     double epsilon) {
-
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& save_mean_t = save_mean_t_opt.value_or(Tensor());
   const Tensor& save_var_t = save_var_t_opt.value_or(Tensor());
@@ -262,7 +312,8 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
   checkAllSameGPU(c, {input, grad_output, weight, save_mean, save_var});
-  if (input->scalar_type() == ScalarType::Half || input->scalar_type() == ScalarType::BFloat16) {
+  if (input->scalar_type() == ScalarType::Half ||
+      input->scalar_type() == ScalarType::BFloat16) {
     checkScalarType(c, weight, ScalarType::Float);
   } else {
     checkAllSameType(c, {input, weight});
@@ -279,9 +330,10 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
     checkNumel(c, t, num_features);
   }
 
-  auto grad_input_t  = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
+  auto grad_input_t = at::empty(
+      input->sizes(), input->options(), input->suggest_memory_format());
   auto grad_weight_t = at::empty(weight->sizes(), weight->options());
-  auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
+  auto grad_bias_t = at::empty(weight->sizes(), weight->options());
 
   auto handle = getHipdnnHandle();
   auto inputType = getHipdnnDataType(*input);
@@ -295,11 +347,14 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
   auto dy_attr = createTensorAttributes(*grad_output);
   auto input_attr = createTensorAttributes(*input);
   auto weight_attr = createTensorAttributes(expandScale(*weight, input->dim()));
-  auto savedMeanAttr = createTensorAttributes(expandScale(*save_mean, input->dim()));
-  auto savedInvVarAttr = createTensorAttributes(expandScale(*save_var, input->dim()));
+  auto savedMeanAttr =
+      createTensorAttributes(expandScale(*save_mean, input->dim()));
+  auto savedInvVarAttr =
+      createTensorAttributes(expandScale(*save_var, input->dim()));
 
   auto bnBwdAttributes = hipdnn_frontend::graph::BatchnormBackwardAttributes();
-  bnBwdAttributes.set_saved_mean_and_inv_variance(savedMeanAttr, savedInvVarAttr);
+  bnBwdAttributes.set_saved_mean_and_inv_variance(
+      savedMeanAttr, savedInvVarAttr);
 
   auto [dx, dscale, dbias] = graph->batchnorm_backward(
       dy_attr, input_attr, weight_attr, bnBwdAttributes);
@@ -311,7 +366,8 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
 
   int64_t workspace_size = 0;
   HIPDNN_FE_CHECK(graph->get_workspace_size(workspace_size));
-  auto workspace = at::empty({workspace_size}, input_t.options().dtype(at::kByte));
+  auto workspace =
+      at::empty({workspace_size}, input_t.options().dtype(at::kByte));
 
   std::unordered_map<int64_t, void*> variantPack;
   variantPack[dy_attr->get_uid()] = grad_output->data_ptr();
@@ -325,9 +381,11 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
 
   HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.data_ptr()));
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
+  return std::tuple<Tensor, Tensor, Tensor>{
+      grad_input_t, grad_weight_t, grad_bias_t};
 }
 
-}}  // namespace native
+} // namespace native
+} // namespace at
 
 #endif
