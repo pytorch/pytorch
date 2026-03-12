@@ -443,6 +443,16 @@ class ConfigModule(ModuleType):
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
+    def _get_value_silent(self, key: str) -> Any:
+        """Get config value without triggering or consuming deprecation warning."""
+        config = self._config[key]
+        old_warned = config._deprecation_warned
+        config._deprecation_warned = True
+        try:
+            return getattr(self, key)
+        finally:
+            config._deprecation_warned = old_warned
+
     def __delattr__(self, name: str) -> None:
         self._is_dirty = True
         # must support delete because unittest.mock.patch deletes
@@ -537,7 +547,7 @@ class ConfigModule(ModuleType):
                 continue
             if self._config[key].alias is not None:
                 continue
-            config[key] = copy.deepcopy(getattr(self, key))
+            config[key] = copy.deepcopy(self._get_value_silent(key))
 
         return config
 
