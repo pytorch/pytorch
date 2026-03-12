@@ -196,4 +196,10 @@ class DynamicMetalShaderLibrary : public MetalShaderLibrary {
   ~DynamicMetalShaderLibrary() override;
 };
 
+class PrecompiledMetalShaderLibrary : public MetalShaderLibrary {
+ public:
+  explicit PrecompiledMetalShaderLibrary(const std::vector<uint8_t>& data);
+  ~PrecompiledMetalShaderLibrary() override;
+};
+
 } // namespace at::native::mps
