@@ -2534,8 +2534,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                     ],
                 )
 
-            from .distributed import P2POpVariable
-
             p2p_ops = kwargs["p2p_op_list"]
             if not isinstance(p2p_ops, variables.ListVariable):
                 raise torch._dynamo.exc.InternalTorchDynamoError(
@@ -2549,13 +2547,32 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             group_var: VariableTracker | None = None
 
             for item in p2p_ops.items:
-                assert isinstance(item, P2POpVariable)
-                ops.append(item.op)
-                tensors.append(item.tensor)
-                peers.append(item.peer)
-                tags.append(item.tag)
+                if item.python_type() is not dist.P2POp:
+                    raise torch._dynamo.exc.InternalTorchDynamoError(
+                        "`P2POp` used incorrectly"
+                    )
+
+                op_var = item.var_getattr(tx, "op")
+                if op_var.is_python_constant():
+                    op = op_var.as_python_constant()
+                    if op not in (dist.isend, dist.irecv):
+                        raise torch._dynamo.exc.InternalTorchDynamoError(
+                            f"unexpected P2POp op {op}"
+                        )
+                    op_var = variables.ConstantVariable.create(op.__name__)
+                elif hasattr(op_var, "get_name"):
+                    op_var = variables.ConstantVariable.create(op_var.get_name())
+                else:
+                    raise torch._dynamo.exc.InternalTorchDynamoError(
+                        f"unexpected P2POp op variable {op_var}"
+                    )
+
+                ops.append(op_var)
+                tensors.append(item.var_getattr(tx, "tensor"))
+                peers.append(item.var_getattr(tx, "peer"))
+                tags.append(item.var_getattr(tx, "tag"))
                 if group_var is None:
-                    group_var = item.group
+                    group_var = item.var_getattr(tx, "group")
 
             assert group_var is not None
             new_args: tuple[VariableTracker, ...] = ()

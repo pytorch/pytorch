@@ -547,11 +547,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     ],
                 )
 
-            from .distributed import P2POpVariable
-
-            return P2POpVariable.create(
-                tx, self.value, args=args, kwargs=kwargs, source=self.source
+            var = tx.output.side_effects.track_new_user_defined_object(
+                SourcelessBuilder.create(tx, object),
+                self,
+                [],
             )
+            var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
+            return var
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
@@ -1395,6 +1397,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             "Attempted setattr on a user-defined object that does not have "
             "an AttributeMutation mutation_type"
         )
+
+        if type(self.value) is torch.distributed.P2POp and (
+            tx.output.side_effects.has_pending_mutation_of_attr(self, name_str)
+            or name_str in self.value.__dict__
+        ):
+            unimplemented(
+                gb_type="P2POp mutation",
+                context=f"object={self}, name={name}, value={value}",
+                explanation="Dynamo does not support mutating torch.distributed.P2POp instances.",
+                hints=[
+                    "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile.",
+                ],
+            )
 
         if name_str == "__class__":
             unimplemented(

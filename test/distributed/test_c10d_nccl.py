@@ -6127,7 +6127,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     ops.append(dist.P2POp(dist.isend, tensor, 0))
                 else:
                     raise NotImplementedError
-            return dist.batch_isend_irecv(ops)[0].wait()
+            return [work.wait() for work in dist.batch_isend_irecv(ops)]
 
         if self.rank == self.MAIN_PROCESS_RANK:
             return
@@ -6141,7 +6141,13 @@ class NCCLTraceTest(NCCLTraceTestBase):
         ops_per_coalesce = len(op_sizes_per_coalesce)
 
         for _ in range(num_coalesced_ops):
-            compiled_fn(op_sizes_per_coalesce)
+            outputs = compiled_fn(op_sizes_per_coalesce)
+            if self.rank == 0:
+                self.assertEqual(len(outputs), ops_per_coalesce)
+                for output, input_sizes in zip(outputs, op_sizes_per_coalesce):
+                    self.assertEqual(
+                        output, torch.full(input_sizes, 2.0, device=self.local_device)
+                    )
 
         torch.cuda.synchronize()
 
@@ -6163,6 +6169,36 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(t["entries"][coalesced_op_idx]["state"], "completed")
             except Exception:
                 self.assertEqual(t["entries"][coalesced_op_idx]["state"], "scheduled")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @torch._dynamo.config.patch({"enable_p2p_compilation": True})
+    def test_compiled_fire_and_forget_isend(self):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        self._create_process_group_nccl()
+        device = torch.device(f"cuda:{self.rank}")
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            if self.rank == 0:
+                dist.isend(x, dst=1)
+            else:
+                dist.irecv(x, src=0)
+            return x
+
+        if self.rank == 0:
+            x = torch.ones(4, device=device) * 42
+            out = fn(x)
+            self.assertEqual(out, x)
+        else:
+            x = torch.zeros(4, device=device)
+            out = fn(x)
+            expected = torch.ones(4, device=device) * 42
+            self.assertEqual(out, expected)
+            self.assertEqual(x, expected)
+
+        torch.cuda.synchronize(device=device)
 
     def _single_isend_with_wait_pattern(self, tensor, dst_rank):
         req = dist.isend(tensor, dst_rank)

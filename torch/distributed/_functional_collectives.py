@@ -1542,9 +1542,16 @@ lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 lib_impl.impl("broadcast", _broadcast_meta, "Meta")
 lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 
-# mark these ops has side effect so that they won't be removed by DCE
+# Mark these ops as side effectful so that DCE does not remove communication
+# whose result tensors are ignored by user code.
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops)  # type: ignore[has-type]
 
 
 # Register legacy ops for backward compatibility
@@ -1732,7 +1739,8 @@ def isend_inplace(
 ):
     if group is None:
         group = dist.group.WORLD
-    assert group is not None
+    if group is None:
+        raise AssertionError("group cannot be None")
     if group_dst != -1:
         if dst is not None:
             raise ValueError(
@@ -1758,7 +1766,8 @@ def irecv_inplace(
 ):
     if group is None:
         group = dist.group.WORLD
-    assert group is not None
+    if group is None:
+        raise AssertionError("group cannot be None")
     if group_src != -1:
         if src is not None:
             raise ValueError(
@@ -1779,7 +1788,8 @@ def batch_p2p_ops_inplace(
     tensors: list[torch.Tensor],
     group_name: RANK_TYPES,
 ):
-    assert dist.is_initialized()
+    if not dist.is_initialized():
+        raise AssertionError("torch.distributed must be initialized")
     if group_name is None or group_name == "":
         group_name = c10d._get_default_group()
     group_name = _resolve_group_name(group_name)
@@ -1853,17 +1863,22 @@ def _remapped_all_gather(*args, **kwargs):
 
 
 def _remapped_isend(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_isend should only be called during tracing")
     return isend_inplace(*args, **kwargs)
 
 
 def _remapped_irecv(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_irecv should only be called during tracing")
     return irecv_inplace(*args, **kwargs)
 
 
 def _remapped_batch_p2p_ops(*args, **kwargs):
-    assert _are_we_tracing()
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_batch_p2p_ops should only be called during tracing"
+        )
     return batch_p2p_ops_inplace(*args, **kwargs)
 
 
