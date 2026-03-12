@@ -403,11 +403,39 @@ command runs tests such as `TestNN.test_BCELoss` and
 
 ### Local linting
 
-You can run the same linting steps that are used in CI locally via `make`:
+PyTorch uses `lintrunner` for local linting and in CI.
+
+If you do not already have `lintrunner`, install it once from the root of the
+repository:
 
 ```bash
-make lint
+pip install lintrunner
+lintrunner init
 ```
+
+Run the following command to lint files changed in your working tree and the
+`HEAD` commit:
+
+```bash
+lintrunner
+```
+
+If your PR targets `main`, run the following command to lint your entire
+branch:
+
+```bash
+lintrunner -m main
+```
+
+To lint all files in the repository, run:
+
+```bash
+lintrunner --all-files
+```
+
+If you prefer to use [Spin](https://github.com/scientific-python/spin),
+`spin quicklint` lints changed files and `spin lint` runs the default lint
+configuration described above.
 
 Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
 
@@ -1207,18 +1235,22 @@ performing these checks, before a commit is created:
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 
-If you have already committed files and
-CI reports `flake8` errors, you can run the check locally in your PR branch with:
+If you have already committed files and CI reports lint errors, you can run the
+same checks locally in your PR branch with:
 
   ```bash
-  flake8 $(git diff --name-only $(git merge-base --fork-point main))
+  lintrunner -m main
   ```
 
-You'll need to install an appropriately configured flake8; see
-[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
-for documentation on how to do this.
+If your PR targets a different base branch, replace `main` with that branch.
 
-Fix the code so that no errors are reported when you re-run the above check again,
+To rerun only `flake8`, add `--take FLAKE8`:
+
+  ```bash
+  lintrunner -m main --take FLAKE8
+  ```
+
+Fix the code so that no errors are reported when you re-run the relevant check,
 and then commit the fix.
 
 ## Building PyTorch with ASAN
