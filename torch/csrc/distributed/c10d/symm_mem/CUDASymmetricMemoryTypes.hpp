@@ -1,5 +1,9 @@
 #pragma once
 
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <cuda.h>
+#endif
+
 #include <cstddef>
 #include <cstdint>
 
