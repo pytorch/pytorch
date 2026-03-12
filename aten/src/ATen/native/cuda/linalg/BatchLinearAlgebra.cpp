@@ -1492,13 +1492,14 @@ void linalg_lstsq_gelsd(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singul
   rank.copy_((above_tol).sum(-1));
 
   // Avoid dividing by zero by masking singular values that are not above the tolerance
-  Tensor S_safe = singular_values.mul(above_tol).add_(above_tol.logical_not());
+  Tensor S_safe = at::where(above_tol, singular_values, 1.0);
+  S_safe.unsqueeze_(-1);
+  above_tol.unsqueeze_(-1);
   auto B_narrowed = B.narrow(-2, 0, m);
   Tensor UhB = at::matmul(U.mH(), B_narrowed);
-  Tensor S_safe_expanded = S_safe.unsqueeze(-1).to(A.scalar_type());
-  Tensor SpinvUhB = UhB.div(S_safe_expanded);
+  Tensor SpinvUhB = UhB.div(S_safe.to(A.scalar_type()));
   // Zero out contributions from singular values below tolerance
-  SpinvUhB = at::where(above_tol.unsqueeze(-1), SpinvUhB, 0.0);
+  SpinvUhB.masked_fill_(~above_tol, 0.0);
 
   auto X = at::matmul(Vh.mH(), SpinvUhB);
   if (m > n)
