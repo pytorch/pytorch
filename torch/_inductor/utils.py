@@ -3469,6 +3469,7 @@ def copy_misaligned_inputs(
     Clones misaligned tensors which we inferred were aligned. Returns a tuple of [old_tensors], [new_tensors] for every
     cloned tensor which is in `return_pair_idxs`.
     """
+    from torch._subclasses.fake_tensor import FakeTensor
 
     old_tensors: list[torch.Tensor] = []
     new_tensors: list[torch.Tensor] = []
@@ -3480,6 +3481,9 @@ def copy_misaligned_inputs(
         assert isinstance(_inp, torch.Tensor), (
             f"Expected tensors only, but got: {type(_inp)}"
         )
+        # Skip alignment check for FakeTensors (they don't have real data_ptr)
+        if isinstance(_inp, FakeTensor):
+            continue
         if _inp.data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(_inp)
 

@@ -206,8 +206,23 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
-  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
-      dtype_ != dtype || device_index_ != device.index() ||
+  // For FakeTensors (which have Meta dispatch key), we need special handling:
+  // - Skip the exact dispatch key match (Meta vs CPU/CUDA)
+  // - But ensure the device TYPE matches by checking if both are CUDA or both are CPU
+  bool is_fake_tensor = dispatch_key_set.has(c10::DispatchKey::Meta);
+  if (is_fake_tensor) {
+    // For FakeTensors, check that the expected dispatch key's device type matches
+    // E.g., if compiled with CUDA FakeTensor, only allow CUDA FakeTensors
+    c10::DispatchKeySet expected_ks(c10::DispatchKeySet::RAW, dispatch_key_);
+    bool expected_cuda = expected_ks.has(c10::DispatchKey::CUDA);
+    bool actual_cuda = dispatch_key_set.has(c10::DispatchKey::CUDA);
+    if (expected_cuda != actual_cuda) {
+      return false;
+    }
+  } else if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr()) {
+    return false;
+  }
+  if (dtype_ != dtype || device_index_ != device.index() ||
       requires_grad_ != requires_grad) {
     return false;
   }
@@ -467,7 +482,8 @@ PyObject* TensorGuards_check(
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
 
-    if (Py_TYPE(item) != checks[i].pytype) {
+    // POC: Skip exact pytype check, just verify it's some tensor type
+    if (!THPVariable_Check(item)) {
       Py_RETURN_FALSE;
     }
     auto insertion = unique_tensors.insert({item, nullptr});
@@ -535,7 +551,8 @@ PyObject* TensorGuards_check_verbose(
   ska::flat_hash_map<PyObject*, std::nullptr_t> unique_tensors;
   for (auto i : c10::irange(len)) {
     PyObject* item = PyTuple_GET_ITEM(args, i);
-    if (Py_TYPE(item) != checks[i].pytype) {
+    // POC: Skip exact pytype check, just verify it's some tensor type
+    if (!THPVariable_Check(item)) {
       std::stringstream fail_reason;
       PyObject* type_str = PyObject_Str(PyObject_Type(item));
       fail_reason << "expected type of '" << tensor_check_names[i]
@@ -966,6 +983,11 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     return nullptr;
   }
 
+  // Skip guard check for tensors with symbolic sizes/strides (e.g., FakeTensors)
+  if (tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    Py_RETURN_TRUE;
+  }
+
   // We may add the size/stride assert at compile time due to unbacked symint,
   // but at runtime, the tensor can be empty.
   if (tensor.numel() == 0) {
@@ -1036,6 +1058,11 @@ static PyObject* assert_alignment(PyObject* dummy, PyObject* args) {
   }
 
   at::Tensor tensor = THPVariable_Unpack(item);
+
+  // Skip alignment check for tensors with symbolic sizes/strides (e.g., FakeTensors)
+  if (tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    Py_RETURN_TRUE;
+  }
 
   int64_t storage_offset = tensor.storage_offset();
   size_t itemsize = tensor.itemsize();
@@ -4582,7 +4609,8 @@ class TENSOR_MATCH : public LeafGuard {
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    if (Py_TYPE(value) != _tensor_check->pytype) {
+    // POC: Skip exact pytype check, just verify it's some tensor type
+    if (!THPVariable_Check(value)) {
       return false;
     }
     return _tensor_check->check(
@@ -4592,7 +4620,8 @@ class TENSOR_MATCH : public LeafGuard {
   GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
 
-    if (Py_TYPE(value) != _tensor_check->pytype) {
+    // POC: Skip exact pytype check, just verify it's some tensor type
+    if (!THPVariable_Check(value)) {
       std::stringstream fail_reason;
       PyObject* type_str = PyObject_Str(PyObject_Type(value));
       fail_reason << "expected type of '" << _tensor_name

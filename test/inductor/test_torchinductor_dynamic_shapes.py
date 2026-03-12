@@ -1367,6 +1367,74 @@ class TestInductorDynamic(TestCase):
         # Test backward pass as well - this is where the bug manifested
         out_compiled.sum().backward()
 
+    def test_compile_with_fake_tensor_dynamic_shapes(self, device):
+        """
+        Test that torch.compile works with FakeTensors that have dynamic shapes.
+        
+        This tests the JIT compilation flow where:
+        1. A FakeTensor with symbolic dim0 (dynamic) and static dim1 is passed
+        2. Compilation happens, but kernel execution is short-circuited for FakeTensors
+        3. Real tensors can then use the cached compiled code
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            ShapeEnv,
+            DimDynamic,
+            StatelessSymbolicContext,
+        )
+        from torch._dynamo.source import ConstantSource
+
+        @torch.compile(backend="inductor", dynamic=True)
+        def fn1(x):
+            if x.size()[0] > 10:
+                return x.sum(dim=0) + x.mean()
+            else:
+                return x * 100
+
+        @torch.compile(backend="inductor", dynamic=True)
+        def fn2(x, y):
+            return x + y * 100
+
+        def program(x):
+            # eager code
+            fake_x = x + 100
+            tmp1 = fn1(fake_x)
+            # more eager
+            tmp2 = tmp1.contiguous()
+            tmp3 = fn2(tmp1, tmp1)
+            return tmp3
+
+        shape_env = ShapeEnv()
+
+        with FakeTensorMode(shape_env=shape_env) as mode:
+            source = ConstantSource("test_input")
+            # Create symbolic sizes: dim0 is DYNAMIC, dim1 is STATIC
+            sym_sizes, sym_strides, _ = shape_env.create_symbolic_sizes_strides_storage_offset(
+                torch.empty(30, 10, device=device),
+                source=source,
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+                ),
+            )
+
+            # Create fake tensor with symbolic shape directly on device
+            fake_x = torch.empty_strided(sym_sizes, sym_strides, device=device)
+
+            # Warm up with fake tensor with batch size marked dynamic
+            result_fake = program(fake_x)
+            # FakeTensor output should have symbolic shape
+            self.assertTrue(hasattr(result_fake.shape[0], '__sym_int__') or 
+                          str(result_fake.shape[0]).startswith('s'))
+
+        # Run with real tensors - should use cached compiled code
+        result_real1 = program(torch.rand(100, 10, device=device))
+        # With size > 10, fn1 returns sum(dim=0) which has shape [10]
+        self.assertEqual(result_real1.shape, torch.Size([10]))
+
+        # Run with different batch size - dynamic shapes should handle this
+        result_real2 = program(torch.rand(200, 10, device=device))
+        self.assertEqual(result_real2.shape, torch.Size([10]))
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 

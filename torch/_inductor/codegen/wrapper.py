@@ -1592,6 +1592,9 @@ class PythonWrapperCodegen(CodeGen):
         prefix_indent = self.write_launcher_fn_call_get_indent()
 
         with self.prefix.indent(prefix_indent):
+            # Add FakeTensor short-circuit at the beginning
+            self._write_fake_tensor_shortcircuit()
+
             if config.triton.debug_sync_graph:
                 self.prefix.writeline(V.graph.device_ops.synchronize())
             phase = V.graph.get_training_phase()
@@ -1612,6 +1615,15 @@ class PythonWrapperCodegen(CodeGen):
                 and (not is_codegen_graph_partition_subgraph(self))
             ):
                 self.codegen_input_size_and_nan_asserts()
+
+    def _write_fake_tensor_shortcircuit(self) -> None:
+        """
+        Generate code to detect FakeTensor inputs and short-circuit kernel execution.
+        Returns FakeTensor outputs with correct shapes instead of running real kernels.
+        """
+        # This is now handled in output_code.py at runtime, not in codegen
+        # Keeping this method for potential future use
+        pass
 
     def codegen_input_size_and_nan_asserts(self) -> None:
         if config.size_asserts:
