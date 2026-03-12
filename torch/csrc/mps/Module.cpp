@@ -510,7 +510,7 @@ void initModule(PyObject* module) {
   m.def("_mps_loadMetalllib", [](const py::bytes& data) {
     auto sv = static_cast<std::string_view>(data);
     std::vector<uint8_t> bytes(sv.begin(), sv.end());
-    return std::make_shared<PrecompiledMetalShaderLibrary>(bytes);
+    return std::make_shared<PrecompiledMetalShaderLibrary>(std::move(bytes));
   });
   m.def("_mps_loadMetallibFromPath", [](const std::string& path) {
     return std::make_shared<PrecompiledMetalShaderLibrary>(path);

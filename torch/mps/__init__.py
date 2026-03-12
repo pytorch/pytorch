@@ -192,9 +192,7 @@ def load_metallib(source):
             raise RuntimeError("MPS is not available")
         return torch._C._mps_loadMetallibFromPath(str(source))
     else:
-        raise TypeError(
-            f"expected bytes or path, got {type(source).__name__}"
-        )
+        raise TypeError(f"expected bytes or path, got {type(source).__name__}")
 
 
 def is_available() -> bool:

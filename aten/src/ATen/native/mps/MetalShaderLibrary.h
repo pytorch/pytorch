@@ -198,7 +198,7 @@ class DynamicMetalShaderLibrary : public MetalShaderLibrary {
 
 class PrecompiledMetalShaderLibrary : public MetalShaderLibrary {
  public:
-  explicit PrecompiledMetalShaderLibrary(const std::vector<uint8_t>& data);
+  explicit PrecompiledMetalShaderLibrary(std::vector<uint8_t> data);
   explicit PrecompiledMetalShaderLibrary(const std::string& path);
   ~PrecompiledMetalShaderLibrary() override;
 };

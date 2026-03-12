@@ -1340,7 +1340,7 @@ DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
 }
 
 // PrecompiledMetalShaderLibrary implementation
-PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(const std::vector<uint8_t>& data)
+PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(std::vector<uint8_t> data)
     : MetalShaderLibrary("") {
   auto device = MPSDevice::getInstance()->device();
   NSError* error = nil;
@@ -1351,13 +1351,16 @@ PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(const std::vector<u
   TORCH_CHECK(library, "Failed to load metallib: ", error ? [[error description] UTF8String] : "unknown error");
 }
 
-PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(const std::string& path)
-    : MetalShaderLibrary("") {
+PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(const std::string& path): MetalShaderLibrary("") {
   auto device = MPSDevice::getInstance()->device();
   NSError* error = nil;
   NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
   library = [device newLibraryWithURL:url error:&error];
-  TORCH_CHECK(library, "Failed to load metallib from '", path, "': ", error ? [[error description] UTF8String] : "unknown error");
+  TORCH_CHECK(library,
+              "Failed to load metallib from '",
+              path,
+              "': ",
+              error ? [[error description] UTF8String] : "unknown error");
 }
 
 PrecompiledMetalShaderLibrary::~PrecompiledMetalShaderLibrary() {
