@@ -27,6 +27,15 @@ class TestUnflatten(TestCase):
         unflattened_output = unflattened(*args)
         self.assertTrue(torch.allclose(orig_output, unflattened_output))
 
+    def test_export_allows_aten_hardtanh_with_inverted_bounds(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.hardtanh(x, min_val=2, max_val=0)
+
+        x = torch.randn(3)
+        ep = export(M(), (x,), strict=True)
+        self.assertEqual(ep.module()(x), M()(x))
+
     def test_unflatten_nested(self):
         class NestedChild(torch.nn.Module):
             def forward(self, x):
