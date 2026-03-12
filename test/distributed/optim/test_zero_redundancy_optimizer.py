@@ -36,7 +36,7 @@ from torch.testing._internal.common_distributed import (
     requires_ddp_rank,
     requires_gloo,
     skip_if_lt_x_gpu,
-    skip_if_no_gpu,
+    skip_if_no_accelerator,
     skip_if_win32,
 )
 from torch.testing._internal.common_utils import (
@@ -372,7 +372,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 msg=f"Model buffers differ:\n{b_a} {b_b}\n" + message,
             )
 
-    @skip_if_no_gpu
+    @skip_if_no_accelerator
     def test_step(self):
         """Check that ZeroRedundancyOptimizer properly exposes the ``step()``
         interface."""
@@ -411,7 +411,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             self.assertEqual(m.weight, m_zero.weight)
             self.assertEqual(m.bias, m_zero.bias)
 
-    @skip_if_no_gpu
+    @skip_if_no_accelerator
     def test_step_with_closure(self):
         """Check that ZeroRedundancyOptimizer properly exposes the
         ``step(closure)`` interface."""
@@ -460,7 +460,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 self.assertEqual(m.weight, torch.tensor([[1.1]]))
                 self.assertEqual(m.bias, torch.tensor([2.1]))
 
-    @skip_if_no_gpu
+    @skip_if_no_accelerator
     def test_lr_scheduler(self):
         """Check that a normal PyTorch ``lr_scheduler`` is usable with
         ZeroRedundancyOptimizer."""
@@ -562,7 +562,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         all_trainable()
         some_trainable()
 
-    @skip_if_no_gpu
+    @skip_if_no_accelerator
     def test_multiple_param_groups(self):
         """
         Check parity between constructing ZeRO with multiple parameter groups
@@ -629,7 +629,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 torch.testing.assert_close(layer1.bias, layer2.bias)
                 torch.testing.assert_close(layer1.bias, layer3.bias)
 
-    @skip_if_no_gpu
+    @skip_if_no_accelerator
     def test_collect_shards(self):
         """Check the state consolidation mechanism and the state dict exposed
         by ZeroRedundancyOptimizer."""
@@ -780,7 +780,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         )
         check(optimizer)
 
-    @skip_if_no_gpu
+    @skip_if_no_accelerator
     @parametrize(
         "optimizer_class_str",
         ["Adam", "AdamW", "SGD"],
@@ -1084,7 +1084,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     iter += 1
 
     @requires_accelerator_dist_backend()
-    @skip_if_no_gpu
+    @skip_if_no_accelerator
     def test_zero_join_gpu(self):
         """Check that the ZeRO join hook allows training with uneven inputs
         on GPU."""
@@ -1356,7 +1356,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     # are not currently supported.
     @skip_if_win32()
     @requires_accelerator_dist_backend()
-    @skip_if_no_gpu
+    @skip_if_no_accelerator
     @parametrize(
         "use_gpu",
         [True],

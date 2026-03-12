@@ -73,6 +73,14 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
 DEVICE_COUNT: int
 
+_PRIVATEUSE1_BACKEND: str | None = None
+
+
+def register_privateuse1_backend(name: str) -> None:
+    global _PRIVATEUSE1_BACKEND
+    _PRIVATEUSE1_BACKEND = name
+
+
 if TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1:
     DEVICE_TYPE = torch.accelerator.current_accelerator().type
     DEVICE_COUNT = torch.accelerator.device_count()
@@ -628,7 +636,7 @@ def skip_unless_torch_gpu(method: T) -> T:
     >>> def test_some_method(self) -> None:
     >>>   ...
     """
-    # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
+    # The builtin @skip_if_no_accelerator relies on os.environ['WORLD_SIZE'] being set.
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 
@@ -707,7 +715,7 @@ class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
         # we skip the test.
         if torch.accelerator.is_available():
             if world_size > torch.accelerator.device_count():
-                sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+                sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
             else:
                 torch.accelerator.set_device_index(rank)
 
@@ -802,11 +810,11 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
         )
         if requires_gpu and torch.accelerator.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{self.world_size}"].exit_code)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
 
-        if backend not in [
+        _known = [
             "nccl",
             "gloo",
             "mpi",
@@ -817,8 +825,11 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             "xccl",
             "fake",
             "cpu:gloo,xpu:xccl",
-            curr_backend,
-        ]:
+        ]
+        if _PRIVATEUSE1_BACKEND:
+            _known.append(_PRIVATEUSE1_BACKEND)
+
+        if backend not in _known:
             raise RuntimeError(f"Backend {backend} not supported!")
 
         device_id = None

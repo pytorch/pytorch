@@ -108,6 +108,14 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
+    "multi-device-1": TestSkip(90, "Need at least 1 accelerator device"),
+    "multi-device-2": TestSkip(91, "Need at least 2 accelerator devices"),
+    "multi-device-3": TestSkip(92, "Need at least 3 accelerator devices"),
+    "multi-device-4": TestSkip(93, "Need at least 4 accelerator devices"),
+    "multi-device-5": TestSkip(94, "Need at least 5 accelerator devices"),
+    "multi-device-6": TestSkip(95, "Need at least 6 accelerator devices"),
+    "multi-device-7": TestSkip(96, "Need at least 7 accelerator devices"),
+    "multi-device-8": TestSkip(97, "Need at least 8 accelerator devices"),
 }
 
 
@@ -137,14 +145,14 @@ def requires_ddp_rank(device):
     return device in DDP_RANK_DEVICES
 
 
-def skip_if_no_gpu(func):
-    """Skips if the world size exceeds the number of Devices, ensuring that if the
+def skip_if_no_accelerator(func):
+    """Skips if the world size exceeds the number of devices, ensuring that if the
     test is run, each rank has its own device via ``torch.cuda.device(rank) or torch.accelerator.device_index(rank)``."""
 
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not (TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
-            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
+            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if TEST_CUDA and torch.cuda.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
@@ -153,7 +161,7 @@ def skip_if_no_gpu(func):
         if TEST_XPU and torch.xpu.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
         if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
 
@@ -256,7 +264,7 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
                 return func(*args, **kwargs)
             if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
                 return func(*args, **kwargs)
-            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            test_skip = TEST_SKIPS[f"multi-device-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
