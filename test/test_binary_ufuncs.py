@@ -521,6 +521,19 @@ class TestBinaryUfuncs(TestCase):
         def _supported(dtypes):
             return all(x in supported_dtypes for x in dtypes)
 
+        complex_comparison_ops = {
+            "max",
+            "maximum",
+            "min",
+            "minimum",
+            "fmax",
+            "fmin",
+        }
+        expects_complex_promotion_runtime_error = (
+            torch.device(device).type in {"cuda", "xpu"}
+            and op.name in complex_comparison_ops
+        )
+
         # int x int type promotion
         if _supported((torch.int16, torch.int32, torch.int64)):
             lhs_i16 = make_lhs(dtype=torch.int16)
@@ -593,8 +606,12 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_i64, dtype=torch.complex64)
-                self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
+                if expects_complex_promotion_runtime_error:
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for 'Complex"):
+                        op(lhs_i16, rhs_i32, out=out)
+                else:
+                    self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.complex64)
+                    self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
 
         # float x float type promotion
         if _supported((torch.float32, torch.float64)):
@@ -626,8 +643,12 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
 
                 out = torch.empty_like(lhs_f64, dtype=torch.complex64)
-                self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.complex64)
-                self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
+                if expects_complex_promotion_runtime_error:
+                    with self.assertRaisesRegex(RuntimeError, "not implemented for 'Complex"):
+                        op(lhs_f32, rhs_f64, out=out)
+                else:
+                    self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.complex64)
+                    self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
 
                 if not op.always_returns_bool:
                     # float outs can't be cast to an integer dtype
