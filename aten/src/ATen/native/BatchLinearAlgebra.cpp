@@ -2866,8 +2866,9 @@ Tensor ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool l
 DEFINE_DISPATCH(geqp3_stub);
 
 /*
-  Computes the QR decomposition with column pivoting using GEQP3 and ORGQR operations.
-  This is an in-place function and Q, R, and P tensors must have correct shape and be Fortran contiguous.
+  Computes the QR decomposition with column pivoting using the GEQP3 and ORGQR operations.
+  This is an in-place function; Q, R, and P must have the correct shapes.
+  Q and R must be Fortran-contiguous, while P must be C-contiguous.
 
   Args:
   * `A` - [in] Input tensor for QR decomposition with column pivoting
