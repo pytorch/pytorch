@@ -1362,43 +1362,13 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
         output_code_log.debug("Output code: \n%s", code)
         output_code_log.debug("Output code written to: %s", artifact_path)
-        # On cache hit, use artifact path as filename
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "fx_graph_runnable",
-                "encoding": "string",
-            },
-            payload_fn=lambda: graph.runnable_graph_str,
-        )
-        trace_structured(
-            "inductor_post_grad_graph",
-            payload_fn=lambda: graph.inductor_post_grad_graph_str,
-        )
-        trace_structured(
-            "inductor_output_code",
-            lambda: {
-                "filename": artifact_path,
-                "file_path": os.path.abspath(artifact_path),
-            },
-            payload_fn=lambda: code,
-        )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_provenance_tracking_node_mappings",
-                "encoding": "json",
-            },
-            payload_fn=lambda: graph.inductor_provenance_mapping_str,
-        )
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "inductor_provenance_tracking_kernel_stack_traces",
-                "encoding": "json",
-            },
-            payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
-        )
+        if graph.recorded_structured_logs is not None:
+            for log_name, metadata, payload in graph.recorded_structured_logs:
+                trace_structured(
+                    log_name,
+                    metadata_fn=lambda m=metadata: m,  # pyrefly: ignore[bad-argument-type]
+                    payload_fn=lambda p=payload: p,  # pyrefly: ignore[bad-argument-type]
+                )
         if (
             get_metrics_context().in_progress()
             and graph.inductor_provenance_stack_traces_str

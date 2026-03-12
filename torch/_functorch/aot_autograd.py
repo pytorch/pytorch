@@ -26,6 +26,7 @@ from torch._dynamo.utils import (
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.utils import BoxedBool
+from torch._logging._internal import StructuredTraceRecorder, trace_log
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1158,6 +1159,9 @@ def aot_module_simplified(
                 mod = pre_grad_passes(mod, fake_flat_args)
 
             stack.enter_context(compiled_autograd._disable())
+            if trace_log.handlers:
+                recorder = stack.enter_context(StructuredTraceRecorder.record())
+                aot_config._structured_trace_recorder = recorder
             aot_state = create_aot_state(
                 stack,
                 functional_call,

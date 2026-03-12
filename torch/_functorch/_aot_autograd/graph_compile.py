@@ -492,6 +492,8 @@ def _cache_inference_info(
     if cache_info is not None and should_save_cache():
         time_taken_ns = time.time_ns() - cache_info.start_time_ns
         guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
+        recorder = aot_config._structured_trace_recorder
+        recorded_logs = list(recorder.entries) if recorder is not None else None
         entry = AOTAutogradCache.make_entry(
             compiled_fw_func=compiled_fw,  # type: ignore[arg-type]
             compiled_bw_func=None,
@@ -510,6 +512,7 @@ def _cache_inference_info(
             backward_state_indices=None,
             num_symints_saved_for_bw=None,
             serialized_bw_module=None,
+            recorded_structured_logs=recorded_logs,
         )
         AOTAutogradCache.save(
             cache_info.cache_key,
@@ -2339,6 +2342,10 @@ def _cache_autograd_info(
     if aot_config.cache_info is not None:
         forward_time_taken_ns = time.time_ns() - aot_config.cache_info.start_time_ns
 
+        # Snapshot recorded structured logs now, since the closure may run lazily
+        recorder = aot_config._structured_trace_recorder
+        recorded_logs = list(recorder.entries) if recorder is not None else None
+
         # NB: aot_config here is technically not needed as an argument: we could just
         # close over aot_config.cache_info, since aot_config never changes.
         # But closing over random variables is confusing IMO, so I'm leaving it.
@@ -2392,6 +2399,7 @@ def _cache_autograd_info(
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
                     serialized_bw_module=serialize_graph_module(bw_module),
+                    recorded_structured_logs=recorded_logs,
                 )
                 AOTAutogradCache.save(
                     cache_info.cache_key,

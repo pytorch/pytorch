@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
     from torch._inductor.cudagraph_utils import BoxedDeviceIndex
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
+    from torch._logging._internal import RecordedStructuredLog
 
 
 log = logging.getLogger(__name__)
@@ -1180,6 +1181,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         backward_state_indices: list[int] | None,
         num_symints_saved_for_bw: int | None,
         serialized_bw_module: SerializedGraphModule | None,
+        recorded_structured_logs: list[RecordedStructuredLog] | None = None,
     ) -> GenericAOTAutogradResult[Any, Any]:
         if should_bundle_autograd_cache():
             # Helper function to unwrap all the wrappers we added during aotdispatch
@@ -1220,6 +1222,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
                 serialized_bw_module=serialized_bw_module,
+                recorded_structured_logs=recorded_structured_logs,
             )
 
         else:
@@ -1269,4 +1272,5 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 sanitized_aot_config=sanitized_aot_config,
                 guards_expr=guards_expr,
                 serialized_bw_module=serialized_bw_module,
+                recorded_structured_logs=recorded_structured_logs,
             )

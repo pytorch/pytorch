@@ -13,12 +13,13 @@ import pkgutil
 import re
 import sys
 import tempfile
+import threading
 import time
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Generic, Optional
+from typing import Any, Generic, NamedTuple, Optional
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
@@ -1376,6 +1377,43 @@ def get_structured_logging_overhead() -> float | None:
         return None
 
 
+class RecordedStructuredLog(NamedTuple):
+    name: str
+    metadata: dict[str, Any]
+    payload: Optional[str]
+
+
+_active_structured_trace_recorder: threading.local = threading.local()
+
+
+class StructuredTraceRecorder:
+    """Records trace_structured calls for replay on cache hit.
+
+    Thread-local active recorder is set during cache-miss compilation so that
+    trace_structured calls are captured for later replay on cache hit.
+    """
+
+    def __init__(self) -> None:
+        self.entries: list[RecordedStructuredLog] = []
+
+    @staticmethod
+    @contextlib.contextmanager
+    def record():
+        """Set a new recorder as the active one; yields it."""
+        recorder = StructuredTraceRecorder()
+        prev = getattr(_active_structured_trace_recorder, "value", None)
+        _active_structured_trace_recorder.value = recorder
+        try:
+            yield recorder
+        finally:
+            _active_structured_trace_recorder.value = prev
+
+    @staticmethod
+    def get_active() -> Optional["StructuredTraceRecorder"]:
+        """Return the active recorder, or None."""
+        return getattr(_active_structured_trace_recorder, "value", None)
+
+
 def trace_structured_artifact(
     name: str,  # this will go in metadata
     encoding: str,
@@ -1490,6 +1528,17 @@ def trace_structured(
             "", extra={"metadata": record, "payload": payload}, stacklevel=2
         )
         log_trace_structured_event(name, record)
+
+        # Record for cache replay if a recorder is active
+        active_recorder = StructuredTraceRecorder.get_active()
+        if active_recorder is not None:
+            active_recorder.entries.append(
+                RecordedStructuredLog(
+                    name,
+                    record[name],  # pyrefly: ignore[bad-argument-type]
+                    payload,
+                )
+            )
 
         if record_logging_overhead:
             # Convert to seconds from nanoseconds, add it to the frame compile total

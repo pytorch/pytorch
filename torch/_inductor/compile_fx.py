@@ -95,6 +95,7 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
+from torch._logging._internal import StructuredTraceRecorder, trace_log
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -1243,6 +1244,11 @@ class _InProcessFxCompile(FxCompile):
         with (
             _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard(),
             dynamo_utils.preserve_rng_state(),
+            (
+                StructuredTraceRecorder.record()
+                if trace_log.handlers
+                else contextlib.nullcontext()
+            ) as _inductor_trace_recorder,
         ):
             if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
                 import time
@@ -1721,7 +1727,7 @@ class _InProcessFxCompile(FxCompile):
                                 compile_id
                             )
 
-                    return CompiledFxGraph(
+                    compiled_fx_graph = CompiledFxGraph(
                         compiled_fn,
                         graph,
                         gm,
@@ -1740,7 +1746,11 @@ class _InProcessFxCompile(FxCompile):
                         compiled_fn_runner,
                         inductor_provenance_tracking_node_mappings,
                         inductor_kernel_stack_trace_str,
+                        recorded_structured_logs=list(_inductor_trace_recorder.entries)
+                        if _inductor_trace_recorder is not None
+                        else None,
                     )
+                    return compiled_fx_graph
 
 
 def fx_codegen_and_compile(

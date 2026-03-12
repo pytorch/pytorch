@@ -3,6 +3,7 @@
 import copy
 import dataclasses
 import functools
+import logging
 import operator
 import os
 import pickle
@@ -3316,6 +3317,104 @@ class HOPCacheTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+
+trace_log = logging.getLogger("torch.__trace")
+
+# Metadata keys that are common framing, not artifact identifiers
+_TRACE_FRAMING_KEYS = frozenset(
+    {
+        "rank",
+        "frame_id",
+        "frame_compile_id",
+        "attempt",
+        "has_payload",
+        "stack",
+        "compiled_autograd_id",
+    }
+)
+
+
+class _ArtifactNameHandler(logging.Handler):
+    """Collects artifact names from structured trace log records."""
+
+    def __init__(self, names_list):
+        super().__init__()
+        self.names = names_list
+
+    def emit(self, record):
+        metadata = getattr(record, "metadata", None)
+        if metadata is None:
+            return
+        if "str" in metadata:
+            return
+        if "artifact" in metadata:
+            self.names.append(metadata["artifact"].get("name", ""))
+        else:
+            for key in metadata:
+                if key not in _TRACE_FRAMING_KEYS:
+                    self.names.append(key)
+                    break
+
+
+class AOTAutogradCacheStructuredTraceTests(AOTAutogradCacheTests):
+    """
+    Tests that combine AOTAutograd caching with structured trace capture.
+    Inherits cache helpers from AOTAutogradCacheTests and adds trace log
+    capture following the pattern from test_structured_trace.py.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.trace_names = []
+        self._trace_handler = _ArtifactNameHandler(self.trace_names)
+        self.old_trace_level = trace_log.level
+        trace_log.setLevel(logging.DEBUG)
+        trace_log.addHandler(self._trace_handler)
+
+    def tearDown(self):
+        trace_log.removeHandler(self._trace_handler)
+        trace_log.setLevel(self.old_trace_level)
+        super().tearDown()
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_structured_trace_replay_completeness(self):
+        """
+        Verify that structured trace artifact names are identical between
+        cache miss and cache hit runs.
+        """
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # Cache miss
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        miss_names = list(self.trace_names)
+
+        # Cache hit — reset collected names and dynamo, keep disk caches
+        self.trace_names.clear()
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        hit_names = list(self.trace_names)
+
+        # Artifacts that should be replayed on cache hit
+        replayed_artifacts = {
+            "torch._functorch.config",
+            "aot_forward_graph_fw_metadata",
+            "before_post_grad_graph",
+        }
+        for name in replayed_artifacts:
+            self.assertIn(name, miss_names, f"{name} missing from cache miss")
+            self.assertIn(name, hit_names, f"{name} missing from cache hit")
 
 
 if __name__ == "__main__":

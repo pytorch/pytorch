@@ -54,6 +54,7 @@ from .utils import simple_wraps
 
 if TYPE_CHECKING:
     from torch._inductor.compile_fx import _CompileFxKwargs
+    from torch._logging._internal import RecordedStructuredLog
 
     from .schemas import AOTConfig, ViewAndMutationMeta
 
@@ -374,6 +375,10 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
     # Used by Compiled Autograd
     serialized_bw_module: SerializedGraphModule | None
 
+    # Auto-recorded structured trace logs for cache replay.
+    # None means old cache entry (backward compat); fall back to hardcoded replay.
+    recorded_structured_logs: Optional[list[RecordedStructuredLog]] = None
+
     def pre_save(self) -> None:
         """
         Perform any preparations to make the result ready for serialization.
@@ -408,52 +413,26 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         """
         from torch._dynamo.utils import CompileEventLogger, dynamo_timed
 
-        # Log the output of AOTAutogradCache
+        # Replay structured trace logs from cache
+        if self.recorded_structured_logs is not None:
+            for log_name, metadata, payload in self.recorded_structured_logs:
+                torch._logging.trace_structured(
+                    log_name,
+                    metadata_fn=lambda m=metadata: m,  # pyrefly: ignore[bad-argument-type]
+                    payload_fn=lambda p=payload: p,  # pyrefly: ignore[bad-argument-type]
+                )
+
         if aot_config.enable_log:
             if self.aot_joint_graph_str is not None:
-                torch._logging.trace_structured(
-                    "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
-                )
                 aot_graphs_log.info(
                     "Joint graph (from cache)\n\n%s", self.aot_joint_graph_str
                 )
-
             if self.aot_forward_graph_str is not None:
-                from torchgen.utils import dataclass_repr
-
-                torch._logging.trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": "aot_forward_graph_fw_metadata",
-                        "encoding": "string",
-                    },
-                    payload_fn=lambda: dataclass_repr(self.runtime_metadata),
-                )
-                if self.maybe_subclass_meta is not None:
-                    torch._logging.trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": "aot_forward_graph_fw_subclass_metadata",
-                            "encoding": "string",
-                        },
-                        payload_fn=lambda: dataclass_repr(self.maybe_subclass_meta),
-                    )
-
-                # It's called an inference graph if not running with autograd
-                has_backward = self.aot_backward_graph_str is not None
-                torch._logging.trace_structured(
-                    "aot_forward_graph" if has_backward else "aot_inference_graph",
-                    payload_fn=lambda: self.aot_forward_graph_str,
-                )
                 aot_graphs_log.info(
                     "Forward graph (from cache)\n\n%s",
                     self.aot_forward_graph_str,
                 )
-
             if self.aot_backward_graph_str is not None:
-                torch._logging.trace_structured(
-                    "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
-                )
                 aot_graphs_log.info(
                     "Backward graph (from cache)\n\n%s",
                     self.aot_backward_graph_str,

@@ -1124,6 +1124,8 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+    # Recorder for structured trace logs, set during cache miss compilation
+    _structured_trace_recorder: Any = None
 
     def __post_init__(self) -> None:
         if self.pre_dispatch:
