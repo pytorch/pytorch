@@ -85,12 +85,12 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
 #include <ATen/hipdnn/Exceptions.h>
 #include <ATen/hipdnn/Handle.h>
 #include <ATen/hipdnn/Types.h>
+#include <ATen/hipdnn/Utils.h>
 #include <hipdnn_frontend.hpp>
 
 #include <ATen/TensorUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -103,14 +103,6 @@ Tensor expandScale(const Tensor& t, int64_t dim) {
 }
 
 } // namespace
-
-inline std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
-createTensorAttributes(const Tensor& t) {
-  auto tensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-  tensor->set_dim(t.sizes().vec()).set_data_type(getHipdnnDataType(t));
-  tensor->set_stride(t.strides().vec());
-  return tensor;
-}
 
 std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
     const Tensor& input_t,
@@ -385,7 +377,6 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
       grad_input_t, grad_weight_t, grad_bias_t};
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif
