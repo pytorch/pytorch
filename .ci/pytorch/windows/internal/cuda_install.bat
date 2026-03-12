@@ -190,6 +190,11 @@ if "%INSTALLED_CUDNN_VERSION%" == "%EXPECTED_CUDNN_VERSION%" (
 
 echo cuDNN version mismatch: installed %INSTALLED_CUDNN_VERSION%, expected %EXPECTED_CUDNN_VERSION%. Reinstalling...
 
+:: Remove old cuDNN DLLs so they don't shadow the new version at runtime.
+:: AMI-installed cuDNN places DLLs directly in bin\, while newer archives
+:: use bin\x64\. Without cleanup the old DLLs in bin\ are found first.
+del /Q "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\cudnn*.dll" 2>nul
+
 :install_cudnn
 
 if not exist "%SRC_DIR%\temp_build" mkdir "%SRC_DIR%\temp_build"
