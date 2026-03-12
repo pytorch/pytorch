@@ -30,7 +30,7 @@ import types
 import warnings
 from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, TypeVar, cast
+from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
