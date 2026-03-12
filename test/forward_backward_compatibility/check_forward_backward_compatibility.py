@@ -91,6 +91,8 @@ ALLOW_LIST = [
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
+    ("aten::hipdnn_batch_norm", datetime.date(9999, 1, 1)),
+    ("aten::hipdnn_batch_norm_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_input", datetime.date(9999, 1, 1)),
