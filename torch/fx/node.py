@@ -594,11 +594,11 @@ class Node(_NodeBase):
     @compatibility(is_backward_compatible=True)
     def format_node(
         self,
-        placeholder_names: Optional[list[str]] = None,
-        maybe_return_typename: Optional[list[str]] = None,
+        placeholder_names: list[str] | None = None,
+        maybe_return_typename: list[str] | None = None,
         *,
         include_tensor_metadata: bool = False,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Return a descriptive string representation of ``self``.
 
@@ -692,7 +692,7 @@ class Node(_NodeBase):
     def replace_all_uses_with(
         self,
         replace_with: "Node",
-        delete_user_cb: Optional[Callable[["Node"], bool]] = None,
+        delete_user_cb: Callable[["Node"], bool] | None = None,
         *,
         propagate_meta: bool = False,
     ) -> list["Node"]:
@@ -786,10 +786,10 @@ class Node(_NodeBase):
     def normalized_arguments(
         self,
         root: torch.nn.Module,
-        arg_types: Optional[tuple[Any]] = None,
-        kwarg_types: Optional[dict[str, Any]] = None,
+        arg_types: tuple[Any] | None = None,
+        kwarg_types: dict[str, Any] | None = None,
         normalize_to_only_use_kwargs: bool = False,
-    ) -> Optional[ArgsKwargsPair]:
+    ) -> ArgsKwargsPair | None:
         """
         Returns normalized arguments to Python targets. This means that
         `args/kwargs` will be matched up to the module/functional's
