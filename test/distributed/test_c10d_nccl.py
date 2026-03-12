@@ -6116,18 +6116,17 @@ class NCCLTraceTest(NCCLTraceTestBase):
     )
     @parametrize("timing_enabled", [True, False])
     def test_batched_send_recv_compiled(self, op_sizes_per_coalesce, timing_enabled):
-        def _pattern(op_sizes_per_coalesce):
+        def _pattern(tensors):
             ops = list()
-            for input_sizes in op_sizes_per_coalesce:
-                tensor = torch.ones(input_sizes).to(self.local_device)
+            for tensor in tensors:
                 if self.rank == 0:
                     ops.append(dist.P2POp(dist.irecv, tensor, 1))
                 elif self.rank == 1:
-                    tensor *= 2
                     ops.append(dist.P2POp(dist.isend, tensor, 0))
                 else:
                     raise NotImplementedError
-            return [work.wait() for work in dist.batch_isend_irecv(ops)]
+            for work in dist.batch_isend_irecv(ops):
+                work.wait()
 
         if self.rank == self.MAIN_PROCESS_RANK:
             return
@@ -6141,12 +6140,25 @@ class NCCLTraceTest(NCCLTraceTestBase):
         ops_per_coalesce = len(op_sizes_per_coalesce)
 
         for _ in range(num_coalesced_ops):
-            outputs = compiled_fn(op_sizes_per_coalesce)
             if self.rank == 0:
-                self.assertEqual(len(outputs), ops_per_coalesce)
-                for output, input_sizes in zip(outputs, op_sizes_per_coalesce):
+                tensors = [
+                    torch.zeros(input_sizes).to(self.local_device)
+                    for input_sizes in op_sizes_per_coalesce
+                ]
+            elif self.rank == 1:
+                tensors = [
+                    torch.full(input_sizes, 2.0).to(self.local_device)
+                    for input_sizes in op_sizes_per_coalesce
+                ]
+            else:
+                raise NotImplementedError
+
+            compiled_fn(tensors)
+            if self.rank == 0:
+                self.assertEqual(len(tensors), ops_per_coalesce)
+                for tensor, input_sizes in zip(tensors, op_sizes_per_coalesce):
                     self.assertEqual(
-                        output, torch.full(input_sizes, 2.0, device=self.local_device)
+                        tensor, torch.full(input_sizes, 2.0, device=self.local_device)
                     )
 
         torch.cuda.synchronize()
