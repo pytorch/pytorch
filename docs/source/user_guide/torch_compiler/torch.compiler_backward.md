@@ -30,8 +30,17 @@ Use ``torch._functorch.config.backward_pass_autocast``
 to control that assumption; an incorrect assumption may lead to silent
 incorrectness.
 
+```{note}
+The default value of `backward_pass_autocast` will change from
+`"same_as_forward"` to `"off"` in a future release. `"off"` matches the
+recommended PyTorch usage where autocast wraps only the forward pass.
+If you rely on `"same_as_forward"` behavior, set it explicitly to silence
+the deprecation warning.
+See [#153044](https://github.com/pytorch/pytorch/issues/153044) for details.
+```
+
 The options are either:
-- `"same_as_forward"` (default).
+- `"same_as_forward"`.
   We assume that the backward of the ``torch.compile``'ed region
   will be run under the same autocast context manager that the region was run
   under (if any). Use this if your code looks like the following:

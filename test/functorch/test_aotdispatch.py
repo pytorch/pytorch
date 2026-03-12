@@ -795,6 +795,30 @@ def forward(self, primals_1):
                 self.assertEqual(out, torch.zeros_like(out))
                 self.assertEqual(grad, torch.ones_like(grad))
 
+    def test_backward_pass_autocast_default_warns(self):
+        # When autocast is active and backward_pass_autocast is at its default,
+        # a FutureWarning should be emitted about the upcoming default change.
+        for device in ["cpu"] + (["cuda"] if torch.cuda.is_available() else []):
+            with self.assertWarnsRegex(FutureWarning, "backward_pass_autocast"):
+                self._compile_autocast(device, forward_autocast=True)
+
+    @torch._functorch.config.patch(backward_pass_autocast="same_as_forward")
+    def test_backward_pass_autocast_explicit_no_warn(self):
+        # When backward_pass_autocast is explicitly set (even to the same value
+        # as the current default), no warning should be emitted.
+        for device in ["cpu"] + (["cuda"] if torch.cuda.is_available() else []):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", FutureWarning)
+                self._compile_autocast(device, forward_autocast=True)
+
+    def test_backward_pass_autocast_no_autocast_no_warn(self):
+        # When no autocast is active, no warning should be emitted regardless
+        # of the config default.
+        for device in ["cpu"] + (["cuda"] if torch.cuda.is_available() else []):
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", FutureWarning)
+                self._compile_autocast(device, forward_autocast=False)
+
     @skipIfDynamoInput(
         "Test doesn't make sense with dynamo, which changes order of mutations"
     )
