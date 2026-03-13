@@ -28,7 +28,6 @@
 #include <c10/util/irange.h>
 
 #include <algorithm>
-#include <ciso646>
 #include <functional>
 #include <numeric>
 #include <utility>
@@ -2220,7 +2219,7 @@ Tensor split_backward(
   auto num_splits = grads.size();
   std::vector<c10::SymInt> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] =
-      split_size - (split_size * num_splits - dim_size);
+      split_size - (split_size * c10::SymInt(num_splits) - dim_size);
   return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
 }
 
@@ -4003,7 +4002,7 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     B_grad = B_grad_X;
   }
 
-  return std::make_tuple(A_grad, B_grad);
+  return std::make_tuple(std::move(A_grad), std::move(B_grad));
 }
 
 std::tuple<Tensor, Tensor> linalg_qr_jvp(
@@ -4591,7 +4590,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     Tensor G_A = left ? -at::matmul(G_B, X_H) : -at::matmul(X_H, G_B);
     G_A = upper ? G_A.triu(static_cast<int>(unitriangular))
                 : G_A.tril(-static_cast<int>(unitriangular));
-    return std::make_tuple(G_A, B_requires_grad ? G_B : Tensor{});
+    return std::make_tuple(std::move(G_A), B_requires_grad ? G_B : Tensor{});
   } else {
     return std::make_tuple(Tensor{}, G_B);
   }
@@ -4906,31 +4905,31 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask) {
   const auto normalized_ndim = normalized_shape.size();
-  const auto input_shape = input_t.sizes();
+  const auto input_shape = input_t.sym_sizes();
   const auto input_ndim = input_t.dim();
   const auto axis = input_ndim - normalized_ndim;
-  const int64_t M =
+  const c10::SymInt M =
       c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
-  const int64_t N =
+  const c10::SymInt N =
       c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
   // printf("M: %ld, N: %ld", M, N);
 
-  auto input = input_t.reshape({M, N});
-  auto gO = gO_t.reshape({M, N});
-  auto save_mean = save_mean_t.reshape({M, 1});
-  auto save_invstd = save_invstd_t.reshape({M, 1});
+  auto input = input_t.reshape_symint({M, N});
+  auto gO = gO_t.reshape_symint({M, N});
+  auto save_mean = save_mean_t.reshape_symint({M, c10::SymInt(1)});
+  auto save_invstd = save_invstd_t.reshape_symint({M, c10::SymInt(1)});
 
   bool affine = isDefined(gamma);
   Tensor gamma_expanded;
   Tensor ggG_expanded, ggB_expanded;
   if (affine) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    gamma_expanded = gamma->reshape({1, N});
+    gamma_expanded = gamma->reshape_symint({c10::SymInt(1), N});
     if (ggG.defined()) {
-      ggG_expanded = ggG.reshape({1, N});
+      ggG_expanded = ggG.reshape_symint({c10::SymInt(1), N});
     }
     if (ggB.defined()) {
-      ggB_expanded = ggB.reshape({1, N});
+      ggB_expanded = ggB.reshape_symint({c10::SymInt(1), N});
     }
   } else {
     gamma_expanded = at::ones({1}, input.options());
@@ -4938,7 +4937,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
 
   Tensor ggI_expanded;
   if (ggI.defined()) {
-    ggI_expanded = ggI.reshape({M, N});
+    ggI_expanded = ggI.reshape_symint({M, N});
   }
 
   // for half inputs, save_mean, save_invstd are float
@@ -4961,10 +4960,11 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     auto ggI_sum = ggI_expanded.sum(1, true);
     auto ggI_mu_sum = (ggI_expanded * input_sub_mu).sum(1, true);
 
+    auto three_over_n = c10::SymFloat(3.) / c10::SymFloat(N);
     auto all_sub = ((ggI_sum * gxhat_sum).div_(N))
                        .sub_((ggI_expanded * gxhat).sum(1, true))
                        .add_((sigma2_eps_neg_1 * gxhat_mu_sum * ggI_mu_sum)
-                                 .mul_(3. / static_cast<double>(N)));
+                                 .mul_(three_over_n));
     auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(N);
     auto gI_1t =
         (ggI_mu_sum * sigma2_eps_neg_3_2).div_(N) * (gxhat_sum.div(N) - gxhat);
@@ -4994,7 +4994,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   auto first_bwd_fn_grad_input = [&](const Tensor& gO_local,
                                      const Tensor& gamma_local) -> Tensor {
     auto h0 = (gamma_local * sigma2_eps_neg_1_2).div_(N);
-    auto h1 = (N * gO_local)
+    auto h1 = (gO_local.mul(N))
                   .sub_(gO_local.sum(1, true))
                   .sub_(
                       input_sub_mu.mul(sigma2_eps_neg_1) *
@@ -5027,7 +5027,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
   }
   if (ggO.defined()) {
-    ggO = ggO.expand({M, N}).reshape_as(input_t);
+    ggO = ggO.expand_symint({M, N}).reshape_as(input_t);
   }
 
   if (output_mask[1] && !gG.defined()) {
@@ -5132,7 +5132,7 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
     }
   }
 
-  return std::make_tuple(dX, dgamma);
+  return std::make_tuple(std::move(dX), std::move(dgamma));
 }
 
 std::tuple<Tensor, Tensor, Tensor>
@@ -5220,7 +5220,7 @@ infinitely_differentiable_native_group_norm_backward(
     dbeta = db.sum(0).reshape_as(toNonOptTensor(gamma));
   }
 
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
@@ -5343,6 +5343,15 @@ Tensor _cudnn_ctc_loss_backward(
   } else {
     return raw_grad * grad_out.unsqueeze(0).unsqueeze(2);
   }
+}
+
+Tensor _miopen_ctc_loss_backward(
+    const Tensor& grad_out,
+    const Tensor& loss,
+    const Tensor& raw_grad,
+    bool zero_infinity) {
+  // MIOpen CTC Loss backward is identical to cuDNN
+  return _cudnn_ctc_loss_backward(grad_out, loss, raw_grad, zero_infinity);
 }
 
 bool any_variable_defined(const variable_list& variables) {
@@ -5745,7 +5754,8 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
   Tensor self_grad, tau_grad, other_grad;
 
   if (!grad.defined()) {
-    return std::make_tuple(self_grad, tau_grad, other_grad);
+    return std::make_tuple(
+        std::move(self_grad), std::move(tau_grad), std::move(other_grad));
   }
 
   const auto self_requires_grad = grad_output_mask[0];
@@ -5804,7 +5814,7 @@ std::tuple<Tensor, Tensor> polar_backward(
     auto result_mul_1_j = result * Scalar(c10::complex<double>{0.0, 1.0});
     grad_angle = at::real(grad_conj * result_mul_1_j);
   }
-  return std::make_tuple(grad_abs, grad_angle);
+  return std::make_tuple(std::move(grad_abs), std::move(grad_angle));
 }
 
 Tensor i1_backward(
@@ -6046,8 +6056,7 @@ Tensor linalg_solve_jvp(
     const Tensor& X,
     const Tensor& LU,
     const Tensor& pivots,
-    const bool left,
-    const bool use_A_T) {
+    const bool left) {
   at::NoTF32Guard disable_tf32;
   // For left=True (left=False is analogous)
   // dX = A^{-1}(dB - dAX)
@@ -6069,8 +6078,7 @@ Tensor linalg_solve_jvp(
   auto X_ = vector_to_matrix(X);
   auto dB_ = vector_to_matrix(dB);
   auto R_ = left ? dA.matmul(X_) : X_.matmul(dA);
-  auto dX_ =
-      at::linalg_lu_solve(LU, pivots, dB_ - R_, left, /*adjoint*/ use_A_T);
+  auto dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
   return matrix_to_vector(dX_);
 }
 
@@ -6108,9 +6116,8 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
   if (at::GradMode::is_enabled()) {
     gB_ = at::linalg_solve(A.mH(), vector_to_matrix(gX), left);
   } else {
-    const auto use_A_T = A.is_contiguous() && !A.is_complex();
     gB_ = at::linalg_lu_solve(
-        LU, pivots, vector_to_matrix(gX), left, /*adjoint*/ !use_A_T);
+        LU, pivots, vector_to_matrix(gX), left, /*adjoint*/ true);
   }
 
   Tensor gA_;
@@ -7447,7 +7454,14 @@ mkldnn_rnn_layer_differentiable_backward(
   }
 
   auto cat_layer_dx = at::cat(layer_dx, 0);
-  return std::make_tuple(cat_layer_dx, dWx, dWh, db, db, dprev_h, dprev_c);
+  return std::make_tuple(
+      std::move(cat_layer_dx),
+      std::move(dWx),
+      std::move(dWh),
+      db,
+      db,
+      std::move(dprev_h),
+      std::move(dprev_c));
 }
 
 Tensor values_backward(const Tensor& grad, const Tensor& self) {

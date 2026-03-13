@@ -13,7 +13,7 @@ class CallTorchBindKernel : public OpKernel {
   CallTorchBindKernel() = delete; // deleted default constructor
   CallTorchBindKernel(const Node* node);
 
-  void computeInternal(ExecutionFrame& executionFrame) const override final;
+  void computeInternal(ExecutionFrame& executionFrame) const final;
 
  private:
   std::string methodName_;

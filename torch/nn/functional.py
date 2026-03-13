@@ -11,15 +11,15 @@ from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import (
     _add_docstr,
     _infer_size,
-    _ScalingType as ScalingType,
-    _SwizzleType as SwizzleType,
+    _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
+    _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
 )
 from torch._jit_internal import (
     _overload,
     boolean_dispatch,
     BroadcastingList1,
-    BroadcastingList2,
-    BroadcastingList3,
+    BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
+    BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
@@ -439,10 +439,10 @@ Args:
 def fractional_max_pool2d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
-    output_size: Optional[BroadcastingList2[int]] = None,
-    output_ratio: Optional[BroadcastingList2[float]] = None,
+    output_size: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
+    output_ratio: Optional[BroadcastingList2[float]] = None,  # noqa: UP045
     return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None,
+    _random_samples: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
@@ -492,7 +492,8 @@ def fractional_max_pool2d_with_indices(
             "fractional_max_pool2d requires specifying either an output_size or an output_ratio"
         )
     if output_size is None:
-        assert output_ratio is not None
+        if output_ratio is None:
+            raise AssertionError("output_ratio is unexpectedly None")
         if len(output_ratio) > 2:
             raise ValueError(
                 "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."
@@ -516,10 +517,10 @@ def fractional_max_pool2d_with_indices(
 def _fractional_max_pool2d(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
-    output_size: Optional[BroadcastingList2[int]] = None,
-    output_ratio: Optional[BroadcastingList2[float]] = None,
+    output_size: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
+    output_ratio: Optional[BroadcastingList2[float]] = None,  # noqa: UP045
     return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None,
+    _random_samples: Tensor | None = None,
 ) -> Tensor:
     if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
@@ -551,10 +552,10 @@ fractional_max_pool2d = boolean_dispatch(
 def fractional_max_pool3d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
-    output_size: Optional[BroadcastingList3[int]] = None,
-    output_ratio: Optional[BroadcastingList3[float]] = None,
+    output_size: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
+    output_ratio: Optional[BroadcastingList3[float]] = None,  # noqa: UP045
     return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None,
+    _random_samples: Tensor | None = None,
 ) -> tuple[Tensor, Tensor]:  # noqa: D400
     r"""
     fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
@@ -611,7 +612,8 @@ def fractional_max_pool3d_with_indices(
             "fractional_max_pool3d requires specifying either an output_size or an output_ratio"
         )
     if output_size is None:
-        assert output_ratio is not None
+        if output_ratio is None:
+            raise AssertionError("output_ratio is unexpectedly None")
         _output_ratio = _triple(output_ratio)
         output_size = [
             int(input.size(-3) * _output_ratio[0]),
@@ -632,10 +634,10 @@ def fractional_max_pool3d_with_indices(
 def _fractional_max_pool3d(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
-    output_size: Optional[BroadcastingList3[int]] = None,
-    output_ratio: Optional[BroadcastingList3[float]] = None,
+    output_size: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
+    output_ratio: Optional[BroadcastingList3[float]] = None,  # noqa: UP045
     return_indices: bool = False,
-    _random_samples: Optional[Tensor] = None,
+    _random_samples: Tensor | None = None,
 ) -> Tensor:
     if has_torch_function_variadic(input, _random_samples):
         return handle_torch_function(
@@ -667,7 +669,7 @@ fractional_max_pool3d = boolean_dispatch(
 def max_pool1d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,
+    stride: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
     padding: BroadcastingList1[int] = 0,
     dilation: BroadcastingList1[int] = 1,
     ceil_mode: bool = False,
@@ -720,7 +722,7 @@ def max_pool1d_with_indices(
 def _max_pool1d(
     input: Tensor,
     kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,
+    stride: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
     padding: BroadcastingList1[int] = 0,
     dilation: BroadcastingList1[int] = 1,
     ceil_mode: bool = False,
@@ -757,7 +759,7 @@ max_pool1d = boolean_dispatch(
 def max_pool2d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,
+    stride: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
     padding: BroadcastingList2[int] = 0,
     dilation: BroadcastingList2[int] = 1,
     ceil_mode: bool = False,
@@ -810,7 +812,7 @@ def max_pool2d_with_indices(
 def _max_pool2d(
     input: Tensor,
     kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,
+    stride: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
     padding: BroadcastingList2[int] = 0,
     dilation: BroadcastingList2[int] = 1,
     ceil_mode: bool = False,
@@ -847,7 +849,7 @@ max_pool2d = boolean_dispatch(
 def max_pool3d_with_indices(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,
+    stride: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
     padding: BroadcastingList3[int] = 0,
     dilation: BroadcastingList3[int] = 1,
     ceil_mode: bool = False,
@@ -900,7 +902,7 @@ def max_pool3d_with_indices(
 def _max_pool3d(
     input: Tensor,
     kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,
+    stride: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
     padding: BroadcastingList3[int] = 0,
     dilation: BroadcastingList3[int] = 1,
     ceil_mode: bool = False,
@@ -939,7 +941,7 @@ def _unpool_output_size(
     kernel_size: list[int],
     stride: list[int],
     padding: list[int],
-    output_size: Optional[list[int]],
+    output_size: list[int] | None,
 ) -> list[int]:
     input_size = input.size()
     default_size = torch.jit.annotate(list[int], [])
@@ -975,9 +977,9 @@ def max_unpool1d(
     input: Tensor,
     indices: Tensor,
     kernel_size: BroadcastingList1[int],
-    stride: Optional[BroadcastingList1[int]] = None,
+    stride: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
     padding: BroadcastingList1[int] = 0,
-    output_size: Optional[BroadcastingList1[int]] = None,
+    output_size: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
 ) -> Tensor:
     r"""Compute a partial inverse of :class:`MaxPool1d`.
 
@@ -1014,9 +1016,9 @@ def max_unpool2d(
     input: Tensor,
     indices: Tensor,
     kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,
+    stride: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
     padding: BroadcastingList2[int] = 0,
-    output_size: Optional[BroadcastingList2[int]] = None,
+    output_size: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
 ) -> Tensor:
     r"""Compute a partial inverse of :class:`MaxPool2d`.
 
@@ -1047,9 +1049,9 @@ def max_unpool3d(
     input: Tensor,
     indices: Tensor,
     kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,
+    stride: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
     padding: BroadcastingList3[int] = 0,
-    output_size: Optional[BroadcastingList3[int]] = None,
+    output_size: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
 ) -> Tensor:
     r"""Compute a partial inverse of :class:`MaxPool3d`.
 
@@ -1080,7 +1082,7 @@ def lp_pool3d(
     input: Tensor,
     norm_type: int | float,
     kernel_size: BroadcastingList3[int],
-    stride: Optional[BroadcastingList3[int]] = None,
+    stride: Optional[BroadcastingList3[int]] = None,  # noqa: UP045
     ceil_mode: bool = False,
 ) -> Tensor:
     r"""
@@ -1121,7 +1123,7 @@ def lp_pool2d(
     input: Tensor,
     norm_type: int | float,
     kernel_size: BroadcastingList2[int],
-    stride: Optional[BroadcastingList2[int]] = None,
+    stride: Optional[BroadcastingList2[int]] = None,  # noqa: UP045
     ceil_mode: bool = False,
 ) -> Tensor:
     r"""
@@ -1160,7 +1162,7 @@ def lp_pool1d(
     input: Tensor,
     norm_type: int | float,
     kernel_size: int,
-    stride: Optional[BroadcastingList1[int]] = None,
+    stride: Optional[BroadcastingList1[int]] = None,  # noqa: UP045
     ceil_mode: bool = False,
 ) -> Tensor:
     r"""Apply a 1D power-average pooling over an input signal composed of several input planes.
@@ -2086,9 +2088,9 @@ def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
 
 def softmin(
     input: Tensor,
-    dim: Optional[int] = None,
+    dim: int | None = None,
     _stacklevel: int = 3,
-    dtype: Optional[DType] = None,
+    dtype: DType | None = None,
 ) -> Tensor:
     r"""Apply a softmin function.
 
@@ -2119,9 +2121,9 @@ def softmin(
 
 def softmax(
     input: Tensor,
-    dim: Optional[int] = None,
+    dim: int | None = None,
     _stacklevel: int = 3,
-    dtype: Optional[DType] = None,
+    dtype: DType | None = None,
 ) -> Tensor:
     r"""Apply a softmax function.
 
@@ -2236,9 +2238,9 @@ def gumbel_softmax(
 
 def log_softmax(
     input: Tensor,
-    dim: Optional[int] = None,
+    dim: int | None = None,
     _stacklevel: int = 3,
-    dtype: Optional[DType] = None,
+    dtype: DType | None = None,
 ) -> Tensor:
     r"""Apply a softmax followed by a logarithm.
 
@@ -2453,8 +2455,8 @@ def _no_grad_embedding_renorm_(
 def embedding(
     input: Tensor,
     weight: Tensor,
-    padding_idx: Optional[int] = None,
-    max_norm: Optional[float] = None,
+    padding_idx: int | None = None,
+    max_norm: float | None = None,
     norm_type: float = 2.0,
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
@@ -2479,7 +2481,7 @@ def embedding(
 
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
-        weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
+        weight (Tensor): The embedding matrix (must be 2-D) with number of rows equal to the maximum possible index + 1,
             and number of columns equal to the embedding size
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
                                      therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
@@ -2542,13 +2544,11 @@ def embedding(
         )
     if padding_idx is not None:
         if padding_idx > 0:
-            assert padding_idx < weight.size(0), (
-                "Padding_idx must be within num_embeddings"
-            )
+            if padding_idx >= weight.size(0):
+                raise AssertionError("Padding_idx must be within num_embeddings")
         elif padding_idx < 0:
-            assert padding_idx >= -weight.size(0), (
-                "Padding_idx must be within num_embeddings"
-            )
+            if padding_idx < -weight.size(0):
+                raise AssertionError("Padding_idx must be within num_embeddings")
             padding_idx = weight.size(0) + padding_idx
     else:
         padding_idx = -1
@@ -2570,15 +2570,15 @@ def embedding(
 def embedding_bag(
     input: Tensor,
     weight: Tensor,
-    offsets: Optional[Tensor] = None,
-    max_norm: Optional[float] = None,
+    offsets: Tensor | None = None,
+    max_norm: float | None = None,
     norm_type: float = 2,
     scale_grad_by_freq: bool = False,
     mode: str = "mean",
     sparse: bool = False,
-    per_sample_weights: Optional[Tensor] = None,
+    per_sample_weights: Tensor | None = None,
     include_last_offset: bool = False,
-    padding_idx: Optional[int] = None,
+    padding_idx: int | None = None,
 ) -> Tensor:
     r"""Compute sums, means or maxes of `bags` of embeddings.
 
@@ -2810,10 +2810,10 @@ def _verify_batch_size(size: list[int]) -> None:
 
 def batch_norm(
     input: Tensor,
-    running_mean: Optional[Tensor],
-    running_var: Optional[Tensor],
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
     training: bool = False,
     momentum: float = 0.1,
     eps: float = 1e-5,
@@ -2840,8 +2840,12 @@ def batch_norm(
         # pyrefly: ignore [bad-argument-type]
         _verify_batch_size(input.size())
 
-    if eps <= 0.0:
-        raise ValueError(f"batch_norm eps must be positive, but got {eps}")
+    if training and eps <= 0.0:
+        raise ValueError(
+            f"batch_norm eps must be positive during training, but got {eps}"
+        )
+    elif eps < 0.0:
+        raise ValueError(f"batch_norm eps must be non-negative, but got {eps}")
 
     return torch.batch_norm(
         input,
@@ -2869,10 +2873,10 @@ def _verify_spatial_size(size: list[int]) -> None:
 
 def instance_norm(
     input: Tensor,
-    running_mean: Optional[Tensor] = None,
-    running_var: Optional[Tensor] = None,
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    running_mean: Tensor | None = None,
+    running_var: Tensor | None = None,
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
     use_input_stats: bool = True,
     momentum: float = 0.1,
     eps: float = 1e-5,
@@ -2914,8 +2918,8 @@ def instance_norm(
 def layer_norm(
     input: Tensor,
     normalized_shape: list[int],
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
     eps: float = 1e-5,
 ) -> Tensor:
     r"""Apply Layer Normalization for last certain number of dimensions.
@@ -2940,8 +2944,8 @@ def layer_norm(
 def rms_norm(
     input: Tensor,
     normalized_shape: list[int],
-    weight: Optional[Tensor] = None,
-    eps: Optional[float] = None,
+    weight: Tensor | None = None,
+    eps: float | None = None,
 ) -> Tensor:
     r"""Apply Root Mean Square Layer Normalization.
 
@@ -2957,8 +2961,8 @@ def rms_norm(
 def group_norm(
     input: Tensor,
     num_groups: int,
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
     eps: float = 1e-5,
 ) -> Tensor:
     r"""Apply Group Normalization for last certain number of dimensions.
@@ -3122,10 +3126,10 @@ if ctc_loss.__doc__:
 def nll_loss(
     input: Tensor,
     target: Tensor,
-    weight: Optional[Tensor] = None,
-    size_average: Optional[bool] = None,
+    weight: Tensor | None = None,
+    size_average: bool | None = None,
     ignore_index: int = -100,
-    reduce: Optional[bool] = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:
     r"""Compute the negative log likelihood loss.
@@ -3191,9 +3195,9 @@ def poisson_nll_loss(
     target: Tensor,
     log_input: bool = True,
     full: bool = False,
-    size_average: Optional[bool] = None,
+    size_average: bool | None = None,
     eps: float = 1e-8,
-    reduce: Optional[bool] = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:
     r"""Compute the Poisson negative log likelihood loss.
@@ -3328,7 +3332,6 @@ def gaussian_nll_loss(
         var.clamp_(min=eps)
 
     # Calculate the loss
-    # pyrefly: ignore [unsupported-operation]
     loss = 0.5 * (torch.log(var) + (input - target) ** 2 / var)
     if full:
         loss += 0.5 * math.log(2 * math.pi)
@@ -3344,8 +3347,8 @@ def gaussian_nll_loss(
 def kl_div(
     input: Tensor,
     target: Tensor,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
     log_target: bool = False,
 ) -> Tensor:
@@ -3421,10 +3424,10 @@ def kl_div(
 def cross_entropy(
     input: Tensor,
     target: Tensor,
-    weight: Optional[Tensor] = None,
-    size_average: Optional[bool] = None,
+    weight: Tensor | None = None,
+    size_average: bool | None = None,
     ignore_index: int = -100,
-    reduce: Optional[bool] = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
     label_smoothing: float = 0.0,
 ) -> Tensor:
@@ -3515,9 +3518,9 @@ def cross_entropy(
 def binary_cross_entropy(
     input: Tensor,
     target: Tensor,
-    weight: Optional[Tensor] = None,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    weight: Tensor | None = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:
     r"""Compute Binary Cross Entropy between the target and input probabilities.
@@ -3577,11 +3580,11 @@ def binary_cross_entropy(
 def binary_cross_entropy_with_logits(
     input: Tensor,
     target: Tensor,
-    weight: Optional[Tensor] = None,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    weight: Tensor | None = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
-    pos_weight: Optional[Tensor] = None,
+    pos_weight: Tensor | None = None,
 ) -> Tensor:
     r"""Compute Binary Cross Entropy between target and input logits.
 
@@ -3590,8 +3593,9 @@ def binary_cross_entropy_with_logits(
     Args:
         input: Tensor of arbitrary shape as unnormalized scores (often referred to as logits).
         target: Tensor of the same shape as input with values between 0 and 1
-        weight (Tensor, optional): a manual rescaling weight
-            if provided it's repeated to match input tensor shape
+        weight (Tensor, optional): a manual rescaling weight. If provided, the dimension
+           of weight supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+           with respect to the input (and target) shape.
         size_average (bool, optional): Deprecated (see :attr:`reduction`).
         reduce (bool, optional): Deprecated (see :attr:`reduction`).
         reduction (str, optional): Specifies the reduction to apply to the output:
@@ -3646,8 +3650,8 @@ def binary_cross_entropy_with_logits(
 def smooth_l1_loss(
     input: Tensor,
     target: Tensor,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
     beta: float = 1.0,
 ) -> Tensor:
@@ -3719,7 +3723,7 @@ def huber_loss(
     target: Tensor,
     reduction: str = "mean",
     delta: float = 1.0,
-    weight: Optional[Tensor] = None,
+    weight: Tensor | None = None,
 ) -> Tensor:
     r"""Compute the Huber loss, with optional weighting.
 
@@ -3805,10 +3809,10 @@ def huber_loss(
 def l1_loss(
     input: Tensor,
     target: Tensor,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
-    weight: Optional[Tensor] = None,
+    weight: Tensor | None = None,
 ) -> Tensor:  # noqa: D400,D402
     r"""Compute the L1 loss, with optional weighting.
 
@@ -3881,10 +3885,10 @@ def l1_loss(
 def mse_loss(
     input: Tensor,
     target: Tensor,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
-    weight: Optional[Tensor] = None,
+    weight: Tensor | None = None,
 ) -> Tensor:
     r"""Compute the element-wise mean squared error, with optional weighting.
 
@@ -3961,8 +3965,8 @@ def margin_ranking_loss(
     input2: Tensor,
     target: Tensor,
     margin: float = 0,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
     r"""Compute the margin ranking loss.
@@ -4011,8 +4015,8 @@ def hinge_embedding_loss(
     input: Tensor,
     target: Tensor,
     margin: float = 1.0,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
     r"""Compute the hinge embedding loss.
@@ -4054,8 +4058,8 @@ def hinge_embedding_loss(
 def multilabel_margin_loss(
     input: Tensor,
     target: Tensor,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
     r"""Compute the multilabel margin loss.
@@ -4096,8 +4100,8 @@ def multilabel_margin_loss(
 def soft_margin_loss(
     input: Tensor,
     target: Tensor,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
     r"""Compute the soft margin loss.
@@ -4138,9 +4142,9 @@ def soft_margin_loss(
 def multilabel_soft_margin_loss(
     input: Tensor,
     target: Tensor,
-    weight: Optional[Tensor] = None,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    weight: Tensor | None = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
     r"""Compute the multilabel soft margin loss.
@@ -4200,8 +4204,8 @@ def cosine_embedding_loss(
     input2: Tensor,
     target: Tensor,
     margin: float = 0,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
     r"""Compute the cosine embedding loss.
@@ -4247,9 +4251,9 @@ def multi_margin_loss(
     target: Tensor,
     p: int = 1,
     margin: float = 1.0,
-    weight: Optional[Tensor] = None,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    weight: Tensor | None = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:  # noqa: D400,D402
     r"""Compute the multi margin loss, with optional weighting.
@@ -4444,10 +4448,10 @@ Examples::
 @_overload
 def upsample(  # noqa: F811
     input: Tensor,
-    size: Optional[int] = None,
-    scale_factor: Optional[float] = None,
+    size: int | None = None,
+    scale_factor: float | None = None,
     mode: str = "nearest",
-    align_corners: Optional[bool] = None,
+    align_corners: bool | None = None,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
     pass
@@ -4456,10 +4460,10 @@ def upsample(  # noqa: F811
 @_overload
 def upsample(  # noqa: F811
     input: Tensor,
-    size: Optional[list[int]] = None,
-    scale_factor: Optional[float] = None,
+    size: list[int] | None = None,
+    scale_factor: float | None = None,
     mode: str = "nearest",
-    align_corners: Optional[bool] = None,
+    align_corners: bool | None = None,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
     pass
@@ -4557,11 +4561,11 @@ def _is_integer(x) -> bool:
 @_overload
 def interpolate(  # noqa: F811
     input: Tensor,
-    size: Optional[int] = None,
-    scale_factor: Optional[list[float]] = None,
+    size: int | None = None,
+    scale_factor: list[float] | None = None,
     mode: str = "nearest",
-    align_corners: Optional[bool] = None,
-    recompute_scale_factor: Optional[bool] = None,
+    align_corners: bool | None = None,
+    recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
@@ -4571,11 +4575,11 @@ def interpolate(  # noqa: F811
 @_overload
 def interpolate(  # noqa: F811
     input: Tensor,
-    size: Optional[list[int]] = None,
-    scale_factor: Optional[list[float]] = None,
+    size: list[int] | None = None,
+    scale_factor: list[float] | None = None,
     mode: str = "nearest",
-    align_corners: Optional[bool] = None,
-    recompute_scale_factor: Optional[bool] = None,
+    align_corners: bool | None = None,
+    recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
@@ -4585,11 +4589,11 @@ def interpolate(  # noqa: F811
 @_overload
 def interpolate(  # noqa: F811
     input: Tensor,
-    size: Optional[int] = None,
-    scale_factor: Optional[float] = None,
+    size: int | None = None,
+    scale_factor: float | None = None,
     mode: str = "nearest",
-    align_corners: Optional[bool] = None,
-    recompute_scale_factor: Optional[bool] = None,
+    align_corners: bool | None = None,
+    recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
@@ -4599,11 +4603,11 @@ def interpolate(  # noqa: F811
 @_overload
 def interpolate(  # noqa: F811
     input: Tensor,
-    size: Optional[list[int]] = None,
-    scale_factor: Optional[float] = None,
+    size: list[int] | None = None,
+    scale_factor: float | None = None,
     mode: str = "nearest",
-    align_corners: Optional[bool] = None,
-    recompute_scale_factor: Optional[bool] = None,
+    align_corners: bool | None = None,
+    recompute_scale_factor: bool | None = None,
     antialias: bool = False,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:
@@ -4612,11 +4616,11 @@ def interpolate(  # noqa: F811
 
 def interpolate(  # noqa: F811
     input: Tensor,
-    size: Optional[int] = None,
-    scale_factor: Optional[list[float]] = None,
+    size: int | None = None,
+    scale_factor: list[float] | None = None,
     mode: str = "nearest",
-    align_corners: Optional[bool] = None,
-    recompute_scale_factor: Optional[bool] = None,
+    align_corners: bool | None = None,
+    recompute_scale_factor: bool | None = None,
     antialias: bool = False,
 ) -> Tensor:  # noqa: B950
     r"""Down/up samples the input.
@@ -4653,7 +4657,8 @@ def interpolate(  # noqa: F811
             for out-of-boundary values, making this operation *independent* of input size
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
-            Default: ``False``
+            Default: ``None``. When ``None`` and :attr:`mode` is one of the linear modes,
+            it is treated as ``False``.
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation. If `recompute_scale_factor` is ``True``, then
             `scale_factor` must be passed in and `scale_factor` is used to compute the
@@ -4719,7 +4724,8 @@ def interpolate(  # noqa: F811
     if size is not None and scale_factor is not None:
         raise ValueError("only one of size or scale_factor should be defined")
     elif size is not None:
-        assert scale_factor is None
+        if scale_factor is not None:
+            raise AssertionError("scale_factor must be None when size is specified")
         scale_factors = None
         if isinstance(size, (list, tuple)):
             if len(size) != dim:
@@ -4739,7 +4745,8 @@ def interpolate(  # noqa: F811
         else:
             output_size = [size for _ in range(dim)]
     elif scale_factor is not None:
-        assert size is None
+        if size is not None:
+            raise AssertionError("size must be None when scale_factor is specified")
         output_size = None
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
@@ -4773,7 +4780,8 @@ def interpolate(  # noqa: F811
     if recompute_scale_factor is not None and recompute_scale_factor:
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
-        assert scale_factors is not None
+        if scale_factors is None:
+            raise AssertionError("scale_factors is unexpectedly None")
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
@@ -4825,18 +4833,22 @@ def interpolate(  # noqa: F811
         return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size is unexpectedly None")
         # pyrefly: ignore [bad-argument-type]
         return adaptive_avg_pool1d(input, output_size)
     if input.dim() == 4 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size is unexpectedly None")
         return adaptive_avg_pool2d(input, output_size)
     if input.dim() == 5 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size is unexpectedly None")
         return adaptive_avg_pool3d(input, output_size)
 
     if input.dim() == 3 and mode == "linear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         return torch._C._nn.upsample_linear1d(
             input,
             # pyrefly: ignore [bad-argument-type]
@@ -4845,7 +4857,8 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 4 and mode == "bilinear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         if antialias:
             return torch._C._nn._upsample_bilinear2d_aa(
                 input,
@@ -4872,7 +4885,8 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 5 and mode == "trilinear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
@@ -4891,7 +4905,8 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 4 and mode == "bicubic":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         if antialias:
             return torch._C._nn._upsample_bicubic2d_aa(
                 input,
@@ -4935,8 +4950,8 @@ if interpolate.__doc__:
 @_overload
 def upsample_nearest(  # noqa: F811
     input: Tensor,
-    size: Optional[int] = None,
-    scale_factor: Optional[float] = None,
+    size: int | None = None,
+    scale_factor: float | None = None,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
@@ -4945,8 +4960,8 @@ def upsample_nearest(  # noqa: F811
 @_overload
 def upsample_nearest(  # noqa: F811
     input: Tensor,
-    size: Optional[list[int]] = None,
-    scale_factor: Optional[float] = None,
+    size: list[int] | None = None,
+    scale_factor: float | None = None,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
@@ -4987,8 +5002,8 @@ if upsample_nearest.__doc__:
 @_overload
 def upsample_bilinear(  # noqa: F811
     input: Tensor,
-    size: Optional[int] = None,
-    scale_factor: Optional[float] = None,
+    size: int | None = None,
+    scale_factor: float | None = None,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
@@ -4997,8 +5012,8 @@ def upsample_bilinear(  # noqa: F811
 @_overload
 def upsample_bilinear(  # noqa: F811
     input: Tensor,
-    size: Optional[list[int]] = None,
-    scale_factor: Optional[float] = None,
+    size: list[int] | None = None,
+    scale_factor: float | None = None,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
@@ -5007,8 +5022,8 @@ def upsample_bilinear(  # noqa: F811
 @_overload
 def upsample_bilinear(  # noqa: F811
     input: Tensor,
-    size: Optional[int] = None,
-    scale_factor: Optional[list[float]] = None,
+    size: int | None = None,
+    scale_factor: list[float] | None = None,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
@@ -5017,8 +5032,8 @@ def upsample_bilinear(  # noqa: F811
 @_overload
 def upsample_bilinear(  # noqa: F811
     input: Tensor,
-    size: Optional[list[int]] = None,
-    scale_factor: Optional[list[float]] = None,
+    size: list[int] | None = None,
+    scale_factor: list[float] | None = None,
     # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
@@ -5075,7 +5090,7 @@ def grid_sample(
     grid: Tensor,
     mode: str = "bilinear",
     padding_mode: str = "zeros",
-    align_corners: Optional[bool] = None,
+    align_corners: bool | None = None,
 ) -> Tensor:
     r"""Compute grid sample.
 
@@ -5233,7 +5248,7 @@ def grid_sample(
 def affine_grid(
     theta: Tensor,
     size: list[int],
-    align_corners: Optional[bool] = None,
+    align_corners: bool | None = None,
 ) -> Tensor:
     r"""Generate 2D or 3D flow field (sampling grid), given a batch of affine matrices :attr:`theta`.
 
@@ -5338,7 +5353,7 @@ def pad(
     input: Tensor,
     pad: list[int],
     mode: str = "constant",
-    value: Optional[float] = None,
+    value: float | None = None,
 ) -> Tensor:
     r"""
     pad(input, pad, mode="constant", value=None) -> Tensor
@@ -5551,8 +5566,8 @@ def triplet_margin_loss(
     p: float = 2,
     eps: float = 1e-6,
     swap: bool = False,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> Tensor:
     r"""Compute the triplet loss between given input tensors and a margin greater than 0.
@@ -5590,7 +5605,7 @@ def triplet_margin_with_distance_loss(
     positive: Tensor,
     negative: Tensor,
     *,
-    distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
+    distance_function: Callable[[Tensor, Tensor], Tensor] | None = None,
     margin: float = 1.0,
     swap: bool = False,
     reduction: str = "mean",
@@ -5667,7 +5682,7 @@ def normalize(
     p: float = 2.0,
     dim: int = 1,
     eps: float = 1e-12,
-    out: Optional[Tensor] = None,
+    out: Tensor | None = None,
 ) -> Tensor:
     r"""Perform :math:`L_p` normalization of inputs over specified dimension.
 
@@ -5700,7 +5715,8 @@ def normalize(
 
 
 def assert_int_or_pair(arg: list[int], arg_name: str, message: str) -> None:
-    assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
+    if not (isinstance(arg, int) or len(arg) == 2):
+        raise AssertionError(message.format(arg_name))
 
 
 def unfold(
@@ -5787,7 +5803,7 @@ def _in_projection_packed(
     k: Tensor,
     v: Tensor,
     w: Tensor,
-    b: Optional[Tensor] = None,
+    b: Tensor | None = None,
 ) -> list[Tensor]:
     r"""Perform the in-projection step of the attention operation, using packed weights.
 
@@ -5867,9 +5883,9 @@ def _in_projection(
     w_q: Tensor,
     w_k: Tensor,
     w_v: Tensor,
-    b_q: Optional[Tensor] = None,
-    b_k: Optional[Tensor] = None,
-    b_v: Optional[Tensor] = None,
+    b_q: Tensor | None = None,
+    b_k: Tensor | None = None,
+    b_v: Tensor | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]:
     r"""Perform the in-projection step of the attention operation.
 
@@ -5905,27 +5921,30 @@ def _in_projection(
 
     """
     Eq, Ek, Ev = q.size(-1), k.size(-1), v.size(-1)
-    assert w_q.shape == (
-        Eq,
-        Eq,
-    ), f"expecting query weights shape of {(Eq, Eq)}, but got {w_q.shape}"
-    assert w_k.shape == (
-        Eq,
-        Ek,
-    ), f"expecting key weights shape of {(Eq, Ek)}, but got {w_k.shape}"
-    assert w_v.shape == (
-        Eq,
-        Ev,
-    ), f"expecting value weights shape of {(Eq, Ev)}, but got {w_v.shape}"
-    assert b_q is None or b_q.shape == (Eq,), (
-        f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
-    )
-    assert b_k is None or b_k.shape == (Eq,), (
-        f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
-    )
-    assert b_v is None or b_v.shape == (Eq,), (
-        f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
-    )
+    if w_q.shape != (Eq, Eq):
+        raise AssertionError(
+            f"expecting query weights shape of {(Eq, Eq)}, but got {w_q.shape}"
+        )
+    if w_k.shape != (Eq, Ek):
+        raise AssertionError(
+            f"expecting key weights shape of {(Eq, Ek)}, but got {w_k.shape}"
+        )
+    if w_v.shape != (Eq, Ev):
+        raise AssertionError(
+            f"expecting value weights shape of {(Eq, Ev)}, but got {w_v.shape}"
+        )
+    if b_q is not None and b_q.shape != (Eq,):
+        raise AssertionError(
+            f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
+        )
+    if b_k is not None and b_k.shape != (Eq,):
+        raise AssertionError(
+            f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
+        )
+    if b_v is not None and b_v.shape != (Eq,):
+        raise AssertionError(
+            f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
+        )
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
@@ -5987,6 +6006,21 @@ scaled_dot_product_attention = _add_docstr(
                 def forward(self, ...):
                     return F.scaled_dot_product_attention(...,
                         dropout_p=(self.p if self.training else 0.0))
+
+    Note:
+
+        The boolean mask semantics for ``attn_mask`` are the inverse of
+        :class:`~torch.nn.MultiheadAttention`'s ``key_padding_mask``.
+
+        In :func:`scaled_dot_product_attention`, ``True`` indicates values
+        to **participate** in attention.
+
+        In :class:`~torch.nn.MultiheadAttention`, ``True`` indicates values
+        to be **masked out** (padding).
+
+        If migrating from MHA, ensure you invert your boolean mask (e.g.,
+        using ``~mask`` or ``mask.logical_not()``).
+
 
     Note:
 
@@ -6093,8 +6127,8 @@ def _mha_shape_check(
     query: Tensor,
     key: Tensor,
     value: Tensor,
-    key_padding_mask: Optional[Tensor],
-    attn_mask: Optional[Tensor],
+    key_padding_mask: Tensor | None,
+    attn_mask: Tensor | None,
     num_heads: int,
 ):
     # Verifies the expected shape for `query, `key`, `value`, `key_padding_mask` and `attn_mask`
@@ -6105,44 +6139,51 @@ def _mha_shape_check(
     if query.dim() == 3:
         # Batched Inputs
         is_batched = True
-        assert key.dim() == 3 and value.dim() == 3, (
-            "For batched (3-D) `query`, expected `key` and `value` to be 3-D"
-            f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
-        )
+        if key.dim() != 3 or value.dim() != 3:
+            raise AssertionError(
+                "For batched (3-D) `query`, expected `key` and `value` to be 3-D"
+                f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
+            )
         if key_padding_mask is not None:
-            assert key_padding_mask.dim() == 2, (
-                "For batched (3-D) `query`, expected `key_padding_mask` to be `None` or 2-D"
-                f" but found {key_padding_mask.dim()}-D tensor instead"
-            )
+            if key_padding_mask.dim() != 2:
+                raise AssertionError(
+                    "For batched (3-D) `query`, expected `key_padding_mask` to be `None` or 2-D"
+                    f" but found {key_padding_mask.dim()}-D tensor instead"
+                )
         if attn_mask is not None:
-            assert attn_mask.dim() in (2, 3), (
-                "For batched (3-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
-                f" but found {attn_mask.dim()}-D tensor instead"
-            )
+            if attn_mask.dim() not in (2, 3):
+                raise AssertionError(
+                    "For batched (3-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
+                    f" but found {attn_mask.dim()}-D tensor instead"
+                )
     elif query.dim() == 2:
         # Unbatched Inputs
         is_batched = False
-        assert key.dim() == 2 and value.dim() == 2, (
-            "For unbatched (2-D) `query`, expected `key` and `value` to be 2-D"
-            f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
-        )
+        if key.dim() != 2 or value.dim() != 2:
+            raise AssertionError(
+                "For unbatched (2-D) `query`, expected `key` and `value` to be 2-D"
+                f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
+            )
 
         if key_padding_mask is not None:
-            assert key_padding_mask.dim() == 1, (
-                "For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D"
-                f" but found {key_padding_mask.dim()}-D tensor instead"
-            )
+            if key_padding_mask.dim() != 1:
+                raise AssertionError(
+                    "For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D"
+                    f" but found {key_padding_mask.dim()}-D tensor instead"
+                )
 
         if attn_mask is not None:
-            assert attn_mask.dim() in (2, 3), (
-                "For unbatched (2-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
-                f" but found {attn_mask.dim()}-D tensor instead"
-            )
+            if attn_mask.dim() not in (2, 3):
+                raise AssertionError(
+                    "For unbatched (2-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
+                    f" but found {attn_mask.dim()}-D tensor instead"
+                )
             if attn_mask.dim() == 3:
                 expected_shape = (num_heads, query.shape[0], key.shape[0])
-                assert attn_mask.shape == expected_shape, (
-                    f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}"
-                )
+                if attn_mask.shape != expected_shape:
+                    raise AssertionError(
+                        f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}"
+                    )
     else:
         raise AssertionError(
             f"query should be unbatched 2D or batched 3D tensor but received {query.dim()}-D query tensor"
@@ -6152,13 +6193,13 @@ def _mha_shape_check(
 
 
 def _canonical_mask(
-    mask: Optional[Tensor],
+    mask: Tensor | None,
     mask_name: str,
-    other_type: Optional[DType],
+    other_type: DType | None,
     other_name: str,
     target_type: DType,
     check_other: bool = True,
-) -> Optional[Tensor]:
+) -> Tensor | None:
     if mask is not None:
         _mask_dtype = mask.dtype
         _mask_is_float = torch.is_floating_point(mask)
@@ -6180,7 +6221,7 @@ def _canonical_mask(
     return mask
 
 
-def _none_or_dtype(input: Optional[Tensor]) -> Optional[DType]:
+def _none_or_dtype(input: Tensor | None) -> DType | None:
     if input is None:
         return None
     elif isinstance(input, torch.Tensor):
@@ -6209,27 +6250,27 @@ def multi_head_attention_forward(
     value: Tensor,
     embed_dim_to_check: int,
     num_heads: int,
-    in_proj_weight: Optional[Tensor],
-    in_proj_bias: Optional[Tensor],
-    bias_k: Optional[Tensor],
-    bias_v: Optional[Tensor],
+    in_proj_weight: Tensor | None,
+    in_proj_bias: Tensor | None,
+    bias_k: Tensor | None,
+    bias_v: Tensor | None,
     add_zero_attn: bool,
     dropout_p: float,
     out_proj_weight: Tensor,
-    out_proj_bias: Optional[Tensor],
+    out_proj_bias: Tensor | None,
     training: bool = True,
-    key_padding_mask: Optional[Tensor] = None,
+    key_padding_mask: Tensor | None = None,
     need_weights: bool = True,
-    attn_mask: Optional[Tensor] = None,
+    attn_mask: Tensor | None = None,
     use_separate_proj_weight: bool = False,
-    q_proj_weight: Optional[Tensor] = None,
-    k_proj_weight: Optional[Tensor] = None,
-    v_proj_weight: Optional[Tensor] = None,
-    static_k: Optional[Tensor] = None,
-    static_v: Optional[Tensor] = None,
+    q_proj_weight: Tensor | None = None,
+    k_proj_weight: Tensor | None = None,
+    v_proj_weight: Tensor | None = None,
+    static_k: Tensor | None = None,
+    static_v: Tensor | None = None,
     average_attn_weights: bool = True,
     is_causal: bool = False,
-) -> tuple[Tensor, Optional[Tensor]]:
+) -> tuple[Tensor, Tensor | None]:
     r"""Forward method for MultiHeadAttention.
 
     See :class:`torch.nn.MultiheadAttention` for details.
@@ -6404,45 +6445,53 @@ def multi_head_attention_forward(
             # longer causal.
             is_causal = False
 
-    assert embed_dim == embed_dim_to_check, (
-        f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
-    )
+    if embed_dim != embed_dim_to_check:
+        raise AssertionError(
+            f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
+        )
     if isinstance(embed_dim, torch.Tensor):
         # embed_dim can be a tensor when JIT tracing
         head_dim = embed_dim.div(num_heads, rounding_mode="trunc")
     else:
         head_dim = embed_dim // num_heads
-    assert head_dim * num_heads == embed_dim, (
-        f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
-    )
+    if head_dim * num_heads != embed_dim:
+        raise AssertionError(
+            f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
+        )
     if use_separate_proj_weight:
         # allow MHA to have different embedding dimensions when separate projection weights are used
-        assert key.shape[:2] == value.shape[:2], (
-            f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
-        )
+        if key.shape[:2] != value.shape[:2]:
+            raise AssertionError(
+                f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
+            )
     else:
-        assert key.shape == value.shape, (
-            f"key shape {key.shape} does not match value shape {value.shape}"
-        )
+        if key.shape != value.shape:
+            raise AssertionError(
+                f"key shape {key.shape} does not match value shape {value.shape}"
+            )
 
     #
     # compute in-projection
     #
     if not use_separate_proj_weight:
-        assert in_proj_weight is not None, (
-            "use_separate_proj_weight is False but in_proj_weight is None"
-        )
+        if in_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is False but in_proj_weight is None"
+            )
         q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
     else:
-        assert q_proj_weight is not None, (
-            "use_separate_proj_weight is True but q_proj_weight is None"
-        )
-        assert k_proj_weight is not None, (
-            "use_separate_proj_weight is True but k_proj_weight is None"
-        )
-        assert v_proj_weight is not None, (
-            "use_separate_proj_weight is True but v_proj_weight is None"
-        )
+        if q_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is True but q_proj_weight is None"
+            )
+        if k_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is True but k_proj_weight is None"
+            )
+        if v_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is True but v_proj_weight is None"
+            )
         if in_proj_bias is None:
             b_q = b_k = b_v = None
         else:
@@ -6483,8 +6532,10 @@ def multi_head_attention_forward(
 
     # add bias along batch dimension (currently second)
     if bias_k is not None and bias_v is not None:
-        assert static_k is None, "bias cannot be added to static key."
-        assert static_v is None, "bias cannot be added to static value."
+        if static_k is not None:
+            raise AssertionError("bias cannot be added to static key.")
+        if static_v is not None:
+            raise AssertionError("bias cannot be added to static value.")
         k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
         v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
         if attn_mask is not None:
@@ -6494,8 +6545,10 @@ def multi_head_attention_forward(
             # pyrefly: ignore [bad-argument-type]
             key_padding_mask = pad(key_padding_mask, (0, 1))
     else:
-        assert bias_k is None
-        assert bias_v is None
+        if bias_k is not None:
+            raise AssertionError("bias_k is set but bias_v is None")
+        if bias_v is not None:
+            raise AssertionError("bias_v is set but bias_k is None")
 
     #
     # reshape q, k, v for multihead attention and make them batch first
@@ -6507,24 +6560,28 @@ def multi_head_attention_forward(
         k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert static_k.size(0) == bsz * num_heads, (
-            f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
-        )
-        assert static_k.size(2) == head_dim, (
-            f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
-        )
+        if static_k.size(0) != bsz * num_heads:
+            raise AssertionError(
+                f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
+            )
+        if static_k.size(2) != head_dim:
+            raise AssertionError(
+                f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
+            )
         k = static_k
     if static_v is None:
         # pyrefly: ignore [no-matching-overload]
         v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert static_v.size(0) == bsz * num_heads, (
-            f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
-        )
-        assert static_v.size(2) == head_dim, (
-            f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
-        )
+        if static_v.size(0) != bsz * num_heads:
+            raise AssertionError(
+                f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
+            )
+        if static_v.size(2) != head_dim:
+            raise AssertionError(
+                f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
+            )
         v = static_v
 
     # add zero attention along batch dimension (now first)
@@ -6577,9 +6634,8 @@ def multi_head_attention_forward(
         _B, _Nt, E = q.shape
         q_scaled = q * math.sqrt(1.0 / float(E))
 
-        assert not (is_causal and attn_mask is None), (
-            "FIXME: is_causal not implemented for need_weights"
-        )
+        if is_causal and attn_mask is None:
+            raise AssertionError("FIXME: is_causal not implemented for need_weights")
 
         if attn_mask is not None:
             attn_output_weights = torch.baddbmm(
@@ -6594,7 +6650,6 @@ def multi_head_attention_forward(
         attn_output = torch.bmm(attn_output_weights, v)
 
         attn_output = (
-            # pyrefly: ignore [no-matching-overload]
             attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
         )
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
@@ -6630,7 +6685,6 @@ def multi_head_attention_forward(
             q, k, v, attn_mask, dropout_p, is_causal
         )
         attn_output = (
-            # pyrefly: ignore [no-matching-overload]
             attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
         )
 
@@ -6646,9 +6700,9 @@ def grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
     *,
-    offs: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
-    out_dtype: Optional[torch.dtype] = None,
+    offs: Tensor | None = None,
+    bias: Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
 ) -> Tensor:
     r"""
     grouped_mm(mat_a, mat_b, *, offs=None, bias=None, out_dtype=None)
@@ -6697,9 +6751,9 @@ def scaled_mm(
     scale_recipe_b: ScalingType | list[ScalingType],
     swizzle_a: SwizzleType | list[SwizzleType] | None = None,
     swizzle_b: SwizzleType | list[SwizzleType] | None = None,
-    bias: Optional[Tensor] = None,
-    output_dtype: Optional[torch.dtype] = torch.bfloat16,
-    contraction_dim: list[int] | tuple[int] = (),
+    bias: Tensor | None = None,
+    output_dtype: torch.dtype | None = torch.bfloat16,
+    contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
 ) -> Tensor:
     r"""
@@ -6781,10 +6835,10 @@ def scaled_grouped_mm(
     scale_recipe_b: ScalingType | list[ScalingType],
     swizzle_a: SwizzleType | list[SwizzleType] | None = None,
     swizzle_b: SwizzleType | list[SwizzleType] | None = None,
-    bias: Optional[Tensor] = None,
-    offs: Optional[Tensor] = None,
-    output_dtype: Optional[torch.dtype] = torch.bfloat16,
-    contraction_dim: list[int] | tuple[int] = (),
+    bias: Tensor | None = None,
+    offs: Tensor | None = None,
+    output_dtype: torch.dtype | None = torch.bfloat16,
+    contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
 ) -> Tensor:
     r"""

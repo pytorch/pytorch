@@ -42,7 +42,7 @@ TensorBase empty_mps(
     auto* allocator = at::mps::GetMPSAllocator();
     int64_t nelements = c10::multiply_integers(size);
     auto dtype = dtype_or_default(dtype_opt);
-    TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
+    TORCH_CHECK_TYPE(dtype != kDouble && dtype != kComplexDouble, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
 
 
     auto dtype_meta = scalarTypeToTypeMeta(dtype);

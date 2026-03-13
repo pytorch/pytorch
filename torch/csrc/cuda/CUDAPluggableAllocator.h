@@ -11,12 +11,6 @@
 
 namespace torch::cuda::CUDAPluggableAllocator {
 
-#if defined(USE_ROCM)
-using streamType = c10::hip::HIPStream;
-#else
-using streamType = c10::cuda::CUDAStream;
-#endif
-
 TORCH_CUDA_CPP_API std::shared_ptr<
     c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator();
@@ -91,25 +85,27 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   std::vector<c10::cuda::CUDACachingAllocator::StreamSegmentSize>
   getExpandableSegmentSizes(c10::DeviceIndex device) override;
   void emptyCache(c10::cuda::MempoolId_t mempool_id = {0, 0}) override;
-  void enable(bool) override {}
+  void enable(bool /*value*/) override {}
   bool isEnabled() const override {
     return true;
   }
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 
-  void recordStream(const c10::DataPtr&, streamType stream) override;
+  void recordStream(const c10::DataPtr& /*ptr*/, c10::cuda::CUDAStream stream)
+      override;
 
   c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) override;
   void resetAccumulatedStats(c10::DeviceIndex device) override;
   void resetPeakStats(c10::DeviceIndex device) override;
   c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot(
-      c10::cuda::MempoolId_t mempool) override;
+      c10::cuda::MempoolId_t mempool,
+      bool include_traces = true) override;
   void beginAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)>) override;
+      std::function<bool(cudaStream_t)> /*filter*/) override;
   void endAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id) override;
@@ -117,13 +113,14 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       override;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
   c10::cuda::CUDACachingAllocator::ShareableHandle shareIpcHandle(
-      void*) override;
+      void* /*ptr*/) override;
   void recordHistory(
       bool enabled,
       c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       c10::cuda::CUDACachingAllocator::RecordContext when,
-      bool clearHistory) override;
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) override;
   void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
   void attachAllocatorTraceTracker(

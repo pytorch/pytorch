@@ -104,7 +104,15 @@ class _MeshLayout(Layout):
         → cannot merge; result stays (3,2):(4,1)
         """
         layout = coalesce(self)
-        return _MeshLayout(layout.shape, layout.stride)
+        # The original PuCute coalesce() will use stride=0 for size=1 for all dimension.
+        # We don't want to do that in device mesh, we will reset them to be 1 to be same as PyTorch.
+        if is_int(layout.stride) and layout.stride == 0:
+            return _MeshLayout(layout.shape, 1)
+        elif is_tuple(layout.stride) and any(s == 0 for s in layout.stride):
+            non_zero_strides = tuple(s if s != 0 else 1 for s in layout.stride)
+            return _MeshLayout(layout.shape, non_zero_strides)
+        else:
+            return _MeshLayout(layout.shape, layout.stride)
 
     def composition(self, layout: "_MeshLayout") -> "_MeshLayout":
         """
@@ -297,9 +305,12 @@ class _MeshLayout(Layout):
         Returns:
             torch.Tensor: A tensor representing the actual device allocation from rank_map
         """
-        assert rank_map.ndim == 1
-        assert rank_map.is_contiguous()
-        assert rank_map.numel() >= self.cosize()
+        if rank_map.ndim != 1:
+            raise AssertionError
+        if not rank_map.is_contiguous():
+            raise AssertionError
+        if rank_map.numel() < self.cosize():
+            raise AssertionError
 
         complement_layout = self.complement(rank_map.numel())
 

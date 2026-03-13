@@ -27,7 +27,6 @@ std::unordered_set<Symbol> supported_ops = {
     prim::Return,
     prim::PythonOp,
     aten::format,
-    prim::Uninitialized,
     aten::__getitem__};
 
 // Flatten block inputs and insert a tuple construct in the block

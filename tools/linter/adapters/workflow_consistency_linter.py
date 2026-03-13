@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "pyyaml==6.0.2",
+# ]
+# ///
 """Checks for consistency of jobs between different GitHub workflows.
 
 Any job with a specific `sync-tag` must match all other jobs with the same `sync-tag`.
@@ -107,6 +113,22 @@ def get_jobs_with_sync_tag(
     # same is true for ['with']['test-matrix']
     if "test-matrix" in job.get("with", {}):
         del job["with"]["test-matrix"]
+    # and ['with']['tests-to-include'], since dispatch filters differ
+    if "tests-to-include" in job.get("with", {}):
+        del job["with"]["tests-to-include"]
+
+    # normalize needs: remove helper job-filter so comparisons ignore it
+    needs = job.get("needs")
+    if needs:
+        needs_list = [needs] if isinstance(needs, str) else list(needs)
+        needs_list = [n for n in needs_list if n != "job-filter"]
+        if not needs_list:
+            job.pop("needs", None)
+        elif len(needs_list) == 1:
+            job["needs"] = needs_list[0]
+        else:
+            job["needs"] = needs_list
+
     return (sync_tag, job_id, job)
 
 

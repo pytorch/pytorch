@@ -63,7 +63,7 @@ class BarrierConfig:
         )
     """
 
-    barrier_type: Optional[str] = None
+    barrier_type: str | None = None
     barrier_args: dict[str, Any] = field(default_factory=dict)
 
 

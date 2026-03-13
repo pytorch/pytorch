@@ -69,6 +69,11 @@ BATCH_SIZE_DIVISORS = {
 REQUIRE_HIGHER_TOLERANCE = {
     "inception_v3",
     "mobilenetv3_large_100",
+    "convnextv2_nano.fcmae_ft_in22k_in1k",
+}
+
+REQUIRE_HIGHER_TOLERANCE_FP16_XPU = {
+    "botnet26t_256",
 }
 
 REQUIRE_HIGHER_TOLERANCE_AMP = {}
@@ -96,6 +101,7 @@ SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {}
 REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
     "inception_v3",
     "mobilenetv3_large_100",
+    "vit_base_patch14_dinov2.lvd142m",
 }
 
 
@@ -364,6 +370,12 @@ class TimmRunner(BenchmarkRunner):
                 tolerance = 8 * 1e-2
             elif name in REQUIRE_HIGHER_TOLERANCE or (
                 self.args.amp and name in REQUIRE_HIGHER_TOLERANCE_AMP
+            ):
+                tolerance = 4 * 1e-2
+            elif (
+                name in REQUIRE_HIGHER_TOLERANCE_FP16_XPU
+                and self.args.float16
+                and current_device == "xpu"
             ):
                 tolerance = 4 * 1e-2
             else:

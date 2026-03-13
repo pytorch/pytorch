@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import numbers
-from typing import Union
 
 import torch
 from torch import Size, Tensor
@@ -100,7 +99,7 @@ class CrossMapLRN2d(Module):
         return "{size}, alpha={alpha}, beta={beta}, k={k}".format(**self.__dict__)
 
 
-_shape_t = Union[int, list[int], Size]
+_shape_t = int | list[int] | Size
 
 
 class LayerNorm(Module):
@@ -357,7 +356,10 @@ class RMSNorm(Module):
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
-        eps: a value added to the denominator for numerical stability. Default: ``torch.finfo(x.dtype).eps``
+        eps: a value added to the denominator for numerical stability. If not specified,
+            uses the machine epsilon of the computation (opmath) type: fp16/bf16 and
+            fp32 inputs use ``torch.finfo(torch.float32).eps``, while fp64 inputs use
+            ``torch.finfo(torch.float64).eps``.
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
 

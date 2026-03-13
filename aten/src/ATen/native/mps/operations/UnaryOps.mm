@@ -31,7 +31,6 @@
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/real.h>
-#include <ATen/ops/reciprocal_native.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
@@ -190,7 +189,6 @@ REGISTER_MPS_UNARY_STUB(trunc, truncate);
     });                                                                                                          \
   }
 
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)

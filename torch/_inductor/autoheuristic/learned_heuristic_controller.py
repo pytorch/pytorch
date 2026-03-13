@@ -2,7 +2,7 @@ import importlib
 import inspect
 import pkgutil
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
 from torch._inductor.autoheuristic.autoheuristic_utils import (
     AHContext,
@@ -93,7 +93,7 @@ class LearnedHeuristicController:
 
         return LearnedHeuristicController.existing_heuristics[name]
 
-    def get_decision(self) -> Optional[Choice]:
+    def get_decision(self) -> Choice | None:
         """
         Returns the decision made by the learned heuristic or None if no heuristic was found or the heuristic is unsure
         which choice to make.
@@ -105,7 +105,7 @@ class LearnedHeuristicController:
                 return heuristic.get_decision(self.context, self.metadata.choices)
         return None
 
-    def get_decisions_ranked(self, top_k: int) -> Optional[list[Choice]]:
+    def get_decisions_ranked(self, top_k: int) -> list[Choice] | None:
         heuristics = self.get_heuristics(self.metadata.name)
         for heuristic in heuristics:
             if heuristic.check_precondition(self.metadata, self.context):

@@ -24,7 +24,6 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
@@ -341,7 +340,7 @@ class TORCH_API TensorBase {
                 "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
                 "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
                 "equivalent dense tensor, multiply numel() by element_size()");
-    return impl_->sym_numel() * impl_->itemsize();
+    return impl_->sym_numel() * c10::SymInt(impl_->itemsize());
   }
 
   int64_t numel() const {
@@ -628,11 +627,9 @@ class TORCH_API TensorBase {
     return mutable_data_ptr();
   }
 
-  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
+  // Implemented in aten/src/ATen/templates/TensorMethods.cpp
+  template <typename T>
   const T* const_data_ptr() const;
-
-  template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
-  const std::remove_const_t<T>* const_data_ptr() const;
 
   template <typename T>
   T* mutable_data_ptr() const;

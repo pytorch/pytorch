@@ -1,4 +1,3 @@
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/util.h>
 
@@ -373,24 +372,24 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
 
-static constexpr int32_t kTruncatLength = 30;
+static constexpr int32_t kTruncateLength = 30;
 
 template <typename ListLikeType>
 static inline std::string format_list(
     ListLikeType list,
     bool truncate,
     bool with_escaped_quotes = true) {
-  if (truncate && list.size() > kTruncatLength) {
+  if (truncate && list.size() > kTruncateLength) {
     if (with_escaped_quotes == true) {
       auto x = fmt::format(
           "\"[{}, ..., {}]\"",
-          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          fmt::join(list.begin(), list.begin() + kTruncateLength - 1, ", "),
           *std::prev(list.end()));
       return x;
     } else {
       auto x = fmt::format(
           "[{}, ..., {}]",
-          fmt::join(list.begin(), list.begin() + kTruncatLength - 1, ", "),
+          fmt::join(list.begin(), list.begin() + kTruncateLength - 1, ", "),
           *std::prev(list.end()));
       return x;
     }
@@ -511,6 +510,9 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       }
     }
   }
+
+  map.emplace(
+      kIsAsynchronizedOp, std::to_string(debugInfo->isAsynchronizedOp()));
 
   if (get_record_tensor_addrs_enabled()) {
     std::vector<std::string> addressList;

@@ -81,7 +81,8 @@ imports = [
 
 
 def process_hf_reformer_output(out):
-    assert isinstance(out, list)
+    if not isinstance(out, list):
+        raise AssertionError(f"expected out to be a list, got {type(out)}")
     # second output is unstable
     return [elem for i, elem in enumerate(out) if i != 1]
 
@@ -114,7 +115,8 @@ TORCHBENCH_ONLY_MODELS = [
 # TODO(sdym): use batch-size-file parameter of common.main, like torchbench.py
 # Get the list of models and their batch sizes
 MODELS_FILENAME = os.path.join(os.path.dirname(__file__), "huggingface_models_list.txt")
-assert os.path.exists(MODELS_FILENAME)
+if not os.path.exists(MODELS_FILENAME):
+    raise AssertionError(f"models file not found: {MODELS_FILENAME}")
 with open(MODELS_FILENAME) as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]
@@ -124,7 +126,8 @@ with open(MODELS_FILENAME) as fh:
             continue
         batch_size = int(batch_size)
         BATCH_SIZE_KNOWN_MODELS[model_name] = batch_size
-assert BATCH_SIZE_KNOWN_MODELS
+if not BATCH_SIZE_KNOWN_MODELS:
+    raise AssertionError("BATCH_SIZE_KNOWN_MODELS is empty")
 
 
 try:

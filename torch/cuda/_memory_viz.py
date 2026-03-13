@@ -109,18 +109,21 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
                 # Ok to skip, the file will be removed by tempfile
                 pass
     args = [flamegraph_script, "--countname", "bytes"]
-    p = subprocess.Popen(
+    with subprocess.Popen(
         args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf-8"
-    )
-    assert p.stdin is not None
-    assert p.stdout is not None
-    p.stdin.write(flamegraph_lines)
-    p.stdin.close()
-    result = p.stdout.read()
-    p.stdout.close()
-    p.wait()
-    assert p.wait() == 0
-    return result
+    ) as p:
+        if p.stdin is None:
+            raise AssertionError("p.stdin is None")
+        if p.stdout is None:
+            raise AssertionError("p.stdout is None")
+        p.stdin.write(flamegraph_lines)
+        p.stdin.close()
+        result = p.stdout.read()
+        p.stdout.close()
+        p.wait()
+        if p.wait() != 0:
+            raise AssertionError(f"flamegraph process exited with code {p.wait()}")
+        return result
 
 
 def _write_blocks(f, prefix, blocks):
@@ -303,9 +306,10 @@ def segsum(data):
                     occupied[j] = m
         stream = "" if seg["stream"] == 0 else f", stream_{seg['stream']}"
         body = "".join(occupied)
-        assert (
-            seg_free_external + seg_free_internal + seg_allocated == seg["total_size"]
-        )
+        if seg_free_external + seg_free_internal + seg_allocated != seg["total_size"]:
+            raise AssertionError(
+                f"Segment size mismatch: {seg_free_external} + {seg_free_internal} + {seg_allocated} != {seg['total_size']}"
+            )
         stream = f" stream_{seg['stream']}" if seg["stream"] != 0 else ""
         if seg["total_size"] >= PAGE_SIZE:
             out.write(
@@ -317,7 +321,10 @@ def segsum(data):
     out.write(f"total_allocated: {Bytes(total_allocated)}\n")
     out.write(f"total_free: {_report_free(free_external, free_internal)}\n")
     out.write(legend)
-    assert free_internal + free_external + total_allocated == total_reserved
+    if free_internal + free_external + total_allocated != total_reserved:
+        raise AssertionError(
+            f"Memory accounting error: {free_internal} + {free_external} + {total_allocated} != {total_reserved}"
+        )
     return out.getvalue()
 
 

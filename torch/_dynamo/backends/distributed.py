@@ -20,7 +20,7 @@ import logging
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from unittest import mock
 
 import torch
@@ -84,7 +84,8 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
 
 def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
     headers = ("Index", "Size (b)", "Param Names")
-    rows: list[tuple[Optional[int], Optional[int], str]] = []
+    rows: list[tuple[int | None, int | None, str]] = []
+    # pyrefly: ignore [implicit-any]
     extended_buckets = []
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
@@ -167,7 +168,7 @@ def propagate_dynamo_source(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -
         if "." not in name and len(name):
             for node in module.graph.find_nodes(op="placeholder"):
                 # non-placeholder in original_gm may become placeholder in submodules
-                node._dynamo_source = name_to_dynamo_source.get(node.name, None)
+                node._dynamo_source = name_to_dynamo_source.get(node.name)
 
 
 class DDPOptimizerContext:
@@ -432,7 +433,7 @@ class DDPOptimizer:
         self,
         bucket_bytes_cap: int,
         backend_compile_fn: CompilerFn,
-        first_bucket_cap: Optional[int] = None,
+        first_bucket_cap: int | None = None,
     ) -> None:
         if first_bucket_cap is not None:
             self.first_bucket_cap = first_bucket_cap
@@ -489,7 +490,7 @@ class DDPOptimizer:
         """
         Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
-        to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
+        to compile each subgraph. Finally, stitches compiled graphs into one graphmodule
         and returns its callable.
         """
         # 1: compute the partition map according to DDP bucket logic

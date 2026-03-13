@@ -1,13 +1,17 @@
+import asyncio
 import json
 import logging
+import os
 import socket
 import threading
-from collections.abc import Iterator
+import time
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-import requests
 from jinja2 import DictLoader, Environment
 
 from torch.distributed.debug._store import get_world_size, tcpstore_client
@@ -16,16 +20,101 @@ from torch.distributed.debug._store import get_world_size, tcpstore_client
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def fetch_all(
-    endpoint: str, args: str = ""
-) -> tuple[list[str], Iterator[requests.Response]]:
+# ---------------------------------------------------------------------------
+# Base types
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class Response:
+    status_code: int
+    text: str
+
+    def raise_for_status(self):
+        if self.status_code != 200:
+            raise RuntimeError(f"HTTP {self.status_code}: {self.text}")
+
+    def json(self):
+        return json.loads(self.text)
+
+
+@dataclass(slots=True)
+class NavLink:
+    path: str
+    label: str
+
+
+@dataclass(slots=True)
+class Route:
+    path: str
+    handler: Callable[["HTTPRequestHandler"], bytes]
+
+
+class DebugHandler(ABC):
+    @abstractmethod
+    def routes(self) -> list[Route]: ...
+
+    @abstractmethod
+    def nav_links(self) -> list[NavLink]: ...
+
+    def templates(self) -> dict[str, str]:
+        return {}
+
+    def dump(self) -> str | None:
+        return None
+
+    def dump_filename(self) -> str:
+        return type(self).__name__.lower()
+
+
+# ---------------------------------------------------------------------------
+# Network helpers
+# ---------------------------------------------------------------------------
+
+
+def fetch_thread_pool(urls: list[str]) -> Iterable[Response]:
+    # late import for optional dependency
+    import requests
+
+    max_workers = 20
+
+    def get(url: str) -> Response:
+        resp = requests.post(url)
+        return Response(resp.status_code, resp.text)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        resps = executor.map(get, urls)
+
+    return resps
+
+
+def fetch_aiohttp(urls: list[str]) -> Iterable[Response]:
+    # late import for optional dependency
+    # pyrefly: ignore [missing-import]
+    import aiohttp
+
+    async def fetch(session: aiohttp.ClientSession, url: str) -> Response:
+        async with session.post(url) as resp:
+            text = await resp.text()
+            return Response(resp.status, text)
+
+    async def gather(urls: list[str]) -> Iterable[Response]:
+        async with aiohttp.ClientSession() as session:
+            return await asyncio.gather(*[fetch(session, url) for url in urls])
+
+    return asyncio.run(gather(urls))
+
+
+def fetch_all(endpoint: str, args: str = "") -> tuple[list[str], Iterable[Response]]:
     store = tcpstore_client()
     keys = [f"rank{r}" for r in range(get_world_size())]
     addrs = store.multi_get(keys)
     addrs = [f"{addr.decode()}/handler/{endpoint}?{args}" for addr in addrs]
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        resps = executor.map(requests.post, addrs)
+    try:
+        resps = fetch_aiohttp(addrs)
+    except ImportError:
+        resps = fetch_thread_pool(addrs)
 
     return addrs, resps
 
@@ -35,8 +124,12 @@ def format_json(blob: str):
     return json.dumps(parsed, indent=2)
 
 
-templates = {
-    "base.html": """
+# ---------------------------------------------------------------------------
+# Template constants
+# ---------------------------------------------------------------------------
+
+
+BASE_TEMPLATE = """
 <!doctype html>
 <head>
     <title>{% block title %}{% endblock %} - PyTorch Distributed</title>
@@ -91,29 +184,16 @@ templates = {
 <nav>
     <h1>Torch Distributed Debug Server</h1>
 
-    <a href="/">Home</a> <!--@lint-ignore-->
-    <a href="/stacks">Python Stack Traces</a> <!--@lint-ignore-->
-    <a href="/fr_trace">FlightRecorder</a> <!--@lint-ignore-->
-    <a href="/fr_trace_nccl">FlightRecorder NCCL</a> <!--@lint-ignore-->
-    <a href="/profile">torch profiler</a> <!--@lint-ignore-->
-    <a href="/wait_counters">Wait Counters</a> <!--@lint-ignore-->
+    {{ nav_links | safe }}
 </nav>
 
 <section class="content">
   {% block header %}{% endblock %}
   {% block content %}{% endblock %}
 </section>
-    """,
-    "index.html": """
-{% extends "base.html" %}
-{% block header %}
-  <h1>{% block title %}Index{% endblock %}</h1>
-{% endblock %}
-{% block content %}
-Hi
-{% endblock %}
-    """,
-    "raw_resp.html": """
+    """
+
+RAW_RESP_TEMPLATE = """
 {% extends "base.html" %}
 {% block header %}
     <h1>{% block title %}{{title}}{% endblock %}</h1>
@@ -129,8 +209,9 @@ Hi
         {% endif %}
     {% endfor %}
 {% endblock %}
-    """,
-    "json_resp.html": """
+    """
+
+JSON_RESP_TEMPLATE = """
 {% extends "base.html" %}
 {% block header %}
     <h1>{% block title %}{{ title }}{% endblock %}</h1>
@@ -146,72 +227,65 @@ Hi
         {% endif %}
     {% endfor %}
 {% endblock %}
-    """,
-    "profile.html": """
-{% extends "base.html" %}
-{% block header %}
-    <h1>{% block title %}torch.profiler{% endblock %}</h1>
-{% endblock %}
+    """
 
-{% block content %}
-    <form action="/profile" method="get">
-        <label for="duration">Duration (seconds):</label>
-        <input type="number" id="duration" name="duration" value="{{ duration }}" min="1" max="60">
-        <input type="submit" value="Submit">
-    </form>
 
-    <script>
-    function stringToArrayBuffer(str) {
-        const encoder = new TextEncoder();
-        return encoder.encode(str).buffer;
-    }
-    async function openPerfetto(data) {
-        const ui = window.open('https://ui.perfetto.dev/#!/');
-        if (!ui) { alert('Popup blocked. Allow popups for this page and click again.'); return; }
+# ---------------------------------------------------------------------------
+# PeriodicDumper
+# ---------------------------------------------------------------------------
 
-        // Perfetto readiness handshake: PING until we receive PONG
-        await new Promise((resolve, reject) => {
-        const onMsg = (e) => {
-            if (e.source === ui && e.data === 'PONG') {
-            window.removeEventListener('message', onMsg);
-            clearInterval(pinger);
-            resolve();
-            }
-        };
-        window.addEventListener('message', onMsg);
-        const pinger = setInterval(() => { try { ui.postMessage('PING', '*'); } catch (_e) {} }, 250);
-        setTimeout(() => { clearInterval(pinger); window.removeEventListener('message', onMsg); reject(); }, 20000);
-        }).catch(() => { alert('Perfetto UI did not respond. Try again.'); return; });
 
-        ui.postMessage({
-        perfetto: {
-            buffer: stringToArrayBuffer(JSON.stringify(data)),
-            title: "torch profiler",
-            fileName: "trace.json",
-        }
-        }, '*');
-    }
-    </script>
+class PeriodicDumper:
+    def __init__(
+        self,
+        handlers: list[DebugHandler],
+        output_dir: str,
+        interval_seconds: float = 60.0,
+    ) -> None:
+        self._handlers = handlers
+        self._output_dir = output_dir
+        self._interval_seconds = interval_seconds
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
 
-    {% for i, (addr, resp) in enumerate(zip(addrs, resps)) %}
-        <h2>Rank {{ i }}: {{ addr }}</h2>
-        {% if resp.status_code != 200 %}
-            <p>Failed to fetch: status={{ resp.status_code }}</p>
-            <pre>{{ resp.text }}</pre>
-        {% else %}
-            <script>
-            function run{{ i }}() {
-                var data = {{ resp.text | safe }};
-                openPerfetto(data);
-            }
-            </script>
+    def start(self) -> None:
+        os.makedirs(self._output_dir, exist_ok=True)
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+            name="distributed.debug.PeriodicDumper",
+        )
+        self._thread.start()
 
-            <button onclick="run{{ i }}()">View {{ i }}</button>
-        {% endif %}
-    {% endfor %}
-{% endblock %}
-    """,
-}
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join()
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            for handler in self._handlers:
+                try:
+                    content = handler.dump()
+                except Exception:
+                    logger.exception("Failed to dump %s", handler.dump_filename())
+                    continue
+                if content is None:
+                    continue
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                filename = f"{handler.dump_filename()}_{timestamp}.txt"
+                path = os.path.join(self._output_dir, filename)
+                try:
+                    with open(path, "w") as f:
+                        f.write(content)
+                except Exception:
+                    logger.exception("Failed to write dump to %s", path)
+            self._stop_event.wait(self._interval_seconds)
+
+
+# ---------------------------------------------------------------------------
+# HTTP server
+# ---------------------------------------------------------------------------
 
 
 class _IPv6HTTPServer(ThreadingHTTPServer):
@@ -222,6 +296,13 @@ class _IPv6HTTPServer(ThreadingHTTPServer):
 class HTTPRequestHandler(BaseHTTPRequestHandler):
     frontend: "FrontendServer"
 
+    def log_message(self, format, *args):
+        logger.info(
+            "%s %s",
+            self.client_address[0],
+            format % args,
+        )
+
     def do_GET(self):
         self.frontend._handle_request(self)
 
@@ -229,7 +310,10 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         return urlparse(self.path).path
 
     def get_query(self) -> dict[str, list[str]]:
-        return parse_qs(urlparse(self.path).query)
+        return parse_qs(self.get_raw_query())
+
+    def get_raw_query(self) -> str:
+        return urlparse(self.path).query
 
     def get_query_arg(
         self, name: str, default: object = None, type: type = str
@@ -241,25 +325,48 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
 
 
 class FrontendServer:
-    def __init__(self, port: int):
-        # Setup templates
-        loader = DictLoader(templates)
+    def __init__(
+        self,
+        port: int,
+        handlers: list[DebugHandler] | None = None,
+    ):
+        if handlers is None:
+            from torch.distributed.debug._debug_handlers import default_handlers
+
+            handlers = default_handlers()
+
+        # Build nav HTML from handlers
+        nav_html = "\n".join(
+            f'    <a href="{link.path}">{link.label}</a> <!--@lint-ignore-->'
+            for handler in handlers
+            for link in handler.nav_links()
+        )
+
+        # Merge all handler templates + shared templates
+        all_templates: dict[str, str] = {
+            "base.html": BASE_TEMPLATE,
+            "raw_resp.html": RAW_RESP_TEMPLATE,
+            "json_resp.html": JSON_RESP_TEMPLATE,
+        }
+        for handler in handlers:
+            all_templates.update(handler.templates())
+
+        loader = DictLoader(all_templates)
         self._jinja_env = Environment(loader=loader, enable_async=True)
         self._jinja_env.globals.update(
             zip=zip,
             format_json=format_json,
             enumerate=enumerate,
+            nav_links=nav_html,
         )
 
-        # Create routes
-        self._routes = {
-            "/": self._handle_index,
-            "/stacks": self._handle_stacks,
-            "/fr_trace": self._handle_fr_trace,
-            "/fr_trace_nccl": self._handle_fr_trace_nccl,
-            "/profile": self._handle_profiler,
-            "/wait_counters": self._handle_wait_counters,
-        }
+        # Build route table from handlers
+        self._routes: dict[str, Callable[[HTTPRequestHandler], bytes]] = {}
+        for handler in handlers:
+            for route in handler.routes():
+                self._routes[route.path] = route.handler
+
+        self._handlers = handlers
 
         # Create HTTP server
         RequestHandlerClass = type(
@@ -275,6 +382,7 @@ class FrontendServer:
             target=self._serve,
             args=(),
             daemon=True,
+            name="distributed.debug.FrontendServer",
         )
         self._thread.start()
 
@@ -282,7 +390,7 @@ class FrontendServer:
         try:
             self._server.serve_forever()
         except Exception:
-            logger.exception("got exception in checkpoint server")
+            logger.exception("got exception in frontend server")
 
     def join(self) -> None:
         self._thread.join()
@@ -296,12 +404,13 @@ class FrontendServer:
         handler = self._routes[path]
         try:
             resp = handler(req)
-        except Exception as e:
+        # Catch SystemExit to not crash when FlightRecorder errors.
+        except (Exception, SystemExit) as e:
             logger.exception(
-                "Exception in checkpoint server when handling %s",
+                "Exception in frontend server when handling %s",
                 path,
             )
-            req.send_error(500, str(e))
+            req.send_error(500, f"Exception: {repr(e)}")
             return
 
         req.send_response(200)
@@ -309,53 +418,42 @@ class FrontendServer:
         req.end_headers()
         req.wfile.write(resp)
 
-    def _render_template(self, template: str, **kwargs: object) -> bytes:
+    def render_template(self, template: str, **kwargs: object) -> bytes:
         return self._jinja_env.get_template(template).render(**kwargs).encode()
 
-    def _handle_index(self, req: HTTPRequestHandler) -> bytes:
-        return self._render_template("index.html")
 
-    def _handle_stacks(self, req: HTTPRequestHandler) -> bytes:
-        addrs, resps = fetch_all("dump_traceback")
-        return self._render_template(
-            "raw_resp.html", title="Stacks", addrs=addrs, resps=resps
-        )
+def main(
+    port: int,
+    dump_dir: str | None,
+    dump_interval: float,
+    handlers: list[DebugHandler],
+    enabled_dumps: set[str],
+) -> None:
+    logger.setLevel(logging.INFO)
 
-    def _handle_fr_trace(self, req: HTTPRequestHandler) -> bytes:
-        addrs, resps = fetch_all("fr_trace_json")
-
-        return self._render_template(
-            "json_resp.html",
-            title="FlightRecorder",
-            addrs=addrs,
-            resps=resps,
-        )
-
-    def _handle_fr_trace_nccl(self, req: HTTPRequestHandler) -> bytes:
-        addrs, resps = fetch_all("dump_nccl_trace_json", "onlyactive=true")
-
-        return self._render_template(
-            "json_resp.html",
-            title="FlightRecorder NCCL",
-            addrs=addrs,
-            resps=resps,
-        )
-
-    def _handle_profiler(self, req: HTTPRequestHandler) -> bytes:
-        duration = req.get_query_arg("duration", default=1.0, type=float)
-
-        addrs, resps = fetch_all("torch_profile", f"duration={duration}")
-
-        return self._render_template("profile.html", addrs=addrs, resps=resps)
-
-    def _handle_wait_counters(self, req: HTTPRequestHandler) -> bytes:
-        addrs, resps = fetch_all("wait_counter_values")
-        return self._render_template(
-            "json_resp.html", title="Wait Counters", addrs=addrs, resps=resps
-        )
-
-
-def main(port: int) -> None:
-    server = FrontendServer(port=port)
+    server = FrontendServer(port=port, handlers=handlers)
     logger.info("Frontend server started on port %d", server._server.server_port)
-    server.join()
+
+    dumper: PeriodicDumper | None = None
+    if dump_dir is not None:
+        dumper = PeriodicDumper(
+            [
+                handler
+                for handler in handlers
+                if handler.dump_filename() in enabled_dumps
+            ],
+            dump_dir,
+            dump_interval,
+        )
+        dumper.start()
+        logger.info(
+            "Periodic dumper started, writing to %s every %.0fs",
+            dump_dir,
+            dump_interval,
+        )
+
+    try:
+        server.join()
+    finally:
+        if dumper is not None:
+            dumper.stop()

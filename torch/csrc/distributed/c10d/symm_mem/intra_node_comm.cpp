@@ -20,7 +20,7 @@ static int intraNodeCommIdx = 0;
  * Query the nvlink connection among devices.
  */
 static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
-#if !defined(USE_RCOM)
+#if !defined(USE_ROCM)
   auto connectivity = detect_dma_connectivity(c10::DeviceType::CUDA, "nvlink");
   NvlMesh nvlMesh = {};
   for (size_t srcRank = 0; srcRank < kMaxDevices; ++srcRank) {

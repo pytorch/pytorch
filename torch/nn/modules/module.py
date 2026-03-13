@@ -30,7 +30,7 @@ __all__ = [
     "Module",
 ]
 
-_grad_t = Union[tuple[Tensor, ...], Tensor]
+_grad_t = tuple[Tensor, ...] | Tensor
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -44,7 +44,6 @@ class _IncompatibleKeys(
     __slots__ = ()
 
     def __repr__(self) -> str:
-        # pyrefly: ignore [missing-attribute]
         if not self.missing_keys and not self.unexpected_keys:
             return "<All keys matched successfully>"
         return super().__repr__()
@@ -58,7 +57,8 @@ def _addindent(s_, numSpaces):
     if len(s) == 1:
         return s_
     first = s.pop(0)
-    s = [(numSpaces * " ") + line for line in s]
+    # Only add indentation to non-blank lines; blank lines stay empty
+    s = [(numSpaces * " ") + line if line.strip() else "" for line in s]
     s = "\n".join(s)
     s = first + "\n" + s
     return s
@@ -72,7 +72,7 @@ _global_parameter_registration_hooks: dict[int, Callable] = OrderedDict()
 
 
 class _WrappedHook:
-    def __init__(self, hook: Callable, module: Optional["Module"] = None) -> None:
+    def __init__(self, hook: Callable, module: Optional["Module"] = None) -> None:  # noqa: UP045
         self.hook: Callable = hook
         functools.update_wrapper(self, hook)
 
@@ -93,7 +93,7 @@ class _WrappedHook:
     def __getstate__(self) -> dict:
         result = {"hook": self.hook, "with_module": self.with_module}
         if self.with_module:
-            # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [bad-typed-dict-key]
             result["module"] = self.module()
 
         return result
@@ -294,7 +294,7 @@ def register_module_forward_hook(
 
 
 def register_module_backward_hook(
-    hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
+    hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
 ) -> RemovableHandle:
     r"""Register a backward hook common to all the modules.
 
@@ -323,7 +323,7 @@ def register_module_backward_hook(
 
 
 def register_module_full_backward_pre_hook(
-    hook: Callable[["Module", _grad_t], None | _grad_t],
+    hook: Callable[["Module", _grad_t], _grad_t | None],
 ) -> RemovableHandle:
     r"""Register a backward pre-hook common to all the modules.
 
@@ -350,7 +350,7 @@ def register_module_full_backward_pre_hook(
 
 
 def register_module_full_backward_hook(
-    hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
+    hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
 ) -> RemovableHandle:
     r"""Register a backward hook common to all the modules.
 
@@ -475,7 +475,7 @@ class Module:
     _load_state_dict_pre_hooks: dict[int, Callable]
     _state_dict_pre_hooks: dict[int, Callable]
     _load_state_dict_post_hooks: dict[int, Callable]
-    _modules: dict[str, Optional["Module"]]
+    _modules: dict[str, Optional["Module"]]  # noqa: UP045
     call_super_init: bool = False
     _compiled_call_impl: Callable | None = None
 
@@ -639,7 +639,7 @@ class Module:
                     param = output
             self._parameters[name] = param
 
-    def add_module(self, name: str, module: Optional["Module"]) -> None:
+    def add_module(self, name: str, module: Optional["Module"]) -> None:  # noqa: UP045
         r"""Add a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
@@ -667,7 +667,7 @@ class Module:
                 module = output
         self._modules[name] = module
 
-    def register_module(self, name: str, module: Optional["Module"]) -> None:
+    def register_module(self, name: str, module: Optional["Module"]) -> None:  # noqa: UP045
         r"""Alias for :func:`add_module`."""
         self.add_module(name, module)
 
@@ -817,7 +817,7 @@ class Module:
                 raise AttributeError("`" + atoms[-1] + "` is not an nn.Module")
         setattr(parent, atoms[-1], module)
 
-    def get_parameter(self, target: str) -> "Parameter":
+    def get_parameter(self, target: str) -> Parameter:
         """Return the parameter given by ``target`` if it exists, otherwise throw an error.
 
         See the docstring for ``get_submodule`` for a more detailed
@@ -853,7 +853,7 @@ class Module:
 
         return param
 
-    def get_buffer(self, target: str) -> "Tensor":
+    def get_buffer(self, target: str) -> Tensor:
         """Return the buffer given by ``target`` if it exists, otherwise throw an error.
 
         See the docstring for ``get_submodule`` for a more detailed
@@ -992,13 +992,14 @@ class Module:
                     ) from e
                 out_param = param
             elif p_should_use_set_data:
-                # pyrefly: ignore [bad-assignment]
                 param.data = param_applied
                 out_param = param
             else:
-                assert isinstance(param, Parameter)
-                assert param.is_leaf
-                # pyrefly: ignore [bad-argument-type]
+                if not isinstance(param, Parameter):
+                    raise AssertionError("param must be a Parameter")
+                if not param.is_leaf:
+                    raise AssertionError("param must be a leaf tensor")
+
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
 
@@ -1018,10 +1019,12 @@ class Module:
                         ) from e
                     out_param.grad = param_grad
                 elif g_should_use_set_data:
-                    assert out_param.grad is not None
+                    if out_param.grad is None:
+                        raise AssertionError("out_param.grad must not be None")
                     out_param.grad.data = grad_applied
                 else:
-                    assert param_grad.is_leaf
+                    if not param_grad.is_leaf:
+                        raise AssertionError("param_grad must be a leaf tensor")
                     out_param.grad = grad_applied.requires_grad_(
                         param_grad.requires_grad
                     )
@@ -1335,7 +1338,6 @@ class Module:
 
         """
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
-            # pyrefly: ignore [not-iterable]
             *args,
             **kwargs,
         )
@@ -1382,7 +1384,7 @@ class Module:
 
     def register_full_backward_pre_hook(
         self,
-        hook: Callable[["Module", _grad_t], None | _grad_t],
+        hook: Callable[["Module", _grad_t], _grad_t | None],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a backward pre-hook on the module.
@@ -1390,7 +1392,7 @@ class Module:
         The hook will be called every time the gradients for the module are computed.
         The hook should have the following signature::
 
-            hook(module, grad_output) -> tuple[Tensor] or None
+            hook(module, grad_output) -> tuple[Tensor, ...], Tensor or None
 
         The :attr:`grad_output` is a tuple. The hook should
         not modify its arguments, but it can optionally return a new gradient with
@@ -1430,7 +1432,7 @@ class Module:
         return handle
 
     def register_backward_hook(
-        self, hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t]
+        self, hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None]
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
 
@@ -1457,7 +1459,7 @@ class Module:
 
     def register_full_backward_hook(
         self,
-        hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
+        hook: Callable[["Module", _grad_t, _grad_t], _grad_t | None],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
@@ -2606,11 +2608,12 @@ class Module:
             incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
             for hook in module._load_state_dict_post_hooks.values():
                 out = hook(module, incompatible_keys)
-                assert out is None, (
-                    "Hooks registered with ``register_load_state_dict_post_hook`` are not"
-                    "expected to return new values, if incompatible_keys need to be modified,"
-                    "it should be done inplace."
-                )
+                if out is not None:
+                    raise AssertionError(
+                        "Hooks registered with ``register_load_state_dict_post_hook`` are not"
+                        "expected to return new values, if incompatible_keys need to be modified,"
+                        "it should be done inplace."
+                    )
 
         load(self, state_dict)
         del load
@@ -2799,14 +2802,18 @@ class Module:
                 memo.add(module)
                 yield name, module
 
-    def modules(self) -> Iterator["Module"]:
+    def modules(self, remove_duplicate: bool = True) -> Iterator["Module"]:
         r"""Return an iterator over all modules in the network.
+
+        Args:
+            remove_duplicate: whether to remove the duplicated module instances in the result
+                or not.
 
         Yields:
             Module: a module in the network
 
         Note:
-            Duplicate modules are returned only once. In the following
+            Duplicate modules are returned only once by default. In the following
             example, ``l`` will be returned only once.
 
         Example::
@@ -2823,12 +2830,12 @@ class Module:
             1 -> Linear(in_features=2, out_features=2, bias=True)
 
         """
-        for _, module in self.named_modules():
+        for _, module in self.named_modules(remove_duplicate=remove_duplicate):
             yield module
 
     def named_modules(
         self,
-        memo: set["Module"] | None = None,
+        memo: set["Module"] | None = None,  # noqa: UP007
         prefix: str = "",
         remove_duplicate: bool = True,
     ):

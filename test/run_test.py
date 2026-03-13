@@ -21,7 +21,7 @@ from contextlib import ExitStack
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Any, cast, NamedTuple, Optional, Union
+from typing import Any, cast, NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
+    isRocmArchAnyOf,
     retry_shell,
     set_cwd,
     shell,
@@ -191,13 +192,20 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
-    "inductor/test_max_autotune",  # taking excessive time, many tests >30 min
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "test_openreg",
 ]
+
+# Add architecture-specific blocklist entries
+if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
+    # Some autotune tests on gfx1100 are hanging, disable for now
+    ROCM_BLOCKLIST.append("inductor/test_max_autotune")
+    # ROCm 7.2 gfx1100 started timing out due to these
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_dynamic_shapes")
+    ROCM_BLOCKLIST.append("inductor/test_torchinductor_opinfo")
+    ROCM_BLOCKLIST.append("inductor/test_ck_backend")
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
@@ -262,13 +270,11 @@ S390X_BLOCKLIST = [
     # depend on z3-solver
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
-    "test_openreg",
 ]
 
 XPU_BLOCKLIST = [
     "test_autograd",
     "profiler/test_memory_profiler",
-    "test_openreg",
 ]
 
 XPU_TEST = [
@@ -286,7 +292,6 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
-    "test_openreg",
     "test_overrides",
     "test_show_pickle",
     "test_tensorexpr",
@@ -298,6 +303,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
     "test_privateuseone_python_backend",
+    "functorch/test_control_flow_cuda_initialization",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -414,6 +420,7 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
+CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
@@ -527,7 +534,10 @@ def run_test(
         ]
 
     if extra_unittest_args:
-        assert isinstance(extra_unittest_args, list)
+        if not isinstance(extra_unittest_args, list):
+            raise AssertionError(
+                f"extra_unittest_args must be a list, got {type(extra_unittest_args)}"
+            )
         unittest_args.extend(extra_unittest_args)
 
     # If using pytest, replace -f with equivalent -x
@@ -698,7 +708,8 @@ def install_cpp_extensions(extensions_dir, env=os.environ):
     )
     install_directory = os.path.join(extensions_dir, "install", platlib_rel)
 
-    assert install_directory, "install_directory must not be empty"
+    if not install_directory:
+        raise AssertionError("install_directory must not be empty")
     return install_directory, 0
 
 
@@ -884,8 +895,8 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
         if TEST_CUDA:
-            exts_to_build.append((install_cmd, "libtorch_agnostic_2_9_extension"))
-            exts_to_build.append((install_cmd, "libtorch_agnostic_2_10_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agn_2_9_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agn_2_10_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
                 cmd,
@@ -914,8 +925,8 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
                     install_directories.append(os.path.join(root, directory))
 
         for extension_name in [
-            "libtorch_agnostic_2_9_extension",
-            "libtorch_agnostic_2_10_extension",
+            "libtorch_agn_2_9_extension",
+            "libtorch_agn_2_10_extension",
         ]:
             for root, directories, _ in os.walk(
                 os.path.join(cpp_extensions, extension_name, "install")
@@ -976,6 +987,15 @@ def test_openreg(test_module, test_directory, options):
     install_dir, return_code = install_cpp_extensions(openreg_dir)
     if return_code != 0:
         return return_code
+
+    # Run the openreg C++ unit tests (gtest) built by cmake.
+    ortests_bin = os.path.join(
+        openreg_dir, "build", "third_party", "openreg", "ortests"
+    )
+    if os.path.isfile(ortests_bin):
+        return_code = shell([ortests_bin], cwd=openreg_dir)
+        if return_code != 0:
+            return return_code
 
     with extend_python_path([install_dir]):
         cmd = [
@@ -1277,9 +1297,10 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
 
 
 def run_ci_sanity_check(test: ShardedTest, test_directory, options):
-    assert test.name == "test_ci_sanity_check_fail", (
-        f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
-    )
+    if test.name != "test_ci_sanity_check_fail":
+        raise AssertionError(
+            f"This handler only works for test_ci_sanity_check_fail, got {test.name}"
+        )
     ret_code = run_test(test, test_directory, options, print_log=False)
     # This test should fail
     if ret_code != 1:
@@ -1314,6 +1335,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
     "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
+    "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
@@ -1352,6 +1374,12 @@ def parse_args():
         help="Run all distributed tests",
     )
     parser.add_argument(
+        "--include-cpython-tests",
+        "--include-cpython-tests",
+        action="store_true",
+        help="If this flag is present, we will only run cpython tests.",
+    )
+    parser.add_argument(
         "--include-dynamo-core-tests",
         "--include-dynamo-core-tests",
         action="store_true",
@@ -1359,6 +1387,16 @@ def parse_args():
             "If this flag is present, we will only run dynamo tests. "
             "If this flag is not present, we will run all tests "
             "(including dynamo tests)."
+        ),
+    )
+    parser.add_argument(
+        "--include-inductor-core-tests",
+        "--include-inductor-core-tests",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run inductor tests. "
+            "If this flag is not present, we will run all tests "
+            "(including inductor tests)."
         ),
     )
     parser.add_argument(
@@ -1385,13 +1423,21 @@ def parse_args():
         "--mps",
         "--mps",
         action="store_true",
-        help=("If this flag is present, we will only run test_mps and test_metal"),
+        help=(
+            "If this flag is present, we will only run subset of tests, such as test_mps, test_nn, ..."
+        ),
     )
     parser.add_argument(
         "--xpu",
         "--xpu",
         action="store_true",
         help=("If this flag is present, we will run xpu tests except XPU_BLOCK_LIST"),
+    )
+    parser.add_argument(
+        "--openreg",
+        "--openreg",
+        action="store_true",
+        help=("If this flag is present, we will only run test_openreg"),
     )
     parser.add_argument(
         "--cpp",
@@ -1476,6 +1522,7 @@ def parse_args():
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
+    GITHUB_WORKFLOW = os.environ.get("GITHUB_WORKFLOW", "slow")
     parser.add_argument(
         "--enable-td",
         action="store_true",
@@ -1486,8 +1533,10 @@ def parse_args():
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and os.environ.get("GITHUB_WORKFLOW", "slow")
-        in ("trunk", "pull", "rocm", "rocm-mi300"),
+        and (
+            GITHUB_WORKFLOW in ("trunk", "pull")
+            or GITHUB_WORKFLOW.startswith(("rocm-", "periodic-rocm-"))
+        ),
     )
     parser.add_argument(
         "--shard",
@@ -1587,7 +1636,7 @@ def exclude_tests(
     return selected_tests
 
 
-def must_serial(file: Union[str, ShardedTest]) -> bool:
+def must_serial(file: str | ShardedTest) -> bool:
     if isinstance(file, ShardedTest):
         file = file.name
     return (
@@ -1627,10 +1676,21 @@ def get_selected_tests(options) -> list[str]:
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    if options.include_cpython_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in CPYTHON_TESTS, selected_tests)
+        )
+
     # Filter to only run dynamo tests when --include-dynamo-core-tests option is specified
     if options.include_dynamo_core_tests:
         selected_tests = list(
             filter(lambda test_name: test_name in DYNAMO_CORE_TESTS, selected_tests)
+        )
+
+    # Filter to only run dynamo tests when --include-inductor-core-tests option is specified
+    if options.include_inductor_core_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in INDUCTOR_TESTS, selected_tests)
         )
 
     # Filter to only run functorch tests when --functorch option is specified
@@ -1658,7 +1718,9 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
+        os.environ["PYTORCH_TESTING_DEVICE_ONLY_FOR"] = "mps"
         selected_tests = [
+            "test_ops",
             "test_mps",
             "test_metal",
             "test_modules",
@@ -1673,7 +1735,7 @@ def get_selected_tests(options) -> list[str]:
             "inductor/test_torchinductor_dynamic_shapes",
         ]
     else:
-        # Exclude all mps tests otherwise
+        # Exclude mps-only tests otherwise
         options.exclude.extend(["test_mps", "test_metal"])
 
     if options.xpu:
@@ -1681,6 +1743,11 @@ def get_selected_tests(options) -> list[str]:
     else:
         # Exclude all xpu specific tests otherwise
         options.exclude.extend(XPU_TEST)
+
+    if options.openreg:
+        selected_tests = ["test_openreg"]
+    else:
+        options.exclude.append("test_openreg")
 
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
@@ -1834,12 +1901,15 @@ def load_test_class_times(
 def get_sharding_opts(options) -> tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
-        assert len(options.shard) == 2, "Unexpected shard format"
-        assert min(options.shard) > 0, "Shards must be positive numbers"
+        if len(options.shard) != 2:
+            raise AssertionError("Unexpected shard format")
+        if min(options.shard) <= 0:
+            raise AssertionError("Shards must be positive numbers")
         which_shard, num_shards = options.shard
-        assert which_shard <= num_shards, (
-            "Selected shard must be less than or equal to total number of shards"
-        )
+        if which_shard > num_shards:
+            raise AssertionError(
+                "Selected shard must be less than or equal to total number of shards"
+            )
 
     return (which_shard, num_shards)
 
@@ -1872,7 +1942,7 @@ class TestFailure(NamedTuple):
 
 def run_test_module(
     test: ShardedTest, test_directory: str, options
-) -> Optional[TestFailure]:
+) -> TestFailure | None:
     try:
         maybe_set_hip_visible_devies()
 
@@ -1887,9 +1957,10 @@ def run_test_module(
         print_to_stderr(
             f"Finished {str(test)} ... [{datetime.now()}][{end}], took {(end - start) / 60:.2f}min"
         )
-        assert isinstance(return_code, int) and not isinstance(return_code, bool), (
-            f"While running {str(test)} got non integer return code {return_code}"
-        )
+        if not isinstance(return_code, int) or isinstance(return_code, bool):
+            raise AssertionError(
+                f"While running {str(test)} got non integer return code {return_code}"
+            )
         if return_code == 0:
             return None
 
@@ -1937,7 +2008,7 @@ def run_tests(
         ):
             shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
-    def handle_complete(failure: Optional[TestFailure]):
+    def handle_complete(failure: TestFailure | None):
         failed = failure is not None
         if IS_CI and options.upload_artifacts_while_running:
             parse_xml_and_upload_json()
@@ -2043,6 +2114,20 @@ def main():
     check_pip_packages()
 
     options = parse_args()
+    tests_to_include_env = os.environ.get("TESTS_TO_INCLUDE", "").strip()
+    if tests_to_include_env:
+        # Parse env var tests to module names (strips .py suffix and ::method)
+        env_tests = {parse_test_module(t) for t in tests_to_include_env.split()}
+
+        if options.include != TESTS:
+            # --include was explicitly provided, intersect with env var
+            cli_tests = {parse_test_module(t) for t in options.include}
+            options.include = list(env_tests & cli_tests)
+        else:
+            # No explicit --include, use env var tests
+            options.include = list(env_tests)
+
+        options.enable_td = False
 
     # Include sharding info in all metrics
     which_shard, num_shards = get_sharding_opts(options)

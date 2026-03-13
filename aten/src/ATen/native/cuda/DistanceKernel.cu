@@ -9,6 +9,7 @@
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #include <ATen/native/Distance.h>
+#include <ATen/NumericUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -34,7 +35,13 @@ struct dists {
 
   // Zero norm
   struct zero {
-    static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t /*p*/) { agg += diff != 0.0; }
+    static __forceinline__ __device__ void inc(scalar_t& agg, const scalar_t diff, const scalar_t /*p*/) {
+      if (diff != diff) { // NaN
+        agg = diff;
+      } else if (diff != 0.0) {
+        agg += 1.0;
+      }
+    }
     static __forceinline__ __device__ scalar_t finish(const scalar_t agg, const scalar_t /*p*/) { return agg; }
     static __forceinline__ __device__ void agg(scalar_t& update, const scalar_t other) { update += other; }
   };

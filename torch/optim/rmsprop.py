@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the RMSprop algorithm."""
 
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -31,14 +31,14 @@ class RMSprop(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-2,
+        lr: float | Tensor = 1e-2,
         alpha: float = 0.99,
         eps: float = 1e-8,
         weight_decay: float = 0,
         momentum: float = 0,
         centered: bool = False,
         capturable: bool = False,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         differentiable: bool = False,
     ) -> None:  # noqa: D107
@@ -149,7 +149,7 @@ class RMSprop(Optimizer):  # noqa: D101
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -483,7 +483,7 @@ def rmsprop(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     maximize: bool = False,
     differentiable: bool = False,
     capturable: bool = False,

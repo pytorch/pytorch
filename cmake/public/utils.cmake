@@ -383,10 +383,22 @@ function(torch_compile_options libname)
       -Wno-strict-aliasing
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wredundant-move -Wno-interference-size)
+      list(APPEND private_compile_options -Wredundant-move)
+      # -Wno-interference-size only exists in GCC 12+
+      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+        list(APPEND private_compile_options -Wno-interference-size)
+      endif()
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wextra-semi -Wmove)
+      if(NOT USE_CUDA)
+        # NS: One can compile CUDA code with extra-semi flag as nvcc generates code like
+        # namespace MemoryOps_cu_d8602b38_109889 __attribute__((visibility("hidden")))  { };
+        list(APPEND private_compile_options -Wextra-semi)
+      else()
+        # NVCC + clang15  reports deprecated copies from GPU lambda instantiations
+        list(APPEND private_compile_options -Wno-deprecated-copy)
+      endif()
+      list(APPEND private_compile_options -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
@@ -405,7 +417,10 @@ function(torch_compile_options libname)
         -Wno-error=unused-parameter
       )
       if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        list(APPEND private_compile_options -Werror=unused-but-set-variable)
+        list(APPEND private_compile_options -Werror=unused-but-set-variable -Werror=cpp)
+      endif()
+      if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        list(APPEND private_compile_options -Werror=macro-redefined -Werror=deprecated-copy-with-dtor)
       endif()
     endif()
   endif()

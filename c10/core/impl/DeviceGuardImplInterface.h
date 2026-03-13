@@ -144,6 +144,17 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream exchangeStream(Stream) const = 0;
 
   /**
+   * Returns a backend-specific, opaque native handle associated with the given
+   * stream.
+   *
+   * The returned pointer is owned and managed by PyTorch. Callers must not
+   * modify or free it.
+   */
+  virtual void* getStreamNativeHandle(const Stream) const {
+    TORCH_CHECK(false, "Backend doesn't support getting stream native handle.")
+  }
+
+  /**
    * Destroys the given event.
    */
   virtual void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
@@ -304,15 +315,16 @@ struct NoOpDeviceGuardImpl : public DeviceGuardImplInterface {
   DeviceCapability getDeviceCapability(Device /*unused*/) const override {
     DeviceCapability cap;
     if constexpr (D == DeviceType::Meta) {
-      cap.capability_bits = 0;
+      cap.capability_data.capability_bits = 0;
       // Meta only supports basic types for shape inference
       // Byte, Char, Short, Int, Long, Float, Double,
       // Bool, ComplexFloat, ComplexDouble
-      cap.capability_bits = (1ULL << kIndex_Byte) | (1ULL << kIndex_Char) |
-          (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
-          (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
-          (1ULL << kIndex_Double) | (1ULL << kIndex_ComplexFloat) |
-          (1ULL << kIndex_ComplexDouble) | (1ULL << kIndex_Bool);
+      cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+          (1ULL << kIndex_Char) | (1ULL << kIndex_Short) |
+          (1ULL << kIndex_Int) | (1ULL << kIndex_Long) |
+          (1ULL << kIndex_Float) | (1ULL << kIndex_Double) |
+          (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_ComplexDouble) |
+          (1ULL << kIndex_Bool);
     }
     return cap;
   }

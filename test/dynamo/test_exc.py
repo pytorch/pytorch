@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import logging
 import unittest
 
 import torch
@@ -8,7 +7,12 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 from torch._dynamo.comptime import comptime
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import (
+    TorchDynamoException,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -21,6 +25,27 @@ from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_
 
 class ExcTests(LoggingTestCase):
     maxDiff = None
+
+    @torch._dynamo.config.patch(suppress_errors=True)
+    def test_user_error_backend_soft_fail(self):
+        def backend(_, __):
+            raise UserError(UserErrorType.INVALID_INPUT, "backend user error")
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend=backend)(x), fn(x))
+
+    def test_user_error_separated_from_unsupported(self):
+        err = UserError(UserErrorType.INVALID_INPUT, "bad input")
+
+        self.assertIsInstance(err, TorchDynamoException)
+        self.assertNotIsInstance(err, Unsupported)
+        self.assertEqual(err.error_type, UserErrorType.INVALID_INPUT)
+        self.assertEqual(err.msg, "bad input")
+        self.assertEqual(err.message, "bad input")
+        self.assertEqual(str(err), "bad input")
 
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
@@ -121,17 +146,36 @@ from user code:
         )
 
     @torch._dynamo.config.patch(inject_BUILD_SET_unimplemented_TESTING_ONLY=True)
-    @make_logging_test(dynamo=logging.DEBUG)
+    @make_logging_test(graph_breaks=True)
     def test_unsupported_error(self, records):
         def fn001(x):
             return {1, 2}
 
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
-        # TODO: There is no graph break log!  This is because the graph break
-        # logging is not in a centralized location; unsupported
-        # instruction bypasses it
-        self.getRecord(records, "Graph break:")
+        record = self.getRecord(records, "missing BUILD_SET handler")
+
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            """\
+Graph break in user code at test_exc.py:N
+Graph Break Reason: Failed to handle graph break gracefully. Skipping the function and falling back to eager. Graph break encountered:
+
+missing BUILD_SET handler
+  Explanation: Missing BUILD_SET bytecode handler (for testing purposes).
+
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0200.html
+
+User code traceback:
+  File "test_exc.py", line N, in test_unsupported_error
+    torch.compile(fn001, backend="eager")(torch.randn(1))
+  File "test_exc.py", line N, in fn001
+    return {1, 2}
+""",  # noqa: B950
+        )
 
     @torch._dynamo.config.patch(suppress_errors=False)
     def test_internal_error_no_suppress(self):
@@ -177,13 +221,16 @@ from user code:
             munge_exc(record.getMessage()),
             """\
 Graph break in user code at test_exc.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+
 User code traceback:
   File "test_exc.py", line N, in test_graph_break_log
     torch.compile(fn001, backend="eager")(torch.randn(1))

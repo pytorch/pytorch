@@ -242,6 +242,10 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
 
     // parse through kwargs if they exist
     if (self->keyword_values != nullptr && profiler_need_input) {
+      const auto kw_size = PyDict_Size(self->keyword_values);
+      if (kw_size > 0) {
+        kwargs.reserve(static_cast<size_t>(kw_size));
+      }
       Py_ssize_t pos = 0;
       PyObject *key = nullptr, *value = nullptr;
       while (PyDict_Next(self->keyword_values, &pos, &key, &value)) {
@@ -347,7 +351,8 @@ void initPythonBindings(PyObject* module) {
       .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK)
       .value(
           "KINETO_PRIVATEUSE1_FALLBACK",
-          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK);
+          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK)
+      .value("KINETO_PRIVATEUSE1", ProfilerState::KINETO_PRIVATEUSE1);
 
   py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
       .value("NONE", ActiveProfilerType::NONE)
@@ -430,6 +435,7 @@ void initPythonBindings(PyObject* module) {
                 py_metrics,
                 p.profiler_measure_per_kernel,
                 p.verbose,
+                py_perf_events,
                 p.enable_cuda_sync_events,
                 p.adjust_profiler_step,
                 p.disable_external_correlation,
@@ -437,26 +443,23 @@ void initPythonBindings(PyObject* module) {
                 p.capture_overload_names,
                 p.record_python_gc_info,
                 p.expose_kineto_event_metadata,
-                p.custom_profiler_config,
-                p.performance_events);
+                p.custom_profiler_config);
           },
           [](const py::tuple& t) { // __setstate__
-            TORCH_CHECK(t.size() < 5, "Expected at least 5 values in state");
+            TORCH_CHECK(t.size() >= 12, "Expected at least 12 values in state");
 
             py::list py_metrics = t[0].cast<py::list>();
-            std::vector<std::string> metrics{py_metrics.size()};
-
+            std::vector<std::string> metrics;
+            metrics.reserve(py_metrics.size());
             for (const auto& py_metric : py_metrics) {
               metrics.push_back(py::str(py_metric));
             }
 
+            py::list py_perf_events = t[3].cast<py::list>();
             std::vector<std::string> performance_events;
-            if (t.size() == 5) {
-              py::list py_perf_events = t[4].cast<py::list>();
-              performance_events.resize(py_perf_events.size());
-              for (const auto& py_perf_event : py_perf_events) {
-                performance_events.push_back(py::str(py_perf_event));
-              }
+            performance_events.reserve(py_perf_events.size());
+            for (const auto& py_perf_event : py_perf_events) {
+              performance_events.push_back(py::str(py_perf_event));
             }
 
             return ExperimentalConfig(
@@ -464,8 +467,14 @@ void initPythonBindings(PyObject* module) {
                 t[1].cast<bool>(),
                 t[2].cast<bool>(),
                 std::move(performance_events),
-                t[3].cast<bool>(),
-                t[4].cast<bool>());
+                t[4].cast<bool>(),
+                t[5].cast<bool>(),
+                t[6].cast<bool>(),
+                t[7].cast<bool>(),
+                t[8].cast<bool>(),
+                t[9].cast<bool>(),
+                t[10].cast<bool>(),
+                t[11].cast<std::string>());
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")

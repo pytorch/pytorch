@@ -1,6 +1,6 @@
 import ctypes
 import sys
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 
@@ -9,10 +9,20 @@ from torch._utils import _get_device_index as _torch_get_device_index
 
 
 def _get_hip_runtime_library() -> ctypes.CDLL:
-    if sys.platform == "win32":
-        lib = ctypes.CDLL(f"amdhip64_{torch.version.hip[0]}.dll")
-    else:  # Unix-based systems
-        lib = ctypes.CDLL("libamdhip64.so")
+    # If ROCm python packages are available, query the OS-independent absolute
+    # path to the library provided by those packages, including any version suffix.
+    # See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md#dynamic-library-resolution
+    try:
+        # pyrefly: ignore [import-error, missing-import]
+        import rocm_sdk
+
+        lib = ctypes.CDLL(str(rocm_sdk.find_libraries("amdhip64")[0]))
+    except (ImportError, IndexError):
+        if sys.platform == "win32":
+            lib = ctypes.CDLL(f"amdhip64_{torch.version.hip[0]}.dll")
+        else:  # Unix-based systems
+            lib = ctypes.CDLL("libamdhip64.so")
+
     lib.cuGetErrorString = lib.hipGetErrorString  # type: ignore[attr-defined]
     lib.cuModuleLoadData = lib.hipModuleLoadData  # type: ignore[attr-defined]
     lib.cuModuleGetFunction = lib.hipModuleGetFunction  # type: ignore[attr-defined]
@@ -21,7 +31,7 @@ def _get_hip_runtime_library() -> ctypes.CDLL:
     return lib
 
 
-def _get_cuda_runtime_library() -> ctypes.CDLL:
+def _get_cuda_library() -> ctypes.CDLL:
     if sys.platform == "win32":
         return ctypes.CDLL("nvcuda.dll")
     else:  # Unix-based systems
@@ -33,7 +43,7 @@ def _get_gpu_runtime_library() -> ctypes.CDLL:
     if torch.version.hip:
         return _get_hip_runtime_library()
     else:
-        return _get_cuda_runtime_library()
+        return _get_cuda_library()
 
 
 # Helper: check CUDA errors
@@ -50,19 +60,27 @@ def _check_cuda(result: int) -> None:
 
 
 def _get_hiprtc_library() -> ctypes.CDLL:
-    if sys.platform == "win32":
-        version_str = "".join(["0", torch.version.hip[0], "0", torch.version.hip[2]])
-        lib = ctypes.CDLL(f"hiprtc{version_str}.dll")
-    else:
-        lib = ctypes.CDLL("libhiprtc.so")
+    try:
+        # pyrefly: ignore [import-error, missing-import]
+        import rocm_sdk
+
+        lib = ctypes.CDLL(str(rocm_sdk.find_libraries("hiprtc")[0]))
+    except (ImportError, IndexError):
+        if sys.platform == "win32":
+            version_str = "".join(
+                ["0", torch.version.hip[0], "0", torch.version.hip[2]]
+            )
+            lib = ctypes.CDLL(f"hiprtc{version_str}.dll")
+        else:
+            lib = ctypes.CDLL("libhiprtc.so")
 
     # Provide aliases for HIP RTC functions to match NVRTC API
     lib.nvrtcGetErrorString = lib.hiprtcGetErrorString  # type: ignore[attr-defined]
     lib.nvrtcCreateProgram = lib.hiprtcCreateProgram  # type: ignore[attr-defined]
     lib.nvrtcDestroyProgram = lib.hiprtcDestroyProgram  # type: ignore[attr-defined]
     lib.nvrtcCompileProgram = lib.hiprtcCompileProgram  # type: ignore[attr-defined]
-    lib.nvrtcGetPTXSize = lib.hiprtcGetCodeSize  # type: ignore[attr-defined]
-    lib.nvrtcGetPTX = lib.hiprtcGetCode  # type: ignore[attr-defined]
+    lib.nvrtcGetCUBINSize = lib.hiprtcGetCodeSize  # type: ignore[attr-defined]
+    lib.nvrtcGetCUBIN = lib.hiprtcGetCode  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLogSize = lib.hiprtcGetProgramLogSize  # type: ignore[attr-defined]
     lib.nvrtcGetProgramLog = lib.hiprtcGetProgramLog  # type: ignore[attr-defined]
     lib.nvrtcAddNameExpression = lib.hiprtcAddNameExpression  # type: ignore[attr-defined]
@@ -125,9 +143,9 @@ def _get_gpu_rtc_compatible_flags() -> list[str]:
 def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
-    compute_capability: Optional[str] = None,
-    cuda_include_dirs: Optional[list] = None,
-    nvcc_options: Optional[list] = None,
+    compute_capability: str | None = None,
+    cuda_include_dirs: list | None = None,
+    nvcc_options: list | None = None,
     auto_pch: bool = False,
 ) -> tuple[bytes, str]:
     """
@@ -198,7 +216,8 @@ def _nvrtc_compile(
 
     # Enable automatic precompiled headers (CUDA 12.8+)
     if auto_pch:
-        assert str(torch.version.cuda) >= "12.8", "PCH requires CUDA 12.8+"
+        if str(torch.version.cuda) < "12.8":
+            raise AssertionError(f"PCH requires CUDA 12.8+, got {torch.version.cuda}")
         if nvcc_options is None:
             nvcc_options = []
         nvcc_options.append("--pch")
@@ -244,11 +263,11 @@ def _nvrtc_compile(
         libnvrtc.nvrtcGetProgramLog(prog, log)
         raise RuntimeError(f"Kernel compilation failed:\n{log.value.decode()}")
 
-    # Get PTX
-    ptx_size = ctypes.c_size_t()
-    check_nvrtc(libnvrtc.nvrtcGetPTXSize(prog, ctypes.byref(ptx_size)))
-    ptx = ctypes.create_string_buffer(ptx_size.value)
-    check_nvrtc(libnvrtc.nvrtcGetPTX(prog, ptx))
+    # Get binary
+    binary_size = ctypes.c_size_t()
+    check_nvrtc(libnvrtc.nvrtcGetCUBINSize(prog, ctypes.byref(binary_size)))
+    binary = ctypes.create_string_buffer(binary_size.value)
+    check_nvrtc(libnvrtc.nvrtcGetCUBIN(prog, binary))
 
     # Get mangled name
     c_mangled_name = ctypes.c_char_p()
@@ -262,11 +281,9 @@ def _nvrtc_compile(
 
     libnvrtc.nvrtcDestroyProgram(ctypes.byref(prog))
 
-    # For HIP, hipRTC generates raw CO binaries instead of PTX,
-    # and for some reason, ".value" causes the string to be truncated,
+    # For some reason, ".value" causes the string to be truncated,
     # likely due to the presence of '\0' in the string. So we use .raw instead.
-    ptx_bytes = ptx.raw if torch.version.hip else ptx.value
-    return ptx_bytes, mangled_name
+    return binary.raw, mangled_name
 
 
 class _CudaModule:
@@ -313,9 +330,9 @@ class _CudaKernel:
         self,
         grid: tuple[int, int, int] = (1, 1, 1),
         block: tuple[int, int, int] = (1, 1, 1),
-        args: Optional[list] = None,
+        args: list | None = None,
         shared_mem: int = 0,
-        stream: Optional[Any] = None,
+        stream: Any | None = None,
     ) -> None:
         """
         Call the compiled CUDA kernel
@@ -450,8 +467,8 @@ class _CudaKernel:
 
 
 def _cuda_load_module(
-    ptx: Union[str, bytes], kernel_names: Optional[list[str]] = None
-) -> Union[_CudaModule, dict[str, "_CudaKernel"]]:
+    ptx: str | bytes, kernel_names: list[str] | None = None
+) -> _CudaModule | dict[str, "_CudaKernel"]:
     """
     Loads a CUDA module from PTX code and returns a module object that can access kernels.
 

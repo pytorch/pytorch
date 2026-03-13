@@ -1,4 +1,6 @@
 #include <ATen/native/mps/kernels/LinearAlgebra.h>
+#include <c10/metal/common.h>
+#include <c10/metal/reduction_utils.h>
 #include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_simdgroup>
@@ -33,6 +35,54 @@ inline c10::metal::opmath_t<T> matmul_inner(
     if (tiledRow < sizes.y && thread_id.x < sizes.z) {
       B_tile[tid.y][tid.x] =
           mat2Data[tiledRow * strides[1].x + thread_id.x * strides[1].y];
+    } else {
+      B_tile[tid.y][tid.x] = 0;
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint k = 0; k < TILE_DIM; k++) {
+      sum += c10::metal::mul(A_tile[tid.y][k], B_tile[k][tid.x]);
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  return sum;
+}
+
+template <typename T, uint N>
+inline c10::metal::opmath_t<T> batched_matmul_inner(
+    constant T* mat1Data,
+    constant T* mat2Data,
+    uint batch,
+    constant array<ulong, N>& strides,
+    constant uint4& sizes,
+    threadgroup T A_tile[TILE_DIM][TILE_DIM],
+    threadgroup T B_tile[TILE_DIM][TILE_DIM],
+    uint3 tid,
+    uint row,
+    uint col) {
+  c10::metal::opmath_t<T> sum = 0;
+
+  // Compute batch offsets
+  uint batch1Offset = batch * strides[2];
+  uint batch2Offset = batch * strides[5];
+
+  uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
+  for (uint t = 0; t < numTiles; t++) {
+    uint tiledCol = t * TILE_DIM + tid.x;
+    if (row < sizes.x && tiledCol < sizes.y) {
+      A_tile[tid.y][tid.x] =
+          mat1Data[batch1Offset + row * strides[1] + tiledCol * strides[0]];
+    } else {
+      A_tile[tid.y][tid.x] = 0;
+    }
+
+    uint tiledRow = t * TILE_DIM + tid.y;
+    if (tiledRow < sizes.y && col < sizes.z) {
+      B_tile[tid.y][tid.x] =
+          mat2Data[batch2Offset + tiledRow * strides[4] + col * strides[3]];
     } else {
       B_tile[tid.y][tid.x] = 0;
     }
@@ -115,45 +165,88 @@ kernel void naive_bmm(
   uint col = group_id.x * TILE_DIM + tid.x;
   uint row = group_id.y * TILE_DIM + tid.y;
 
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  auto sum = batched_matmul_inner<T, 9>(
+      mat1Data, mat2Data, batch, strides, sizes, A_tile, B_tile, tid, row, col);
+
+  if (row < sizes.x && col < sizes.z) {
+    outputData[batch * strides[8] + col * strides[6] + row * strides[7]] =
+        static_cast<T>(sum);
+  }
+}
+
+template <typename T>
+kernel void naive_baddbmm(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant T* biasData [[buffer(3)]],
+    constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
+    constant array<ulong, 12>& strides [[buffer(5)]],
+    constant uint4& sizes [[buffer(6)]],
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 group_id [[threadgroup_position_in_grid]]) {
+  uint batch = group_id.z;
+  uint col = group_id.x * TILE_DIM + tid.x;
+  uint row = group_id.y * TILE_DIM + tid.y;
+
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  auto sum = batched_matmul_inner<T, 12>(
+      mat1Data, mat2Data, batch, strides, sizes, A_tile, B_tile, tid, row, col);
+
+  if (row < sizes.x && col < sizes.z) {
+    uint biasOffset = batch * strides[11];
+    auto bias = biasData[biasOffset + row * strides[10] + col * strides[9]];
+    outputData[batch * strides[8] + col * strides[6] + row * strides[7]] =
+        static_cast<T>(
+            c10::metal::mul(alpha_beta[0], sum) +
+            c10::metal::mul(alpha_beta[1], bias));
+  }
+}
+
+template <typename T>
+kernel void naive_addbmm(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant T* biasData [[buffer(3)]],
+    constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
+    constant array<ulong, 12>& strides [[buffer(5)]],
+    constant uint4& sizes [[buffer(6)]],
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 group_id [[threadgroup_position_in_grid]]) {
+  uint col = group_id.x * TILE_DIM + tid.x;
+  uint row = group_id.y * TILE_DIM + tid.y;
+
   c10::metal::opmath_t<T> sum = 0;
 
   threadgroup T A_tile[TILE_DIM][TILE_DIM];
   threadgroup T B_tile[TILE_DIM][TILE_DIM];
 
-  // batch offsets for both matrices
-  uint batch1Offset = batch * strides[2];
-  uint batch2Offset = batch * strides[5];
-
-  uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
-  for (uint t = 0; t < numTiles; t++) {
-    uint tiledCol = t * TILE_DIM + tid.x;
-    if (row < sizes.x && tiledCol < sizes.y) {
-      A_tile[tid.y][tid.x] =
-          mat1Data[batch1Offset + row * strides[1] + tiledCol * strides[0]];
-    } else {
-      A_tile[tid.y][tid.x] = 0;
-    }
-
-    uint tiledRow = t * TILE_DIM + tid.y;
-    if (tiledRow < sizes.y && col < sizes.z) {
-      B_tile[tid.y][tid.x] =
-          mat2Data[batch2Offset + tiledRow * strides[4] + col * strides[3]];
-    } else {
-      B_tile[tid.y][tid.x] = 0;
-    }
-
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    for (uint k = 0; k < TILE_DIM; k++) {
-      sum += A_tile[tid.y][k] * B_tile[k][tid.x];
-    }
-
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+  // Iterate through all batches and accumulate
+  for (uint batch = 0; batch < sizes.w; batch++) {
+    sum += batched_matmul_inner<T, 12>(
+        mat1Data,
+        mat2Data,
+        batch,
+        strides,
+        sizes,
+        A_tile,
+        B_tile,
+        tid,
+        row,
+        col);
   }
 
   if (row < sizes.x && col < sizes.z) {
-    outputData[batch * strides[8] + col * strides[6] + row * strides[7]] =
-        static_cast<T>(sum);
+    auto bias = biasData[row * strides[10] + col * strides[9]];
+    outputData[row * strides[7] + col * strides[6]] = static_cast<T>(
+        c10::metal::mul(alpha_beta[0], sum) +
+        c10::metal::mul(alpha_beta[1], bias));
   }
 }
 
@@ -718,8 +811,11 @@ kernel void orgqr(
     constant T* tau [[buffer(1)]],
     device T* H [[buffer(2)]],
     device T* H_prod [[buffer(3)]],
-    constant OrgqrParams<>& params [[buffer(4)]],
-    uint tid [[thread_position_in_grid]]) {
+    device T* H_prod_work [[buffer(4)]],
+    constant OrgqrParams<>& params [[buffer(5)]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]]) {
   constant auto& A_strides = params.A_strides;
   constant auto& tau_strides = params.tau_strides;
   constant auto& H_strides = params.H_strides;
@@ -727,11 +823,11 @@ kernel void orgqr(
 
   auto num_batch_dims = params.num_batch_dims;
   auto m = params.m;
+  auto m2 = params.m2;
   auto n = params.n;
   auto k = params.k;
 
-  auto m2 = m * m;
-  auto batch_idx = tid / m2;
+  auto batch_idx = tgid;
 
   // Find the matrices for this thread's batch index
   uint32_t A_offset = 0;
@@ -753,53 +849,265 @@ kernel void orgqr(
   tau += tau_offset;
   H += H_offset;
   H_prod += H_offset;
+  H_prod_work += H_offset;
 
-  auto matrix_idx = tid % m2;
-  auto r = matrix_idx / m;
-  auto c = matrix_idx % m;
   auto A_stride_r = A_strides[num_batch_dims];
   auto A_stride_c = A_strides[num_batch_dims + 1];
   auto tau_stride = tau_strides[num_batch_dims];
   auto H_stride_r = H_strides[num_batch_dims];
   auto H_stride_c = H_strides[num_batch_dims + 1];
 
-  // Find the element of H and H_prod that this thread will calculate
-  device T* H_elem_ptr = H + (r * H_stride_r + c * H_stride_c);
-  device T* H_prod_elem_ptr = H_prod + (r * H_stride_r + c * H_stride_c);
-
   for (uint32_t i = 0; i < k; i++) {
     // Calculate and write H_i
+    for (auto matrix_idx = tid; matrix_idx < m2; matrix_idx += tptg) {
+      auto r = matrix_idx / m;
+      auto c = matrix_idx % m;
+      T H_irc = calc_H_irc(A, A_stride_r, A_stride_c, tau, tau_stride, r, c, i);
 
-    T H_irc = calc_H_irc(A, A_stride_r, A_stride_c, tau, tau_stride, r, c, i);
+      if (i == 0) {
+        H_prod[r * H_stride_r + c * H_stride_c] = H_irc;
+      } else {
+        H[r * H_stride_r + c * H_stride_c] = H_irc;
+      }
+    }
 
-    // Calculate element [r, c] of prod(H_0, ..., H_i)
-    if (i == 0) {
-      *H_prod_elem_ptr = H_irc;
-    } else {
-      *H_elem_ptr = H_irc;
-
+    if (i > 0) {
       // Need this sync because the below matmul requires all threads to finish
       // writing their entries to `H_prod` and `H`.
       threadgroup_barrier(mem_flags::mem_threadgroup);
 
-      T H_prod_0_to_i_rc =
-          calc_matmul_rc(H_prod, H, H_stride_r, H_stride_c, m, r, c);
+      // Calculate H_prod @ H_i, and write result to H_prod_work
+      for (auto matrix_idx = tid; matrix_idx < m2; matrix_idx += tptg) {
+        auto r = matrix_idx / m;
+        auto c = matrix_idx % m;
+
+        T H_prod_0_to_i_rc =
+            calc_matmul_rc(H_prod, H, H_stride_r, H_stride_c, m, r, c);
+
+        H_prod_work[r * H_stride_r + c * H_stride_c] = H_prod_0_to_i_rc;
+      }
 
       // Need this sync because the above matmul uses the current values in
       // `H_prod`, and we don't want to overwrite those until all threads are
       // finished using them.
       threadgroup_barrier(mem_flags::mem_threadgroup);
 
-      *H_prod_elem_ptr = H_prod_0_to_i_rc;
+      // Copy H_prod_work into H_prod
+      for (auto matrix_idx = tid; matrix_idx < m2; matrix_idx += tptg) {
+        auto r = matrix_idx / m;
+        auto c = matrix_idx % m;
+        H_prod[r * H_stride_r + c * H_stride_c] =
+            H_prod_work[r * H_stride_r + c * H_stride_c];
+      }
     }
   }
 
-  device T* A_elem_ptr = A + (r * A_stride_r + c * A_stride_c);
-
-  if (c < n) {
-    *A_elem_ptr = *H_prod_elem_ptr;
+  for (auto matrix_idx = tid; matrix_idx < m2; matrix_idx += tptg) {
+    auto r = matrix_idx / m;
+    auto c = matrix_idx % m;
+    if (c < n) {
+      A[r * A_stride_r + c * A_stride_c] =
+          H_prod[r * H_stride_r + c * H_stride_c];
+    }
   }
 }
+
+template <typename TO, typename TI>
+kernel void unpack_pivots(
+    device TO* perm [[buffer(0)]],
+    constant TI* pivots [[buffer(1)]],
+    constant UnpackPivotsParams& params [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  auto perm_batch_stride = params.perm_batch_stride;
+  auto pivots_batch_stride = params.pivots_batch_stride;
+  auto dim_size = params.dim_size;
+
+  perm += perm_batch_stride * tid;
+  pivots += pivots_batch_stride * tid;
+
+  for (uint32_t i = 0; i < dim_size; i++) {
+    auto j = pivots[i] - 1;
+    auto perm_j = perm[j];
+    perm[j] = perm[i];
+    perm[i] = perm_j;
+  }
+}
+
+template <typename T>
+kernel void linalg_qr_householder(
+    device T* A [[buffer(0)]],
+    device T* Q [[buffer(1)]],
+    device T* R [[buffer(2)]],
+    device int* info [[buffer(3)]],
+    constant QrParams& params [[buffer(4)]],
+    device T* v_work [[buffer(5)]],
+    uint3 thread_pos [[thread_position_in_threadgroup]],
+    uint3 tpg [[threads_per_threadgroup]],
+    uint3 tg_pos [[threadgroup_position_in_grid]]) {
+  using opmath_t = c10::metal::opmath_t<T>;
+
+  const uint32_t tid = thread_pos.x;
+  const uint32_t group_size = tpg.x;
+  const uint32_t m = params.m;
+  const uint32_t n = params.n;
+
+  // Batch indexing
+  const uint32_t batch_idx = tg_pos.x;
+  const uint32_t A_stride = m * n;
+  const uint32_t Q_stride = m * m;
+  const uint32_t R_stride = m * n;
+  const uint32_t v_stride = m;
+
+  device T* A_batch = A + batch_idx * A_stride;
+  device T* Q_batch = Q + batch_idx * Q_stride;
+  device T* R_batch = R + batch_idx * R_stride;
+  device T* v_batch = v_work + batch_idx * v_stride;
+
+  constexpr auto kMaxThreadsPerThreadgroup = 1024;
+  constexpr auto kMaxSIMDGroups =
+      kMaxThreadsPerThreadgroup / c10::metal::simdgroup_size;
+
+  threadgroup opmath_t scratch[kMaxSIMDGroups];
+  threadgroup opmath_t tau_shared;
+
+  // initialize Q = Identity (m x m)
+  for (uint32_t i = tid; i < m * m; i += group_size) {
+    Q_batch[i] = static_cast<T>((i / m == i % m) ? 1.0 : 0.0);
+  }
+
+  // initialize R = A (m x n)
+  for (uint32_t i = tid; i < m * n; i += group_size) {
+    R_batch[i] = A_batch[i];
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+
+  for (uint32_t k = 0; k < min(m, n); k++) {
+    // Step 1: compute norm of R[k:m, k] and copy to v_batch
+    opmath_t norm_sq = 0.0;
+    for (uint32_t i = k + tid; i < m; i += group_size) {
+      T r_ik = R_batch[i * n + k];
+      v_batch[i] = r_ik;
+      const auto val = static_cast<opmath_t>(r_ik);
+      norm_sq = fma(val, val, norm_sq);
+    }
+    const auto norm = ::metal::precise::sqrt(
+        c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size));
+
+    // scale norm_eps by matrix dimension to handle accumulated error
+    const auto norm_eps = ::metal::numeric_limits<opmath_t>::epsilon() * m;
+    const auto tau_eps = ::metal::numeric_limits<opmath_t>::epsilon();
+
+    // Step 2: compute Householder vector and tau
+    if (tid == 0) {
+      // LAPACK convention: skip reflection for last row to preserve natural
+      // sign When k == m - 1, there's only one element in the column, so
+      // reflection would just flip its sign. Instead, preserve whatever value
+      // emerged from prior transformations to match LAPACK's behavior.
+      if (fabs(norm) < norm_eps || k == m - 1) {
+        tau_shared = 0.0;
+      } else {
+        opmath_t alpha = static_cast<opmath_t>(v_batch[k]);
+        opmath_t sign_alpha = (alpha >= 0.0) ? 1.0 : -1.0;
+        opmath_t beta = sign_alpha * norm;
+        opmath_t u1 = alpha + beta;
+
+        tau_shared = 1.0 + fabs(alpha) / norm;
+
+        v_batch[k] = static_cast<T>(1.0); // always 1 by construction
+        for (uint32_t i = k + 1; i < m; i++) {
+          v_batch[i] = static_cast<T>(static_cast<opmath_t>(v_batch[i]) / u1);
+        }
+
+        R_batch[k * n + k] = static_cast<T>(-beta);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+
+    const auto tau = tau_shared;
+    if (tau < tau_eps)
+      continue;
+
+    // (zero out column k below diagonal)
+    for (uint32_t i = k + 1 + tid; i < m; i += group_size) {
+      R_batch[i * n + k] = static_cast<T>(0.0);
+    }
+
+    // Step 3: apply reflection to trailing columns of R
+    // Parallelize across columns: each SIMD group (32 threads) handles one
+    // column
+    uint32_t simd_lane = tid % c10::metal::simdgroup_size;
+    uint32_t simd_group_id = tid / c10::metal::simdgroup_size;
+    uint32_t num_simd_groups = group_size / c10::metal::simdgroup_size;
+
+    for (uint32_t j_base = k + 1; j_base < n; j_base += num_simd_groups) {
+      uint32_t j = j_base + simd_group_id;
+      if (j < n) {
+        // Each SIMD group computes dot product for its column
+        // Use SIMD reduction within the group
+        opmath_t dot = 0.0;
+        for (uint32_t i = k + simd_lane; i < m; i += 32) {
+          opmath_t v_i = static_cast<opmath_t>(v_batch[i]);
+          opmath_t r_ij = static_cast<opmath_t>(R_batch[i * n + j]);
+          dot = fma(v_i, r_ij, dot);
+        }
+        opmath_t vt_col = simd_sum(dot);
+        opmath_t factor = tau * vt_col;
+
+        // Update column
+        for (uint32_t i = k + simd_lane; i < m; i += 32) {
+          opmath_t v_i = static_cast<opmath_t>(v_batch[i]);
+          opmath_t r_ij = static_cast<opmath_t>(R_batch[i * n + j]);
+          R_batch[i * n + j] = static_cast<T>(r_ij - v_i * factor);
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_device);
+
+    // Step 4: accumulate Q = Q * H_k
+    // each SIMD group handles one row
+    for (uint32_t i_base = 0; i_base < m; i_base += num_simd_groups) {
+      uint32_t i = i_base + simd_group_id;
+      if (i < m) {
+        opmath_t dot = 0.0;
+        for (uint32_t j = k + simd_lane; j < m; j += 32) {
+          opmath_t v_j = static_cast<opmath_t>(v_batch[j]);
+          opmath_t q_ij = static_cast<opmath_t>(Q_batch[i * m + j]);
+          dot = fma(q_ij, v_j, dot);
+        }
+        opmath_t row_v = simd_sum(dot);
+        opmath_t factor = tau * row_v;
+
+        // Update row
+        for (uint32_t j = k + simd_lane; j < m; j += 32) {
+          opmath_t v_j = static_cast<opmath_t>(v_batch[j]);
+          opmath_t q_ij = static_cast<opmath_t>(Q_batch[i * m + j]);
+          Q_batch[i * m + j] = static_cast<T>(q_ij - v_j * factor);
+        }
+      }
+    }
+
+    threadgroup_barrier(mem_flags::mem_device);
+  }
+
+  if (tid == 0) {
+    info[0] = 0;
+  }
+}
+
+#define REGISTER_QR(T)                                \
+  template [[host_name("linalg_qr_householder_" #T)]] \
+  kernel void linalg_qr_householder<T>(               \
+      device T * A [[buffer(0)]],                     \
+      device T * Q [[buffer(1)]],                     \
+      device T * R [[buffer(2)]],                     \
+      device int* info [[buffer(3)]],                 \
+      constant QrParams& params [[buffer(4)]],        \
+      device T* v_work [[buffer(5)]],                 \
+      uint3 tid [[thread_position_in_threadgroup]],   \
+      uint3 tpg [[threads_per_threadgroup]],          \
+      uint3 tg_pos [[threadgroup_position_in_grid]]);
+
+REGISTER_QR(float);
 
 #define INSTANTIATE_MM_OPS(DTYPE)                                           \
   template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>(       \
@@ -828,7 +1136,31 @@ kernel void orgqr(
       constant array<ulong2, 4> & strides [[buffer(5)]],                    \
       constant uint3 & sizes [[buffer(6)]],                                 \
       uint2 tid [[thread_position_in_threadgroup]],                         \
-      uint2 group_id [[threadgroup_position_in_grid]])
+      uint2 group_id [[threadgroup_position_in_grid]]);                     \
+  template [[host_name("naive_baddbmm_" #DTYPE)]]                           \
+  kernel void naive_baddbmm<DTYPE>(                                         \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant DTYPE * biasData [[buffer(3)]],                              \
+      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
+          alpha_beta [[buffer(4)]],                                         \
+      constant array<ulong, 12> & strides [[buffer(5)]],                    \
+      constant uint4 & sizes [[buffer(6)]],                                 \
+      uint3 tid [[thread_position_in_threadgroup]],                         \
+      uint3 group_id [[threadgroup_position_in_grid]]);                     \
+  template [[host_name("naive_addbmm_" #DTYPE)]]                            \
+  kernel void naive_addbmm<DTYPE>(                                          \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant DTYPE * biasData [[buffer(3)]],                              \
+      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
+          alpha_beta [[buffer(4)]],                                         \
+      constant array<ulong, 12> & strides [[buffer(5)]],                    \
+      constant uint4 & sizes [[buffer(6)]],                                 \
+      uint3 tid [[thread_position_in_threadgroup]],                         \
+      uint3 group_id [[threadgroup_position_in_grid]])
 
 INSTANTIATE_MM_OPS(float);
 INSTANTIATE_MM_OPS(half);
@@ -852,11 +1184,27 @@ INSTANTIATE_MM_OPS(uchar);
       constant T * tau [[buffer(1)]],                \
       device T * H [[buffer(2)]],                    \
       device T * H_prod [[buffer(3)]],               \
-      constant OrgqrParams<> & params [[buffer(4)]], \
-      uint tid [[thread_position_in_grid]]);
+      device T * H_prod_work [[buffer(4)]],          \
+      constant OrgqrParams<> & params [[buffer(5)]], \
+      uint tid [[thread_position_in_threadgroup]],   \
+      uint tptg [[threads_per_threadgroup]],         \
+      uint tgid [[threadgroup_position_in_grid]]);
 
 REGISTER_ORGQR(float);
 REGISTER_ORGQR(half);
 REGISTER_ORGQR(bfloat);
 REGISTER_ORGQR(float2);
 REGISTER_ORGQR(half2);
+
+#define REGISTER_UNPACK_PIVOTS(TO, TI)                    \
+  template [[host_name("unpack_pivots_" #TO "_" #TI)]]    \
+  kernel void unpack_pivots<TO, TI>(                      \
+      device TO * perm [[buffer(0)]],                     \
+      constant TI * pivots [[buffer(1)]],                 \
+      constant UnpackPivotsParams & params [[buffer(2)]], \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_UNPACK_PIVOTS(int, int);
+REGISTER_UNPACK_PIVOTS(int, long);
+REGISTER_UNPACK_PIVOTS(long, int);
+REGISTER_UNPACK_PIVOTS(long, long);

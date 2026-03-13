@@ -1,6 +1,6 @@
+import enum
 import os
 import sys
-from typing import Optional
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -83,7 +83,7 @@ validate_shape_env_version_key = False
 # issued (as we test if we've hit the limit on-the-fly, whereas we may
 # do further simplifications at final guard issuance time that make guards
 # irrelevant.)
-symbol_guard_limit_before_specialize: Optional[int] = None
+symbol_guard_limit_before_specialize: int | None = None
 
 # This flag changes whether we should use the same symbolic variable to represent input sizes that are the same.
 use_duck_shape = True
@@ -108,5 +108,27 @@ enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
     env_name_default="TORCH_ENRICH_RPOFILER_STACK_TRACE",
 )
 
+# When True, log a warning instead of raising PendingUnbackedSymbolNotFound exception
+# when pending unbacked symbols are not found in returned outputs.
+# The worst that can happen is an error somewhere else in the stack where we expect
+# to locate an unbacked binding. Or a runtime assertion not being lowered in the output
+# code.
+soft_pending_unbacked_not_found_error = False
+
+# When True, aggressively return fallback values in guard_or opting into
+# guard-free semantics. This optimizes tracing time when symbolic reasoning
+# is expensive. Since guard_or_X already have a general path to take, we
+# can skip expensive static evaluation and just return the fallback value directly.
+# This is usually safe because the fallback represents a valid code path that
+# could be taken anyway.
+# See AggressiveGuardFreeMode below for valid values.
+aggressive_guard_free_semantics = 0
+
 
 install_config_module(sys.modules[__name__])
+
+
+class AggressiveGuardFreeMode(enum.IntEnum):
+    DISABLED = 0
+    VALUE_RANGE_ANALYSIS = 1  # use bound_sympy before returning fallback
+    SKIP_RANGE_ANALYSIS = 2  # skip range analysis entirely, just return fallback_value

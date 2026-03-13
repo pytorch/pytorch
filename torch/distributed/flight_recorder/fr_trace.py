@@ -30,7 +30,6 @@ python fr_trace.py <dump dir containing trace files> [-o <output file>]
 
 import pickle
 from collections.abc import Sequence
-from typing import Optional
 
 from torch.distributed.flight_recorder.components.builder import build_db, transform_ft
 from torch.distributed.flight_recorder.components.config_manager import JobConfig
@@ -41,18 +40,20 @@ from torch.distributed.flight_recorder.components.types import types
 __all__ = ["main"]
 
 
-def main(args: Optional[Sequence[str]] = None) -> None:
+def main(args: Sequence[str] | None = None) -> None:
     config = JobConfig()
     # pyrefly: ignore [bad-assignment]
     args = config.parse_args(args)
     # pyrefly: ignore [missing-attribute]
-    assert args.trace_dir, "Trace directory trace_dir is required"
+    if not args.trace_dir:
+        raise AssertionError("Trace directory trace_dir is required")
     # pyrefly: ignore [bad-argument-type]
     details, version = read_dir(args)
     # pyrefly: ignore [missing-attribute]
     if args.transform_ft:
         # pyrefly: ignore [missing-attribute]
-        assert args.group_world_size, "World size is required for transform_ft"
+        if not args.group_world_size:
+            raise AssertionError("World size is required for transform_ft")
         # pyrefly: ignore [bad-argument-type]
         details = transform_ft(details, args.group_world_size)
     # pyrefly: ignore [bad-argument-type]

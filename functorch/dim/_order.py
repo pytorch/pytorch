@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -40,7 +40,7 @@ def _wrap_dim(arg: Any, orig_ndim: int, allow_none: bool = True) -> DimEntry:
 
 
 def order(
-    tensor_or_dim: Union[torch.Tensor, Any], *dims: Union[Any, Sequence[Any]]
+    tensor_or_dim: torch.Tensor | Any, *dims: Any | Sequence[Any]
 ) -> torch.Tensor:
     """
     Reorder the dimensions of a tensor or create a tensor from a dimension.
@@ -154,7 +154,8 @@ def order(
         new_levels.extend(flat_positional_dims)
 
     # Match tensor to new level structure
-    assert data is not None, "Cannot reorder None tensor"
+    if data is None:
+        raise AssertionError("Cannot reorder None tensor")
     ndata = _match_levels(data, orig_levels, new_levels)
 
     # Handle dimension flattening if requested

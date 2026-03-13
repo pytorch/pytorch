@@ -9,6 +9,8 @@ from copy import deepcopy
 import torch
 from torch import Tensor
 from torch.__future__ import get_swap_module_params_on_conversion
+from torch._library.opaque_object import is_opaque_reference_type
+from torch._opaque_base import OpaqueBase
 from torch.nn.modules.container import Module, ModuleDict, ModuleList
 from torch.nn.parameter import Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -204,20 +206,29 @@ class ParametrizationList(ModuleList):
             _register_parameter_or_buffer(self, "original", original)
         else:
             for i, originali in enumerate(new):
-                if not isinstance(originali, Tensor):
-                    raise ValueError(
-                        "'right_inverse' must return a Tensor or a Sequence of tensors "
-                        "(list, tuple...). "
-                        f"Got element {i} of the sequence with type {type(originali).__name__}."
-                    )
-
-                # If the original tensor was a Parameter that required grad, we expect the user to
-                # add the new parameters to the optimizer after registering the parametrization
-                # (this is documented)
-                if isinstance(original, Parameter):
-                    originali = Parameter(originali, original.requires_grad)
-                originali.requires_grad_(original.requires_grad)
-                _register_parameter_or_buffer(self, f"original{i}", originali)
+                match originali:
+                    case OpaqueBase():
+                        if not is_opaque_reference_type(type(originali)):
+                            raise ValueError(
+                                f"'right_inverse' must return a Tensor or a reference-type "
+                                f"opaque. Got element {i} of the sequence with type "
+                                f"{type(originali).__name__}."
+                            )
+                        setattr(self, f"original{i}", originali)
+                    case Tensor():
+                        # If the original tensor was a Parameter that required grad, we expect the user to
+                        # add the new parameters to the optimizer after registering the parametrization
+                        # (this is documented)
+                        if isinstance(original, Parameter):
+                            originali = Parameter(originali, original.requires_grad)
+                        originali.requires_grad_(original.requires_grad)
+                        _register_parameter_or_buffer(self, f"original{i}", originali)
+                    case _:
+                        raise ValueError(
+                            "'right_inverse' must return a Tensor or a Sequence of tensors "
+                            "(list, tuple...). "
+                            f"Got element {i} of the sequence with type {type(originali).__name__}."
+                        )
 
         if not self.unsafe:
             # Consistency checks:
@@ -292,17 +303,25 @@ class ParametrizationList(ModuleList):
                     )
                 for i, tensor in enumerate(value):
                     original_i = getattr(self, f"original{i}")
-                    if not isinstance(tensor, Tensor):
-                        raise ValueError(
-                            f"`right_inverse` must return a sequence of tensors. "
-                            f"Got element {i} of type {type(tensor).__name__}"
-                        )
-                    if original_i.dtype != tensor.dtype:
-                        raise ValueError(
-                            f"Tensor {i} returned by `right_inverse` has dtype {tensor.dtype} "
-                            f"while `original{i}` has dtype {original_i.dtype}"
-                        )
-                    _maybe_set(original_i, tensor)
+                    match tensor:
+                        case OpaqueBase():
+                            if is_opaque_reference_type(type(tensor)):
+                                setattr(self, f"original{i}", tensor)
+                                continue
+                            # Fall-through
+                        case Tensor():
+                            if original_i.dtype != tensor.dtype:
+                                raise ValueError(
+                                    f"Tensor {i} returned by `right_inverse` has dtype {tensor.dtype} "
+                                    f"while `original{i}` has dtype {original_i.dtype}"
+                                )
+                            _maybe_set(original_i, tensor)
+                            continue
+                    raise ValueError(
+                        f"'right_inverse' must return a sequence of tensors "
+                        f"or reference-type opaques. Got element {i} of type "
+                        f"{type(tensor).__name__}."
+                    )
 
     def forward(self) -> Tensor:
         if torch.jit.is_scripting():
@@ -384,7 +403,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
     """
     # We check the precondition.
     # This should never fire if register_parametrization is correctly implemented
-    assert not hasattr(module, tensor_name)
+    if hasattr(module, tensor_name):
+        raise AssertionError(f"Module already has an attribute named '{tensor_name}'")
 
     @torch.jit.unused
     def get_cached_parametrization(parametrization) -> Tensor:
@@ -609,7 +629,11 @@ def register_parametrization(
             # else right_inverse is assumed to be the identity
 
         # add the new parametrization to the parametrization list
-        assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
+        if not isinstance(module.parametrizations, ModuleDict):
+            raise AssertionError(
+                f"Expected module.parametrizations to be a ModuleDict, "
+                f"got {type(module.parametrizations).__name__}"
+            )
         module.parametrizations[tensor_name].append(parametrization)  # type: ignore[operator]
         # If unsafe was True in previous parametrization, keep it enabled
         module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr, operator]
@@ -633,7 +657,11 @@ def register_parametrization(
         # Add a property into the class
         _inject_property(module, tensor_name)
         # Add a ParametrizationList
-        assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
+        if not isinstance(module.parametrizations, ModuleDict):
+            raise AssertionError(
+                f"Expected module.parametrizations to be a ModuleDict, "
+                f"got {type(module.parametrizations).__name__}"
+            )
         module.parametrizations[tensor_name] = parametrizations
     else:
         raise ValueError(
@@ -698,12 +726,20 @@ def remove_parametrizations(
         )
 
     # Fetch the original tensor
-    assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
+    if not isinstance(module.parametrizations, ModuleDict):
+        raise AssertionError(
+            f"Expected module.parametrizations to be a ModuleDict, "
+            f"got {type(module.parametrizations).__name__}"
+        )
     parametrizations = module.parametrizations[tensor_name]
-    # pyrefly: ignore [invalid-argument]
+
     if parametrizations.is_tensor:
         original = parametrizations.original
-        assert isinstance(original, torch.Tensor), "is_tensor promised us a Tensor"
+        if not isinstance(original, torch.Tensor):
+            raise AssertionError(
+                f"Expected original to be a Tensor (is_tensor promised us a Tensor), "
+                f"got {type(original).__name__}"
+            )
         if leave_parametrized:
             with torch.no_grad():
                 t = getattr(module, tensor_name)
@@ -792,14 +828,22 @@ def transfer_parametrizations_and_params(
         Module: to_module
     """
     if is_parametrized(from_module):
-        assert isinstance(from_module.parametrizations, ModuleDict)  # for mypy
+        if not isinstance(from_module.parametrizations, ModuleDict):
+            raise AssertionError(
+                f"Expected from_module.parametrizations to be a ModuleDict, "
+                f"got {type(from_module.parametrizations).__name__}"
+            )
 
         # get list of all params or the single param to transfer
         parameters_to_transfer: list | ModuleDict = (
             from_module.parametrizations if tensor_name is None else [tensor_name]
         )
 
-        assert hasattr(parameters_to_transfer, "__iter__")  # for mypy
+        if not hasattr(parameters_to_transfer, "__iter__"):
+            raise AssertionError(
+                f"Expected parameters_to_transfer to be iterable, "
+                f"got {type(parameters_to_transfer).__name__}"
+            )
         for parameter_name in parameters_to_transfer:
             # initialize the to-be-transferred param in to_module if it doesn't exist already
             if not hasattr(to_module, parameter_name):
@@ -814,7 +858,11 @@ def transfer_parametrizations_and_params(
                 parameter_name
             ]:
                 register_parametrization(to_module, parameter_name, param_func)
-            assert isinstance(to_module.parametrizations, ModuleDict)  # for mypy
+            if not isinstance(to_module.parametrizations, ModuleDict):
+                raise AssertionError(
+                    f"Expected to_module.parametrizations to be a ModuleDict, "
+                    f"got {type(to_module.parametrizations).__name__}"
+                )
 
             # make values match, original values can be stored in either original or
             # original0, original1..., need to check both cases

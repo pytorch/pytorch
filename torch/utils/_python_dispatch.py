@@ -50,10 +50,27 @@ def is_in_any_mode_without_ignore_compile_internals() -> bool:
     return _is_in_any_mode_without_ignore_compile_internals
 
 
+def any_torch_dispatch_mode_on_stack() -> bool:
+    stack_len = torch._C._len_torch_dispatch_stack()
+
+    for idx in range(stack_len):
+        mode = _get_dispatch_stack_at(idx)
+
+        # Apply filters first
+        if mode.is_infra_mode():
+            continue
+
+        if mode.ignore_compile_internals():
+            continue
+
+        return True
+    return False
+
+
 class TorchDispatchMode:
     """
     A ``TorchDispatchMode`` allows you to override the meaning of all
-    ``__torch_dispatch__`` overrideable functions within a dynamic scope,
+    ``__torch_dispatch__`` overridable functions within a dynamic scope,
     without having to actually create a tensor subclass or manually
     monkey-patch functions in the PyTorch API.  Some common situations
     where you should use a mode:
@@ -87,7 +104,15 @@ class TorchDispatchMode:
     # Mode authors can implement how the mode interacts with higher order operators.
     supports_higher_order_operators = False
 
-    def __init__(self, _dispatch_key=None) -> None:
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if cls._should_skip_dynamo():
+            if "__torch_dispatch__" in cls.__dict__:
+                raw = cls.__dict__["__torch_dispatch__"]
+                if not isinstance(raw, classmethod):
+                    cls.__torch_dispatch__ = torch._disable_dynamo(raw, recursive=True)
+
+    def __init__(self, _dispatch_key=None):
         if _dispatch_key is not None:
             if not isinstance(_dispatch_key, torch._C.DispatchKey):
                 raise AssertionError("_dispatch_key must be a torch._C.DispatchKey")
@@ -99,7 +124,7 @@ class TorchDispatchMode:
             deque()
         )
 
-    def _lazy_init_old_dispatch_mode_flags(self) -> None:
+    def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
             self.old_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
 
@@ -180,6 +205,32 @@ class TorchDispatchMode:
     @classmethod
     def is_infra_mode(cls) -> bool:
         return False
+
+    @classmethod
+    def _should_skip_dynamo(cls) -> bool:
+        """Skip Dynamo when the flag is set to True
+
+        This is temporary measure to rollout a feature
+        that skips PT2 compilation inside __torch_dispatch__
+        frames.
+
+        If this flag is off, we would expect following:
+
+        class YoloMode(TorchDispatchMode):
+            @classmethod
+            def _should_skip_dynamo(cls):
+                return False
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.mul.Tensor(args[0], args[1])
+
+        x = torch.ones(5)
+        with YoloMode():
+            out = torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
+
+        # instead of recursively disabling, we are compiling into __torch_dispatch__
+        assert len(backend.graphs) == 1
+        """
+        return True
 
     @classmethod
     def ignore_compile_internals(cls) -> bool:
@@ -797,7 +848,10 @@ def autograd_would_have_decomposed(
             backend_key = torch._C._parse_dispatch_key(
                 torch._C._dispatch_key_for_device(a.device.type)
             )
-            assert backend_key is not None
+            if backend_key is None:
+                raise AssertionError(
+                    f"failed to parse dispatch key for device {a.device.type}"
+                )
             # TODO: use func.has_kernel_for_dispatch_key(backend_key)
             # but this one checks py_impl and CompositeImplicitAutograd
             # incorrectly shows up as has backend reg here

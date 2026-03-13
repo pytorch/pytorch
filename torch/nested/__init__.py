@@ -113,7 +113,10 @@ def as_nested_tensor(
                 *torch._nested_compute_contiguous_strides_offsets(nested_sizes),
             )
         else:
-            assert isinstance(ts, list)
+            if not isinstance(ts, list):
+                raise AssertionError(
+                    f"Expected ts to be a list, but got {type(ts).__name__}"
+                )
             return torch._nested_tensor_from_tensor_list(ts, dtype, None, device, None)
     elif layout == torch.jagged:
         if isinstance(ts, Tensor):
@@ -139,7 +142,10 @@ def as_nested_tensor(
         else:
             from torch.nested._internal.nested_tensor import jagged_from_list
 
-            assert isinstance(ts, list)
+            if not isinstance(ts, list):
+                raise AssertionError(
+                    f"Expected ts to be a list, but got {type(ts).__name__}"
+                )
             nt, _ = jagged_from_list(ts, offsets=None, device=device, dtype=dtype)
             return nt
     else:

@@ -22,12 +22,21 @@ namespace {
 using namespace vec;
 
 void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-    iter.dtype(), "index_cpu", [&] {
-    cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
-      *(scalar_t*)dst = c10::load((scalar_t*)(src + offset));
-    });
-  });
+  AT_DISPATCH_V2(
+    iter.dtype(),
+    "index_cpu",
+    AT_WRAP([&] {
+      cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
+        *(scalar_t*)dst = c10::load((scalar_t*)(src + offset));
+      });
+    }),
+    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+    AT_EXPAND(AT_FLOAT8_TYPES),
+    AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+    kComplexHalf,
+    kHalf,
+    kBool,
+    kBFloat16);
 }
 
 // Given a linear index, returns the offset of the tensor.

@@ -132,6 +132,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.manual_seed,
         torch.initial_seed,
         torch.seed,
+        torch.thread_safe_generator,
         torch.save,
         torch.load,
         torch.set_printoptions,
@@ -193,6 +194,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.cudnn_convolution_add_relu,
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
+        torch.miopen_ctc_loss,
         torch.empty,
         torch.empty_permuted,
         torch.empty_strided,
@@ -464,7 +466,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.addr: lambda input, vec1, vec2, beta=1, alpha=1, out=None: -1,
         torch.affine_grid_generator: lambda theta, size, align_corners: -1,
         torch.all: lambda input, dim=None: -1,
-        torch.allclose: lambda input, other, trol=1e-05, atol=1e-08, equal_nan=False: -1,
+        torch.allclose: lambda input, other, rtol=1e-05, atol=1e-08, equal_nan=False: -1,
         torch.alpha_dropout: lambda input, p, train, inplace=False: -1,
         torch.amax: lambda input, dim=None: -1,
         torch.amin: lambda input, dim=None: -1,
@@ -741,7 +743,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.linalg.ldl_factor_ex: lambda input, hermitian=False, check_errors=False, out=None: -1,
         torch.linalg.ldl_factor: lambda input, hermitian=False, out=None: -1,
         torch.linalg.ldl_solve: lambda LD, pivots, B, hermitian=False, out=None: -1,
-        torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
+        torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05, cudnn_enabled=True: -1,
         torch.lcm: lambda input, other, out=None: -1,
         torch.ldexp: lambda input, other, out=None: -1,
         torch.le: lambda input, other, out=None: -1,
@@ -1566,6 +1568,35 @@ def get_testing_overrides() -> dict[Callable, Callable]:
                 ret2[func] = v
 
     ret.update(ret2)
+
+    # Distributed functions are added after the auto-generation loop above
+    # to avoid generating spurious Tensor method entries (e.g., dist.reduce
+    # would otherwise generate __reduce__ on Tensor).
+    if torch.distributed.is_available():
+        import torch.distributed as dist
+
+        ret.update(
+            {
+                dist.broadcast: lambda tensor, src=None, group=None, async_op=False, group_src=None: -1,
+                dist.all_reduce: lambda tensor, op=None, group=None, async_op=False: -1,
+                dist.reduce: lambda tensor, dst=None, op=None, group=None, async_op=False, group_dst=None: -1,
+                dist.all_reduce_coalesced: lambda tensors, op=None, group=None, async_op=False: -1,
+                dist.all_gather: lambda tensor_list, tensor, group=None, async_op=False: -1,
+                dist.all_gather_into_tensor: lambda output_tensor, input_tensor, group=None, async_op=False: -1,
+                dist.all_gather_coalesced: lambda output_tensor_lists, input_tensor_list, group=None, async_op=False: -1,
+                dist.gather: lambda tensor, gather_list=None, dst=None, group=None, async_op=False, group_dst=None: -1,
+                dist.scatter: lambda tensor, scatter_list=None, src=None, group=None, async_op=False, group_src=None: -1,
+                dist.reduce_scatter: lambda output, input_list, op=None, group=None, async_op=False: -1,
+                dist.reduce_scatter_tensor: lambda output, input, op=None, group=None, async_op=False: -1,
+                dist.all_to_all_single: lambda output, input, output_split_sizes=None, input_split_sizes=None, group=None, async_op=False: -1,  # noqa: B950
+                dist.all_to_all: lambda output_tensor_list, input_tensor_list, group=None, async_op=False: -1,
+                dist.isend: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
+                dist.irecv: lambda tensor, src=None, group=None, tag=0, group_src=None: -1,
+                dist.send: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
+                dist.recv: lambda tensor, src=None, group=None, tag=0, group_src=None: -1,
+            }
+        )  # fmt: skip
+
     return ret
 
 
@@ -1881,9 +1912,8 @@ def _get_overridable_functions() -> tuple[
                         "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                         "but still has an explicit override"
                     )
-                    assert func.__get__ not in get_testing_overrides(), msg.format(
-                        namespace, func.__name__
-                    )
+                    if func.__get__ in get_testing_overrides():
+                        raise AssertionError(msg.format(namespace, func.__name__))
                     continue
                 else:
                     overridable_funcs[func].append(func.__get__)
@@ -1903,9 +1933,8 @@ def _get_overridable_functions() -> tuple[
                     "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                     "but still has an explicit override"
                 )
-                assert func not in get_testing_overrides(), msg.format(
-                    namespace, func.__name__
-                )
+                if func in get_testing_overrides():
+                    raise AssertionError(msg.format(namespace, func.__name__))
                 continue
             overridable_funcs[namespace].append(func)
     return overridable_funcs, index

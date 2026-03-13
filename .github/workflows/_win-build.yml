@@ -55,6 +55,9 @@ on:
       test-matrix:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
+      build-environment:
+        value: ${{ jobs.build.outputs.build-environment }}
+        description: Top-level label for what's being built/tested.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -67,6 +70,7 @@ jobs:
     timeout-minutes: 240
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      build-environment: ${{ inputs.build-environment }}
     defaults:
       run:
         shell: bash

@@ -82,7 +82,7 @@ use sys.modules.get("torchrec") or the like.
 
 def check_file(filepath: str) -> list[LintMessage]:
     path = Path(filepath)
-    file = _linter.PythonFile("import_linter", path)
+    file = _linter.PythonFile("import_linter", path=path)
     lint_messages = []
     for line_number, line_of_tokens in enumerate(file.token_lines):
         # Skip indents

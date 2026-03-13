@@ -5,7 +5,6 @@
 
 #include <c10/util/Enumerate.h>
 
-#include <torch/nativert/executor/DelegateExecutor.h>
 #include <torch/nativert/executor/Weights.h>
 
 namespace torch::nativert {
@@ -124,10 +123,12 @@ void ConstantFolder::unlinkConstants(
     }
   }
 
-  for (const auto& f : foldables_) {
-    VLOG(1) << "Const-folded node: " << *f.node;
+  if (VLOG_IS_ON(1)) {
+    for (const auto& f : foldables_) {
+      VLOG(1) << "Const-folded node: " << *f.node;
+    }
+    VLOG(1) << "Const-folded " << foldables_.size() << " nodes";
   }
-  LOG(INFO) << "Const-folded " << foldables_.size() << " nodes";
 
   // remove moved (i.e., associated w/ const-folded nodes) kernels
   // from the input kernel vector

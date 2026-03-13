@@ -5,13 +5,13 @@ name: slow-rocm-mi200
 
 on:
   push:
-    branches:
-      - release/*
+    #branches:
+      #- release/*
     tags:
       - ciflow/slow/*
       - ciflow/slow-rocm-mi200/*
-  schedule:
-    - cron: 0 */3 * * *
+  #schedule:
+    #- cron: 0 */3 * * *
   workflow_dispatch:
 
 concurrency:
@@ -75,7 +75,7 @@ jobs:
       - linux-jammy-rocm-py3_10-build
       - target-determination
     with:
-      build-environment: linux-jammy-rocm-py3.10
+      build-environment: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
     secrets: inherit

@@ -96,7 +96,10 @@ def model_training_evaluation(
 
 
 def check_loss(ref_loss, res_loss):
-    assert len(ref_loss) == len(res_loss)
+    if len(ref_loss) != len(res_loss):
+        raise AssertionError(
+            f"Expected loss lists to have equal length, but got {len(ref_loss)} and {len(res_loss)}"
+        )
     length = len(ref_loss)
     x = min(length, 10)
     return sum(res_loss[-x:]) / 10 <= sum(ref_loss[-x:]) / 10 + 0.1

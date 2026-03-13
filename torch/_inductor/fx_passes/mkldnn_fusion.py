@@ -361,8 +361,15 @@ if torch._C._has_mkldnn:
         )
 
     def _silu_fusion(computation_call):
+        # Match: x / (exp(-x) + 1) pattern used by inductor's silu decomposition
         return CallFunction(
-            aten.mul, computation_call, CallFunction(aten.sigmoid, computation_call)
+            aten.div,
+            computation_call,
+            CallFunction(
+                aten.add,
+                CallFunction(aten.exp, CallFunction(aten.neg, computation_call)),
+                1,
+            ),
         )
 
     def _hardsigmoid_fusion(computation_call):
@@ -716,7 +723,6 @@ if torch._C._has_mkldnn:
             if any(_other_input_not_inplaceable(n, other_index) for n in binary_nodes):
                 return False
             if any(
-                # pyrefly: ignore [missing-attribute]
                 n.args[other_index].op in ["placeholder", "output"]
                 for n in binary_nodes
             ):
@@ -1562,16 +1568,19 @@ if torch._C._has_mkldnn:
         # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
         # Otherwise even the matmul or innerproduct can not be accelerated with acl
         if (
-            torch.backends.mkldnn.enabled
-            and torch.backends.mkldnn.is_available()
-            and not torch.ops.mkldnn._is_mkldnn_acl_supported()
+            not torch.backends.mkldnn.enabled
+            or not torch.backends.mkldnn.is_available()
         ):
+            return
+
+        if not torch.ops.mkldnn._is_mkldnn_acl_supported():
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()
             _register_binary_fusion()
             _register_quantization_lowerings()
-            _register_woq_lowerings()
+
+        _register_woq_lowerings()
 
     @functools.cache
     def _mkldnn_weight_pack_init():

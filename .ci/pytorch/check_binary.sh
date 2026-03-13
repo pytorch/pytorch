@@ -26,6 +26,8 @@ set -eux -o pipefail
 # libtorch package.
 
 # ensure we don't link to system libraries, linked libraries should be found from RPATH
+# Save the old LD_LIBRARY_PATH to restore it later
+OLD_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 unset LD_LIBRARY_PATH
 
 if [[ -z ${DESIRED_PYTHON:-} ]]; then
@@ -152,7 +154,7 @@ setup_link_flags () {
 TEST_CODE_DIR="$(dirname $(realpath ${BASH_SOURCE[0]}))/test_example_code"
 build_and_run_example_cpp () {
   setup_link_flags
-  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -std=gnu++17 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
+  g++ ${TEST_CODE_DIR}/$1.cpp -I${install_root}/include -I${install_root}/include/torch/csrc/api/include -std=gnu++20 -L${install_root}/lib ${REF_LIB} ${ADDITIONAL_LINKER_FLAGS} -ltorch $TORCH_CPU_LINK_FLAGS $TORCH_CUDA_LINK_FLAGS $C10_LINK_FLAGS -o $1
   ./$1
 }
 
@@ -307,4 +309,11 @@ except RuntimeError as e:
     echo "PyTorch doesn't support TLS_TCP transport, please build with USE_GLOO_WITH_OPENSSL=1"
     exit 1
   fi
+fi
+
+###############################################################################
+# Restore LD_LIBRARY_PATH to its original value
+###############################################################################
+if [[ -n "$OLD_LD_LIBRARY_PATH" ]]; then
+  export LD_LIBRARY_PATH="$OLD_LD_LIBRARY_PATH"
 fi

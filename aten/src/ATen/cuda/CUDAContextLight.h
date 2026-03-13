@@ -89,6 +89,7 @@ TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
+TORCH_CUDA_CPP_API void clearCublasWorkspacesForStream(cudaStream_t stream);
 struct WorkspaceMapWithMutex {
   std::map<std::tuple<void*, void*>, at::DataPtr> map;
   std::shared_mutex mutex;
@@ -100,9 +101,7 @@ TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
 TORCH_CUDA_CPP_API size_t getCUDABlasLtWorkspaceSize();
 TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace();
 
-#if defined(CUDART_VERSION) || defined(USE_ROCM)
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
-#endif
 
 #if defined(USE_CUDSS)
 TORCH_CUDA_CPP_API cudssHandle_t getCurrentCudssHandle();

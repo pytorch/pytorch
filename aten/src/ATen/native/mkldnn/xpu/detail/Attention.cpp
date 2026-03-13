@@ -70,7 +70,6 @@ struct SDPALogicalParams {
     TORCH_INTERNAL_ASSERT(
         query_.scalar_type() == attention_.scalar_type(),
         "scaled_dot_product_attention_xpu: query and attention tensors should have the same data type.");
-    const dims scalar_shape = {1};
 
     at::Tensor reshaped_query = query_;
     at::Tensor reshaped_key = key_;
@@ -125,17 +124,17 @@ struct SDPALogicalParams {
     LOGIC_TENSOR_DESC(key, dtype);
     scale = {
         static_cast<size_t>(TensorID::scale),
-        to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
-        scalar_shape,
+        logical_tensor::data_type::f32,
+        0,
         logical_tensor::layout_type::strided,
-        logical_tensor::property_type::constant};
+        logical_tensor::property_type::host_scalar};
     if (is_causal) {
       neg_inf = {
           static_cast<size_t>(TensorID::neg_inf),
-          to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
-          scalar_shape,
+          logical_tensor::data_type::f32,
+          0,
           logical_tensor::layout_type::strided,
-          logical_tensor::property_type::constant};
+          logical_tensor::property_type::host_scalar};
     }
     if (attn_mask_.has_value()) {
       const data_type mask_dtype =
@@ -431,7 +430,6 @@ struct SDPABackwardLogicalParams {
     TORCH_INTERNAL_ASSERT(
         logsumexp_.defined() && logsumexp_.scalar_type() == at::kFloat,
         "scaled_dot_product_attention_backward_xpu: Expected logsumexp to be defined and have FP32 data type");
-    const dims scalar_shape = {1};
 
     at::Tensor reshaped_grad_out = grad_out_;
     at::Tensor reshaped_query = query_;
@@ -479,17 +477,17 @@ struct SDPABackwardLogicalParams {
     LOGIC_TENSOR_DESC(logsumexp, sdpa_intermediate_dtype);
     scale = {
         static_cast<size_t>(TensorID::scale),
-        to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
-        scalar_shape,
+        logical_tensor::data_type::f32,
+        0,
         logical_tensor::layout_type::strided,
-        logical_tensor::property_type::constant};
+        logical_tensor::property_type::host_scalar};
     if (is_causal) {
       neg_inf = {
           static_cast<size_t>(TensorID::neg_inf),
-          to_logical_tensor_data_type(at::toOpMathType(query_.scalar_type())),
-          scalar_shape,
+          logical_tensor::data_type::f32,
+          0,
           logical_tensor::layout_type::strided,
-          logical_tensor::property_type::constant};
+          logical_tensor::property_type::host_scalar};
     }
     if (attn_mask_.has_value()) {
       const data_type mask_dtype =
@@ -846,18 +844,6 @@ void sdpa(
   l_outputs = std::move(logical_params.get_output());
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
-  Tensor softmax_scale1 = at::full(
-      {},
-      softmax_scale,
-      query.options().dtype(at::toOpMathType(query.scalar_type())));
-  std::optional<at::Tensor> neg_inf;
-  if (is_causal) {
-    neg_inf = at::full(
-        {},
-        -std::numeric_limits<float>::infinity(),
-        query.options().dtype(at::toOpMathType(query.scalar_type())));
-  }
-
   std::vector<dnnl::graph::tensor> outputs = {
       {l_outputs[0], eng, attention.data_ptr()},
   };
@@ -874,9 +860,12 @@ void sdpa(
 
   ADD_INPUT(query);
   ADD_INPUT(key);
-  ADD_INPUT(softmax_scale1);
-  if (neg_inf.has_value()) {
-    ADD_INPUT((*neg_inf));
+  inputs.emplace_back(
+      dnnl::graph::tensor::make_scalar_tensor(l_inputs[i++], &softmax_scale));
+  if (is_causal) {
+    constexpr float neg_inf_val = -std::numeric_limits<float>::infinity();
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], const_cast<float*>(&neg_inf_val)));
   }
   if (attn_mask.has_value()) {
     ADD_INPUT((*attn_mask));
@@ -903,7 +892,7 @@ void sdpa_backward(
     const Tensor& logsumexp,
     std::optional<at::Tensor> attn_mask,
     bool is_causal,
-    double scale,
+    float softmax_scale,
     Tensor& grad_query,
     Tensor& grad_key,
     Tensor& grad_value) {
@@ -957,16 +946,6 @@ void sdpa_backward(
   l_outputs = std::move(logical_params.get_output());
   compiled_partition = partition.compile(l_inputs, l_outputs, eng);
 
-  Tensor softmax_scale = at::full(
-      {}, scale, query.options().dtype(at::toOpMathType(query.scalar_type())));
-  std::optional<at::Tensor> neg_inf;
-  if (is_causal) {
-    neg_inf = at::full(
-        {},
-        -std::numeric_limits<float>::infinity(),
-        query.options().dtype(at::toOpMathType(query.scalar_type())));
-  }
-
   std::vector<dnnl::graph::tensor> outputs = {
       {l_outputs[0], eng, grad_query.data_ptr()},
       {l_outputs[1], eng, grad_key.data_ptr()},
@@ -986,9 +965,12 @@ void sdpa_backward(
   ADD_INPUT(value);
   ADD_INPUT(out);
   ADD_INPUT(logsumexp);
-  ADD_INPUT(softmax_scale);
-  if (neg_inf.has_value()) {
-    ADD_INPUT((*neg_inf));
+  inputs.emplace_back(
+      dnnl::graph::tensor::make_scalar_tensor(l_inputs[i++], &softmax_scale));
+  if (is_causal) {
+    constexpr float neg_inf_val = -std::numeric_limits<float>::infinity();
+    inputs.emplace_back(dnnl::graph::tensor::make_scalar_tensor(
+        l_inputs[i++], const_cast<float*>(&neg_inf_val)));
   }
   if (attn_mask.has_value()) {
     ADD_INPUT((*attn_mask));

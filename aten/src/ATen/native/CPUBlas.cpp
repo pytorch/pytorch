@@ -2,7 +2,6 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/native/mkldnn/Matmul.h>
-#include <ATen/Config.h>
 
 #include <c10/util/SmallBuffer.h>
 #include <c10/util/irange.h>
@@ -28,6 +27,14 @@ extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 float *beta,
                 float *c, int *ldc);
 #endif  // BLAS_HAS_SBGEMM
+#ifdef BLAS_HAS_SHGEMM
+extern "C" void shgemm_(char *transa, char *transb, int *m, int *n, int *k,
+                float *alpha,
+                const at::Half *a, int *lda,
+                const at::Half *b, int *ldb,
+                float *beta,
+                float *c, int *ldc);
+#endif  // BLAS_HAS_SHGEMM
 extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy);
 extern "C" void dcopy_(int *n, const double *x, int *incx, double *y, int *incy);
 extern "C" void scopy_(int *n, const float *x, int *incx, float *y, int *incy);
@@ -57,6 +64,11 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
 #define ONEDNN_UKERNEL_ENABLED
 #endif
+
+#if IDEEP_PREREQ(3, 9, 0, 0)
+#define ONEDNN_FP8_UKERNEL_AVAILABLE
+#endif
+
 #endif  // AT_MKLDNN_ENABLED()
 
 #if defined(ONEDNN_UKERNEL_ENABLED)
@@ -414,6 +426,34 @@ void gemm(
      return;
    }
 #endif
+#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SHGEMM)
+   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+      int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+      char transa_ = to_blas(transa), transb_ = to_blas(transb);
+      float alpha_ = alpha, beta_ = beta;
+      int c_size = n_ * m_;
+      // C matrix in OpenBLAS shgemm are of type "float" so we have to convert, copy and copy back.
+      std::vector<float> float_v(c_size, 0.0f);
+      for (const auto j : c10::irange(n)) {
+        for (const auto i : c10::irange(m)) {
+          float_v[j * m_ + i] = c10::convert<float>(c[j * ldc_ + i]);
+        }
+      }
+      shgemm_(&transa_, &transb_,
+              &m_, &n_, &k_,
+              &alpha_,
+              a, &lda_,
+              b, &ldb_,
+              &beta_,
+              float_v.data(), &m_);
+      for (const auto j : c10::irange(n)) {
+        for (const auto i : c10::irange(m)) {
+          c[j * ldc_ + i] = c10::convert<at::Half>(float_v[j * m_ + i]);
+        }
+      }
+      return;
+   }
+#endif
    gemm_stub(
       at::kCPU, at::kHalf,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -471,6 +511,21 @@ void gemm(
     const float beta,
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SHGEMM)
+  if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    char transa_ = to_blas(transa), transb_ = to_blas(transb);
+    float alpha_ = alpha, beta_ = beta;
+    shgemm_(&transa_, &transb_,
+            &m_, &n_, &k_,
+            &alpha_,
+            a, &lda_,
+            b, &ldb_,
+            &beta_,
+            c, &ldc_);
+    return;
+  }
+#endif
 #ifdef MKL_HAS_SHGEMM
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
     int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
@@ -943,20 +998,19 @@ struct PackKey {
 };
 
 static inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
-  if (dtype == ScalarType::Float) {
-    return dnnl::memory::data_type::f32;
-  } else if (dtype == ScalarType::BFloat16) {
-    return dnnl::memory::data_type::bf16;
-  } else if (dtype == ScalarType::Half) {
-    return dnnl::memory::data_type::f16;
-  } else if (dtype == ScalarType::Int) {
-    return dnnl::memory::data_type::s32;
-  } else if (dtype == ScalarType::Byte) {
-    return dnnl::memory::data_type::u8;
-  } else if (dtype == ScalarType::Char) {
-    return dnnl::memory::data_type::s8;
-  } else {
-    TORCH_CHECK(false, "get_dnnl_dtype expects float/bfloat16/half/int8 tensor input");
+  using at::ScalarType;
+  using data_type = dnnl::memory::data_type;
+  switch (dtype) {
+    case ScalarType::Float:          return data_type::f32;
+    case ScalarType::BFloat16:       return data_type::bf16;
+    case ScalarType::Half:           return data_type::f16;
+    case ScalarType::Int:            return data_type::s32;
+    case ScalarType::Byte:           return data_type::u8;
+    case ScalarType::Char:           return data_type::s8;
+    case ScalarType::Float8_e4m3fn:  return data_type::f8_e4m3;
+    case ScalarType::Float8_e5m2:    return data_type::f8_e5m2;
+    default:
+      TORCH_CHECK(false, "Unsupported dtype for oneDNN");
   }
 }
 
@@ -1056,7 +1110,7 @@ struct GemmHelper {
     // Create a scratchpad buffer for the brgemm execution
     scratchpad = std::vector<uint8_t>(brg.get_scratchpad_size());
     // Prepare default vector of pairs of tensors A and B offsets for each batch.
-    A_B_offsets.reserve(1);
+    A_B_offsets.resize(1);
     A_B_offsets[0] = std::make_pair(0, 0);
   }
   dnnl::ukernel::brgemm brg;
@@ -1127,21 +1181,25 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     if (!at::globalContext().userEnabledMkldnn()) {
       return false;
     }
-    if (dtype == ScalarType::Half) {
-      static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
-      return fp16_support;
-    } else if (dtype == ScalarType::Float) {
-      static bool fp32_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx2;
-      return fp32_support;
-    } else if (dtype == ScalarType::BFloat16) {
-      static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
-      return bf16_support;
-    } else if (dtype == ScalarType::Byte) {
-      static bool u8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
-      return u8_support;
-    } else if (dtype == ScalarType::Char) {
-      static bool s8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_vnni;
-      return s8_support;
+    static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
+    static bool fp32_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx2;
+    static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
+    static bool u8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+    static bool s8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_vnni;
+#ifdef ONEDNN_FP8_UKERNEL_AVAILABLE
+    static bool f8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+#else
+    static bool f8_support = false;
+#endif
+    switch (dtype) {
+      case ScalarType::Half:          return fp16_support;
+      case ScalarType::Float:         return fp32_support;
+      case ScalarType::BFloat16:      return bf16_support;
+      case ScalarType::Byte:          return u8_support;
+      case ScalarType::Char:          return s8_support;
+      case ScalarType::Float8_e4m3fn: return f8_support;
+      case ScalarType::Float8_e5m2:   return f8_support;
+      default:                        return false;
     }
     return false;
   }
@@ -1186,15 +1244,22 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     if (!at::globalContext().userEnabledMkldnn()) {
       return false;
     }
-    if (dtype == ScalarType::Half) {
-      static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
-      return fp16_pack;
-    } else if (dtype == ScalarType::BFloat16) {
-      static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
-      return bf16_pack;
-    } else if (dtype == ScalarType::Byte || dtype == ScalarType::Char) {
-      static bool bit8_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
-      return bit8_pack;
+    static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
+    static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+    static bool bit8_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+#ifdef ONEDNN_FP8_UKERNEL_AVAILABLE
+    static bool fp8_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+#else
+    static bool fp8_pack = false;
+#endif
+    switch (dtype) {
+      case ScalarType::Half:          return fp16_pack;
+      case ScalarType::BFloat16:      return bf16_pack;
+      case ScalarType::Byte:          return bit8_pack;
+      case ScalarType::Char:          return bit8_pack;
+      case ScalarType::Float8_e4m3fn: return fp8_pack;
+      case ScalarType::Float8_e5m2:   return fp8_pack;
+      default:                        return false;
     }
     return false;
   }
@@ -1366,6 +1431,54 @@ void brgemm(
   // raise an error if the path is not supported
   TORCH_CHECK(false,
     "I8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const at::Float8_e4m3fn* A,
+    const at::Float8_e4m3fn* B,
+    float* C,
+    bool is_vnni) {
+#if defined(ONEDNN_UKERNEL_ENABLED) && defined(ONEDNN_FP8_UKERNEL_AVAILABLE)
+  if (is_vnni && Brgemm::device_check(ScalarType::Float8_e4m3fn)) {
+    Brgemm::call<at::Float8_e4m3fn, at::Float8_e4m3fn, float>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  // raise an error if the path is not supported
+  TORCH_CHECK(false,
+    "F8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const at::Float8_e5m2* A,
+    const at::Float8_e5m2* B,
+    float* C,
+    bool is_vnni) {
+#if defined(ONEDNN_UKERNEL_ENABLED) && defined(ONEDNN_FP8_UKERNEL_AVAILABLE)
+  if (is_vnni && Brgemm::device_check(ScalarType::Float8_e5m2)) {
+    Brgemm::call<at::Float8_e5m2, at::Float8_e5m2, float>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  // raise an error if the path is not supported
+  TORCH_CHECK(false,
+    "F8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
 }
 
 void brgemm_release(bool is_vnni) {

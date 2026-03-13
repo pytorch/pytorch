@@ -3,7 +3,6 @@ import io
 import pickle
 import warnings
 from collections.abc import Collection
-from typing import Union
 
 from torch.utils._import_utils import dill_available
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
@@ -11,7 +10,7 @@ from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 
 __all__ = ["traverse", "traverse_dps"]
 
-DataPipe = Union[IterDataPipe, MapDataPipe]
+DataPipe = IterDataPipe | MapDataPipe
 DataPipeGraph = dict[int, tuple[DataPipe, "DataPipeGraph"]]
 
 
@@ -158,5 +157,6 @@ def _traverse_helper(
     for item in items:
         # Using cache.copy() here is to prevent recursion on a single path rather than global graph
         # Single DataPipe can present multiple times in different paths in graph
+        # pyrefly: ignore [no-matching-overload]
         d[dp_id][1].update(_traverse_helper(item, only_datapipe, cache.copy()))
     return d

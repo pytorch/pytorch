@@ -420,7 +420,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             comptime.assert_static(x.size(0))
             return x + 1
 
-        opt_fn = torch.compile(fn, dynamic=True, fullgraph=True)
+        opt_fn = torch.compile(fn, dynamic=True, fullgraph=True, backend="eager")
         opt_fn(torch.randn(12, 23))
 
     def test_shape_graph_break(self):
@@ -437,7 +437,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     def test_isinstance_symint(self):
         def fn(x):
-            assert isinstance(x.size(0), int)
+            assert isinstance(x.size(0), int)  # noqa: S101
             return x * 2
 
         x = torch.randn(20)
@@ -467,7 +467,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             out = F.conv1d(x, kernel, padding=padding, stride=2)
             return out
 
-        opt_func = torch.compile(func)
+        opt_func = torch.compile(func, backend="eager")
 
         x = torch.randn(1, 1, 175)
         opt_func(x)  # passes
@@ -493,7 +493,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         def shift_right(tensor: torch.Tensor) -> torch.Tensor:
             return (tensor >> 2).to(torch.long)
 
-        opt_fn = torch.compile(shift_right, fullgraph=True, dynamic=True)
+        opt_fn = torch.compile(
+            shift_right, fullgraph=True, dynamic=True, backend="eager"
+        )
         sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
         opt_fn(sample_input)
 
@@ -877,7 +879,7 @@ def forward(self):
         x = torch.randn(1)
         torch._dynamo.decorators.mark_unbacked(x, 0)
 
-        @torch.compile()
+        @torch.compile(backend="eager")
         def f(x):
             if guard_size_oblivious(x.size(0) != 1):
                 return x + 3
@@ -912,6 +914,31 @@ def forward(self):
         o1_2_ref = main_model(x2, 2)
         o1_2 = opt_model(x2, 2)
         self.assertEqual(o1_2_ref, o1_2)
+
+    def test_float_guard_source_on_recompile(self):
+        # Regression test: when a float attribute triggers recompilation and
+        # becomes dynamic, the guard produced by produce_guards_verbose should
+        # have a proper source annotation, not "(unknown source)".
+        cache = {}
+
+        class Module(torch.nn.Module):
+            def __init__(self, key: float):
+                super().__init__()
+                self.key = key
+                cache[key] = torch.randn(16)
+
+            def forward(self, x):
+                return x + cache[self.key]
+
+        x = torch.randn(16)
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with ctx():
+            for key in [1.0, 2.0, 3.0]:
+                model = torch.compile(Module(key))
+                model(x)
+
+        guard_log = log_stream.getvalue()
+        self.assertNotIn("unknown source", guard_log)
 
 
 class UnspecTestsDevice(torch._dynamo.test_case.TestCase):

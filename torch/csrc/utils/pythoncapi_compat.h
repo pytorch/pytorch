@@ -1743,7 +1743,7 @@ static inline void
 _PyLong_SetSignAndDigitCount(PyLongObject *op, int sign, Py_ssize_t size)
 {
 #if PY_VERSION_HEX >= 0x030C0000
-    op->long_value.lv_tag = (uintptr_t)(1 - sign) | ((uintptr_t)(size) << 3);
+    op->long_value.lv_tag = (uintptr_t)(1 - sign) | ((uintptr_t)size << 3);
 #elif PY_VERSION_HEX >= 0x030900A4
     Py_SET_SIZE(op, sign * size);
 #else

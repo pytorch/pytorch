@@ -419,7 +419,7 @@ class UsageLogger:
         elif self._has_amdsmi:
             # Iterate over the available GPUs
             for handle in self._gpu_handles:
-                # see https://rocm.docs.amd.com/projects/amdsmi/en/docs-5.7.0/py-interface_readme_link.html
+                # see https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-py-lib.html
                 engine_usage = amdsmi.amdsmi_get_gpu_activity(handle)
                 gpu_uuid = amdsmi.amdsmi_get_gpu_device_uuid(handle)
                 gpu_utilization = engine_usage["gfx_activity"]
@@ -459,6 +459,7 @@ class UsageLogger:
                 self._gpu_lib_detected = "amdsmi"
                 self._gpu_handles = amdsmi.amdsmi_get_processor_handles()
 
+            # pyrefly: ignore[bad-assignment]
             self._num_of_cpus = psutil.cpu_count(logical=True)
             # update summary info
             self._metadata.gpu_count = len(self._gpu_handles)

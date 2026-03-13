@@ -30,6 +30,7 @@ class ExecutorchCallDelegate(HigherOrderOperator):
         super().__init__("executorch_call_delegate")
 
     def __call__(self, lowered_module, *args):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(lowered_module, *args)
 
 
@@ -172,7 +173,10 @@ def get_lowered_module_name(
         if not hasattr(root, qualname):
             break
         i += 1
-    assert qualname is not None
+    if qualname is None:
+        raise AssertionError(
+            "qualname must not be None after finding unused module slot"
+        )
 
     root.add_module(qualname, lowered_module)
     return qualname

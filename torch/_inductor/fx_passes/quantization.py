@@ -1165,7 +1165,7 @@ def _is_valid_woq_optimization_pattern():
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            and x.device.type in ("cpu", "cuda")
+            and x.device.type in ("cpu", "cuda", "xpu")
             and x.device == weight.device
             and x.device == scales.device
         )
@@ -1539,6 +1539,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         for user_node in user_node_list[1:]:
             _source_node = dequant_pattern_end_node
             _user_node = user_node
+            # pyrefly: ignore [bad-assignment]
             while _source_node != dequant_pattern_start_node.args[0]:
                 _user_node = clone_to_new_node(graph, _source_node, _user_node)
                 _source_node = _source_node.args[0]  # type: ignore[assignment]

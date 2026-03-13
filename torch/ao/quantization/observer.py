@@ -1906,6 +1906,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
                         self.scale_dtype,
                         self.zero_point_dtype,
                         self.preserve_zero,
+                        # pyrefly: ignore [missing-attribute]
                         self.zero_point_domain.name,
                     ),
                 )
@@ -1942,6 +1943,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
                     self.target_dtype,
                     self.quant_min,
                     self.quant_max,
+                    # pyrefly: ignore [missing-attribute]
                     self.zero_point_domain.name,
                 ),
                 {},
@@ -1956,6 +1958,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
                     self.target_dtype,
                     self.quant_min,
                     self.quant_max,
+                    # pyrefly: ignore [missing-attribute]
                     self.zero_point_domain.name,
                 ),
                 {"output_dtype": self.original_dtype},

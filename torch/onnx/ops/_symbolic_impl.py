@@ -14,7 +14,6 @@ or less the same thing but is required by the `torch.library.custom_op` interfac
 # flake8: noqa: B950
 import dataclasses
 from collections.abc import Sequence
-from typing import Optional, Union
 
 import torch
 from torch.onnx.ops import _dtype_mappings
@@ -58,16 +57,14 @@ class EncodedAttrs:
         cls,
         attrs: dict[
             str,
-            Union[
-                int,
-                float,
-                str,
-                bool,
-                Sequence[int],
-                Sequence[float],
-                Sequence[str],
-                Sequence[bool],
-            ],
+            int
+            | float
+            | str
+            | bool
+            | Sequence[int]
+            | Sequence[float]
+            | Sequence[str]
+            | Sequence[bool],
         ],
     ) -> "EncodedAttrs":
         encoded = cls(
@@ -117,38 +114,26 @@ class EncodedAttrs:
                     raise ValueError(f"Unsupported sequence type for attribute {k}")
             else:
                 raise ValueError(f"Unsupported attribute type for {k}: {type(v)}")
-        assert len(encoded.attr_keys) == len(encoded.attr_types), (
-            f"Mismatch between number of attribute keys and types: {len(encoded.attr_keys)} != {len(encoded.attr_types)}"
-        )
-        assert len(encoded.attr_keys) == len(encoded.attr_pos), (
-            f"Mismatch between number of attribute keys and positions: {len(encoded.attr_keys)} != {len(encoded.attr_pos)}"
-        )
+        if len(encoded.attr_keys) != len(encoded.attr_types):
+            raise AssertionError(
+                f"Mismatch between number of attribute keys and types: {len(encoded.attr_keys)} != {len(encoded.attr_types)}"
+            )
+        if len(encoded.attr_keys) != len(encoded.attr_pos):
+            raise AssertionError(
+                f"Mismatch between number of attribute keys and positions: {len(encoded.attr_keys)} != {len(encoded.attr_pos)}"
+            )
         return encoded
 
     def to_dict(
         self,
     ) -> dict[
         str,
-        Union[
-            int,
-            float,
-            str,
-            list[int],
-            list[float],
-            list[str],
-        ],
+        int | float | str | list[int] | list[float] | list[str],
     ]:
         """Convert the encoded attributes back to a dictionary for creating an ONNX node."""
         attrs: dict[
             str,
-            Union[
-                int,
-                float,
-                str,
-                list[int],
-                list[float],
-                list[str],
-            ],
+            int | float | str | list[int] | list[float] | list[str],
         ] = {}
         for i, key in enumerate(self.attr_keys):
             attr_type = self.attr_types[i]
@@ -181,11 +166,11 @@ class EncodedAttrs:
     ),
 )
 def _symbolic(
-    inputs: Sequence[Optional[torch.Tensor]],
+    inputs: Sequence[torch.Tensor | None],
     op_type: str,
     onnx_dtype: int,
     *,
-    shape: Sequence[Union[int, torch.SymInt]],
+    shape: Sequence[int | torch.SymInt],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],
@@ -195,7 +180,7 @@ def _symbolic(
     metadata_props_keys: Sequence[str] = (),
     metadata_props_values: Sequence[str] = (),
     domain: str = "",
-    version: Optional[int] = None,
+    version: int | None = None,
 ) -> torch.Tensor:
     torch._check(
         onnx_dtype in _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE,
@@ -212,7 +197,7 @@ def _(
     op_type: str,
     onnx_dtype: int,
     *,
-    shape: Sequence[Union[int, torch.SymInt]],
+    shape: Sequence[int | torch.SymInt],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],
@@ -222,7 +207,7 @@ def _(
     metadata_props_keys: Sequence[str] = (),
     metadata_props_values: Sequence[str] = (),
     domain: str = "",
-    version: Optional[int] = None,
+    version: int | None = None,
 ) -> torch.Tensor:
     torch._check(
         onnx_dtype in _dtype_mappings.ONNX_DTYPE_TO_TORCH_DTYPE,
@@ -247,11 +232,11 @@ def _(
     ),
 )
 def _symbolic_multi_out(
-    inputs: Sequence[Optional[torch.Tensor]],
+    inputs: Sequence[torch.Tensor | None],
     op_type: str,
     onnx_dtypes: Sequence[int],
     *,
-    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
+    shapes: Sequence[Sequence[int | torch.SymInt]],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],
@@ -261,7 +246,7 @@ def _symbolic_multi_out(
     metadata_props_keys: Sequence[str] = (),
     metadata_props_values: Sequence[str] = (),
     domain: str = "",
-    version: Optional[int] = None,
+    version: int | None = None,
 ) -> list[torch.Tensor]:
     outputs = []
     torch._check(
@@ -287,7 +272,7 @@ def _(
     op_type: str,
     onnx_dtypes: Sequence[int],
     *,
-    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
+    shapes: Sequence[Sequence[int | torch.SymInt]],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],
@@ -297,7 +282,7 @@ def _(
     metadata_props_keys: Sequence[str] = (),
     metadata_props_values: Sequence[str] = (),
     domain: str = "",
-    version: Optional[int] = None,
+    version: int | None = None,
 ) -> list[torch.Tensor]:
     outputs = []
     torch._check(

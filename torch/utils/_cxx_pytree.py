@@ -16,7 +16,7 @@ import functools
 import sys
 import types
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, overload, TypeAlias, TypeVar, Union
+from typing import Any, overload, TypeAlias, TypeVar
 from typing_extensions import deprecated, Self, TypeIs
 
 import torch.utils._pytree as python_pytree
@@ -49,8 +49,8 @@ from optree import PyTreeSpec  # direct import for type annotations
 __all__ = [
     "PyTree",
     "Context",
-    "FlattenFunc",
-    "UnflattenFunc",
+    "FlattenFn",
+    "UnflattenFn",
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
@@ -106,17 +106,22 @@ TreeSpec: TypeAlias = PyTreeSpec
 
 Context = Any
 PyTree = Any
-FlattenFunc = Callable[[PyTree], tuple[list[Any], Context]]
-UnflattenFunc = Callable[[Iterable[Any], Context], PyTree]
-OpTreeUnflattenFunc = Callable[[Context, Iterable[Any]], PyTree]
+FlattenFn = Callable[[PyTree], tuple[list[Any], Context]]
+UnflattenFn = Callable[[Iterable[Any], Context], PyTree]
+OpTreeUnflattenFn = Callable[[Context, Iterable[Any]], PyTree]
 DumpableContext = Any  # Any json dumpable text
 ToDumpableContextFn = Callable[[Context], DumpableContext]
 FromDumpableContextFn = Callable[[DumpableContext], Context]
 KeyPath = tuple[KeyEntry, ...]
-FlattenWithKeysFunc = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
+FlattenWithKeysFn = Callable[[PyTree], tuple[list[tuple[KeyEntry, Any]], Any]]
+
+# Keep deprecated alias for backward compatibility
+FlattenFunc = FlattenFn  # deprecated
+UnflattenFunc = UnflattenFn  # deprecated
+FlattenWithKeysFunc = FlattenWithKeysFn  # deprecated
 
 
-def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
+def _reverse_args(func: UnflattenFn) -> OpTreeUnflattenFn:
     @functools.wraps(func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         return func(*reversed(args), **kwargs)
@@ -126,13 +131,13 @@ def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
 
 def register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
+    flatten_fn: FlattenFn,
+    unflatten_fn: UnflattenFn,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
     from_dumpable_context: FromDumpableContextFn | None = None,
-    flatten_with_keys_fn: FlattenWithKeysFunc | None = None,
+    flatten_with_keys_fn: FlattenWithKeysFn | None = None,
 ) -> None:
     """Register a container-like type as pytree node.
 
@@ -194,8 +199,8 @@ def register_pytree_node(
 )
 def _register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
+    flatten_fn: FlattenFn,
+    unflatten_fn: UnflattenFn,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
@@ -245,8 +250,8 @@ def _register_pytree_node(
 
 def _private_register_pytree_node(
     cls: type[Any],
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
+    flatten_fn: FlattenFn,
+    unflatten_fn: UnflattenFn,
     *,
     serialized_type_name: str | None = None,
     to_dumpable_context: ToDumpableContextFn | None = None,
@@ -270,7 +275,7 @@ def _private_register_pytree_node(
 def _is_pytreespec_instance(
     obj: Any,
     /,
-) -> TypeIs[Union[TreeSpec, python_pytree.PyTreeSpec]]:
+) -> TypeIs[TreeSpec | python_pytree.PyTreeSpec]:
     if isinstance(obj, (TreeSpec, python_pytree.PyTreeSpec)):
         return True
     if "torch._dynamo.polyfills.pytree" in sys.modules:
@@ -414,6 +419,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
                 f"PyTreeSpec but got item of type {type(treespec)}."
             )
         # Allow passing the PyTreeSpec instance as the first argument
+        # pyrefly: ignore [bad-assignment]
         leaves, treespec = treespec, leaves
     return treespec.unflatten(leaves)
 
@@ -612,7 +618,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
+TypeAny = type[Any] | tuple[type[Any], ...] | types.UnionType
 
 Fn2 = Callable[[T | S], R]
 Fn3 = Callable[[T | S | U], R]

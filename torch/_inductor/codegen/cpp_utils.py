@@ -6,7 +6,7 @@ import math
 import sys
 from collections import namedtuple
 from collections.abc import Callable, Sequence
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import patch
 
 import sympy
@@ -101,6 +101,7 @@ GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
 def get_promote_dtype(args):
     return (
+        # pyrefly: ignore [no-matching-overload]
         functools.reduce(
             torch.promote_types,  # type: ignore[arg-type]
             [n.dtype for n in args if isinstance(n, CppCSEVariable)],
@@ -145,7 +146,7 @@ class CppCSEVariable(CSEVariable):
         self,
         name,
         bounds: ValueRanges[Any],
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
         shape: BlockShapeType = None,
     ) -> None:
         super().__init__(name, bounds, dtype, shape=shape)
@@ -205,6 +206,7 @@ class CppPrinter(_CppPrinter):
         if isinstance(item, sympy.Mod):
             # use parenthesis to enforce precedence.
             # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            # pyrefly: ignore [missing-attribute]
             return f"({self._print(item)})"
         else:
             return super().parenthesize(item, level, strict)
@@ -376,7 +378,7 @@ class LocalBufferContext:
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def add_local_buffer(
-        self, local_buffer: ir.Buffer, global_buffers: Optional[list[ir.Buffer]] = None
+        self, local_buffer: ir.Buffer, global_buffers: list[ir.Buffer] | None = None
     ):
         assert local_buffer.get_name() not in self.local_buffers
         self.local_buffers[local_buffer.get_name()] = local_buffer

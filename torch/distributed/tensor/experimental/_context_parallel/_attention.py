@@ -127,7 +127,8 @@ def _partial_update(
     The result is a tensor that is the same size as ``original``.
     """
     chunks = list(original.chunk(n_chunks, dim=dim))
-    assert chunks[idx].shape == new.shape, (original.shape, new.shape, idx)
+    if chunks[idx].shape != new.shape:
+        raise AssertionError((original.shape, new.shape, idx))
     if add:
         chunks[idx] += new
     else:
@@ -156,15 +157,18 @@ class _SDPAMerger:
         if len(block_lse.shape) < len(block_out.shape):
             block_lse = block_lse.unsqueeze(dim=-1)
             self._should_lse_squeeze = True
-        assert len(block_lse.shape) == len(block_out.shape)
+        if len(block_lse.shape) != len(block_out.shape):
+            raise AssertionError
 
         if self._lse is None:
             self._lse = block_lse
             self._out = block_out
         else:
             ROUND_ROBIN_CYCLE = 2
-            assert self._lse is not None
-            assert self._out is not None
+            if self._lse is None:
+                raise AssertionError
+            if self._out is None:
+                raise AssertionError
             lse = (
                 self._lse.chunk(ROUND_ROBIN_CYCLE, dim=self._seq_dim)[1]
                 if partial
@@ -213,8 +217,10 @@ class _SDPAMerger:
         self._merge_one(out, lse, partial)
 
     def results(self) -> tuple[torch.Tensor, torch.Tensor]:
-        assert self._out is not None
-        assert self._lse is not None
+        if self._out is None:
+            raise AssertionError
+        if self._lse is None:
+            raise AssertionError
         out = self._out.to(self._out_dtype)
         if self._should_lse_squeeze:
             lse = self._lse.squeeze(-1).to(self._lse_dtype)
@@ -259,7 +265,8 @@ class _AllToAllRotater(_RingRotater):
         self._buffer = ft_c.permute_tensor(curr_buffer, dsts, self._pg)
 
     def next_buffer(self) -> torch.Tensor:
-        assert self._buffer is not None
+        if self._buffer is None:
+            raise AssertionError
         return _maybe_wait(self._buffer)
 
 
@@ -287,7 +294,8 @@ class _AllGatherRotater(_RingRotater):
         rank = dist.get_rank(self._pg)
         idx = rank - self._idx
 
-        assert self._aggregated_buffer is not None
+        if self._aggregated_buffer is None:
+            raise AssertionError
         self._aggregated_buffer = _maybe_wait(self._aggregated_buffer)
         return self._aggregated_buffer.chunk(dist.get_world_size(self._pg))[idx]
 
@@ -397,9 +405,8 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(group, dist.ProcessGroup), (
-        "process group must be single dimension"
-    )
+    if not isinstance(group, dist.ProcessGroup):
+        raise AssertionError("process group must be single dimension")
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -631,8 +638,10 @@ def _templated_ring_attention_backward(
                 add=True,
             )
 
-    assert grad_key_ is not None
-    assert grad_value_ is not None
+    if grad_key_ is None:
+        raise AssertionError
+    if grad_value_ is None:
+        raise AssertionError
     grad_query = grad_query.to(query.dtype)
     next_grad_kv = dkv_rotater.next_buffer().to(key.dtype)
     grad_key = next_grad_kv[: grad_key.numel()].reshape(grad_key.shape)
@@ -892,7 +901,7 @@ def _sdpa_handler(
 ) -> object:
     # extract local tensor and sharding infos to a OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    logger.debug("Dispatching op_call: %s", op_info.schema)
+    logger.debug("Dispatching op_call: %s", op_info.schema or op_call)
 
     # sharding propagation
     # TODO: remove the context parallel strategy from the default propagation
@@ -900,8 +909,10 @@ def _sdpa_handler(
     # propagate.
     DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
-    assert output_sharding is not None, "output sharding should not be None"
-    assert not output_sharding.needs_redistribute, "inputs need to be redistributed"
+    if output_sharding is None:
+        raise AssertionError("output sharding should not be None")
+    if output_sharding.needs_redistribute:
+        raise AssertionError("inputs need to be redistributed")
 
     call_maps: dict[torch._ops.OpOverload, Callable] = {
         aten._scaled_dot_product_flash_attention.default: _scaled_dot_product_ring_flash_attention,
@@ -933,7 +944,7 @@ custom_ops = {
     aten._scaled_dot_product_cudnn_attention.default: _sdpa_handler,
     aten._scaled_dot_product_cudnn_attention_backward.default: _sdpa_handler,
 }
-exitsing_custom_ops = DTensor._op_dispatcher._custom_op_handlers
+existing_custom_ops = DTensor._op_dispatcher._custom_op_handlers
 
 
 ArgsType = tuple[Any, ...]
@@ -991,7 +1002,7 @@ def _enable_cp_dtensor_dispatcher() -> None:
     """Enables DTensor dispatcher to dispatch SDPA to CP."""
     # Enable custom op handlers for CP
     DTensor._op_dispatcher._custom_op_handlers = {
-        **exitsing_custom_ops,
+        **existing_custom_ops,
         **custom_ops,
     }
     # Register CP-specific sharding rules
@@ -1003,7 +1014,7 @@ def _enable_cp_dtensor_dispatcher() -> None:
 def _disable_cp_dtensor_dispatcher() -> None:
     """Disables DTensor dispatcher to dispatch SDPA to CP."""
     # Restore original custom op handlers
-    DTensor._op_dispatcher._custom_op_handlers = exitsing_custom_ops
+    DTensor._op_dispatcher._custom_op_handlers = existing_custom_ops
 
     # TODO: unregister_cp_sharding_rules(clear_the_cache=True) will cause
     # all DTensor sharding propagation cache being invalidated. It is not
@@ -1080,17 +1091,16 @@ def _context_parallel_buffers(
     # generate the index tensor for rearranging the buffer if a load-balance
     # is available
     load_balance_indices = load_balancer._generate_indices() if load_balancer else None
-    assert load_balance_indices is None or load_balance_indices.ndim == 2, (
-        "load balance index expects shape (1, seq_len) or (B, seq_len) "
-        f"but got {load_balance_indices.shape}."
-    )
+    if not (load_balance_indices is None or load_balance_indices.ndim == 2):
+        raise AssertionError(
+            "load balance index expects shape (1, seq_len) or (B, seq_len) "
+            f"but got {load_balance_indices.shape}."
+        )
 
     new_buffers = []
     sharded_buffer: torch.Tensor | BlockMask
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if isinstance(buffer, torch.Tensor):
-            # TODO: the load balance doesn't perform error handling.
-
             # NOTE: assuming batch dim is 0
 
             if load_balance_indices is not None:
@@ -1108,6 +1118,8 @@ def _context_parallel_buffers(
                     )
 
                 if seq_dim == 0:
+                    # buffer has shape [seq_len] or [seq_len, ...]
+                    # Just use the first (and only) batch of indices
                     buffer = torch.index_select(
                         buffer, dim=0, index=load_balance_indices[0]
                     )
@@ -1117,12 +1129,27 @@ def _context_parallel_buffers(
                         size = [data_batch_size] + list(indices.size())[1:]
                         indices = indices.expand(*size)
 
-                    for i in range(data_batch_size):
-                        buffer[i] = torch.index_select(
-                            buffer[i], dim=seq_dim - 1, index=indices[i]
-                        )
+                    # load_balance_indices that has shape [B, seq_len] where:
+                    #   - dim 0 corresponds to buffer dim 0 (batch)
+                    #   - dim 1 corresponds to buffer dim seq_dim
+                    # Need to insert dimensions for all dims between 0 and seq_dim,
+                    # and all dims after seq_dim.
 
-            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
+                    # Insert dimensions between batch (dim 0) and seq_dim
+                    for i in range(1, seq_dim):
+                        indices = indices.unsqueeze(i)
+
+                    # Insert dimensions after seq_dim
+                    for _ in range(seq_dim + 1, buffer.ndim):
+                        indices = indices.unsqueeze(-1)
+
+                    # Expand to match buffer's shape
+                    indices = indices.expand(buffer.shape)
+
+                    buffer = torch.gather(buffer, dim=seq_dim, index=indices)
+
+            # use DTensor to shard the buffer on sequence dimension,
+            # retain the local tensor
             sharded_buffer = distribute_tensor(
                 buffer, mesh, [Shard(seq_dim)], src_data_rank=None
             ).to_local()
@@ -1214,10 +1241,11 @@ def _create_cp_block_mask(
         local_q_size: int,
         qkv_rearrange_indices: torch.Tensor | None = None,
     ) -> _mask_mod_signature:
-        assert qkv_rearrange_indices is None or qkv_rearrange_indices.ndim == 2, (
-            "load balance index expects shape (1, seq_len) or (B, seq_len) "
-            f"but got {qkv_rearrange_indices.shape}."
-        )
+        if not (qkv_rearrange_indices is None or qkv_rearrange_indices.ndim == 2):
+            raise AssertionError(
+                "load balance index expects shape (1, seq_len) or (B, seq_len) "
+                f"but got {qkv_rearrange_indices.shape}."
+            )
 
         def qkv_idx_restore(
             b: torch.Tensor, idx_post_rearrange: torch.Tensor
@@ -1308,7 +1336,8 @@ class _ContextParallel(ParallelStyle):
             return module
         elif self.attention_type == self.AttentionType.SDPA:
             module.register_forward_pre_hook(
-                partial(self.sdpa_input_fn, mesh=mesh), with_kwargs=True
+                partial(self.sdpa_input_fn, mesh=mesh),
+                with_kwargs=True,
             )
             module.register_forward_hook(partial(self.sdpa_output_fn, mesh=mesh))
             return module
@@ -1318,18 +1347,21 @@ class _ContextParallel(ParallelStyle):
     def flex_input_fn(
         self, module: nn.Module | None, args: Any, kwargs: Any, mesh: DeviceMesh
     ) -> Any:
+        # We don't care about other args, and these argument order must be consistent
+        # with the signature of flex_attention.
+        expected_arg_names = ("query", "key", "value")
         args_list = list(args)
-        for idx, name in enumerate(
-            ("query", "key", "value", "score_mod", "block_mask")
-        ):
+        for idx, name in enumerate(expected_arg_names):
             if idx >= len(args):
                 args_list.append(kwargs.pop(name, None))
 
-        query, key, value, score_mod, block_mask = args_list[:5]
-        assert isinstance(query, torch.Tensor)
-        assert isinstance(key, torch.Tensor)
-        assert isinstance(value, torch.Tensor)
-        assert isinstance(block_mask, BlockMask | tuple)
+        query, key, value = args_list[: len(expected_arg_names)]
+        if not isinstance(query, torch.Tensor):
+            raise AssertionError
+        if not isinstance(key, torch.Tensor):
+            raise AssertionError
+        if not isinstance(value, torch.Tensor):
+            raise AssertionError
 
         key = key.contiguous()
         value = value.contiguous()
@@ -1340,6 +1372,9 @@ class _ContextParallel(ParallelStyle):
         args_list[1] = global_key
         args_list[2] = global_value
 
+        for idx in range(len(args), len(expected_arg_names)):
+            kwargs[expected_arg_names[idx]] = args_list[idx]
+        args_list = args_list[: len(args)]
         return tuple(args_list), kwargs
 
     def sdpa_input_fn(
@@ -1355,7 +1390,8 @@ class _ContextParallel(ParallelStyle):
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, torch.Tensor):
                 if isinstance(arg, DTensor):
-                    assert arg._spec.placements == placement
+                    if arg._spec.placements != placement:
+                        raise AssertionError
                 else:
                     arg = DTensor.from_local(arg, mesh, placement, run_check=False)
 
@@ -1444,11 +1480,11 @@ def _context_parallel_shard(
         device = flat_buffers[0].kv_num_blocks.device
     for buffer in flat_buffers:
         if isinstance(buffer, torch.Tensor):
-            assert device == buffer.device, "All buffers must be on the same device"
+            if device != buffer.device:
+                raise AssertionError("All buffers must be on the same device")
         else:
-            assert device == buffer.kv_num_blocks.device, (
-                "All buffers must be on the same device"
-            )
+            if device != buffer.kv_num_blocks.device:
+                raise AssertionError("All buffers must be on the same device")
 
     flat_sharded_buffers = _context_parallel_buffers(
         mesh, flat_buffers, flat_seq_dims, load_balancer
@@ -1549,7 +1585,8 @@ def context_parallel(
         load_balancer,
     )
     for buffer, shard in zip(buffers, shards):
-        assert isinstance(shard, torch.Tensor), "ContextParallel only supports Tensor"
+        if not isinstance(shard, torch.Tensor):
+            raise AssertionError("ContextParallel only supports Tensor")
         shard = shard.clone()
         buffer.resize_(shard.shape)
         buffer.copy_(shard)
@@ -1611,10 +1648,11 @@ def context_parallel_unshard(
         load_balancer._generate_indices(restore=True) if load_balancer else None
     )
 
-    assert restore_indices is None or restore_indices.ndim == 2, (
-        "load balance restore index expects shape (1, seq_len) or (B, seq_len) "
-        f"but got {restore_indices.shape}."
-    )
+    if not (restore_indices is None or restore_indices.ndim == 2):
+        raise AssertionError(
+            "load balance restore index expects shape (1, seq_len) or (B, seq_len) "
+            f"but got {restore_indices.shape}."
+        )
     unsharded_buffers = []
     for b, dim in zip(buffers, seq_dims):
         b = b.contiguous()

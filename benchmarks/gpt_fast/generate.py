@@ -2,9 +2,7 @@ import dataclasses
 import itertools
 import platform
 import time
-from typing import Optional
 
-import torchao
 from common import Experiment, register_experiment
 from mixtral_moe_model import ConditionalFeedForward, Transformer as MixtralMoE
 from mixtral_moe_quantize import (
@@ -30,12 +28,12 @@ compiled = False
 class GPTModelConfig:
     name: str
     module: type
-    mode: Optional[str]
+    mode: str | None
     quantizer: type
     token_per_sec: float
     memory_bandwidth: float
     compilation_time: float
-    batch_size: Optional[int] = None
+    batch_size: int | None = None
 
 
 def device_sync(device):
@@ -62,7 +60,7 @@ def multinomial_sample_one_no_sync(
     return torch.argmax(probs_sort / q, dim=-1, keepdim=True).to(dtype=torch.int)
 
 
-def logits_to_probs(logits, temperature: float = 1.0, top_k: Optional[int] = None):
+def logits_to_probs(logits, temperature: float = 1.0, top_k: int | None = None):
     logits = logits / max(temperature, 1e-5)
 
     if top_k is not None:
@@ -73,7 +71,7 @@ def logits_to_probs(logits, temperature: float = 1.0, top_k: Optional[int] = Non
     return probs
 
 
-def sample(logits, temperature: float = 1.0, top_k: Optional[int] = None):
+def sample(logits, temperature: float = 1.0, top_k: int | None = None):
     probs = logits_to_probs(logits[0, -1], temperature, top_k)
     idx_next = multinomial_sample_one_no_sync(probs)
     return idx_next, probs
@@ -91,7 +89,10 @@ def decode_one_token(
     model: torch.nn.Module, x: torch.Tensor, input_pos: torch.Tensor, **sampling_kwargs
 ) -> tuple[torch.Tensor, torch.Tensor]:
     # input_pos: [B, 1]
-    assert input_pos.shape[-1] == 1
+    if input_pos.shape[-1] != 1:
+        raise AssertionError(
+            f"input_pos.shape[-1] must be 1, but got {input_pos.shape[-1]}"
+        )
     logits = model(x, input_pos)
     return sample(logits, **sampling_kwargs)
 
@@ -225,36 +226,6 @@ def run_experiment(
     aggregate_metrics = {"tokens_per_sec": [], "memory_bandwidth": []}
     start = -1
     compilation_time = None
-
-    if x.mode == "autoquant":
-        print("Using autoquant")
-        model = torchao.autoquant(model, manual=True, error_on_unseen=False)
-        generate(model, prompt, max_new_tokens, temperature=temperature, top_k=top_k)
-        model.finalize_autoquant()
-
-    if x.mode == "autoquant_v2":
-        print("Using autoquant_v2")
-        from torchao.prototype.quantization.autoquant_v2 import autoquant_v2
-
-        p = prompt.view(1, -1)
-        T = prompt.size(0)
-        T_new = T + max_new_tokens
-        max_seq_length = min(T_new, model.config.block_size)
-        input_pos = torch.arange(0, T, device=device)
-        example_input = (p, input_pos)
-
-        with torch.device(device):
-            model.setup_caches(max_batch_size=1, max_seq_length=max_seq_length)
-        model = autoquant_v2(
-            model,
-            manual=True,
-            error_on_unseen=False,
-            example_input=example_input,
-            batch_size=x.batch_size,
-        )
-        torch.compiler.cudagraph_mark_step_begin()
-        generate(model, prompt, max_new_tokens, temperature=temperature, top_k=top_k)
-        model.finalize_autoquant()
 
     global decode_one_token, prefill, compiled
     if not compiled:
@@ -405,202 +376,6 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
         175,
         1130,
         133,
-    )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
-        model, device=device
-    )
-    return [
-        Experiment(
-            model.name,
-            "token_per_sec",
-            model.token_per_sec,
-            f"{token_per_sec:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-        Experiment(
-            model.name,
-            "memory_bandwidth(GB/s)",
-            model.memory_bandwidth,
-            f"{memory_bandwidth:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-        Experiment(
-            model.name,
-            "compilation_time(s)",
-            model.compilation_time,
-            f"{compilation_time:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-    ]
-
-
-# token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_llama2_7b_autoquant(device: str = "cuda"):
-    model = GPTModelConfig(
-        "Llama-2-7b-chat-hf",
-        LLaMA,
-        "autoquant",
-        None,
-        144,
-        957,
-        136,
-    )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
-        model, device=device
-    )
-    return [
-        Experiment(
-            model.name,
-            "token_per_sec",
-            model.token_per_sec,
-            f"{token_per_sec:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-        Experiment(
-            model.name,
-            "memory_bandwidth(GB/s)",
-            model.memory_bandwidth,
-            f"{memory_bandwidth:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-        Experiment(
-            model.name,
-            "compilation_time(s)",
-            model.compilation_time,
-            f"{compilation_time:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-    ]
-
-
-# token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_mixtral_8x7b_autoquant(device: str = "cuda"):
-    # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
-    model = GPTModelConfig(
-        "Mixtral-8x7B-v0.1",
-        MixtralMoE,
-        "autoquant",
-        None,
-        175,
-        1130,
-        133,
-    )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
-        model, device=device
-    )
-    return [
-        Experiment(
-            model.name,
-            "token_per_sec",
-            model.token_per_sec,
-            f"{token_per_sec:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-        Experiment(
-            model.name,
-            "memory_bandwidth(GB/s)",
-            model.memory_bandwidth,
-            f"{memory_bandwidth:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-        Experiment(
-            model.name,
-            "compilation_time(s)",
-            model.compilation_time,
-            f"{compilation_time:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-    ]
-
-
-# token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_llama2_7b_autoquant_v2(device: str = "cuda"):
-    model = GPTModelConfig(
-        "Llama-2-7b-chat-hf",
-        LLaMA,
-        "autoquant_v2",
-        None,
-        144,
-        957,
-        136,
-        6,  # batch_size
-    )
-    token_per_sec, memory_bandwidth, compilation_time = run_experiment(
-        model, device=device
-    )
-    return [
-        Experiment(
-            model.name,
-            "token_per_sec",
-            model.token_per_sec,
-            f"{token_per_sec:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-        Experiment(
-            model.name,
-            "memory_bandwidth(GB/s)",
-            model.memory_bandwidth,
-            f"{memory_bandwidth:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-        Experiment(
-            model.name,
-            "compilation_time(s)",
-            model.compilation_time,
-            f"{compilation_time:.02f}",
-            model.mode,
-            device,
-            get_arch_name(),
-            True,
-        ),
-    ]
-
-
-# token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_mixtral_8x7b_autoquant_v2(device: str = "cuda"):
-    # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
-    model = GPTModelConfig(
-        "Mixtral-8x7B-v0.1",
-        MixtralMoE,
-        "autoquant_v2",
-        None,
-        175,
-        1130,
-        133,
-        6,  # batch_size
     )
     token_per_sec, memory_bandwidth, compilation_time = run_experiment(
         model, device=device

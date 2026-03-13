@@ -30,7 +30,7 @@ using namespace at;
 
 template<typename scalar_type>
 struct Foo {
-  static void apply(Tensor a, Tensor b) {
+  static void apply(Tensor a, [[maybe_unused]] Tensor b) {
     scalar_type s = 1;
     std::stringstream ss;
     ss << "hello, dispatch: " << a.toString() << s << '\n';

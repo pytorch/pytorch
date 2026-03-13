@@ -8,6 +8,7 @@ in `./_utils/worker.py`.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import itertools
 import logging
@@ -1334,7 +1335,11 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 # test.
                 # See NOTE [ DataLoader on Linux and open files limit ]
                 fds_limit_margin = 10
-                [tempfile.NamedTemporaryFile() for _ in range(fds_limit_margin)]  # noqa: SIM115
+                with contextlib.ExitStack() as stack:
+                    for _ in range(fds_limit_margin):
+                        stack.enter_context(
+                            tempfile.NamedTemporaryFile()  # pyrefly: ignore [bad-argument-type]
+                        )
             except OSError as e:
                 if e.errno == errno.EMFILE:
                     raise RuntimeError(
@@ -1623,7 +1628,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # the logic of this function.
         if (
             _utils is None
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is True
+            # pyrefly: ignore [unnecessary-comparison]
             or _utils.python_exit_status is None
         ):
             # See (2) of the note. If Python is shutting down, do no-op.

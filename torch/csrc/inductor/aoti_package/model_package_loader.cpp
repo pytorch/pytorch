@@ -4,12 +4,10 @@
 #include <c10/util/string_view.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
-#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -33,7 +31,6 @@ namespace fs = std::filesystem;
 #define access _access
 #define F_OK 0
 #else
-#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -619,6 +616,7 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     }
 
     TORCH_CHECK(
+        false,
         "Failed to find a generated cpp file or so file for model '",
         model_name,
         "' in the zip archive.\n\nAvailable models in the archive:\n",

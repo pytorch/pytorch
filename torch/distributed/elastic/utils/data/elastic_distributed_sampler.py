@@ -53,7 +53,7 @@ class ElasticDistributedSampler(DistributedSampler[T]):
             raise TypeError("Dataset must be an instance of collections.abc.Sized")
 
         # Cast to Sized for mypy
-        # pyrefly: ignore [redundant-cast]
+
         sized_dataset = cast(Sized, dataset)
 
         if start_index >= len(sized_dataset):
@@ -81,11 +81,13 @@ class ElasticDistributedSampler(DistributedSampler[T]):
 
         # add extra samples to make it evenly divisible
         indices += indices[: (self.total_size - len(indices))]
-        assert len(indices) == self.total_size
+        if len(indices) != self.total_size:
+            raise AssertionError
 
         # subsample
         indices = indices[self.rank : self.total_size : self.num_replicas]
-        assert len(indices) == self.num_samples
+        if len(indices) != self.num_samples:
+            raise AssertionError
 
         return iter(indices)
 

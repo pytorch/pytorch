@@ -6,12 +6,12 @@ import token
 from enum import Enum
 from functools import cached_property, total_ordering
 from typing import Any, TYPE_CHECKING
-from typing_extensions import Self
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from tokenize import TokenInfo
+    from typing_extensions import Self
 
 
 _OVERRIDES = {"@override", "@typing_extensions.override", "@typing.override"}
@@ -38,11 +38,8 @@ class Block:
     # The index of the very first token in the block (the "class" or "def" keyword)
     begin: int
 
-    # The index of the first INDENT token for this block
-    indent: int
-
-    # The index of the DEDENT token for this end of this block
-    dedent: int
+    # The index of the last token for this block
+    end: int
 
     # The docstring for the block
     docstring: str
@@ -76,19 +73,15 @@ class Block:
 
     @property
     def end_line(self) -> int:
-        if 0 <= self.dedent < len(self.tokens):
-            return self.tokens[self.dedent].start[0] - 1
-        else:
-            return self.tokens[-1].start[0]
-            # Only happens in one case so far: a file whose last line was
-            #
-            #    def function(): ...
-            #
-            # and the dedent correctly pointed to one past the end of self.tokens
+        return self.tokens[self.end].start[0]
 
     @property
     def line_count(self) -> int:
-        return self.end_line - self.start_line
+        return self.end_line - self.start_line + 1
+
+    @property
+    def line_range(self) -> range:
+        return range(self.start_line, self.end_line + 1)
 
     @property
     def is_class(self) -> bool:
@@ -141,14 +134,16 @@ class Block:
         return self.start_line < b.start_line and self.end_line >= b.end_line
 
     def __eq__(self, o: object) -> bool:
-        assert isinstance(o, Block)
+        if not isinstance(o, Block):
+            raise AssertionError(f"Expected Block, got {type(o)}")
         return o.tokens is self.tokens and o.index == self.index
 
     def __hash__(self) -> int:
         return super().__hash__()
 
     def __lt__(self, o: Self) -> bool:
-        assert isinstance(o, Block) and o.tokens is self.tokens
+        if not (isinstance(o, Block) and o.tokens is self.tokens):
+            raise AssertionError("Expected Block with same tokens")
         return o.index < self.index
 
 
