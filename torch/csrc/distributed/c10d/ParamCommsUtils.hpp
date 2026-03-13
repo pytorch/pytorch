@@ -84,6 +84,19 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     return isAsynchronizedOp_;
   }
 
+  int64_t getSequenceNumber() const {
+    return sequenceNumber_;
+  }
+
+  bool getIsP2P() const {
+    return isP2P_;
+  }
+
+  void setSequenceInfo(int64_t seqNum, bool isP2P) {
+    sequenceNumber_ = seqNum;
+    isP2P_ = isP2P;
+  }
+
  private:
   std::tuple<std::string, std::string> pgName_; // <group_name, group_desc>
   int rank_{};
@@ -98,6 +111,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   int globalRankStride_{};
   std::vector<int64_t> groupRanks_;
   bool isAsynchronizedOp_{};
+  int64_t sequenceNumber_{-1};
+  bool isP2P_{false};
 };
 
 #define RECORD_PARAM_COMMS(                                                    \
@@ -126,6 +141,11 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       globalRankStride,                                                        \
       worldSize,                                                               \
       false);                                                                  \
+  {                                                                            \
+    auto seqTuple = seq;                                                       \
+    paramCommsInfo->setSequenceInfo(                                            \
+        std::get<0>(seqTuple), std::get<1>(seqTuple));                         \
+  }                                                                            \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       seq,                                                                     \
@@ -202,6 +222,11 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       globalRankStride,                                                        \
       worldSize,                                                               \
       isAsyncOp);                                                              \
+  {                                                                            \
+    auto seqTuple = seq;                                                       \
+    paramCommsInfo->setSequenceInfo(                                            \
+        std::get<0>(seqTuple), std::get<1>(seqTuple));                         \
+  }                                                                            \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(InputTensors),                                               \
