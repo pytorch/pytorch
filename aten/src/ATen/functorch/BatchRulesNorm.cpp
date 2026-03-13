@@ -815,6 +815,60 @@ struct MiopenBatchNormBackwardBatchRuleHelper {
       decltype(&fn),\
       &fn>::apply)
 
+template <typename F, F Func>
+struct HipdnnBatchNormBatchRuleHelper {
+  static std::tuple<Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>,Tensor, std::optional<int64_t>> apply(
+    const Tensor& input, std::optional<int64_t> input_bdim,
+    const Tensor& weight_opt, std::optional<int64_t> weight_bdim,
+    const std::optional<Tensor>& bias_opt, std::optional<int64_t> bias_bdim,
+    const std::optional<Tensor>& running_mean_opt, std::optional<int64_t> running_mean_bdim,
+    const std::optional<Tensor>& running_var_opt, std::optional<int64_t> running_var_bdim,
+    bool training, double momentum, double eps) {
+    return batch_norm_batch_rule<F, Func>(
+        input, input_bdim, weight_opt, weight_bdim, bias_opt, bias_bdim,
+        running_mean_opt, running_mean_bdim, running_var_opt, running_var_bdim, training, momentum, eps);
+  }
+};
+
+template <typename F, F Func>
+struct HipdnnBatchNormBackwardBatchRuleHelper {
+  static std::tuple<Tensor,Tensor,Tensor> apply(
+    const at::Tensor & input,
+    const at::Tensor & grad_out,
+    const at::Tensor & weight,
+    const std::optional<at::Tensor> & running_mean_opt,
+    const std::optional<at::Tensor> & running_var_opt,
+    const std::optional<at::Tensor> & save_mean_opt,
+    const std::optional<at::Tensor> & save_rstd_opt,
+    double eps) {
+
+    auto maybe_layer = maybeCurrentDynamicLayer();
+    vmap_check_escaped(maybe_layer, "HipdnnBatchNormBackwardBatchRuleHelper.apply");
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    int64_t cur_level = maybe_layer->layerId();
+
+    if (!areAnyBatchedAtLevel({input, grad_out, weight, running_mean_opt,
+          running_var_opt, save_mean_opt, save_rstd_opt}, cur_level)) {
+      c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+      return at::hipdnn_batch_norm_backward(input, grad_out, weight,
+          running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, eps);
+    }
+
+    return batch_norm_backward_plumbing<F, Func>(
+        grad_out, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, true, eps, {true, true, true});
+  }
+};
+
+#define HIPDNN_BATCH_NORM_BATCH_RULE(fn) SINGLE_ARG(\
+    HipdnnBatchNormBatchRuleHelper<\
+      decltype(&ATEN_FN(fn)),\
+      &ATEN_FN(fn)>::apply)
+
+#define HIPDNN_BATCH_NORM_BACKWARD_BATCH_RULE(fn) SINGLE_ARG(\
+    HipdnnBatchNormBackwardBatchRuleHelper<\
+      decltype(&fn),\
+      &fn>::apply)
+
 static std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_batch_norm_backward_wrapper(
     const at::Tensor & grad_out,
     const at::Tensor & input,
@@ -846,6 +900,21 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_batch_norm_backward_w
     return at::miopen_batch_norm_backward(input, grad_out, weight_opt, running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, eps);
   }
 
+static std::tuple<at::Tensor,at::Tensor,at::Tensor> hipdnn_batch_norm_backward_wrapper(
+    const at::Tensor & grad_out,
+    const at::Tensor & input,
+    const at::Tensor& weight_opt,
+    const std::optional<at::Tensor> & running_mean_opt,
+    const std::optional<at::Tensor> & running_var_opt,
+    const std::optional<at::Tensor> & save_mean_opt,
+    const std::optional<at::Tensor> & save_rstd_opt,
+    bool training,
+    double eps,
+    std::array<bool,3> output_mask) {
+    TORCH_INTERNAL_ASSERT(!training);
+    return at::hipdnn_batch_norm_backward(input, grad_out, weight_opt, running_mean_opt, running_var_opt, save_mean_opt, save_rstd_opt, eps);
+  }
+
 // NB: This is NOT good. In the ideal world, we do NOT want to convert the new legit op back into native_batch_norm
 // as native_batch_norm has a problematic schema--it promises it is functional when it is not. However, vmap doesn't
 // work with dynamo anyway so we gain some buffer room to do wrong things here. The (reasonable) hope is that we will
@@ -866,11 +935,13 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(native_batch_norm, NATIVE_BATCH_NORM_BATCH_RULE(native_batch_norm));
   VMAP_SUPPORT(cudnn_batch_norm, CUDNN_BATCH_NORM_BATCH_RULE(cudnn_batch_norm));
   VMAP_SUPPORT(miopen_batch_norm, MIOPEN_BATCH_NORM_BATCH_RULE(miopen_batch_norm));
+  VMAP_SUPPORT(hipdnn_batch_norm, HIPDNN_BATCH_NORM_BATCH_RULE(hipdnn_batch_norm));
   m.impl("_native_batch_norm_legit", _native_batch_norm_legit_batch);
   m.impl("_native_batch_norm_legit.no_stats", _native_batch_norm_legit_no_stats_batch);
   m.impl("native_batch_norm_backward", NATIVE_BATCH_NORM_BACKWARD_BATCH_RULE(native_batch_norm_backward));
   m.impl("cudnn_batch_norm_backward", CUDNN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::cudnn_batch_norm_backward_wrapper));
   m.impl("miopen_batch_norm_backward", MIOPEN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::miopen_batch_norm_backward_wrapper));
+  m.impl("hipdnn_batch_norm_backward", HIPDNN_BATCH_NORM_BACKWARD_BATCH_RULE(at::functorch::hipdnn_batch_norm_backward_wrapper));
   m.impl("native_group_norm", native_group_norm_plumbing);
   m.impl("native_group_norm_backward", native_group_norm_backward_plumbing);
   VMAP_SUPPORT(native_layer_norm, native_layer_norm_batch_rule);

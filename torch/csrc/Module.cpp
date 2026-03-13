@@ -3018,7 +3018,8 @@ Call this whenever a new thread is created in order to propagate values from
   py::enum_<at::native::BatchNormBackend>(py_module, "_BatchNormBackend")
       .value("Native", at::native::BatchNormBackend::Native)
       .value("Cudnn", at::native::BatchNormBackend::Cudnn)
-      .value("Miopen", at::native::BatchNormBackend::Miopen);
+      .value("Miopen", at::native::BatchNormBackend::Miopen)
+      .value("Hipdnn", at::native::BatchNormBackend::Hipdnn);
 
   py_module.def(
       "_select_batch_norm_backend",
