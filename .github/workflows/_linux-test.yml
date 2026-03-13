@@ -117,6 +117,7 @@ jobs:
         with:
           no-sudo: true
           checkout-mode: treeless
+          submodules: false
 
       - name: Setup Python
         if: contains(matrix.runner, 'b200')

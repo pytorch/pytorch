@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from functools import lru_cache
 from itertools import chain
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch._guards import detect_fake_mode
@@ -364,7 +364,7 @@ class ShardingPropagator:
         self,
         op_overload: OpOverload,
         strategy_info: _SingleDimStrategyInfo,
-        schema_info: Optional[RuntimeSchemaInfo] = None,
+        schema_info: RuntimeSchemaInfo | None = None,
     ):
         """
         Register a strategy over a single mesh-dim, relying on infra to automatically expand to the full mesh.

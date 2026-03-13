@@ -455,6 +455,15 @@ void AOTIPythonKernelHolder::cache_miss(
       kernel != nullptr,
       "Unsupported device: ",
       c10::DeviceTypeName(device_.type()));
+
+  // Populate the in-memory cache so subsequent calls hit cache_hit.
+  auto inputs_metadata =
+      unpack_input_parameters(op.schema().arguments(), *stack);
+  AOTIKernelMetadata aoti_kernel_metadata;
+  aoti_kernel_metadata.parameter_metadata_list_ = std::move(inputs_metadata);
+  aoti_kernel_metadata.kernel_runner_ = kernel;
+  aoti_kernel_cache_.push_back(std::move(aoti_kernel_metadata));
+
   auto inputs = unpack_tensors(op.schema().arguments(), *stack, device_);
   auto outputs = kernel->run(inputs);
   torch::jit::drop(*stack, op.schema().arguments().size());

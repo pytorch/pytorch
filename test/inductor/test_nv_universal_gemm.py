@@ -12,11 +12,16 @@ from torch._inductor.template_heuristics.nv_universal_gemm import (
     NVUniversalGemmHeuristics,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import ensure_nv_universal_gemm_available, run_and_get_code
+from torch._inductor.utils import (
+    ensure_nv_universal_gemm_available,
+    ensure_nvmatmul_heuristics_available,
+    run_and_get_code,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 # TODO(nikhilap): Remove Blackwell restriction once cutlass_api includes H100 kernels
@@ -259,11 +264,15 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
-    def test_scaled_gemm_mxfp8(self):
+    @parametrize(
+        "layout_a",
+        ("contiguous", "aligned_offset", "view"),
+    )
+    def test_scaled_gemm_mxfp8(self, layout_a):
         """Test MXFP8 scaled GEMM with NVGEMM backend.
 
         Note: Invalid inputs (wrong shapes, dtypes, K not divisible by 16, etc.)
-        are caught early by Dynamo's _check_scaled_mm_sizes in torch/_meta_registrations.py.
+        are caught early by Dynamo's _check_scaled_mm_sizes in torch._meta_registrations.
         NVGEMM can assume inputs are valid by the time they reach kernel selection.
         """
         from torch._inductor.utils import ceildiv
@@ -284,8 +293,20 @@ class TestNVUniversalGemm(TestCase):
                 a, b, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float32
             )
 
-        # Create FP8 tensors
-        a_fp8 = torch.randint(-1, 2, (m, k), device=device).to(torch.float8_e4m3fn)
+        # Create FP8 tensor A with requested layout
+        if layout_a == "contiguous":
+            a_fp8 = torch.randint(-1, 2, (m, k), device=device).to(torch.float8_e4m3fn)
+        elif layout_a == "aligned_offset":
+            # 16 elements * 1 byte = 16 bytes (16-byte aligned)
+            storage = torch.randint(-1, 2, (m * k + 512,), device=device).to(
+                torch.float8_e4m3fn
+            )
+            a_fp8 = torch.as_strided(storage[16:], (m, k), (k, 1))
+        elif layout_a == "view":
+            storage = torch.randint(-1, 2, (m * k,), device=device).to(
+                torch.float8_e4m3fn
+            )
+            a_fp8 = storage.view(m, k)
         # B is N x K, then transposed to K x N for scaled_mm
         b_fp8 = torch.randint(-1, 2, (n, k), device=device).to(torch.float8_e4m3fn).T
 
@@ -311,6 +332,88 @@ class TestNVUniversalGemm(TestCase):
         ):
             compiled_fn = torch.compile(scaled_mm)
             result = compiled_fn(a_fp8, b_fp8, scale_a, scale_b)
+
+        torch.testing.assert_close(result, expected)
+
+    @parametrize("out_dtype", (torch.float32, torch.bfloat16))
+    @parametrize(
+        "layout_a",
+        ("contiguous", "aligned_offset", "view"),
+    )
+    @parametrize(
+        "m,n,k",
+        (
+            (256, 512, 1024),
+            (256, 1024, 512),
+            (128, 256, 512),
+            (512, 256, 1024),
+        ),
+    )
+    def test_scaled_gemm_nvf4(self, out_dtype, layout_a, m, n, k):
+        """Test NVF4 (Float4 + Float8E4M3FN scales, block_size=16) with NVGEMM backend.
+
+        NVF4 is the FP4 format supported end-to-end through torch._scaled_mm.
+        ATen requires float8_e4m3fn scale factors for FP4 blockwise scaling.
+        Uses autotune_choice_name_regex to force the vendored kernel.
+        """
+        from torch._inductor.utils import ceildiv
+
+        packed_k = k // 2
+        block_size = 16
+        device = "cuda"
+
+        def _round_up(x, multiple):
+            return ((x + multiple - 1) // multiple) * multiple
+
+        def scaled_mm(a, b, scale_a, scale_b):
+            return torch._scaled_mm(
+                a, b, scale_a=scale_a, scale_b=scale_b, out_dtype=out_dtype
+            )
+
+        # Create FP4 tensor A with requested layout
+        if layout_a == "contiguous":
+            a_fp4 = torch.randint(
+                0, 256, (m, packed_k), device=device, dtype=torch.uint8
+            ).view(torch.float4_e2m1fn_x2)
+        elif layout_a == "aligned_offset":
+            # 16 elements * 1 byte = 16 bytes (16-byte aligned)
+            storage = torch.randint(
+                0, 256, (m * packed_k + 512,), device=device, dtype=torch.uint8
+            ).view(torch.float4_e2m1fn_x2)
+            a_fp4 = torch.as_strided(storage[16:], (m, packed_k), (packed_k, 1))
+        elif layout_a == "view":
+            storage = torch.randint(
+                0, 256, (m * packed_k,), device=device, dtype=torch.uint8
+            ).view(torch.float4_e2m1fn_x2)
+            a_fp4 = storage.view(m, packed_k)
+        b_fp4 = torch.randint(
+            0, 256, (n, packed_k), device=device, dtype=torch.uint8
+        ).view(torch.float4_e2m1fn_x2)
+        b_fp4_t = b_fp4.T
+
+        num_k_blocks = ceildiv(k, block_size)
+        padded_k_blocks = _round_up(num_k_blocks, 4)
+        block_size_mn = 128
+        scale_a_numel = block_size_mn * ceildiv(m, block_size_mn) * padded_k_blocks
+        scale_b_numel = block_size_mn * ceildiv(n, block_size_mn) * padded_k_blocks
+
+        scale_a = torch.rand(scale_a_numel, device=device).to(torch.float8_e4m3fn)
+        scale_b = torch.rand(scale_b_numel, device=device).to(torch.float8_e4m3fn)
+
+        expected = scaled_mm(a_fp4, b_fp4_t, scale_a, scale_b)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "nvgemm_max_profiling_configs": 3,
+                "autotune_fallback_to_aten": False,
+                # Force vendored kernel via description regex
+                "test_configs.autotune_choice_desc_regex": "inductor_vendored",
+            }
+        ):
+            compiled_fn = torch.compile(scaled_mm)
+            result = compiled_fn(a_fp4, b_fp4_t, scale_a, scale_b)
 
         torch.testing.assert_close(result, expected)
 
@@ -461,6 +564,45 @@ class TestNVUniversalGemmHeuristics(TestCase):
                 # Test count > available kernels (should return all 3)
                 result = heuristics.filter_kernels(kernels, inputs, count=10)
                 self.assertEqual(len(result), 3)
+
+
+@unittest.skipIf(
+    not (
+        ensure_nv_universal_gemm_available()
+        and is_datacenter_blackwell_arch()
+        and ensure_nvmatmul_heuristics_available()
+    ),
+    "Requires cutlass_api, nvMatmulHeuristics, and Blackwell GPU",
+)
+class TestNVUniversalGemmHeuristicsIntegration(TestCase):
+    """Integration tests for nvMatmulHeuristics with real library calls."""
+
+    def test_fp4_heuristic_configs(self):
+        """Test that nvMatmulHeuristics returns configs for FP4 blockscaled GEMM."""
+        heuristics = NVUniversalGemmHeuristics()
+
+        m, n, k = 256, 512, 1024
+        configs = heuristics._get_heuristic_configs(
+            m,
+            n,
+            k,
+            dtype_a=torch.float4_e2m1fn_x2,
+            layout_a="row",
+            layout_b="col",
+            count=5,
+            valid_configs=OrderedSet(),
+            accumulator_type=torch.float32,
+            dtype_b=torch.float4_e2m1fn_x2,
+            out_dtype=torch.float32,
+        )
+
+        self.assertGreater(
+            len(configs), 0, "nvMatmulHeuristics returned no FP4 configs"
+        )
+        for cfg in configs:
+            self.assertGreater(cfg.tile_m, 0)
+            self.assertGreater(cfg.tile_n, 0)
+            self.assertGreater(cfg.estimated_runtime, 0)
 
 
 @unittest.skipIf(

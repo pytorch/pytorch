@@ -6353,6 +6353,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res2 = opt_fn(x)
         self.assertEqual(res, res2)
 
+    def test_function_return_none_creates_constant_variable(self):
+        """
+        Test that functions returning None properly return ConstantVariable.create(None)
+        instead of raw None, which would violate the stack's type contract.
+
+        Regression test for: Avoid using Optional[VariableTracker]
+        """
+
+        def gn(x):
+            return
+
+        torch._dynamo.config.reorderable_logging_functions.add(gn)
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1
+            if gn(x) is None:
+                return x + 2
+            return x + 4
+
+        # If this doesn't crash, the test passes
+        fn(torch.ones(3))
+
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_ctor_list_of_tensor(self):
         def fn(x):
@@ -7713,6 +7736,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
             self.assertEqual(f(), torch.zeros(2, 2))
             self.assertEqual(opt_f(), torch.ones(2, 2))
+
+    def test_is_exporting_not_true_during_compile(self):
+        def f():
+            if torch.compiler.is_exporting():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        opt_f = torch.compile(f, backend="eager")
+
+        self.assertEqual(f(), torch.zeros(2, 2))
+        self.assertEqual(opt_f(), torch.zeros(2, 2))
 
     def test_torch_generator_set_state(self):
         def fn():
@@ -13373,6 +13408,52 @@ fn
         self.assertEqual(ref, res)
         self.assertEqual(ref, t + 10)
 
+    def test_property_setter(self):
+        class Box:
+            def __init__(self, value):
+                self._value = torch.tensor([value], dtype=torch.float32)
+
+            @property
+            def value(self):
+                return self._value + 1
+
+            @value.setter
+            def value(self, new_value):
+                self._value = new_value * 2
+
+        def fn(b):
+            b.value = 5
+            return b.value
+
+        b = Box(0)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(Box(0))
+        res = opt_fn(b)
+        self.assertEqual(ref, res)
+
+    def test_property_setter_in_init(self):
+        class Clamped:
+            def __init__(self, val):
+                self.val = val
+
+            @property
+            def val(self):
+                return self._val
+
+            @val.setter
+            def val(self, v):
+                self._val = torch.clamp(v, 0, 100)
+
+        def fn(x):
+            obj = Clamped(x)
+            return obj.val
+
+        x = torch.tensor([200.0])
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
         with self.assertRaisesRegex(
@@ -14067,6 +14148,39 @@ fn
         ref = f(x)
         res = opt_f(x)
         self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_new_tensor_break(self):
+        a = torch.tensor([1, 0, 0, 5])
+
+        cases = {
+            "scalar": lambda a: a.new_tensor([a.nonzero().squeeze(-1).numel()]),
+            "multi": lambda a: (
+                n := a.nonzero().squeeze(-1).numel(),
+                a.new_tensor([n, n + 1, n * 2]),
+            )[-1],
+            "mixed_shape": lambda a: (
+                n := a.nonzero().squeeze(-1).numel(),
+                a.new_tensor([n * a.shape[0], n + a.shape[0], a.shape[0] - n]),
+            )[-1],
+            "nested": lambda a: (
+                n := a.nonzero().squeeze(-1).numel(),
+                a.new_tensor([[n, n + 1], [n * 2, n - 1]]),
+            )[-1],
+            "with_zero": lambda a: (
+                n := a.nonzero().squeeze(-1).numel(),
+                a.new_tensor([0, n, n * n]),
+            )[-1],
+        }
+
+        for name, fn in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(
+                    torch.compile(fn, fullgraph=True, backend="eager")(a),
+                    fn(a),
+                )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_builtin_bool_on_tensor(self):

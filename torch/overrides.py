@@ -1568,6 +1568,35 @@ def get_testing_overrides() -> dict[Callable, Callable]:
                 ret2[func] = v
 
     ret.update(ret2)
+
+    # Distributed functions are added after the auto-generation loop above
+    # to avoid generating spurious Tensor method entries (e.g., dist.reduce
+    # would otherwise generate __reduce__ on Tensor).
+    if torch.distributed.is_available():
+        import torch.distributed as dist
+
+        ret.update(
+            {
+                dist.broadcast: lambda tensor, src=None, group=None, async_op=False, group_src=None: -1,
+                dist.all_reduce: lambda tensor, op=None, group=None, async_op=False: -1,
+                dist.reduce: lambda tensor, dst=None, op=None, group=None, async_op=False, group_dst=None: -1,
+                dist.all_reduce_coalesced: lambda tensors, op=None, group=None, async_op=False: -1,
+                dist.all_gather: lambda tensor_list, tensor, group=None, async_op=False: -1,
+                dist.all_gather_into_tensor: lambda output_tensor, input_tensor, group=None, async_op=False: -1,
+                dist.all_gather_coalesced: lambda output_tensor_lists, input_tensor_list, group=None, async_op=False: -1,
+                dist.gather: lambda tensor, gather_list=None, dst=None, group=None, async_op=False, group_dst=None: -1,
+                dist.scatter: lambda tensor, scatter_list=None, src=None, group=None, async_op=False, group_src=None: -1,
+                dist.reduce_scatter: lambda output, input_list, op=None, group=None, async_op=False: -1,
+                dist.reduce_scatter_tensor: lambda output, input, op=None, group=None, async_op=False: -1,
+                dist.all_to_all_single: lambda output, input, output_split_sizes=None, input_split_sizes=None, group=None, async_op=False: -1,  # noqa: B950
+                dist.all_to_all: lambda output_tensor_list, input_tensor_list, group=None, async_op=False: -1,
+                dist.isend: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
+                dist.irecv: lambda tensor, src=None, group=None, tag=0, group_src=None: -1,
+                dist.send: lambda tensor, dst=None, group=None, tag=0, group_dst=None: -1,
+                dist.recv: lambda tensor, src=None, group=None, tag=0, group_src=None: -1,
+            }
+        )  # fmt: skip
+
     return ret
 
 

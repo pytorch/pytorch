@@ -1286,8 +1286,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
         from typing import Union
 
         def fn(x):
-            d = {Union[int, str]: x * 2, Union[float, bool]: x * 3}
-            return d[Union[int, str]] + d[Union[float, bool]]
+            d = {Union[int, str]: x * 2, Union[float, bool]: x * 3}  # noqa: UP007
+            return d[Union[int, str]] + d[Union[float, bool]]  # noqa: UP007
 
         x = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)

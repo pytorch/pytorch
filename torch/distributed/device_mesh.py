@@ -6,7 +6,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed import is_available
@@ -201,7 +201,7 @@ else:
         _rank_map: torch.Tensor
         _mesh_dim_names: tuple[str, ...] | None
         _layout: _MeshLayout
-        _root_mesh: Optional["DeviceMesh"] = None
+        _root_mesh: "DeviceMesh | None" = None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
         # Registry mapping group names to ProcessGroup objects (to avoid C++ lookup)
@@ -210,7 +210,7 @@ else:
         def __init__(
             self,
             device_type: str,
-            mesh: Union[torch.Tensor, "ArrayLike"] | None = None,
+            mesh: "torch.Tensor | ArrayLike | None" = None,
             *,
             mesh_dim_names: tuple[str, ...] | None = None,
             backend_override: tuple[BackendConfig, ...] | None = None,
@@ -218,7 +218,7 @@ else:
             _rank: int | None = None,
             _layout: _MeshLayout | None = None,
             _rank_map: torch.Tensor | None = None,
-            _root_mesh: Optional["DeviceMesh"] = None,
+            _root_mesh: "DeviceMesh | None" = None,
         ) -> None:
             # no-op in OSS, logs API usage metrics in meta-internal runs
             torch._C._log_api_usage_once(
@@ -333,7 +333,7 @@ else:
 
                 self._coordinate_on_dim = self._compute_coordinate_on_dim()
 
-            self._hash: Optional[int] = None
+            self._hash: int | None = None
 
         @staticmethod
         def _compute_coordinates_from_mesh(
@@ -1037,7 +1037,7 @@ else:
         def from_group(
             group: ProcessGroup | list[ProcessGroup],
             device_type: str,
-            mesh: Union[torch.Tensor, "ArrayLike"] | None = None,
+            mesh: "torch.Tensor | ArrayLike | None" = None,
             *,
             mesh_dim_names: tuple[str, ...] | None = None,
         ) -> "DeviceMesh":
@@ -1375,7 +1375,7 @@ else:
                 raise ValueError(
                     f"dim {dim} specified in `_unflatten` is out of range {self.ndim}"
                 )
-            elif isinstance(dim, str) and dim in not_none(self.mesh_dim_names):
+            elif isinstance(dim, str) and dim not in not_none(self.mesh_dim_names):
                 raise ValueError(
                     f"dim {dim} specified in `_unflatten` is not in {self.mesh_dim_names}"
                 )
@@ -1637,8 +1637,8 @@ def _register_distributed_opaque_types():
             "_sym_get_coordinate": MemberType.USE_REAL,
             "_get_mesh_dim_by_name": MemberType.USE_REAL,
             "_get_root_mesh": MemberType.INLINED,
+            "__getitem__": MemberType.INLINED,
             "_get_slice_mesh_layout": MemberType.INLINED,
             "_create_sub_mesh": MemberType.INLINED,
-            "__getitem__": MemberType.INLINED,
         },
     )

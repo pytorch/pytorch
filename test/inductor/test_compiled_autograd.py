@@ -5412,6 +5412,7 @@ if IS_S390X:
 skipped_tests.add("test_clear_saved_tensors_on_access")
 skipped_tests.add("test_clear_saved_tensors_on_access_double_access_error")
 skipped_tests.add("test_forward_traceback_preserves_exception_with_checkpoint")
+skipped_tests.add("test_checkpoint_error_suggests_mark_dynamic")
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")

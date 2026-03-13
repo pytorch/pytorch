@@ -98,6 +98,22 @@ class TestCodegenTriton(InductorTestCase):
             ),
         )
 
+    def test_config_of_sizearg_with_check_constraint(self):
+        from torch.utils._sympy.functions import Mod
+
+        s2 = sympy.Symbol("s2", positive=True, integer=True)
+
+        self.assertFalse(
+            V.graph.sizevars.statically_known_multiple_of(s2, 16),
+        )
+
+        shape_env = V.graph.sizevars.shape_env
+        shape_env.axioms[sympy.Eq(Mod(s2, 16), 0)] = sympy.true
+
+        self.assertTrue(
+            V.graph.sizevars.statically_known_multiple_of(s2, 16),
+        )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

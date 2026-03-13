@@ -34,6 +34,7 @@ import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
 from torch._library.opaque_object import is_opaque_reference_type
+from torch._opaque_base import OpaqueBase
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -333,8 +334,8 @@ class TensorVariable(VariableTracker):
             proxy = getattr(self.as_proxy(), name)
             example_value = getattr(fake_val, name)
             if name in attrs:
-                # attrs returned from tensor_flatten are always tensors
-                assert isinstance(example_value, torch.Tensor)
+                # attrs returned from tensor_flatten are always tensors or opaques
+                assert isinstance(example_value, (torch.Tensor, OpaqueBase))
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(tx=tx, proxy=proxy, example_value=example_value)
@@ -343,6 +344,11 @@ class TensorVariable(VariableTracker):
                     tx.output.fake_mode, example_value
                 )
                 return TorchScriptObjectVariable.create(proxy, fake_script_obj)
+            elif isinstance(
+                example_value,
+                torch._library.fake_class_registry.FakeScriptObject,
+            ):
+                return TorchScriptObjectVariable.create(proxy, example_value)
             # any other attributes on the subclass (that are not methods)
             # are assumed to be constant metadata.
             elif not callable(example_value):
@@ -379,12 +385,14 @@ class TensorVariable(VariableTracker):
         try:
             real_value = getattr(_input_associated_real_value, name)
         except AttributeError:
+            error_message = VariableTracker.build(
+                tx,
+                f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'",
+            )
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[
-                    f"'{type(_input_associated_real_value).__name__}' object has no attribute '{name}'"
-                ],
+                args=[error_message],
             )
 
         attr_source = AttrSource(self.source, name)
@@ -1424,13 +1432,13 @@ class TensorVariable(VariableTracker):
         value: Any | None = None,
     ) -> Any | None:
         if value is not None and config.enable_dynamo_decompositions:
-            from .. import polyfills
+            from torch._inductor import inductor_prims
 
-            return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.addcmul_inplace),
-                [self, tensor1, tensor2, value],
-                {},
-            )
+            mul_var = variables.TorchInGraphFunctionVariable(torch.mul)
+            fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
+            product = mul_var.call_function(tx, [tensor1, tensor2], {})
+            result = fma_var.call_function(tx, [product, value, self], {})
+            return self.call_method(tx, "copy_", [result], {})
         return None
 
     def method___setitem__(
@@ -1547,11 +1555,18 @@ class TensorVariable(VariableTracker):
         *,
         alpha: VariableTracker | None = None,
     ) -> VariableTracker | None:
-        if alpha is not None and config.enable_dynamo_decompositions:
-            result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
-                tx, [other, alpha], {}
-            )
-            return self.call_method(tx, "add_", [result], {})
+        # Tensor alpha: ATen would call .item() and fma internally.
+        # Use fma directly to avoid the item() graph break.
+        if (
+            alpha is not None
+            and isinstance(alpha, TensorVariable)
+            and config.enable_dynamo_decompositions
+        ):
+            from torch._inductor import inductor_prims
+
+            fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
+            result = fma_var.call_function(tx, [other, alpha, self], {})
+            return self.call_method(tx, "copy_", [result], {})
         return None
 
     def method_addcdiv_(
@@ -1566,10 +1581,11 @@ class TensorVariable(VariableTracker):
             result = variables.TorchInGraphFunctionVariable(torch.div).call_function(
                 tx, [tensor1, tensor2], {}
             )
-            result = variables.TorchInGraphFunctionVariable(torch.mul).call_function(
-                tx, [result, value], {}
-            )
-            return self.call_method(tx, "add_", [result], {})
+            from torch._inductor import inductor_prims
+
+            fma_var = variables.TorchInGraphFunctionVariable(inductor_prims.fma)
+            fma_result = fma_var.call_function(tx, [result, value, self], {})
+            return self.call_method(tx, "copy_", [fma_result], {})
         return None
 
     def method___contains__(
@@ -1788,6 +1804,31 @@ class TensorVariable(VariableTracker):
         ):
             return self.call_method(tx, "new_empty", args, kwargs)
         return None
+
+    def method_new_tensor(
+        self: "TensorVariable",
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if len(args) != 1:
+            return None
+        data_arg = args[0]
+        layout = kwargs.get("layout")
+        if layout is not None:
+            if not layout.is_python_constant():
+                return None
+            if layout.as_python_constant() != torch.strided:
+                return None
+        fwd_kwargs = dict(kwargs)
+        fwd_kwargs.pop("layout", None)
+        fwd_kwargs.setdefault("dtype", self.var_getattr(tx, "dtype"))
+        fwd_kwargs.setdefault("device", self.var_getattr(tx, "device"))
+        return variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
+            tx,
+            [data_arg],
+            fwd_kwargs,
+        )
 
     def method_untyped_storage(
         self, tx: "InstructionTranslator"

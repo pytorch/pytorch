@@ -1456,6 +1456,16 @@
       ]
     }
   ],
+  "GB4695": [
+    {
+      "Gb_type": "torch.jit.script/freeze modules unsupported",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support tracing into torch.jit.script or torch.jit.freeze modules because they execute in the TorchScript runtime, not Python. Replace the ScriptModule submodule with the original eager nn.Module.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0124": [
     {
       "Gb_type": "Unsupported Tensor.item() call with capture_scalar_outputs=False",
@@ -2548,6 +2558,16 @@
       "Explanation": "The PyTorch package doesn't include torch.distributed when building from source.",
       "Hints": [
         "Set USE_DISTRIBUTED=1 to enable it when building PyTorch from source."
+      ]
+    }
+  ],
+  "GB2977": [
+    {
+      "Gb_type": "wrap_jit_function: missing _torchdynamo_inline",
+      "Context": "type: {type(value).__name__}",
+      "Explanation": "Dynamo expected a JIT function with a _torchdynamo_inline attribute, but the object does not have one.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

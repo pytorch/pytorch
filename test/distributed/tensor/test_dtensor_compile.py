@@ -45,6 +45,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.placement_types import _StridedShard
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
@@ -1723,25 +1724,25 @@ class outer_fn(torch.nn.Module):
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
 
-    def test_device_mesh_slicing_during_make_fx(self):
-        from torch.fx.experimental.proxy_tensor import make_fx
-
+    def test_device_mesh_slice(self):
         dist.destroy_process_group()
         dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=8)
         mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
 
         def fn(x):
-            # Slice the mesh during make_fx tracing. Previously this would fail
-            # because DeviceMesh.__getitem__ only disabled FakeTensorMode but not
-            # proxy tensor tracing, causing _local_scalar_dense errors in
-            # _get_mesh_tensor_from_full_mesh.
             tp_mesh = mesh["tp"]
             dt = DTensor.from_local(x, tp_mesh, [Shard(0)], run_check=False)
+            if "tp" not in dt.device_mesh.mesh_dim_names:
+                return x
             return dt.to_local()
 
         x = torch.randn(4, 4)
+        res = fn(x)
         traced = make_fx(fn, tracing_mode="fake")(x)
-        self.assertEqual(traced(x), fn(x))
+        self.assertEqual(traced(x), res)
+
+        compiled = torch.compile(fn, backend="aot_eager")(x)
+        self.assertEqual(compiled, res)
 
     def test_compile_redistribute_flattened_mesh(self):
         """
@@ -2020,6 +2021,46 @@ class TestDTensorCompileE2E(DTensorTestBase):
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_net(replicated_inp)
         self.assertEqual(output.full_tensor(), ref_out)
+
+    @with_comms
+    def test_unbacked_illegal_views(self):
+        """Test that views with unbacked shapes match eager behavior"""
+        device_mesh = self.build_device_mesh()
+
+        def create_dt(shard_dim):
+            tensor = torch.randn(8, 8, 8)
+            dt = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
+            for i in range(3):
+                torch._dynamo.decorators.mark_unbacked(dt, i)
+            return dt
+
+        # aot_eager backend decomposes to as_strided, will fail as unsupported
+        @torch.compile(backend="eager", fullgraph=True)
+        def flatten_on_even_mesh(x):
+            torch._check(x.size(0) % self.world_size == 0)
+            return x.view(-1)
+
+        # view should be legal, since sharding is even and flatten is on first dim
+        dt = create_dt(0)
+        flatten_on_even_mesh(dt)
+
+        # flattening on non-first dimension should fail
+        dt = create_dt(1)
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot be performed without redistribution"
+        ):
+            flatten_on_even_mesh(dt)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def flatten(x):
+            return x.view(-1)
+
+        # uneven case: not informing compiler of divisibility will crash
+        dt = create_dt(0)
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to flatten unevenly sharded dimension 0"
+        ):
+            flatten(dt)
 
     @with_comms
     def test_split_with_symint_split_size(self):

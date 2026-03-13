@@ -16,8 +16,8 @@ from torch.distributed._composable_state import (
     _State,
 )
 from torch.distributed.device_mesh import _get_device_handle
+from torch.distributed.fsdp._common_utils import collect_grad_tensors
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
-from torch.utils._pytree import tree_flatten
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import _cast_fp_tensor, _dynamo_disable, TrainingState
@@ -200,11 +200,27 @@ class FSDPState(_State):
                 fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
+        self._validate_no_duplicate_params()
         # Run parameter group lazy inits after initializing FQNs for improved
         # error messages
         for state in self._state_ctx.all_states:
             for fsdp_param_group in state._fsdp_param_groups:
                 fsdp_param_group.lazy_init()
+
+    def _validate_no_duplicate_params(self) -> None:
+        seen: set[int] = set()
+        for state in self._state_ctx.all_states:
+            for fsdp_param_group in state._fsdp_param_groups:
+                for fsdp_param in fsdp_param_group.fsdp_params:
+                    if fsdp_param._orig_param_id in seen:
+                        raise ValueError(
+                            f"Parameter '{fsdp_param._param_fqn}' is shared with a "
+                            f"parameter already managed by another FSDP group. "
+                            f"For shared/tied parameters, use "
+                            f"fully_shard([module_a, module_b]) to place them in "
+                            f"the same FSDP group."
+                        )
+                    seen.add(fsdp_param._orig_param_id)
 
     def _init_shared_state(self) -> None:
         self._comm_ctx.lazy_init(self._device)
@@ -363,10 +379,11 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-        flat_outputs, _ = tree_flatten(output)
-        for t in flat_outputs:
-            if torch.is_tensor(t) and t.requires_grad:
-                t.register_hook(self._pre_backward)
+        # output is the forward return value — pass directly without wrapping
+        # (unlike _register_post_backward_hook which wraps (args, kwargs))
+        tensors = collect_grad_tensors(output)
+        for t in tensors:
+            t.register_hook(self._pre_backward)
         return output
 
     def _register_root_post_backward_final_callback(self):

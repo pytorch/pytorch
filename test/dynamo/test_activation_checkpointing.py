@@ -2268,7 +2268,7 @@ def forward(self, arg0_1, arg1_1):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
-            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops in checkpointed regions.",
+            "Activation checkpoint rematerialization in `forward-loss-backward` graph does not support RNG ops in recompute regions.",
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
 

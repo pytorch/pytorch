@@ -148,7 +148,7 @@ function install_128 {
 
 function install_130 {
   CUDNN_VERSION=9.19.0.56
-  echo "Installing CUDA 13.0 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-0.7.1"
+  echo "Installing CUDA 13.0 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-0.8.0"
   # install CUDA 13.0 in the same container
   install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
 
@@ -160,6 +160,24 @@ function install_130 {
   CUDA_VERSION=13.0 bash install_nccl.sh
 
   CUDA_VERSION=13.0 bash install_cusparselt.sh
+
+  ldconfig
+}
+
+function install_132 {
+  CUDNN_VERSION=9.19.0.56
+  echo "Installing CUDA 13.2 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-0.8.0"
+  # install CUDA 13.2 in the same container
+  install_cuda 13.2.0 cuda_13.2.0_595.45.04_linux
+
+  # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
+  install_cudnn 13 $CUDNN_VERSION
+
+  install_nvshmem 13 $NVSHMEM_VERSION
+
+  CUDA_VERSION=13.2 bash install_nccl.sh
+
+  CUDA_VERSION=13.2 bash install_cusparselt.sh
 
   ldconfig
 }
@@ -177,6 +195,8 @@ do
     12.9|12.9.*) install_129;
         ;;
     13.0|13.0.*) install_130;
+        ;;
+    13.2|13.2.*) install_132;
         ;;
     *) echo "bad argument $1"; exit 1
         ;;

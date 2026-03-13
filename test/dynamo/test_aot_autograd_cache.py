@@ -3,10 +3,12 @@
 import copy
 import dataclasses
 import functools
+import operator
 import os
 import pickle
 import shutil
 import unittest
+from collections.abc import Sequence
 from unittest.mock import patch
 
 import torch
@@ -29,9 +31,10 @@ from torch._inductor.custom_graph_pass import CustomRuntimeEstimator
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, InputType
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
+from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -48,6 +51,18 @@ from torch.utils.checkpoint import (
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
 )
+
+
+def custom_pre_grad_pass_remove_ident_muls(g: torch.fx.Graph) -> None:
+    """
+    Pre-grad pass that removes redundant identity multiplications (1 * x).
+    """
+    for n in g.nodes:
+        if n.op == "call_function" and n.target is operator.mul:
+            lhs, rhs = n.args
+            if lhs == 1:
+                n.replace_all_uses_with(rhs)
+                g.erase_node(n)
 
 
 def aot_eager_regional_inductor():
@@ -2537,6 +2552,174 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(
             x_view2.untyped_storage().data_ptr(), x2.untyped_storage().data_ptr()
         )
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_cache_hit_logs_aot_graphs(self):
+        """
+        Verify that TORCH_LOGS=aot_graphs prints graphs on cache hit, not just cache miss.
+        See https://github.com/pytorch/pytorch/issues/149060
+        """
+        from torch.testing._internal.logging_utils import logs_to_string
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # First call: cache miss — aot_graphs should be logged
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
+        )
+        with ctx():
+            compiled_fn(a, b)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertIn("Forward graph", log_stream.getvalue())
+
+        # Reset dynamo so guards force recompilation (but keep disk cache)
+        self._clear_dynamo_and_codecache()
+
+        # Second call: cache hit — aot_graphs should ALSO be logged.
+        # On cache hit the log comes from aot_autograd_result, not graph_capture.
+        log_stream2, ctx2 = logs_to_string(
+            "torch._functorch._aot_autograd.aot_autograd_result", "aot_graphs"
+        )
+        with ctx2():
+            compiled_fn(a, b)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertIn("Forward graph (from cache)", log_stream2.getvalue())
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_pre_grad_passes_called_on_cache_miss_only(self):
+        """
+        Verify that pre_grad_passes are called on cache miss but not on cache hit.
+        Also, verify that pre_grad_custom_pass is still considered correctly for the cache key.
+        Do this in 4 steps:
+        - Compile w/o  custom pre-grad pass, expect cache miss, expect to run pre-grad passes, expect NO graph change
+        - Compile w/o  custom pre-grad pass, expect cache hit
+        - Compile with custom pre-grad pass, expect cache miss, expect to run pre-grad passes, expect graph change
+        - Compile with custom pre-grad pass, expect cache hit
+        """
+
+        from torch._inductor.compile_fx import run_pre_grad_passes
+
+        # Target function with an identity multiplication that we can remove with a custom pre-grad pass
+        def fn(x, y):
+            return 1 * x + y
+
+        # Track the invocations of run_pre_grad_passes
+        @dataclasses.dataclass
+        class PreGradInvocation:
+            num_nodes_before: int
+            num_nodes_after: int
+
+        pre_grad_invocations: list[PreGradInvocation] = []
+
+        def wrap_run_pre_grad_passes(
+            model: GraphModule, example_inputs: Sequence[InputType]
+        ) -> GraphModule:
+            nonlocal pre_grad_invocations
+            num_nodes_before = len(model.graph.nodes)
+            run_pre_grad_passes(model, example_inputs)
+            num_nodes_after = len(model.graph.nodes)
+            pre_grad_invocations.append(
+                PreGradInvocation(
+                    num_nodes_before=num_nodes_before, num_nodes_after=num_nodes_after
+                )
+            )
+            return model
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.compile_fx.run_pre_grad_passes",
+                wrap_run_pre_grad_passes,
+            ),
+        ):
+            self._clear_all_caches()
+
+            # First compilation - cache miss, pre-grad passes should be called, no changes to graph expected
+            compiled_fn = torch.compile(fn)
+            result1 = compiled_fn(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(
+                len(pre_grad_invocations),
+                1,
+                "run_pre_grad_passes should be called on cache miss",
+            )
+            self.assertEqual(
+                pre_grad_invocations[-1].num_nodes_after
+                - pre_grad_invocations[-1].num_nodes_before,
+                0,
+            )
+
+            # Reset dynamo but keep the cache
+            torch._dynamo.reset()
+
+            # Second compilation - cache hit, pre-grad passes should NOT be called
+            compiled_fn2 = torch.compile(fn)
+            result2 = compiled_fn2(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(
+                len(pre_grad_invocations),
+                1,
+                "run_pre_grad_passes should NOT be called on cache hit",
+            )
+
+            # Reset dynamo but keep the cache
+            torch._dynamo.reset()
+
+            # Third compilation with custom pre-grad pass - cache miss, pre-grad passes should be called,
+            # expect one graph node removed
+            with inductor_config.patch(
+                "pre_grad_custom_pass", custom_pre_grad_pass_remove_ident_muls
+            ):
+                compiled_fn3 = torch.compile(fn)
+                result3 = compiled_fn3(x, y)
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+                self.assertEqual(
+                    len(pre_grad_invocations),
+                    2,
+                    "run_pre_grad_passes should be called on cache miss",
+                )
+                self.assertEqual(
+                    pre_grad_invocations[-1].num_nodes_after
+                    - pre_grad_invocations[-1].num_nodes_before,
+                    -1,
+                )
+
+                # Reset dynamo but keep the cache
+                torch._dynamo.reset()
+
+                # Fourth compilation with custom pre-grad pass - cache hit, pre-grad passes should NOT be called
+                compiled_fn4 = torch.compile(fn)
+                result4 = compiled_fn4(x, y)
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+                self.assertEqual(
+                    len(pre_grad_invocations),
+                    2,
+                    "run_pre_grad_passes should NOT be called on cache hit",
+                )
+
+            # Results should match
+            self.assertEqual(result1, result2)
+            self.assertEqual(result2, result3)
+            self.assertEqual(result3, result4)
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})

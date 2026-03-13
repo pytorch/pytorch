@@ -4,7 +4,7 @@
 import itertools
 import math
 import unittest
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.nn.functional as F
@@ -612,7 +612,7 @@ class DistMatrixOpsTest(DTensorTestBase):
             batch_2_placements: list[Placement],
             beta: int,
             alpha: int,
-            batch_1_grad: Optional[torch.Tensor],
+            batch_1_grad: torch.Tensor | None,
         ) -> None:
             tensor_dt = distribute_tensor(tensor, device_mesh, tensor_placements)
             batch_1_dt = distribute_tensor(batch_1, device_mesh, batch_1_placements)
@@ -1037,6 +1037,37 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(dist_inp.grad.full_tensor(), inp.grad)
         self.assertEqual(dist_w1.grad.full_tensor(), w1.grad)
         self.assertEqual(dist_w2.grad.full_tensor(), w2.grad)
+
+    @with_comms
+    def test_constant_pad_nd(self):
+        """constant_pad_nd: shard non-padded, replicate padded, Partial iff value==0."""
+        device_mesh = self.build_device_mesh()
+        t = torch.randn(8, 6, device=self.device_type)
+        pad = [1, 1]  # pad last dim only
+        expected = torch.nn.functional.pad(t, pad, value=0.0)
+
+        # Shard on non-padded dim (dim 0) — should work directly
+        dt = distribute_tensor(t, device_mesh, [Shard(0)])
+        result = torch.nn.functional.pad(dt, pad, value=0.0)
+        self.assertEqual(result.full_tensor(), expected)
+
+        # Shard on padded dim (dim 1) — forces redistribute to Replicate
+        dt = distribute_tensor(t, device_mesh, [Shard(1)])
+        result = torch.nn.functional.pad(dt, pad, value=0.0)
+        self.assertEqual(result.full_tensor(), expected)
+
+        # Partial input with value=0 — Partial passes through
+        dt = distribute_tensor(t, device_mesh, [Partial()])
+        result = torch.nn.functional.pad(dt, pad, value=0.0)
+        self.assertEqual(result.placements, (Partial(),))
+        self.assertEqual(result.full_tensor(), expected)
+
+        # Partial input with value!=0 — forces redistribute to Replicate
+        expected_nz = torch.nn.functional.pad(t, pad, value=1.0)
+        dt = distribute_tensor(t, device_mesh, [Partial()])
+        result = torch.nn.functional.pad(dt, pad, value=1.0)
+        self.assertNotEqual(result.placements, (Partial(),))
+        self.assertEqual(result.full_tensor(), expected_nz)
 
 
 instantiate_parametrized_tests(DistMatrixOpsTest)

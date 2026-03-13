@@ -770,7 +770,7 @@ def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:
         return []
 
 
-def _get_cpp_std_cflag(std_num: str = "c++17") -> list[str]:
+def _get_cpp_std_cflag(std_num: str = "c++20") -> list[str]:
     if _IS_WINDOWS:
         """
         On Windows, only c++20 can support `std::enable_if_t`.

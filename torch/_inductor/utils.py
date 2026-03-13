@@ -1535,6 +1535,9 @@ class IndentedBuffer:
                 buf.write("\n")
         return buf.getvalue()
 
+    def get_lines_ref(self):
+        return self._lines
+
     def clear(self) -> None:
         self._lines.clear()
 
@@ -2014,9 +2017,36 @@ def ensure_nv_universal_gemm_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("cutlass_api") is not None
+        available = importlib.util.find_spec("cutlass_api") is not None
     except ImportError:
         return False
+    if available:
+        _ensure_fp4_dtype_registered()
+    return available
+
+
+def _ensure_fp4_dtype_registered():
+    """Patch cutlass_api to handle torch.float4_e2m1fn_x2 -> cutlass.Float4E2M1FN.
+
+    NOTE: cutlass_api doesn't natively map this dtype. We patch the lookup function
+    in-place so all callers (including TensorWrapper) pick up the change.
+    Remove once cutlass_api adds native FP4 support.
+    """
+    import cutlass_api.utils
+
+    try:
+        cutlass_api.utils.cutlass_type_from_torch_type(torch.float4_e2m1fn_x2)
+    except (KeyError, AttributeError):
+        import cutlass
+
+        _orig = cutlass_api.utils.cutlass_type_from_torch_type
+
+        def _patched(dtype):
+            if dtype == torch.float4_e2m1fn_x2:
+                return cutlass.Float4E2M1FN
+            return _orig(dtype)
+
+        cutlass_api.utils.cutlass_type_from_torch_type = _patched
 
 
 @functools.lru_cache(maxsize=1)
@@ -2102,6 +2132,21 @@ def use_blackwell_cutedsl_grouped_mm(
 
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
+
+    # TODO: Enable CUTLASS in non-AOT cpp_wrapper mode. The CUTLASS
+    # codegen (CUDATemplateKernel.call_kernel) already has cpp_wrapper-aware
+    # arg handling, but the other half is missing: the non-triton branch of
+    # CppWrapperGpu._generate_kernel_call_helper unconditionally emits
+    # `kernels.<name>(...)`, and that AOTInductorModelKernels struct only
+    # exists in AOT mode. Fixing this requires adding dlopen/dlsym loading
+    # for the compiled CUTLASS .so, similar to how the triton branch uses
+    # static CUfunction + loadKernel for non-AOT mode.
+    if V.graph.cpp_wrapper and not V.graph.aot_mode:
+        log.warning(
+            "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
+            "Skipping CUTLASS backend."
+        )
+        return False
 
     gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:

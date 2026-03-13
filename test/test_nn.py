@@ -2667,6 +2667,31 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected_loss = torch.tensor(0.25)
         self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
 
+    def test_mse_loss_mixed_dtype_grad(self):
+        devices = ['cpu'] + (['cuda'] if TEST_CUDA else [])
+        for device in devices:
+            for reduction in ['mean', 'sum', 'none']:
+                x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True, device=device)
+                y = torch.tensor([1.5, 2.5], dtype=torch.float64, requires_grad=True, device=device)
+                loss = F.mse_loss(x, y, reduction=reduction)
+                if reduction == 'mean':
+                    expected_loss = torch.tensor(0.25, dtype=torch.float64, device=device)
+                    expected_grad_x = torch.tensor([-0.5, -0.5], dtype=torch.float32, device=device)
+                    expected_grad_y = torch.tensor([0.5, 0.5], dtype=torch.float64, device=device)
+                elif reduction == 'sum':
+                    expected_loss = torch.tensor(0.5, dtype=torch.float64, device=device)
+                    expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
+                    expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
+                else:  # 'none'
+                    expected_loss = torch.tensor([0.25, 0.25], dtype=torch.float64, device=device)
+                    expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
+                    expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
+                self.assertEqual(loss, expected_loss, atol=1e-6, rtol=0)
+                grad = torch.ones_like(loss) if reduction == 'none' else None
+                loss.backward(grad)
+                self.assertEqual(x.grad, expected_grad_x, atol=1e-6, rtol=0)
+                self.assertEqual(y.grad, expected_grad_y, atol=1e-6, rtol=0)
+
     def test_weighted_l1_loss_with_weights(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
         targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
@@ -7647,6 +7672,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ]:
             test_rnn_cell(cell_fn, gate_count)
 
+    def test_conv3d_initialization_consistency(self):
+        # 1. Create a Conv3d layer
+        m = torch.nn.Conv3d(3, 6, kernel_size=3)
+
+        # 2. Test initialization in default (contiguous) format
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_default = m.weight.clone().detach()
+
+        # 3. Test initialization in channels_last_3d format
+        m.to(memory_format=torch.channels_last_3d)
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_channels_last = m.weight.clone().detach()
+
+        # 4. Verify both initializations are identical
+        self.assertEqual(
+            weights_default,
+            weights_channels_last,
+            msg="Conv3d initialization is inconsistent between memory formats"
+        )
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),

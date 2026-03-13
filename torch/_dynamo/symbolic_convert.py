@@ -1758,11 +1758,11 @@ class InstructionTranslatorBase(
                     # twice is not an issue (second stop is a no op).
                     self.output.mark_bytecode_tracing_stop()
 
-    def push(self, val: VariableTracker | None) -> None:
-        assert val is None or isinstance(val, VariableTracker), (
+    def push(self, val: VariableTracker) -> None:
+        assert isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
         )
-        self.stack.append(val)  # type: ignore[arg-type]
+        self.stack.append(val)
 
     def push_many(self, vals: list[VariableTracker]) -> None:
         for val in vals:
@@ -2111,20 +2111,6 @@ class InstructionTranslatorBase(
         assert inst.target is not None
         self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
-    def BEGIN_FINALLY(self, inst: Instruction) -> None:
-        self.push(None)
-
-    def WITH_CLEANUP_START(self, inst: Instruction) -> None:
-        exit, exc = self.popn(2)
-        assert exc is None
-        self.push(exc)
-
-        self.push(exit.call_function(self, [CONSTANT_VARIABLE_NONE] * 3, {}))
-
-    def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
-        self.popn(2)
-        self.push(None)
-
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
         self.push(it)
@@ -2215,11 +2201,15 @@ class InstructionTranslatorBase(
                 f"raised exception {val}", real_stack=python_stack
             )
 
-        unimplemented(
-            gb_type="Failed to raise exception",
-            context=str(exc),
-            explanation="Attempted to raise a non-Exception type/value.",
-            hints=[*graph_break_hints.USER_ERROR],
+        exc.raise_observed_exception(
+            TypeError,
+            self,
+            args=[
+                VariableTracker.build(
+                    self,
+                    f"exceptions must derive from BaseException, not {val.python_type_name()}",
+                )
+            ],
         )
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
@@ -2736,15 +2726,14 @@ class InstructionTranslatorBase(
             self.PUSH_NULL(inst)
             self.push(obj)
         else:
-            self.push(obj)
-            self.push(None)
+            raise AssertionError(
+                "LOAD_METHOD should have been rewritten to LOAD_ATTR. We should never reach here."
+            )
 
     def CALL_METHOD(self, inst: Instruction) -> None:
-        args = self.popn(inst.argval)
-        dummy = self.pop()
-        assert dummy is None
-        fn = self.pop()
-        self.call_function(fn, args, {})
+        raise AssertionError(
+            "CALL_METHOD should have been rewritten to CALL_FUNCTION. This function should never be called."
+        )
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
@@ -5199,23 +5188,30 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
-        if args and isinstance(args[0], NNModuleVariable):
-            module = parent.output.get_submodule(args[0].module_key)
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
-        # When we have inline_nn_module turned on, modules resolve to UnspecializedNNModuleVariable
-        if args and isinstance(args[0], UnspecializedNNModuleVariable):
-            module = args[0].value
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
+        # For unrealized lazy VTs, use peek_type to skip non-Module args
+        # without realizing them (which would install unnecessary guards).
+        if args:
+            arg0 = args[0]
+            should_check = True
+            if isinstance(arg0, LazyVariableTracker) and not arg0.is_realized():
+                if issubclass(arg0.peek_type(), torch.nn.Module):
+                    arg0 = arg0.realize()
+                else:
+                    should_check = False
+
+            if should_check:
+                if isinstance(arg0, NNModuleVariable):
+                    module = parent.output.get_submodule(arg0.module_key)
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
+                elif isinstance(arg0, UnspecializedNNModuleVariable):
+                    module = arg0.value
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
 
         assert not isinstance(func, SkipFunctionVariable)
         tracer: InliningInstructionTranslator
