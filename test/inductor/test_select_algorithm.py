@@ -3,10 +3,8 @@ import contextlib
 import functools
 import unittest.mock
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
-
-import pytest
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -72,9 +70,8 @@ def patches(fn):
     def wrapped(*args, **kwargs):
         counters.clear()
         torch.manual_seed(12345)
-        assert torch.backends.cuda.matmul.fp32_precision != "tf32", (
-            "correctness testing is allergic to tf32"
-        )
+        if torch.backends.cuda.matmul.fp32_precision == "tf32":
+            raise AssertionError("correctness testing is allergic to tf32")
         return fn(*args, **kwargs)
 
     return wrapped
@@ -293,10 +290,6 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @pytest.mark.xfail(
-        condition=not torch.version.hip,
-        reason="C++ wrapper dynamic shapes fails on CUDA, fixed on ROCm",
-    )
     @patches
     def test_mm_plus_mm3(self):
         @torch.compile
@@ -481,9 +474,9 @@ class TestSelectAlgorithm(TestCase):
             def get_template_configs(
                 self,
                 kernel_inputs: KernelInputs,
-                templates: list[Union[KernelTemplate, ExternKernelChoice]],
+                templates: list[KernelTemplate | ExternKernelChoice],
                 op_name: str,
-                kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+                kwarg_overrides: dict[str, dict[str, Any]] | None = None,
             ):
                 return super().get_template_configs(
                     kernel_inputs, templates, op_name, kwarg_overrides
@@ -876,7 +869,8 @@ class TestTemplateRender(TestCase):
                 XBLOCK=XBLOCK,
                 triton_meta=custom_triton_meta,
             )
-            return autotune_select_algorithm("add", choices, [a, b], layout)
+            node, _ = autotune_select_algorithm("add", choices, [a, b], layout)
+            return node
 
         with patch_lowering(
             {
@@ -897,8 +891,10 @@ class TestTemplateRender(TestCase):
             b = torch.zeros((XBLOCK,), device=GPU_TYPE)
 
             _result, kernels = run_and_get_kernels(add, a, b)
-            assert len(kernels) == 1
-            assert hook_identifier in kernels[0]
+            if len(kernels) != 1:
+                raise AssertionError
+            if hook_identifier not in kernels[0]:
+                raise AssertionError
             FileCheck().check("triton_meta=").check(str(custom_triton_meta)).run(
                 kernels[0]
             )

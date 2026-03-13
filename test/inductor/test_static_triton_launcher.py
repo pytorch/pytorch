@@ -2,7 +2,6 @@
 import os
 import random
 import tempfile
-from typing import Union
 from unittest import mock
 
 import torch
@@ -82,7 +81,7 @@ class TestStaticTritonLauncher(TestCase):
     def _make_launcher(
         self,
         compiled_kernel: CompiledKernel,
-    ) -> Union[StaticallyLaunchedCudaKernel, StaticallyLaunchedXpuKernel]:
+    ) -> StaticallyLaunchedCudaKernel | StaticallyLaunchedXpuKernel:
         """
         Compiles a Triton kernel with the provided *args,
         writes its cubin to the temporary file, and returns the file path.
@@ -92,7 +91,8 @@ class TestStaticTritonLauncher(TestCase):
         result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
         # Test reload cubin from raw here
         old_cubin_path = result.cubin_path
-        assert old_cubin_path is not None
+        if old_cubin_path is None:
+            raise AssertionError
         result.cubin_path = None
         result.reload_cubin_from_raw(old_cubin_path)
         device_interface = get_interface_for_device(GPU_TYPE)

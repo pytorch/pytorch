@@ -22,6 +22,7 @@ import argparse
 import fnmatch
 import itertools
 import re
+import sys
 import time
 from collections import defaultdict
 from collections.abc import Callable
@@ -35,6 +36,7 @@ from torch._ops import OpOverload
 from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
+from torch.distributed.tensor._decompositions import DecompShardingStrategy
 from torch.distributed.tensor._dtensor_spec import TensorMeta
 from torch.distributed.tensor._op_schema import (
     DTensorSpec,
@@ -49,8 +51,10 @@ from torch.testing._internal.opinfo import core as opinfo_core
 from torch.utils import _pytree as pytree
 
 
-# A combo key is (input_placement_strs, output_placement_str)
-ComboKey = tuple[tuple[str, ...], str]
+# A combo key is (input_placement_strs, output_placement_strs)
+# For single-output ops: (("S(0)",), ("P(min)",))
+# For multi-output ops:  (("S(0)",), ("P(min)", "P(min)"))
+ComboKey = tuple[tuple[str, ...], tuple[str, ...]]
 
 # Partial reduce ops to enumerate
 PARTIAL_REDUCE_OPS = ["sum", "avg", "min", "max"]
@@ -69,27 +73,7 @@ SKIP_OPS: dict[str, str] = {
 }
 
 
-@dataclass
-class PlacementCombination:
-    """Represents a combination of input and output placements."""
-
-    input_placements: tuple[Placement, ...]  # One placement per input tensor
-    output_placement: Placement  # Placement for the output tensor
-
-    def __hash__(self):
-        return hash(
-            (tuple(str(p) for p in self.input_placements), str(self.output_placement))
-        )
-
-    def __eq__(self, other):
-        if not isinstance(other, PlacementCombination):
-            return NotImplemented
-        return tuple(str(p) for p in self.input_placements) == tuple(
-            str(p) for p in other.input_placements
-        ) and str(self.output_placement) == str(other.output_placement)
-
-    def __str__(self):
-        return f"inputs={placement_tuple_to_str(self.input_placements)}, output={placement_tuple_to_str((self.output_placement,))}"
+PlacementCombination = tuple[tuple[Placement, ...], tuple[Placement, ...]]
 
 
 @dataclass
@@ -97,7 +81,7 @@ class Discrepancy:
     """Represents a discrepancy between ground truth and DTensor's rules."""
 
     input_placements: tuple[str, ...]
-    output_placement: str
+    output_placements: tuple[str, ...]
     sample_idx: int
     input_shapes: tuple[tuple[int, ...], ...]
     discrepancy_type: str  # "false_positive" or "false_negative"
@@ -124,6 +108,9 @@ class ComparisonStats:
     total_samples: int = 0
     total_combinations: int = 0
     skip_reasons: dict[str, int] = field(default_factory=dict)
+    no_dtensor_support: bool = False
+    # Per aten op variant breakdown (e.g. "aten.min.dim" -> 5)
+    true_positives_by_op: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -143,21 +130,6 @@ class _FalsePositiveMitigations:
     non_rounded_negated_sample: SampleInput | None = None
     non_rounded_negated_tensors: list[tuple[str, torch.Tensor]] | None = None
     non_rounded_negated_ground_truth: torch.Tensor | list[torch.Tensor] | None = None
-
-
-def placement_tuple_to_str(placements: tuple[Placement, ...]) -> str:
-    """Convert a tuple of placements to a readable string."""
-    parts: list[str] = []
-    for p in placements:
-        if isinstance(p, Shard):
-            parts.append(f"S({p.dim})")
-        elif isinstance(p, Replicate):
-            parts.append("R")
-        elif isinstance(p, Partial):
-            parts.append(f"P({p.reduce_op})")
-        else:
-            parts.append(str(p))
-    return "(" + ", ".join(parts) + ")"
 
 
 def parse_placement(s: str) -> Placement | None:
@@ -223,7 +195,7 @@ def normalize_placement_str(p_str: str, shape: tuple[int, ...]) -> str:
 def normalize_combo_key(
     combo_key: ComboKey,
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
 ) -> ComboKey:
     """
     Normalize a combo_key by converting trivial shards to Replicate.
@@ -233,25 +205,26 @@ def normalize_combo_key(
     - S(0), R -> R on input [1,4] becomes R, R -> R
 
     Args:
-        combo_key: (input_placement_strs, output_placement_str) tuple
+        combo_key: (input_placement_strs, output_placement_strs) tuple
         input_shapes: Shapes of input tensors
-        output_shape: Shape of output tensor
+        output_shapes: Shapes of output tensors
 
     Returns:
         Normalized combo_key with trivial shards converted to Replicate
     """
-    input_placement_strs, output_placement_str = combo_key
+    input_placement_strs, output_placement_strs = combo_key
 
-    # Normalize input placements
     normalized_inputs = tuple(
         normalize_placement_str(p_str, shape)
         for p_str, shape in zip(input_placement_strs, input_shapes)
     )
 
-    # Normalize output placement
-    normalized_output = normalize_placement_str(output_placement_str, output_shape)
+    normalized_outputs = tuple(
+        normalize_placement_str(p_str, shape)
+        for p_str, shape in zip(output_placement_strs, output_shapes)
+    )
 
-    return (normalized_inputs, normalized_output)
+    return (normalized_inputs, normalized_outputs)
 
 
 def get_1d_input_placements_for_tensor(
@@ -314,8 +287,34 @@ def extract_tensors_from_sample(
     return tensors
 
 
+def _checkerboard_mask(
+    tensor: torch.Tensor, tensor_idx: int = 0, mask_shift: int = 0
+) -> torch.Tensor:
+    """Checkerboard mask that alternates in every dimension.
+
+    Unlike flat-index % 2, which can be uniform along even-stride dimensions
+    (causing all elements in a reduction group to get the same offset), the
+    checkerboard uses sum-of-coordinates mod 2 so adjacent elements differ
+    along every axis.
+
+    Returns a flat bool tensor of shape (numel,).
+    """
+    if tensor.ndim == 0:
+        return torch.tensor([(tensor_idx + mask_shift) % 2 == 0], device=tensor.device)
+    coords = [torch.arange(s, device=tensor.device) for s in tensor.shape]
+    grids = torch.meshgrid(*coords, indexing="ij")
+    coord_sum = grids[0].clone()
+    for g in grids[1:]:
+        coord_sum += g
+    return ((coord_sum + tensor_idx + mask_shift) % 2 == 0).flatten()
+
+
 def _create_partial_input(
-    tensor: torch.Tensor, placement: Partial, world_size: int, tensor_idx: int = 0
+    tensor: torch.Tensor,
+    placement: Partial,
+    world_size: int,
+    tensor_idx: int = 0,
+    mask_shift: int = 0,
 ) -> LocalTensor:
     """
     Create a LocalTensor with values that reduce to the original tensor.
@@ -345,14 +344,21 @@ def _create_partial_input(
     to falsely validate P(sum)->P(sum).
 
     Distinct magnitudes for P(min) vs P(max): P(min) offsets non-holding
-    ranks by +0.7 while P(max) offsets by -1.3. Using different
-    magnitudes prevents accidental cancellation when min and max
-    placements appear in the same combination.
+    ranks by +(range*2+1) while P(max) offsets by -(range*2+1), where
+    range is the tensor's value range. Using adaptive offsets that exceed
+    the value range ensures that index-returning ops (argmin/argmax)
+    produce different results on different ranks, correctly rejecting
+    P(min)/P(max) inputs for those ops. Using different signs for min vs
+    max prevents accidental cancellation when both appear in the same
+    combination.
 
-    Alternating rank ownership for P(min)/P(max): a mask alternating by
-    element (shifted by tensor index) controls which rank holds the true
-    value vs the offset value. This prevents the degenerate case where
-    one rank always holds all true values.
+    Alternating rank ownership for P(min)/P(max): a multi-dimensional
+    checkerboard mask (sum of coordinates mod 2) controls which rank holds
+    the true value vs the offset value. Unlike a flat-index mask which can
+    have uniform parity along an even-stride dimension, the checkerboard
+    guarantees alternation along EVERY dimension. The mask_shift parameter
+    allows re-validation with the complementary mask to catch ops where
+    the result coincidentally matches.
 
     """
     reduce_op = placement.reduce_op
@@ -365,9 +371,9 @@ def _create_partial_input(
         flat = tensor.flatten()
         offset_mag = flat.abs() + 1.0
         signs = torch.ones_like(flat)
-        signs[
-            (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
-        ] = -1.0
+        # Use checkerboard mask so offset sign alternates in every dimension,
+        # not just along flat index (which can be uniform along even-stride dims).
+        signs[_checkerboard_mask(tensor, tensor_idx, mask_shift)] = -1.0
         offset = (offset_mag * signs).reshape(tensor.shape)
 
         scale = world_size if reduce_op == "avg" else 1
@@ -382,30 +388,36 @@ def _create_partial_input(
     elif reduce_op == "min":
         # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
-        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        # Offset must exceed the tensor's value range so that the mask pattern
+        # determines argmin/argmax, not the original values.
+        value_range = (flat.max() - flat.min()).item()
+        min_offset = value_range * 2 + 1
+        mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
                 r_offset = torch.where(
-                    mask, torch.zeros_like(flat), torch.full_like(flat, 0.7)
+                    mask, torch.zeros_like(flat), torch.full_like(flat, min_offset)
                 )
             else:
                 r_offset = torch.where(
-                    mask, torch.full_like(flat, 0.7), torch.zeros_like(flat)
+                    mask, torch.full_like(flat, min_offset), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
     elif reduce_op == "max":
         # See docstring above: "Distinct Magnitudes" and "Alternating Rank Ownership"
         flat = tensor.flatten()
-        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
+        value_range = (flat.max() - flat.min()).item()
+        max_offset = -(value_range * 2 + 1)
+        mask = _checkerboard_mask(tensor, tensor_idx, mask_shift)
         for r in range(world_size):
             if r == 0:
                 r_offset = torch.where(
-                    mask, torch.zeros_like(flat), torch.full_like(flat, -1.3)
+                    mask, torch.zeros_like(flat), torch.full_like(flat, max_offset)
                 )
             else:
                 r_offset = torch.where(
-                    mask, torch.full_like(flat, -1.3), torch.zeros_like(flat)
+                    mask, torch.full_like(flat, max_offset), torch.zeros_like(flat)
                 )
             local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
 
@@ -425,6 +437,7 @@ def validate_combination(
     ground_truth: torch.Tensor | list[torch.Tensor],
     world_size: int = 2,
     mesh: DeviceMesh | None = None,
+    mask_shift: int = 0,
 ) -> tuple[bool, str]:
     """
     Validate a single placement combination against ground truth.
@@ -456,11 +469,11 @@ def validate_combination(
 
         local_tensors = []
         for tensor_idx, ((name, tensor), placement) in enumerate(
-            zip(tensors, combination.input_placements)
+            zip(tensors, combination[0])
         ):
             if isinstance(placement, Partial):
                 local_tensor = _create_partial_input(
-                    tensor, placement, world_size, tensor_idx
+                    tensor, placement, world_size, tensor_idx, mask_shift
                 )
             elif isinstance(placement, Replicate):
                 _tmp = {r: tensor.clone() for r in range(world_size)}
@@ -470,7 +483,10 @@ def validate_combination(
                 # Create sharded LocalTensor directly to work in LocalTensorMode
                 shard_dim = placement.dim
                 chunks = tensor.tensor_split(world_size, dim=shard_dim)
-                _tmp = {r: chunks[r].clone().contiguous() for r in range(world_size)}
+                _tmp = {
+                    r: chunks[r].clone(memory_format=torch.contiguous_format)
+                    for r in range(world_size)
+                }
                 # pyrefly: ignore [bad-argument-type, bad-argument-count]
                 local_tensor = LocalTensor(_tmp)
             else:
@@ -516,7 +532,16 @@ def validate_combination(
                 f"Output count mismatch: got {len(local_outputs)}, expected {len(ground_truths)}",
             )
 
-        for i, (local_out, gt) in enumerate(zip(local_outputs, ground_truths)):
+        if len(local_outputs) != len(combination[1]):
+            return (
+                False,
+                f"Output count mismatch with placements: "
+                f"got {len(local_outputs)}, expected {len(combination[1])}",
+            )
+
+        for i, (local_out, gt, out_plc) in enumerate(
+            zip(local_outputs, ground_truths, combination[1])
+        ):
             if not isinstance(local_out, torch.Tensor):
                 return False, f"Local output[{i}] is not a tensor: {type(local_out)}"
 
@@ -526,12 +551,12 @@ def validate_combination(
             output_dt = DTensor.from_local(
                 local_out,
                 mesh,
-                (combination.output_placement,),
+                (out_plc,),
                 shape=gt.shape,
                 stride=gt.stride(),
             )
 
-            if isinstance(combination.output_placement, Replicate):
+            if isinstance(out_plc, Replicate):
                 local_values = [local_out._local_tensors[r] for r in range(world_size)]
                 all_same = all(
                     torch.allclose(local_values[0], lv, atol=1e-5, rtol=1e-5)
@@ -572,29 +597,24 @@ def validate_combination(
 
 
 def has_pmin_pmax(
-    input_placements: tuple[Placement, ...], output_placement: Placement
+    input_placements: tuple[Placement, ...],
+    output_placements: tuple[Placement, ...],
 ) -> bool:
     """Check if any placement is Partial(min) or Partial(max)."""
-    for p in input_placements:
+    for p in (*input_placements, *output_placements):
         if isinstance(p, Partial) and p.reduce_op in ("min", "max"):
             return True
-    if isinstance(output_placement, Partial) and output_placement.reduce_op in (
-        "min",
-        "max",
-    ):
-        return True
     return False
 
 
 def has_any_partial(
-    input_placements: tuple[Placement, ...], output_placement: Placement
+    input_placements: tuple[Placement, ...],
+    output_placements: tuple[Placement, ...],
 ) -> bool:
     """Check if any placement is Partial (any reduce op)."""
-    for p in input_placements:
+    for p in (*input_placements, *output_placements):
         if isinstance(p, Partial):
             return True
-    if isinstance(output_placement, Partial):
-        return True
     return False
 
 
@@ -630,7 +650,7 @@ def _run_op_on_sample(op: Callable[..., Any], sample: SampleInput) -> Any:
 def _extract_rules_from_op_strategy(
     op_strategy: Any,
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
 ) -> set[ComboKey]:
     """Extract normalized sharding rules from an OpStrategy.
 
@@ -646,22 +666,25 @@ def _extract_rules_from_op_strategy(
         if spec.input_specs is None:
             continue
         if isinstance(spec.output_specs, tuple):
-            first_output_spec = spec.output_specs[0]
-            # output_specs tuple can contain None for non-tensor outputs
-            # (e.g. SDPA's philox_seed/offset, layer norm backward with
-            # output_mask). The validator doesn't support mixed outputs.
-            if first_output_spec is None:
-                raise NotImplementedError(
-                    f"Strategy has None in output_specs, indicating mixed "
-                    f"tensor/non-tensor outputs which the validator does not "
-                    f"support. output_specs: {spec.output_specs}"
-                )
-            output_plc = first_output_spec.placements[0]
+            output_plcs: list[Placement] = []
+            for out_spec in spec.output_specs:
+                if out_spec is None:
+                    raise NotImplementedError(
+                        f"Strategy has None in output_specs, indicating mixed "
+                        f"tensor/non-tensor outputs which the validator does not "
+                        f"support. output_specs: {spec.output_specs}"
+                    )
+                output_plcs.append(out_spec.placements[0])
         else:
-            output_plc = spec.output_spec.placements[0]
+            # Single DTensorSpec — the propagator duplicates it for all
+            # outputs of multi-output ops, so we do the same here.
+            output_plcs = [spec.output_spec.placements[0]] * len(output_shapes)
         input_plcs = tuple(s.placements[0] for s in spec.input_specs)
-        rule_key = (tuple(str(p) for p in input_plcs), str(output_plc))
-        normalized_rule = normalize_combo_key(rule_key, input_shapes, output_shape)
+        rule_key: ComboKey = (
+            tuple(str(p) for p in input_plcs),
+            tuple(str(p) for p in output_plcs),
+        )
+        normalized_rule = normalize_combo_key(rule_key, input_shapes, output_shapes)
         if not is_fully_replicated(
             tuple(parse_placement(p) or Replicate() for p in normalized_rule[0])
         ):
@@ -717,19 +740,13 @@ def get_aten_op_for_sample(
     else:
         return None, (), {}
 
-    non_tensor_args = tuple(a for a in captured_args if not isinstance(a, torch.Tensor))
-    non_tensor_kwargs = {
-        k: v for k, v in captured_kwargs.items() if not isinstance(v, torch.Tensor)
-    }
-
-    return captured_op, non_tensor_args, non_tensor_kwargs
+    return captured_op, captured_args, captured_kwargs
 
 
 def query_single_dim_strategy(
     op_overload: OpOverload,
-    tensors: list[tuple[str, torch.Tensor]],
-    mesh: DeviceMesh | None,
-    kwargs: dict[str, Any] | None = None,
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
 ) -> list[list[Placement]] | None:
     """
     Query DTensor's single-dim strategy for given input tensors.
@@ -743,11 +760,20 @@ def query_single_dim_strategy(
     strategy_func = propagator.op_single_dim_strategy_funcs[op_overload]
 
     args_meta = tuple(
-        TensorMeta(shape=t.shape, stride=t.stride(), dtype=t.dtype) for _, t in tensors
+        TensorMeta(shape=a.shape, stride=a.stride(), dtype=a.dtype)
+        if isinstance(a, torch.Tensor)
+        else a
+        for a in captured_args
     )
+    kwargs_meta = {
+        k: TensorMeta(shape=v.shape, stride=v.stride(), dtype=v.dtype)
+        if isinstance(v, torch.Tensor)
+        else v
+        for k, v in captured_kwargs.items()
+    }
 
     try:
-        result = strategy_func(op_overload, args_meta, kwargs or {})
+        result = strategy_func(op_overload, args_meta, kwargs_meta)
 
         expanded_result: list[list[Placement]] = []
         for combo in result:
@@ -926,10 +952,10 @@ def _prepare_false_positive_mitigations(
 def _query_dtensor_rules(
     aten_op: OpOverload | None,
     tensors: list[tuple[str, torch.Tensor]],
-    non_tensor_args: tuple[Any, ...],
-    non_tensor_kwargs: dict[str, Any],
+    captured_args: tuple[Any, ...],
+    captured_kwargs: dict[str, Any],
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
     world_size: int,
     verbose: bool,
 ) -> set[ComboKey]:
@@ -943,24 +969,31 @@ def _query_dtensor_rules(
     if not aten_op:
         return set()
 
+    num_tensors = len(tensors)
+    non_tensor_kwargs = {
+        k: v for k, v in captured_kwargs.items() if not isinstance(v, torch.Tensor)
+    }
+    n_outputs = len(output_shapes)
     propagator = DTensor._op_dispatcher.sharding_propagator
     rules: set[ComboKey] = set()
 
     if aten_op in propagator.op_single_dim_strategy_funcs:
         strategy_result = query_single_dim_strategy(
-            aten_op, tensors, None, kwargs=non_tensor_kwargs
+            aten_op, captured_args, captured_kwargs
         )
         if strategy_result:
             for combo in strategy_result:
-                if len(combo) >= len(tensors) + 1:
+                if len(combo) >= num_tensors + 1:
                     output_plc = combo[0]
-                    input_plcs = tuple(combo[1 : len(tensors) + 1])
-                    rule_key = (
+                    input_plcs = tuple(combo[1 : num_tensors + 1])
+                    # single_dim_strategy returns one output placement;
+                    # duplicate for all outputs (matches propagator behavior)
+                    rule_key: ComboKey = (
                         tuple(str(p) for p in input_plcs),
-                        str(output_plc),
+                        tuple(str(output_plc) for _ in range(n_outputs)),
                     )
                     normalized_rule = normalize_combo_key(
-                        rule_key, input_shapes, output_shape
+                        rule_key, input_shapes, output_shapes
                     )
                     if not is_fully_replicated(
                         tuple(
@@ -973,8 +1006,9 @@ def _query_dtensor_rules(
     elif aten_op in propagator.op_strategy_funcs:
         try:
             mesh = init_device_mesh("cpu", (world_size,))
-            input_strategies = []
-            for name, t in tensors:
+            # Build OpStrategy objects for each tensor, keyed by identity
+            tensor_to_strategy: dict[int, OpStrategy] = {}
+            for _, t in tensors:
                 input_placements = get_1d_input_placements_for_tensor(
                     t, include_partial=True
                 )
@@ -988,13 +1022,17 @@ def _query_dtensor_rules(
                         ),
                     )
                     specs.append(OpSpec(output_specs=spec, input_specs=tuple()))
-                input_strategies.append(OpStrategy(specs))
-            args_schema = list(input_strategies) + list(non_tensor_args)
+                tensor_to_strategy[id(t)] = OpStrategy(specs)
+            # Interleave strategies and non-tensor args at original positions
+            args_schema = [
+                tensor_to_strategy[id(a)] if isinstance(a, torch.Tensor) else a
+                for a in captured_args
+            ]
             op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
             strategy_func = propagator.op_strategy_funcs[aten_op]
             output_strategy = strategy_func(op_schema)
             rules |= _extract_rules_from_op_strategy(
-                output_strategy, input_shapes, output_shape
+                output_strategy, input_shapes, output_shapes
             )
         except Exception as e:
             if verbose:
@@ -1005,29 +1043,28 @@ def _query_dtensor_rules(
         # seed (Shard(0) on the first input). Rules requiring other input
         # placements (e.g., Shard(1), Partial, or sharding on non-first inputs)
         # will not be found, so this under-reports DTensor's capabilities.
-        try:
-            from torch.distributed.tensor._decompositions import DecompShardingStrategy
-        except ImportError:
-            DecompShardingStrategy = None  # type: ignore[assignment, misc]
-        if DecompShardingStrategy is not None and DecompShardingStrategy.has_decomp(
-            aten_op
-        ):
+        if DecompShardingStrategy.has_decomp(aten_op):
             try:
                 mesh = init_device_mesh("cpu", (world_size,))
-                args_schema = []
-                for i, (_, t) in enumerate(tensors):
-                    # First tensor gets Shard(0) to seed candidate
-                    # placement generation in _get_candidate_placements
-                    plc = Shard(0) if i == 0 else Replicate()
-                    spec = DTensorSpec(
-                        mesh=mesh,
-                        placements=(plc,),
-                        tensor_meta=TensorMeta(
-                            shape=t.shape, stride=t.stride(), dtype=t.dtype
-                        ),
-                    )
-                    args_schema.append(spec)
-                args_schema.extend(non_tensor_args)
+                # Interleave DTensorSpec and non-tensor args at original positions
+                tensor_idx = 0
+                args_schema: list[Any] = []
+                for a in captured_args:
+                    if isinstance(a, torch.Tensor):
+                        # First tensor gets Shard(0) to seed candidate
+                        # placement generation in _get_candidate_placements
+                        plc = Shard(0) if tensor_idx == 0 else Replicate()
+                        spec = DTensorSpec(
+                            mesh=mesh,
+                            placements=(plc,),
+                            tensor_meta=TensorMeta(
+                                shape=a.shape, stride=a.stride(), dtype=a.dtype
+                            ),
+                        )
+                        args_schema.append(spec)
+                        tensor_idx += 1
+                    else:
+                        args_schema.append(a)
                 op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
                 propagator.decomp_strategy.ensure_schema_info(aten_op)
                 output_strategy = propagator.decomp_strategy.propagate_strategy(
@@ -1035,7 +1072,7 @@ def _query_dtensor_rules(
                 )
                 if output_strategy is not None:
                     rules |= _extract_rules_from_op_strategy(
-                        output_strategy, input_shapes, output_shape
+                        output_strategy, input_shapes, output_shapes
                     )
             except Exception as e:
                 if verbose:
@@ -1049,73 +1086,90 @@ def _validate_with_mitigations(
     sample: SampleInput,
     tensors: list[tuple[str, torch.Tensor]],
     input_placements: tuple[Placement, ...],
-    output_placement: Placement,
+    output_placements: tuple[Placement, ...],
     ground_truth: torch.Tensor | list[torch.Tensor],
     world_size: int,
     mesh: DeviceMesh,
     mitigations: _FalsePositiveMitigations,
 ) -> bool:
     """Validate a combination, including false positive mitigation re-checks."""
-    combo = PlacementCombination(input_placements, output_placement)
+    combo: PlacementCombination = (input_placements, output_placements)
     is_valid, _ = validate_combination(
         op, sample, tensors, combo, ground_truth, world_size, mesh
     )
 
+    # Flipped-mask mitigation: the checkerboard mask that controls offset
+    # signs (for P(sum)/P(avg)) or rank ownership (for P(min)/P(max)) is
+    # deterministic per tensor_idx. Re-validate with the complementary mask
+    # to catch index-returning ops (argmin/argmax) where the result
+    # coincidentally matches because the dominant value happens to land on
+    # a position where both mask orientations preserve argmin/argmax.
+    if is_valid and has_any_partial(input_placements, output_placements):
+        is_valid, _ = validate_combination(
+            op,
+            sample,
+            tensors,
+            combo,
+            ground_truth,
+            world_size,
+            mesh,
+            mask_shift=1,
+        )
+
     if (
         is_valid
         and mitigations.negated_sample
-        and has_pmin_pmax(input_placements, output_placement)
+        and has_pmin_pmax(input_placements, output_placements)
     ):
-        assert mitigations.negated_tensors is not None
-        assert mitigations.negated_ground_truth is not None
-        negated_combo = PlacementCombination(input_placements, output_placement)
-        negated_valid, _ = validate_combination(
+        if mitigations.negated_tensors is None:
+            raise AssertionError("negated_tensors is None")
+        if mitigations.negated_ground_truth is None:
+            raise AssertionError("negated_ground_truth is None")
+        is_valid, _ = validate_combination(
             op,
             mitigations.negated_sample,
             mitigations.negated_tensors,
-            negated_combo,
+            combo,
             mitigations.negated_ground_truth,
             world_size,
             mesh,
         )
-        is_valid = is_valid and negated_valid
 
     if (
         is_valid
         and mitigations.non_rounded_sample
-        and has_any_partial(input_placements, output_placement)
+        and has_any_partial(input_placements, output_placements)
     ):
-        assert mitigations.non_rounded_ground_truth is not None
-        non_rounded_combo = PlacementCombination(input_placements, output_placement)
-        non_rounded_valid, _ = validate_combination(
+        if mitigations.non_rounded_ground_truth is None:
+            raise AssertionError("non_rounded_ground_truth is None")
+        is_valid, _ = validate_combination(
             op,
             mitigations.non_rounded_sample,
             tensors,
-            non_rounded_combo,
+            combo,
             mitigations.non_rounded_ground_truth,
             world_size,
             mesh,
         )
-        is_valid = is_valid and non_rounded_valid
 
     if (
         is_valid
         and mitigations.non_rounded_negated_sample
-        and has_pmin_pmax(input_placements, output_placement)
+        and has_pmin_pmax(input_placements, output_placements)
     ):
-        assert mitigations.non_rounded_negated_tensors is not None
-        assert mitigations.non_rounded_negated_ground_truth is not None
-        nr_negated_combo = PlacementCombination(input_placements, output_placement)
-        nr_negated_valid, _ = validate_combination(
+        if mitigations.non_rounded_negated_tensors is None:
+            raise AssertionError("non_rounded_negated_tensors is None")
+        if mitigations.non_rounded_negated_ground_truth is None:
+            raise AssertionError("non_rounded_negated_ground_truth is None")
+        is_valid, _ = validate_combination(
             op,
             mitigations.non_rounded_negated_sample,
             mitigations.non_rounded_negated_tensors,
-            nr_negated_combo,
+            combo,
             mitigations.non_rounded_negated_ground_truth,
             world_size,
             mesh,
         )
-        is_valid = is_valid and nr_negated_valid
 
     return is_valid
 
@@ -1123,21 +1177,22 @@ def _validate_with_mitigations(
 def _assert_keys_normalized(
     keys: set[ComboKey],
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
 ) -> None:
     """Assert all combo keys have trivial shards already normalized to Replicate."""
     for key in keys:
-        assert key == normalize_combo_key(key, input_shapes, output_shape), (
-            f"Key {key} contains un-normalized trivial shards; "
-            f"call normalize_combo_key before _compare_rules"
-        )
+        if key != normalize_combo_key(key, input_shapes, output_shapes):
+            raise AssertionError(
+                f"Key {key} contains un-normalized trivial shards; "
+                f"call normalize_combo_key before _compare_rules"
+            )
 
 
 def _compare_rules(
     ground_truth_valid: set[ComboKey],
     dtensor_rules: set[ComboKey],
     input_shapes: tuple[tuple[int, ...], ...],
-    output_shape: tuple[int, ...],
+    output_shapes: tuple[tuple[int, ...], ...],
     sample_idx: int,
     scalar_args: tuple[Any, ...],
     scalar_kwargs: dict[str, Any],
@@ -1150,17 +1205,21 @@ def _compare_rules(
     if not dtensor_rules:
         return
 
-    _assert_keys_normalized(ground_truth_valid, input_shapes, output_shape)
-    _assert_keys_normalized(dtensor_rules, input_shapes, output_shape)
+    _assert_keys_normalized(ground_truth_valid, input_shapes, output_shapes)
+    _assert_keys_normalized(dtensor_rules, input_shapes, output_shapes)
 
+    op_str = str(aten_op)
     for combo_key in ground_truth_valid:
         if combo_key in dtensor_rules:
             stats.true_positives += 1
+            stats.true_positives_by_op[op_str] = (
+                stats.true_positives_by_op.get(op_str, 0) + 1
+            )
         else:
             stats.false_negatives.append(
                 Discrepancy(
                     input_placements=combo_key[0],
-                    output_placement=combo_key[1],
+                    output_placements=combo_key[1],
                     sample_idx=sample_idx,
                     input_shapes=input_shapes,
                     discrepancy_type="false_negative",
@@ -1177,7 +1236,7 @@ def _compare_rules(
             stats.false_positives.append(
                 Discrepancy(
                     input_placements=combo_key[0],
-                    output_placement=combo_key[1],
+                    output_placements=combo_key[1],
                     sample_idx=sample_idx,
                     input_shapes=input_shapes,
                     discrepancy_type="false_positive",
@@ -1234,15 +1293,16 @@ def _print_discrepancy_section(
         lambda: defaultdict(list)
     )
     for d in discrepancies:
-        op_str = str(d.aten_op) if d.aten_op else "(unknown)"
-        key = (d.input_placements, d.output_placement)
+        op_str = str(d.aten_op)
+        key = (d.input_placements, d.output_placements)
         by_op[op_str][key].append(d)
 
     for op_str in sorted(by_op.keys()):
         print(f"\n  [{op_str}]")
         for (inp, out), discs in sorted(by_op[op_str].items(), key=str):
             inp_str = ", ".join(inp)
-            print(f"    {inp_str} -> {out}")
+            out_str = out[0] if len(out) == 1 else "(" + ", ".join(out) + ")"
+            print(f"    {inp_str} -> {out_str}")
             if show_repro:
                 limit = len(discs) if show_repro < 0 else show_repro
                 for d in discs[:limit]:
@@ -1259,6 +1319,24 @@ def _print_comparison_summary(
     show_repro: int = 0,
 ) -> None:
     """Print discrepancy details for an operator."""
+    # Per aten op variant breakdown
+    fp_by_op: dict[str, set[ComboKey]] = defaultdict(set)
+    for d in stats.false_positives:
+        op_str = str(d.aten_op)
+        fp_by_op[op_str].add((d.input_placements, d.output_placements))
+    fn_by_op: dict[str, set[ComboKey]] = defaultdict(set)
+    for d in stats.false_negatives:
+        op_str = str(d.aten_op)
+        fn_by_op[op_str].add((d.input_placements, d.output_placements))
+
+    all_ops = sorted(set(stats.true_positives_by_op) | set(fp_by_op) | set(fn_by_op))
+    if len(all_ops) > 1:
+        for op_str in all_ops:
+            tp = stats.true_positives_by_op.get(op_str, 0)
+            fp = len(fp_by_op.get(op_str, set()))
+            fn = len(fn_by_op.get(op_str, set()))
+            print(f"  {op_str}: {tp} correct, {fp} incorrect, {fn} missing")
+
     _print_discrepancy_section(
         "Incorrect (has rule but ground truth invalid)",
         stats.false_positives,
@@ -1269,6 +1347,37 @@ def _print_comparison_summary(
         stats.false_negatives,
         show_repro,
     )
+
+
+def _has_dtensor_support(aten_op: OpOverload) -> bool:
+    """Check if an aten op has any DTensor sharding strategy registered."""
+    propagator = DTensor._op_dispatcher.sharding_propagator
+    if aten_op in propagator.op_single_dim_strategy_funcs:
+        return True
+    if aten_op in propagator.op_strategy_funcs:
+        return True
+    return DecompShardingStrategy.has_decomp(aten_op)
+
+
+def _discover_aten_op(
+    opinfos: list[opinfo_core.OpInfo],
+    device: str,
+    dtype: torch.dtype,
+) -> OpOverload | None:
+    """Discover the aten op dispatched by the first valid sample."""
+    for opinfo in opinfos:
+        try:
+            samples = list(opinfo.sample_inputs(device, dtype))
+        except Exception:
+            continue
+        for sample in samples:
+            tensors = extract_tensors_from_sample(sample)
+            if not tensors or any(0 in t.shape for _, t in tensors):
+                continue
+            aten_op, _, _ = get_aten_op_for_sample(opinfo.op, sample, opinfo.name)
+            if aten_op is not None:
+                return aten_op
+    return None
 
 
 def compare_operator(
@@ -1299,6 +1408,12 @@ def compare_operator(
     opinfos = get_opinfo_by_name(op_name)
 
     stats = ComparisonStats()
+
+    aten_op = _discover_aten_op(opinfos, device, dtype)
+    if aten_op is None or not _has_dtensor_support(aten_op):
+        stats.no_dtensor_support = True
+        return stats
+
     total_samples = 0
     total_combinations = 0
     skip_reasons: dict[str, int] = defaultdict(int)
@@ -1351,11 +1466,15 @@ def compare_operator(
                 first_gt = (
                     ground_truth[0] if isinstance(ground_truth, list) else ground_truth
                 )
-                if first_gt.numel() > 0 and (first_gt == 0).all():
+                if first_gt.numel() == 0:
+                    total_samples -= 1
+                    skip_reasons["zero-element output"] += 1
+                    continue
+                if (first_gt == 0).all():
                     total_samples -= 1
                     skip_reasons["all-zero output"] += 1
                     continue
-                if first_gt.numel() > 0 and first_gt.isnan().all():
+                if first_gt.isnan().all():
                     total_samples -= 1
                     skip_reasons["all-NaN output"] += 1
                     continue
@@ -1364,7 +1483,9 @@ def compare_operator(
                 continue
 
             input_shapes = tuple(t.shape for _, t in tensors)
-            output_shape = tuple(first_gt.shape)
+            gt_list = ground_truth if isinstance(ground_truth, list) else [ground_truth]
+            output_shapes = tuple(tuple(gt.shape) for gt in gt_list)
+            n_outputs = len(gt_list)
 
             scalar_args = tuple(
                 a for a in sample.args if not isinstance(a, torch.Tensor)
@@ -1381,19 +1502,21 @@ def compare_operator(
                 get_1d_input_placements_for_tensor(t, include_partial=True)
                 for _, t in tensors
             ]
+            # Use first output for enumerating placement options (DTensor applies
+            # the same placement to all outputs of multi-output ops)
             output_placement_options = get_1d_output_placements_for_tensor(first_gt)
 
-            aten_op, non_tensor_args, non_tensor_kwargs = get_aten_op_for_sample(
+            aten_op, captured_args, captured_kwargs = get_aten_op_for_sample(
                 op, sample, opinfo.name
             )
 
             dtensor_rules = _query_dtensor_rules(
                 aten_op,
                 tensors,
-                non_tensor_args,
-                non_tensor_kwargs,
+                captured_args,
+                captured_kwargs,
                 input_shapes,
-                output_shape,
+                output_shapes,
                 world_size,
                 verbose,
             )
@@ -1407,7 +1530,7 @@ def compare_operator(
                 if incorrect_only:
                     combinations_to_test = []
                     for combo_key in dtensor_rules:
-                        input_plc_strs, output_plc_str = combo_key
+                        input_plc_strs, output_plc_strs = combo_key
                         input_plcs_list: list[Placement] = []
                         all_valid = True
                         for s in input_plc_strs:
@@ -1416,11 +1539,21 @@ def compare_operator(
                                 all_valid = False
                                 break
                             input_plcs_list.append(p)
-                        output_plc = parse_placement(output_plc_str)
-                        if not all_valid or output_plc is None:
+                        output_plcs_list: list[Placement] = []
+                        for s in output_plc_strs:
+                            p = parse_placement(s)
+                            if p is None:
+                                all_valid = False
+                                break
+                            output_plcs_list.append(p)
+                        if not all_valid:
                             continue
                         combinations_to_test.append(
-                            (tuple(input_plcs_list), output_plc, combo_key)
+                            (
+                                tuple(input_plcs_list),
+                                tuple(output_plcs_list),
+                                combo_key,
+                            )
                         )
                 else:
                     combinations_to_test = []
@@ -1428,17 +1561,22 @@ def compare_operator(
                         if is_fully_replicated(input_placements):
                             continue
                         for output_placement in output_placement_options:
+                            # Apply same placement to all outputs (matches
+                            # DTensor propagator behavior for multi-output ops)
+                            output_placements = tuple(
+                                output_placement for _ in range(n_outputs)
+                            )
                             combo_key = (
                                 tuple(str(p) for p in input_placements),
-                                str(output_placement),
+                                tuple(str(p) for p in output_placements),
                             )
                             combinations_to_test.append(
-                                (input_placements, output_placement, combo_key)
+                                (input_placements, output_placements, combo_key)
                             )
 
                 for (
                     input_placements,
-                    output_placement,
+                    output_placements,
                     combo_key,
                 ) in combinations_to_test:
                     total_combinations += 1
@@ -1447,7 +1585,7 @@ def compare_operator(
                         sample,
                         tensors,
                         input_placements,
-                        output_placement,
+                        output_placements,
                         ground_truth,
                         world_size,
                         mesh,
@@ -1456,7 +1594,7 @@ def compare_operator(
 
                     if is_valid:
                         normalized_key = normalize_combo_key(
-                            combo_key, input_shapes, output_shape
+                            combo_key, input_shapes, output_shapes
                         )
                         if not is_fully_replicated(
                             tuple(
@@ -1470,7 +1608,7 @@ def compare_operator(
                 ground_truth_valid,
                 dtensor_rules,
                 input_shapes,
-                output_shape,
+                output_shapes,
                 sample_idx,
                 scalar_args,
                 scalar_kwargs,
@@ -1533,6 +1671,74 @@ def get_registered_op_names() -> list[str]:
     return sorted(result)
 
 
+def report_registrations(verbose: bool = False) -> None:
+    """Report the number (and optionally full list) of ops by registration method.
+
+    Directly registered categories (mutually exclusive):
+      - rule: ops registered via register_prop_rule
+      - op_strategy: ops registered via register_op_strategy
+      - single_dim_strategy: ops registered via register_single_dim_strategy
+
+    Ops not in any of the above may still be supported at runtime via
+    DecompShardingStrategy, which traces through the op's decomposition and
+    propagates placements through the decomposed sub-ops.  Whether this
+    actually works depends on every sub-op having a registered strategy.
+    We report the decomposition_table entries as a separate (untested) count.
+    """
+    from torch._decomp import decomposition_table
+
+    propagator = DTensor._op_dispatcher.sharding_propagator
+
+    rule_ops = sorted(propagator.op_to_rules.keys(), key=str)
+    strategy_ops = sorted(propagator.op_strategy_funcs.keys(), key=str)
+    single_dim_ops = sorted(propagator.op_single_dim_strategy_funcs.keys(), key=str)
+
+    directly_registered = (
+        set(propagator.op_to_rules.keys())
+        | set(propagator.op_strategy_funcs.keys())
+        | set(propagator.op_single_dim_strategy_funcs.keys())
+    )
+
+    # Ops from the explicit decomposition table that aren't directly registered.
+    # These *may* work via DecompShardingStrategy if all their sub-ops are
+    # supported, but we can't verify that without tracing each one.
+    decomp_only_ops = sorted(
+        (op for op in decomposition_table if op not in directly_registered),
+        key=str,
+    )
+
+    print("=" * 70)
+    print("DTensor operator registration report")
+    print("=" * 70)
+
+    print("\nDirectly registered:")
+    print(f"  rule (register_prop_rule):            {len(rule_ops):>4}")
+    print(f"  op_strategy (register_op_strategy):   {len(strategy_ops):>4}")
+    print(f"  single_dim_strategy:                  {len(single_dim_ops):>4}")
+    print(f"  total:                                {len(directly_registered):>4}")
+
+    print(f"\nDecomposition table (not directly registered): {len(decomp_only_ops)}")
+    print(
+        "  These ops have entries in torch._decomp.decomposition_table but no\n"
+        "  direct DTensor strategy. They may work at runtime via\n"
+        "  DecompShardingStrategy if all decomposed sub-ops are supported.\n"
+        "  Additional ops beyond this count may also be reachable via CIA\n"
+        "  (CompositeImplicitAutograd) decompositions."
+    )
+
+    if verbose:
+
+        def _print_ops(label: str, ops: list) -> None:
+            print(f"\n{label} ({len(ops)}):")
+            for op in ops:
+                print(f"  {op}")
+
+        _print_ops("rule", rule_ops)
+        _print_ops("op_strategy", strategy_ops)
+        _print_ops("single_dim_strategy", single_dim_ops)
+        _print_ops("decomp table (not directly registered)", decomp_only_ops)
+
+
 if __name__ == "__main__":
     # Override common size variables to ensure even sharding across world_size=2.
     # These are process-global mutations, but this is a CLI entry point so the
@@ -1583,6 +1789,16 @@ if __name__ == "__main__":
         metavar="N",
         help="Show N sample repros per rule (default 1 if flag given, -1 for all)",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Show registration statistics (op counts per registration method)",
+    )
+    parser.add_argument(
+        "--report-full",
+        action="store_true",
+        help="Show full op lists with registration statistics (implies --report)",
+    )
     args = parser.parse_args()
 
     dtype_map = {
@@ -1594,6 +1810,14 @@ if __name__ == "__main__":
     dtype = dtype_map.get(args.dtype, torch.float32)
 
     dist.init_process_group("fake", rank=0, world_size=args.world_size)
+
+    if args.report or args.report_full:
+        report_registrations(verbose=args.report_full)
+        if not args.all_registered and not args.op:
+            dist.destroy_process_group()
+            sys.exit(0)
+        print()
+
     try:
         if args.all_registered:
             op_names = get_registered_op_names()
@@ -1633,6 +1857,13 @@ if __name__ == "__main__":
                     incorrect_only=args.incorrect_only,
                 )
                 elapsed = time.time() - op_start
+
+                if stats.no_dtensor_support:
+                    print(
+                        f"\n[{i + 1}/{len(op_names)}] {display}"
+                        f" — skipped: no DTensor support"
+                    )
+                    continue
 
                 if stats.total_samples == 0 and stats.skip_reasons:
                     reasons = ", ".join(
@@ -1692,11 +1923,11 @@ if __name__ == "__main__":
 
             for name, stats, elapsed in formatted_results:
                 fp_rules = {
-                    (d.input_placements, d.output_placement)
+                    (d.input_placements, d.output_placements)
                     for d in stats.false_positives
                 }
                 fn_rules = {
-                    (d.input_placements, d.output_placement)
+                    (d.input_placements, d.output_placements)
                     for d in stats.false_negatives
                 }
                 n_fp = len(fp_rules)

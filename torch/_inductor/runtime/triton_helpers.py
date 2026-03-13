@@ -342,6 +342,9 @@ def bucketize_binary_search(
         else:
             is_above = values > bucket_upper_bound
 
+        if is_floating(values):
+            is_above = is_above | (values != values)
+
         low = tl.where(is_above & mask, mid + 1, low)
         high = tl.where(is_above, high, mid)
 
@@ -679,7 +682,7 @@ def select_one(x, mask, dim, keep_dims=False):
     idtype = tl.core.get_int_dtype(x.dtype.primitive_bitwidth, signed=False)
     ix = x.to(idtype, bitcast=True)
     iy = tl.sum(ix * mask, dim, keep_dims=keep_dims)
-    return iy.to(x.dtype, bitcast=True)
+    return iy.to(idtype).to(x.dtype, bitcast=True)
 
 
 @triton.jit

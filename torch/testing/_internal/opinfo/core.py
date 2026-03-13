@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, TypeVar
 
 import torch
 from torch.testing import make_tensor
@@ -652,7 +652,7 @@ class OpInfo:
 
     # An optional reference function that accepts ndarrays (AKA "NumPy arrays").
     # If given, the op will be compared with its reference on each of its sample inputs.
-    ref: Optional[Callable] = None
+    ref: Callable | None = None
 
     # the following metadata describes the operator, its variants, and its aliases, if any
 
@@ -837,11 +837,11 @@ class OpInfo:
 
     # If `supports_cow_input_no_materialize_forward == True`, this list contains
     # the arg indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize_forward: list[Union[int, str]] = None
+    allow_cow_input_materialize_forward: list[int | str] = None
 
     # If `supports_cow_input_no_materialize_backward == True`, this list contains
     # the arg indices or kwarg names of inputs that are expected to materialize
-    allow_cow_input_materialize_backward: list[Union[int, str]] = None
+    allow_cow_input_materialize_backward: list[int | str] = None
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
@@ -876,10 +876,10 @@ class OpInfo:
     aten_name: str = None
 
     # if this is a composite implicit autograd op, the decomposed op
-    decomp_aten_name: Optional[str] = None
+    decomp_aten_name: str | None = None
 
     # name of the corresponding aten:: operator for backwards
-    aten_backward_name: Optional[str] = None
+    aten_backward_name: str | None = None
 
     # if a op's aten::node is expected to be symbolically autodiffed
     assert_autodiffed: bool = False
@@ -1819,11 +1819,11 @@ class ReductionOpInfo(OpInfo):
         name,
         *,
         # The identity value for the operator if it has one.
-        identity: Optional[Any] = None,
+        identity: Any | None = None,
         # The nan policy for the operator if it implements one.
         # - propagate: NaN values are propagated to the output
         # - omit: NaN values are discarded during the reduction
-        nan_policy: Optional[str] = None,
+        nan_policy: str | None = None,
         # Whether the operator supports reducing multiple dimensions.
         supports_multiple_dims: bool = True,
         # Whether the operator promotes integral to floating point dtypes.
@@ -1833,7 +1833,7 @@ class ReductionOpInfo(OpInfo):
         # If a specific dtype is given, then the operator always returns that
         # dtype irrespective of the input dtype. If None, the operator returns
         # the dtype according to the type promotion rules above.
-        result_dtype: Optional[torch.dtype] = None,
+        result_dtype: torch.dtype | None = None,
         # Casts complex results to real (e.g. linalg.norm or torch.var)
         complex_to_real: bool = False,
         # ReductionOpInfo tests generate their own input, dim and keepdim

@@ -177,6 +177,7 @@ jobs:
         run: |
           bash .github/scripts/pr-sanity-check.sh
 
+
   workflow-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     needs: get-label-type
@@ -357,6 +358,45 @@ jobs:
       runner: ${{ needs.get-label-type.outputs.label-type }}
       ref:    ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     secrets: inherit
+
+  doc-redirects-check:
+    name: doc-redirects-check
+    needs: get-label-type
+    runs-on: [self-hosted, "${{ needs.get-label-type.outputs.label-type }}linux.large"]
+    if: github.event_name == 'pull_request' && github.repository_owner == 'pytorch'
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Doc redirects check (nonretryable)
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          # Run the check with auto-fix to generate suggestions
+          python3 .github/scripts/check_doc_redirects.py \
+            --base-ref "origin/${BASE_REF}" \
+            --auto-fix
+
+          # If redirects.py was modified, show the diff and fail
+          if ! git diff --quiet docs/source/redirects.py 2>/dev/null; then
+            echo ""
+            echo "📋 The following redirects were auto-generated:"
+            echo ""
+            git diff docs/source/redirects.py
+            echo ""
+            echo "Please add these changes to your PR by running locally:"
+            echo ""
+            echo "    python3 .github/scripts/check_doc_redirects.py --base-ref origin/main --auto-fix"
+            echo "    git add docs/source/redirects.py"
+            echo "    git commit --amend --no-edit  # or create a new commit"
+            echo ""
+            exit 1
+          fi
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}

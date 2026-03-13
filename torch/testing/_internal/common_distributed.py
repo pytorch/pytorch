@@ -24,7 +24,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -341,7 +341,7 @@ def with_nccl_blocking_wait(func):
     def wrapper(*args, **kwargs):
         # Save and unset TORCH_NCCL_ASYNC_ERROR_HANDLING
         try:
-            cached_nccl_async_error_handling: Union[str, None] = os.environ[
+            cached_nccl_async_error_handling: str | None = os.environ[
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
             ]
             del os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"]
@@ -351,7 +351,7 @@ def with_nccl_blocking_wait(func):
 
         # Save val of TORCH_NCCL_BLOCKING_WAIT and set it.
         try:
-            cached_nccl_blocking_wait: Union[str, None] = os.environ[
+            cached_nccl_blocking_wait: str | None = os.environ[
                 "TORCH_NCCL_BLOCKING_WAIT"
             ]
         except KeyError:
@@ -712,10 +712,10 @@ def init_multigpu_helper(world_size: int, backend: str):
     return rank_to_GPU
 
 
-tmp_dir: Optional[tempfile.TemporaryDirectory] = None
+tmp_dir: tempfile.TemporaryDirectory | None = None
 
 
-def initialize_temp_directories(init_method: Optional[str] = None) -> None:
+def initialize_temp_directories(init_method: str | None = None) -> None:
     global tmp_dir
     tmp_dir = tempfile.TemporaryDirectory()
     os.environ["TEMP_DIR"] = tmp_dir.name
@@ -1695,7 +1695,7 @@ class MultiProcContinuousTest(TestCase):
     # rank of the current process
     rank: int = -2  # unset state
     # Rendezvous file
-    rdvz_file: Optional[str] = None
+    rdvz_file: str | None = None
     # timeout configured per class
     timeout: timedelta = timedelta(seconds=120)
     # Poison pill for rest of tests if one of them fails
@@ -1704,7 +1704,7 @@ class MultiProcContinuousTest(TestCase):
     _processes_spawned: bool = False
 
     @classmethod
-    def backend_str(cls) -> Optional[str]:
+    def backend_str(cls) -> str | None:
         """
         ProcessGroup backend str.
         To be customized by sub test classes, e.g. "nccl".
@@ -1922,11 +1922,18 @@ class MultiProcContinuousTest(TestCase):
         if cls._processes_spawned:
             return
 
-        # Handle both method and string attribute for device_type
+        # Handle method, property, and string attribute for device_type
         # (instantiate_device_type_tests sets device_type as a string attribute,
         # making this compatible as a drop-in replacement for MultiProcessTestCase)
-        device_type_attr = cls.device_type
-        if callable(device_type_attr):
+        device_type_attr = cls.__dict__.get("device_type", cls.device_type)
+        if isinstance(device_type_attr, classmethod):
+            device_type = device_type_attr.__func__(cls)
+        elif isinstance(device_type_attr, property):
+            # Note: fget expects an instance but we pass cls since no instance
+            # exists yet. This works because DTensorTestMixin.device_type only
+            # accesses class-level attributes (world_size, module constants).
+            device_type = device_type_attr.fget(cls)
+        elif callable(device_type_attr):
             device_type = device_type_attr()
         else:
             device_type = device_type_attr
@@ -2009,21 +2016,25 @@ class MultiProcContinuousTest(TestCase):
         def wrapper(self):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
-                # Wait for the workers to finish the test
+                # Drain all completion queues before raising any exception,
+                # so stale results don't desync subsequent tests.
+                deferred_exception = None
                 for i, completion_queue in enumerate(self.completion_queues):
                     rv = completion_queue.get()
+                    if deferred_exception is not None:
+                        # Already captured an exception; just drain
+                        continue
                     if isinstance(rv, unittest.SkipTest):
-                        raise rv
+                        deferred_exception = rv
+                        continue
                     if isinstance(rv, BaseException):
-                        # Hit an exception, re-raise it in the main process.
                         logger.warning(
                             f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
                             f"skipping rest of tests in Test class: {self.__class__.__name__}"  # noqa: G004
                         )
-                        # Poison rest of tests (because ProcessGroup may be not
-                        # reusable now)
                         self.__class__.poison_pill = True
-                        raise rv
+                        deferred_exception = rv
+                        continue
 
                     # Success
                     if rv != self.id():
@@ -2033,6 +2044,9 @@ class MultiProcContinuousTest(TestCase):
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
+
+                if deferred_exception is not None:
+                    raise deferred_exception
             else:
                 # Worker just runs the test
                 fn()

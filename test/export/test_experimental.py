@@ -62,7 +62,11 @@ class GlobalContext:
         """Reconstructs from (leaves, ctx)."""
         output = cls()
         summary_spec, tensor_spec = ctx
-        assert len(leaves) == summary_spec.num_leaves + tensor_spec.num_leaves
+        if len(leaves) != summary_spec.num_leaves + tensor_spec.num_leaves:
+            raise AssertionError(
+                f"Expected {summary_spec.num_leaves + tensor_spec.num_leaves} leaves, "
+                f"got {len(leaves)}"
+            )
         output._summaries = pytree.tree_unflatten(
             leaves[: summary_spec.num_leaves], summary_spec
         )
@@ -789,6 +793,34 @@ def forward(self, x):
         res_eager = Foo()(*eager_inputs[0], **eager_inputs[1])
 
         self.assertEqual(res_export, res_eager)
+
+    def test_single_op(self):
+        # from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+        x, y = (torch.randn(2, 3), torch.randn(2, 3))
+        graph = dynamo_graph_capture_for_export(torch.ops.aten.add.Tensor)(x, y)
+        self.assertExpectedInline(
+            graph.code.strip("\r\n "),
+            """\
+def forward(self, other):
+    _fn_args = (self, other)
+    self, L_self_ , L_other_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_self_ = L_self_
+    l_other_ = L_other_
+    add_tensor = torch.ops.aten.add.Tensor(self = l_self_, other = l_other_, alpha = 1);  l_self_ = l_other_ = None
+    return self._dynamo_bytecode_unflatten((add_tensor,), _fn_args)""",
+        )
+        out = torch.empty(10)
+        graph = dynamo_graph_capture_for_export(torch.ops.aten.range.out)(0, 9, out=out)
+        self.assertExpectedInline(
+            graph.code.strip("\r\n "),
+            """\
+def forward(self, start, end, out):
+    _fn_args = (start, end, out)
+    L_out_ , = self._dynamo_bytecode_flatten(*_fn_args)
+    l_out_ = L_out_
+    range_out = torch.ops.aten.range.out(start = 0, end = 9, step = 1, out = l_out_);  l_out_ = None
+    return self._dynamo_bytecode_unflatten((range_out,), _fn_args)""",
+        )
 
     def test_export_leaf(self):
         class Foo(torch.nn.Module):

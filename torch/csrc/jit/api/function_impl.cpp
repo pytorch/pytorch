@@ -1,7 +1,6 @@
 #include <c10/util/Flags.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <torch/csrc/jit/passes/constant_pooling.h>
@@ -75,16 +74,6 @@ c10::intrusive_ptr<c10::ivalue::Future> GraphFunction::runAsync(
     Stack& stack,
     TaskLauncher taskLauncher) {
   return get_executor().runAsync(stack, std::move(taskLauncher));
-}
-
-size_t GraphFunction::num_inputs() const {
-  return graph()->inputs().size();
-}
-
-void GraphFunction::check_single_output() {
-  TORCH_CHECK(
-      graph()->outputs().size() == 1,
-      "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
 }
 
 void GraphFunction::ensure_defined() {

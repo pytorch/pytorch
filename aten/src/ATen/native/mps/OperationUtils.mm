@@ -484,8 +484,8 @@ MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray) 
   MPSShape* originalSortedStridesShape = sortedStridesShape;
   bool hasNonZeroStrides = nStrides == 0 ? false : nonZeroStrides[sortedStridesIndices[nStrides - 1]] != 1;
   if (hasNonZeroStrides) {
-    originalSortedMPSShape = [sortedMPSShape copy];
-    originalSortedStridesShape = [sortedStridesShape copy];
+    originalSortedMPSShape = [[sortedMPSShape copy] autorelease];
+    originalSortedStridesShape = [[sortedStridesShape copy] autorelease];
     [sortedStridesShape addObject:[NSNumber numberWithInteger:1]];
     [sortedMPSShape addObject:[NSNumber numberWithInteger:1]];
   }

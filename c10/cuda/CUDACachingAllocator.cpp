@@ -420,8 +420,8 @@ struct ExpandableSegment {
       return map(range);
     }
 
-    while (end > handles_.size()) {
-      handles_.emplace_back(std::nullopt);
+    if (end > handles_.size()) {
+      handles_.resize(end);
     }
     for (auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
@@ -729,9 +729,11 @@ struct ExpandableSegment {
     trimHandles();
   }
   void trimHandles() {
-    while (!handles_.empty() && !handles_.back()) {
-      handles_.pop_back();
-    }
+    auto it = std::find_if(
+        handles_.rbegin(),
+        handles_.rend(),
+        [](const std::optional<Handle>& opt) { return opt.has_value(); });
+    handles_.erase(it.base(), handles_.end());
   }
   void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
     size_t start = 0;
@@ -2656,18 +2658,62 @@ class DeviceCachingAllocator {
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
-    if (CUDAAllocatorConfig::graph_capture_record_stream_reuse() &&
-        !graph_reuse_context.empty()) {
-      auto capture_id = mempool_to_capture_id[mempool_id];
-      auto graph_context = graph_reuse_context[capture_id];
-      for (auto& [stream, _] : graph_context.visited) {
-        TORCH_INTERNAL_ASSERT(
-            stream_get_capture_info(stream).status ==
-                cudaStreamCaptureStatusNone,
-            "This stream should not be capturing when the capture is ended");
+    if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
+      // Remove stream reuse context and mapping for this capture, if present.
+      if (!graph_reuse_context.empty()) {
+        auto capture_id = mempool_to_capture_id[mempool_id];
+        auto graph_context = graph_reuse_context[capture_id];
+        for (auto& [stream, _] : graph_context.visited) {
+          TORCH_INTERNAL_ASSERT(
+              stream_get_capture_info(stream).status ==
+                  cudaStreamCaptureStatusNone,
+              "This stream should not be capturing when the capture is ended");
+        }
+        graph_reuse_context.erase(capture_id);
+        mempool_to_capture_id.erase(mempool_id);
       }
-      graph_reuse_context.erase(capture_id);
-      mempool_to_capture_id.erase(mempool_id);
+
+      // Free deferred blocks associated with the ended pool, if any.
+      // cudaStreamEndCapture would have failed if any stream used during
+      // capture hadn't been joined back, so all stream uses on these
+      // blocks are known to be complete and we can safely clear them.
+      if (!deferred_blocks.empty()) {
+        auto pool_it = graph_pools.find(mempool_id);
+        if (pool_it != graph_pools.end()) {
+          auto* private_pool = pool_it->second.get();
+          auto context = maybeGatherContext(RecordContext::ALL);
+          std::vector<Block*> blocks_to_erase;
+          for (auto& [block, markers] : deferred_blocks) {
+            if (block->pool->owner_PrivatePool == private_pool) {
+              // At capture end, handle blocks associated with non-capturing
+              // streams. Remove only stream uses introduced during capture
+              // (guaranteed complete), and for any leftover pre-capture uses,
+              // insert events to track their completion. This aligns with
+              // insert_events_deferred_until_no_capture semantics.
+              remove_cudagraph_stream_uses(block);
+              if (block->stream_uses.empty()) {
+                free_block(block, context);
+              } else {
+                // Pre-capture stream uses remain; record events so
+                // process_events can free the block once they complete.
+                insert_events(block);
+                // block->event_count should likely be non-zero here since
+                // block->stream_uses is not empty. Defensive: still free if
+                // event_count is zero, but this should be rare.
+                if (block->event_count == 0) {
+                  free_block(block, context);
+                }
+              }
+              // Must erase from deferred_blocks regardless of which branch we
+              // took.
+              blocks_to_erase.push_back(block);
+            }
+          }
+          for (auto* b : blocks_to_erase) {
+            deferred_blocks.erase(b);
+          }
+        }
+      }
     }
 
     for (auto it = captures_underway.begin(); it != captures_underway.end();
@@ -4095,6 +4141,15 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[device]->isHistoryEnabled();
   }
 
+  std::shared_ptr<GatheredContext> getContextForPointer(
+      const void* ptr) override {
+    Block* block = get_allocated_block(const_cast<void*>(ptr));
+    if (!block) {
+      return nullptr;
+    }
+    return block->context_when_allocated;
+  }
+
   bool checkPoolLiveAllocations(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
@@ -4655,7 +4710,7 @@ struct BackendStaticInitializer {
 // initialization, and doing so there may introduce static initialization
 // order (SIOF) issues.
 #define HIP_MASQUERADING_AS_CUDA "cuda"
-    at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 0);
+    at::SetAllocator(c10::Device(HIP_MASQUERADING_AS_CUDA).type(), r, 1);
     allocator.store(r);
 #undef HIP_MASQUERADING_AS_CUDA
   }

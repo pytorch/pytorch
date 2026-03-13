@@ -4,6 +4,7 @@ import copy
 import functools
 import logging
 import random
+import re
 import unittest
 from contextlib import contextmanager
 from datetime import timedelta
@@ -351,6 +352,8 @@ def run_hf_bert_ddp(self, model, inputs, backend):
 
 
 class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", True)
     @patch.object(torch._inductor.config, "fallback_random", True)
@@ -363,6 +366,8 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         model = FakeDDP(model)
         run_hf_bert_ddp(self, model, inputs, "inductor")
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @patch.object(config, "optimize_ddp", True)
     def test_hf_bert_ddp_aot_eager(self):
         model, inputs = get_hf_bert(0)
@@ -597,6 +602,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "inductor")
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -605,6 +612,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_hf_bert_ddp_inductor(self):
         self._test_hf_bert_ddp_inductor(static_graph=False)
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -619,12 +628,16 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = DDP(model, static_graph=static_graph)
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
     def test_hf_bert_ddp_aot_eager(self):
         self._test_hf_bert_aot_eager(static_graph=False)
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @skip_if_lt_x_gpu(2)
     @import_transformers_or_skip()
     @config.patch(optimize_ddp=True, enable_compiler_collectives=True)
@@ -844,6 +857,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 find_first_node(cnt.graphs[0], tag_activation_checkpoint) is not None
             )
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
@@ -889,6 +904,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 )
                 self.assertTrue(same(correct_results, opt_results))
 
+    @unittest.expectedFailure
+    # https://github.com/huggingface/transformers/issues/44188
     @import_transformers_or_skip()
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
@@ -1174,11 +1191,13 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             f(x)
             """
 
+            # Ranks take different code paths (tensor vs int), so compilation counts
+            # can differ. Check that every rank triggered compilation at least once.
             metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
             torch.distributed.all_gather_object(res, len(metrics))
-            for r in res[1:]:
-                self.assertEqual(res[0], r)
+            for r in res:
+                self.assertGreaterEqual(r, 1, "each rank should compile at least once")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @enable_guard_collectives()
@@ -1494,7 +1513,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @patch.object(config, "optimize_ddp", True)
     def test_graph_split(self):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
         """
         Just ensures that the appropriate number of splits happen (based on
         bucket size and model parameters) - verifies the number of times
@@ -1690,7 +1710,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
         """
         Same as above, but using inductor backend.
         We observed issues with inductor/fx interface in the past.
@@ -1710,7 +1731,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     )
     @patch.object(config, "optimize_ddp", True)
     def _test_graph_split_inductor_layout_optimizations_impl(self, context):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
         channel_dim = 512
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
 
@@ -1770,7 +1792,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_transpose(self):
-        assert config.optimize_ddp
+        if not config.optimize_ddp:
+            raise AssertionError("Expected config.optimize_ddp to be True")
 
         B = 100
         N = 30
@@ -2226,7 +2249,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_reduce_returns_none(self):
         def fn(x, w):
             result = dist.all_reduce(x, async_op=False)
-            assert result is None
+            assert result is None  # noqa: S101
             return x @ w
 
         x = torch.randn(4, 4, device=self.device)
@@ -2239,7 +2262,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_gather_into_tensor_returns_none(self):
         def fn(output, input, w):
             result = dist.all_gather_into_tensor(output, input, async_op=False)
-            assert result is None
+            assert result is None  # noqa: S101
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2252,7 +2275,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_reduce_scatter_tensor_returns_none(self):
         def fn(output, input, w):
             result = dist.reduce_scatter_tensor(output, input, async_op=False)
-            assert result is None
+            assert result is None  # noqa: S101
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2265,7 +2288,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_to_all_single_returns_none(self):
         def fn(output, input, w):
             result = dist.all_to_all_single(output, input, async_op=False)
-            assert result is None
+            assert result is None  # noqa: S101
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2278,7 +2301,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_gather_returns_none(self):
         def fn(tensor_list, tensor, w):
             result = dist.all_gather(tensor_list, tensor, async_op=False)
-            assert result is None
+            assert result is None  # noqa: S101
             return tensor_list[0] @ w
 
         tensor = torch.randn(4, 4, device=self.device)
@@ -2291,7 +2314,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_reduce_scatter_base_returns_none(self):
         def fn(output, input, w):
             result = dist._reduce_scatter_base(output, input, async_op=False)
-            assert result is None
+            assert result is None  # noqa: S101
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2304,7 +2327,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
     def test_compiled_all_gather_base_returns_none(self):
         def fn(output, input, w):
             result = dist._all_gather_base(output, input, async_op=False)
-            assert result is None
+            assert result is None  # noqa: S101
             return output @ w
 
         input = torch.randn(4, 4, device=self.device)
@@ -2320,6 +2343,144 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         actual = compiled_fn(output, input, w)
         self.assertEqual(actual, input @ w)
+
+
+@unittest.skipIf(not dist.is_available(), "requires distributed")
+class TestNNFunctionalCompile(torch._dynamo.test_case.TestCase):
+    """Tests for torch.distributed.nn.functional under torch.compile."""
+
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=2)
+
+    def tearDown(self):
+        dist.destroy_process_group()
+        super().tearDown()
+
+    def _assert_not_supported(self, fn, x, name, *, suggestion=None):
+        expected = f"torch.distributed.nn.functional.{name} is not supported under torch.compile."
+        if suggestion:
+            expected = re.escape(expected + f" Use {suggestion} instead.")
+        with self.assertRaisesRegex(RuntimeError, expected):
+            fn(x)
+
+    def test_nn_functional_all_reduce_unsupported(self):
+        from torch.distributed.nn.functional import all_reduce
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return all_reduce(x, op=dist.ReduceOp.SUM)
+
+        self._assert_not_supported(
+            fn,
+            torch.randn(4, 4),
+            "all_reduce",
+            suggestion="torch.distributed._functional_collectives.all_reduce",
+        )
+
+    def test_nn_functional_all_gather_unsupported(self):
+        from torch.distributed.nn.functional import all_gather
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return all_gather(x)
+
+        self._assert_not_supported(
+            fn,
+            torch.randn(4, 4),
+            "all_gather",
+            suggestion="torch.distributed._functional_collectives.all_gather_tensor",
+        )
+
+    def test_nn_functional_reduce_scatter_unsupported(self):
+        from torch.distributed.nn.functional import reduce_scatter
+
+        @torch.compile(fullgraph=True)
+        def fn(input_list):
+            output = torch.empty(4, 4)
+            return reduce_scatter(output, input_list)
+
+        self._assert_not_supported(
+            fn,
+            [torch.randn(4, 4), torch.randn(4, 4)],
+            "reduce_scatter",
+            suggestion="torch.distributed._functional_collectives.reduce_scatter_tensor",
+        )
+
+    def test_nn_functional_all_to_all_single_unsupported(self):
+        from torch.distributed.nn.functional import all_to_all_single
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            output = torch.empty_like(x)
+            return all_to_all_single(output, x)
+
+        self._assert_not_supported(
+            fn,
+            torch.randn(4, 4),
+            "all_to_all_single",
+            suggestion="torch.distributed._functional_collectives.all_to_all_single",
+        )
+
+    def test_nn_functional_broadcast_unsupported(self):
+        from torch.distributed.nn.functional import broadcast
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return broadcast(x, src=0)
+
+        self._assert_not_supported(
+            fn,
+            torch.randn(4),
+            "broadcast",
+            suggestion="torch.distributed._functional_collectives.broadcast",
+        )
+
+    def test_nn_functional_reduce_unsupported(self):
+        from torch.distributed.nn.functional import reduce
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return reduce(x, dst=0)
+
+        self._assert_not_supported(fn, torch.randn(4), "reduce")
+
+    def test_nn_functional_gather_unsupported(self):
+        from torch.distributed.nn.functional import gather
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return gather(x, dst=0)
+
+        self._assert_not_supported(fn, torch.randn(4), "gather")
+
+    def test_nn_functional_scatter_unsupported(self):
+        from torch.distributed.nn.functional import scatter
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return scatter([x, x], src=0)
+
+        self._assert_not_supported(fn, torch.randn(4), "scatter")
+
+    def test_nn_functional_all_to_all_unsupported(self):
+        from torch.distributed.nn.functional import all_to_all
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return all_to_all([torch.empty_like(x)], [x])
+
+        self._assert_not_supported(fn, torch.randn(4), "all_to_all")
+
+    def test_nn_functional_all_gather_base_unsupported(self):
+        from torch.distributed.nn.functional import _all_gather_base
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            output = torch.empty(8)
+            return _all_gather_base(output, x)
+
+        self._assert_not_supported(fn, torch.randn(4), "_all_gather_base")
 
 
 if __name__ == "__main__":

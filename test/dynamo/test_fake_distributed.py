@@ -96,7 +96,6 @@ class GraphModule(torch.nn.Module):
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
         ge_2: "Sym(u2 >= 0)" = primals_3 >= 0
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
-
         floordiv: "Sym((u0//2))" = primals_1 // 2
 
         all_to_all_single: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(primals_4, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_4 = None
@@ -154,6 +153,27 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(10)
         res = fn(x)
         self.assertEqual(res, (x + 1, [0]))
+
+    def test_device_mesh_init_skip_after_graph_break(self):
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(1, self.world_size),
+            mesh_dim_names=("dp", "tp"),
+        )
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            # Graph break so the subsequent DeviceMesh construction happens
+            # at runtime, where eval_frame intercepts DeviceMesh.__init__
+            # as a top-level frame.
+            torch._dynamo.graph_break()
+            layout = device_mesh._get_slice_mesh_layout(("tp",))
+            sub = device_mesh._create_sub_mesh(layout, ("tp",))
+            return x + sub.size()
+
+        x = torch.ones(10)
+        res = fn(x)
+        self.assertEqual(res, x + self.world_size)
 
 
 instantiate_parametrized_tests(TestFakeDistributed)

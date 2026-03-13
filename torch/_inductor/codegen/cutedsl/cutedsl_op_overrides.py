@@ -7,7 +7,6 @@ template kernels, particularly for flex attention modifications.
 """
 
 import math
-from typing import Optional, Union
 
 import sympy
 
@@ -17,7 +16,7 @@ from torch._inductor.virtualized import OpsValue, V
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
-CuteDSLArg = Union[CSEVariable, str, bool, float, int]
+CuteDSLArg = CSEVariable | str | bool | float | int
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
@@ -54,7 +53,7 @@ class CuteDSLOpOverrides(OpOverrides):
     LOG2_E = 1.4426950408889634  # 1/ln(2) for converting natural exp to base-2 exp
 
     @staticmethod
-    def _get_cse_var(arg: CuteDSLArg) -> Optional[CSEVariable]:
+    def _get_cse_var(arg: CuteDSLArg) -> CSEVariable | None:
         """Extract CSEVariable from arg if it's a tensor (either direct or wrapped in OpsValue)."""
         if isinstance(arg, CSEVariable):
             return arg
@@ -70,9 +69,9 @@ class CuteDSLOpOverrides(OpOverrides):
         return str(arg)
 
     @staticmethod
-    def _node_tensor_flags() -> Optional[tuple[bool, bool]]:
+    def _node_tensor_flags() -> tuple[bool, bool] | None:
         node = V.current_node
-        if node is None or len(node.args) < 2:
+        if not isinstance(node, torch.fx.Node) or len(node.args) < 2:
             return None
 
         def _is_tensor(raw_arg: object) -> bool:
@@ -106,7 +105,7 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def _extract_dtype_and_bounds(
         *args: CuteDSLArg,
-    ) -> tuple[Optional[torch.dtype], ValueRanges[sympy.Expr]]:
+    ) -> tuple[torch.dtype | None, ValueRanges[sympy.Expr]]:
         """Extract dtype and bounds from CSEVariable arguments (including OpsValue wrappers)."""
         for arg in args:
             cse_var = CuteDSLOpOverrides._get_cse_var(arg)
@@ -179,10 +178,10 @@ class CuteDSLOpOverrides(OpOverrides):
         return op_format.format(a=a, b=b)
 
     @staticmethod
-    def _expected_tensor_val() -> Optional[torch.Tensor]:
+    def _expected_tensor_val() -> torch.Tensor | None:
         """Return the fake-tensor value from the current FX node's metadata, if any."""
         node = V.current_node
-        if node is None:
+        if not isinstance(node, torch.fx.Node):
             return None
         val = node.meta.get("val")
         return val if isinstance(val, torch.Tensor) else None
@@ -216,7 +215,7 @@ class CuteDSLOpOverrides(OpOverrides):
         return op_format.format(x=x)
 
     @staticmethod
-    def constant(value: Union[bool, float, int], dtype: torch.dtype) -> str:
+    def constant(value: bool | float | int, dtype: torch.dtype) -> str:
         """Generate CuteDSL constant representation."""
         if value == float("-inf"):
             return "float('-inf')"

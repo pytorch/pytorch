@@ -2,11 +2,12 @@
 # ruff: noqa: F841
 import contextlib
 import dataclasses
+import functools
 import importlib
 import math
 import unittest
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -92,7 +93,7 @@ class BlockDescriptorTestBase(InductorTestCase):
     block_descriptor_constructor_str = "tl.make_block_ptr"
 
     def _discontiguous_tensor(
-        self, view_size: tuple[int, ...], device: Union[torch.device, str]
+        self, view_size: tuple[int, ...], device: torch.device | str
     ) -> torch.Tensor:
         """
         Create a padded tensor of the given size.
@@ -126,13 +127,13 @@ class BlockDescriptorTestBase(InductorTestCase):
         self: InductorTestCase,
         func: Callable[..., Any],
         *args,
-        compile_kwargs: Optional[dict] = None,
-        expected_num_block_pointers: Optional[int] = None,
+        compile_kwargs: dict | None = None,
+        expected_num_block_pointers: int | None = None,
         expected_num_programs: int = 1,
         expected_num_triton_kernels: int = 1,
-        config_patches: Optional[dict] = None,
-        rtol: Optional[float] = None,
-        atol: Optional[float] = None,
+        config_patches: dict | None = None,
+        rtol: float | None = None,
+        atol: float | None = None,
     ):
         """
         Runs the module through Inductor, comparing to eager reference.
@@ -160,7 +161,7 @@ class BlockDescriptorTestBase(InductorTestCase):
             }
             self.assertTrue(torch.allclose(ref, actual, **tol))
 
-        def count_code(substr: str, expected: Optional[int]):
+        def count_code(substr: str, expected: int | None):
             count = sum(prog.count(substr) for prog in code)
             if expected is not None:
                 self.assertEqual(count, expected)
@@ -247,8 +248,8 @@ class CommonTemplate:
         self,
         full_size: tuple[int, ...],
         view_size: tuple[int, ...],
-        stride: Optional[tuple[int, ...]],
-        offset: Optional[int],
+        stride: tuple[int, ...] | None,
+        offset: int | None,
         require_block_ptr: bool,
         prefer_nd_tiling: bool,
     ):
@@ -1018,7 +1019,7 @@ class CommonTemplate:
 
         view_size = (5, 7)
         arg0 = self._discontiguous_tensor(view_size, self.device)
-        arg1 = torch.empty(view_size)
+        arg1 = torch.randn(view_size)
 
         # No guarantees on the number of kernels or pointers.
         result, (code,) = self._run_and_compare(
@@ -1055,6 +1056,64 @@ class CommonTemplate:
 
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
+
+    # FIXME: fails for Triton CPU. Tiling does not contain YBLOCK.
+    @test_torchinductor.xfail_if_triton_cpu
+    @xfail_if_use_tensor_descriptor
+    def test_reduction_padded_output_tiling(self):
+        """
+        Test a [Y, X, R0] reduction with tiled output dimensions.
+        The key to elicit this test case is a padded output tensor.
+        """
+        x = torch.randn((9, 11, 2), device=self.device)
+
+        # We expect block pointers for the input and output.
+        result, (code,) = self._run_and_compare(
+            functools.partial(torch.amax, dim=-1),
+            x,
+            expected_num_block_pointers=2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "pad_outputs": True,
+                "padding_alignment_bytes": 32,
+                "padding_stride_threshold": 0,
+                "unroll_reductions_threshold": 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check the code for multiple output dims.
+        self._assert_pointwise_ndims(code, 2)
+        self._assert_reduction_ndims(code, 1)
+
+    @xfail_if_use_tensor_descriptor
+    @parametrize("unroll", (False, True))
+    def test_reduce_trailing_dims_discontiguous_input(self, unroll: bool):
+        """
+        Test a [Y, X, R0, R1] reduction where the input tensor is discontiguous, but we
+        only reduce over the last two dimensions.
+        """
+        view = self._discontiguous_tensor((7, 5, 3, 2), self.device)
+
+        # We expect block pointers for the inputs and output.
+        # Note there are more inputs if unrolled.
+        result, (code,) = self._run_and_compare(
+            functools.partial(
+                torch.amax,
+                dim=(-1, -2),
+            ),
+            view,
+            expected_num_block_pointers=7 if unroll else 2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "unroll_reductions_threshold": 1e4 if unroll else 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check the code for multiple pointwise dims.
+        self._assert_pointwise_ndims(code, 2)
+        self._assert_reduction_ndims(code, 0 if unroll else 2)
 
     def test_2d_reduction_with_broadcast(self):
         """
@@ -1385,7 +1444,7 @@ class CommonTemplate:
         class InputShape:
             x: int
             y: int
-            z: Optional[int] = None
+            z: int | None = None
 
             def to_list(self):
                 out = [self.y, self.x]

@@ -2,7 +2,7 @@
 # ruff: noqa: F821
 # flake8: noqa: F821
 from collections.abc import Callable, Collection, Mapping, MutableMapping
-from typing import cast, TypeVar, Union
+from typing import cast, TypeVar
 
 import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
@@ -10,7 +10,7 @@ from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.tensor import DTensor
 
 
-PATH_ITEM = Union[str, int]
+PATH_ITEM = str | int
 OBJ_PATH = tuple[PATH_ITEM, ...]
 T = TypeVar("T")
 

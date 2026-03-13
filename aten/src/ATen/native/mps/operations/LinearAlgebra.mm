@@ -17,6 +17,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
@@ -31,6 +32,8 @@
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_lu_native.h>
+#include <ATen/ops/linalg_qr.h>
+#include <ATen/ops/linalg_qr_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/lu_unpack.h>
 #include <ATen/ops/lu_unpack_native.h>
@@ -671,9 +674,11 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
 
   TORCH_CHECK(output.is_mps());
 
+  // Edge case behaviors must match _int_mm_out_cpu CPU implementation
   // Transpose inputs if needed
-  if (output.numel() == 0) {
-    return output;
+  // Outer or inner dimension is 0
+  if (output.numel() == 0 || self.size(1) == 0) {
+    return output.zero_();
   }
 
   // MPS matmul returns silently incorrect results if one of the matrix dimensions is greater than 2**15
@@ -862,6 +867,17 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     output.resize_(bias_sizes);
   }
   if (output.numel() == 0) {
+    return output;
+  }
+  // Inner dimension is 0
+  // Early out as some paths in the code below do not handle this case correctly
+  if (self.size(1) == 0) {
+    if (beta.toDouble() == 0.0) {
+      output.zero_();
+    } else {
+      output.copy_(*bias_);
+      output.mul_(beta);
+    }
     return output;
   }
 
@@ -1063,6 +1079,11 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
 }
 
 static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
+  TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(),
+              "Expected arguments of same type but got ",
+              batch1.scalar_type(),
+              " and ",
+              batch2.scalar_type());
   using namespace mps;
 
   // Matmul not supported if any output dimension size is larger than 2**32
@@ -1227,11 +1248,11 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
         const uint64_t aBatchOffset = i * aRows * aCols;
         const uint64_t bBatchOffset = i * bRows * bCols;
         MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
-                                                              offset:(A_t.storage_offset() + aBatchOffset) * aElemSize
+                                                              offset:(A_.storage_offset() + aBatchOffset) * aElemSize
                                                           descriptor:sourceMatrixDesc] autorelease];
         MPSMatrix* rightHandSideMatrix =
             [[[MPSMatrix alloc] initWithBuffer:bBuffer
-                                        offset:(B_t.storage_offset() + bBatchOffset) * bElemSize
+                                        offset:(B_.storage_offset() + bBatchOffset) * bElemSize
                                     descriptor:rightHandSideMatrixDesc] autorelease];
         MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
                                                                 offset:(out.storage_offset() + bBatchOffset) * bElemSize
@@ -1419,8 +1440,8 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
   if (result.numel() == 0) {
     return result;
   }
-  auto cholesky = upper ? result.triu().clone() : result.tril().clone();
-  cholesky = cholesky.contiguous();
+  auto cholesky =
+      upper ? result.triu().clone(at::MemoryFormat::Contiguous) : result.tril().clone(at::MemoryFormat::Contiguous);
 
   auto n = result.size(-1);
   auto identity = at::eye(n, result.options()).expand_as(result).contiguous();
@@ -1438,6 +1459,107 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
     result.copy_(at::matmul(temp.mT(), temp));
   }
   return result;
+}
+
+static void metal_qr_kernel_impl(const Tensor& A, const Tensor& Q, const Tensor& R, bool reduced_mode) {
+  using namespace mps;
+
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+
+  int64_t batch_size = 1;
+  for (int64_t i = 0; i < A.dim() - 2; i++) {
+    batch_size *= A.size(i);
+  }
+
+  auto A_work = A.reshape({batch_size, m, n}).contiguous();
+
+  QrParams params;
+  params.m = m;
+  params.n = n;
+
+  auto info = at::zeros({1}, A.options().dtype(kInt));
+  MPSStream* stream = getCurrentMPSStream();
+
+  Tensor Q_work = at::empty({batch_size, m, m}, A.options());
+  Tensor R_work = at::empty({batch_size, m, n}, A.options());
+  Tensor v_work = at::empty({batch_size, m}, A.options());
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto compute_encoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc(fmt::format("linalg_qr_householder_{}", scalarToMetalTypeString(A)));
+
+      getMPSProfiler().beginProfileKernel(pso, "linalg_qr", {A});
+      [compute_encoder setComputePipelineState:pso];
+
+      MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
+      // one threadgroup per matrix in batch
+      MTLSize gridSize = MTLSizeMake(batch_size, 1, 1);
+
+      mtl_setArgs(compute_encoder, A_work, Q_work, R_work, info, params, v_work);
+      [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+
+      getMPSProfiler().endProfileKernel(pso);
+    }
+  });
+
+  bool is_batched = A.dim() > 2;
+
+  if (reduced_mode) {
+    auto k = std::min(m, n);
+    auto Q_reduced = Q_work.narrow(-1, 0, k); // [batch, m, k]
+    auto R_reduced = R_work.narrow(-2, 0, k); // [batch, k, n]
+
+    if (is_batched) {
+      Q.copy_(Q_reduced.reshape(Q.sizes()));
+      R.copy_(R_reduced.reshape(R.sizes()));
+    } else {
+      Q.copy_(Q_reduced.squeeze(0));
+      R.copy_(R_reduced.squeeze(0));
+    }
+  } else {
+    // Q=mxm, R=mxn
+    if (is_batched) {
+      Q.copy_(Q_work.reshape(Q.sizes()));
+      R.copy_(R_work.reshape(R.sizes()));
+    } else {
+      Q.copy_(Q_work.squeeze(0));
+      R.copy_(R_work.squeeze(0));
+    }
+  }
+
+  if (info.item<int>() != 0) {
+    TORCH_CHECK(false, "linalg_qr: MPS kernel failed with error code ", info.item<int>());
+  }
+}
+
+static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tensor& R, const c10::string_view mode) {
+  using namespace mps;
+
+  TORCH_CHECK(A.scalar_type() == kFloat, "linalg_qr: MPS currently supports float32 only");
+
+  if (A.numel() == 0) {
+    return;
+  }
+
+  auto m = A.size(-2);
+  auto n = A.size(-1);
+
+  if (std::min(m, n) > 512) {
+    TORCH_WARN_ONCE(
+        "linalg_qr: MPS implementation is currently limited to min(m,n) <= 512, "
+        "falling back to CPU.");
+    auto A_cpu = A.to(at::kCPU);
+    auto [Q_cpu, R_cpu] = at::linalg_qr(A_cpu, mode);
+    const_cast<Tensor&>(Q).copy_(Q_cpu.to(at::kMPS));
+    const_cast<Tensor&>(R).copy_(R_cpu.to(at::kMPS));
+    return;
+  }
+
+  bool reduced_mode = (mode != "complete");
+
+  metal_qr_kernel_impl(A, Q, R, reduced_mode);
 }
 
 } // namespace mps
@@ -1628,6 +1750,28 @@ Tensor linalg_solve_triangular_mps(const Tensor& A, const Tensor& B, bool upper,
   return out;
 }
 
+Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool upper) {
+  auto out = at::empty({0}, self.options().memory_format(MemoryFormat::Contiguous));
+  const bool first_transpose = upper;
+  const bool second_transpose = !upper;
+
+  mps::linalg_solve_triangular_mps_impl(A,
+                                        self,
+                                        upper,
+                                        first_transpose,
+                                        /*left=*/true,
+                                        /*unitriangular=*/false,
+                                        out);
+  mps::linalg_solve_triangular_mps_impl(A,
+                                        out,
+                                        upper,
+                                        second_transpose,
+                                        /*left=*/true,
+                                        /*unitriangular=*/false,
+                                        out);
+  return out;
+}
+
 TORCH_IMPL_FUNC(triangular_solve_mps_out)
 (const Tensor& self,
  const Tensor& A,
@@ -1662,6 +1806,10 @@ TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 
 TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
   mps::linalg_inv_ex_out_mps_impl(A, check_errors, result, info);
+}
+
+TORCH_IMPL_FUNC(linalg_qr_out_mps)(const Tensor& A, c10::string_view mode, const Tensor& Q, const Tensor& R) {
+  mps::linalg_qr_out_impl_mps(A, Q, R, mode);
 }
 
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)

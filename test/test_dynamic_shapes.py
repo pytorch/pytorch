@@ -1122,6 +1122,88 @@ def forward(self, x_1):
         assert_not_optimized(torch.sym_max(mx3, s3 + s7))
         assert_not_optimized(torch.sym_max(mx3, s7 * 2))
 
+    def test_build_proxy_for_optimized_add(self):
+        """
+        Test that _build_proxy_for_sym_expr correctly handles flattened
+        sympy.Add expressions with more than 2 arguments.
+
+        When sympy.Add operations are optimized by _optimized_add
+        (in torch/fx/experimental/sym_node.py), they can be flattened into a
+        single Add node with 3 or more arguments (e.g., Add(s0, s1, s2)
+        instead of Add(Add(s0, s1), s2)).
+
+        _build_proxy_for_sym_expr must handle this by using torch.sym_sum
+        (which natively supports n-ary addition) instead of operator.add
+        (which is binary and would either raise TypeError or silently drop
+        arguments via FX codegen's 2-placeholder format string).
+        """
+        import torch.fx as fx
+        from torch.fx.experimental.proxy_tensor import (
+            _build_proxy_for_sym_expr,
+            _SympyExprTrackerValue,
+            PythonKeyTracer,
+            set_meta,
+        )
+        from torch.utils._thunk import Thunk
+
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+
+        # This triggers _optimized_add and produces a flattened sympy.Add
+        # with 3 arguments: Add(s0_symbol, s1_symbol, s2_symbol)
+        optimized_sum = s0 + s1 + s2
+        self.assertTrue(optimized_sum.node._optimized_summation)
+        # Confirm the underlying sympy expression has 3 args (flattened).
+        self.assertEqual(len(optimized_sum.node.expr.args), 3)
+
+        # ------------------------------------------------------------------
+        # Case 1: out=None
+        #
+        # Previously this would call operator.add(a, b, c) and raise
+        # TypeError. Now uses torch.sym_sum which handles n-ary addition.
+        # ------------------------------------------------------------------
+        tracer_none = PythonKeyTracer()
+        for sym in [s0, s1, s2]:
+            tracer_none.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                proxy=sym, value=sym
+            )
+
+        result = _build_proxy_for_sym_expr(tracer_none, optimized_sum.node.expr)
+        self.assertEqual(int(result), 9)
+
+        # ------------------------------------------------------------------
+        # Case 2: out=optimized_sum  (the typical path from get_proxy_slot)
+        #
+        # Previously _sym_register would record operator.add with 3 args,
+        # and FX codegen's "{} + {}" format string would silently drop the
+        # third argument. Now uses torch.sym_sum which correctly handles
+        # all arguments.
+        # ------------------------------------------------------------------
+        tracer = PythonKeyTracer()
+        tracer.root = torch.nn.Module()
+        tracer.graph = fx.Graph(tracer_cls=PythonKeyTracer)
+
+        for sym, name in [(s0, "s0"), (s1, "s1"), (s2, "s2")]:
+            node = tracer.graph.placeholder(name)
+            proxy = fx.Proxy(node, tracer)
+            set_meta(proxy, sym)
+            tracer.sympy_expr_tracker[sym.node.expr] = _SympyExprTrackerValue(
+                proxy=proxy, value=sym
+            )
+            tracer.symnode_tracker[sym] = Thunk(lambda p=proxy: p)
+
+        _build_proxy_for_sym_expr(tracer, optimized_sum.node.expr, out=optimized_sum)
+
+        out_proxy = tracer.symnode_tracker[optimized_sum].force()
+        tracer.graph.output(out_proxy.node)
+
+        gm = fx.GraphModule(tracer.root, tracer.graph)
+
+        result = gm(2, 3, 4)  # should be 2 + 3 + 4 = 9
+        self.assertEqual(result, 9)
+
     def test_sym_max_multi_max_simplify(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
@@ -3612,6 +3694,25 @@ class TestUnbacked(TestCase):
             ):
                 func_negative(x)
 
+    def test_meta_copy(self):
+        """
+        Test that meta_copy_ does not raise when self and src have different
+        unbacked symint sizes.
+        """
+        from torch._meta_registrations import meta_copy_
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+
+            self_tensor = torch.empty((u0, 256))
+            src_tensor = torch.empty((u1, 256))
+
+            meta_copy_(self_tensor, src_tensor)
+
 
 class TestUbackedOps(TestCase):
     @fresh_cache()
@@ -4914,12 +5015,12 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(counter.frame_count, 2)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_shape_id_no_recompile_without_dynamic_indices(self):
+    def test_shape_id_no_recompile_without_unbacked_indices(self):
         """
-        Test that passing a tensor without _dynamo_dynamic_indices after
+        Test that passing a tensor without _dynamo_unbacked_indices after
         compiling with shape_ids does NOT trigger recompilation.
         The guard on shape_ids only applies when the runtime tensor
-        also has _dynamo_dynamic_indices.
+        also has _dynamo_unbacked_indices.
         """
         counter = CompileCounter()
 
@@ -4928,14 +5029,14 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         compiled_func = torch.compile(func, backend=counter)
 
-        # First call with shape_id (has _dynamo_dynamic_indices)
+        # First call with shape_id (has _dynamo_unbacked_indices)
         x1 = torch.rand(4, 3)
         torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
         compiled_func(x1)
         self.assertEqual(counter.frame_count, 1)
 
-        # Second call with regular tensor (no _dynamo_dynamic_indices)
-        # Should NOT recompile - guard passes when no _dynamo_dynamic_indices
+        # Second call with regular tensor (no _dynamo_unbacked_indices)
+        # Should NOT recompile - guard passes when no _dynamo_unbacked_indices
         x2 = torch.rand(4, 3)
         compiled_func(x2)
         self.assertEqual(counter.frame_count, 1)
@@ -4963,6 +5064,133 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         x2 = torch.rand(4, 3)
         torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="other")
         compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_bounds_recompilation(self):
+        """
+        Test that changing _dynamo_unbacked_bounds triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with min/max bounds
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, min=1, max=100)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same bounds - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0, min=1, max=100)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call without bounds - should recompile
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 2)
+
+        # Fourth call with different bounds - should recompile
+        x4 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x4, 0, min=1, max=200)
+        compiled_func(x4)
+        self.assertEqual(counter.frame_count, 3)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_bounds_no_recompile_without_unbacked_indices(self):
+        """
+        Test that passing a tensor without _dynamo_unbacked_indices after
+        compiling with bounds does NOT trigger recompilation.
+        The guard on bounds only applies when the runtime tensor
+        also has _dynamo_unbacked_indices.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with bounds (has _dynamo_unbacked_indices)
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, min=1, max=100)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with regular tensor (no _dynamo_unbacked_indices)
+        # Should NOT recompile - guard passes when no _dynamo_unbacked_indices
+        x2 = torch.rand(4, 3)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_no_bounds_then_bounds(self):
+        """
+        Test that compiling without bounds then calling with bounds
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_unbacked but no bounds
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same (no bounds) - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with min=1, max=100 - should recompile
+        # (compiled without bounds, now calling with bounds)
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0, min=1, max=100)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 2)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_no_shape_id_then_shape_id(self):
+        """
+        Test that compiling without shape_id then calling with shape_id
+        triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with mark_unbacked but no shape_id
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same (no shape_id) - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call with shape_id="batch" - should recompile
+        # (compiled without shape_id, now calling with shape_id)
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0, shape_id="batch")
+        compiled_func(x3)
         self.assertEqual(counter.frame_count, 2)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")

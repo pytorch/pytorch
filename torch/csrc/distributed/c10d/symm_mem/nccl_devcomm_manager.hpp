@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -28,6 +29,7 @@ class NCCLDevCommManager {
 
   // Get an NCCL device communicator for a group.
   ncclDevComm& get_devcomm(const std::string& group_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = group_to_comms_.find(group_name);
     if (it == group_to_comms_.end()) {
       TORCH_CHECK(
@@ -41,6 +43,7 @@ class NCCLDevCommManager {
 
   // Get a host-side communicator for a group.
   ncclComm_t get_comm(const std::string& group_name) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = group_to_comms_.find(group_name);
     if (it == group_to_comms_.end()) {
       TORCH_CHECK(
@@ -58,6 +61,7 @@ class NCCLDevCommManager {
       ncclComm_t comm,
       int lsa_barrier_count,
       int gin_barrier_count) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto it = group_to_comms_.find(group_name);
     if (it != group_to_comms_.end()) {
       return;
@@ -108,6 +112,7 @@ class NCCLDevCommManager {
  private:
   // Device where the NCCL device communicator manager is created
   const c10::Device device_;
+  std::mutex mutex_;
   // A map from group name to NCCL device communicator for that group.
   std::unordered_map<std::string, std::pair<ncclComm_t, ncclDevComm>>
       group_to_comms_;

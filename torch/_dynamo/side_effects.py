@@ -30,11 +30,12 @@ import warnings
 import weakref
 from collections.abc import Generator, MutableMapping
 from types import CellType
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
@@ -45,7 +46,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
-from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
+from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
@@ -115,27 +116,26 @@ class SideEffects:
     def __init__(
         self,
         output_graph: "OutputGraph",
-        id_to_variable: Optional[dict[int, VariableTracker]] = None,
-        store_attr_mutations: Optional[
-            dict[VariableTracker, dict[str, VariableTracker]]
-        ] = None,
+        id_to_variable: dict[int, VariableTracker] | None = None,
+        store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
+        | None = None,
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
-        keepalive: Optional[list[Any]] = None,
-        save_for_backward: Optional[
-            list[tuple[AutogradFunctionContextVariable, list[VariableTracker]]]
-        ] = None,
-        tensor_hooks: Optional[
-            dict[
-                int,
-                tuple[
-                    "variables.TensorVariable",
-                    VariableTracker,
-                    "variables.RemovableHandleVariable",
-                    str,
-                ],
-            ]
-        ] = None,
+        keepalive: list[Any] | None = None,
+        save_for_backward: list[
+            tuple[AutogradFunctionContextVariable, list[VariableTracker]]
+        ]
+        | None = None,
+        tensor_hooks: dict[
+            int,
+            tuple[
+                "variables.TensorVariable",
+                VariableTracker,
+                "variables.RemovableHandleVariable",
+                str,
+            ],
+        ]
+        | None = None,
     ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)
@@ -150,7 +150,7 @@ class SideEffects:
         self._has_existing_dict_mutation = False
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
-        self.ca_final_callbacks_var: Optional[ListVariable] = None
+        self.ca_final_callbacks_var: ListVariable | None = None
 
         # Tracks VariableTracker objects whose mutations can be skipped.
         # For normal mutated variables, Dynamo generates code to replay/reconstruct
@@ -160,6 +160,9 @@ class SideEffects:
         # Used for temporary mutations in contexts like torch.func.functional_call,
         # where module parameters/buffers are modified but later restored.
         self.ignore_mutation_on_these_variables: set[VariableTracker] = set()
+        # Sources mutated during tracing: AttrSource for attribute
+        # mutations, var.source for value mutations (list/dict/etc).
+        self.mutated_sources: OrderedSet[Source] = OrderedSet()
 
     def ignore_mutations_on(self, var: VariableTracker) -> None:
         """Mutations to this variable will be executed but not not tracked,
@@ -191,7 +194,7 @@ class SideEffects:
             and self.tensor_hooks == other.tensor_hooks
         )
 
-    def diff(self, other: "SideEffects") -> Optional[str]:
+    def diff(self, other: "SideEffects") -> str | None:
         if self.id_to_variable != other.id_to_variable:
             sk_itv = self.id_to_variable.keys()
             ok_itv = other.id_to_variable.keys()
@@ -257,6 +260,19 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
+    def _maybe_record_side_effect(self, item: VariableTracker) -> None:
+        """Record the first externally-visible side effect on the current tracer."""
+        if item.mutation_type is not None and not is_side_effect_safe(
+            item.mutation_type
+        ):
+            output_graph = self.output_graph_weakref()
+            if output_graph:
+                tracer = output_graph.current_tx.output.current_tracer
+                if tracer.side_effect_stack is None:
+                    tracer.side_effect_stack = (
+                        torch._guards.TracingContext.extract_stack()
+                    )
+
     def check_allowed_side_effect(self, item: VariableTracker) -> bool:
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
@@ -265,8 +281,10 @@ class SideEffects:
         if isinstance(item, AutogradFunctionContextVariable):
             return True
         if self.should_allow_externally_visible_side_effects_in_subtracer():
+            self._maybe_record_side_effect(item)
             return True
         if self.should_allow_side_effects_in_hop():
+            self._maybe_record_side_effect(item)
             return True
         if self.is_reconstructing_generator():
             # This is missing the case where one mutates a tensor. See
@@ -307,6 +325,9 @@ class SideEffects:
         self.store_attr_mutations[item][name] = value
         # Capture user stack for this mutation
         self._capture_user_stack(item)
+        item_source = getattr(item, "source", None)
+        if item_source is not None:
+            self.mutated_sources.add(AttrSource(item_source, name))
 
     def load_attr(
         self,
@@ -341,6 +362,16 @@ class SideEffects:
 
     def load_cell(self, cellvar: VariableTracker) -> VariableTracker:
         assert isinstance(cellvar, variables.CellVariable)
+        # Track the cell_contents source during subgraph tracing so that
+        # mutations (e.g. nonlocal counter = 3) are detected by the reuse
+        # mechanism via set intersection with mutated_sources.
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            cell_source = getattr(cellvar, "source", None)
+            if cell_source is not None:
+                output_graph.current_tx.output.current_tracer.traced_sources.add(
+                    AttrSource(cell_source, "cell_contents")
+                )
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
@@ -578,7 +609,7 @@ class SideEffects:
         return variable
 
     def track_cell_existing(
-        self, source: Optional[Source], cell: CellType, contents: VariableTracker
+        self, source: Source | None, cell: CellType, contents: VariableTracker
     ) -> VariableTracker:
         variable = variables.CellVariable(
             # We don't support mutation to cell without source because we need
@@ -657,7 +688,7 @@ class SideEffects:
         # Recursively visit Variables and see if any of them have been mutated.
         init_live_vars = []
         # gather stack/symbolic_locals for all tx's up the chain
-        cur_tx: Optional[InstructionTranslatorBase] = tx
+        cur_tx: InstructionTranslatorBase | None = tx
         while cur_tx is not None:
             init_live_vars.extend([cur_tx.stack, cur_tx.symbolic_locals])
             if cur_tx.parent is not None:
@@ -705,6 +736,8 @@ class SideEffects:
 
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
+        if var.source is not None:
+            self.mutated_sources.add(var.source)
         if (
             var.source
             and isinstance(var, variables.ConstDictVariable)

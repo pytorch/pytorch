@@ -954,11 +954,17 @@ def sym_min(a, b):
         return builtins.min(a, b)  # type: ignore[call-overload]
 
 
-def sym_sum(args):
+def sym_sum(*args):
     """
     N-ary add which is faster to compute for long lists than iterated binary
     addition.  Only does something special for integers.
+
+    Accepts both ``sym_sum([a, b, c])`` and ``sym_sum(a, b, c)``.
     """
+    # Normalise: accept both sym_sum([a, b, c]) and sym_sum(a, b, c).
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        args = args[0]
+
     if overrides.has_torch_function(args):
         return overrides.handle_torch_function(sym_sum, args, args)
 
@@ -2463,10 +2469,11 @@ class _TorchCompileInductorWrapper:
                     )
             self.config[attr_name] = val
 
-    def __call__(self, model_, inputs_):
+    def __call__(self, model_, inputs_, *, config_patches=None):
         from torch._inductor.compile_fx import compile_fx
 
-        return compile_fx(model_, inputs_, config_patches=self.config)
+        all_patches = {**self.config, **(config_patches or {})}
+        return compile_fx(model_, inputs_, config_patches=all_patches)
 
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
@@ -2491,7 +2498,7 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         self.apply_options({"cpp_wrapper": True})
         self.apply_options({"aot_inductor.package": True})
 
-    def __call__(self, model_, inputs_):
+    def __call__(self, model_, inputs_, *, config_patches=None):
         from contextlib import nullcontext
         from unittest import mock
 
@@ -2509,7 +2516,7 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
             ctx,
             torch._inductor.config.patch("enable_autograd_for_aot", True),
         ):
-            return super().__call__(model_, inputs_)
+            return super().__call__(model_, inputs_, config_patches=config_patches)
 
 
 class _TorchCompileWrapper:
@@ -3007,3 +3014,6 @@ def _as_tensor_fullprec(t):
 # an autoloaded backend are defined
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+# Register all registered custom / override ops in torch/_native
+import torch._native

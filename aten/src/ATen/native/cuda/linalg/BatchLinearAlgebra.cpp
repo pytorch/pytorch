@@ -39,8 +39,6 @@
 #include <magma_v2.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 
-const bool use_magma_ = true;
-
 namespace {
 struct MagmaInitializer {
   MagmaInitializer() {
@@ -59,9 +57,6 @@ struct MagmaInitializer {
 #if MAGMA_VERSION_MINOR >= 10 || MAGMA_VERSION_MICRO >= 10
 #error "MAGMA release minor or micro version >= 10, please correct AT_MAGMA_VERSION"
 #endif
-
-#else
-const bool use_magma_ = false;
 
 #endif
 
@@ -110,16 +105,6 @@ void magmaLuNoPivBatched(
     magma_int_t m, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
-template<class scalar_t>
-void magmaCholeskySolve(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda,
-    scalar_t* dB, magma_int_t lddb, magma_int_t* info);
-
-template<class scalar_t>
-void magmaCholeskySolveBatched(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
-    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue);
-
 #if defined(USE_ROCM)
 template<class scalar_t>
 void magmaTriangularSolveBatched(
@@ -137,17 +122,6 @@ void magmaEig(
     value_t *rwork,
     magma_int_t *info);
 #endif
-
-template<class scalar_t>
-void magmaLuSolve(
-    magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv,
-    scalar_t* dB, magma_int_t lddb, magma_int_t* info, magma_trans_t trans);
-
-template<class scalar_t>
-void magmaLuSolveBatched(
-    magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
-    scalar_t** dB_array, magma_int_t lddb, magma_int_t& info,
-    magma_int_t batchsize, const MAGMAQueue& magma_queue, magma_trans_t trans);
 
 #if AT_MAGMA_VERSION >= 254
 
@@ -347,82 +321,6 @@ void magmaLuNoPivBatched<c10::complex<float>>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<>
-void magmaCholeskySolve<double>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
-    double* dB, magma_int_t lddb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dpotrs_gpu(uplo, n, nrhs, dA, ldda, dB, lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolve<float>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda,
-    float* dB, magma_int_t lddb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_spotrs_gpu(uplo, n, nrhs, dA, ldda, dB, lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolve<c10::complex<double>>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, c10::complex<double>* dA, magma_int_t ldda,
-    c10::complex<double>* dB, magma_int_t lddb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zpotrs_gpu(uplo, n, nrhs,
-    reinterpret_cast<magmaDoubleComplex*>(dA), ldda,
-    reinterpret_cast<magmaDoubleComplex*>(dB), lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolve<c10::complex<float>>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, c10::complex<float>* dA, magma_int_t ldda,
-    c10::complex<float>* dB, magma_int_t lddb, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cpotrs_gpu(uplo, n, nrhs,
-    reinterpret_cast<magmaFloatComplex*>(dA), ldda,
-    reinterpret_cast<magmaFloatComplex*>(dB), lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolveBatched<double>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
-    double** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  info = magma_dpotrs_batched(uplo, n, nrhs, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolveBatched<float>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda,
-    float** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  info = magma_spotrs_batched(uplo, n, nrhs, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolveBatched<c10::complex<double>>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, c10::complex<double>** dA_array, magma_int_t ldda,
-    c10::complex<double>** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  info = magma_zpotrs_batched(uplo, n, nrhs,
-    reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda,
-    reinterpret_cast<magmaDoubleComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskySolveBatched<c10::complex<float>>(
-    magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, c10::complex<float>** dA_array, magma_int_t ldda,
-    c10::complex<float>** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
-  info = magma_cpotrs_batched(uplo, n, nrhs,
-    reinterpret_cast<magmaFloatComplex**>(dA_array), ldda,
-    reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
 #if defined(USE_ROCM)
 template<>
 void magmaTriangularSolveBatched<double>(
@@ -548,78 +446,6 @@ void magmaEig<c10::complex<float>, float>(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 #endif
-
-template<>
-void magmaLuSolve<double>(
-    magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda, magma_int_t* ipiv,
-    double* dB, magma_int_t lddb, magma_int_t* info, magma_trans_t trans) {
-  MagmaStreamSyncGuard guard;
-  magma_dgetrs_gpu(trans, n, nrhs, dA, ldda, ipiv, dB, lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuSolve<float>(
-    magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda, magma_int_t* ipiv,
-    float* dB, magma_int_t lddb, magma_int_t* info, magma_trans_t trans) {
-  MagmaStreamSyncGuard guard;
-  magma_sgetrs_gpu(trans, n, nrhs, dA, ldda, ipiv, dB, lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuSolve<c10::complex<double>>(
-    magma_int_t n, magma_int_t nrhs, c10::complex<double>* dA, magma_int_t ldda, magma_int_t* ipiv,
-    c10::complex<double>* dB, magma_int_t lddb, magma_int_t* info, magma_trans_t trans) {
-  MagmaStreamSyncGuard guard;
-  magma_zgetrs_gpu(trans, n, nrhs, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, ipiv, reinterpret_cast<magmaDoubleComplex*>(dB), lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuSolve<c10::complex<float>>(
-    magma_int_t n, magma_int_t nrhs, c10::complex<float>* dA, magma_int_t ldda, magma_int_t* ipiv,
-    c10::complex<float>* dB, magma_int_t lddb, magma_int_t* info, magma_trans_t trans) {
-  MagmaStreamSyncGuard guard;
-  magma_cgetrs_gpu(trans, n, nrhs, reinterpret_cast<magmaFloatComplex*>(dA), ldda, ipiv, reinterpret_cast<magmaFloatComplex*>(dB), lddb, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuSolveBatched<double>(
-    magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
-    double** dB_array, magma_int_t lddb, magma_int_t& info,
-    magma_int_t batchsize, const MAGMAQueue& magma_queue, magma_trans_t trans) {
-  info = magma_dgetrs_batched(trans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuSolveBatched<float>(
-    magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
-    float** dB_array, magma_int_t lddb, magma_int_t& info,
-    magma_int_t batchsize, const MAGMAQueue& magma_queue, magma_trans_t trans) {
- info = magma_sgetrs_batched(trans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
- AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuSolveBatched<c10::complex<double>>(
-    magma_int_t n, magma_int_t nrhs, c10::complex<double>** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
-    c10::complex<double>** dB_array, magma_int_t lddb, magma_int_t& info,
-    magma_int_t batchsize, const MAGMAQueue& magma_queue, magma_trans_t trans) {
-  info = magma_zgetrs_batched(trans, n, nrhs, reinterpret_cast<magmaDoubleComplex**>(dA_array), ldda, dipiv_array, reinterpret_cast<magmaDoubleComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaLuSolveBatched<c10::complex<float>>(
-    magma_int_t n, magma_int_t nrhs, c10::complex<float>** dA_array, magma_int_t ldda, magma_int_t** dipiv_array,
-    c10::complex<float>** dB_array, magma_int_t lddb, magma_int_t& info,
-    magma_int_t batchsize, const MAGMAQueue& magma_queue, magma_trans_t trans) {
- info = magma_cgetrs_batched(trans, n, nrhs, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, dipiv_array, reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, batchsize, magma_queue.get_queue());
- AT_CUDA_CHECK(cudaGetLastError());
-}
 
 namespace {
 
@@ -811,106 +637,58 @@ REGISTER_CUDA_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-template <typename scalar_t>
-static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, int64_t& info) {
-#if !AT_MAGMA_ENABLED()
-TORCH_CHECK(false, "cholesky_solve: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
-#else
-  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
-
-  auto A_data = A.data_ptr<scalar_t>();
-  auto b_data = b.data_ptr<scalar_t>();
-  magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
-  magma_int_t lda = std::max<magma_int_t>(1, n);
-  magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
-
-  int info_tmp = 0;
-  if (b.dim() == 2) {
-    magmaCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, lda,
-                                 b_data, lda, &info_tmp);
-    info = info_tmp;
+namespace {
+// At the time of writing, the unconditional dispatch
+// to the native cholesky_solve method in cuSOLVER is slow
+// with batched inputs.
+template <bool use_dedicated_kernel_unconditionally = false>
+inline void _cholesky_solve_helper_cuda_cusolver_algo_selector(
+  Tensor& self,
+  const Tensor& A,
+  bool upper) {
+  if constexpr (use_dedicated_kernel_unconditionally) {
+    _cholesky_solve_helper_cuda_cusolver(self, A, upper);
   } else {
-    auto A_mat_stride = matrixStride(A);
-    auto b_mat_stride = matrixStride(b);
-    magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
-
-    scalar_t** A_array;
-    scalar_t** b_array;
-
-    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size);
-    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
-
-    // Set up the created arrays
-    for (int64_t i = 0; i < batch_size; i++) {
-      A_array[i] = &A_data[i * A_mat_stride];
-      b_array[i] = &b_data[i * b_mat_stride];
+    // TODO: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
+    // TODO: Non-batched potrs is too slow in the batched setting compared to two triangular solves.
+    // Non-batched input -> non-batched potrs.
+    // Batched input -> two triangular solves.
+    if (batchCount(self) == 1) {
+      _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+    } else {
+      const auto L = upper
+        ? c10::MaybeOwned<Tensor>::owned(A.mH())
+        : c10::MaybeOwned<Tensor>::borrowed(A);
+      // NOTE: we tolerate redispatch with at::triangular_solve_triangular
+      // because it handles memory layout optimization and conj/neg flags.
+      // IMPORTANT NOTE: `self` and `A` are not processed for kernel calls yet!
+      // Step 1: Solve for Y: L Y = B or U^H Y = B.
+      at::linalg_solve_triangular_out(self, *L, self, /*upper=*/false);
+      // Step 2: Solve for X: L^H X = Y or U X = Y.
+      at::linalg_solve_triangular_out(self, L->mH(), self, /*upper=*/true);
     }
-
-    MAGMAQueue magma_queue(b.get_device());
-
-    constexpr int64_t batch_limit = 65535;
-    // Compute as many batches of 65535 possible
-    // The number of "mini"-batches are floor(batch_size / batch_limit)
-    // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
-    int64_t mini_batches = batch_size / batch_limit, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
-      scalar_t** A_array_cur = &A_array[mini_idx];
-      scalar_t** b_array_cur = &b_array[mini_idx];
-
-      magmaCholeskySolveBatched<scalar_t>(
-          uplo, n, nrhs, A_array_cur, lda, b_array_cur, lda,
-          info_tmp, batch_limit, magma_queue);
-
-      if (info_tmp != 0) {
-        break;
-      }
-    }
-
-    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
-    // which concisely is equal to batch_size % batch_limit
-    if (batch_size % batch_limit != 0 && info_tmp == 0) {
-      magmaCholeskySolveBatched<scalar_t>(
-          uplo, n, nrhs, &A_array[mini_idx], lda, &b_array[mini_idx], lda,
-          info_tmp, batch_size % batch_limit, magma_queue);
-    }
-
-    info = info_tmp;
   }
-#endif
 }
 
-Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bool upper) {
-  int64_t info = 0;
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  auto A_working_copy = cloneBatchedColumnMajor(A);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_solve_cuda", [&]{
-    apply_cholesky_solve<scalar_t>(self_working_copy, A_working_copy, upper, info);
-  });
-  TORCH_CHECK(info == 0, "MAGMA cholesky_solve : invalid argument: ", -info);
-  return self_working_copy;
+inline void _cholesky_solve_helper_cuda_cusolver_dispatcher(
+    Tensor& self,
+    const Tensor& A,
+    bool upper) {
+  // For now, unconditional dispatch to the dedicated cholesky solve
+  // kernel in cuSOLVER is slow for batched inputs.
+  // TODO: switch once resolved.
+  _cholesky_solve_helper_cuda_cusolver_algo_selector<
+    /*use_dedicated_kernel_unconditionally=*/false
+  >(self, A, upper);
 }
 
-// Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
-//     Batched cholesky_solve is dispatched to magma.
+} // namespace (anonymous)
+
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
-#if defined(USE_LINALG_SOLVER)
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-      return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
-    case at::LinalgBackend::Magma:
-      return _cholesky_solve_helper_cuda_magma(self, A, upper);
-    default:
-      if (batchCount(self) == 1 || !use_magma_) {
-        return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
-      } else {
-        return _cholesky_solve_helper_cuda_magma(self, A, upper);
-      }
-  }
-#else
-  return _cholesky_solve_helper_cuda_magma(self, A, upper);
-#endif
+  _warn_once_magma_deprecation("linalg.cholesky_solve");
+  at::Tensor self_working_copy = cloneBatchedColumnMajor(self);
+  _cholesky_solve_helper_cuda_cusolver_dispatcher(self_working_copy, A, upper);
+  return self_working_copy;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -924,81 +702,16 @@ REGISTER_CUDA_DISPATCH(cholesky_stub, &cholesky_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/*
-Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky solver
-This is an in-place routine, content of 'input' is overwritten.
-'infos' is an int Tensor containing error codes for each matrix in the batched input.
-MAGMA requires 'infos' to reside in CPU memory.
-For more information see MAGMA's documentation for POTRS routine.
-*/
-template <typename scalar_t>
-static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
-#if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(false, "cholesky_inverse: MAGMA library not found in compilation. Please rebuild with MAGMA.");
-#else
-  // magmaCholeskyInverse (magma_dpotri_gpu) is slow because internally
-  // it transfers data several times between GPU and CPU and calls lapack routine on CPU
-  // using magmaCholeskySolveBatched is a lot faster
-  // note that magmaCholeskySolve is also slow
-
-  // 'input' is modified in-place we need to clone it and replace with a diagonal matrix
-  // for apply_cholesky_solve
-  auto input_working_copy = cloneBatchedColumnMajor(input);
-
-  // 'input' tensor has to be a batch of diagonal matrix
-  input.fill_(0);
-  input.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
-
-  Tensor result_u, input_u;
-  if (input.dim() == 2) {
-    // unsqueezing here so that the batched version is used
-    result_u = input.unsqueeze(0);
-    input_u = input_working_copy.unsqueeze(0);
-  } else {
-    result_u = input;
-    input_u = input_working_copy;
-  }
-
-  // magma's potrs_batched doesn't take matrix-wise array of ints as an 'info' argument
-  // it returns a single 'magma_int_t'
-  // if info = 0 the operation is successful, if info = -i, the i-th parameter had an illegal value.
-  int64_t info_tmp = 0;
-  apply_cholesky_solve<scalar_t>(result_u, input_u, upper, info_tmp);
-  infos.fill_(info_tmp);
-#endif
-}
-
-// This is a type dispatching helper function for 'apply_cholesky_inverse'
-Tensor& cholesky_inverse_kernel_impl_magma(Tensor &result, Tensor& infos, bool upper) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cuda", [&]{
-    apply_cholesky_inverse<scalar_t>(result, infos, upper);
-  });
-  return result;
-}
-
-Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) {
+Tensor& cholesky_inverse_kernel_impl(Tensor &result, [[maybe_unused]] Tensor& infos, bool upper) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
-  // the content of result is overwritten by 'apply_cholesky_inverse'
-#if defined(USE_LINALG_SOLVER)
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-      return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
-    case at::LinalgBackend::Magma:
-      return cholesky_inverse_kernel_impl_magma(result, infos, upper);
-    default:
-      if (batchCount(result) == 1 ||
-          !use_magma_) {
-        return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
-      } else {
-        return cholesky_inverse_kernel_impl_magma(result, infos, upper);
-      }
-  }
-#else
-  return cholesky_inverse_kernel_impl_magma(result, infos, upper);
-#endif
-
+  // the content of result is overwritten
+  _warn_once_magma_deprecation("linalg.cholesky_inverse");
+  at::Tensor A = cloneBatchedColumnMajor(result);
+  result.fill_(0);
+  result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+  _cholesky_solve_helper_cuda_cusolver_dispatcher(result, A, upper);
+  return result;
 }
 
 REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
@@ -1497,160 +1210,6 @@ REGISTER_CUDA_DISPATCH(svd_stub, &svd_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/*
-  Solves the matrix equation A X = B
-  X and B are n-by-nrhs matrices, A is represented using the LU factorization.
-  This is an in-place routine, content of `B` is overwritten.
-  This is a "looped" variant for calling single input MAGMA function on batched input.
-
-  Args:
-  * `LU` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
-  * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
-  * `B` -  [in] the right hand side matrix B
-           [out] the solution matrix X
-
-  For further details, please see the MAGMA documentation for magma_dgetrs_gpu.
-*/
-template <typename scalar_t>
-static void apply_lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
-#if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling linalg.lu_solve on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. Please rebuild with MAGMA.");
-#else
-  auto trans = to_magma(transpose);
-  auto b_data = B.data_ptr<scalar_t>();
-  auto lu_data = LU.data_ptr<scalar_t>();
-
-  // MAGMA requires pivots to be a CPU tensor
-  Tensor pivots_cpu = pivots.cpu();
-  auto pivots_data = pivots_cpu.data_ptr<magma_int_t>();
-
-  auto b_stride = matrixStride(B);
-  auto lu_stride = LU.dim() > 2 ? LU.stride(-3) : 0;
-  auto pivots_stride = pivots_cpu.dim() > 1 ? pivots_cpu.stride(-2) : 0;
-  auto batch_size = batchCount(B);
-
-  magma_int_t n = magma_int_cast(LU.size(-2), "n");
-  magma_int_t nrhs = magma_int_cast(B.size(-1), "nrhs");
-  auto leading_dimension = std::max<magma_int_t>(1, n);
-
-  // LU and pivots tensors can be broadcasted to B
-  // here we construct a helper indexing tensor to linearly index into lu and pivots
-  IntArrayRef lu_batch_shape(LU.sizes().data(), LU.dim() - 2);
-  IntArrayRef b_batch_shape(B.sizes().data(), B.dim() - 2);
-  BroadcastLinearIndices lu_index(
-      batchCount(LU), lu_batch_shape, b_batch_shape);
-
-  int info = 0;
-  for (decltype(batch_size) i = 0; i < batch_size; i++) {
-    int64_t lu_index_i = lu_index(i);
-    scalar_t* b_working_ptr = &b_data[i * b_stride];
-    scalar_t* lu_working_ptr = &lu_data[lu_index_i * lu_stride];
-    int* pivots_working_ptr = &pivots_data[lu_index_i * pivots_stride];
-
-    magmaLuSolve<scalar_t>(n, nrhs, lu_working_ptr, leading_dimension, pivots_working_ptr, b_working_ptr, leading_dimension, &info, trans);
-
-    // info from magmaLuSolve only reports if the i-th parameter is wrong
-    // so we don't need to check it all the time
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
-  }
-#endif
-}
-
-/*
-  Solves the matrix equation A X = B
-  X and B are n-by-nrhs matrices, A is represented using the LU factorization.
-  This is an in-place routine, content of `B` is overwritten.
-  This is a specialized batched variant, it is expected to be faster than the "looped" version only for small inputs.
-
-  Args:
-  * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
-  * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
-  * `B` -  [in] the right hand side matrix B
-           [out] the solution matrix X
-
-  For further details, please see the MAGMA documentation for magma_dgetrs_batched.
-*/
-template <typename scalar_t>
-static void apply_lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
-#if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling linalg.lu_solve on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. Please rebuild with MAGMA.");
-#else
-  TORCH_INTERNAL_ASSERT(batchCount(B) == batchCount(LU), "batch_size of LU and B must be the same");
-  TORCH_INTERNAL_ASSERT(batchCount(LU) == batchCount(pivots.unsqueeze(-1)), "batch_size of LU and pivots must be the same");
-  auto trans = to_magma(transpose);
-  auto b_data = B.data_ptr<scalar_t>();
-  auto lu_data = LU.data_ptr<scalar_t>();
-
-  magma_int_t n = magma_int_cast(LU.size(-2), "n");
-  magma_int_t nrhs = magma_int_cast(B.size(-1), "nrhs");
-  auto leading_dimension = std::max<magma_int_t>(1, n);
-
-  auto pivots_data = pivots.data_ptr<magma_int_t>();
-
-  auto b_stride = matrixStride(B);
-  auto lu_stride = matrixStride(LU);
-  auto pivots_stride = pivots.size(-1);
-  magma_int_t batch_size = magma_int_cast(batchCount(B), "batchCount");
-
-  magma_int_t** pivots_array;
-  scalar_t** lu_array;
-  scalar_t** b_array;
-
-  ALLOCATE_ARRAY(pivots_array, magma_int_t*, batch_size);
-  ALLOCATE_ARRAY(lu_array, scalar_t*, batch_size);
-  ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
-
-  for (int64_t i = 0; i < batch_size; i++) {
-    pivots_array[i] = &pivots_data[i * pivots_stride];
-    b_array[i] = &b_data[i * b_stride];
-    lu_array[i] = &lu_data[i * lu_stride];
-  }
-
-  MAGMAQueue magma_queue(B.get_device());
-
-  // Compute the result in batches of 65535
-  // that is the maximum allowed number for batch_size in MAGMA
-  constexpr int64_t batch_limit = 65535;
-
-  for (int64_t mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
-    int64_t nbatches = std::min(batch_limit, batch_size - mini_idx);
-    scalar_t** lu_array_cur = &lu_array[mini_idx];
-    scalar_t** b_array_cur = &b_array[mini_idx];
-    magma_int_t** pivots_array_cur = &pivots_array[mini_idx];
-
-    int info;
-    magmaLuSolveBatched<scalar_t>(
-        n, nrhs, lu_array_cur, leading_dimension,
-        pivots_array_cur, b_array_cur, leading_dimension,
-        info, nbatches, magma_queue, trans);
-
-    // info from magmaLuSolveBatched only reports if the i-th parameter is wrong
-    // so we don't need to check it all the time
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
-  }
-#endif
-}
-
-static void lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
-  // There is a bug in MAGMA when TransposeType is transpose or conj-transpose.
-  TORCH_INTERNAL_ASSERT(trans == TransposeType::NoTranspose);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_batched_magma", [&]{
-    apply_lu_solve_batched_magma<scalar_t>(LU, pivots, B, trans);
-  });
-}
-
-static void lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "lu_solve_looped_magma", [&]{
-    apply_lu_solve_looped_magma<scalar_t>(LU, pivots, B, trans);
-  });
-}
-
 c10::MaybeOwned<Tensor> maybe_expand_lu(const Tensor& B, const Tensor& LU) {
   // B and LU have the same number of dimensions
   if (batchCount(B) != batchCount(LU)) {
@@ -1684,9 +1243,6 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   auto b = batchCount(B);
   auto n = LU.size(-2);
   auto k = B.size(-1);
-  // magma implementation of LU solve cannot handle a b tensor with last dim > 1024
-  // See https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for
-  bool over_batched_magma_dim_limit = k > 1024;
   // heuristics determined from tests discussed in https://github.com/pytorch/pytorch/pull/72935
 
   // Computes X = U^{-1}L^{-1}P^T B via triangular solves
@@ -1731,52 +1287,35 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     }
   };
 
+  _warn_once_magma_deprecation("linalg.lu_solve");
+
 #ifdef USE_LINALG_SOLVER
   auto lu_solve_batched_cublas_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
     auto LU_ = maybe_expand_lu(B, LU);
     auto pivots_ = maybe_expand_pivots(B, pivots);
     lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
   };
-#endif
-
-  auto lu_solve_batched_magma_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
-    auto LU_ = maybe_expand_lu(B, LU);
-    auto pivots_ = maybe_expand_pivots(B, pivots);
-    lu_solve_batched_magma(*LU_, *pivots_, B, trans);
-  };
-
 
   // Preferred Backend
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
-#ifdef USE_LINALG_SOLVER
   if (preferred_backend == at::LinalgBackend::Cusolver) {
+    // TODO: Re-eval this condition
     if (b <= 2 && n >= 64) {
       lu_solve_looped_cusolver(LU, pivots, B, trans);
     } else {
       lu_solve_batched_cublas_fn(LU, pivots, B, trans);
     }
     return;
-  } else
-#endif // ifdef USE_LINALG_SOLVER
-  if (preferred_backend == at::LinalgBackend::Magma) {
-    // Looped magma is very slow, but batched magma is buggy in these two cases
-    if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose) {
-      lu_solve_batched_magma_fn(LU, pivots, B, trans);
-    }
-    else {
-      lu_solve_looped_magma(LU, pivots, B, trans);
-    }
-    return;
   }
 
+  // TODO: Re-eval this heuristic
   // Heuristic
   //if (n == k) {
   // if (k <= 16) batched_cublas
   // else solve_triag
   //} else {
   //if (n <= 8) {
-  // if (k >= 256 && NoTranspose) batched_magma
-  // else batched_cusolver
+  // batched_cublas
   //} else if (n <= 32) {
   //  b <= 2 looped_cusolver
   //  k <= 8 batched_cusolver
@@ -1794,8 +1333,6 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   //}
   //}
 
-
-#ifdef USE_LINALG_SOLVER
   // Particular case when multiplying A^{-1}B where B is square
   // In this case doing two triangular solves is almost always fastest
   if (n == k) {
@@ -1807,31 +1344,27 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     return;
   }
 
-if (n <= 8) {
-  if (use_magma_ && !over_batched_magma_dim_limit && trans == TransposeType::NoTranspose && k >= 256) {
-    lu_solve_batched_magma_fn(LU, pivots, B, trans);
-  } else {
+  if (n <= 8) {
     lu_solve_batched_cublas_fn(LU, pivots, B, trans);
-  }
-} else if (n <= 64) {
-  if (b <= 2 && (k <= 64 || trans != TransposeType::NoTranspose || n <= 32)) {
-    lu_solve_looped_cusolver(LU, pivots, B, trans);
-  } else if (k <= 8) {
-    lu_solve_batched_cublas_fn(LU, pivots, B, trans);
-  } else {
+  } else if (n <= 64) {
+    if (b <= 2 && (k <= 64 || trans != TransposeType::NoTranspose || n <= 32)) {
+      lu_solve_looped_cusolver(LU, pivots, B, trans);
+    } else if (k <= 8) {
+      lu_solve_batched_cublas_fn(LU, pivots, B, trans);
+    } else {
+      lu_solve_triangular(LU, pivots, B, trans);
+    }
+  } else if (n <= 128) {
+    if (b <= 2 && k <= 2)  {
+      lu_solve_looped_cusolver(LU, pivots, B, trans);
+    } else if (k <= 2)  {
+      lu_solve_batched_cublas_fn(LU, pivots, B, trans);
+    } else {
+      lu_solve_triangular(LU, pivots, B, trans);
+    }
+  } else { // n > 128
     lu_solve_triangular(LU, pivots, B, trans);
   }
-} else if (n <= 128) {
-  if (b <= 2 && k <= 2)  {
-    lu_solve_looped_cusolver(LU, pivots, B, trans);
-  } else if (k <= 2)  {
-    lu_solve_batched_cublas_fn(LU, pivots, B, trans);
-  } else {
-    lu_solve_triangular(LU, pivots, B, trans);
-  }
-} else { // n > 128
-  lu_solve_triangular(LU, pivots, B, trans);
-}
 #else
   // No cublas or cusolver
   // lu_solve_triangular is almost always best

@@ -686,9 +686,21 @@ Tensor nll_loss_nd_symint(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
-    TORCH_CHECK_VALUE(
-        false,
+  if (self.dim() != 1) {
+    auto sizes_match = self.sym_sizes()[0].sym_eq(target.sym_sizes()[0]);
+    if (TORCH_GUARD_OR_FALSE(sizes_match.sym_not())) {
+      // Statically known mismatch - raise ValueError for eager mode
+      TORCH_CHECK_VALUE(
+          false,
+          "Expected input batch_size (",
+          self.sym_sizes()[0],
+          ") to match target batch_size (",
+          target.sym_sizes()[0],
+          ").");
+    }
+    // For unbacked symbolic shapes, emit runtime check.
+    TORCH_SYM_CHECK(
+        sizes_match,
         "Expected input batch_size (",
         self.sym_sizes()[0],
         ") to match target batch_size (",
@@ -702,8 +714,6 @@ Tensor nll_loss_nd_symint(
   if (input_.dim() == 1 || input_.dim() == 2) {
     ret = at::nll_loss_symint(input_, target_, weight, reduction, std::move(ignore_index));
   } else if (input_.dim() == 4) {
-    input_ = input_.contiguous();
-    target_ = target_.contiguous();
     ret = at::nll_loss2d_symint(input_, target_, weight, reduction, std::move(ignore_index));
   } else {
     // dim == 3 or dim > 4

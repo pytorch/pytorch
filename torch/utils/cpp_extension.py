@@ -635,7 +635,7 @@ class BuildExtension(build_ext):
     A custom :mod:`setuptools` build extension .
 
     This :class:`setuptools.build_ext` subclass takes care of passing the
-    minimum required compiler flags (e.g. ``-std=c++17``) as well as mixed
+    minimum required compiler flags (e.g. ``-std=c++20``) as well as mixed
     C++/CUDA/SYCL compilation (and support for CUDA/SYCL files in general).
 
     When using :class:`BuildExtension`, it is allowed to supply a dictionary
@@ -767,7 +767,7 @@ class BuildExtension(build_ext):
             # overriding the option if the user explicitly passed it.
             cpp_format_prefix = '/{}:' if self.compiler.compiler_type == 'msvc' else '-{}='
             cpp_flag_prefix = cpp_format_prefix.format('std')
-            cpp_flag = cpp_flag_prefix + 'c++17'
+            cpp_flag = cpp_flag_prefix + 'c++20'
             if not any(flag.startswith(cpp_flag_prefix) for flag in cflags):
                 cflags.append(cpp_flag)
 
@@ -1011,7 +1011,7 @@ class BuildExtension(build_ext):
                         if IS_HIP_EXTENSION:
                             cflags = win_hip_flags(cflags)
                         else:
-                            cflags = win_cuda_flags(cflags) + ['-std=c++17', '--use-local-env']
+                            cflags = win_cuda_flags(cflags) + ['-std=c++20', '--use-local-env']
                             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                                 cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
                         for flag in COMMON_MSVC_FLAGS:
@@ -1098,7 +1098,7 @@ class BuildExtension(build_ext):
             cuda_post_cflags = None
             cuda_cflags = None
             if with_cuda:
-                cuda_cflags = ['-std=c++17']
+                cuda_cflags = ['-std=c++20']
                 for common_cflag in common_cflags:
                     cuda_cflags.append('-Xcompiler')
                     cuda_cflags.append(common_cflag)
@@ -1960,7 +1960,7 @@ def _check_and_build_extension_h_precompiler_headers(
     if not is_standalone:
         common_cflags += ['-DTORCH_API_INCLUDE_EXTENSION_H']
 
-    common_cflags += ['-std=c++17', '-fPIC']
+    common_cflags += ['-std=c++20', '-fPIC']
     common_cflags_str = listToString(common_cflags)
 
     pch_cmd = format_precompiler_header_cmd(compiler, head_file, head_file_pch, common_cflags_str, torch_include_dirs_str, extra_cflags_str, extra_include_paths_str)
@@ -2874,15 +2874,15 @@ def _write_ninja_file_to_build_library(path,
 
     if IS_WINDOWS:
         COMMON_HIP_FLAGS.extend(['-fms-runtime-lib=dll'])
-        cflags = common_cflags + ['/std:c++17'] + extra_cflags
+        cflags = common_cflags + ['/std:c++20'] + extra_cflags
         cflags += COMMON_MSVC_FLAGS + (COMMON_HIP_FLAGS if IS_HIP_EXTENSION else [])
         cflags = _nt_quote_args(cflags)
     else:
-        cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
+        cflags = common_cflags + ['-fPIC', '-std=c++20'] + extra_cflags
 
     if with_cuda and IS_HIP_EXTENSION:
         cuda_flags = ['-DWITH_HIP'] + common_cflags + extra_cflags + COMMON_HIP_FLAGS + COMMON_HIPCC_FLAGS
-        cuda_flags = cuda_flags + ['-std=c++17']
+        cuda_flags = cuda_flags + ['-std=c++20']
         cuda_flags += _get_rocm_arch_flags(cuda_flags)
         cuda_flags += extra_cuda_cflags
         if IS_WINDOWS:
@@ -2894,14 +2894,14 @@ def _write_ninja_file_to_build_library(path,
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                 cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
-            cuda_flags = cuda_flags + ['-std=c++17']
+            cuda_flags = cuda_flags + ['-std=c++20']
             cuda_flags = _nt_quote_args(cuda_flags)
             cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:
             cuda_flags += ['--compiler-options', "'-fPIC'"]
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
-                cuda_flags.append('-std=c++17')
+                cuda_flags.append('-std=c++20')
             cc_env = os.getenv("CC")
             if cc_env is not None:
                 cuda_flags = ['-ccbin', cc_env] + cuda_flags

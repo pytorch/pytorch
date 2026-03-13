@@ -599,6 +599,33 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_torch_function_mode_mutated_state(self):
+        class CounterMode(TorchFunctionMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                self.count += 1
+                return func(*args, **(kwargs or {}))
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return x.sin()
+
+        with CounterMode() as mode:
+            f(torch.randn(3))
+            first_count = mode.count
+            first_frame_count = cnt.frame_count
+
+            # count changed, should recompile
+            f(torch.randn(3))
+
+        self.assertEqual(first_frame_count, 1)
+        self.assertGreater(first_count, 0)
+        self.assertEqual(cnt.frame_count, 2)
+
     # Needs larger cache size since we recompile for each op
     @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):
@@ -802,6 +829,55 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                         torch.ones(2, 2, 2, 2),
                     )
+
+    @requires_gpu
+    def test_default_device_factory_functions(self):
+        """Test that factory functions respect default device in compiled code"""
+
+        @torch.compile(fullgraph=True)
+        def random_func(
+            x: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            # Test various factory functions
+            rnd = torch.randint(0, 2**32, size=x.shape, dtype=torch.uint32)
+            zeros = torch.zeros_like(rnd, device="cpu")
+            zeros_matched = torch.zeros_like(rnd)
+            return x + rnd, rnd, zeros, zeros_matched
+
+        torch.set_default_device(device_type)
+        (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
+
+        # Verify tensors are on the current accelerator
+        self.assertEqual(rnd.device.type, device_type)
+        self.assertEqual(result.device.type, device_type)
+        self.assertEqual(zeros.device.type, "cpu")
+        self.assertEqual(zeros_matched.device.type, rnd.device.type)
+
+        torch.set_default_device("cpu")
+        (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
+
+        # Verify tensors are on cpu
+        self.assertEqual(rnd.device.type, "cpu")
+        self.assertEqual(result.device.type, "cpu")
+        self.assertEqual(zeros.device.type, "cpu")
+        self.assertEqual(zeros_matched.device.type, rnd.device.type)
+
+        torch.set_default_device(None)
+
+    @requires_gpu
+    def test_default_device_factory_functions_priority(self):
+        torch.set_default_device(device_type)
+
+        @torch.compile(fullgraph=True)
+        def with_explicit_device(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            rnd = torch.randint(
+                0, 2**32, size=x.shape, dtype=torch.uint32, device="cpu"
+            )
+            return x + rnd, rnd
+
+        (result, rnd) = with_explicit_device(torch.randn(()))
+        self.assertEqual(rnd.device.type, "cpu")
+        self.assertEqual(result.device.type, device_type)
 
 
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
@@ -1424,7 +1500,7 @@ class outer_fn(torch.nn.Module):
 
     @requires_gpu
     def test_nested_compile_dynamic(self):
-        """Test that wrap_compiled_regions raises on dynamic shapes."""
+        """Test that wrap_compiled_regions works with dynamic shapes."""
 
         d_model = 64
 
@@ -1436,21 +1512,26 @@ class outer_fn(torch.nn.Module):
             def forward(self, x):
                 return self.linear(x)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "wrap_compiled_regions does not support dynamic shapes yet",
-        ):
-            torch._dynamo.reset()
+        torch._dynamo.reset()
 
-            compiled_mm = torch.compile(
-                MMLayer(d_model).to(GPU_TYPE),
-                backend="inductor",
-                options={"wrap_inductor_compiled_regions": True},
-                dynamic=True,
-            )
+        layer = MMLayer(d_model).to(GPU_TYPE)
+        compiled_mm = torch.compile(
+            layer,
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            dynamic=True,
+        )
 
-            x = torch.randn(2, d_model, device=GPU_TYPE)
-            compiled_mm(x)
+        x = torch.randn(2, d_model, device=GPU_TYPE)
+        result = compiled_mm(x)
+        self.assertEqual(result.shape, (2, d_model))
+        torch.testing.assert_close(result, layer(x))
+
+        # Different batch size reuses the same compiled code
+        x2 = torch.randn(5, d_model, device=GPU_TYPE)
+        result2 = compiled_mm(x2)
+        self.assertEqual(result2.shape, (5, d_model))
+        torch.testing.assert_close(result2, layer(x2))
 
     @requires_gpu
     def test_nested_compile_input_mutation(self):

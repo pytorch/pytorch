@@ -11,7 +11,7 @@ from itertools import combinations
 from random import Random
 from shutil import rmtree
 from threading import Event, Lock
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeVar
 from unittest.mock import patch
 
@@ -635,13 +635,13 @@ class LocksTest(TestMixin, TestCase):
         finally:
             executor.shutdown()
 
-    def is_lock(self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+    def is_lock(self, lock_or_flock: Lock | FileLock) -> bool:
         return hasattr(lock_or_flock, "locked")
 
-    def is_flock(self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+    def is_flock(self, lock_or_flock: Lock | FileLock) -> bool:
         return hasattr(lock_or_flock, "is_locked")
 
-    def lock_or_flock_locked(self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+    def lock_or_flock_locked(self, lock_or_flock: Lock | FileLock) -> bool:
         if self.is_lock(lock_or_flock):
             return lock_or_flock.locked()
         elif self.is_flock(lock_or_flock):
@@ -691,7 +691,7 @@ class LocksTest(TestMixin, TestCase):
         - Different lock types (Lock vs FileLock) behave consistently with their respective APIs
         """
 
-        def inner(lock_or_flock: Union[Lock, FileLock], timeout: int) -> None:
+        def inner(lock_or_flock: Lock | FileLock, timeout: int) -> None:
             if self.is_lock(lock_or_flock):
                 lock: Lock = lock_or_flock
                 if acquisition_mode == "safe":
@@ -718,12 +718,13 @@ class LocksTest(TestMixin, TestCase):
                 raise NotImplementedError
             self.assertFalse(self.lock_or_flock_locked(lock_or_flock))
 
-        assert lock_typename in ["Lock", "FileLock"]
+        if lock_typename not in ["Lock", "FileLock"]:
+            raise AssertionError(f"Unexpected lock_typename: {lock_typename}")
         flock_fpath: Path = (
             impls._OnDiskCacheImpl()._cache_dir
             / f"testing-locks-instance-{self.random_string}.lock"
         )
-        lock_or_flock: Union[Lock, FileLock] = (
+        lock_or_flock: Lock | FileLock = (
             Lock() if lock_typename == "Lock" else FileLock(str(flock_fpath))
         )
         lock_exception_type: type = (
@@ -741,7 +742,12 @@ class LocksTest(TestMixin, TestCase):
             raise NotImplementedError
 
         with self.executor() as executor:
-            assert lock_timeout in ["BLOCKING", "NON_BLOCKING", "BLOCKING_WITH_TIMEOUT"]
+            if lock_timeout not in [
+                "BLOCKING",
+                "NON_BLOCKING",
+                "BLOCKING_WITH_TIMEOUT",
+            ]:
+                raise AssertionError(f"Unexpected lock_timeout: {lock_timeout}")
             lock_or_flock_future: Future[None] = executor.submit(
                 inner,
                 lock_or_flock,

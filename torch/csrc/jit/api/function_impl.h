@@ -1,11 +1,10 @@
 #pragma once
 
 #include <ATen/core/function.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 namespace torch::jit {
-
-using ::c10::FunctionSchema;
 
 struct TORCH_API GraphFunction : public Function {
   GraphFunction(
@@ -59,7 +58,9 @@ struct TORCH_API GraphFunction : public Function {
   // if this isn't yet defined, run its method_creator function
   void ensure_defined() override;
 
-  size_t num_inputs() const override;
+  size_t num_inputs() const override {
+    return graph()->inputs().size();
+  }
 
   Function& setSchema(FunctionSchema schema) override {
     schema_ = std::make_unique<FunctionSchema>(std::move(schema));
@@ -79,7 +80,11 @@ struct TORCH_API GraphFunction : public Function {
     return true;
   }
 
-  void check_single_output();
+  void check_single_output() {
+    TORCH_CHECK(
+        graph()->outputs().size() == 1,
+        "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
+  }
 
   GraphExecutor& get_executor() {
     ensure_defined();

@@ -64,7 +64,8 @@ def skipOps(op_db, test_case_name, base_test_name, to_skip):
             for o in all_opinfos
             if o.name == op_name and o.variant_test_name == variant_name
         ]
-        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        if not (len(matching_opinfos) >= 1):
+            raise AssertionError(f"Couldn't find OpInfo for {xfail}")
         for opinfo in matching_opinfos:
             decorators = list(opinfo.decorators)
             if expected_failure:
@@ -200,8 +201,6 @@ dtensor_fails = {
     xfail("nn.functional.conv_transpose3d"),
     # in-place op requires placement change during decomposition
     xfail("nn.functional.cosine_similarity"),
-    # Shard(0) causes local tensor index out of bounds for value broadcasting
-    xfail("index_put"),
     # "cannot resize variables that require grad" from test harness
     xfail("resize_"),
     xfail("resize_as_"),
@@ -285,8 +284,6 @@ dtensor_compiled_fails = {
     xfail("expand_as"),
     xfail("hsplit"),
     xfail("linalg.diagonal"),
-    xfail("max", "reduction_with_dim"),
-    xfail("min", "reduction_with_dim"),
     xfail("movedim"),
     xfail("narrow"),
     xfail("permute"),
@@ -391,24 +388,8 @@ dtensor_fails_no_strategy = {
     xfail("cummin"),
     xfail("diagonal_scatter"),
     xfail("exponential"),
-    xfail("fft.fft"),
-    xfail("fft.fft2"),
-    xfail("fft.fftn"),
-    xfail("fft.fftshift"),
-    xfail("fft.ifft"),
-    xfail("fft.ifft2"),
-    xfail("fft.ifftshift"),
-    xfail("fft.ihfft"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
-    xfail("fft.irfft2"),
-    xfail("fft.irfftn"),
-    xfail("fft.rfft"),
-    xfail("fft.rfft2"),
-    xfail("fft.rfftn"),
-    xfail("flip"),
-    xfail("fliplr"),
-    xfail("flipud"),
     xfail("geometric"),
     xfail("geqrf"),
     xfail("grid_sampler_2d"),
@@ -513,8 +494,6 @@ dtensor_fails_no_strategy = {
     xfail("polar"),
     xfail("put"),
     xfail("renorm"),
-    xfail("roll"),
-    xfail("rot90"),
     xfail("scatter_reduce", "amax"),
     xfail("scatter_reduce", "amin"),
     xfail("scatter_reduce", "mean"),
@@ -750,7 +729,8 @@ class TestDTensorOps(TestCase):
 
     def run_one_hot(self):
         ops = [op for op in op_db if op.name == "nn.functional.one_hot"]
-        assert len(ops) == 1
+        if len(ops) != 1:
+            raise AssertionError(f"Expected 1 op, got {len(ops)}")
         op = ops[0]
         # num_classes = -1 appears to have a bug with dtensor.max().item()
         self.run_opinfo_test(
@@ -884,19 +864,10 @@ class TestLocalDTensorOps(TestDTensorOps):
 # This list only contains ops NOT in ops_dde_xfail - those are base tensor issues.
 ops_unbacked_dtensor_dde = {
     xfail("__getitem__"),
-    xfail("__radd__"),
-    xfail("__rdiv__"),
     xfail("__rmatmul__"),
-    xfail("__rmod__"),
-    xfail("__rmul__"),
-    xfail("__rpow__"),
-    xfail("__rsub__"),
     xfail("_segment_reduce", "lengths"),
     xfail("_segment_reduce", "offsets"),
     xfail("_unsafe_masked_index"),
-    xfail("add"),
-    xfail("addcdiv"),
-    xfail("addcmul"),
     xfail("addmm"),
     xfail("addmm", "decomposed"),
     xfail("addr"),
@@ -907,81 +878,41 @@ ops_unbacked_dtensor_dde = {
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
     xfail("as_strided_copy"),
-    xfail("atan2"),
     xfail("block_diag"),
-    xfail("broadcast_tensors"),
+    xfail("bucketize"),
     skip("broadcast_to"),
     xfail("bucketize"),
     xfail("cartesian_prod"),
     xfail("cholesky_solve"),
-    xfail("clamp"),
-    xfail("clamp_max"),
-    xfail("clamp_min"),
-    xfail("column_stack"),
-    xfail("copysign"),
+    xfail("constant_pad_nd"),
     xfail("cumprod"),
-    xfail("diagflat"),
     xfail("dist"),
-    xfail("div", "floor_rounding"),
-    xfail("div", "no_rounding_mode"),
-    xfail("div", "trunc_rounding"),
-    xfail("einsum"),
-    xfail("eq"),
-    xfail("expand"),
-    xfail("expand_as"),
-    xfail("expand_copy"),
     xfail("fill"),
     xfail("flatten"),
-    xfail("float_power"),
-    xfail("floor_divide"),
-    xfail("fmax"),
-    xfail("fmin"),
-    xfail("fmod"),
+    xfail("flip"),
+    xfail("fliplr"),
+    xfail("flipud"),
+    xfail("float"),
     xfail("frexp"),
     xfail("gather"),
-    xfail("ge"),
-    xfail("gt"),
-    xfail("heaviside"),
     xfail("histc"),
-    xfail("hypot"),
-    xfail("igamma"),
-    xfail("igammac"),
     xfail("index_put"),
     xfail("index_select"),
-    xfail("isclose"),
-    xfail("ldexp"),
-    xfail("le"),
-    xfail("lerp"),
-    xfail("logaddexp"),
-    xfail("logical_and"),
-    xfail("logical_or"),
-    xfail("logical_xor"),
-    xfail("lt"),
-    xfail("masked.normalize"),
     xfail("masked_fill"),
     xfail("masked_scatter"),
     xfail("masked_select"),
     xfail("matmul"),
-    xfail("max", "binary"),
     xfail("max", "reduction_with_dim"),
-    xfail("maximum"),
-    xfail("meshgrid", "list_of_tensors"),
-    xfail("meshgrid", "variadic_tensors"),
-    xfail("min", "binary"),
     xfail("min", "reduction_with_dim"),
-    xfail("minimum"),
     xfail("msort"),
-    xfail("mul"),
     xfail("mv"),
     xfail("narrow"),
     xfail("narrow_copy"),
-    xfail("ne"),
     xfail("new_empty"),
     xfail("new_empty_strided"),
     xfail("new_full"),
     xfail("new_ones"),
     xfail("new_zeros"),
-    xfail("nextafter"),
     xfail("nn.functional.celu"),
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
@@ -1001,8 +932,7 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.margin_ranking_loss"),
     xfail("nn.functional.mish"),
     xfail("nn.functional.multilabel_soft_margin_loss"),
-    xfail("nn.functional.normalize"),
-    xfail("nn.functional.pixel_unshuffle"),
+    xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.poisson_nll_loss"),
     xfail("nn.functional.relu6"),
     xfail("nn.functional.selu"),
@@ -1010,16 +940,15 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.triplet_margin_loss"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
+    xfail("nn.functional.pixel_unshuffle"),
     xfail("nonzero_static"),
-    xfail("outer"),
     xfail("permute_copy"),
-    xfail("pow"),
     xfail("prod"),
     xfail("ravel"),
-    xfail("remainder"),
     xfail("reshape"),
     xfail("reshape_as"),
     xfail("rsub"),
+    xfail("rot90"),
     xfail("scatter"),
     xfail("scatter_add"),
     xfail("slice"),
@@ -1029,14 +958,10 @@ ops_unbacked_dtensor_dde = {
     xfail("special.log_ndtr"),
     xfail("special.ndtri"),
     xfail("special.spherical_bessel_j0"),
-    xfail("special.zeta"),
-    xfail("squeeze"),
     xfail("squeeze", "multiple"),
     xfail("std_mean"),
-    xfail("sub"),
     xfail("topk"),
     xfail("transpose_copy"),
-    xfail("true_divide"),
     xfail("unflatten"),
     xfail("unsqueeze_copy"),
     xfail("vdot"),
@@ -1044,8 +969,6 @@ ops_unbacked_dtensor_dde = {
     xfail("view_as"),
     xfail("view_as_complex"),
     xfail("view_copy"),
-    xfail("where"),
-    xfail("xlogy"),
 }
 
 
@@ -1246,8 +1169,11 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             lambda s: Shard(s.dim),
             single_dim_strats[aten_op](aten_op, args_meta, kwargs_meta),
         )
-        # TODO(pianpwk): handle multi-output once that lands for single-dim
-        for output_placement, *input_placements in strategies:
+        n_inputs = len(all_tensor_meta)
+        for strategy in strategies:
+            input_placements = strategy[-n_inputs:]
+            output_placements = strategy[:-n_inputs]
+
             # skip strategies with invalid shards
             def is_invalid_shard(meta, p):
                 ndim = len(meta.shape)
@@ -1267,17 +1193,16 @@ class TestSingleDimStrategies(DTensorOpTestBase):
             ):
                 continue
 
-            # add the validate_sharding_rule function
             self.assertTrue(
                 validate_sharding_rule_sample(
                     aten_op,
                     full_args,
                     full_kwargs,
                     input_placements,
-                    (output_placement,),
+                    tuple(output_placements),
                     mesh,
                 ),
-                f"{op.name}: {input_placements} -> {(output_placement,)} failed",
+                f"{op.name}: {input_placements} -> {tuple(output_placements)} failed",
             )
 
 
