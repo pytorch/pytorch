@@ -14,7 +14,7 @@ from torch.testing._internal.common_jit import (
     check_against_reference,
     JitCommonTestCase,
 )
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, skipOps, xfail
 from torch.testing._internal.common_utils import (
     clone_input_helper,
     first_sample,
@@ -54,6 +54,24 @@ class TestJit(JitCommonTestCase):
     #   same values for the cross-product of op variants (function, method, inplace)
     #   and runtimes (eager, traced, scripted).
     # TODO WARNING: inplace x {traced, scripted} not currently tested
+    @skipOps(
+        "TestJit",
+        "test_variant_consistency_jit",
+        {
+            # Signal window ops have non-tensor (integer) inputs
+            xfail("signal.windows.bartlett"),
+            xfail("signal.windows.blackman"),
+            xfail("signal.windows.cosine"),
+            xfail("signal.windows.exponential"),
+            xfail("signal.windows.gaussian"),
+            xfail("signal.windows.general_cosine"),
+            xfail("signal.windows.general_hamming"),
+            xfail("signal.windows.hamming"),
+            xfail("signal.windows.hann"),
+            xfail("signal.windows.kaiser"),
+            xfail("signal.windows.nuttall"),
+        },
+    )
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
         _requires_grad = dtype in op.supported_backward_dtypes(

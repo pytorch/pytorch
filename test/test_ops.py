@@ -213,6 +213,23 @@ meta_consistency_out_dtype_mismatch_xfails = {
 }
 
 
+# Signal window ops require non-tensor (integer) inputs and are not compatible
+# with the standard tensor-oriented test infrastructure.
+_signal_windows_skips = {
+    skip("signal.windows.bartlett"),
+    skip("signal.windows.blackman"),
+    skip("signal.windows.cosine"),
+    skip("signal.windows.exponential"),
+    skip("signal.windows.gaussian"),
+    skip("signal.windows.general_cosine"),
+    skip("signal.windows.general_hamming"),
+    skip("signal.windows.hamming"),
+    skip("signal.windows.hann"),
+    skip("signal.windows.kaiser"),
+    skip("signal.windows.nuttall"),
+}
+
+
 # Tests that apply to all operators and aren't related to any particular
 #   system
 @unMarkDynamoStrictTest
@@ -832,6 +849,7 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
+    @skipOps("TestCommon", "test_noncontiguous_samples", _signal_windows_skips)
     @skipXPU
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
@@ -1353,6 +1371,7 @@ class TestCommon(TestCase):
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
     #   against eager's gold standard op function variant
+    @skipOps("TestCommon", "test_variant_consistency_eager", _signal_windows_skips)
     @skipXPU
     @_variant_ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
@@ -2303,6 +2322,7 @@ class TestMathBits(TestCase):
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
+    @skipOps("TestMathBits", "test_conj_view", _signal_windows_skips)
     @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
@@ -2325,6 +2345,7 @@ class TestMathBits(TestCase):
             torch.is_complex,
         )
 
+    @skipOps("TestMathBits", "test_neg_view", _signal_windows_skips)
     @ops(ops_and_refs, allowed_dtypes=(torch.double,))
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
@@ -2344,6 +2365,7 @@ class TestMathBits(TestCase):
             lambda x: True,
         )
 
+    @skipOps("TestMathBits", "test_neg_conj_view", _signal_windows_skips)
     @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:

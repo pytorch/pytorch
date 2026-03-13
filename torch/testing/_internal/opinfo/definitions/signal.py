@@ -299,51 +299,7 @@ def make_signal_windows_opinfo(
         error_inputs_func=error_inputs_func,
         supports_out=False,
         supports_autograd=False,
-        skips=(
-            # TODO: same as this?
-            # https://github.com/pytorch/pytorch/issues/81774
-            # also see: arange, new_full
-            # fails to match any schemas despite working in the interpreter
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestOperatorSignatures",
-                "test_get_torch_func_signature_exhaustive",
-            ),
-            # fails to match any schemas despite working in the interpreter
-            DecorateInfo(
-                unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
-            ),
-            # skip these tests since we have non tensor input
-            DecorateInfo(
-                unittest.skip("Skipped!"), "TestCommon", "test_noncontiguous_samples"
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-            ),
-            DecorateInfo(unittest.skip("Skipped!"), "TestMathBits", "test_conj_view"),
-            DecorateInfo(
-                unittest.skip("Skipped!"), "TestMathBits", "test_neg_conj_view"
-            ),
-            DecorateInfo(unittest.skip("Skipped!"), "TestMathBits", "test_neg_view"),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestVmapOperatorsOpInfo",
-                "test_vmap_exhaustive",
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestVmapOperatorsOpInfo",
-                "test_op_has_batch_rule",
-            ),
-            DecorateInfo(
-                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
-            *skips,
-        ),
+        skips=skips,
     )
 
 
@@ -408,13 +364,6 @@ op_db: list[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_window, std=1.92),
         reference_inputs_func=partial(reference_inputs_gaussian_window, std=1.92),
         error_inputs_func=error_inputs_gaussian_window,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Buggy on MPS for now (mistakenly promotes to float64)"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
-        ),
     ),
     make_signal_windows_opinfo(
         name="signal.windows.kaiser",

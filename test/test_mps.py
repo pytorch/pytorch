@@ -36,6 +36,8 @@ from functools import partial
 
 from torch.testing._internal.common_methods_invocations import (
     op_db,
+    skip,
+    skipOps,
     UnaryUfuncInfo,
     ReductionOpInfo,
     SpectralFuncInfo,
@@ -13180,6 +13182,25 @@ class TestCommon(TestCase):
     # MPS still requires some fairly heavy special casing in the test framework.
     # When MPS becomes more consistent, this can probably be merged with that test using
     # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
+    @skipOps(
+        "TestCommon",
+        "test_numpy_ref_mps",
+        {
+            # Signal window ops have non-tensor (integer) inputs;
+            # also buggy on MPS (mistakenly promotes to float64)
+            skip("signal.windows.bartlett"),
+            skip("signal.windows.blackman"),
+            skip("signal.windows.cosine"),
+            skip("signal.windows.exponential"),
+            skip("signal.windows.gaussian"),
+            skip("signal.windows.general_cosine"),
+            skip("signal.windows.general_hamming"),
+            skip("signal.windows.hamming"),
+            skip("signal.windows.hann"),
+            skip("signal.windows.kaiser"),
+            skip("signal.windows.nuttall"),
+        },
+    )
     @suppress_warnings
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))

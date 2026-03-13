@@ -25,7 +25,7 @@ import warnings
 from math import sqrt
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, skipOps, xfail
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
@@ -4681,6 +4681,24 @@ class TestOperatorSignatures(JitTestCase):
             self.orig_tracer_mutable_flag
         )
 
+    @skipOps(
+        "TestOperatorSignatures",
+        "test_get_torch_func_signature_exhaustive",
+        {
+            # Signal window ops have non-tensor (integer) inputs
+            xfail("signal.windows.bartlett"),
+            xfail("signal.windows.blackman"),
+            xfail("signal.windows.cosine"),
+            xfail("signal.windows.exponential"),
+            xfail("signal.windows.gaussian"),
+            xfail("signal.windows.general_cosine"),
+            xfail("signal.windows.general_hamming"),
+            xfail("signal.windows.hamming"),
+            xfail("signal.windows.hann"),
+            xfail("signal.windows.kaiser"),
+            xfail("signal.windows.nuttall"),
+        },
+    )
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):

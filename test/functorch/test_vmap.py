@@ -4435,6 +4435,18 @@ class TestVmapOperatorsOpInfo(TestCase):
                         sample.kwargs["memory_format"] == torch.channels_last
                     ),
                 ),
+                # Signal window ops have non-tensor (integer) inputs
+                skip("signal.windows.bartlett"),
+                skip("signal.windows.blackman"),
+                skip("signal.windows.cosine"),
+                skip("signal.windows.exponential"),
+                skip("signal.windows.gaussian"),
+                skip("signal.windows.general_cosine"),
+                skip("signal.windows.general_hamming"),
+                skip("signal.windows.hamming"),
+                skip("signal.windows.hann"),
+                skip("signal.windows.kaiser"),
+                skip("signal.windows.nuttall"),
             }
         ),
     )
@@ -4617,6 +4629,18 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail(
                     "searchsorted"
                 ),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
+                # Signal window ops have non-tensor (integer) inputs
+                skip("signal.windows.bartlett"),
+                skip("signal.windows.blackman"),
+                skip("signal.windows.cosine"),
+                skip("signal.windows.exponential"),
+                skip("signal.windows.gaussian"),
+                skip("signal.windows.general_cosine"),
+                skip("signal.windows.general_hamming"),
+                skip("signal.windows.hamming"),
+                skip("signal.windows.hann"),
+                skip("signal.windows.kaiser"),
+                skip("signal.windows.nuttall"),
             }
         ),
     )
