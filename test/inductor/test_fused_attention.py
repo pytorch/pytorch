@@ -467,6 +467,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             override_check_equal=True,
             atol=2e-3,
         )
+        args = (
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+        )
         self._check_common(
             sfdp_pattern_7_v2,
             args,
@@ -488,6 +493,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,
+        )
+        args = (
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
         )
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_7_v2),
@@ -525,6 +535,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
         self._check_common(sfdp_pattern_8, args, atol=2e-3)
+        args = (
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+        )
         self._check_common(sfdp_pattern_8_v2, args, atol=2e-3, contains=False)
 
         args = (
@@ -533,6 +548,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
         )
         self._check_common(checkpoint_wrapper(sfdp_pattern_8), args, atol=2e-3)
+        args = (
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+        )
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_8_v2),
             args,
@@ -580,6 +600,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             override_check_equal=True,
             atol=2e-3,
         )
+        args = (
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+        )
         self._check_common(
             sfdp_pattern_9_v2,
             args,
@@ -600,6 +625,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             has_dropout=True,
             override_check_equal=True,
             atol=2e-3,
+        )
+        args = (
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
         )
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_9_v2),
@@ -639,6 +669,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
         self._check_common(sfdp_pattern_10, args, atol=2e-3)
+        args = (
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
+        )
         self._check_common(
             sfdp_pattern_10_v2,
             args,
@@ -652,6 +687,11 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
         )
         self._check_common(checkpoint_wrapper(sfdp_pattern_10), args, atol=2e-3)
+        args = (
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+            torch.randn((2, 8, 4, 16), device=GPU_TYPE, dtype=torch.half),
+        )
         self._check_common(
             checkpoint_wrapper(sfdp_pattern_10_v2),
             args,
