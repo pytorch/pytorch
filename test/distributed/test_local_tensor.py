@@ -567,6 +567,108 @@ class TestLocalTensorRankWorld3(LocalTensorRankTest):
             expected_output = torch.tensor([0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
             self.assertEqual(result._local_tensors[self.rank], expected_output)
 
+    def test_all_to_all_single_uneven_splits(self):
+        """Test that all_to_all_single works correctly with uneven split sizes.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/177371.
+        Previously this would crash with "shape '[N, C]' is invalid for input of
+        size M" because _local_alltoall_base_ incorrectly used view() to reshape
+        the source tensor into the output section when the two had incompatible
+        first-dimension sizes.
+        """
+        # world_size = 3
+        # Each rank has a (6, 4) tensor.  We send 2 rows to each rank
+        # (input_split_sizes = [2, 2, 2]) but receive different amounts:
+        #   rank 0 expects [3, 2, 1] rows from ranks [0, 1, 2]  -> output 6 rows
+        #   rank 1 expects [2, 2, 2] rows from ranks [0, 1, 2]  -> output 6 rows
+        #   rank 2 expects [1, 2, 3] rows from ranks [0, 1, 2]  -> output 6 rows
+        #
+        # In a consistent all_to_all_single, rank_i's input_split_sizes[j] must
+        # equal rank_j's output_split_sizes[i], so the split sizes above satisfy:
+        #   rank_0.input_split_sizes = [2, 2, 2]
+        #   rank_1.input_split_sizes = [3, 2, 1]  (sent to ranks 0, 1, 2)
+        #   rank_2.input_split_sizes = [1, 2, 3]
+
+        # Build the per-rank input tensors (6 rows, 4 cols, values = rank*10 + row)
+        local_tensors = {
+            r: torch.arange(24, dtype=torch.float).reshape(6, 4) + r * 100
+            for r in range(self.world_size)
+        }
+
+        fake_pg = torch.distributed.distributed_c10d._get_default_group()
+
+        with LocalTensorMode(self.world_size):
+            lt_input = LocalTensor(local_tensors)
+
+            # output_split_sizes for each rank
+            output_split_sizes_per_rank = {
+                0: [2, 2, 2],  # rank 0 receives 2 rows from each rank
+                1: [3, 2, 1],  # rank 1 receives 3 from rank0, 2 from rank1, 1 from rank2
+                2: [1, 2, 3],  # rank 2 receives 1 from rank0, 2 from rank1, 3 from rank2
+            }
+            # input_split_sizes for each rank (must be consistent with output)
+            # rank_i sends input_split_sizes[j] rows to rank_j
+            # = output_split_sizes_per_rank[j][i]
+            input_split_sizes_per_rank = {
+                0: [2, 3, 1],  # rank 0 sends 2->rank0, 3->rank1, 1->rank2
+                1: [2, 2, 2],  # rank 1 sends 2->rank0, 2->rank1, 2->rank2
+                2: [2, 1, 3],  # rank 2 sends 2->rank0, 1->rank1, 3->rank2
+            }
+
+            # Use rank_map to create LocalInt split sizes so each rank sees its own
+            # split sizes via the LocalTensorMode machinery.
+            from torch.distributed._local_tensor import LocalIntNode
+
+            def _make_local_int_list(per_rank_dict):
+                """Build a list of SymInts where each position across ranks
+                corresponds to the per-rank split sizes list."""
+                n = len(next(iter(per_rank_dict.values())))
+                result = []
+                for pos in range(n):
+                    node = LocalIntNode({r: per_rank_dict[r][pos] for r in per_rank_dict})
+                    result.append(torch.SymInt(node))
+                return result
+
+            out_splits = _make_local_int_list(output_split_sizes_per_rank)
+            in_splits = _make_local_int_list(input_split_sizes_per_rank)
+
+            # Allocate the output LocalTensor with the correct per-rank sizes
+            lt_output = LocalTensor(
+                {
+                    r: torch.zeros(sum(output_split_sizes_per_rank[r]), 4)
+                    for r in range(self.world_size)
+                }
+            )
+
+            dist.all_to_all_single(
+                lt_output,
+                lt_input,
+                output_split_sizes=out_splits,
+                input_split_sizes=in_splits,
+                group=fake_pg,
+            )
+
+            # Verify: rank r's output should contain rows from each src rank that
+            # were sent to rank r.  For src rank s, the rows sent to rank r are:
+            # rows [sum(in_split[:r]) : sum(in_split[:r+1])] of src's local tensor.
+            for dst_rank in range(self.world_size):
+                out_split = output_split_sizes_per_rank[dst_rank]
+                actual = lt_output._local_tensors[dst_rank]
+                row_offset = 0
+                for src_rank in range(self.world_size):
+                    in_split = input_split_sizes_per_rank[src_rank]
+                    # src sends in_split[dst_rank] rows to dst_rank
+                    src_start = sum(in_split[:dst_rank])
+                    src_end = src_start + in_split[dst_rank]
+                    expected_chunk = local_tensors[src_rank][src_start:src_end]
+                    actual_chunk = actual[row_offset : row_offset + out_split[src_rank]]
+                    self.assertEqual(
+                        actual_chunk,
+                        expected_chunk,
+                        msg=f"dst_rank={dst_rank}, src_rank={src_rank}: mismatch",
+                    )
+                    row_offset += out_split[src_rank]
+
 
 class TestLocalTensorWorld3(LocalTensorWorldTest):
     world_size = 3

@@ -881,15 +881,24 @@ def _local_alltoall_base_(
                 if j < len(input_splits):
                     split_tensor = input_splits[j]
 
-                    # Determine where to place this split in the output tensor
+                    # Determine where to place this split in the output tensor.
+                    # rank_i's contribution to rank_j's output occupies the i-th
+                    # segment of rank_j's output buffer.  The size of that segment
+                    # is determined by how much rank_i actually sends to rank_j,
+                    # i.e. split_tensor.size(0).  When output_split_sizes are
+                    # provided we use them to compute the starting offset; when
+                    # they are absent we fall back to evenly-spaced offsets.
                     if output_split_sizes is not None and len(output_split_sizes) > 0:
-                        # Calculate offset based on output split sizes
+                        # output_split_sizes[k] is how much rank_j receives from
+                        # the k-th group rank (i.e. group_ranks[k]).  The
+                        # contribution from rank_i (group index i) therefore
+                        # starts at sum(output_split_sizes[:i]).
                         output_offset = sum(output_split_sizes[:i]) if i > 0 else 0
-                        end_offset = (
-                            output_offset + output_split_sizes[i]
-                            if i < len(output_split_sizes)
-                            else output_tensor._local_tensors[rank_j].size(0)
-                        )
+                        # Use the actual split tensor size instead of
+                        # output_split_sizes[i] so that we never attempt an
+                        # invalid reshape when input and output split sizes differ.
+                        actual_send_size = split_tensor.size(0)
+                        end_offset = output_offset + actual_send_size
                     else:
                         # No output split sizes, use even splits
                         split_size = output_tensor._local_tensors[rank_j].size(
@@ -901,14 +910,14 @@ def _local_alltoall_base_(
                             output_tensor._local_tensors[rank_j].size(0),
                         )
 
-                    # Copy the split to the appropriate section of the output tensor
+                    # Copy the split directly into the appropriate section of the
+                    # output tensor.  We must not use view()/reshape() here because
+                    # the source and destination may have different first-dimension
+                    # sizes when uneven split sizes are in use.
                     output_section = output_tensor._local_tensors[rank_j][
                         output_offset:end_offset
                     ]
                     if output_section.numel() > 0:
-                        # Reshape split_tensor to match output_section if necessary
-                        if split_tensor.size() != output_section.size():
-                            split_tensor = split_tensor.view(output_section.size())
                         output_section.copy_(split_tensor)
 
     work = FakeWork()
