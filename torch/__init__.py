@@ -41,7 +41,7 @@ from typing_extensions import (
 # As a bunch of torch.packages internally still have this check
 # we need to keep this. @todo: Remove tests that rely on this check as
 # they are likely stale.
-def _running_with_deploy() -> builtins.bool:
+def _running_with_deploy() -> builtins.bool:            
     return False
 
 
