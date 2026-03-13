@@ -1214,6 +1214,9 @@ else:
 # for larger kernels limit this
 kernel_name_max_ops = 10
 
+# Optional hook to transform fused kernel names.
+customized_fused_kernel_name: Callable[..., Any] | None = None
+
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
@@ -2448,6 +2451,7 @@ _save_config_ignore: list[str] = [
     "post_grad_custom_post_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    "customized_fused_kernel_name",
 ]
 
 _cache_config_ignore_prefix: list[str] = [
@@ -2467,6 +2471,7 @@ _cache_config_ignore_prefix: list[str] = [
     "joint_custom_post_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
+    "customized_fused_kernel_name",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
     # cache related options are not relevant to cache results

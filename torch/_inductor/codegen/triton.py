@@ -6319,6 +6319,8 @@ class TritonScheduling(SIMDScheduling):
                 if config.triton.descriptive_names
                 else ""
             )
+            if fused_name and config.customized_fused_kernel_name is not None:
+                fused_name = config.customized_fused_kernel_name(fused_name, src_code)
             kernel_category = get_kernel_category_by_source_code(src_code)[:3]
             kernel_name = "_".join(
                 ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
