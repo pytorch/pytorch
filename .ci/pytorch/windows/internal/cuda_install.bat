@@ -162,15 +162,15 @@ if %CUDA_VER% EQU 126 (
 )
 if %CUDA_VER% EQU 128 (
     set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda12-archive
-    set EXPECTED_CUDNN_VERSION=9.19.0
+    set EXPECTED_CUDNN_VERSION=9.20.0
 )
 if %CUDA_VER% EQU 129 (
     set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda12-archive
-    set EXPECTED_CUDNN_VERSION=9.17.1
+    set EXPECTED_CUDNN_VERSION=9.20.0
 )
 if %CUDA_VER% EQU 130 (
     set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda13-archive
-    set EXPECTED_CUDNN_VERSION=9.19.0
+    set EXPECTED_CUDNN_VERSION=9.20.0
 )
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 
