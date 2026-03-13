@@ -247,6 +247,41 @@ class FakeTensorTest(TestCase):
         eager_out = model.forward(x, w, b)
         self.assertEqual(fake_out.stride(), eager_out.stride())
 
+    def test_conv_ndhwc(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/177277
+        # conv3d with channels_last_3d input should produce channels_last_3d output
+        # under FakeTensorMode (meta_conv must propagate the memory format).
+        x = torch.randn([1, 2, 6, 6, 6]).to(memory_format=torch.channels_last_3d)
+        w = torch.randn([4, 2, 3, 3, 3]).to(memory_format=torch.channels_last_3d)
+        b = torch.randn([4])
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            fake_out = torch.ops.aten.convolution(
+                x, w, b, [1, 1, 1], [0, 0, 0], [1, 1, 1], False, [0, 0, 0], 1
+            )
+        # Output dim_order should match channels_last_3d: (0, 2, 3, 4, 1)
+        self.assertTrue(
+            fake_out.is_contiguous(memory_format=torch.channels_last_3d),
+            f"Expected channels_last_3d output, got strides {fake_out.stride()}",
+        )
+        # dim_order should be (0, 2, 3, 4, 1), not (0, 1, 2, 3, 4)
+        self.assertEqual(fake_out.dim_order(), (0, 2, 3, 4, 1))
+
+    def test_conv_nhwc_channels_last_weight_only(self):
+        # channels_last format propagated from weight even when input is contiguous
+        x = torch.randn([1, 1024, 16, 16])
+        w = torch.randn([256, 1024, 4, 4]).to(memory_format=torch.channels_last)
+        b = torch.randn([256])
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            fake_out = torch.ops.aten.convolution(
+                x, w, b, [1, 1], [0, 0], [1, 1], False, [0, 0], 1
+            )
+        self.assertTrue(
+            fake_out.is_contiguous(memory_format=torch.channels_last),
+            f"Expected channels_last output, got strides {fake_out.stride()}",
+        )
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
