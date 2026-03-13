@@ -1180,10 +1180,8 @@ class TestOperators(TestCase):
             # TODO: implement batching rule
             skip("_batch_norm_with_update"),
             xfail("__getitem__", ""),  # dynamic error
-            xfail("nanquantile", device_type="cpu"),  # checks q via a .item() call
             xfail("nn.functional.gaussian_nll_loss"),  # checks var for if any value < 0
             xfail("narrow"),  # .item() call
-            xfail("quantile", device_type="cpu"),  # checks q via a .item() call
             xfail("view_as_complex"),  # Tensor must have a last dimension with stride 1
             # required rank 4 tensor to use channels_last format
             xfail("bfloat16"),
