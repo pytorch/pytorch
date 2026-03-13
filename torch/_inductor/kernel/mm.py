@@ -671,9 +671,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         ):
             templates_to_use_aten.append(aten_bias_addmm)
         choices.extend(
-            V.choices.get_template_configs(kernel_inputs_aten, templates_to_use_aten, name)
+            V.choices.get_template_configs(
+                kernel_inputs_aten, templates_to_use_aten, name
+            )
         )
-
 
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
