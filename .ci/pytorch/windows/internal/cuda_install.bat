@@ -127,6 +127,9 @@ if not exist "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_
     echo Installing cuDNN...
     7z x %CUDNN_SETUP_FILE% -o"%SRC_DIR%\temp_build\cudnn"
     xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\"
+    if exist "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\x64\*.*" (
+        xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\x64\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\"
+    )
     xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\lib\x64\"
     xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\"
 
@@ -210,6 +213,11 @@ if errorlevel 1 (
 echo Listing extracted cuDNN archive contents:
 dir /S /B "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%"
 xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\"
+:: Newer cuDNN archives place DLLs under bin\x64\. Flatten them into bin\
+:: so they are found via PATH (which only includes bin\, not bin\x64\).
+if exist "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\x64\*.*" (
+    xcopy /Y "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\bin\x64\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\bin\"
+)
 xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\%CUDNN_LIB_FOLDER%\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\lib\x64\"
 xcopy /Y /S "%SRC_DIR%\temp_build\cudnn\%CUDNN_FOLDER%\include\*.*" "%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION_STR%\include\"
 
