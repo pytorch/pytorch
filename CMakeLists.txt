@@ -422,13 +422,13 @@ if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
   find_program(SCCACHE_EXECUTABLE sccache)
   if(CCACHE_PROGRAM)
-    foreach(LANG CXX C CUDA)
+    foreach(LANG CXX C CUDA SYCL)
       set(CMAKE_${LANG}_COMPILER_LAUNCHER
           "${CCACHE_PROGRAM}"
           CACHE STRING "${LANG} compiler launcher")
     endforeach()
   elseif(SCCACHE_EXECUTABLE)
-    foreach(LANG CXX C CUDA)
+    foreach(LANG CXX C CUDA SYCL)
       set(CMAKE_${LANG}_COMPILER_LAUNCHER
           "${SCCACHE_EXECUTABLE}"
           CACHE STRING "${LANG} compiler launcher")
