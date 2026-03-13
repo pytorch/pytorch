@@ -65,19 +65,35 @@ ACCELERATOR_DIST_BACKENDS = ["nccl", "xccl", "hccl"]
 DDP_RANK_DEVICES = ["cuda", "xpu"]
 HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
 
-# Hooks called in the parent process before workers are spawned.
-_test_env_setup_hooks: list[Callable[..., None]] = []
-# Hooks called in each child worker process with (rank,) before the test runs.
-_worker_env_setup_hooks: list[Callable[[int], None]] = []
+@dataclass
+class EnvSetupHook:
+    fn: Callable[..., None]
+    required_context: list[str]
 
 
-def register_test_env_setup_hook(fn: Callable[..., None]) -> None:
-    """Register a hook called in the parent process before workers spawn."""
-    _test_env_setup_hooks.append(fn)
+_test_setup_hook: EnvSetupHook | None = None
+_worker_init_hook: EnvSetupHook | None = None
 
-def register_worker_env_setup_hook(fn: Callable[[int], None]) -> None:
-    """Register a hook called with (rank) in each spawned worker process."""
-    _worker_env_setup_hooks.append(fn)
+
+def register_test_setup_hook(fn: Callable[..., None], required_context: list[str]) -> None:
+    """Register a hook called in the parent process before workers spawn.
+    The hook receives only the keyword arguments named in *required_context*."""
+    global _test_setup_hook
+    _test_setup_hook = EnvSetupHook(fn=fn, required_context=required_context)
+
+
+def register_worker_init_hook(fn: Callable[..., None], required_context: list[str]) -> None:
+    """Register a hook called in each spawned worker process during init.
+    The hook receives only the keyword arguments named in *required_context*."""
+    global _worker_init_hook
+    _worker_init_hook = EnvSetupHook(fn=fn, required_context=required_context)
+
+
+def _invoke_env_hook(hook: EnvSetupHook | None, **context) -> None:
+    if hook is None:
+        return
+    kwargs = {key: context.get(key) for key in hook.required_context}
+    hook.fn(**kwargs)
 
 class TestSkip(NamedTuple):
     exit_code: int
@@ -828,8 +844,7 @@ class MultiProcessTestCase(TestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        for hook in _test_env_setup_hooks:
-            hook(world_size=self.world_size)
+        _invoke_env_hook(_test_setup_hook, world_size=self.world_size)
 
         # Used for tests that are expected to return a non-0 exit code, such as
         # SIGABRT thrown by watchdog.
@@ -929,8 +944,7 @@ class MultiProcessTestCase(TestCase):
     def _run(
         cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
     ) -> None:
-        for hook in _worker_env_setup_hooks:
-            hook(rank)
+        _invoke_env_hook(_worker_init_hook, rank=rank, world_size=cls.world_size)
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
@@ -1696,8 +1710,7 @@ class DynamoDistributedMultiProcTestCase(DistributedTestBase):
         cls, rank: int, test_name: str, file_name: str, parent_pipe, **kwargs
     ) -> None:
         trace_log.addHandler(logging.NullHandler())
-        for hook in _worker_env_setup_hooks:
-            hook(rank)
+        _invoke_env_hook(_worker_init_hook, rank=rank, world_size=cls.world_size)
 
         # The rest is copypasta from MultiProcessTestCase._run
         self = cls(test_name)
@@ -1811,8 +1824,7 @@ class MultiProcContinuousTest(TestCase):
             else:
                 raise
 
-        for hook in _worker_env_setup_hooks:
-            hook(rank)
+        _invoke_env_hook(_worker_init_hook, rank=rank, world_size=world_size)
 
         # End of bootstrap
         logger.debug("Setup complete")
@@ -2010,8 +2022,7 @@ class MultiProcContinuousTest(TestCase):
         Test fixture. Run before each test.
         """
         super().setUp()
-        for hook in _test_env_setup_hooks:
-            hook(world_size=self.world_size)
+        _invoke_env_hook(_test_setup_hook, world_size=self.world_size)
 
         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
         self.__class__._ensure_processes_spawned()
