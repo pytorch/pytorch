@@ -271,8 +271,10 @@ TEST(WaitCounter, ConcurrentUsage) {
   }
 
   EXPECT_GE(
-      state->startCount.load(), startBefore + kNumThreads * kIterationsPerThread);
-  EXPECT_GE(state->stopCount.load(), stopBefore + kNumThreads * kIterationsPerThread);
+      state->startCount.load(),
+startBefore + kNumThreads * kIterationsPerThread);
+  EXPECT_GE(
+      state->stopCount.load(), stopBefore + kNumThreads * kIterationsPerThread);
 }
 
 TEST(WaitCounter, StaticHandlePerCallSite) {
