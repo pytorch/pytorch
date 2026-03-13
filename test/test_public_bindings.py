@@ -369,6 +369,9 @@ class TestPublicBindings(TestCase):
             "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
             "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
+            "torch._native.ops.rmsnorm._kernels._cute_utils",  # depends on cutlass
+            "torch._native.ops.rmsnorm._kernels._rmsnorm_kernels",  # depends on cutlass/cuda.bindings
+            "torch._native.ops.rmsnorm._kernels.norms",  # depends on cutlass
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",
