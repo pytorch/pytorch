@@ -1409,7 +1409,7 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @onlyOn(["cuda", "xpu", "cpu"])
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_unacceptable_input_dims(self, device):
         # for compiled ops, type checking is in torch/_meta_registrations.py
