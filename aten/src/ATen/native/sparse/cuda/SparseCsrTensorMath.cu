@@ -749,7 +749,8 @@ void _apply_sparse_csr_linear_solve(
   // For column-major layout, leading dimension must be >= nrows.
   // When nrhs==1, stride(1) can be less than size(0), so use max.
   const int64_t b_ld = b.dim() == 1 ? b.size(0) : std::max(b.size(0), b.stride(1));
-  const int64_t x_ld = x.dim() == 1 ? x.size(0) : std::max(x.size(0), x.stride(1));
+  const int64_t b_ld = b.dim() == 1 ? b.size(0) : b.stride(1);
+  const int64_t x_ld = x.dim() == 1 ? x.size(0) : x.stride(1);
   // cuDSS data structures and handle initialization
   cudssConfig_t config;
   cudssMatrix_t b_mt;
