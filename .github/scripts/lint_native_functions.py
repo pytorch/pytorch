@@ -33,7 +33,7 @@ yaml = ruamel.yaml.YAML()  # type: ignore[attr-defined]
 yaml.preserve_quotes = True  # type: ignore[assignment]
 yaml.width = 1000  # type: ignore[assignment]
 yaml.boolean_representation = ["False", "True"]  # type: ignore[attr-defined]
-r = yaml.load(contents)
+r = yaml.safe_load(contents)
 
 # Cuz ruamel's author intentionally didn't include conversion to string
 # https://stackoverflow.com/questions/47614862/best-way-to-use-ruamel-yaml-to-dump-to-string-not-to-stream
