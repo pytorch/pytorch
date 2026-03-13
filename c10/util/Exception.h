@@ -616,12 +616,19 @@ namespace c10::detail {
 // too expensive to run this assert on production builds.
 #ifdef NDEBUG
 // Optimized version - generates no code.
-#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
-  while (false)                               \
-  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...)                        \
+  do {                                                               \
+    if (false) {                                                     \
+      C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__)) \
+    }                                                                \
+  } while (false)
 #else
-#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
-  C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...)                        \
+  do {                                                               \
+    if (true) {                                                      \
+      C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__)) \
+    }                                                                \
+  } while (false)
 #endif
 
 // TODO: We're going to get a lot of similar looking string literals
