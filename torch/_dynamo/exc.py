@@ -400,8 +400,10 @@ class ObservedTypeError(ObservedException):
     # A TypeError exception to be raised from inside Dynamo tracing. This can happen on generator.send(..) method
     pass
 
+
 class ObservedFrozenInstanceError(ObservedException):
-    # A FrozenInstanceError exception to be raised from inside Dynamo tracing. This can happen on a frozen dataclass __getattr__ or __delattr__.
+    # A FrozenInstanceError exception to be raised from inside Dynamo tracing.
+    # This can happen on a frozen dataclass __getattr__ or __delattr__.
     pass
 
 
