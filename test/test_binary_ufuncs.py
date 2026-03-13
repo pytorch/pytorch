@@ -2155,6 +2155,17 @@ class TestBinaryUfuncs(TestCase):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
+    def test_maximum_minimum_mixed_sign_out(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/173110
+        b0 = torch.tensor([1], dtype=torch.uint8, device=device)
+        l0 = torch.tensor([-9], dtype=torch.int64, device=device)
+
+        for op in (torch.maximum, torch.minimum, torch.fmax, torch.fmin):
+            expected = op(b0, l0)
+            out = torch.empty_like(b0)
+            op(b0, l0, out=out)
+            self.assertEqual(out.to(expected.dtype), expected)
+
     @dtypes(*integral_types_and(torch.bool))
     def test_maximum_minimum_int_and_bool(self, device, dtype):
         ops = (
