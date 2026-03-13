@@ -82,6 +82,7 @@ __all__ = [
     "LongTensor",
     "ShortStorage",
     "ShortTensor",
+    
     "SymBool",
     "SymFloat",
     "SymInt",
@@ -168,6 +169,8 @@ if sys.platform == "win32":
         import sysconfig
 
         from torch.version import cuda as cuda_version
+        a=10
+        print(a)
 
         pfiles_path = os.getenv("ProgramFiles", r"C:\Program Files")
         py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
