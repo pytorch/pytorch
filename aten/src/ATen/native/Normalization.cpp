@@ -522,6 +522,22 @@ BatchNormBackend _select_batch_norm_backend(
     return BatchNormBackend::Cudnn;
   }
 
+  // HipDNN — independent of MIOpen
+  if (at::globalContext().userEnabledHipdnn()
+      && detail::getCUDAHooks().compiledWithHipDNN()
+      && input.is_cuda()
+      && input.dim() >= 3
+      && input.dim() <= 5
+      && input.scalar_type() != at::kDouble
+      && weight.scalar_type() == at::kFloat
+      && weight.defined() && bias.defined()
+      && ((running_mean.defined() && running_var.defined())
+        || (!running_mean.defined() && !running_var.defined() && training))
+      && input.is_contiguous(input.suggest_memory_format())
+  ) {
+    return BatchNormBackend::Hipdnn;
+  }
+
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM once ROCm officially supports NHWC in MIOpen
   // See https://github.com/pytorch/pytorch/issues/64427.
   // non static variable is used to be able to change environment variable in runtime for testing
@@ -530,7 +546,6 @@ BatchNormBackend _select_batch_norm_backend(
   bool is_miopen_3_4 = miopen_version >= 30400;  // ROCm 6.4
   bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
   bool PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM").value_or(is_miopen_3_5);
-  bool hipdnn_enabled = at::globalContext().userEnabledHipdnn();
 
   if (
       detail::getCUDAHooks().compiledWithMIOpen()
@@ -549,8 +564,7 @@ BatchNormBackend _select_batch_norm_backend(
               (input.suggest_memory_format() == MemoryFormat::ChannelsLast
                || input.suggest_memory_format() == MemoryFormat::ChannelsLast3d)))
   ) {
-    return (hipdnn_enabled && detail::getCUDAHooks().compiledWithHipDNN())
-        ? BatchNormBackend::Hipdnn : BatchNormBackend::Miopen;
+    return BatchNormBackend::Miopen;
   }
 
   return BatchNormBackend::Native;
@@ -644,8 +658,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                input.contiguous(input.suggest_memory_format()),
                weight.contiguous(),
                bias.contiguous(),
-               running_mean.defined() ? running_mean.contiguous() : running_mean,
-               running_var.defined() ? running_var.contiguous() : running_var,
+               running_mean,
+               running_var,
                training, momentum, eps),
              std::tuple<Tensor>(reserve),
              std::make_tuple(3));
