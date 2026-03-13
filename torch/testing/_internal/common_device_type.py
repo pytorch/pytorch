@@ -357,6 +357,9 @@ class DeviceTypeTestBase(TestCase):
 
     @classmethod
     def update_op_list(cls, ops):
+        if cls.op_decorators is None and cls.op_skips is None:
+            return
+
         op_dict = {op.full_name: op for op in copy.deepcopy(ops.op_list)}
 
         if cls.op_decorators is not None:
