@@ -139,7 +139,7 @@ jobs:
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel'
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -158,10 +158,10 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel'
 
       - name: Login to ECR
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel'
         uses: ./.github/actions/ecr-login
         with:
           aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
@@ -187,13 +187,13 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'  && inputs.build-environment != 'linux-ppc64le-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
         env:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
@@ -203,7 +203,7 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -245,7 +245,7 @@ jobs:
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
         continue-on-error: true
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
@@ -267,6 +267,7 @@ jobs:
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           DOCKER_IMAGE_S390X: ${{ inputs.docker-image-name }}
+          DOCKER_IMAGE_PPC64LE: ${{ inputs.docker-image-name }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -286,17 +287,33 @@ jobs:
             # since some steps are skipped on s390x, if they are necessary, run them here
             env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
             env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          elif [[ ${BUILD_ENVIRONMENT} == *"ppc64le"* ]]; then
+            JENKINS_USER=""
+            USED_IMAGE="${DOCKER_IMAGE_PPC64LE}"
+            # ensure that docker container cleanly exits in 12 hours
+            # if for some reason cleanup action doesn't stop container
+            # when job is cancelled
+            DOCKER_SHELL_CMD="sleep 12h"
+            env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+            env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           else
             JENKINS_USER="--user jenkins"
             USED_IMAGE="${DOCKER_IMAGE}"
             DOCKER_SHELL_CMD=
           fi
-
-          # Leaving 1GB for the runner and other things
-          TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
-          # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details, the 3GB swap
-          # comes from https://github.com/pytorch/test-infra/pull/6058
-          TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
+          
+          # Compute memory limits, but skip setting them for ppc64le
+          if [[ ${BUILD_ENVIRONMENT} != *"ppc64le"* ]]; then
+            
+            # Leaving 1GB for the runner and other things
+            TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
+            # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details, the 3GB swap
+            # comes from https://github.com/pytorch/test-infra/pull/6058
+            TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
+            MEMORY_FLAGS="--memory=${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g --memory-swap=${TOTAL_MEMORY_WITH_SWAP}g"
+          else
+            MEMORY_FLAGS=""
+          fi
 
           if [[ ${BUILD_ENVIRONMENT} == *"riscv64"* ]]; then
             # EC2 specific setup for RISC-V emulation
@@ -345,8 +362,7 @@ jobs:
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e BUILD_ADDITIONAL_PACKAGES \
             -e RUNNER \
-            --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
-            --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
+            ${MEMORY_FLAGS} \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -359,7 +375,7 @@ jobs:
             ${DOCKER_SHELL_CMD}
           )
 
-          if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
+          if [[ ${BUILD_ENVIRONMENT} == *"s390x"* || ${BUILD_ENVIRONMENT} == *"ppc64le"* ]]; then
             # sometimes there are intermittent network errors, do a couple of retries
             docker exec -t "${container_name}" sh -c "python3 -m pip install -r requirements.txt || \
                 (sleep 15 && python3 -m pip install -r requirements.txt) || \
@@ -409,7 +425,7 @@ jobs:
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
-        if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true') && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true') && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel'
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -417,9 +433,9 @@ jobs:
           path: artifacts.zip
           s3-bucket: ${{ inputs.s3-bucket }}
 
-      - name: Store PyTorch Build Artifacts for s390x
+      - name: Store PyTorch Build Artifacts for s390x and ppc64le
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true') && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        if: inputs.build-generates-artifacts && (steps.build.outcome != 'skipped' || steps.use-old-whl.outputs.reuse == 'true') && (inputs.build-environment == 'linux-s390x-binary-manywheel' || inputs.build-environment == 'linux-ppc64le-binary-manywheel')
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14
@@ -428,7 +444,7 @@ jobs:
 
       - name: copy logs
         shell: bash
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel'}}
         continue-on-error: true
         run: |
           rm -f ./usage_logs
@@ -436,7 +452,7 @@ jobs:
           cp ../../usage_logs/usage_log_build_*.txt ./usage_logs/
 
       - name: Upload raw usage log to s3
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel'}}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel'}}
         uses: seemethere/upload-artifact-s3@v5
         with:
           s3-prefix: |
@@ -446,14 +462,14 @@ jobs:
           path: usage_logs/usage_log_build_*.txt
 
       - name: Upload sccache stats
-        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: steps.build.outcome != 'skipped' && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel'
         uses: ./.github/actions/upload-sccache-stats
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           build-time: ${{ steps.build.outputs.build_time }}
 
       - name: Upload utilization stats
-        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ always() && steps.build.outcome != 'skipped' && !inputs.disable-monitor && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel' }}
         continue-on-error: true
         uses: ./.github/actions/upload-utilization-stats
         with:
@@ -466,12 +482,12 @@ jobs:
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
-        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: always() && inputs.build-environment != 'linux-s390x-binary-manywheel' && inputs.build-environment != 'linux-ppc64le-binary-manywheel'
 
       - name: Cleanup docker
-        if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'
+        if: always() && (inputs.build-environment == 'linux-s390x-binary-manywheel' || inputs.build-environment == 'linux-ppc64le-binary-manywheel')
         shell: bash
         run: |
-          # on s390x stop the container for clean worker stop
+          # on s390x and ppc64le stop the container for clean worker stop
           docker stop -a || true
           docker kill -a || true
