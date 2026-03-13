@@ -272,7 +272,7 @@ TEST(WaitCounter, ConcurrentUsage) {
 
   EXPECT_GE(
       state->startCount.load(),
-startBefore + kNumThreads * kIterationsPerThread);
+      startBefore + kNumThreads * kIterationsPerThread);
   EXPECT_GE(
       state->stopCount.load(), stopBefore + kNumThreads * kIterationsPerThread);
 }
