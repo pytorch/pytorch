@@ -6280,6 +6280,94 @@ class CommonTemplate:
         actual = compiled()
         self.assertEqual(actual, expected)
 
+    def test_complex_uniform_constant_folding(self):
+        # Fix https://github.com/pytorch/pytorch/issues/174891
+        # view.dtype with mismatched element sizes changes element count,
+        # so constant folding must not treat the result as uniform.
+        def fn(x):
+            mask = torch.ones(2, 1, dtype=torch.complex64, device=self.device)
+            return x + mask
+
+        x = torch.full((2, 2), 1.0, dtype=torch.complex64, device=self.device)
+        expected = fn(x)
+        compiled = torch.compile(fn, backend="inductor")
+        actual = compiled(x)
+        self.assertEqual(actual, expected)
+
+    def test_view_dtype_non_0d_larger_to_smaller_element_size(self):
+        # Non-0-d counterpart of test_view_dtype_0d_smaller_to_larger_element_size.
+        # element_size (8) > itemsize (4): complex64 -> float32.
+        import torch.fx as fx
+        from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
+
+        graph = fx.Graph()
+
+        full_node = graph.call_function(
+            torch.ops.aten.full.default,
+            args=([2], 1 + 0j),
+            kwargs={
+                "dtype": torch.complex64,
+                "layout": torch.strided,
+                "device": self.device,
+                "pin_memory": False,
+            },
+        )
+        full_node.meta["val"] = torch.full(
+            [2], 1 + 0j, dtype=torch.complex64, device=self.device
+        )
+
+        view_node = graph.call_function(
+            torch.ops.aten.view.dtype, args=(full_node, torch.float32)
+        )
+        view_node.meta["val"] = torch.full(
+            [2], 1 + 0j, dtype=torch.complex64, device=self.device
+        ).view(torch.float32)
+
+        graph.output(view_node)
+        gm = fx.GraphModule(torch.nn.Module(), graph)
+
+        folder = UniformValueConstantFolder(gm)
+        folder.run()
+
+        self.assertNotIn(view_node, folder.node_replacements)
+
+    def test_view_dtype_non_0d_smaller_to_larger_element_size(self):
+        # Non-0-d counterpart of test_view_dtype_0d_smaller_to_larger_element_size.
+        # element_size (4) < itemsize (8): float32 -> complex64.
+        import torch.fx as fx
+        from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
+
+        graph = fx.Graph()
+
+        full_node = graph.call_function(
+            torch.ops.aten.full.default,
+            args=([2], 1.0),
+            kwargs={
+                "dtype": torch.float32,
+                "layout": torch.strided,
+                "device": self.device,
+                "pin_memory": False,
+            },
+        )
+        full_node.meta["val"] = torch.full(
+            [2], 1.0, dtype=torch.float32, device=self.device
+        )
+
+        view_node = graph.call_function(
+            torch.ops.aten.view.dtype, args=(full_node, torch.complex64)
+        )
+        view_node.meta["val"] = torch.full(
+            [2], 1.0, dtype=torch.float32, device=self.device
+        ).view(torch.complex64)
+
+        graph.output(view_node)
+        gm = fx.GraphModule(torch.nn.Module(), graph)
+
+        folder = UniformValueConstantFolder(gm)
+        folder.run()
+
+        self.assertNotIn(view_node, folder.node_replacements)
+
     def test_uniform(self):
         def fn(x):
             return aten.uniform.default(x, 0, 1)
