@@ -335,6 +335,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
             aten.miopen_batch_norm_backward,
+            aten.hipdnn_batch_norm_backward,
             aten.deg2rad,
             aten.deg2rad_,
             aten.detach,

@@ -2604,6 +2604,31 @@ def miopen_batch_norm_backward(
         [True, True, True],
     )
 
+@register_decomposition(aten.hipdnn_batch_norm_backward)
+@out_wrapper("out0", "out1", "out2")
+def hipdnn_batch_norm_backward(
+    input: Tensor,
+    grad_output: Tensor,
+    weight: Tensor,
+    running_mean: Tensor | None,
+    running_var: Tensor | None,
+    save_mean: Tensor | None,
+    save_var: Tensor | None,
+    epsilon: float,
+):
+    return aten.native_batch_norm_backward(
+        grad_output,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_var,
+        True,
+        epsilon,
+        [True, True, True],
+    )
+
 
 @register_decomposition(aten.cudnn_batch_norm_backward)
 @out_wrapper("out0", "out1", "out2")
