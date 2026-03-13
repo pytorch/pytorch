@@ -470,17 +470,20 @@ def _batch_p2p(p2p_ops: list[dist.P2POp], desc: str | None = None) -> list[dist.
     desc_str = f"{desc}, " if desc else ""
     logger.debug("batch_p2p %s%s", desc_str, p2p_ops)
 
-    op_types = {p.op for p in p2p_ops}
-    if op_types == {dist.isend}:
-        return [
-            p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
-            for p in p2p_ops
-        ]
-    if op_types == {dist.irecv}:
-        return [
-            p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
-            for p in p2p_ops
-        ]
+    # Disable optimization for XPU devices (XCCL) due to stream ordering requirements
+    device_type = p2p_ops[0].tensor.device.type if p2p_ops else None
+    if device_type != "xpu":
+        op_types = {p.op for p in p2p_ops}
+        if op_types == {dist.isend}:
+            return [
+                p.op(p.tensor, group=p.group, tag=p.tag, group_dst=p.group_peer)
+                for p in p2p_ops
+            ]
+        if op_types == {dist.irecv}:
+            return [
+                p.op(p.tensor, group=p.group, tag=p.tag, group_src=p.group_peer)
+                for p in p2p_ops
+            ]
 
     return dist.batch_isend_irecv(p2p_ops)
 
