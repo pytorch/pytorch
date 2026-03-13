@@ -177,9 +177,7 @@ class TestCompareToNumpy(TestCase):
             if dtype is not None:
                 kwargs = {"dtype": getattr(tnp, dtype.__name__)}
             result = tnp.add(scalar, array, **kwargs).tensor.numpy()
-            # On Windows, int scalar promotion can differ (LLP64 vs LP64); skip dtype assert there.
-            skip_dtype_assert = sys.platform == "win32" and isinstance(scalar, int)
-            if not skip_dtype_assert and result.dtype != result_numpy.dtype:
+            if result.dtype != result_numpy.dtype:
                 raise AssertionError(
                     f"Expected result.dtype == {result_numpy.dtype}, got {result.dtype}"
                 )
@@ -219,16 +217,36 @@ class TestCompareToNumpy(TestCase):
                 # TypeError: ufunc 'hypot' not supported for the input types
                 result_numpy = None
 
+            type_mismatch = False
+            expected_numpy_dtype = None
+            expected_torch_dtype = None
+
             if result is not None and result_numpy is not None:
-                # On Windows, int scalar promotion can differ (LLP64 vs LP64); skip dtype assert there.
-                skip_dtype_assert = sys.platform == "win32" and isinstance(scalar, int)
-                if (
-                    not skip_dtype_assert
-                    and result.tensor.numpy().dtype != result_numpy.dtype
-                ):
-                    raise AssertionError(
-                        f"Expected result dtype == {result_numpy.dtype}, got {result.tensor.numpy().dtype}"
-                    )
+                expected_numpy_dtype = result_numpy.dtype
+                expected_torch_dtype = result.tensor.numpy().dtype
+                if sys.platform == "win32":
+                    if (
+                        array.tensor.numpy().dtype != _np.bool_
+                        and result.tensor.numpy().dtype != result_numpy.dtype
+                    ):
+                        type_mismatch = True
+
+                    if (
+                        array.tensor.numpy().dtype == _np.bool_
+                        and result_numpy.dtype == _np.int32
+                        and result.tensor.numpy().dtype != _np.int64
+                    ):
+                        expected_numpy_dtype = _np.int32
+                        expected_torch_dtype = tnp.int64
+                        type_mismatch = True
+                else:
+                    if result.tensor.numpy().dtype != result_numpy.dtype:
+                        type_mismatch = True
+
+            if type_mismatch:
+                raise AssertionError(
+                    f"Expected result numpy dtype == {expected_numpy_dtype}, torch dtype == {expected_torch_dtype}"
+                )
 
         finally:
             _np._set_promotion_state(state)

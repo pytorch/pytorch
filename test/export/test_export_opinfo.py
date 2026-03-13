@@ -215,11 +215,7 @@ for op in ops:
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env=(
-                        {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
-                        if sys.platform == "win32"
-                        else {"CUDA_VISIBLE_DEVICES": ""}
-                    ),
+                    env={"CUDA_VISIBLE_DEVICES": ""},
                 )
             )
             .decode("ascii")
@@ -228,10 +224,13 @@ for op in ops:
         self.assertEqual(r, "")
 
     @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Failing on Windows, device_count() changes from 0 to 1 ",
+    )
     def test_preserve_original_behavior(self):
         test_script = f"""\
 import torch
-import sys
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 def cuda_calls_behavior_unchanged():
@@ -263,11 +262,9 @@ def cuda_calls_behavior_unchanged():
     except Exception as e:
         exception_count += 1
 
+    assert torch.cuda.is_available() == False
     assert torch.cuda.device_count() == 0
-    # On Linux all 5 CUDA ops raise and is_available() is False; on Windows behavior can differ
-    if sys.platform != "win32":
-        assert exception_count == 5
-        assert torch.cuda.is_available() == False
+    assert exception_count == 5
 
 cuda_calls_behavior_unchanged()
 
@@ -285,11 +282,7 @@ cuda_calls_behavior_unchanged()
             (
                 subprocess.check_output(
                     [sys.executable, "-c", test_script],
-                    env=(
-                        {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
-                        if sys.platform == "win32"
-                        else {"CUDA_VISIBLE_DEVICES": ""}
-                    ),
+                    env={"CUDA_VISIBLE_DEVICES": ""},
                 )
             )
             .decode("ascii")

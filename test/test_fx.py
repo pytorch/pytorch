@@ -4489,6 +4489,9 @@ event=aten::t node=t stack_trace=return F.linear(input, self.weight, self.bias)
 event=aten::transpose node=t stack_trace=return F.linear(input, self.weight, self.bias)
 event=aten::as_strided node=t stack_trace=return F.linear(input, self.weight, self.bias)
 event=aten::addmm node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::expand node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
 event={kernel_event} node=addmm stack_trace=return F.linear(input, self.weight, self.bias)
 event=aten::relu node=relu stack_trace=return F.relu(input, inplace=self.inplace)
 event=aten::clamp_min node=relu stack_trace=return F.relu(input, inplace=self.inplace)
@@ -4497,6 +4500,9 @@ event=aten::t node=t_1 stack_trace=return F.linear(input, self.weight, self.bias
 event=aten::transpose node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
 event=aten::as_strided node=t_1 stack_trace=return F.linear(input, self.weight, self.bias)
 event=aten::addmm node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::expand node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event=aten::as_strided node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
+event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)
 event={kernel_event} node=addmm_1 stack_trace=return F.linear(input, self.weight, self.bias)"""
         else:
             expected = f"""\
