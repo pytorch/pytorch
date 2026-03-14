@@ -1163,11 +1163,27 @@ def _init_logs(log_file_name=None) -> None:
     trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
 
     # If TORCH_COMPILE_DEBUG=1 is set but no TORCH_TRACE, automatically use
-    # the torch_compile_debug directory for trace logs (to simplify tlparse usage)
+    # the torch_compile_debug directory for trace logs (to simplify tlparse usage).
+    # Note: we replicate the default_debug_dir_root() logic from torch._dynamo.config
+    # here instead of importing it, because _init_logs() runs during torch.__init__
+    # and importing torch._dynamo at this point triggers a circular import when
+    # triton is initializing (triton -> tritonparse -> torch -> _init_logs ->
+    # torch._dynamo -> import triton, but triton is still partially initialized).
     if trace_dir_name is None and os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1":
-        import torch._dynamo.config as dynamo_config
+        import getpass
 
-        trace_dir_name = os.path.join(dynamo_config.debug_dir_root, "tlparse")
+        from torch._environment import is_fbcode
+
+        debug_dir_var = os.environ.get("TORCH_COMPILE_DEBUG_DIR")
+        if debug_dir_var is not None:
+            debug_dir_root = os.path.join(debug_dir_var, "torch_compile_debug")
+        elif is_fbcode():
+            debug_dir_root = os.path.join(
+                tempfile.gettempdir(), getpass.getuser(), "torch_compile_debug"
+            )
+        else:
+            debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+        trace_dir_name = os.path.join(debug_dir_root, "tlparse")
 
     if dtrace_dir_name := os.environ.get(DTRACE_ENV_VAR, None):
         GET_DTRACE_STRUCTURED = True
