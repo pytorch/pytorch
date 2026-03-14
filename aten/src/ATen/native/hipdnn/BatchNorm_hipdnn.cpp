@@ -209,13 +209,18 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
         at::empty({workspace_size}, input_t.options().dtype(at::kByte));
 
     std::unordered_map<int64_t, void*> variantPack;
-    variantPack[input_attr->get_uid()] = input->data_ptr();
-    variantPack[weight_attr->get_uid()] = weight->data_ptr();
-    variantPack[bias_attr->get_uid()] = bias->data_ptr();
+    variantPack[input_attr->get_uid()] =
+        const_cast<void*>(input->const_data_ptr());
+    variantPack[weight_attr->get_uid()] =
+        const_cast<void*>(weight->const_data_ptr());
+    variantPack[bias_attr->get_uid()] =
+        const_cast<void*>(bias->const_data_ptr());
     variantPack[y->get_uid()] = output->data_ptr();
     variantPack[savedMean->get_uid()] = save_mean.data_ptr();
     variantPack[savedInvVar->get_uid()] = save_var.data_ptr();
     if (running_mean->defined()) {
+      // running stats are updated in-place: prev and next point to the same
+      // tensor so the graph overwrites the running stats during execution.
       variantPack[prev_mean_attr->get_uid()] = running_mean->data_ptr();
       variantPack[prev_var_attr->get_uid()] = running_var->data_ptr();
       variantPack[nextMean->get_uid()] = running_mean->data_ptr();
@@ -265,11 +270,16 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm(
         at::empty({workspace_size}, input_t.options().dtype(at::kByte));
 
     std::unordered_map<int64_t, void*> variantPack;
-    variantPack[input_attr->get_uid()] = input->data_ptr();
-    variantPack[weight_attr->get_uid()] = weight->data_ptr();
-    variantPack[bias_attr->get_uid()] = bias->data_ptr();
-    variantPack[mean_attr->get_uid()] = running_mean->data_ptr();
-    variantPack[variance_attr->get_uid()] = running_var->data_ptr();
+    variantPack[input_attr->get_uid()] =
+        const_cast<void*>(input->const_data_ptr());
+    variantPack[weight_attr->get_uid()] =
+        const_cast<void*>(weight->const_data_ptr());
+    variantPack[bias_attr->get_uid()] =
+        const_cast<void*>(bias->const_data_ptr());
+    variantPack[mean_attr->get_uid()] =
+        const_cast<void*>(running_mean->const_data_ptr());
+    variantPack[variance_attr->get_uid()] =
+        const_cast<void*>(running_var->const_data_ptr());
     variantPack[output_attr->get_uid()] = output->data_ptr();
 
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, workspace.data_ptr()));
@@ -361,11 +371,16 @@ std::tuple<Tensor, Tensor, Tensor> hipdnn_batch_norm_backward(
       at::empty({workspace_size}, input_t.options().dtype(at::kByte));
 
   std::unordered_map<int64_t, void*> variantPack;
-  variantPack[dy_attr->get_uid()] = grad_output->data_ptr();
-  variantPack[input_attr->get_uid()] = input->data_ptr();
-  variantPack[weight_attr->get_uid()] = weight->data_ptr();
-  variantPack[savedMeanAttr->get_uid()] = save_mean->data_ptr();
-  variantPack[savedInvVarAttr->get_uid()] = save_var->data_ptr();
+  variantPack[dy_attr->get_uid()] =
+      const_cast<void*>(grad_output->const_data_ptr());
+  variantPack[input_attr->get_uid()] =
+      const_cast<void*>(input->const_data_ptr());
+  variantPack[weight_attr->get_uid()] =
+      const_cast<void*>(weight->const_data_ptr());
+  variantPack[savedMeanAttr->get_uid()] =
+      const_cast<void*>(save_mean->const_data_ptr());
+  variantPack[savedInvVarAttr->get_uid()] =
+      const_cast<void*>(save_var->const_data_ptr());
   variantPack[dx->get_uid()] = grad_input_t.data_ptr();
   variantPack[dscale->get_uid()] = grad_weight_t.data_ptr();
   variantPack[dbias->get_uid()] = grad_bias_t.data_ptr();
