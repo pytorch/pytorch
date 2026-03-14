@@ -257,6 +257,11 @@ def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: st
         size = (batch, seq_len, num_heads, head_dim) if not packed else (batch, seq_len, 3 * num_heads * head_dim)
         return torch.randn(size, device=device, dtype=dtype, requires_grad=requires_grad)
 
+def compute_golden_reference_ieee(func, *args, **kwargs):
+    """Wrapper to compute golden reference with IEEE precision."""
+    with torch.backends.cuda.matmul.allow_tf32 as False:
+        with torch.backends.cudnn.flags(allow_tf32=False):
+            return func(*args, **kwargs)
 
 class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -3898,7 +3903,7 @@ class TestSDPACudaOnly(NNTestCase):
         value = torch.rand(batch_size, num_heads_kv, seq_len_k, head_dim,
                            device=device, dtype=dtype, requires_grad=True)
 
-        higher_precision_dtype = torch.float64
+        higher_precision_dtype = torch.float64 if dtype == torch.float32 else torch.float32
         query_ref, key_ref, value_ref = query_key_value_clones(query, key, value, dtype=higher_precision_dtype)
 
         is_dropout = dropout_p > 0.0
@@ -3909,7 +3914,7 @@ class TestSDPACudaOnly(NNTestCase):
                     query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
             with sdpa_kernel(backends=[SDPBackend.MATH]):
                 # High Precision Math Reference
-                out_ref = F.scaled_dot_product_attention(
+                out_ref = compute_golden_reference_ieee(F.scaled_dot_product_attention, 
                     query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
@@ -3939,7 +3944,7 @@ class TestSDPACudaOnly(NNTestCase):
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
             dropout_mask = softmax_mask >= 0
             # High Precision Math Reference
-            out_ref = torch.ops.aten._scaled_dot_product_attention_math(
+            out_ref = compute_golden_reference_ieee(torch.ops.aten._scaled_dot_product_attention_math,
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
                 scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
             # Low Precision Math Reference
@@ -3956,7 +3961,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         grads = torch.autograd.grad(out, (query, key, value), upstream_grad)
         grads_ref_lp = torch.autograd.grad(out_lp_ref, (query, key, value), upstream_grad)
-        grads_ref = torch.autograd.grad(out_ref, (query_ref, key_ref, value_ref), upstream_grad)
+        grads_ref = compute_golden_reference_ieee(torch.autograd.grad, out_ref, (query_ref, key_ref, value_ref), upstream_grad)
 
         fudge_factors = {
             'out': 4,
