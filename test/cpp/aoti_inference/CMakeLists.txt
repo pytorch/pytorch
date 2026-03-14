@@ -55,3 +55,25 @@ if(INSTALL_TEST)
     install(FILES $<TARGET_PDB_FILE:test_aoti_inference> DESTINATION bin OPTIONAL)
   endif()
 endif()
+
+# Build kernel_capture unit tests (CPU-only, no model data needed).
+add_executable(test_aoti_kernel_capture
+  ${TORCH_ROOT}/test/cpp/common/main.cpp
+  ${AOT_INDUCTOR_TEST_ROOT}/test_kernel_capture.cpp
+)
+
+target_compile_definitions(test_aoti_kernel_capture PRIVATE USE_GTEST)
+
+target_link_libraries(test_aoti_kernel_capture PRIVATE
+  torch
+  gtest_main
+)
+
+target_compile_options_if_supported(test_aoti_kernel_capture -Wno-unused-variable)
+
+if(INSTALL_TEST)
+  install(TARGETS test_aoti_kernel_capture DESTINATION bin)
+  if(MSVC AND BUILD_SHARED_LIBS)
+    install(FILES $<TARGET_PDB_FILE:test_aoti_kernel_capture> DESTINATION bin OPTIONAL)
+  endif()
+endif()

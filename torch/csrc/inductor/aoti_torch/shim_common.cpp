@@ -1259,6 +1259,76 @@ void aoti_torch_save_tensor_handle(
 #endif // !defined(C10_MOBILE)
 }
 
+void aoti_torch_save_kernel_capture(
+    const char* filepath,
+    const char* kernel_name,
+    const char* tag,
+    int32_t num_tensors,
+    const AtenTensorHandle* tensor_handles,
+    const int32_t* tensor_positions,
+    int32_t num_int_scalars,
+    const int64_t* int_scalar_values,
+    const int32_t* int_scalar_positions,
+    int32_t num_float_scalars,
+    const double* float_scalar_values,
+    const int32_t* float_scalar_positions) {
+#ifndef C10_MOBILE
+  try {
+    // Determine total arg count from max position across all arrays.
+    int32_t total_args = 0;
+    for (int32_t i = 0; i < num_tensors; ++i) {
+      total_args = std::max(total_args, tensor_positions[i] + 1);
+    }
+    for (int32_t i = 0; i < num_int_scalars; ++i) {
+      total_args = std::max(total_args, int_scalar_positions[i] + 1);
+    }
+    for (int32_t i = 0; i < num_float_scalars; ++i) {
+      total_args = std::max(total_args, float_scalar_positions[i] + 1);
+    }
+
+    // Build ordered args list by position.
+    c10::impl::GenericList args_list(c10::AnyType::get());
+    args_list.reserve(total_args);
+    for (int32_t i = 0; i < total_args; ++i) {
+      args_list.push_back(c10::IValue());
+    }
+    for (int32_t i = 0; i < num_tensors; ++i) {
+      at::Tensor* t = tensor_handle_to_tensor_pointer(tensor_handles[i]);
+      if (!t || !t->defined()) {
+        continue;
+      }
+      args_list.set(tensor_positions[i], c10::IValue(t->cpu()));
+    }
+    for (int32_t i = 0; i < num_int_scalars; ++i) {
+      args_list.set(int_scalar_positions[i], c10::IValue(int_scalar_values[i]));
+    }
+    for (int32_t i = 0; i < num_float_scalars; ++i) {
+      args_list.set(
+          float_scalar_positions[i], c10::IValue(float_scalar_values[i]));
+    }
+
+    c10::impl::GenericDict data(c10::StringType::get(), c10::AnyType::get());
+    data.insert("kernel", std::string(kernel_name));
+    data.insert("tag", std::string(tag));
+    data.insert("args", std::move(args_list));
+
+    auto bytes = torch::jit::pickle_save(c10::IValue(data));
+    std::ofstream fout(filepath, std::ios::out | std::ios::binary);
+    fout.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    fout.close();
+    if (!fout) {
+      std::cerr << "aoti_kernel_capture: failed to write " << filepath << '\n';
+      return;
+    }
+
+    std::cout << "aoti_kernel_capture: saved " << filepath << '\n';
+  } catch (const std::exception& e) {
+    std::cerr << "aoti_kernel_capture: failed to save " << filepath << ": "
+              << e.what() << '\n';
+  }
+#endif // !defined(C10_MOBILE)
+}
+
 void aoti_torch_print_tensor_handle(AtenTensorHandle self, const char* msg) {
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 

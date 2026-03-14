@@ -481,6 +481,23 @@ AOTI_TORCH_EXPORT void aoti_torch_save_tensor_handle(
     const char* launch_prefix,
     const char* kernel_name);
 
+// Save captured kernel call inputs as a .pt file for debugging.
+// Tensors, int scalars, and float scalars are passed as flat arrays with
+// position indices to reconstruct the original argument order.
+AOTI_TORCH_EXPORT void aoti_torch_save_kernel_capture(
+    const char* filepath,
+    const char* kernel_name,
+    const char* tag,
+    int32_t num_tensors,
+    const AtenTensorHandle* tensor_handles,
+    const int32_t* tensor_positions,
+    int32_t num_int_scalars,
+    const int64_t* int_scalar_values,
+    const int32_t* int_scalar_positions,
+    int32_t num_float_scalars,
+    const double* float_scalar_values,
+    const int32_t* float_scalar_positions);
+
 // helpers for converting between StableIValue and actual IValues
 using StableIValue = uint64_t;
 
