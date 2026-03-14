@@ -278,7 +278,13 @@ class TestWithNCCL(DistributedTestBase):
         with torch.inference_mode():
             input = torch.ones((10), device=self.device)
             output = f(input)
-            self.assertEqual(output, 0 * input)
+            if self.rank == 0:
+                self.assertEqual(
+                    output,
+                    torch.empty(0, device=self.device, dtype=input.dtype),
+                )
+            else:
+                self.assertEqual(output, 0 * input)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
