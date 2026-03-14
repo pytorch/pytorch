@@ -51,6 +51,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    tf32_off,
     tf32_on_and_off,
     tf32_enabled,
 )
@@ -259,9 +260,8 @@ def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: st
 
 def compute_golden_reference_ieee(func, *args, **kwargs):
     """Wrapper to compute golden reference with IEEE precision."""
-    with torch.backends.cuda.matmul.allow_tf32 as False:
-        with torch.backends.cudnn.flags(allow_tf32=False):
-            return func(*args, **kwargs)
+    with tf32_off():
+        return func(*args, **kwargs)
 
 class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
