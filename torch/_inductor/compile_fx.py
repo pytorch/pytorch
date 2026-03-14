@@ -2776,6 +2776,7 @@ def _compile_fx_main(
     example_inputs_: Sequence[InputType],
     inner_compile: Callable[..., OutputCode],
     ignore_shape_env: bool,
+    *,
     get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> CompileFxOutput:
     """
