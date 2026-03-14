@@ -665,12 +665,12 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
 
     if use_aten_gemm_kernels():
         is_rocm = torch.version.hip is not None
-        #For Aten on rocm, Separate Aten template and Triton template due to they have different kernel inputs
+        # For Aten on rocm, Separate Aten template and Triton template due to they have different kernel inputs
         if is_rocm:
             templates_to_use_aten: list[ExternKernelChoice | KernelTemplate] = []
             templates_to_use_aten.append(aten_addmm)
             if (
-                inp_expanded.get_stride()[0] == 0 
+                inp_expanded.get_stride()[0] == 0
                 and inductor_config.triton.autotune_cublasLt
             ):
                 templates_to_use_aten.append(aten_bias_addmm)
@@ -686,7 +686,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 and inductor_config.triton.autotune_cublasLt
             ):
                 templates_to_use.append(aten_bias_addmm)
-    
+
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
 
