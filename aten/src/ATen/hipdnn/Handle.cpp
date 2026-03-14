@@ -9,9 +9,6 @@
 namespace at::native {
 namespace {
 
-using namespace hipdnn_frontend;
-using namespace hipdnn_frontend::detail;
-
 void createHipdnnHandle(hipdnnHandle_t* handle) {
   HIPDNN_CHECK(hipdnnCreate(handle));
 }
@@ -21,7 +18,7 @@ void destroyHipdnnHandle(hipdnnHandle_t handle) {
   // See comments in the miopen equivalent (Handle.cpp).
 }
 
-using HipdnnPoolType = at::cuda::DeviceThreadHandlePool<
+using HipDNNPoolType = at::cuda::DeviceThreadHandlePool<
     hipdnnHandle_t,
     createHipdnnHandle,
     destroyHipdnnHandle>;
@@ -37,8 +34,8 @@ hipdnnHandle_t getHipdnnHandle() {
   // See: https://github.com/pytorch/pytorch/pull/22405
   // This thread local unique_ptrs will be destroyed when the thread terminates,
   // releasing its reserved handles back to the pool.
-  static auto pool = std::make_shared<HipdnnPoolType>();
-  thread_local std::unique_ptr<HipdnnPoolType::PoolWindow> myPoolWindow(
+  static auto pool = std::make_shared<HipDNNPoolType>();
+  thread_local std::unique_ptr<HipDNNPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);

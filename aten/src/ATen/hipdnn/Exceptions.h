@@ -2,7 +2,6 @@
 
 #include <c10/util/Exception.h>
 #include <hipdnn_frontend.hpp>
-#include <string>
 
 namespace c10 {
 
@@ -12,7 +11,7 @@ class HipDNNError : public c10::Error {
 
 } // namespace c10
 
-#define HIPDNN_CHECK(EXPR)                                              \
+#define HIPDNN_CHECK(EXPR, ...)                                         \
   do {                                                                  \
     hipdnnStatus_t status = EXPR;                                       \
     if (status != HIPDNN_STATUS_SUCCESS) {                              \
@@ -23,13 +22,15 @@ class HipDNNError : public c10::Error {
             "hipDNN error: ",                                           \
             hipdnnGetErrorString(status),                               \
             ". This error may appear if you passed in a non-contiguous" \
-            " input.");                                                 \
+            " input.",                                                  \
+            ##__VA_ARGS__);                                             \
       } else {                                                          \
         TORCH_CHECK_WITH(                                               \
             HipDNNError,                                                \
             false,                                                      \
             "hipDNN error: ",                                           \
-            hipdnnGetErrorString(status));                              \
+            hipdnnGetErrorString(status),                               \
+            ##__VA_ARGS__);                                             \
       }                                                                 \
     }                                                                   \
   } while (0)
