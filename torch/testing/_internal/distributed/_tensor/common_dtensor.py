@@ -631,7 +631,7 @@ def skip_unless_torch_gpu(method: T) -> T:
     >>> def test_some_method(self) -> None:
     >>>   ...
     """
-    # The builtin @skip_if_no_accelerator relies on os.environ['WORLD_SIZE'] being set.
+    # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
     return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
 
 

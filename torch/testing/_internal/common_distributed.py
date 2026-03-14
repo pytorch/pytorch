@@ -144,15 +144,13 @@ class DistTestCases:
 def requires_ddp_rank(device):
     return device in DDP_RANK_DEVICES
 
-
-def skip_if_no_accelerator(func):
-    """Skips if the world size exceeds the number of devices, ensuring that if the
-    test is run, each rank has its own device via ``torch.cuda.device(rank) or torch.accelerator.device_index(rank)``."""
-
+def skip_if_no_gpu(func):
+    """Skips if the world size exceeds the number of GPUs, ensuring that if the
+    test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not (TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
-            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
+        if not (TEST_CUDA or TEST_HPU or TEST_XPU):
+            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if TEST_CUDA and torch.cuda.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
@@ -160,6 +158,21 @@ def skip_if_no_accelerator(func):
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
         if TEST_XPU and torch.xpu.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def skip_if_no_accelerator(func):
+    """Skips if the world size exceeds the number of devices, ensuring that if the
+    test is run, each rank has its own device via ``torch.accelerator.device_index(rank)``."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not (TEST_PRIVATEUSE1):
+            sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
+        world_size = int(os.environ["WORLD_SIZE"])
         if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
