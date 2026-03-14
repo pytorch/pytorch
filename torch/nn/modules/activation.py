@@ -27,6 +27,7 @@ __all__ = [
     "CELU",
     "SELU",
     "GLU",
+    "SwiGLU",
     "GELU",
     "Hardshrink",
     "LeakyReLU",
@@ -771,6 +772,47 @@ class GLU(Module):
         """
         Return the extra representation of the module.
         """
+        return f"dim={self.dim}"
+
+
+class SwiGLU(Module):
+    r"""Applies the SwiGLU gated activation function.
+
+    .. math::
+        \text{SwiGLU}(a, b) = \text{SiLU}(a) \otimes b
+
+    where the input is split in half along ``dim`` to form ``a`` and ``b``,
+    :math:`\text{SiLU}` is the Sigmoid Linear Unit (swish) function,
+    and :math:`\otimes` is the element-wise product between matrices.
+
+    See `GLU Variants Improve Transformer <https://arxiv.org/abs/2002.05202>`_.
+
+    Args:
+        dim (int): the dimension on which to split the input. Default: -1
+
+    Shape:
+        - Input: :math:`(\ast_1, N, \ast_2)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(\ast_1, M, \ast_2)` where :math:`M=N/2`
+
+    Examples::
+
+        >>> m = nn.SwiGLU()
+        >>> input = torch.randn(4, 2)
+        >>> output = m(input)
+    """
+
+    __constants__ = ["dim"]
+    dim: int
+
+    def __init__(self, dim: int = -1) -> None:
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.swiglu(input, self.dim)
+
+    def extra_repr(self) -> str:
         return f"dim={self.dim}"
 
 

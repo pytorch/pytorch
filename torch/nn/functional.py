@@ -1767,6 +1767,39 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:
     return torch._C._nn.glu(input, dim)
 
 
+def swiglu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
+    r"""
+    swiglu(input, dim=-1) -> Tensor
+
+    Applies the SwiGLU gated activation function.
+
+    .. math ::
+        \text{SwiGLU}(a, b) = \text{SiLU}(a) \otimes b
+
+    where `input` is split in half along `dim` to form `a` and `b`, :math:`\text{SiLU}`
+    is the Sigmoid Linear Unit (swish) function, and :math:`\otimes` is the element-wise
+    product between matrices.
+
+    See `GLU Variants Improve Transformer <https://arxiv.org/abs/2002.05202>`_.
+
+    Args:
+        input (Tensor): input tensor
+        dim (int): dimension on which to split the input. Default: -1
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(swiglu, (input,), input, dim=dim)
+    if input.dim() == 0:
+        raise RuntimeError(
+            "swiglu does not support scalars because halving size must be even"
+        )
+    if input.size(dim) % 2 != 0:
+        raise RuntimeError(
+            f"Halving size must be even, but dimension {dim} is {input.size(dim)}"
+        )
+    a, b = input.chunk(2, dim)
+    return a * torch.sigmoid(a) * b
+
+
 def hardtanh(
     input: Tensor,
     min_val: float = -1.0,
