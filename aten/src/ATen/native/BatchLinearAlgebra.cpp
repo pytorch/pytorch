@@ -3835,6 +3835,9 @@ Tensor& linalg_solve_triangular_out(
     bool unitriangular,
     Tensor& out) {
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
+  TORCH_CHECK(A.device() == B.device(),
+              "linalg.solve_triangular: Expected A and B to be on the same device, but found A on ",
+              A.device(), " and B on ", B.device(), ".");
   auto [B_, A_] = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/nullptr);
 
   // We'll write F-contig / F-transpose for FORTRAN contiguous / FORTRAN transpose etc
