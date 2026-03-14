@@ -73,12 +73,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
 DEVICE_COUNT: int
 
-_PRIVATEUSE1_BACKEND: str | None = None
-
-
-def register_privateuse1_backend(name: str) -> None:
-    global _PRIVATEUSE1_BACKEND
-    _PRIVATEUSE1_BACKEND = name
+ENABLE_FOR_PRIVATEUSE1: bool = True
 
 
 if TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1:
@@ -826,8 +821,12 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
             "fake",
             "cpu:gloo,xpu:xccl",
         ]
-        if _PRIVATEUSE1_BACKEND:
-            _known.append(_PRIVATEUSE1_BACKEND)
+
+        # Dynamically accept the current device's registered backend,
+        # but only if the plugin hasn't opted out.
+        if curr_backend and ENABLE_FOR_PRIVATEUSE1:
+            _known.append(curr_backend)
+            _known.append(f"cpu:gloo,{self.device_type}:{curr_backend}")
 
         if backend not in _known:
             raise RuntimeError(f"Backend {backend} not supported!")
