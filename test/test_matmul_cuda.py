@@ -250,6 +250,7 @@ class TestMatmulCuda(InductorTestCase):
 
 
     @onlyCUDA
+    @skipIfRocm(msg="ROCm doesn't support allow_fp16_reduced_precision_reduction flag")
     @dtypes(torch.float16)
     # m == 4 chooses OUTPUT_TYPE reduction on H200
     # m == 8 chooses OUTPUT_TYPE reduction on A100
