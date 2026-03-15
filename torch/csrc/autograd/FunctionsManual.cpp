@@ -7552,9 +7552,9 @@ static Tensor gs_scatter2d(
     auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
     weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
   }
-  auto result = at::zeros({N, C, H * W}, values.options());
-  result.scatter_add_(2, flat, weighted.reshape({N, C, out_H * out_W}));
-  return result.reshape({N, C, H, W});
+  return at::zeros({N, C, H * W}, values.options())
+      .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W}))
+      .reshape({N, C, H, W});
 }
 
 // Gather input values at integer 3D positions.
@@ -7609,9 +7609,9 @@ static Tensor gs_scatter3d(
         (w_idx >= 0) & (w_idx < W);
     weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
   }
-  auto result = at::zeros({N, C, D * H * W}, values.options());
-  result.scatter_add_(2, flat, weighted.reshape({N, C, out_D * out_H * out_W}));
-  return result.reshape({N, C, D, H, W});
+  return at::zeros({N, C, D * H * W}, values.options())
+      .scatter_add(2, flat, weighted.reshape({N, C, out_D * out_H * out_W}))
+      .reshape({N, C, D, H, W});
 }
 
 // Compute unnormalized source coordinate and per-position chain-rule multiplier
