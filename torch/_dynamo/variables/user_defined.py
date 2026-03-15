@@ -537,7 +537,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         constant_args = check_constant_args(args, kwargs)
 
-        if self.value is torch.distributed.P2POp:
+        if torch.distributed.is_available() and self.value is torch.distributed.P2POp:
             if not config.enable_p2p_compilation:
                 unimplemented(
                     gb_type="P2P compilation disabled for P2POp construction",
@@ -1399,7 +1399,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             "an AttributeMutation mutation_type"
         )
 
-        if type(self.value) is torch.distributed.P2POp and (
+        if torch.distributed.is_available() and type(self.value) is torch.distributed.P2POp and (
             tx.output.side_effects.has_pending_mutation_of_attr(self, name_str)
             or name_str in self.value.__dict__
         ):
