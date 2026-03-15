@@ -7715,7 +7715,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     auto y1 = y0 + 1;
 
     Tensor I_nw, I_ne, I_sw, I_se;
-    if (output_mask[0] || output_mask[1]) {
+    if (output_mask[0] || output_mask[1] || output_mask[2]) {
       I_nw = gs_gather2d(input, y0, x0, zeros_oob);
       I_ne = gs_gather2d(input, y0, x1, zeros_oob);
       I_sw = gs_gather2d(input, y1, x0, zeros_oob);
@@ -7750,7 +7750,15 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
           gs_scatter2d(grad_output, w_sw, y1, x0, H, W, zeros_oob) +
           gs_scatter2d(grad_output, w_se, y1, x1, H, W, zeros_oob);
     }
-    // d_grid from ggGrid is 0 for bilinear.
+    // ggGrid -> d_grid: cross second derivative d²output/(dix diy) = I_nw -
+    // I_ne - I_sw + I_se
+    if (output_mask[2]) {
+      auto cross = (grad_output * (I_nw - I_ne - I_sw + I_se)).sum(1);
+      auto d_grid_x = gix_mult * ggG_y * cross;
+      auto d_grid_y = giy_mult * ggG_x * cross;
+      auto contrib = at::stack({std::move(d_grid_x), std::move(d_grid_y)}, -1);
+      d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
+    }
   } else { // bicubic
     // Cubic interpolation coefficients and derivatives w.r.t. fractional
     // offset. For t in [0,1], the four corners are at offsets {-1, 0, 1, 2}
@@ -7905,7 +7913,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   auto ggG_z = ggGrid.select(-1, 2) * giz_mult;
 
   Tensor I_tnw, I_tne, I_tsw, I_tse, I_bnw, I_bne, I_bsw, I_bse;
-  if (output_mask[0] || output_mask[1]) {
+  if (output_mask[0] || output_mask[1] || output_mask[2]) {
     I_tnw = gs_gather3d(input, z0, y0, x0, zeros_oob);
     I_tne = gs_gather3d(input, z0, y0, x1, zeros_oob);
     I_tsw = gs_gather3d(input, z0, y1, x0, zeros_oob);
@@ -7967,7 +7975,30 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
         gs_scatter3d(grad_output, w_bse, z1, y1, x1, D, H, W, zeros_oob);
   }
 
-  // d_grid from ggGrid is 0 for bilinear 3D.
+  // ggGrid -> d_grid: cross second derivatives for 3D bilinear.
+  // d²output/(dix diy) = (1-fz)*(I_tnw-I_tne-I_tsw+I_tse) +
+  // fz*(I_bnw-I_bne-I_bsw+I_bse) d²output/(dix diz) =
+  // (1-fy)*(I_tnw-I_tne-I_bnw+I_bne) + fy*(I_tsw-I_tse-I_bsw+I_bse)
+  // d²output/(diy diz) = (1-fx)*(I_tnw-I_tsw-I_bnw+I_bsw) +
+  // fx*(I_tne-I_tse-I_bne+I_bse)
+  if (output_mask[2]) {
+    auto fx_ = fx.unsqueeze(1), fy_ = fy.unsqueeze(1), fz_ = fz.unsqueeze(1);
+    auto d2_xy = (1 - fz_) * (I_tnw - I_tne - I_tsw + I_tse) +
+        fz_ * (I_bnw - I_bne - I_bsw + I_bse);
+    auto d2_xz = (1 - fy_) * (I_tnw - I_tne - I_bnw + I_bne) +
+        fy_ * (I_tsw - I_tse - I_bsw + I_bse);
+    auto d2_yz = (1 - fx_) * (I_tnw - I_tsw - I_bnw + I_bsw) +
+        fx_ * (I_tne - I_tse - I_bne + I_bse);
+    auto dot_xy = (grad_output * d2_xy).sum(1);
+    auto dot_xz = (grad_output * d2_xz).sum(1);
+    auto dot_yz = (grad_output * d2_yz).sum(1);
+    auto d_grid_x = gix_mult * (ggG_y * dot_xy + ggG_z * dot_xz);
+    auto d_grid_y = giy_mult * (ggG_x * dot_xy + ggG_z * dot_yz);
+    auto d_grid_z = giz_mult * (ggG_x * dot_xz + ggG_y * dot_yz);
+    auto contrib = at::stack(
+        {std::move(d_grid_x), std::move(d_grid_y), std::move(d_grid_z)}, -1);
+    d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
+  }
   return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
 }
 
