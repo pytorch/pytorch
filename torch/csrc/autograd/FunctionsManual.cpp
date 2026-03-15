@@ -7842,10 +7842,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       auto dot_dx2 = (grad_output * d2I_dx2).sum(1);
       auto dot_dy2 = (grad_output * d2I_dy2).sum(1);
       auto dot_dxdy = (grad_output * d2I_dxdy).sum(1);
-      auto ggrid_d_grid_x =
-          gix_mult * (ggG_x * gix_mult * dot_dx2 + ggG_y * giy_mult * dot_dxdy);
-      auto ggrid_d_grid_y =
-          giy_mult * (ggG_x * gix_mult * dot_dxdy + ggG_y * giy_mult * dot_dy2);
+      auto ggrid_d_grid_x = gix_mult * (ggG_x * dot_dx2 + ggG_y * dot_dxdy);
+      auto ggrid_d_grid_y = giy_mult * (ggG_x * dot_dxdy + ggG_y * dot_dy2);
       auto ggrid_d_grid =
           at::stack({std::move(ggrid_d_grid_x), std::move(ggrid_d_grid_y)}, -1);
       d_grid =
