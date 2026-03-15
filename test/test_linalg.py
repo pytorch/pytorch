@@ -1045,9 +1045,9 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double, torch.cdouble)
-    def test_det_backward(self):
+    def test_det_backward(self, device, dtype):
         # Regression test for #80761.
-        input = torch.tensor([[0.]], dtype=self.dtype, requires_grad=True)
+        input = torch.tensor([[0.]], device=device, dtype=self.dtype, requires_grad=True)
         self.assertTrue(torch.autograd.gradcheck(torch.det, inputs=input))
 
     @skipCUDAIfNoMagma
