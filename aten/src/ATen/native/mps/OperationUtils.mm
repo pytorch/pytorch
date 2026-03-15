@@ -1340,7 +1340,7 @@ DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
 }
 
 // PrecompiledMetalShaderLibrary implementation
-PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(std::vector<uint8_t> data): MetalShaderLibrary("") {
+PrecompiledMetalShaderLibrary::PrecompiledMetalShaderLibrary(std::vector<uint8_t> data) : MetalShaderLibrary("") {
   auto device = MPSDevice::getInstance()->device();
   NSError* error = nil;
   dispatch_data_t dd =
