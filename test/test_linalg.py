@@ -1050,6 +1050,16 @@ class TestLinalg(TestCase):
         input = torch.tensor([[0.]], device=device, dtype=dtype, requires_grad=True)
         self.assertTrue(torch.autograd.gradcheck(torch.det, inputs=input))
 
+        # When A has 0 elements (e.g. empty batch), backward should return a
+        # zeros tensor with the same shape as A, not an undefined tensor.
+        for shape in [(0, 3, 3), (2, 0, 0)]:
+            A = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+            det = torch.linalg.det(A)
+            det.sum().backward()
+            self.assertIsNotNone(A.grad)
+            self.assertEqual(A.grad.shape, A.shape)
+            self.assertEqual(A.grad, torch.zeros_like(A))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
