@@ -6320,6 +6320,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                             with cudnn.flags(enabled=False):
                                 test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
+                    # do gradgradcheck (bilinear and bicubic; nearest is piecewise constant)
+                    if mode in ('bilinear', 'bicubic'):
+                        N = random.randint(2, 4)
+                        C = random.randint(2, 4)
+                        H = random.randint(2, 5)
+                        W = random.randint(2, 5)
+                        input = torch.randn(N, C, H, W, requires_grad=True)
+                        grid = torch.randn(N, H, W, 2, requires_grad=True)
+                        self.assertTrue(gradgradcheck(
+                            lambda inp, grd: F.grid_sample(inp, grd, mode=mode, padding_mode=padding_mode,
+                                                           align_corners=align_corners),
+                            (input, grid)))
+
     @set_default_dtype(torch.double)
     def test_grid_sample_3d(self):
         # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
@@ -6453,8 +6466,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         device_list = ['cpu']
         if TEST_CUDA:
-            device_list.append('cuda')
-
         def normalize_indices(indices_unnormalized: torch.Tensor, dim_size: int, align_corners: bool):
             if align_corners:
                 indices_normalized = 2 * indices_unnormalized / (dim_size - 1) - 1

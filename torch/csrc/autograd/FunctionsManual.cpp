@@ -7694,13 +7694,6 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   if (!ggGrid.defined() || interpolation_mode == 1 /* nearest */) {
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      interpolation_mode == 0 /* bilinear */,
-      "grid_sampler_2d double backward not implemented for interpolation_mode=",
-      interpolation_mode);
-
-  // Bilinear: ggGrid contributions to d_grad_output and d_input.
-  auto N = input.size(0), C = input.size(1);
   auto H = input.size(2), W = input.size(3);
 
   auto [ix, gix_mult] =
@@ -7710,8 +7703,6 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
 
   auto x0 = at::floor(ix).to(at::kLong);
   auto y0 = at::floor(iy).to(at::kLong);
-  auto x1 = x0 + 1;
-  auto y1 = y0 + 1;
   auto fx = ix - x0.to(ix.dtype());
   auto fy = iy - y0.to(iy.dtype());
 
@@ -7719,43 +7710,140 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   auto ggG_x = ggGrid.select(-1, 0) * gix_mult; // (N, out_H, out_W)
   auto ggG_y = ggGrid.select(-1, 1) * giy_mult;
 
-  Tensor I_nw, I_ne, I_sw, I_se;
-  if (output_mask[0] || output_mask[1]) {
-    I_nw = gs_gather2d(input, y0, x0, zeros_oob);
-    I_ne = gs_gather2d(input, y0, x1, zeros_oob);
-    I_sw = gs_gather2d(input, y1, x0, zeros_oob);
-    I_se = gs_gather2d(input, y1, x1, zeros_oob);
-  }
+  if (interpolation_mode == 0 /* bilinear */) {
+    auto x1 = x0 + 1;
+    auto y1 = y0 + 1;
 
-  // ggGrid -> d_grad_output: gather input with derivative interpolation
-  // weights. d(w_nw)/d(ix) = -(1-fy), d(w_ne)/d(ix) = (1-fy), d(w_sw)/d(ix) =
-  // -fy, d(w_se)/d(ix) = fy d(w_nw)/d(iy) = -(1-fx), d(w_ne)/d(iy) = -fx,
-  // d(w_sw)/d(iy) = (1-fx), d(w_se)/d(iy) = fx
-  if (output_mask[0]) {
-    auto gx = ggG_x.unsqueeze(1);
-    auto gy = ggG_y.unsqueeze(1);
-    auto fx_ = fx.unsqueeze(1);
-    auto fy_ = fy.unsqueeze(1);
-    auto d_gO =
-        gx * ((fy_ - 1) * I_nw + (1 - fy_) * I_ne - fy_ * I_sw + fy_ * I_se) +
-        gy * ((fx_ - 1) * I_nw - fx_ * I_ne + (1 - fx_) * I_sw + fx_ * I_se);
-    d_grad_output = d_grad_output.defined() ? d_grad_output + d_gO : d_gO;
-  }
+    Tensor I_nw, I_ne, I_sw, I_se;
+    if (output_mask[0] || output_mask[1]) {
+      I_nw = gs_gather2d(input, y0, x0, zeros_oob);
+      I_ne = gs_gather2d(input, y0, x1, zeros_oob);
+      I_sw = gs_gather2d(input, y1, x0, zeros_oob);
+      I_se = gs_gather2d(input, y1, x1, zeros_oob);
+    }
 
-  // ggGrid -> d_input: scatter grad_output with derivative interpolation
-  // weights.
-  if (output_mask[1]) {
-    auto w_nw = ggG_x * (fy - 1) + ggG_y * (fx - 1);
-    auto w_ne = ggG_x * (1 - fy) - ggG_y * fx;
-    auto w_sw = -ggG_x * fy + ggG_y * (1 - fx);
-    auto w_se = ggG_x * fy + ggG_y * fx;
-    d_input = gs_scatter2d(grad_output, w_nw, y0, x0, H, W, zeros_oob) +
-        gs_scatter2d(grad_output, w_ne, y0, x1, H, W, zeros_oob) +
-        gs_scatter2d(grad_output, w_sw, y1, x0, H, W, zeros_oob) +
-        gs_scatter2d(grad_output, w_se, y1, x1, H, W, zeros_oob);
-  }
+    // ggGrid -> d_grad_output: gather input with derivative interpolation
+    // weights. d(w_nw)/d(ix) = -(1-fy), d(w_ne)/d(ix) = (1-fy),
+    // d(w_sw)/d(ix) = -fy, d(w_se)/d(ix) = fy
+    // d(w_nw)/d(iy) = -(1-fx), d(w_ne)/d(iy) = -fx,
+    // d(w_sw)/d(iy) = (1-fx), d(w_se)/d(iy) = fx
+    if (output_mask[0]) {
+      auto gx = ggG_x.unsqueeze(1);
+      auto gy = ggG_y.unsqueeze(1);
+      auto fx_ = fx.unsqueeze(1);
+      auto fy_ = fy.unsqueeze(1);
+      auto d_gO =
+          gx * ((fy_ - 1) * I_nw + (1 - fy_) * I_ne - fy_ * I_sw + fy_ * I_se) +
+          gy * ((fx_ - 1) * I_nw - fx_ * I_ne + (1 - fx_) * I_sw + fx_ * I_se);
+      d_grad_output = d_grad_output.defined() ? d_grad_output + d_gO : d_gO;
+    }
 
-  // d_grid from ggGrid is 0 for bilinear.
+    // ggGrid -> d_input: scatter grad_output with derivative interpolation
+    // weights.
+    if (output_mask[1]) {
+      auto w_nw = ggG_x * (fy - 1) + ggG_y * (fx - 1);
+      auto w_ne = ggG_x * (1 - fy) - ggG_y * fx;
+      auto w_sw = -ggG_x * fy + ggG_y * (1 - fx);
+      auto w_se = ggG_x * fy + ggG_y * fx;
+      d_input = gs_scatter2d(grad_output, w_nw, y0, x0, H, W, zeros_oob) +
+          gs_scatter2d(grad_output, w_ne, y0, x1, H, W, zeros_oob) +
+          gs_scatter2d(grad_output, w_sw, y1, x0, H, W, zeros_oob) +
+          gs_scatter2d(grad_output, w_se, y1, x1, H, W, zeros_oob);
+    }
+    // d_grid from ggGrid is 0 for bilinear.
+  } else { // bicubic
+    // Cubic interpolation coefficients and derivatives w.r.t. fractional
+    // offset. For t in [0,1], the four corners are at offsets {-1, 0, 1, 2}
+    // from base.
+    constexpr double A = -0.75;
+    auto fx1 = fx + 1.0, fx2 = 1.0 - fx, fx3 = 2.0 - fx;
+    auto fy1 = fy + 1.0, fy2 = 1.0 - fy, fy3 = 2.0 - fy;
+
+    std::array<Tensor, 4> cx = {
+        ((A * fx1 - 5 * A) * fx1 + 8 * A) * fx1 - 4 * A,
+        ((A + 2) * fx - (A + 3)) * fx.square() + 1,
+        ((A + 2) * fx2 - (A + 3)) * fx2.square() + 1,
+        ((A * fx3 - 5 * A) * fx3 + 8 * A) * fx3 - 4 * A,
+    };
+    std::array<Tensor, 4> dcx = {
+        (3 * A * fx1 - 10 * A) * fx1 + 8 * A,
+        (3 * (A + 2) * fx - 2 * (A + 3)) * fx,
+        -(3 * (A + 2) * fx2 - 2 * (A + 3)) * fx2,
+        (-3 * A * fx3 + 10 * A) * fx3 - 8 * A,
+    };
+    std::array<Tensor, 4> cy = {
+        ((A * fy1 - 5 * A) * fy1 + 8 * A) * fy1 - 4 * A,
+        ((A + 2) * fy - (A + 3)) * fy.square() + 1,
+        ((A + 2) * fy2 - (A + 3)) * fy2.square() + 1,
+        ((A * fy3 - 5 * A) * fy3 + 8 * A) * fy3 - 4 * A,
+    };
+    std::array<Tensor, 4> dcy = {
+        (3 * A * fy1 - 10 * A) * fy1 + 8 * A,
+        (3 * (A + 2) * fy - 2 * (A + 3)) * fy,
+        -(3 * (A + 2) * fy2 - 2 * (A + 3)) * fy2,
+        (-3 * A * fy3 + 10 * A) * fy3 - 8 * A,
+    };
+
+    // Second derivatives (only needed for d_grid).
+    std::array<Tensor, 4> d2cx, d2cy;
+    if (output_mask[2]) {
+      d2cx = {
+          6 * A * fx1 - 10 * A,
+          6 * (A + 2) * fx - 2 * (A + 3),
+          6 * (A + 2) * fx2 - 2 * (A + 3),
+          6 * A * fx3 - 10 * A,
+      };
+      d2cy = {
+          6 * A * fy1 - 10 * A,
+          6 * (A + 2) * fy - 2 * (A + 3),
+          6 * (A + 2) * fy2 - 2 * (A + 3),
+          6 * A * fy3 - 10 * A,
+      };
+    }
+
+    Tensor d2I_dx2, d2I_dy2, d2I_dxdy;
+    for (int j = 0; j < 4; ++j) {
+      auto y_idx = y0 + (j - 1);
+      for (int i = 0; i < 4; ++i) {
+        auto x_idx = x0 + (i - 1);
+        auto Iij = gs_gather2d(input, y_idx, x_idx, zeros_oob);
+        auto w = ggG_x * dcx[i] * cy[j] + ggG_y * cx[i] * dcy[j];
+        if (output_mask[0]) {
+          auto contrib = Iij * w.unsqueeze(1);
+          d_grad_output =
+              d_grad_output.defined() ? d_grad_output + contrib : contrib;
+        }
+        if (output_mask[1]) {
+          auto s = gs_scatter2d(grad_output, w, y_idx, x_idx, H, W, zeros_oob);
+          d_input = d_input.defined() ? d_input + s : s;
+        }
+        if (output_mask[2]) {
+          auto dx2 = (d2cx[i] * cy[j]).unsqueeze(1) * Iij;
+          auto dy2 = (cx[i] * d2cy[j]).unsqueeze(1) * Iij;
+          auto dxdy = (dcx[i] * dcy[j]).unsqueeze(1) * Iij;
+          d2I_dx2 = d2I_dx2.defined() ? d2I_dx2 + dx2 : dx2;
+          d2I_dy2 = d2I_dy2.defined() ? d2I_dy2 + dy2 : dy2;
+          d2I_dxdy = d2I_dxdy.defined() ? d2I_dxdy + dxdy : dxdy;
+        }
+      }
+    }
+
+    // d_grid from ggGrid: non-zero for bicubic (second derivative of cubic
+    // weights).
+    if (output_mask[2]) {
+      auto dot_dx2 = (grad_output * d2I_dx2).sum(1);
+      auto dot_dy2 = (grad_output * d2I_dy2).sum(1);
+      auto dot_dxdy = (grad_output * d2I_dxdy).sum(1);
+      auto ggrid_d_grid_x =
+          gix_mult * (ggG_x * gix_mult * dot_dx2 + ggG_y * giy_mult * dot_dxdy);
+      auto ggrid_d_grid_y =
+          giy_mult * (ggG_x * gix_mult * dot_dxdy + ggG_y * giy_mult * dot_dy2);
+      auto ggrid_d_grid =
+          at::stack({std::move(ggrid_d_grid_x), std::move(ggrid_d_grid_y)}, -1);
+      d_grid =
+          d_grid.defined() ? d_grid + ggrid_d_grid : std::move(ggrid_d_grid);
+    }
+  }
   return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
 }
 
