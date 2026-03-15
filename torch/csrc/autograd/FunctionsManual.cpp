@@ -7509,6 +7509,92 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
 
 namespace {
 
+// Bound integer tap coordinate per padding mode (for bicubic taps).
+// Returns a kLong tensor in [0, size-1].
+static Tensor gs_bound_coord(
+    const Tensor& idx,
+    int64_t size,
+    int64_t padding_mode,
+    bool align_corners) {
+  if (padding_mode <= 1 /* zeros or border */) {
+    return idx.clamp(0, size - 1);
+  }
+  // Reflection: mirrors the PyTorch reflect_coordinates convention.
+  if (size <= 1) {
+    return at::zeros_like(idx);
+  }
+  auto x = idx.to(at::kDouble);
+  double span, min_v;
+  if (align_corners) {
+    span = size - 1;
+    min_v = 0.0;
+  } else {
+    x = x + 0.5; // shift to center-of-pixel
+    span = size;
+    min_v = -0.5;
+  }
+  auto in = x - min_v;
+  auto in_abs = in.abs();
+  auto even = at::fmod(at::floor(in_abs / span), 2.0) < 0.5;
+  auto r = at::where(
+      even,
+      at::fmod(in_abs, span),
+      at::full_like(in_abs, span) - at::fmod(in_abs, span));
+  r = r + min_v;
+  if (!align_corners) {
+    r = r - 0.5;
+  }
+  return r.round().clamp(0, size - 1).to(at::kLong);
+}
+
+// Bounded gather for bicubic taps — applies proper padding to tap indices.
+static Tensor gs_gather2d_bc(
+    const Tensor& input,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    int64_t padding_mode,
+    bool align_corners) {
+  auto N = input.size(0), C = input.size(1);
+  auto H = input.size(2), W = input.size(3);
+  auto out_H = h_idx.size(1), out_W = h_idx.size(2);
+  auto h_b = gs_bound_coord(h_idx, H, padding_mode, align_corners);
+  auto w_b = gs_bound_coord(w_idx, W, padding_mode, align_corners);
+  auto flat = (h_b * W + w_b).reshape({N, 1, -1}).expand({N, C, out_H * out_W});
+  auto result = input.reshape({N, C, H * W})
+                    .gather(2, flat)
+                    .reshape({N, C, out_H, out_W});
+  if (padding_mode == 0 /* zeros */) {
+    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
+    result = result * mask.unsqueeze(1).to(result.dtype());
+  }
+  return result;
+}
+
+// Bounded scatter for bicubic taps.
+static Tensor gs_scatter2d_bc(
+    const Tensor& values,
+    const Tensor& weights,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    int64_t H,
+    int64_t W,
+    int64_t padding_mode,
+    bool align_corners) {
+  auto N = values.size(0), C = values.size(1);
+  auto out_H = values.size(2), out_W = values.size(3);
+  auto h_b = gs_bound_coord(h_idx, H, padding_mode, align_corners);
+  auto w_b = gs_bound_coord(w_idx, W, padding_mode, align_corners);
+  auto flat = (h_b * W + w_b).reshape({N, 1, -1}).expand({N, C, out_H * out_W});
+  auto weighted = weights.unsqueeze(1) * values;
+  if (padding_mode == 0 /* zeros */) {
+    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
+    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
+  }
+  return at::zeros({N, C, H * W}, values.options())
+      .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W}))
+      .reshape({N, C, H, W});
+}
+
 // Gather input values at integer 2D positions.
 // h_idx, w_idx: (N, out_H, out_W) kLong — may be out of bounds.
 // If zeros_oob, out-of-bounds positions return 0 (zeros padding).
@@ -7760,6 +7846,25 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
     }
   } else { // bicubic
+    // Native bicubic backward uses raw unnormalized coordinates with a constant
+    // gx_mult/gy_mult (the unnormalize scale only), applying padding
+    // exclusively when sampling each tap value.  Using gs_compute_coords here
+    // would be wrong: for border/reflection modes it zeroes gix_mult at
+    // boundaries, making ggG_x/y = 0 where native still has nonzero
+    // sensitivity.
+    double x_scale = align_corners ? (W - 1) / 2.0 : W / 2.0;
+    double y_scale = align_corners ? (H - 1) / 2.0 : H / 2.0;
+    auto x_raw = align_corners ? (grid.select(-1, 0) + 1) * x_scale
+                               : (grid.select(-1, 0) + 1) * x_scale - 0.5;
+    auto y_raw = align_corners ? (grid.select(-1, 1) + 1) * y_scale
+                               : (grid.select(-1, 1) + 1) * y_scale - 0.5;
+    auto x0_bc = at::floor(x_raw).to(at::kLong);
+    auto y0_bc = at::floor(y_raw).to(at::kLong);
+    auto ggG_x_bc = ggGrid.select(-1, 0) * x_scale;
+    auto ggG_y_bc = ggGrid.select(-1, 1) * y_scale;
+    auto fx = x_raw - x0_bc.to(x_raw.dtype());
+    auto fy = y_raw - y0_bc.to(y_raw.dtype());
+
     // Cubic interpolation coefficients and derivatives w.r.t. fractional
     // offset. For t in [0,1], the four corners are at offsets {-1, 0, 1, 2}
     // from base.
@@ -7811,18 +7916,20 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
 
     Tensor d2I_dx2, d2I_dy2, d2I_dxdy;
     for (int j = 0; j < 4; ++j) {
-      auto y_idx = y0 + (j - 1);
+      auto y_idx = y0_bc + (j - 1);
       for (int i = 0; i < 4; ++i) {
-        auto x_idx = x0 + (i - 1);
-        auto Iij = gs_gather2d(input, y_idx, x_idx, zeros_oob);
-        auto w = ggG_x * dcx[i] * cy[j] + ggG_y * cx[i] * dcy[j];
+        auto x_idx = x0_bc + (i - 1);
+        auto Iij =
+            gs_gather2d_bc(input, y_idx, x_idx, padding_mode, align_corners);
+        auto w = ggG_x_bc * dcx[i] * cy[j] + ggG_y_bc * cx[i] * dcy[j];
         if (output_mask[0]) {
           auto contrib = Iij * w.unsqueeze(1);
           d_grad_output =
               d_grad_output.defined() ? d_grad_output + contrib : contrib;
         }
         if (output_mask[1]) {
-          auto s = gs_scatter2d(grad_output, w, y_idx, x_idx, H, W, zeros_oob);
+          auto s = gs_scatter2d_bc(
+              grad_output, w, y_idx, x_idx, H, W, padding_mode, align_corners);
           d_input = d_input.defined() ? d_input + s : s;
         }
         if (output_mask[2]) {
@@ -7842,8 +7949,10 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       auto dot_dx2 = (grad_output * d2I_dx2).sum(1);
       auto dot_dy2 = (grad_output * d2I_dy2).sum(1);
       auto dot_dxdy = (grad_output * d2I_dxdy).sum(1);
-      auto ggrid_d_grid_x = gix_mult * (ggG_x * dot_dx2 + ggG_y * dot_dxdy);
-      auto ggrid_d_grid_y = giy_mult * (ggG_x * dot_dxdy + ggG_y * dot_dy2);
+      auto ggrid_d_grid_x =
+          x_scale * (ggG_x_bc * dot_dx2 + ggG_y_bc * dot_dxdy);
+      auto ggrid_d_grid_y =
+          y_scale * (ggG_x_bc * dot_dxdy + ggG_y_bc * dot_dy2);
       auto ggrid_d_grid =
           at::stack({std::move(ggrid_d_grid_x), std::move(ggrid_d_grid_y)}, -1);
       d_grid =
