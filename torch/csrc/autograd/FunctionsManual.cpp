@@ -7882,7 +7882,6 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
       interpolation_mode);
 
   // Bilinear 3D: ggGrid contributions.
-  auto N = input.size(0), C = input.size(1);
   auto D = input.size(2), H = input.size(3), W = input.size(4);
 
   auto [ix, gix_mult] =
