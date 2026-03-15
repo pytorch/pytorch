@@ -1174,6 +1174,52 @@ class TestGradTransform(TestCase):
         ft.pop_dynamic_layer_stack_and_undo_to_depth(0)
         self.assertEqual(ft.get_dynamic_layer_stack_depth(), 0)
 
+    def test_inference_mode_gradient_transforms(self, device):
+        def h(x):
+            return x**2
+
+        def g(x):
+            return x.sum()
+
+        @torch._dynamo.disable
+        def run_jvp():
+            with torch.inference_mode():
+                jvp(h, (x,), (ones,))
+
+        @torch._dynamo.disable
+        def run_grad():
+            with torch.inference_mode():
+                grad(g)(x)
+
+        @torch._dynamo.disable
+        def run_vjp():
+            with torch.inference_mode():
+                vjp(h, x)
+
+        err_msg = "not supported in torch.inference_mode()"
+        x = torch.randn(3, device=device)
+        ones = torch.ones(3, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            run_jvp()
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            run_grad()
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            run_vjp()
+
+        with torch.inference_mode(False):
+            _, jvp_result = jvp(h, (x,), (ones,))
+            self.assertTrue(torch.allclose(jvp_result, 2 * x))
+
+            grad_result = grad(g)(x)
+            self.assertTrue(torch.allclose(grad_result, ones))
+
+            _, vjp_fn = vjp(h, x)
+            vjp_result = vjp_fn(ones)[0]
+            self.assertTrue(torch.allclose(vjp_result, 2 * x))
+
 
 @markDynamoStrictTest
 class TestAutogradFunction(TestCase):

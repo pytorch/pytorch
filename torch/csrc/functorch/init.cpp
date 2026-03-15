@@ -19,6 +19,7 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
+#include <c10/core/InferenceMode.h>
 
 #include <iostream>
 
@@ -243,7 +244,17 @@ static RandomnessType get_randomness_enum(const std::string& randomness) {
   }
 }
 
+static void check_inference_mode() {
+  if (c10::InferenceMode::is_enabled()) {
+    TORCH_CHECK(
+        false,
+        "torch.func.{grad, vjp, jvp} are not supported in torch.inference_mode(). ",
+        "Please exit inference_mode before calling these transforms, as autograd is required for differentiation.");
+  }
+}
+
 static int64_t _grad_increment_nesting() {
+  check_inference_mode();
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
   return initAndPushDynamicLayer(
@@ -251,12 +262,14 @@ static int64_t _grad_increment_nesting() {
 }
 
 static int64_t _grad_decrement_nesting() {
+  check_inference_mode();
   auto layer = popDynamicLayerAndDeleteMetadata();
   TORCH_INTERNAL_ASSERT(layer.key() == TransformType::Grad);
   return layer.layerId();
 }
 
 static int64_t _jvp_increment_nesting() {
+  check_inference_mode();
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_fwd_grad_mode =
       c10::AutogradState::get_tls_state().get_fw_grad_mode();
@@ -269,6 +282,7 @@ static int64_t _jvp_increment_nesting() {
 }
 
 static int64_t _jvp_decrement_nesting() {
+  check_inference_mode();
   auto layer = popDynamicLayerAndDeleteMetadata();
   TORCH_INTERNAL_ASSERT(layer.key() == TransformType::Jvp);
   return layer.layerId();
