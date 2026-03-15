@@ -1399,9 +1399,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             "an AttributeMutation mutation_type"
         )
 
-        if torch.distributed.is_available() and type(self.value) is torch.distributed.P2POp and (
-            tx.output.side_effects.has_pending_mutation_of_attr(self, name_str)
-            or name_str in self.value.__dict__
+        if (
+            torch.distributed.is_available()
+            and type(self.value) is torch.distributed.P2POp
+            and (
+                tx.output.side_effects.has_pending_mutation_of_attr(self, name_str)
+                or name_str in self.value.__dict__
+            )
         ):
             unimplemented(
                 gb_type="P2POp mutation",
