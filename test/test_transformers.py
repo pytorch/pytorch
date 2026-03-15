@@ -3914,7 +3914,7 @@ class TestSDPACudaOnly(NNTestCase):
                     query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
             with sdpa_kernel(backends=[SDPBackend.MATH]):
                 # High Precision Math Reference
-                out_ref = compute_golden_reference_ieee(F.scaled_dot_product_attention, 
+                out_ref = compute_golden_reference_ieee(F.scaled_dot_product_attention,
                     query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
@@ -3944,7 +3944,8 @@ class TestSDPACudaOnly(NNTestCase):
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
             dropout_mask = softmax_mask >= 0
             # High Precision Math Reference
-            out_ref = compute_golden_reference_ieee(torch.ops.aten._scaled_dot_product_attention_math,
+            out_ref = compute_golden_reference_ieee(
+                torch.ops.aten._scaled_dot_product_attention_math,
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
                 scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
             # Low Precision Math Reference
