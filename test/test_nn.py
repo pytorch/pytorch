@@ -6328,10 +6328,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         W = random.randint(2, 5)
                         input = torch.randn(N, C, H, W, requires_grad=True)
                         grid = torch.randn(N, H, W, 2, requires_grad=True)
-                        self.assertTrue(gradgradcheck(
-                            lambda inp, grd: F.grid_sample(inp, grd, mode=mode, padding_mode=padding_mode,
-                                                           align_corners=align_corners),
-                            (input, grid)))
+                        with self.subTest(mode=mode, padding_mode=padding_mode, align_corners=align_corners):
+                            self.assertTrue(gradgradcheck(
+                                lambda inp, grd: F.grid_sample(inp, grd, mode=mode, padding_mode=padding_mode,
+                                                               align_corners=align_corners),
+                                (input, grid)))
 
     @set_default_dtype(torch.double)
     def test_grid_sample_3d(self):

@@ -7529,10 +7529,12 @@ static Tensor gs_bound_coord(
     span = size - 1;
     min_v = 0.0;
   } else {
-    x = x + 0.5; // shift to center-of-pixel
     span = size;
     min_v = -0.5;
   }
+  // Native formula: in = idx - min_v (= idx + 0.5 for no-align_corners).
+  // For integer idx this is always a half-integer, so fold result + min_v is
+  // an exact integer — no rounding artifacts.
   auto in = x - min_v;
   auto in_abs = in.abs();
   auto even = at::fmod(at::floor(in_abs / span), 2.0) < 0.5;
@@ -7540,11 +7542,7 @@ static Tensor gs_bound_coord(
       even,
       at::fmod(in_abs, span),
       at::full_like(in_abs, span) - at::fmod(in_abs, span));
-  r = r + min_v;
-  if (!align_corners) {
-    r = r - 0.5;
-  }
-  return r.round().clamp(0, size - 1).to(at::kLong);
+  return (r + min_v).round().clamp(0, size - 1).to(at::kLong);
 }
 
 // Bounded gather for bicubic taps — applies proper padding to tap indices.
