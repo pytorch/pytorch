@@ -830,19 +830,13 @@ inline IValue argumentToIValue(
   } catch (const py::cast_error& error) {
     throw schema_match_error(c10::str(
         schema.formatTypeMismatchMsg(
-            argument,
-            friendlyTypeName(object),
-            argumentPosition,
-            py::repr(object)),
+            argument, friendlyTypeName(object), argumentPosition, std::nullopt),
         "\nCast error details: ",
         error.what()));
   } catch (const py::error_already_set& error) {
     throw schema_match_error(c10::str(
         schema.formatTypeMismatchMsg(
-            argument,
-            friendlyTypeName(object),
-            argumentPosition,
-            py::repr(object)),
+            argument, friendlyTypeName(object), argumentPosition, std::nullopt),
         "\n Python error details: ",
         error.what()));
   }
@@ -856,10 +850,8 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
         " expected value of type ",
         type->str(),
         " for return value but instead got value of type ",
-        py::str(py::type::handle_of(object).attr("__name__")),
+        friendlyTypeName(object),
         ".",
-        "\nValue: ",
-        py::repr(object),
         "\nCast error details: ",
         error.what()));
   }
@@ -921,7 +913,7 @@ inline bool validateFakeScriptObjectSchema(
             argument,
             friendlyTypeName(object),
             argumentPosition,
-            py::repr(object.attr("wrapped_obj"))),
+            friendlyTypeName(object.attr("wrapped_obj"))),
         "\nCast error details: ",
         argument.name(),
         " is expected to be a FakeScriptObject of ",

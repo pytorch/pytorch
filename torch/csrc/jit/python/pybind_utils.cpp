@@ -84,8 +84,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         return var;
       } else {
         if (!allow_numbers_as_tensors) {
-          throw py::cast_error(
-              c10::str("Unable to cast ", py::str(obj), " to Tensor"));
+          throw py::cast_error(c10::str(
+              "Unable to cast ", friendlyTypeName(obj), " object to Tensor"));
         }
         bool save_symint = false;
         at::Scalar scalar;
@@ -108,7 +108,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           scalar = at::Scalar(true);
         } else {
           throw py::cast_error(
-              c10::str("Unable to cast ", py::str(obj), " to Tensor"));
+              c10::str("Unable to cast ", friendlyTypeName(obj), " to Tensor"));
         }
         at::Tensor tensor = at::scalar_to_tensor(scalar);
         tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
@@ -221,7 +221,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
     case TypeKind::NoneType:
       if (!obj.is_none()) {
         throw py::cast_error(
-            c10::str("Cannot cast ", py::str(obj), " to None"));
+            c10::str("Cannot cast ", friendlyTypeName(obj), " to None"));
       }
       return {};
     case TypeKind::BoolType:
@@ -243,9 +243,13 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       const auto& elem_types = tuple_type->elements();
       if (elem_types.size() != tuple_size) {
         throw py::cast_error(c10::str(
-            "Object ",
-            py::str(obj),
-            " had a different number of elements than type ",
+            "Object of type ",
+            friendlyTypeName(obj),
+            " had a different number of elements (",
+            tuple_size,
+            " vs ",
+            elem_types.size(),
+            ") than type ",
             type->repr_str()));
       }
       std::vector<IValue> values;
@@ -477,11 +481,11 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
         if (!classType) {
           throw std::runtime_error(c10::str(
-              "Assigning the object ",
-              py::str(obj),
+              "Assigning an object of type ",
+              friendlyTypeName(obj),
               " to an interface fails because the value is not "
               "a TorchScript compatible type, did you forget to",
-              "turn it into a user defined TorchScript class?"));
+              " turn it into a user defined TorchScript class?"));
         }
         res = toIValue(obj, classType);
       }
@@ -527,8 +531,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       } else if (torch::is_symbool(obj)) {
         return py::cast<c10::SymBool>(obj);
       } else {
-        throw py::cast_error(
-            c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
+        throw py::cast_error(c10::str(
+            "Cannot cast ", friendlyTypeName(obj), " to ", type->repr_str()));
       }
     }
     case TypeKind::RRefType: {
@@ -565,8 +569,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       if (py::isinstance<py::int_>(obj)) {
         return static_cast<at::QScheme>(py::cast<int64_t>(obj));
       }
-      throw py::cast_error(
-          c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
+      throw py::cast_error(c10::str(
+          "Cannot cast ", friendlyTypeName(obj), " to ", type->repr_str()));
     }
     case TypeKind::GeneratorType:
       return py::cast<at::Generator>(obj);
