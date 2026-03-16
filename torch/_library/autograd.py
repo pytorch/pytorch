@@ -10,6 +10,47 @@ from torch.utils import _pytree
 from . import utils
 
 
+# Same as WrappedCtx in torch/_functorch/autograd_function.py, redefined here
+# to avoid a circular import (torch._library is imported during
+# torch.utils._pytree init, and torch._functorch imports _pytree).
+class _WrappedCtx:
+    _pt_reserved_attrs: tuple[str, ...] = ("_pt_reserved_attrs", "_pt_inner_ctx")
+
+    def __init__(self, ctx):
+        if not isinstance(ctx, _WrappedCtx):
+            reserved_attrs = type(self)._pt_reserved_attrs
+            for name in reserved_attrs:
+                if not hasattr(ctx, name):
+                    continue
+                raise RuntimeError(
+                    f"PyTorch reserves the {reserved_attrs} field on ctx. "
+                    "Please name your fields on ctx something else to avoid "
+                    "name collision."
+                )
+        self._pt_inner_ctx = ctx
+
+    def __getattr__(self, name):
+        return getattr(self._pt_inner_ctx, name)
+
+    def __setattr__(self, name, value):
+        if name in type(self)._pt_reserved_attrs:
+            self.__dict__[name] = value
+            return
+        return setattr(self._pt_inner_ctx, name, value)
+
+
+class _CtxWithNeedsInputGrad(_WrappedCtx):
+    _pt_reserved_attrs = ("_pt_needs_input_grad", *_WrappedCtx._pt_reserved_attrs)
+
+    def __init__(self, ctx, needs_input_grad):
+        super().__init__(ctx)
+        self._pt_needs_input_grad = needs_input_grad
+
+    @property
+    def needs_input_grad(self):
+        return self._pt_needs_input_grad
+
+
 class InfoProtocol(Protocol):
     _backward_fn: Callable | None
     _setup_context_fn: Callable | None
@@ -72,12 +113,8 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
 
     def backward(ctx, *grads):
         if info._backward_fn:
-            try:
-                prev_needs_input_grad = ctx.needs_input_grad
-                ctx.needs_input_grad = ctx.needs_input_grad[:-1]
-                result = info._backward_fn(ctx, *grads)
-            finally:
-                ctx.needs_input_grad = prev_needs_input_grad
+            wrapped_ctx = _CtxWithNeedsInputGrad(ctx, ctx.needs_input_grad[:-1])
+            result = info._backward_fn(wrapped_ctx, *grads)
             if isinstance(result, tuple):
                 return (*result, None)
             return result, None
@@ -174,14 +211,13 @@ def supports_tensorlist(cls: Any) -> Any:
         # 1. get rid of the additional bool (which comes from the extra
         # `metadata input`)
         # 2. _pytree.tree_unflatten to get the right structure.
-        prev_needs_input_grad = ctx.needs_input_grad
-        try:
-            ctx.needs_input_grad = _pytree.tree_unflatten(
+        wrapped_ctx = _CtxWithNeedsInputGrad(
+            ctx,
+            _pytree.tree_unflatten(
                 list(ctx.needs_input_grad[:-1]), metadata.input_spec
-            )
-            grad_inputs = orig_backward(ctx, *grads)
-        finally:
-            ctx.needs_input_grad = prev_needs_input_grad
+            ),
+        )
+        grad_inputs = orig_backward(wrapped_ctx, *grads)
 
         if not isinstance(grad_inputs, tuple):
             grad_inputs = (grad_inputs,)
