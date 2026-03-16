@@ -1,10 +1,121 @@
 #include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
+#include <ATen/native/utils/ParamsHash.h>
+#include <list>
+#include <optional>
 #include <unordered_map>
-#include <mutex>
-#include <string_view>
+#include <utility>
 #if AT_CUSPARSELT_ENABLED()
 
 namespace at::native {
+
+namespace {
+
+// Cache key for cuSPARSELt matmul plan. Must be standard layout for ParamsHash.
+struct CsltMatmulCacheKey {
+  int64_t m = 0;
+  int64_t n = 0;
+  int64_t k = 0;
+  int32_t input_type = 0;
+  int32_t output_type = 0;
+  int32_t C_type = 0;
+  int32_t compute_type = 0;
+  int32_t transpose_result = 0;
+  int32_t dense_contiguous = 0;
+  int32_t has_bias = 0;
+  int32_t tensor_alpha_mode = 0;
+  int32_t alg_id = 0;
+  int32_t split_k = 0;
+  int32_t split_k_mode = 0;
+};
+
+static_assert(std::is_standard_layout_v<CsltMatmulCacheKey>);
+
+using CsltMatmulCacheKeyHash = ParamsHash<CsltMatmulCacheKey>;
+using CsltMatmulCacheKeyEqual = ParamsEqual<CsltMatmulCacheKey>;
+
+// Cached plan and workspace size. Plan is destroyed when the cache entry is evicted.
+// Cache is only used when !has_bias (see comment at cache_enabled).
+struct CachedPlan {
+  cusparseLtMatmulPlan_t plan;
+  size_t workspace_size = 0;
+  bool has_plan = false;
+
+  CachedPlan() = default;
+  ~CachedPlan() {
+    if (has_plan) {
+      cusparseLtMatmulPlanDestroy(&plan);
+      has_plan = false;
+    }
+  }
+  CachedPlan(CachedPlan&& other) noexcept
+      : plan(other.plan),
+        workspace_size(other.workspace_size),
+        has_plan(other.has_plan) {
+    other.has_plan = false;
+  }
+  CachedPlan& operator=(CachedPlan&& other) noexcept {
+    if (this != &other) {
+      if (has_plan) {
+        cusparseLtMatmulPlanDestroy(&plan);
+      }
+      plan = other.plan;
+      workspace_size = other.workspace_size;
+      has_plan = other.has_plan;
+      other.has_plan = false;
+    }
+    return *this;
+  }
+  CachedPlan(const CachedPlan&) = delete;
+  CachedPlan& operator=(const CachedPlan&) = delete;
+};
+
+constexpr size_t kCsltMatmulPlanCacheMaxSize = 128;
+
+using CsltMatmulLruList =
+    std::list<std::pair<CsltMatmulCacheKey, CachedPlan>>;
+using CsltMatmulCacheMap = std::unordered_map<
+    CsltMatmulCacheKey,
+    CsltMatmulLruList::iterator,
+    CsltMatmulCacheKeyHash,
+    CsltMatmulCacheKeyEqual>;
+
+struct CsltMatmulPlanCache {
+  CsltMatmulLruList lru_list;
+  CsltMatmulCacheMap cache_map;
+
+  // Returns plan pointer and workspace_size if found; moves entry to front for LRU.
+  std::optional<std::pair<cusparseLtMatmulPlan_t*, size_t>> lookup(
+      const CsltMatmulCacheKey& key) {
+    auto it = cache_map.find(key);
+    if (it == cache_map.end()) {
+      return std::nullopt;
+    }
+    lru_list.splice(lru_list.begin(), lru_list, it->second);
+    CachedPlan& entry = it->second->second;
+    return std::make_pair(&entry.plan, entry.workspace_size);
+  }
+
+  void insert(CsltMatmulCacheKey key, CachedPlan plan) {
+    if (lru_list.size() >= kCsltMatmulPlanCacheMaxSize) {
+      auto& back = lru_list.back();
+      cache_map.erase(back.first);
+      lru_list.pop_back();
+    }
+    lru_list.push_front({std::move(key), std::move(plan)});
+    cache_map[lru_list.front().first] = lru_list.begin();
+  }
+};
+
+thread_local std::unique_ptr<CsltMatmulPlanCache> cslt_matmul_plan_cache;
+
+CsltMatmulPlanCache& getCsltMatmulPlanCache() {
+  if (!cslt_matmul_plan_cache) {
+    cslt_matmul_plan_cache = std::make_unique<CsltMatmulPlanCache>();
+  }
+  return *cslt_matmul_plan_cache;
+}
+
+} // namespace
 
 // Ideally we would use the same DeviceThreadHandlePool mechanism as used in
 // aten/src/ATen/cuda/CuSparseHandlePool.cpp which would handle this for us.
@@ -155,10 +266,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
     handle_initialized = true;
   }
-  // cuSPARSELt constructs
-  cusparseLtMatmulDescriptor_t matmul;
-  cusparseLtMatmulPlan_t plan;
-  cusparseLtMatmulAlgSelection_t alg_sel;
 
   int tensor_alpha_mode = 0;
   float alpha = 1.0;
@@ -299,10 +406,94 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     }
   }
 
+  const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt : Tensor{};
+  if (alpha_opt.has_value()) {
+    if (alpha_tensor.numel() == 1) {
+      alpha = alpha_tensor.item<float>();
+    } else {
+      tensor_alpha_mode = 1;
+    }
+  }
+
   TORCH_INTERNAL_ASSERT(compressed_A.dim() == 2); // encoded M x S
   int64_t k = dense_B.size(0);
   int64_t n = dense_B.size(1);
   int64_t m = compressed_A.size(0);
+
+  const bool has_bias = bias_opt.has_value();
+  // Plan caching disabled: cusparseLtMatmulPlan_t is opaque and retains
+  // internal pointers to the matmul descriptor (and possibly others) passed at
+  // PlanInit. Copying the plan struct into the cache copies those pointers;
+  // the original descriptors are stack locals and go out of scope, so the
+  // cached plan becomes invalid and cusparseLtMatmul(plan_ptr) SIGSEGVs.
+  // Proper caching would require building the plan inside cache-owned memory
+  // so all referenced descriptors outlive the call (not yet implemented).
+  const bool cache_enabled = false;  // !has_bias && !search_alg_id;
+
+  if (cache_enabled) {
+    CsltMatmulCacheKey key{};
+    key.m = m;
+    key.n = n;
+    key.k = k;
+    key.input_type = static_cast<int32_t>(input_type);
+    key.output_type = static_cast<int32_t>(output_type);
+    key.C_type = static_cast<int32_t>(C_type);
+    key.compute_type = static_cast<int32_t>(compute_type);
+    key.transpose_result = transpose_result ? 1 : 0;
+    key.dense_contiguous = dense_B.is_contiguous() ? 1 : 0;
+    key.has_bias = has_bias ? 1 : 0;
+    key.tensor_alpha_mode = tensor_alpha_mode;
+    key.alg_id = alg_id;
+    key.split_k = split_k;
+    key.split_k_mode = split_k_mode;
+
+    auto cached = getCsltMatmulPlanCache().lookup(key);
+    if (cached.has_value()) {
+      cusparseLtMatmulPlan_t* plan_ptr = cached->first;
+      size_t workspace_size = cached->second;
+      ScalarType out_dtype = dense_B.scalar_type();
+      if (out_dtype_opt.has_value()) {
+        out_dtype = out_dtype_opt.value();
+      }
+      auto res_tensor_options =
+          c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
+      at::Tensor res = (transpose_result) ? at::empty({n, m}, res_tensor_options)
+                                          : at::empty({m, n}, res_tensor_options);
+      float* alpha_ptr = (tensor_alpha_mode == 1)
+          ? static_cast<float*>(alpha_tensor.data_ptr())
+          : &alpha;
+      auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+      auto workspacePtr = allocator.allocate(workspace_size);
+      cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+      TORCH_CUDASPARSE_CHECK(cusparseLtMatmul(
+          &handle,
+          plan_ptr,
+          alpha_ptr,
+          compressed_A.data_ptr(),
+          dense_B.data_ptr(),
+          &beta,
+          res.data_ptr(),
+          res.data_ptr(),
+          workspacePtr.get(),
+          &stream,
+          1));
+      const int max_alg_id = 0;
+      cusparseLtSplitKMode_t splitKMode =
+          (split_k_mode > 0) ? static_cast<cusparseLtSplitKMode_t>(split_k_mode)
+                            : static_cast<cusparseLtSplitKMode_t>(-1);
+      return {
+          res,
+          alg_id,
+          split_k,
+          static_cast<int64_t>(splitKMode),
+          max_alg_id};
+    }
+  }
+
+  // Cache miss or cache disabled: build descriptors and plan
+  cusparseLtMatmulDescriptor_t matmul;
+  cusparseLtMatmulPlan_t plan;
+  cusparseLtMatmulAlgSelection_t alg_sel;
 
   // initialize sparse descriptor
   cusparseLtMatDescriptor_t sparse_input_descriptor;
@@ -334,7 +525,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
   at::Tensor res = (transpose_result) ? at::empty({n, m}, res_tensor_options)
                                       : at::empty({m, n}, res_tensor_options);
-
+  
   cusparseLtMatDescriptor_t res_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
       &handle,
@@ -394,8 +585,8 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       &alg_id,
       sizeof(alg_id)));
 
-  cusparseLtSplitKMode_t splitKMode;
-  int max_alg_id;
+  cusparseLtSplitKMode_t splitKMode = static_cast<cusparseLtSplitKMode_t>(-1);
+  int max_alg_id = 0;
   if (split_k != 1) {
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
         &handle,
@@ -415,22 +606,17 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     }
   }
 
-  // set tensor_alpha_mode and alpha pointer for matmul
-  const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt : Tensor{};
-  auto alpha_ptr = &alpha;
-  if (alpha_opt.has_value()) {
-    if (alpha_tensor.numel() == 1) {
-      alpha = alpha_tensor.item<float>();
-    } else {
-      tensor_alpha_mode = 1;
-      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
-          &handle,
-          &matmul,
-          CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING,
-          &tensor_alpha_mode,
-          sizeof(tensor_alpha_mode)));
-      alpha_ptr = static_cast<float*>(alpha_tensor.data_ptr());
-    }
+  // set tensor_alpha_mode for matmul descriptor (alpha_ptr used at execution)
+  float* alpha_ptr = (tensor_alpha_mode == 1)
+      ? static_cast<float*>(alpha_tensor.data_ptr())
+      : &alpha;
+  if (tensor_alpha_mode == 1) {
+    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+        &handle,
+        &matmul,
+        CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING,
+        &tensor_alpha_mode,
+        sizeof(tensor_alpha_mode)));
   }
 
   TORCH_CUDASPARSE_CHECK(
@@ -501,7 +687,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
         res.data_ptr(),
         res.data_ptr(),
         workspacePtr.get(),
-        // jank because of the way we want this to be an array of streams
         &stream,
         1));
   }
@@ -512,8 +697,33 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   TORCH_CUDASPARSE_CHECK(
       cusparseLtMatDescriptorDestroy(&dense_input_descriptor));
   TORCH_CUDASPARSE_CHECK(cusparseLtMatDescriptorDestroy(&res_descriptor));
-  // destroy plan
-  TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
+  TORCH_CUDASPARSE_CHECK(cusparseLtMatDescriptorDestroy(&C_descriptor));
+
+  if (cache_enabled) {
+    CsltMatmulCacheKey key{};
+    key.m = m;
+    key.n = n;
+    key.k = k;
+    key.input_type = static_cast<int32_t>(input_type);
+    key.output_type = static_cast<int32_t>(output_type);
+    key.C_type = static_cast<int32_t>(C_type);
+    key.compute_type = static_cast<int32_t>(compute_type);
+    key.transpose_result = transpose_result ? 1 : 0;
+    key.dense_contiguous = dense_B.is_contiguous() ? 1 : 0;
+    key.has_bias = has_bias ? 1 : 0;
+    key.tensor_alpha_mode = tensor_alpha_mode;
+    key.alg_id = alg_id;
+    key.split_k = split_k;
+    key.split_k_mode = split_k_mode;
+    CachedPlan cached_plan;
+    cached_plan.plan = plan;
+    cached_plan.workspace_size = workspace_size;
+    cached_plan.has_plan = true;
+    getCsltMatmulPlanCache().insert(std::move(key), std::move(cached_plan));
+    // Do not destroy plan; cache now owns it.
+  } else {
+    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
+  }
 
   return {
       res,
