@@ -66,11 +66,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
 )
 
 
-if torch.accelerator.is_available():
-    DEVICE_TYPE = torch.accelerator.current_accelerator().type
-else:
-    # use cuda as default device type for testing when accelerator is not available
-    DEVICE_TYPE = "cuda"
+DEVICE_TYPE = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
 
 
@@ -84,26 +80,27 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 class TestShardedTensorMetadata(TestCase):
     def test_serialize_and_deserialize(self):
+        test_device = "cuda" if DEVICE_TYPE == "cpu" else DEVICE_TYPE
         shard_metadatas = [
             ShardMetadata(
                 shard_offsets=[0, 0],
                 shard_sizes=[5, 5],
-                placement=f"rank:0/{DEVICE_TYPE}:0",
+                placement=f"rank:0/{test_device}:0",
             ),
             ShardMetadata(
                 shard_offsets=[0, 5],
                 shard_sizes=[5, 5],
-                placement=f"rank:1/{DEVICE_TYPE}:1",
+                placement=f"rank:1/{test_device}:1",
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
                 shard_sizes=[5, 5],
-                placement=f"rank:2/{DEVICE_TYPE}:2",
+                placement=f"rank:2/{test_device}:2",
             ),
             ShardMetadata(
                 shard_offsets=[5, 5],
                 shard_sizes=[5, 5],
-                placement=f"rank:3/{DEVICE_TYPE}:3",
+                placement=f"rank:3/{test_device}:3",
             ),
         ]
 
