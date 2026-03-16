@@ -37,6 +37,7 @@ __all__ = [
     "skip_guard_on_globals_unsafe",
     "skip_all_guards_unsafe",
     "nested_compile_region",
+    "opaque_function",
 ]
 
 
@@ -703,6 +704,39 @@ def nested_compile_region(fn=None, options: NestedCompileRegionOptions | None = 
     )
 
     return _mark_compile_region(fn, options=options)
+
+
+def opaque_function(fn=None, *, level="frontend", mutates_args=None):
+    """
+    Unified API to make a function opaque to :func:`torch.compile`.
+
+    ``opaque_function`` combines the functionality of :func:`nonstrict_trace` and
+    :func:`leaf_function` into a single decorator with a ``level`` parameter:
+
+    - ``level="frontend"`` (default): The function is opaque to Dynamo only;
+      AOTAutograd traces into it. Equivalent to :func:`nonstrict_trace`.
+    - ``level="all"``: The function is opaque to the entire compiler stack and
+      runs eagerly at runtime. Requires a ``register_fake`` implementation.
+      Equivalent to :func:`leaf_function`.
+
+    See :func:`nonstrict_trace` and :func:`leaf_function` for detailed usage
+    instructions, examples, and caveats for each level.
+
+    Args:
+        fn: The function to decorate. When used without parentheses
+            (``@opaque_function``), this is the decorated function.
+        level: Either ``"frontend"`` or ``"all"``.
+        mutates_args: Set of argument names that the function mutates in-place.
+            Only valid with ``level="all"``.
+    """
+    import torch._dynamo
+
+    if fn is not None:
+        decorator = torch._dynamo.opaque_function(
+            level=level, mutates_args=mutates_args
+        )
+        return decorator(fn)
+    return torch._dynamo.opaque_function(level=level, mutates_args=mutates_args)
 
 
 def load_compiled_function(
