@@ -10,8 +10,6 @@ import math
 
 import torch
 
-from ._rmsnorm_kernels import _get_sm_count, _rmsnorm_bwd, _rmsnorm_fwd
-
 
 def _stat_shape(input: torch.Tensor, normalized_shape: list[int]) -> list[int]:
     """Compute the shape for mean/rstd stat tensors, matching the C++ convention."""
@@ -28,6 +26,8 @@ def cutedsl_rmsnorm_fwd(
     normalized_shape: list[int],
     eps: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    from ._rmsnorm_kernels import _rmsnorm_fwd
+
     input_shape = input.shape
     N = math.prod(normalized_shape)
     M = input.numel() // N
@@ -50,6 +50,8 @@ def cutedsl_rmsnorm_bwd(
     weight: torch.Tensor | None,
     normalized_shape: list[int],
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    from ._rmsnorm_kernels import _get_sm_count, _rmsnorm_bwd
+
     N = math.prod(normalized_shape)
     M = input.numel() // N
     x = input.reshape(M, N).contiguous()
