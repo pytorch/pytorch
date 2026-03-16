@@ -202,7 +202,7 @@ def export(
         elif isinstance(e, RuntimeError) and "no fake impl registered" in str(e):
             new_msg = str(e) + "\n\n" + draft_export_msg
             e.args = (new_msg,)
-        raise e
+        raise
 
 
 DEFAULT_PICKLE_PROTOCOL = 2
