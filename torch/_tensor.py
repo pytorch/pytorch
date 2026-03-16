@@ -900,7 +900,7 @@ class Tensor(torch._C.TensorBase):
         keepdim=False,
         dtype=None,
     ):
-        r"""See :func:`torch.norm`"""
+        r"""See :func:`torch.linalg.norm`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype
