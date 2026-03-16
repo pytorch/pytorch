@@ -87,8 +87,8 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
 
   _AT_DISPATCH_CP_TYPES(self.scalar_type(), "copy_", [&] {
     const scalar_t* sp = src.const_data_ptr<scalar_t>();
-    scalar_t* rp = self.data_ptr<scalar_t>();
-    scalar_t* bp = buf.data_ptr<scalar_t>();
+    scalar_t* rp = self.mutable_data_ptr<scalar_t>();
+    scalar_t* bp = buf.mutable_data_ptr<scalar_t>();
 
     int64_t NR = src.size(0);
     int64_t NC = src.size(1);
@@ -159,7 +159,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         (self.sizes() == src.sizes())) {
       if (src.dtype() == at::kFloat && self.dtype() == at::kHalf) {
         auto* output_ptr =
-            reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
+            reinterpret_cast<fbgemm::float16*>(self.mutable_data_ptr<at::Half>());
         if (self.numel() < at::internal::GRAIN_SIZE) {
           fbgemm::FloatToFloat16_simd(src.const_data_ptr<float>(), output_ptr, self.numel());
         } else {
@@ -177,7 +177,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
       } else {
         auto in_data = reinterpret_cast<const fbgemm::float16*>(
             src.const_data_ptr<at::Half>());
-        auto* output_ptr = self.data_ptr<float>();
+        auto* output_ptr = self.mutable_data_ptr<float>();
         if (self.numel() < at::internal::GRAIN_SIZE) {
           fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
         } else {

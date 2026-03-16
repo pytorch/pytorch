@@ -134,7 +134,7 @@ Tensor _nested_sum_backward_cpu(
   // (2) the gradient nested tensors are stored contiguously in the buffer
   AT_DISPATCH_ALL_TYPES_AND2(
     ScalarType::Half, ScalarType::BFloat16, self_grad_buffer.scalar_type(), "nested_sum_dim_cpu", [&]() {
-    auto* self_grad_data = self_grad_buffer.data_ptr<scalar_t>();
+    auto* self_grad_data = self_grad_buffer.mutable_data_ptr<scalar_t>();
     const auto* output_grad_data = grad_buffer.const_data_ptr<scalar_t>();
     int64_t out_idx = 0, in_idx = 0;
     for (const auto i : c10::irange(ntensors)) {

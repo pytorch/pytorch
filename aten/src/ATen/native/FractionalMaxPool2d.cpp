@@ -322,8 +322,8 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
     input.scalar_type(),
     "fractional_max_pool2d_out_frame", [&] {
       auto input_data = input.const_data_ptr<scalar_t>();
-      auto output_data = output.data_ptr<scalar_t>();
-      auto indices_data = indices.data_ptr<int64_t>();
+      auto output_data = output.mutable_data_ptr<scalar_t>();
+      auto indices_data = indices.mutable_data_ptr<int64_t>();
       auto randomSamples_data = randomSamples.const_data_ptr<scalar_t>();
       fractional_max_pool2d_out_frame<scalar_t>(
         input_data,
@@ -377,7 +377,7 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cpu) (
     kBFloat16,
     kHalf,
     input.scalar_type(), "fractional_max_pool2d_backward_out_frame", [&] {
-      auto gradInput_data = gradInput.data_ptr<scalar_t>();
+      auto gradInput_data = gradInput.mutable_data_ptr<scalar_t>();
       auto gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
       auto indices_data = indices.const_data_ptr<int64_t>();
       fractional_max_pool2d_backward_out_frame<scalar_t>(

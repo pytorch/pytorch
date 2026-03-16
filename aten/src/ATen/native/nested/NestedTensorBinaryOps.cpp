@@ -58,8 +58,8 @@ static get_elementwise_nested_tensor_impl(
       op_name,
       " requires strides to match when given NestedTensors");
   const auto self_offsets = self_ptr->get_storage_offsets();
-  int64_t *self_offsets_ptr = self_offsets.data_ptr<int64_t>();
-  int64_t *other_offsets_ptr = other_ptr->get_storage_offsets().data_ptr<int64_t>();
+  int64_t *self_offsets_ptr = self_offsets.mutable_data_ptr<int64_t>();
+  int64_t *other_offsets_ptr = other_ptr->get_storage_offsets().mutable_data_ptr<int64_t>();
   bool offsets_match = true;
   for (auto i = 0; i < self_offsets.size(0); i++) {
     offsets_match = offsets_match && (self_offsets_ptr[i] == other_offsets_ptr[i]);

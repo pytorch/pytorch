@@ -78,7 +78,7 @@ namespace {
     int64_t out_sH = output.stride(3);
     int64_t out_sW = output.stride(4);
     const scalar_t *inp_ptr = input.const_data_ptr<scalar_t>();
-    scalar_t *out_ptr = output.data_ptr<scalar_t>();
+    scalar_t *out_ptr = output.mutable_data_ptr<scalar_t>();
     const scalar_t *grid_ptr = grid.const_data_ptr<scalar_t>();
     // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
@@ -277,7 +277,7 @@ namespace {
     if (input_requires_grad) {
       gInp_ptr = grad_input.mutable_data_ptr<scalar_t>();
     }
-    scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
+    scalar_t *gGrid_ptr = grad_grid.mutable_data_ptr<scalar_t>();
     // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
       for (const auto n : c10::irange(start, end)) {
@@ -490,7 +490,7 @@ static Tensor _grid_sampler_2d_cpu_quantized(
   int64_t out_sH = output.stride(2);
   int64_t out_sW = output.stride(3);
   const uint8_t* inp_ptr = input.const_data_ptr<uint8_t>();
-  uint8_t* out_ptr = output.data_ptr<uint8_t>();
+  uint8_t* out_ptr = (uint8_t*)output.mutable_data_ptr<quint8>();
   const float* grid_ptr = grid.const_data_ptr<float>();
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
     for (const auto n : c10::irange(start, end)) {
@@ -592,7 +592,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
   int64_t out_sH = output.stride(2);
   int64_t out_sW = output.stride(3);
   const scalar_t *inp_ptr = input.const_data_ptr<scalar_t>();
-  scalar_t *out_ptr = output.data_ptr<scalar_t>();
+  scalar_t *out_ptr = output.mutable_data_ptr<scalar_t>();
   const scalar_t *grid_ptr = grid.const_data_ptr<scalar_t>();
   // loop over each output pixel
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
@@ -764,7 +764,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
   const scalar_t *grid_ptr = grid.const_data_ptr<scalar_t>();
   const scalar_t *gOut_ptr = grad_output.const_data_ptr<scalar_t>();
   scalar_t *gInp_ptr = grad_input.mutable_data_ptr<scalar_t>();
-  scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
+  scalar_t *gGrid_ptr = grad_grid.mutable_data_ptr<scalar_t>();
   // loop over each output pixel
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
     for (const auto n : c10::irange(start, end)) {
