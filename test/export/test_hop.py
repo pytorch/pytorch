@@ -14,11 +14,13 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
 )
+from torch.testing._internal.common_methods_invocations import xfail
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 from torch.testing._internal.hop_db import (
     FIXME_hop_that_doesnt_have_opinfo_test_allowlist,
     hop_db,
 )
+from torch.testing._internal.opinfo.core import DecorateInfo
 
 
 hop_tests = []
@@ -28,6 +30,45 @@ for op_info in hop_db:
     if op_info_hop_name in FIXME_hop_that_doesnt_have_opinfo_test_allowlist:
         continue
     hop_tests.append(op_info)
+
+
+def skipHopOps(test_case_name, base_test_name, to_skip):
+    for entry in to_skip:
+        op_name, variant_name, device_type, dtypes, expected_failure = entry
+        matching = [
+            o for o in hop_tests
+            if o.name == op_name and o.variant_test_name == variant_name
+        ]
+        if not matching:
+            raise AssertionError(f"Couldn't find OpInfo for {entry}")
+        for op in matching:
+            decorators = list(op.decorators)
+            if expected_failure:
+                decorators.append(DecorateInfo(
+                    unittest.expectedFailure,
+                    test_case_name, base_test_name,
+                    device_type=device_type, dtypes=dtypes,
+                ))
+            else:
+                decorators.append(DecorateInfo(
+                    unittest.skip("Skipped!"),
+                    test_case_name, base_test_name,
+                    device_type=device_type, dtypes=dtypes,
+                ))
+            op.decorators = tuple(decorators)
+
+    def wrapped(fn):
+        return fn
+
+    return wrapped
+
+
+_hop_export_skips = {
+    xfail("invoke_quant", "simple"),
+    xfail("flex_attention", "simple"),
+    xfail("flex_attention_backward", "simple"),
+    xfail("local_map_hop", "simple"),
+}
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
@@ -48,6 +89,7 @@ class TestHOP(TestCase):
             self.assertEqual(type(orig), type(loaded))
             self.assertEqual(orig, loaded)
 
+    @skipHopOps("TestHOP", "test_aot_export", _hop_export_skips)
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_aot_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
@@ -73,6 +115,7 @@ class TestHOP(TestCase):
         # on CUDA devices and fails to free them.
         torchdynamo._reset_guarded_backend_cache()
 
+    @skipHopOps("TestHOP", "test_pre_dispatch_export", _hop_export_skips)
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_pre_dispatch_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
@@ -89,6 +132,7 @@ class TestHOP(TestCase):
             self._compare(model, ep, args, kwargs)
         torchdynamo._reset_guarded_backend_cache()
 
+    @skipHopOps("TestHOP", "test_retrace_export", _hop_export_skips)
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_retrace_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
@@ -106,6 +150,7 @@ class TestHOP(TestCase):
             self._compare(model, ep, args, kwargs)
         torchdynamo._reset_guarded_backend_cache()
 
+    @skipHopOps("TestHOP", "test_serialize_export", _hop_export_skips)
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_serialize_export(self, device, dtype, op):
         class Foo(torch.nn.Module):

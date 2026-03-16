@@ -9,7 +9,7 @@ from torch.nn.attention.flex_attention import _create_empty_block_mask, flex_att
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import onlyCUDA
 from torch.testing._internal.common_dtype import all_types_and, custom_types
-from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
+from torch.testing._internal.opinfo.core import OpInfo, SampleInput
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops import InvokeQuant, invoke_quant_packed
 
@@ -387,15 +387,6 @@ hop_db = [
         check_inplace_batched_forward_grad=False,
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
-        # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
     ),
     OpInfo(
@@ -463,14 +454,6 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
         decorators=[onlyCUDA],
     ),
     OpInfo(
@@ -484,14 +467,6 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
         decorators=[onlyCUDA],
     ),
     OpInfo(
@@ -505,14 +480,6 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
-            ),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
-            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
-        ),
         decorators=[
             onlyCUDA,
             unittest.skipIf(
