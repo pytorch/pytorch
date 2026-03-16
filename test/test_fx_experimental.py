@@ -52,7 +52,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     ops,
 )
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, skipOps, xfail
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase, TEST_WITH_CROSSREF
 from torch.testing._internal.jit_utils import JitTestCase
@@ -1814,7 +1814,22 @@ class {test_classname}(torch.nn.Module):
 
 
 class TestNormalizeOperators(JitTestCase):
+    # autograd tests don't handle operators that change dtype
+    _conversion_op_skips = {
+        xfail("bfloat16", variant_name="functorch_no_channels_last"),
+        xfail("bool", variant_name="functorch_no_channels_last"),
+        xfail("byte", variant_name="functorch_no_channels_last"),
+        xfail("char", variant_name="functorch_no_channels_last"),
+        xfail("double", variant_name="functorch_no_channels_last"),
+        xfail("float", variant_name="functorch_no_channels_last"),
+        xfail("half", variant_name="functorch_no_channels_last"),
+        xfail("int", variant_name="functorch_no_channels_last"),
+        xfail("long", variant_name="functorch_no_channels_last"),
+        xfail("short", variant_name="functorch_no_channels_last"),
+    }
+
     @onlyCPU
+    @skipOps("TestNormalizeOperators", "test_normalize_operator_exhaustive", _conversion_op_skips)
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
