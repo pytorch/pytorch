@@ -1774,6 +1774,27 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         return launcher
 
 
+def _get_binary_cta_args(binary: Any) -> tuple[int, ...]:
+    """Read cluster launch metadata from either the binary or metadata object."""
+
+    metadata = getattr(binary, "metadata", None)
+    num_ctas = getattr(binary, "num_ctas", None)
+    if num_ctas is None and metadata is not None:
+        num_ctas = getattr(metadata, "num_ctas", None)
+
+    if num_ctas is None:
+        return ()
+
+    for owner in (binary, metadata):
+        if owner is None:
+            continue
+        for attr in ("cluster_dims", "clusterDims"):
+            if hasattr(owner, attr):
+                return (num_ctas, *getattr(owner, attr))
+
+    return ()
+
+
 class TritonCompileResult(CompileResult[CompiledKernel]):
     """
     Upstream Triton CompileKernel can not be pickled.  This is a wrapper
@@ -1900,20 +1921,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 if hasattr(binary, "num_warps")
                 else binary.metadata.num_warps
             ),
-            "cta_args": (
-                (
-                    binary.num_ctas,
-                    *get_first_attr(binary, "cluster_dims", "clusterDims"),
-                )
-                if hasattr(binary, "num_ctas")
-                else (
-                    (binary.metadata.num_ctas, *binary.metadata.cluster_dims)
-                    if hasattr(binary, "metadata")
-                    and hasattr(binary.metadata, "num_ctas")
-                    and hasattr(binary.metadata, "cluster_dims")
-                    else ()
-                )
-            ),
+            "cta_args": _get_binary_cta_args(binary),
             "function": get_first_attr(binary, "function", "cu_function"),
             "runner": get_first_attr(binary, "run", "c_wrapper"),
             "math": math_lib,
