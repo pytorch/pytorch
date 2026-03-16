@@ -35,7 +35,12 @@
 
     check_release_file
     is_xnnpack_available
+    main
     pretty_str
+    run
+    run_and_parse_first_match
+    run_and_read_all
+    run_and_return_first_line
 ```
 
 # torch.utils.flop_counter
@@ -94,6 +99,8 @@
     is_out_of_place
     is_pytorch_file
     is_special_file
+    match_extensions
+    matched_files_iter
     openf
     preprocess_file_and_save_result
     preprocessor
@@ -112,7 +119,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.benchmark.examples.fuzzer
 .. py:module:: torch.utils.benchmark.examples.op_benchmark
 .. py:module:: torch.utils.benchmark.examples.simple_timeit
-.. py:module:: torch.utils.benchmark.examples.spectral_ops_fuzz_test
 .. py:module:: torch.utils.benchmark.op_fuzzers.binary
 .. py:module:: torch.utils.benchmark.op_fuzzers.sparse_binary
 .. py:module:: torch.utils.benchmark.op_fuzzers.sparse_unary
@@ -168,7 +174,6 @@ for tracking purposes -->
 .. py:module:: torch.utils.hipify.cuda_to_hip_mappings
 .. py:module:: torch.utils.hipify.version
 .. py:module:: torch.utils.hooks
-.. py:module:: torch.utils.jit.log_extract
 .. py:module:: torch.utils.mkldnn
 .. py:module:: torch.utils.mobile_optimizer
 .. py:module:: torch.utils.show_pickle

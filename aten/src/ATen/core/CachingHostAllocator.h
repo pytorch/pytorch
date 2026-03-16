@@ -825,22 +825,6 @@ struct CachingHostAllocatorImpl {
     return it->second->blocks;
   }
 
-  // We want to keep the non stream capture case as fast as possible,
-  // since memory allocation is often in the critical path in non
-  // stream capture code. This function will skip the overhead of
-  // locking on instance_mutex_, two virtual function calls, and a
-  // call into the CUDA API in order to prevent overheads whenever
-  // possible.
-  bool current_stream_is_capturing_fast_path() const {
-    // Stream capture can allocate only to private pools. If there
-    // are no private pools for which capture is currently underway,
-    // then by modus tollens the current stream is not capturing.
-    if (C10_LIKELY(captures_underway_empty_.load(std::memory_order_relaxed))) {
-      return false;
-    }
-    return stream_is_capturing(get_current_stream());
-  }
-
   B* get_block_from_ptr(void *ptr) {
     std::shared_lock<std::shared_mutex> lk(instance_mutex_);
     {
@@ -886,6 +870,24 @@ struct CachingHostAllocatorImpl {
     }
   }
 
+protected:
+  // We want to keep the non stream capture case as fast as possible,
+  // since memory allocation is often in the critical path in non
+  // stream capture code. This function will skip the overhead of
+  // locking on instance_mutex_, two virtual function calls, and a
+  // call into the CUDA API in order to prevent overheads whenever
+  // possible.
+  bool current_stream_is_capturing_fast_path() const {
+    // Stream capture can allocate only to private pools. If there
+    // are no private pools for which capture is currently underway,
+    // then by modus tollens the current stream is not capturing.
+    if (C10_LIKELY(captures_underway_empty_.load(std::memory_order_relaxed))) {
+      return false;
+    }
+    return stream_is_capturing(get_current_stream());
+  }
+
+private:
   /* These following functions are runtime-related. */
 
   // Allocate page-locked memory on the host.

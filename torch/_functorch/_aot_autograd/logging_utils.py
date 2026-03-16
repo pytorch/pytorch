@@ -10,7 +10,6 @@ from typing import Any
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._C import _FunctionBase
 
 from .schemas import AOTConfig
 
@@ -75,8 +74,10 @@ def track_graph_compiling(
 callback_set = False
 
 
-def setup_stacktrace_preservation_hooks(roots: list[_FunctionBase]) -> None:
-    def iter_graph(roots: list[_FunctionBase]) -> Iterator[_FunctionBase]:
+def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) -> None:
+    def iter_graph(
+        roots: list[torch.autograd.graph.Node],
+    ) -> Iterator[torch.autograd.graph.Node]:
         if not roots:
             return
         seen = set()
@@ -129,6 +130,7 @@ def setup_stacktrace_preservation_hooks(roots: list[_FunctionBase]) -> None:
         return posthook
 
     for node in iter_graph(roots):
+        # pyrefly: ignore[missing-attribute]
         forward_node_stack = node.metadata.get("traceback_", [])
         node.register_prehook(get_prehook(forward_node_stack, node._sequence_nr()))
 

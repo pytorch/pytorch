@@ -35,6 +35,7 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
     - [Using pre-built images](#using-pre-built-images)
     - [Building the image yourself](#building-the-image-yourself)
   - [Building the Documentation](#building-the-documentation)
+    - [Troubleshooting CI Errors](#troubleshooting-ci-errors)
     - [Building a PDF](#building-a-pdf)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
@@ -134,7 +135,7 @@ This enables you to train bigger deep learning models than before.
 
 ### Extensions Without Pain
 
-Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
+Writing new neural network modules, or interfacing with PyTorch's Tensor API, was designed to be straightforward
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
@@ -162,8 +163,10 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 #### Prerequisites
 If you are installing from source, you will need:
 - Python 3.10 or later
-- A compiler that fully supports C++17, such as clang or gcc (gcc 9.4.0 or newer is required, on Linux)
+- A compiler that fully supports C++20, such as clang or gcc (gcc 11.3.0 or newer is required, on Linux)
 - Visual Studio or Visual Studio Build Tool (Windows only)
+- At least 10 GB of free disk space
+- 30-60 minutes for the initial build (subsequent rebuilds are much faster)
 
 \* PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
 Professional, or Community Editions. You can also install the build tools from
@@ -179,7 +182,6 @@ $ source <CONDA_INSTALL_DIR>/bin/activate
 $ conda create -y -n <CONDA_NAME>
 $ conda activate <CONDA_NAME>
 ```
-
 * Windows:
 
 ```bash
@@ -197,7 +199,7 @@ packages (e.g., CUDA, MKL.)
 ##### NVIDIA CUDA Support
 If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads)
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v8.5 or above
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v9.0 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/backend/latest/reference/support-matrix.html) for cuDNN versions with the various supported CUDA, CUDA driver, and NVIDIA hardware.
@@ -258,15 +260,6 @@ pip install mkl-static mkl-include
 # Run from the pytorch directory after cloning
 # For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
 make triton
-```
-
-**On MacOS**
-
-```bash
-# Add this package on intel x86 processor machines only
-pip install mkl-static mkl-include
-# Add these packages if torch.distributed is needed
-conda install pkg-config libuv
 ```
 
 **On Windows**
@@ -407,7 +400,7 @@ ccmake build  # or cmake-gui build
 
 #### Using pre-built images
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+You can also pull a pre-built docker image from Docker Hub and run with docker v23.0+
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
@@ -419,11 +412,11 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 #### Building the image yourself
 
-**NOTE:** Must be built with a docker version > 18.06
+**NOTE:** Must be built with a Docker version >= 23.0
 
-The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
+The Dockerfile is supplied to build images with CUDA 12.1 support and cuDNN v9.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
-unset to use the default.
+unset to use the default, as the Dockerfile uses system Python.
 
 ```bash
 make -f docker.Makefile
@@ -440,7 +433,7 @@ make -f docker.Makefile
 ### Building the Documentation
 
 To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org)
-and the pytorch_sphinx_theme2.
+and the `pytorch_sphinx_theme2`.
 
 Before you build the documentation locally, ensure `torch` is
 installed in your environment. For small fixes, you can install the
@@ -464,21 +457,58 @@ If you get a katex error run `npm install katex`.  If it persists, try
 `npm install -g katex`
 
 > [!NOTE]
-> If you installed `nodejs` with a different package manager (e.g.,
-> `conda`) then `npm` will probably install a version of `katex` that is not
-> compatible with your version of `nodejs` and doc builds will fail.
-> A combination of versions that is known to work is `node@6.13.1` and
-> `katex@0.13.18`. To install the latter with `npm` you can run
-> ```npm install -g katex@0.13.18```
-
-> [!NOTE]
 > If you see a numpy incompatibility error, run:
 > ```
 > pip install 'numpy<2'
 > ```
 
-When you make changes to the dependencies run by CI, edit the
-`.ci/docker/requirements-docs.txt` file.
+
+#### Troubleshooting CI Errors
+Your build may show errors you didn't have locally - here's how to find the errors relevant to the docs.
+
+If the build has any errors, you will see something like this on the PR:
+
+<img width="781" height="400" alt="Monosnap Update installation instructions for doc build · Pull Request #169534 · pytorch:pytorch 2025-12-18 18-22-53" src="https://github.com/user-attachments/assets/49a3dfe7-81c2-4246-852b-bc3f807e95af" />
+
+Any doc-related errors will occur in jobs that include "doc" somewhere in the title. It doesn't look like any of these jobs are relevant to our docs.
+
+
+Let's take a look anyway. Click on the job to see the logs:
+
+<img width="1187" height="668" alt="Monosnap Update installation instructions for doc build · pytorch:pytorch@7380336 2025-12-18 18-24-15" src="https://github.com/user-attachments/assets/117df543-8356-4323-8e1c-ef02a95554ba" />
+
+And we can be sure that this job does not involve docs.
+
+Looking at this build, we can see these jobs are relevant to our docs - and they didn't have any errors:
+
+<img width="777" height="395" alt="Check the docs jobs" src="https://github.com/user-attachments/assets/5d7c196b-2d40-49ad-87e3-f57de6e14a5b" />
+
+You might also see a comment on the PR like this:
+
+<img width="651" height="246" alt="PR Comment" src="https://github.com/user-attachments/assets/27e0120a-ba33-4b1c-b4a5-bf3064520586" />
+
+We can see that some of these issues are relevant to our docs.
+
+Open the logs by clicking on the `gh` link:
+
+<img width="873" height="360" alt="View Logs" src="https://github.com/user-attachments/assets/ab5b862f-8026-489c-b95e-a6cd4257e4b7" />
+
+And here we can see there is a doc-related error:
+
+<img width="1117" height="433" alt="Doc Error" src="https://github.com/user-attachments/assets/0a275921-736d-43a7-ab0f-3e8854d43280" />
+
+You can always find the relevant doc builds by going to the `Checks` tab on your PR, and scrolling down to `pull`.
+
+<img width="481" height="561" alt="checks" src="https://github.com/user-attachments/assets/eef18f2b-7134-4e2e-bd90-bcdc12800132" />
+
+You can either click through or toggle the accordion to see all of the jobs here, where you can see the docs jobs highlighted:
+
+<img width="570" height="611" alt="jobs" src="https://github.com/user-attachments/assets/f62812ca-caee-421b-863c-54f38fd28d46" />
+
+If you click through, you'll see the doc jobs at the bottom, like this:
+
+<img width="354" height="312" alt="View Docs jobs" src="https://github.com/user-attachments/assets/8fadb935-5314-4c4b-a1b5-133781754f03" />
+
 
 #### Building a PDF
 
@@ -522,7 +552,7 @@ on [our website](https://pytorch.org/get-started/previous-versions).
 
 ## Getting Started
 
-Three pointers to get you started:
+Pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)

@@ -16,7 +16,7 @@ import shutil
 import time
 import traceback
 from copy import copy
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -44,6 +44,7 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.output_code import OutputCode
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import LazyString
 from torch._utils_internal import log_cache_bypass
 from torch.compiler._cache import (
@@ -153,6 +154,7 @@ def check_node_safe(node: Node) -> None:
         "torch.sym_float",
         "torch.sym_sum",
         "torch.autograd.grad",
+        "torch.distributed.tensor._api.from_local",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -216,7 +218,10 @@ def check_node_safe(node: Node) -> None:
             # But if user explicitly specified cache hash - allow to cache it.
             if node.meta.get("user_cache_hash", None):
                 return
-        assert not isinstance(node.target, str)
+        if isinstance(node.target, str):
+            raise AssertionError(
+                f"expected node.target to not be a string, got {node.target}"
+            )
         if not is_cacheable_function(node.target):
             module = getattr(node.target, "__module__", None)
             name = getattr(node.target, "__name__", None)
@@ -227,7 +232,10 @@ def check_node_safe(node: Node) -> None:
         method_name = node.target
         method_target = node.args[0]
         # Only support method calls on base tensors
-        assert isinstance(method_target, Node)
+        if not isinstance(method_target, Node):
+            raise AssertionError(
+                f"expected method_target to be Node, got {type(method_target)}"
+            )
         if not is_tensor(method_target):
             module = getattr(method_target, "__module__", None)
             name = getattr(method_target, "__name__", None)
@@ -397,7 +405,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self,
         gm: torch.fx.GraphModule,
     ) -> list[str]:
-        assert has_triton_package(), "Triton is not available"
+        if not has_triton_package():
+            raise AssertionError("Triton is not available")
 
         triton_kernels = []
         for module in gm.modules():
@@ -503,6 +512,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             {
                 AOTConfig: functools.partial(self._reduce_aot_config),
                 torch.Tensor: functools.partial(self._reduce_tensor),
+                FakeScriptObject: functools.partial(self._reduce_fake_script_object),
             }
         )
 
@@ -581,7 +591,10 @@ def normalize_placeholder_names(
                 n.target = target
                 n._rename(name)
                 i += 1
-        assert i == len(old_placeholder_names)
+        if i != len(old_placeholder_names):
+            raise AssertionError(
+                f"i={i} != len(old_placeholder_names)={len(old_placeholder_names)}"
+            )
         # Now restore the old namespace's used names
         gm.graph._graph_namespace._used_names = old_used_names
         gm.recompile()
@@ -757,7 +770,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
                 )
-                result: Optional[tuple[GenericAOTAutogradResult[Any, Any], bytes]] = (
+                result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = (
                     AOTAutogradCache._lookup(
                         cache_key, local, remote, args, cache_info, aot_config
                     )
@@ -891,7 +904,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @classmethod
     def generate_guards_expression(
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
-    ) -> Optional[str]:
+    ) -> str | None:
         shape_env = cls._get_shape_env()
 
         if shape_env is None:
@@ -953,7 +966,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         if torch._inductor.config.unsafe_skip_cache_dynamic_shape_guards:
             return True
         shape_env = AOTAutogradCache._get_shape_env()
-        assert shape_env is not None
+        if shape_env is None:
+            raise AssertionError("shape_env must not be None")
         result = shape_env.evaluate_guards_expression(guard_expr, hints)
         return result
 
@@ -967,7 +981,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         aot_config: AOTConfig | None,
     ) -> tuple[GenericAOTAutogradResult[Any, Any], bytes] | None:
         """Given a key generated by AOTAutogradCachePickler, look up its location in the cache."""
-        remote_cache: Optional[RemoteCache[JsonDataTy]] = None
+        remote_cache: RemoteCache[JsonDataTy] | None = None
         if remote:
             remote_cache = AOTAutogradCache.get_remote_cache()
 
@@ -1009,7 +1023,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             if config.strict_autograd_cache:
                 raise e
         if entry is not None:
-            assert pickled_content is not None
+            if pickled_content is None:
+                raise AssertionError(
+                    "pickled_content must not be None when entry is not None"
+                )
             return (entry, pickled_content)
         else:
             return None
@@ -1029,11 +1046,75 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         write_atomic(path, content)
 
     @staticmethod
+    def _find_unpicklable_field(
+        entry: GenericAOTAutogradResult[Any, Any],
+    ) -> str | None:
+        """Find which field of entry is causing pickle to fail."""
+        # pyrefly: ignore [implicit-any]
+        fields = []
+        if hasattr(entry, "__dataclass_fields__"):
+            fields = list(entry.__dataclass_fields__.keys())
+        elif hasattr(entry, "__dict__"):
+            fields = list(entry.__dict__.keys())
+
+        for name in fields:
+            try:
+                pickle.dumps(getattr(entry, name))
+            except Exception:
+                return name
+        return None
+
+    @staticmethod
+    def _pickle_entry(
+        entry: GenericAOTAutogradResult[Any, Any], remote: bool
+    ) -> bytes | None:
+        """Pickle entry, returning None on failure."""
+        try:
+            return pickle.dumps(entry)
+        except (pickle.PicklingError, TypeError, AttributeError) as e:
+            bad_field = AOTAutogradCache._find_unpicklable_field(entry)
+            error_str = str(e)
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aotautograd_cache_pickle_failure",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps({"error": error_str, "field": bad_field}),
+            )
+            if remote:
+                log_cache_bypass(
+                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
+                )
+            if config.strict_autograd_cache:
+                raise
+            return None
+
+    @staticmethod
+    def _handle_save_error(e: Exception, remote: bool, is_bypass: bool) -> None:
+        """Handle exceptions during save, re-raising if strict mode is enabled."""
+        if is_bypass:
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
+            bypass_reason = str(e)
+        else:
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            bypass_reason = "Unable to serialize: " + str(e)
+        if remote:
+            log_cache_bypass("bypass_aot_autograd", bypass_reason)
+        if config.strict_autograd_cache:
+            raise e
+
+    @staticmethod
     def save(key: str, entry: GenericAOTAutogradResult[Any, Any], remote: bool) -> None:
         """Save a single entry into the cache."""
+        content: bytes | None = None
         try:
             entry.pre_save()
-            content = pickle.dumps(entry)
+            content = AOTAutogradCache._pickle_entry(entry, remote)
+            if content is None:
+                return None
             CacheArtifactManager.record_artifact(
                 AOTAutogradCacheArtifact.type(), key, content
             )
@@ -1043,34 +1124,19 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             ):
                 precompile_key = entry.sanitized_aot_config.precompile_backend_id
                 artifact = BundledAOTAutogradCacheArtifact(precompile_key, entry)
-                # Now that we're saving it, the precompile_backend_id field is no longer
-                # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(artifact)
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
-            if config.strict_autograd_cache:
-                raise
-            counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
-            if remote:
-                log_cache_bypass("bypass_aot_autograd", str(e))
+            AOTAutogradCache._handle_save_error(e, remote, is_bypass=True)
             return None
         except Exception as e:
-            log.info("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
-            if remote:
-                log_cache_bypass(
-                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
-                )
-            if config.strict_autograd_cache:
-                raise
+            AOTAutogradCache._handle_save_error(e, remote, is_bypass=False)
             return None
 
         if remote:
-            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
-                AOTAutogradCache.get_remote_cache()
-            )
+            remote_cache = AOTAutogradCache.get_remote_cache()
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
@@ -1083,7 +1149,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
 
     @staticmethod
     @functools.cache
-    def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+    def get_remote_cache() -> RemoteCache[JsonDataTy] | None:
         """
         Attempts to load the remote cache, returns None on error.
         """
@@ -1098,22 +1164,22 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
     @staticmethod
     def make_entry(
         compiled_fw_func: OutputCode,
-        compiled_bw_func: Optional[OutputCode],
-        aot_joint_graph_str: Optional[str],
-        aot_forward_graph_str: Optional[str],
-        aot_backward_graph_str: Optional[str],
+        compiled_bw_func: OutputCode | None,
+        aot_joint_graph_str: str | None,
+        aot_forward_graph_str: str | None,
+        aot_backward_graph_str: str | None,
         runtime_metadata: ViewAndMutationMeta,
         dispatch_wrappers: list[CompilerWrapper],
-        maybe_subclass_meta: Optional[SubclassMeta],
-        num_fw_outs_saved_for_bw: Optional[int],
+        maybe_subclass_meta: SubclassMeta | None,
+        num_fw_outs_saved_for_bw: int | None,
         indices_of_inps_to_detach: list[int],
         forward_time_taken_ns: int,
         backward_time_taken_ns: int,
         sanitized_aot_config: AOTConfig,
-        guards_expr: Optional[str],
-        backward_state_indices: Optional[list[int]],
-        num_symints_saved_for_bw: Optional[int],
-        serialized_bw_module: Optional[SerializedGraphModule],
+        guards_expr: str | None,
+        backward_state_indices: list[int] | None,
+        num_symints_saved_for_bw: int | None,
+        serialized_bw_module: SerializedGraphModule | None,
     ) -> GenericAOTAutogradResult[Any, Any]:
         if should_bundle_autograd_cache():
             # Helper function to unwrap all the wrappers we added during aotdispatch
@@ -1121,15 +1187,18 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             def unwrap_output_code(obj: object) -> OutputCode:
                 while hasattr(obj, "__wrapped__"):
                     obj = obj.__wrapped__
-                assert isinstance(obj, OutputCode)
+                if not isinstance(obj, OutputCode):
+                    raise AssertionError(f"expected OutputCode, got {type(obj)}")
                 return obj
 
             compiled_fw_graph = unwrap_output_code(compiled_fw_func)
             bundled_compiled_forward = BundledCompiledForward(compiled_fw_graph)
             bundled_compiled_backward = None
             if compiled_bw_func is not None:
-                assert backward_state_indices is not None
-                assert num_symints_saved_for_bw is not None
+                if backward_state_indices is None:
+                    raise AssertionError("backward_state_indices must not be None")
+                if num_symints_saved_for_bw is None:
+                    raise AssertionError("num_symints_saved_for_bw must not be None")
                 compiled_bw_graph = unwrap_output_code(compiled_bw_func)
                 bundled_compiled_backward = BundledCompiledBackward(
                     compiled_bw_graph, backward_state_indices, num_symints_saved_for_bw
@@ -1159,7 +1228,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 compiled_fw_func, "_fx_graph_cache_debug_lines", []
             )
 
-            assert fw_key is not None
+            if fw_key is None:
+                raise AssertionError("fw_key must not be None")
             compiled_forward = CompiledForward(
                 fx_graph_cache_info=(fw_key, fw_debug_lines),
                 fx_graph_guard_expr=getattr(compiled_fw_func, "guards_expr", None),
@@ -1170,9 +1240,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
                 bw_debug_lines = getattr(
                     compiled_bw_func, "_fx_graph_cache_debug_lines", []
                 )
-                assert bw_key is not None
-                assert backward_state_indices is not None
-                assert num_symints_saved_for_bw is not None
+                if bw_key is None:
+                    raise AssertionError("bw_key must not be None")
+                if backward_state_indices is None:
+                    raise AssertionError("backward_state_indices must not be None")
+                if num_symints_saved_for_bw is None:
+                    raise AssertionError("num_symints_saved_for_bw must not be None")
                 compiled_backward = CompiledBackward(
                     fx_graph_cache_info=(bw_key, bw_debug_lines),
                     fx_graph_guard_expr=getattr(compiled_bw_func, "guards_expr", None),

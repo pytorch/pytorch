@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 from collections.abc import Callable, Sequence
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch._ops import OpOverload
@@ -17,7 +17,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._math_ops import _NormPartial
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
@@ -37,6 +40,7 @@ from torch.utils._typing_utils import not_none
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 # leave the remaining pointwise_ops list here for convenience,
 # Below ops are some pointwise ops that are yet to be supported,
 # they might not be a complete list.
@@ -53,6 +57,371 @@ aten = torch.ops.aten
 #     "real",  # complex data type only
 # ]
 
+# Linear pointwise ops, split by linearity type.
+unary_linear_ops = [aten.to.dtype]
+
+
+def _common_pointwise_single_dim_strategy(
+    partial_extra_rules: list[list[Placement | _ShardingPlaceholder]] | None = None,
+) -> Callable[
+    [OpOverload, ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+]:
+    """Factory for single-dim strategies that add partial placement rules."""
+
+    def strategy(
+        op: OpOverload,
+        args_schema: ArgsType,
+        kwargs_schema: KwargsType,
+    ) -> list[list[Placement | _ShardingPlaceholder]]:
+        tensor_arg_metas: list[TensorMeta] = [
+            arg for arg in args_schema if isinstance(arg, TensorMeta)
+        ]
+        common_shape = torch.broadcast_shapes(
+            *[arg.shape for arg in args_schema if isinstance(arg, TensorMeta)]
+        )
+        # For multi-output ops (e.g. frexp), all outputs share the same
+        # pointwise sharding, so replicate the output placement.
+        num_outputs = sum(1 for r in op._schema.returns if "Tensor" in str(r.type))
+        placements: list[list[Placement | _ShardingPlaceholder]] = []
+        for i in range(len(common_shape)):
+            shard_placements: list[Placement | _ShardingPlaceholder] = [
+                _ShardingPlaceholder(i)
+            ] * num_outputs
+            for arg in tensor_arg_metas:
+                common_dim_to_arg_dim = infer_broadcast_dims_map(
+                    common_shape, arg.shape
+                )
+                # If the output shard dim maps to an input dim, shard that
+                # input dim; otherwise it was broadcast, so replicate.
+                if common_dim_to_arg_dim[i] >= 0:
+                    shard_placements.append(
+                        _ShardingPlaceholder(common_dim_to_arg_dim[i])
+                    )
+                else:
+                    shard_placements.append(Replicate())
+            placements.append(shard_placements)
+        if partial_extra_rules:
+            n_tensors = len(tensor_arg_metas)
+            expected_len = num_outputs + n_tensors
+            for rule in partial_extra_rules:
+                # Filter rather than assert: some ops (e.g. mul.Tensor) mix
+                # unary rules (len 2, for scalar promotion) and binary rules
+                # (len 3, for tensor-tensor), so mismatched lengths are expected.
+                # see _MUL_RULES to see how _UNARY_LINEAR_RULES handles the
+                # scalar promotion case
+                if len(rule) == expected_len:
+                    placements.append(rule)
+        return placements
+
+    return strategy
+
+
+def _register_single_dim_pointwise(
+    op: OpOverload,
+    partial_extra_rules: list[list[Placement]] | None = None,
+    static_argnum: int = 0,
+) -> None:
+    strategy_fn = _common_pointwise_single_dim_strategy(
+        partial_extra_rules=partial_extra_rules  # pyrefly: ignore[bad-argument-type]
+    )
+    # For .out ops, append output placement as the out kwarg placement.
+    # Strategy functions author [output, *args] without kwargs. The out tensor
+    # must match the output placement, so we duplicate strategy[0] (output).
+    # This makes strategies [output, *args, out_kwarg] so _get_num_tensor_inputs
+    # (which counts the out kwarg) computes num_outputs correctly.
+    if "out" in op._schema.overload_name:
+        inner_fn = strategy_fn
+
+        def _out_wrapper(
+            op: OpOverload,
+            args: ArgsType,
+            kwargs: KwargsType,
+            _fn: Callable = inner_fn,
+        ) -> list[list[Placement | _ShardingPlaceholder]]:
+            strategies = _fn(op, args, kwargs)
+            n_tensor_args = sum(1 for a in args if isinstance(a, TensorMeta))
+            n_outputs = sum(1 for r in op._schema.returns if "Tensor" in str(r.type))
+            for s in strategies:
+                if len(s) != n_outputs + n_tensor_args:
+                    raise AssertionError(
+                        f"Strategy length {len(s)} != expected {n_outputs + n_tensor_args} "
+                        f"({n_outputs} output(s) + {n_tensor_args} args) for {op}. "
+                        f"out kwarg will be appended by infra."
+                    )
+            return [s + [s[0]] for s in strategies]
+
+        strategy_fn = _out_wrapper
+    register_single_dim_strategy(
+        op,
+        schema_info=RuntimeSchemaInfo(static_argnum, static_kwargkey=["out"]),
+        allow_uneven_sharding=True,
+        allow_unbacked_sharding=True,
+    )(strategy_fn)
+
+
+_UNARY_LINEAR_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum")],
+    [Partial("avg"), Partial("avg")],
+]
+
+binary_additive_ops = [
+    aten.add.Tensor,
+    aten.add_.Tensor,
+    aten.add.out,
+    aten.sub.Tensor,
+    aten.sub_.Tensor,
+    aten.sub.out,
+]
+
+_BINARY_ADDITIVE_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum"), Partial("sum")],
+    [Partial("avg"), Partial("avg"), Partial("avg")],
+    # P(x), R -> P(x): adding/subtracting a replicated value preserves partial types
+    # avg, max, min. sum would result in R being added n times, n = num_ranks
+    # (the replicated value is constant across ranks, so reduce order is unaffected)
+    [Partial("avg"), Partial("avg"), Replicate()],
+    [Partial("max"), Partial("max"), Replicate()],
+    [Partial("min"), Partial("min"), Replicate()],
+    # R, P(avg) -> P(avg): avg is linear so this holds for any alpha
+    # (R, P(max/min) excluded: negative alpha would flip the ordering)
+    [Partial("avg"), Replicate(), Partial("avg")],
+]
+
+for op in binary_additive_ops:
+    _register_single_dim_pointwise(op, _BINARY_ADDITIVE_RULES)
+
+# mul: partials propagate through either arg. div: only through numerator.
+binary_mul_ops = [aten.mul.Tensor, aten.mul_.Tensor, aten.mul.out]
+binary_div_ops = [aten.div.Tensor, aten.div_.Tensor, aten.div.out]
+
+# _UNARY_LINEAR_RULES handles the scalar promotion case: Python's __mul__/__truediv__
+# promote scalars to 0-dim tensors, so aten.mul.Scalar dispatches as aten.mul.Tensor
+# with n_tensors=1, matching the length-2 unary rules.
+_MUL_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum"), Replicate()],
+    [Partial("avg"), Partial("avg"), Replicate()],
+    [Partial("sum"), Replicate(), Partial("sum")],
+    [Partial("avg"), Replicate(), Partial("avg")],
+]
+
+_DIV_RULES: list[list[Placement]] = [
+    [Partial("sum"), Partial("sum"), Replicate()],
+    [Partial("avg"), Partial("avg"), Replicate()],
+]
+
+for op in binary_mul_ops:
+    _register_single_dim_pointwise(op, _UNARY_LINEAR_RULES + _MUL_RULES)
+
+for op in binary_div_ops:
+    _register_single_dim_pointwise(op, _UNARY_LINEAR_RULES + _DIV_RULES)
+
+scalar_linear_ops = [
+    aten.div.Scalar,
+    aten.div_.Scalar,
+    aten.mul.Scalar,
+    aten.mul_.Scalar,
+]
+
+for op in scalar_linear_ops:
+    _register_single_dim_pointwise(op, _UNARY_LINEAR_RULES, static_argnum=1)
+
+neg_ops = [aten.neg.default, aten.neg_.default]
+
+# Non-decreasing unary ops: f(max(a,b)) = max(f(a),f(b)).
+# Only ops that are non-decreasing on their ENTIRE domain belong here.
+# Ops with restricted domains (e.g. log on (0,∞), asin on [-1,1]) do NOT qualify
+# because P(max) offsets can push inputs outside the valid domain.
+non_decreasing_unary_ops = [
+    aten.asinh.default,
+    aten.asinh_.default,
+    aten.asinh.out,
+    aten.atan.default,
+    aten.atan_.default,
+    aten.atan.out,
+    aten.ceil.default,
+    aten.ceil_.default,
+    aten.ceil.out,
+    aten.deg2rad.default,
+    aten.deg2rad_.default,
+    aten.deg2rad.out,
+    aten.erf.default,
+    aten.erf_.default,
+    aten.erf.out,
+    aten.exp.default,
+    aten.exp_.default,
+    aten.exp.out,
+    aten.exp2.default,
+    aten.exp2_.default,
+    aten.exp2.out,
+    aten.expm1.default,
+    aten.expm1_.default,
+    aten.expm1.out,
+    aten.floor.default,
+    aten.floor_.default,
+    aten.floor.out,
+    aten.rad2deg.default,
+    aten.rad2deg_.default,
+    aten.rad2deg.out,
+    aten.relu.default,
+    aten.relu_.default,
+    aten.round.decimals,
+    aten.round.default,
+    aten.round_.decimals,
+    aten.round_.default,
+    aten.round.decimals_out,
+    aten.round.out,
+    aten.sgn.default,
+    aten.sgn_.default,
+    aten.sgn.out,
+    aten.sigmoid.default,
+    aten.sigmoid_.default,
+    aten.sigmoid.out,
+    aten.sign.default,
+    aten.sign_.default,
+    aten.sign.out,
+    aten.sinh.default,
+    aten.sinh_.default,
+    aten.sinh.out,
+    aten.tanh.default,
+    aten.tanh_.default,
+    aten.tanh.out,
+    aten.trunc.default,
+    aten.trunc_.default,
+    aten.trunc.out,
+    # nan_to_num is non-decreasing on its entire domain (including nan/inf):
+    # it maps -inf→min, nan→0, inf→max, and is identity elsewhere.
+    aten.nan_to_num.default,
+    aten.nan_to_num_.default,
+    aten.nan_to_num.out,
+]
+
+_NON_DECREASING_RULES: list[list[Placement]] = [
+    [Partial("max"), Partial("max")],
+    [Partial("min"), Partial("min")],
+]
+
+for op in non_decreasing_unary_ops:
+    _register_single_dim_pointwise(op, _NON_DECREASING_RULES)
+
+# Non-increasing unary ops: f(max(a,b)) = min(f(a),f(b)).
+# Note: acos excluded due to domain constraints [-1,1] causing validation failures
+non_increasing_unary_ops: list[OpOverload] = [
+    aten.erfc.default,
+    aten.erfc_.default,
+    aten.erfc.out,
+    aten.special_erfcx.default,
+    aten.special_erfcx.out,
+]
+
+_NON_INCREASING_RULES: list[list[Placement]] = [
+    [Partial("min"), Partial("max")],
+    [Partial("max"), Partial("min")],
+]
+
+for op in non_increasing_unary_ops:
+    _register_single_dim_pointwise(op, _NON_INCREASING_RULES)
+
+# neg is linear: -(A1 + A2) = -A1 + -A2
+neg_ops = [aten.neg.default, aten.neg_.default, aten.neg.out]
+
+_NEG_RULES: list[list[Placement]] = _UNARY_LINEAR_RULES + _NON_INCREASING_RULES
+
+for op in neg_ops:
+    _register_single_dim_pointwise(op, _NEG_RULES)
+
+
+# All-partial-preserving unary ops: P(x)->P(x) for all x.
+# TODO: positive should be removed once CIA (Copy Is All) optimizes it away.
+all_partial_preserving_unary_ops = [
+    aten.to.dtype,
+    aten.positive.default,
+]
+
+_ALL_PARTIAL_PRESERVING_RULES: list[list[Placement]] = [
+    [Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
+]
+
+for op in all_partial_preserving_unary_ops:
+    _register_single_dim_pointwise(op, _ALL_PARTIAL_PRESERVING_RULES)
+
+all_partial_preserving_binary_ops = [
+    aten.copy_.default,
+    prims.copy_to.default,
+]
+
+_ALL_PARTIAL_BINARY_PRESERVING_RULES: list[list[Placement]] = [
+    [Partial(r), Partial(r), Partial(r)] for r in ("sum", "avg", "max", "min")
+]
+
+for op in all_partial_preserving_binary_ops:
+    _register_single_dim_pointwise(op, _ALL_PARTIAL_BINARY_PRESERVING_RULES)
+
+# Monotonic increasing in both args but don't preserve any specific partial type.
+monotonic_binary_ops = [
+    aten.logaddexp.default,
+    aten.logaddexp.out,
+    aten.logaddexp2.default,
+    aten.logaddexp2.out,
+]
+
+_MONOTONE_BINARY_BASE_RULES: list[list[Placement]] = [
+    [Partial("max"), Partial("max"), Replicate()],
+    [Partial("max"), Replicate(), Partial("max")],
+    [Partial("min"), Partial("min"), Replicate()],
+    [Partial("min"), Replicate(), Partial("min")],
+]
+
+for op in monotonic_binary_ops:
+    _register_single_dim_pointwise(op, _MONOTONE_BINARY_BASE_RULES)
+
+# Binary ops monotonically increasing in both arguments.
+# max-preserving: P(max)+P(max)->P(max) because max(max(a),max(b)) = max(a,b)
+monotonic_max_preserving_binary_ops = [
+    aten.clamp_min.Tensor,
+    aten.fmax.default,
+    aten.fmax.out,
+    aten.maximum.default,
+    aten.maximum.out,
+    prims.fmax.default,
+]
+
+_MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
+    *_MONOTONE_BINARY_BASE_RULES,
+    [Partial("max"), Partial("max"), Partial("max")],
+]
+
+for op in monotonic_max_preserving_binary_ops:
+    _register_single_dim_pointwise(op, _MONOTONE_MAX_PRESERVING_BINARY_BASE_RULES)
+
+# min-preserving: P(min)+P(min)->P(min) because min(min(a),min(b)) = min(a,b)
+monotonic_min_preserving_binary_ops = [
+    aten.clamp_max.Tensor,
+    aten.fmin.default,
+    aten.fmin.out,
+    aten.minimum.default,
+    aten.minimum.out,
+    prims.fmin.default,
+]
+
+_MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES: list[list[Placement]] = [
+    *_MONOTONE_BINARY_BASE_RULES,
+    [Partial("min"), Partial("min"), Partial("min")],
+]
+
+for op in monotonic_min_preserving_binary_ops:
+    _register_single_dim_pointwise(op, _MONOTONE_MIN_PRESERVING_BINARY_BASE_RULES)
+
+
+# The linear pointwise ops map, key is op, value is the type of linearity.
+# Reconstructed from category lists for the existing registration path.
+linear_pointwise_ops: dict[OpOverload, int] = {
+    aten.to.dtype: 0,
+    **dict.fromkeys(binary_additive_ops, 1),
+    **dict.fromkeys(binary_mul_ops, 2),
+    **dict.fromkeys(binary_div_ops, 2),
+    **dict.fromkeys(scalar_linear_ops, 0),
+    **dict.fromkeys(neg_ops, 0),
+}
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
@@ -75,7 +444,6 @@ pointwise_ops = [
     aten.acosh.out,
     aten.acosh_.default,
     aten.add.Scalar,
-    aten.add.out,
     aten.add_.Scalar,
     aten.addcdiv.default,
     aten.addcdiv.out,
@@ -88,15 +456,9 @@ pointwise_ops = [
     aten.asin.default,
     aten.asin.out,
     aten.asin_.default,
-    aten.asinh.default,
-    aten.asinh.out,
-    aten.asinh_.default,
-    aten.atan.default,
-    aten.atan.out,
     aten.atan2.default,
     aten.atan2.out,
     aten.atan2_.default,
-    aten.atan_.default,
     aten.atanh.default,
     aten.atanh.out,
     aten.atanh_.default,
@@ -138,18 +500,13 @@ pointwise_ops = [
     aten.bitwise_xor.Tensor_out,
     aten.bitwise_xor_.Scalar,
     aten.bitwise_xor_.Tensor,
-    aten.ceil.default,
-    aten.ceil.out,
-    aten.ceil_.default,
     aten.clamp.default,
     aten.clamp.Tensor,
     aten.clamp.out,
     aten.clamp_.default,
     aten.clamp_.Tensor,
     aten.clamp_min.default,
-    aten.clamp_min.Tensor,
     aten.clamp_max.default,
-    aten.clamp_max.Tensor,
     aten.clip.default,
     aten.clip.out,
     aten.clip_.default,
@@ -168,38 +525,19 @@ pointwise_ops = [
     aten.cosh.default,
     aten.cosh.out,
     aten.cosh_.default,
-    aten.deg2rad.default,
-    aten.deg2rad.out,
-    aten.deg2rad_.default,
     aten.digamma.default,
     aten.digamma.out,
     aten.digamma_.default,
     aten.div.Tensor_mode,
-    aten.div.out,
     aten.div.out_mode,
     aten.div_.Tensor_mode,
     aten.eq.Tensor,
     aten.eq.Tensor_out,
     aten.eq.Scalar,
     aten.eq.Scalar_out,
-    aten.erf.default,
-    aten.erf.out,
-    aten.erf_.default,
-    aten.erfc.default,
-    aten.erfc.out,
-    aten.erfc_.default,
     aten.erfinv.default,
     aten.erfinv.out,
     aten.erfinv_.default,
-    aten.exp.default,
-    aten.exp.out,
-    aten.exp2.default,
-    aten.exp2.out,
-    aten.exp2_.default,
-    aten.exp_.default,
-    aten.expm1.default,
-    aten.expm1.out,
-    aten.expm1_.default,
     aten.float_power.Scalar,
     aten.float_power.Scalar_out,
     aten.float_power.Tensor_Scalar,
@@ -208,13 +546,6 @@ pointwise_ops = [
     aten.float_power.Tensor_Tensor_out,
     aten.float_power_.Scalar,
     aten.float_power_.Tensor,
-    aten.floor.default,
-    aten.floor.out,
-    aten.floor_.default,
-    aten.fmax.default,
-    aten.fmax.out,
-    aten.fmin.default,
-    aten.fmin.out,
     aten.fmod.Scalar,
     aten.fmod.Scalar_out,
     aten.fmod.Tensor,
@@ -224,6 +555,8 @@ pointwise_ops = [
     aten.frac.default,
     aten.frac.out,
     aten.frac_.default,
+    aten.gcd.default,
+    aten.gcd.out,
     aten.ge.Scalar,
     aten.ge.Tensor,
     aten.gelu.default,
@@ -283,10 +616,6 @@ pointwise_ops = [
     aten.log2.out,
     aten.log2_.default,
     aten.log_.default,
-    aten.logaddexp.default,
-    aten.logaddexp.out,
-    aten.logaddexp2.default,
-    aten.logaddexp2.out,
     aten.logical_and.default,
     aten.logical_and.out,
     aten.logical_and_.default,
@@ -304,24 +633,18 @@ pointwise_ops = [
     aten.logit_.default,
     aten.masked_fill.Scalar,
     aten.masked_fill_.Scalar,
-    aten.mul.out,
     aten.mvlgamma.default,
     aten.mvlgamma.out,
     aten.mvlgamma_.default,
     aten.native_dropout_backward.default,
     aten.native_dropout_backward.out,
-    aten.nan_to_num.default,
-    aten.nan_to_num.out,
-    aten.nan_to_num_.default,
     aten.ne.Scalar,
-    aten.neg.out,
     aten.nextafter.default,
     aten.nextafter.out,
     aten.nextafter_.default,
     aten.polygamma.default,
     aten.polygamma.out,
     aten.polygamma_.default,
-    aten.positive.default,
     aten.pow.Scalar,
     aten.pow.Scalar_out,
     aten.pow.Tensor_Scalar,
@@ -333,11 +656,6 @@ pointwise_ops = [
     aten.reciprocal.default,
     aten.reciprocal.out,
     aten.reciprocal_.default,
-    aten.rad2deg.default,
-    aten.rad2deg.out,
-    aten.rad2deg_.default,
-    aten.relu.default,
-    aten.relu_.default,
     aten.remainder.Scalar,
     aten.remainder.Scalar_Tensor,
     aten.remainder.Scalar_out,
@@ -345,25 +663,10 @@ pointwise_ops = [
     aten.remainder.Tensor_out,
     aten.remainder_.Scalar,
     aten.remainder_.Tensor,
-    aten.round.decimals,
-    aten.round.decimals_out,
-    aten.round.default,
-    aten.round.out,
-    aten.round_.decimals,
-    aten.round_.default,
     aten.rsqrt.default,
     aten.rsqrt.out,
     aten.rsqrt_.default,
     aten.rsub.Scalar,
-    aten.sgn.default,
-    aten.sgn.out,
-    aten.sgn_.default,
-    aten.sigmoid.default,
-    aten.sigmoid.out,
-    aten.sigmoid_.default,
-    aten.sign.default,
-    aten.sign.out,
-    aten.sign_.default,
     aten.signbit.default,
     aten.signbit.out,
     aten.silu.default,
@@ -374,9 +677,6 @@ pointwise_ops = [
     aten.sinc.default,
     aten.sinc.out,
     aten.sinc_.default,
-    aten.sinh.default,
-    aten.sinh.out,
-    aten.sinh_.default,
     aten.sqrt.default,
     aten.sqrt.out,
     aten.sqrt_.default,
@@ -384,18 +684,11 @@ pointwise_ops = [
     aten.square.out,
     aten.square_.default,
     aten.sub.Scalar,
-    aten.sub.out,
     aten.sub_.Scalar,
     aten.tan.default,
     aten.tan.out,
     aten.tan_.default,
-    aten.tanh.default,
-    aten.tanh.out,
-    aten.tanh_.default,
     aten.true_divide.Tensor,
-    aten.trunc.default,
-    aten.trunc.out,
-    aten.trunc_.default,
     aten.where.self,
     aten.where.self_out,
     aten.xlogy.OutScalar_Self,
@@ -413,36 +706,32 @@ pointwise_ops = [
     aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
+    # prims ops
+    # please keep the entries below alphabetically sorted
+    prims.bessel_i0e.default,
+    prims.bessel_i1.default,
+    prims.bessel_i1e.default,
+    prims.bessel_j0.default,
+    prims.bessel_j1.default,
+    prims.div.default,
+    prims.erfcx.default,
+    prims.gcd.default,
+    prims.frexp.default,
+    prims.ndtri.default,
+    prims.ne.default,
+    prims.spherical_bessel_j0.default,
+    prims.zeta.default,
 ]
 
-# the linear pointwise ops map, key is op, value is the type of linearity
-linear_pointwise_ops = {
-    aten.to.dtype: 0,
-    aten.add.Tensor: 1,
-    aten.add_.Tensor: 1,
-    aten.sub.Tensor: 1,
-    aten.sub_.Tensor: 1,
-    aten.div.Scalar: 0,
-    aten.div_.Scalar: 0,
-    aten.div.Tensor: 2,
-    aten.div_.Tensor: 2,
-    aten.mul.Scalar: 0,
-    aten.mul_.Scalar: 0,
-    aten.mul.Tensor: 2,
-    aten.mul_.Tensor: 2,
-    # neg is linear: -(A1 + A2) = -A1 + -A2
-    aten.neg.default: 0,
-    aten.neg_.default: 0,
-}
 
-# Ops that preserve specific Partial types through the operation.
-# For example, torch.maximum preserves Partial("max") because
-# max(max(a), max(b)) == max(a, b).
-partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
-    aten.maximum.default: "max",
-    aten.maximum.out: "max",
-    aten.minimum.default: "min",
-    aten.minimum.out: "min",
+# Reconstruct the original linear_pointwise_ops dict for the existing registration path.
+linear_pointwise_ops: dict[OpOverload, int] = {
+    **dict.fromkeys(unary_linear_ops, 0),
+    **dict.fromkeys(binary_additive_ops, 1),
+    **dict.fromkeys(binary_mul_ops, 2),
+    **dict.fromkeys(binary_div_ops, 2),
+    **dict.fromkeys(scalar_linear_ops, 0),
+    **dict.fromkeys(neg_ops, 0),
 }
 
 
@@ -451,6 +740,7 @@ def pointwise_strategy(
     linearity: int = -1,
     preserve_partial: str | None = None,
 ) -> OpStrategy:
+    """Strategy for pointwise ops on the old registration path."""
     followed_strategy_index = -1
     max_shards = -1
     max_ndim = -1
@@ -474,7 +764,6 @@ def pointwise_strategy(
         for idx, arg_strategy in enumerate(op_schema.args_schema):
             if not isinstance(arg_strategy, OpStrategy):
                 continue
-
             arg_max_shards = arg_strategy.max_num_shards()
             arg_max_ndim = arg_strategy.ndim
             if (arg_max_shards > max_shards) or (
@@ -483,12 +772,10 @@ def pointwise_strategy(
                 followed_strategy_index = idx
                 max_shards = arg_max_shards
                 max_ndim = arg_max_ndim
-
         followed_strategy = op_schema.args_schema[followed_strategy_index]
 
-    assert isinstance(followed_strategy, OpStrategy), (
-        f"no strategy to follow for {op_schema}!"
-    )
+    if not isinstance(followed_strategy, OpStrategy):
+        raise AssertionError(f"no strategy to follow for {op_schema}!")
     return common_pointwise_strategy(
         op_schema.op,
         op_schema.args_schema,
@@ -515,18 +802,6 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, linearity=linearity_type)
 
 
-def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
-    """
-    Strategy for pointwise ops that preserve specific Partial types.
-
-    For example, torch.maximum preserves Partial("max") placements because
-    max(max(a), max(b)) == max(a, b). Similarly, torch.minimum preserves
-    Partial("min") placements.
-    """
-    preserve_partial = partial_preserving_ops.get(op_schema.op)
-    return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
-
-
 def single_mesh_dim_pointwise_strategy(
     op: OpOverload,
     args_schema: ArgsType,
@@ -547,7 +822,7 @@ def single_mesh_dim_linear_pointwise_strategy(
 def single_mesh_dim_common_pointwise_strategy(
     args_schema: ArgsType,
     linearity: int = -1,
-    scalar_tensor_idx: Optional[int] = None,
+    scalar_tensor_idx: int | None = None,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     # TODO rename
     tensor_arg_strategies: list[TensorMeta] = [
@@ -574,9 +849,8 @@ def single_mesh_dim_common_pointwise_strategy(
     if linearity == 0:
         # unary op (e.g. to_copy), and also binary ops like mul.scalar
         # input, output can be partial
-        assert len(tensor_arg_strategies) == 1, (
-            "expected single tensor input for linearity==0 op"
-        )
+        if len(tensor_arg_strategies) != 1:
+            raise AssertionError("expected single tensor input for linearity==0 op")
         placements_list.append([Partial("sum"), Partial("sum")])
         # TODO: do i need to check scalar_tensor_index and assign a replicate to that one, or do i omit a placement for it
         # TODO: can mul.scalar work with avg or only sum? i think only sum works. common_pointwise_strategy seems
@@ -587,16 +861,14 @@ def single_mesh_dim_common_pointwise_strategy(
     elif linearity == 1:
         # binary add ops
         # (A1 + B1) + (A2 + B2) == (A1 + A2) + (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, (
-            "expected two tensor inputs for linearity==1 op"
-        )
+        if len(tensor_arg_strategies) != 2:
+            raise AssertionError("expected two tensor inputs for linearity==1 op")
         placements_list.append([Partial("sum"), Partial("sum"), Partial("sum")])
     elif linearity == 2:
         # binary mul ops (2 tensor inputs)
         # (A * B1) + (A * B2) == A * (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, (
-            "expected two tensor inputs for linearity==2 op"
-        )
+        if len(tensor_arg_strategies) != 2:
+            raise AssertionError("expected two tensor inputs for linearity==2 op")
         placements_list.append([Partial("sum"), Partial("sum"), Replicate()])
         placements_list.append([Partial("sum"), Replicate(), Partial("sum")])
 
@@ -720,7 +992,8 @@ def common_pointwise_strategy(
                     # For the scalar tensor arg in fused ops, do not follow followed_strategy;
                     # instead, let the input mesh and the Replicate placements propagate through.
                     if input_idx == scalar_tensor_idx:
-                        assert all(p == Replicate() for p in input_arg_spec.placements)
+                        if not all(p == Replicate() for p in input_arg_spec.placements):
+                            raise AssertionError
                         input_arg_target_spec = DTensorSpec(
                             mesh=input_arg.mesh,
                             placements=input_arg_spec.placements,
@@ -810,33 +1083,8 @@ norm_partial_avoidable_redistribute_ops = {
     aten.mul_.Scalar,
 }
 
-for op in linear_pointwise_ops:
-    if op in norm_partial_avoidable_redistribute_ops:
-        register_op_strategy(
-            op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
-        )(linear_pointwise_strategy)
-    else:
-        register_op_strategy(
-            op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-        )(linear_pointwise_strategy)
-
-for op in partial_preserving_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        partial_preserving_pointwise_strategy
-    )
-
-# Register copy_ with its custom strategy that preserves all Partial types
-register_op_strategy(
-    aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-)(copy_strategy)
-
 for op in pointwise_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        pointwise_strategy
-    )
-    # register_single_dim_strategy(
-    #     op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    # )(single_mesh_dim_pointwise_strategy)
+    _register_single_dim_pointwise(op)
 
 # TODO: add all for_each ops
 for_each_ops = [
@@ -924,13 +1172,15 @@ def list_pointwise_strategy(
         args_schema: tuple[object, ...],
     ) -> list[TupleStrategy | None]:
         first_arg = args_schema[0]
-        assert isinstance(first_arg, TupleStrategy)
+        if not isinstance(first_arg, TupleStrategy):
+            raise AssertionError
         strategy_len = len(first_arg.children)
         tuple_strategies: list[TupleStrategy | None] = []
         for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
-                assert len(arg.children) == strategy_len
+                if len(arg.children) != strategy_len:
+                    raise AssertionError
                 tuple_strategies.append(arg)
             elif isinstance(arg, OpStrategy):
                 if arg_idx > 0:  # implicitly broadcast
@@ -951,7 +1201,8 @@ def list_pointwise_strategy(
     list_strategy: list[OpStrategy] = []
 
     for child_idx, child_strtgy in enumerate(follow_strategy.children):
-        assert isinstance(child_strtgy, OpStrategy)
+        if not isinstance(child_strtgy, OpStrategy):
+            raise AssertionError
         args_schema: list[OpStrategy | None] = [
             cast(OpStrategy, arg_strategy.children[child_idx]) if arg_strategy else None
             for arg_strategy in args_strategies
@@ -1008,3 +1259,15 @@ for op in fused_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
         list_pointwise_strategy
     )
+
+
+def register_inductor_prims() -> None:
+    """Register DTensor sharding strategies for inductor prims ops.
+
+    Called lazily because inductor prims are created via make_prim() in
+    torch._inductor.inductor_prims, which is imported after this module.
+    """
+    # TODO: handle other inductor prims ops that may need DTensor sharding
+    # strategies (e.g. mul_rn, div_rn). Those are more complicated and not
+    # necessarily pointwise.
+    _register_single_dim_pointwise(prims.fma.default)

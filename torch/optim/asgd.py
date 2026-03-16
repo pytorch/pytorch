@@ -130,7 +130,7 @@ class ASGD(Optimizer):
             closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        self._cuda_graph_capture_health_check()
+        self._accelerator_graph_capture_health_check()
 
         loss = None
         if closure is not None:
@@ -264,7 +264,6 @@ def _single_tensor_asgd(
             ax.copy_(param)
 
         if capturable:
-            # pyrefly: ignore [unsupported-operation]
             eta.copy_(lr / ((1 + lambd * lr * step_t) ** alpha))
             mu.copy_(1 / torch.maximum(step_t - t0, torch.ones_like(step_t)))
         else:

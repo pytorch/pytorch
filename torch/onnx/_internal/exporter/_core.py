@@ -133,10 +133,8 @@ class TorchTensor(ir.Tensor):
         # view the tensor as that dtype so that it is convertible to NumPy,
         # and then view it back to the proper dtype (using ml_dtypes obtained by
         # calling dtype.numpy()).
-        # pyrefly: ignore [missing-attribute]
         if self.dtype == ir.DataType.BFLOAT16:
             return (
-                # pyrefly: ignore [missing-attribute]
                 self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
             )
         if self.dtype in {
@@ -145,11 +143,9 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            # pyrefly: ignore [missing-attribute]
             return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
         if self.dtype == ir.DataType.FLOAT4E2M1:
             return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
-                # pyrefly: ignore [missing-attribute]
                 self.dtype.numpy()
             )
 
@@ -171,7 +167,6 @@ class TorchTensor(ir.Tensor):
 
         if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
             raise TypeError(
-                # pyrefly: ignore [missing-attribute]
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
                 "or save the model without initializers by setting include_initializers=False."
@@ -740,9 +735,13 @@ def _handle_output_node(
         node_name_to_values: A mapping of FX node names to their produced ONNX ``Value``.
         graph_like: The ONNX graph at construction.
     """
-    # node.args[0] can be a tuple with more than one elements. This happens when,
-    # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
-    for output in node.args[0]:  # type: ignore[index,union-attr]
+    if not isinstance(node.args[0], Sequence):
+        output_nodes = (node.args[0],)
+    else:
+        # node.args[0] can be a tuple with more than one elements. This happens when,
+        # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
+        output_nodes = node.args[0]
+    for output in output_nodes:
         if output is None:
             logger.warning(
                 "Output node %s has None output. The output is ignored in the exported graph. Please ensure the graph output order is expected",

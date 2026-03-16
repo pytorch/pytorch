@@ -12,7 +12,7 @@ CUDA_VERSION_SHORT       ?= 12.1
 CUDA_VERSION             ?= 12.1.1
 CUDNN_VERSION            ?= 9
 BASE_RUNTIME              = ubuntu:24.04
-BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-devel-ubuntu24.04
+BASE_DEVEL                = ubuntu:24.04
 CMAKE_VARS               ?=
 
 # The conda channel to use to install cudatoolkit
@@ -40,6 +40,7 @@ BUILD_ARGS                = --build-arg BASE_IMAGE=$(BASE_IMAGE) \
 							--build-arg PYTORCH_VERSION=$(PYTORCH_VERSION) \
 							--build-arg INSTALL_CHANNEL=$(INSTALL_CHANNEL) \
 							--build-arg TRITON_VERSION=$(TRITON_VERSION) \
+							--build-arg BUILD_TYPE=$(BUILD_TYPE) \
 							--build-arg CMAKE_VARS="$(CMAKE_VARS)"
 EXTRA_DOCKER_BUILD_FLAGS ?=
 
@@ -77,6 +78,7 @@ all: devel-image
 
 .PHONY: devel-image
 devel-image: BASE_IMAGE := $(BASE_DEVEL)
+devel-image: BUILD_TYPE := dev
 devel-image: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-devel
 devel-image:
 	$(DOCKER_BUILD)
@@ -91,6 +93,7 @@ ifeq ("$(CUDA_VERSION_SHORT)","cpu")
 
 .PHONY: runtime-image
 runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
+runtime-image: BUILD_TYPE := official
 runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-runtime
 runtime-image:
 	$(DOCKER_BUILD)
@@ -105,6 +108,7 @@ else
 
 .PHONY: runtime-image
 runtime-image: BASE_IMAGE := $(BASE_RUNTIME)
+runtime-image: BUILD_TYPE := official
 runtime-image: DOCKER_TAG := $(PYTORCH_VERSION)-cuda$(CUDA_VERSION_SHORT)-cudnn$(CUDNN_VERSION)-runtime
 runtime-image:
 	$(DOCKER_BUILD)

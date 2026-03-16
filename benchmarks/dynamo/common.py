@@ -25,7 +25,7 @@ import tempfile
 import time
 import weakref
 from contextlib import contextmanager
-from typing import Any, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -55,10 +55,18 @@ from torch._logging.scribe import open_source_signpost
 
 
 try:
-    from torch._dynamo.utils import clone_inputs, graph_break_reasons
+    from torch._dynamo.utils import (
+        clone_inputs,
+        copy_dynamo_tensor_attributes,
+        graph_break_reasons,
+    )
     from torch._inductor.utils import fresh_cache
 except ImportError:
-    from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _dynamo.utils import (
+        clone_inputs,
+        copy_dynamo_tensor_attributes,
+        graph_break_reasons,
+    )
     from _inductor.utils import fresh_cache
 
 import torch._functorch.config
@@ -299,9 +307,15 @@ def load_model_from_path(path_and_class_str):
     spec.loader.exec_module(module)
 
     model_class = getattr(module, class_name)
-    assert issubclass(model_class, torch.nn.Module)
+    if not issubclass(model_class, torch.nn.Module):
+        raise AssertionError(
+            f"expected {class_name} to be a subclass of torch.nn.Module, got {model_class}"
+        )
     model = model_class()
-    assert hasattr(model, "get_example_inputs")
+    if not hasattr(model, "get_example_inputs"):
+        raise AssertionError(
+            f"expected model {class_name} to have get_example_inputs method"
+        )
     inputs = model.get_example_inputs()
     return model, inputs
 
@@ -952,7 +966,9 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
         first_fields.append(kwargs["tag"])
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
-    msg = f"{median[0] * 1000} ms, {median[1] * 1000} ms, {speedup:.3f}x"
+    msg = f"{speedup:.3f}x"
+    if getattr(args, "_print_latency_ms", False):
+        msg = f"{median[0] * 1000:.4f} ms, {median[1] * 1000:.4f} ms, {msg}"
     if args.baseline:
         headers.extend(
             [
@@ -998,9 +1014,10 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
         row,
     )
     c_headers, c_data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
-    assert output_filename.find(".csv") > 0, (
-        f"expected output_filename to be a .csv, but got {output_filename}"
-    )
+    if output_filename.find(".csv") <= 0:
+        raise AssertionError(
+            f"expected output_filename to be a .csv, but got {output_filename}"
+        )
     write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
@@ -1010,7 +1027,8 @@ def latency_experiment_summary(suite_name, args, model, timings, **kwargs):
     # Hypothetically you can use this from other places, but it's currently
     # inaccessible, and when this assert fails you need to update the
     # event_name here to account for the other cases you are using this
-    assert any([args.quantization, args.optimus])
+    if not any([args.quantization, args.optimus]):
+        raise AssertionError("expected args.quantization or args.optimus to be set")
     output_signpost(
         dict(zip(headers, row)),
         args,
@@ -1137,6 +1155,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
     msg = f"{speedup:.3f}x"
+    if getattr(args, "_print_latency_ms", False):
+        msg = f"{median[0] * 1000:.4f} ms, {median[1] * 1000:.4f} ms, {msg}"
     if args.baseline:
         headers.extend(
             [
@@ -1182,9 +1202,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row,
     )
     c_headers, c_data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
-    assert output_filename.find(".csv") > 0, (
-        f"expected output_filename to be a .csv, but got {output_filename}"
-    )
+    if output_filename.find(".csv") <= 0:
+        raise AssertionError(
+            f"expected output_filename to be a .csv, but got {output_filename}"
+        )
     write_outputs(
         output_filename[:-4] + "_compilation_metrics.csv",
         first_headers + c_headers,
@@ -1599,7 +1620,8 @@ def read_batch_size_from_file(args, filename, model_name):
     batch_size = None
     if os.path.exists("benchmarks"):
         filename = os.path.join("benchmarks", filename)
-    assert os.path.exists(filename), filename
+    if not os.path.exists(filename):
+        raise AssertionError(f"file not found: {filename}")
     with open(filename) as f:
         lines = f.readlines()
         lines = [i.split(",") for i in lines if len(i.strip()) > 0]
@@ -1665,12 +1687,15 @@ def cast_to(dtype, model, inputs):
     else:
         model = model.to(dtype)
 
-    inputs = tree_map(
-        lambda x: x.to(dtype)
-        if isinstance(x, torch.Tensor) and x.is_floating_point()
-        else x,
-        inputs,
-    )
+    def cast_and_preserve_markings(x):
+        if not isinstance(x, torch.Tensor) or not x.is_floating_point():
+            return x
+        y = x.to(dtype)
+        # Preserve dynamic/unbacked markings
+        copy_dynamo_tensor_attributes(x, y)
+        return y
+
+    inputs = tree_map(cast_and_preserve_markings, inputs)
     return model, inputs
 
 
@@ -1763,7 +1788,7 @@ class BenchmarkRunner:
         self.grad_scaler = DummyGradScaler()
         self.autocast = contextlib.nullcontext
         self.autocast_arg = {}
-        self.optimizer: Optional[torch.optim.Optimizer] = None
+        self.optimizer: torch.optim.Optimizer | None = None
         self._args = None
 
     def setup_amp(self, current_device=None):
@@ -2100,16 +2125,18 @@ class BenchmarkRunner:
     def deepcopy_and_maybe_parallelize(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
-            assert torch.distributed.is_available(), (
-                "Can't use DDP without a distributed enabled build"
-            )
+            if not torch.distributed.is_available():
+                raise AssertionError(
+                    "Can't use DDP without a distributed enabled build"
+                )
             from torch.nn.parallel import DistributedDataParallel as DDP
 
             model = DDP(model, find_unused_parameters=True)
         elif self.args.fsdp:
-            assert torch.distributed.is_available(), (
-                "Can't use FSDP without a distributed enabled build"
-            )
+            if not torch.distributed.is_available():
+                raise AssertionError(
+                    "Can't use FSDP without a distributed enabled build"
+                )
             from torch.distributed.fsdp import (
                 FullyShardedDataParallel as FSDP,
                 MixedPrecision,
@@ -2561,9 +2588,10 @@ class BenchmarkRunner:
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
         "Run performance test in non-alternately."
-        assert experiment.func is latency_experiment, (
-            "Must run with latency_experiment."
-        )
+        if experiment.func is not latency_experiment:
+            raise AssertionError(
+                f"Must run with latency_experiment, got {experiment.func}"
+            )
 
         def warmup(fn, model, example_inputs, mode, niters=10):
             gc.collect()
@@ -3267,6 +3295,21 @@ def parse_args(args=None):
         help="Only assume batch dimension is dynamic.  Implies --dynamic-shapes",
     )
     parser.add_argument(
+        "--unbacked-batch-only",
+        action="store_true",
+        help="Mark batch dimension as unbacked using mark_unbacked. Implies --dynamic-shapes",
+    )
+    parser.add_argument(
+        "--compare-backed-unbacked",
+        action="store_true",
+        help="Run both dynamic-batch-only (backed) and unbacked-batch-only, then compare results side by side",
+    )
+    parser.add_argument(
+        "--_print-latency-ms",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--specialize-int", action="store_true", help="Run with specialize_int=True."
     )
     parser.add_argument(
@@ -3597,7 +3640,6 @@ def parse_args(args=None):
             "int8dynamic",
             "int8weightonly",
             "int4weightonly",
-            "autoquant",
             "noquant",
         ],
         default=None,
@@ -3684,9 +3726,10 @@ def process_caching_precompile():
     """
     After every process_entry, save precompile artifacts to DynamoCache
     """
-    assert torch._dynamo.config.caching_precompile, (
-        "Caching precompile should be enabled with --caching-precompile"
-    )
+    if not torch._dynamo.config.caching_precompile:
+        raise AssertionError(
+            "Caching precompile should be enabled with --caching-precompile"
+        )
     from torch._dynamo.precompile_context import PrecompileContext
 
     debug_info = PrecompileContext.save_to_dynamo_cache()
@@ -3778,7 +3821,153 @@ def main(runner, original_dir=None, args=None):
         else:
             # single process path just uses the main process
             args.world_size = 1
-            process_entry(0, runner, original_dir, args)
+            if args.compare_backed_unbacked:
+                _run_compare_backed_unbacked(runner, args)
+            else:
+                process_entry(0, runner, original_dir, args)
+
+
+def _run_compare_backed_unbacked(runner, args):
+    """Run backed and unbacked per-model, alternating, and compare speedup."""
+    import re
+    import subprocess
+
+    def print_comparison(all_results):
+        print(f"\n{'=' * 80}", flush=True)
+        print("COMPARISON", flush=True)
+        print(f"{'=' * 80}", flush=True)
+        print(
+            f"  {'model':<40s} {'backed_ms':>10s} {'unbacked_ms':>11s} {'diff':>8s}",
+            flush=True,
+        )
+        print(f"  {'-' * 40} {'-' * 10} {'-' * 11} {'-' * 8}", flush=True)
+        for name, modes in all_results.items():
+            b_ms = modes.get("backed_ms")
+            u_ms = modes.get("unbacked_ms")
+            if b_ms is not None and u_ms is not None:
+                ms_diff_pct = (u_ms - b_ms) / b_ms * 100
+                print(
+                    f"  {name:<40s} {b_ms:>10.3f} {u_ms:>11.3f} {ms_diff_pct:>+7.1f}%",
+                    flush=True,
+                )
+            elif b_ms is not None:
+                print(
+                    f"  {name:<40s} {b_ms:>10.3f} {'N/A':>11s} {'N/A':>8s}", flush=True
+                )
+            elif u_ms is not None:
+                print(
+                    f"  {name:<40s} {'N/A':>10s} {u_ms:>11.3f} {'N/A':>8s}", flush=True
+                )
+            else:
+                backed = (
+                    "FAILED" if "backed" not in modes else f"{modes['backed']:.3f}x"
+                )
+                unbacked = (
+                    "FAILED" if "unbacked" not in modes else f"{modes['unbacked']:.3f}x"
+                )
+                print(
+                    f"  {name:<40s} {backed:>10s} {unbacked:>11s} {'N/A':>8s}",
+                    flush=True,
+                )
+        print(f"{'=' * 80}", flush=True)
+
+    # Build base command, stripping --compare-backed-unbacked and --only + value
+    filtered = []
+    skip_next = False
+    for a in sys.argv:
+        if a == "--compare-backed-unbacked":
+            continue
+        if skip_next:
+            skip_next = False
+            continue
+        if a == "--only":
+            skip_next = True
+            continue
+        filtered.append(a)
+    base_cmd = [sys.executable, "-B"] + filtered
+
+    # Get model list from runner
+    runner.args = args
+    args.filter = args.filter or [r"."]
+    args.exclude = args.exclude or [r"^$"]
+    args.exclude_exact = args.exclude_exact or []
+    models = list(runner.iter_model_names(args))
+
+    if args.only:
+        models = [args.only]
+
+    all_results = {}
+    for model in models:
+        print(f"\n--- {model} ---", flush=True)
+        for mode, flag in [
+            ("backed", "--dynamic-batch-only"),
+            ("unbacked", "--unbacked-batch-only"),
+        ]:
+            cmd = base_cmd + ["--only", model, flag, "--_print-latency-ms"]
+            print(f"  {mode}...", end=" ", flush=True)
+            try:
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                )
+                stdout, stderr = proc.communicate(timeout=600)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                print("TIMEOUT", flush=True)
+                continue
+            except Exception as e:
+                print(f"ERROR ({e})", flush=True)
+                continue
+
+            speedup_match = re.search(r"(\d+\.\d+)x", stdout)
+            latency_match = re.search(r"([\d.]+) ms, ([\d.]+) ms,", stdout)
+            if speedup_match:
+                speedup = float(speedup_match.group(1))
+                eager_ms = float(latency_match.group(1)) if latency_match else None
+                compiled_ms = float(latency_match.group(2)) if latency_match else None
+                extra = ""
+                if eager_ms and compiled_ms:
+                    extra = f" (eager={eager_ms:.3f} ms, compiled={compiled_ms:.3f} ms)"
+                print(f"{speedup:.3f}x{extra}", flush=True)
+                if model not in all_results:
+                    all_results[model] = {}
+                all_results[model][mode] = speedup
+                if eager_ms is not None:
+                    all_results[model][f"{mode}_eager_ms"] = eager_ms
+                if compiled_ms is not None:
+                    all_results[model][f"{mode}_ms"] = compiled_ms
+            else:
+                err_match = re.search(
+                    r"(Error|Exception|Traceback).*", stdout + stderr, re.IGNORECASE
+                )
+                if err_match:
+                    print("FAILED", flush=True)
+                else:
+                    print("SKIP", flush=True)
+
+        # Print running diff for this model
+        if (
+            model in all_results
+            and "backed_ms" in all_results[model]
+            and "unbacked_ms" in all_results[model]
+        ):
+            b_ms = all_results[model]["backed_ms"]
+            u_ms = all_results[model]["unbacked_ms"]
+            ms_diff_pct = (u_ms - b_ms) / b_ms * 100
+            print(
+                f"  => diff: {ms_diff_pct:+.1f}% ({b_ms:.3f} ms vs {u_ms:.3f} ms)",
+                flush=True,
+            )
+        elif (
+            model in all_results
+            and "backed" in all_results[model]
+            and "unbacked" in all_results[model]
+        ):
+            b = all_results[model]["backed"]
+            u = all_results[model]["unbacked"]
+            diff_pct = (u - b) / b * 100
+            print(f"  => diff: {diff_pct:+.1f}% (ratio-based, no ms data)", flush=True)
+
+    print_comparison(all_results)
 
 
 def write_csv_when_exception(args, name: str, status: str, device=None):
@@ -3847,19 +4036,27 @@ def run(runner, args, original_dir=None):
     args.exclude_exact = args.exclude_exact or []
 
     if args.inductor:
-        assert args.backend is None
+        if args.backend is not None:
+            raise AssertionError(f"--inductor conflicts with --backend={args.backend}")
         args.backend = "inductor"
     if args.optimus:
-        assert args.backend is None
+        if args.backend is not None:
+            raise AssertionError(f"--optimus conflicts with --backend={args.backend}")
         args.backend = "optimus"
     if args.quantization:
-        assert args.backend is None
+        if args.backend is not None:
+            raise AssertionError(
+                f"--quantization conflicts with --backend={args.backend}"
+            )
         args.backend = "torchao"
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
+    if args.unbacked_batch_only:
+        args.dynamic_shapes = True
+        torch._dynamo.config.assume_static_by_default = True
     if args.dynamic_shapes:
-        if not args.dynamic_batch_only:
+        if not args.dynamic_batch_only and not args.unbacked_batch_only:
             torch._dynamo.config.assume_static_by_default = False
     if args.compiled_autograd:
         torch._dynamo.config.compiled_autograd = True
@@ -3879,7 +4076,8 @@ def run(runner, args, original_dir=None):
             torch.fx.experimental._config.translation_validation = True
 
     if args.ddp:
-        assert args.training, "DDP benchmark requires --training mode"
+        if not args.training:
+            raise AssertionError("DDP benchmark requires --training mode")
         torch._dynamo.config.optimize_ddp = args.optimize_ddp_mode
         if args.only == "dlrm":
             log.error(
@@ -3897,7 +4095,10 @@ def run(runner, args, original_dir=None):
                 args.batch_size = 4
             else:
                 # Larger batch size of TIMM models to have stable batch_norm
-                assert runner.suite_name == "timm_models"
+                if runner.suite_name != "timm_models":
+                    raise AssertionError(
+                        f"expected runner.suite_name to be 'timm_models', got {runner.suite_name}"
+                    )
                 args.batch_size = 8
 
         # Remove sources of randomness
@@ -4098,7 +4299,8 @@ def run(runner, args, original_dir=None):
         output_filename = "nothing.csv"
     elif args.backend or args.export_aot_inductor:
         if args.export_aot_inductor:
-            assert not args.training, "AOTInductor only supports inference"
+            if args.training:
+                raise AssertionError("AOTInductor only supports inference")
             optimize_ctx = functools.partial(
                 export_aot_inductor, mode=args.inductor_compile_mode
             )
@@ -4107,8 +4309,12 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
             runner.skip_models.update(runner.skip_models_due_to_export_not_supported)
         elif args.backend == "torchao":
-            assert "cuda" in args.devices, "Quantization requires CUDA device."
-            assert args.bfloat16, "Quantization requires dtype bfloat16."
+            if "cuda" not in args.devices:
+                raise AssertionError(
+                    f"Quantization requires CUDA device, got devices={args.devices}"
+                )
+            if not args.bfloat16:
+                raise AssertionError("Quantization requires dtype bfloat16")
             try:
                 from torchao_backend import setup_baseline, torchao_optimize_ctx
             except ImportError:
@@ -4192,7 +4398,10 @@ def run(runner, args, original_dir=None):
                 key, value = config.split("=")
                 typ = type(inductor_config.__getattr__(key))
                 if issubclass(typ, bool):
-                    assert value in ("0", "1", "True", "False")
+                    if value not in ("0", "1", "True", "False"):
+                        raise AssertionError(
+                            f"expected bool value for {key}, got {value}"
+                        )
                     value = value in ("1", "True")
                 elif issubclass(typ, (str, int, float)):
                     value = typ(value)
@@ -4399,21 +4608,34 @@ def run(runner, args, original_dir=None):
             # NB: Assumes only the first batch-y like dimension is the batch
             marked = False
 
-            def detect_and_mark_batch(t):
+            def detect_and_mark_batch(t, use_unbacked=False):
                 nonlocal marked
                 for i, s in enumerate(t.size()):
                     if s == batch_size:
-                        torch._dynamo.maybe_mark_dynamic(t, i)
+                        if use_unbacked:
+                            # Use duck_shape_id="batch" so all batch dimensions
+                            # share the same unbacked symbol
+                            torch._dynamo.decorators.mark_unbacked(
+                                t, i, shape_id="batch", hint_override=batch_size, min=1
+                            )
+                        else:
+                            torch._dynamo.maybe_mark_dynamic(t, i)
                         marked = True
                         break
 
             if (
-                args.dynamic_batch_only
+                (args.dynamic_batch_only or args.unbacked_batch_only)
                 and batch_size > 1
                 and model_name not in CI_SKIP_DYNAMIC_BATCH_ONLY
             ):
-                tree_map_only(torch.Tensor, detect_and_mark_batch, example_inputs)
-                assert marked, f"nothing in example_inputs had a dim with {batch_size}"
+                mark_fn = functools.partial(
+                    detect_and_mark_batch, use_unbacked=args.unbacked_batch_only
+                )
+                tree_map_only(torch.Tensor, mark_fn, example_inputs)
+                if not marked:
+                    raise AssertionError(
+                        f"nothing in example_inputs had a dim with {batch_size}"
+                    )
 
             if args.log_operator_inputs:
                 log_operator_inputs(

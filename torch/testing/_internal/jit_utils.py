@@ -39,7 +39,7 @@ import sys
 import tempfile
 import textwrap
 from importlib.abc import Loader
-from typing import Any, Union
+from typing import Any
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
@@ -800,7 +800,7 @@ class TensorExprTestOptions:
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
 def clone_inputs(args):
-    inputs: list[Union[torch.Tensor, list[torch.Tensor]]] = []
+    inputs: list[torch.Tensor | list[torch.Tensor]] = []
 
     for arg in args:
         if isinstance(arg, torch.Tensor):

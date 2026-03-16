@@ -19,6 +19,7 @@ from torch.quantization._quantized_conversions import (
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
+    blas_library_context,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM80OrLater,
@@ -62,7 +63,8 @@ if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 # Protects against includes accidentally setting the default dtype
-assert torch.get_default_dtype() is torch.float32
+if torch.get_default_dtype() is not torch.float32:
+    raise AssertionError("default dtype should be float32")
 
 def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
     """
@@ -75,15 +77,6 @@ def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
         lambda params: computeCapabilityCheck and condition_fn(params)
     )
 
-
-@contextlib.contextmanager
-def blas_library_context(backend):
-    prev_backend = torch.backends.cuda.preferred_blas_library()
-    torch.backends.cuda.preferred_blas_library(backend)
-    try:
-        yield
-    finally:
-        torch.backends.cuda.preferred_blas_library(prev_backend)
 
 @contextlib.contextmanager
 def rocm_group_gemm_ck_env(value):
@@ -180,6 +173,28 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
+
+    @onlyCUDA
+    @dtypes(torch.cfloat, torch.cdouble)
+    @parametrize("backend", ["cublas", "cublaslt"])
+    def test_mm_with_mH_args(self, dtype, backend):
+        # Testing mm with mH-transformed arguments.
+        # The root cause of:
+        # https://github.com/pytorch/pytorch/issues/174382
+        val = 3 + 4j
+        x = torch.zeros(2, 3, dtype=dtype, device="cuda")
+        x.diagonal().fill_(val)
+
+        ref_corrcoef = torch.empty(2, 2, dtype=dtype, device="cuda")
+        ref_corrcoef.fill_(-0.5)
+        ref_corrcoef.diagonal().fill_(1.0)
+
+        with blas_library_context(backend):
+            for a in (x, x.mH):
+                norm_squared = (a @ a.mH).sum().item()
+                self.assertEqual(norm_squared, 50 + 0j)
+
+            self.assertEqual(torch.corrcoef(x), ref_corrcoef)
 
     @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
@@ -1089,11 +1104,11 @@ class TestMixedDtypesLinearCuda(TestCase):
             input_ref = input.reshape(-1, input.shape[-1])
 
             # First, test plain multiplication.
-            weight_ref = weight.T.to(input.dtype) * scale.view(1, n)
+            weight_ref = weight.T.to(torch.float32) * scale.float().view(1, n)
             weightq = (
                 pack_int4_to_int8(weight.T) if dtypeq == torch.quint4x2 else weight.T
             )
-            output_ref = torch.mm(input_ref, weight_ref).reshape(*input.shape[:-1], n)
+            output_ref = torch.mm(input_ref.float(), weight_ref).to(input.dtype).reshape(*input.shape[:-1], n)
             output = torch.ops.aten._mixed_dtypes_linear(
                 input,
                 quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(
@@ -1104,12 +1119,12 @@ class TestMixedDtypesLinearCuda(TestCase):
             torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
 
             # Second, test the linear operator itself.
-            weight_ref = weight.to(input.dtype) * scale.view(n, 1)
+            weight_ref = weight.to(torch.float32) * scale.float().view(n, 1)
             weightq = pack_int4_to_int8(weight) if dtypeq == torch.quint4x2 else weight
-            bias_ref = bias.view(1, n) if add_bias else None
+            bias_ref = bias.float().view(1, n) if add_bias else None
             output_ref = torch.nn.functional.linear(
-                input_ref, weight_ref, bias=bias_ref
-            ).reshape(*input.shape[:-1], n)
+                input_ref.float(), weight_ref, bias=bias_ref
+            ).to(input.dtype).reshape(*input.shape[:-1], n)
             if activation == "relu":
                 relu = torch.nn.ReLU()
                 output_ref = relu(output_ref)

@@ -2952,10 +2952,15 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     def test_new_group_local_sync_duplicate_pg(self):
         self._test_new_group_local_sync_duplicate_pg(backend="gloo")
 
+    @requires_gloo()
+    def test_new_group_ordered(self):
+        self._test_new_group_ordered(backend="gloo")
+
 
 if __name__ == "__main__":
-    assert not torch.cuda._initialized, (
-        "test_distributed must not have initialized CUDA context on main process"
-    )
+    if torch.cuda._initialized:
+        raise AssertionError(
+            "test_distributed must not have initialized CUDA context on main process"
+        )
 
     run_tests()

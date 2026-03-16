@@ -9,8 +9,8 @@ maintaining type safety through the compilation process.
 import enum
 import operator
 from collections.abc import Sequence
-from typing import Any, Literal, Optional, overload, TYPE_CHECKING, Union
-from typing_extensions import override
+from typing import Any, Literal, Optional, overload, TYPE_CHECKING
+from typing_extensions import Never, override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -42,6 +42,18 @@ class ConstantVariable(VariableTracker):
     The create() method intelligently constructs appropriate variable types for
     nested collections.
     """
+
+    @overload
+    @staticmethod
+    def create(value: None) -> Never: ...
+
+    @overload
+    @staticmethod
+    def create(value: Literal[True]) -> Never: ...
+
+    @overload
+    @staticmethod
+    def create(value: Literal[False]) -> Never: ...
 
     @overload
     @staticmethod
@@ -146,9 +158,15 @@ its type to `common_constant_types`.
         return type(obj) in common_constant_types
 
     @staticmethod
-    def is_literal(obj: object) -> bool:
+    def is_literal(obj: object, cache: dict[int, object] | None = None) -> bool:
+        if cache is None:
+            cache = {}
+        if id(obj) in cache:
+            # no-op if there is a cyclical reference
+            return True
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
-            return all(ConstantVariable.is_literal(x) for x in obj)  # type: ignore[attr-defined]
+            cache[id(obj)] = obj
+            return all(ConstantVariable.is_literal(x, cache) for x in obj)  # type: ignore[attr-defined]
         return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(
@@ -161,7 +179,8 @@ its type to `common_constant_types`.
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
-            raise_observed_exception(AttributeError, tx, args=[name])
+            name_variable = variables.ConstantVariable.create(name)
+            raise_observed_exception(AttributeError, tx, args=[name_variable])
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -265,14 +284,12 @@ its type to `common_constant_types`.
 
         if name == "__len__" and not (args or kwargs):
             try:
-                # pyrefly: ignore [bad-argument-type]
                 return ConstantVariable.create(len(self.value))
             except TypeError as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
-                    # pyrefly: ignore [no-matching-overload]
                     round(self.value, args[0].as_python_constant())
                 )
             except Exception as e:
@@ -283,7 +300,6 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
-                # pyrefly: ignore [not-iterable, unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
@@ -369,6 +385,62 @@ its type to `common_constant_types`.
         )
 
 
+CONSTANT_VARIABLE_NONE = ConstantVariable(None)
+CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
+CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
+
+
+class FakeIdVariable(VariableTracker):
+    """A compile-time-only id value that can be used as a dict key but cannot
+    be reconstructed across graph breaks.
+
+    When dynamo evaluates ``id(x)`` on a variable tracker that has no
+    corresponding runtime object (e.g. a ``ConstDictVariable`` created during
+    tracing), we mint a fake integer id.  This variable holds that id and
+    supports the minimal interface needed to participate as a dict key
+    (hashing and equality).  It intentionally blocks reconstruction so that a
+    graph break does not silently bake a stale id into the resumed bytecode.
+    """
+
+    def __init__(self, value: int, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def as_python_constant(self) -> int:
+        return self.value
+
+    def is_python_constant(self) -> bool:
+        return False
+
+    def python_type(self) -> type:
+        return int
+
+    def is_python_hashable(self) -> bool:
+        return True
+
+    def get_python_hash(self) -> int:
+        return hash(self.value)
+
+    def is_python_equal(self, other: object) -> bool:
+        if isinstance(other, (FakeIdVariable, ConstantVariable)):
+            return self.value == other.as_python_constant()
+        return False
+
+    def reconstruct(self, codegen: Any) -> None:
+        unimplemented(
+            gb_type="Reconstruction of FakeIdVariable",
+            context=str(self.value),
+            explanation=(
+                "A fake id produced by id() on a compile-time container "
+                "cannot be reconstructed across a graph break."
+            ),
+            hints=[
+                "Avoid using id() on containers in code that may graph-break.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+
 class EnumVariable(VariableTracker):
     """VariableTracker for enum.Enum and enum.IntEnum instances
 
@@ -376,7 +448,7 @@ class EnumVariable(VariableTracker):
     both standard Enum and IntEnum with proper value tracking and comparison.
     """
 
-    def __init__(self, value: Union[enum.Enum, enum.IntEnum], **kwargs: Any) -> None:
+    def __init__(self, value: enum.Enum | enum.IntEnum, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -397,7 +469,7 @@ class EnumVariable(VariableTracker):
             hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
         )
 
-    def as_proxy(self) -> Union[enum.Enum, int]:
+    def as_proxy(self) -> enum.Enum | int:
         if isinstance(self.value, int):
             return int(self.value)  # convert IntEnum to a normal int
         return self.value
@@ -405,7 +477,7 @@ class EnumVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
 
-    def as_python_constant(self) -> Union[enum.Enum, enum.IntEnum]:
+    def as_python_constant(self) -> enum.Enum | enum.IntEnum:
         return self.value
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:

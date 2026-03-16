@@ -4,7 +4,7 @@ import logging
 import os
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch.fx import Graph, Node
@@ -138,6 +138,7 @@ class SubgraphMatcher:
             return isinstance(gn_value, torch.Tensor)
         else:
             raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
+        # pyrefly: ignore [unreachable]
         return False
 
     def _nodes_are_equal(self, pn: Node, gn: Node, node_name_match: str = "") -> bool:
@@ -250,7 +251,7 @@ class SubgraphMatcher:
         # match for `gn`
         match_found = True
 
-        def _match_args(args1: Union[list, tuple], args2: Union[list, tuple]) -> bool:
+        def _match_args(args1: list | tuple, args2: list | tuple) -> bool:
             if len(args1) != len(args2):
                 return False
 

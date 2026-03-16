@@ -36,11 +36,11 @@ def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
     group = _resolve_process_group(group_name)
     group_rank = get_group_rank(group, get_rank())
 
-    return (
-        torch.cat(stacked_list, dim=gather_dim)
-        .chunk(group_size, dim=shard_dim)[group_rank]
-        .contiguous()
-    )
+    cat_tensor = torch.cat(stacked_list, dim=gather_dim)
+    # pyrefly: ignore [unsupported-operation]
+    chunk_size = cat_tensor.size(shard_dim) // group_size
+    chunk = torch.narrow(cat_tensor, shard_dim, group_rank * chunk_size, chunk_size)
+    return chunk.contiguous()
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
@@ -54,7 +54,9 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         if isinstance(out, funcol.AsyncCollectiveTensor):
             # stick to the same behavior for the alltoall case, remove this once we enable alltoall async
             out = out.wait()
-        out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
+        from torch.distributed.tensor.placement_types import Shard
+
+        out = Shard._custom_chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
             mesh.get_local_rank(mesh_dim)
         ]
         return out.contiguous()
@@ -106,7 +108,8 @@ def mesh_scatter(
     if output.is_meta:
         return None
     dim_group = mesh.get_group(mesh_dim)
-    assert isinstance(dim_group, ProcessGroup)
+    if not isinstance(dim_group, ProcessGroup):
+        raise AssertionError
 
     if group_src == get_rank(dim_group):
         fut = scatter(
@@ -166,14 +169,17 @@ def mesh_broadcast(
     if tensor.is_meta:
         return None
     dim_group = mesh.get_group(mesh_dim)
-    assert isinstance(dim_group, ProcessGroup)
+    if not isinstance(dim_group, ProcessGroup):
+        raise AssertionError
 
     return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
 @maybe_run_for_local_tensor
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    if pad_size == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(pad_size == 0):
         return tensor
     pad = [0, 0] * (tensor.ndim - pad_dim)
     pad[-1] = pad_size
@@ -182,7 +188,9 @@ def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tenso
 
 @maybe_run_for_local_tensor
 def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
-    if pad_size == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if guard_or_false(pad_size == 0):
         return tensor
     return tensor.narrow(
         pad_dim,
@@ -228,7 +236,8 @@ def check_tensor_meta(
 
 
 def spec_to_bytes(spec: "dtensor_spec.DTensorSpec") -> int:
-    assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
+    if spec.tensor_meta is None:
+        raise AssertionError("spec should have tensor meta defined!")
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
 
 
@@ -414,7 +423,8 @@ def one_step_redistribute_cost(
     if mesh_dim == -1:
         return 0.0
 
-    assert current_placement is not None and target_placement is not None
+    if current_placement is None or target_placement is None:
+        raise AssertionError
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     comm_bytes_gb = (
@@ -496,9 +506,8 @@ def redistribute_cost(
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
     for transform_info in transform_infos:
-        assert current_spec.tensor_meta is not None, (
-            "spec should have tensor meta defined!"
-        )
+        if current_spec.tensor_meta is None:
+            raise AssertionError("spec should have tensor meta defined!")
         current = transform_info.src_dst_placements[0]
         target = transform_info.src_dst_placements[1]
         mesh_dim = transform_info.mesh_dim

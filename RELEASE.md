@@ -51,6 +51,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
+| 2.11 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.17.1.4), CUDA 13.0 (CUDNN 9.17.1.4) | -- | ROCm 7.2 |
 | 2.10 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.15.1.9) | ROCm 7.1 |
 | 2.9 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.13.0.50) | ROCm 6.4 |
 | 2.8 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 12.9 (CUDNN 9.10.2.21) | ROCm 6.4 |
@@ -67,19 +68,19 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ### PyTorch CUDA Support Matrix
 
-For Release 2.9 and 2.10 PyTorch Supports following CUDA Architectures:
+For Release 2.11 PyTorch Supports following CUDA Architectures:
 
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |
 | 12.6.3 | Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0) | |
-| 12.8.1 | Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)  | |
-| 13.0.0 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
+| 12.8.1 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)  | |
+| 13.0.2 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
 
 | CUDA | architectures supported for Linux aarch64 builds |
 | --- | --- |
 | 12.6.3 | Ampere(8.0), Hopper(9.0) |
 | 12.8.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 12.0)  |
-| 13.0.0 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
+| 13.0.2 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
 
 ## Release Cadence
 
@@ -94,15 +95,15 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.5 | Sep 2024 | Oct 2024 | Nov 2024 |  Not planned |
 | 2.6 | Dec 2024 | Jan 2025 | Not planned | Not planned |
 | 2.7 | Mar 2025 | Apr 2025 | Jun 2025 | Not planned |
-| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sep 2025) |
-| 2.9 | Sept 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
-| 2.10 | Dec 2025 | Jan 2026 | (Feb 2026) | (Mar 2026) |
-| 2.11 | 16 Feb 2026 | 18 Mar 2026 | (Apr 2026) | (May 2026) |
-| 2.12 | 13 Apr 2026 | 13 May 2026 | (Jun 2026) | (Jul 2026) |
-| 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | (Sept 2026) |
-| 2.14 | 3 Aug 2026 | 2 Sept 2026 | (Oct 2026) | (Nov 2026) |
-| 2.15 | 28 Sept 2026 | 28 Oct 2026 | (Nov 2026) | (Dec 2026) |
-| 2.16 | 23 Nov 2026 | 22 Dec 2026 | (Jan 2027) | (Feb 2027) |
+| 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | Not planned |
+| 2.9 | Sept 2025 | Oct 2025 | (Nov 2025) | Not planned |
+| 2.10 | Dec 2025 | Jan 2026 | Not planned | Not planned |
+| 2.11 | 16 Feb 2026 | 18 Mar 2026 | (Apr 2026) | Not planned |
+| 2.12 | 13 Apr 2026 | 13 May 2026 | (Jun 2026) | Not planned |
+| 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | Not planned |
+| 2.14 | 3 Aug 2026 | 2 Sept 2026 | (Oct 2026) | Not planned |
+| 2.15 | 28 Sept 2026 | 28 Oct 2026 | (Nov 2026) | Not planned |
+| 2.16 | 23 Nov 2026 | 22 Dec 2026 | (Jan 2027) | Not planned |
 
 ## General Overview
 
@@ -128,7 +129,7 @@ Following requirements need to be met prior to cutting a release branch:
 
 * Triton release branch must be created (e.g., [release/3.6.x](https://github.com/triton-lang/triton/tree/release/3.6.x)) and the Triton pin update PR must be landed (e.g., [#168096](https://github.com/pytorch/pytorch/pull/168096)) at least 1 week before the branch cut
 * Resolve all outstanding issues in the milestones that are feature work and release blocking (for example [release 2.10 milestone](https://github.com/pytorch/pytorch/milestone/57)). A report of outstanding cherry-picks can be produced by running the [github-analytics-daily workflow](https://github.com/pytorch/test-infra/blob/main/.github/workflows/github-analytics-daily.yml)
-* Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems (Linux, MacOS, Windows), Python versions as well as CPU architectures (x86 and arm) and accelerator versions (CUDA, ROCm, XPU).
+* Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems (Linux, macOS, Windows), Python versions as well as CPU architectures (x86 and arm) and accelerator versions (CUDA, ROCm, XPU).
 * All [viable/strict](.github/workflows/update-viablestrict.yml) jobs are green, which requires the following jobs to pass: `pull`, `trunk`, `lint`, `linux-aarch64`
 * All the nightly jobs for pytorch and domain libraries should be green. Validate this using the following HUD links:
   * [PyTorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
@@ -474,7 +475,7 @@ Supported OS flavors are summarized in the table below:
 | Operating System family | Architecture | Notes |
 | --- | --- | --- |
 | Linux | aarch64, x86_64 | Wheels are manylinux2014 compatible, i.e. they should be runnable on any Linux system with glibc-2.17 or above. |
-| MacOS | arm64 | Builds should be compatible with MacOS 11 (Big Sur) or newer, but are actively tested against MacOS 14 (Sonoma). MPS support is enabled on MacOS 13 (Ventura) or later. |
+| macOS | arm64 | Builds should be compatible with macOS 11 (Big Sur) or newer, but are actively tested against macOS 14 (Sonoma). MPS support is enabled on macOS 14 (Sonoma) or later. |
 | Windows | x86_64 | Builds are compatible with Windows-10 or newer. |
 
 # Submitting Tutorials

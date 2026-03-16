@@ -1,6 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+# ruff: noqa: F821
+# flake8: noqa: F821
 from collections.abc import Callable, Collection, Mapping, MutableMapping
-from typing import cast, TypeVar, Union
+from typing import cast, TypeVar
 
 import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
@@ -8,7 +10,7 @@ from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 from torch.distributed.tensor import DTensor
 
 
-PATH_ITEM = Union[str, int]
+PATH_ITEM = str | int
 OBJ_PATH = tuple[PATH_ITEM, ...]
 T = TypeVar("T")
 
@@ -64,6 +66,9 @@ def traverse_state_dict(
     for key, value in state_dict.items():
         _traverse_obj((str(key),), value)
 
+    # release reference cycle to prevent memory leaks in async_save
+    del _traverse_obj, _is_terminal
+
 
 def traverse_state_dict_v_2_3(
     state_dict: STATE_DICT_TYPE,
@@ -106,6 +111,9 @@ def traverse_state_dict_v_2_3(
 
     for key, value in state_dict.items():
         _traverse_obj((str(key),), value)
+
+    # release reference cycle to prevent memory leaks in async_save
+    del _traverse_obj, _is_terminal
 
 
 def set_element(

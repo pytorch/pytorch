@@ -1,7 +1,7 @@
 {
   "description": "Labels suitable for issue triage. Excludes CI triggers, test configs, release notes, deprecated, and PR-only labels.",
   "repo": "pytorch/pytorch",
-  "count": 305,
+  "count": 304,
   "labels": [
     {
       "name": "actionable",
@@ -21,11 +21,11 @@
     },
     {
       "name": "enhancement",
-      "description": "Not as big of a feature, but technically not a bug. Should be easy to fix"
+      "description": "Improvement to something that already works: performance optimization, better error messages, adding a backend-native implementation for an op that already runs via fallback/composite"
     },
     {
       "name": "feature",
-      "description": "A request for a proper, new feature."
+      "description": "A request for wholly new functionality that does not exist today in any form (no fallback, no composite, no workaround)"
     },
     {
       "name": "function request",
@@ -116,10 +116,6 @@
       "description": "Related to ARM architectures builds of PyTorch. Includes Apple M1"
     },
     {
-      "name": "module: assert failure",
-      "description": "The issue involves an assert failure"
-    },
-    {
       "name": "module: autograd",
       "description": "Related to torch.autograd, and the autograd engine in general"
     },
@@ -145,7 +141,7 @@
     },
     {
       "name": "module: binaries",
-      "description": "Anything related to official binaries that we release to users"
+      "description": "Packaging, wheel, and install issues: undefined symbols at import time, version mismatches between pip-installed packages, missing shared libraries (libtorch_cuda.so, libnccl, libcudnn), and broken official binaries"
     },
     {
       "name": "module: bottleneck",
@@ -293,7 +289,7 @@
     },
     {
       "name": "module: determinism",
-      "description": ""
+      "description": "Issues related to torch.use_deterministic_algorithms(), deterministic mode, and reproducibility of results"
     },
     {
       "name": "module: DeviceMesh",
@@ -353,7 +349,7 @@
     },
     {
       "name": "module: edge cases",
-      "description": "Adversarial inputs unlikely to occur in practice"
+      "description": "Adversarial inputs unlikely to occur in practice. Add when inputs are at dtype limits (torch.finfo.max/min), extreme tensor shapes, or unusual values that stress numerical limits."
     },
     {
       "name": "module: elastic",
@@ -389,7 +385,7 @@
     },
     {
       "name": "module: flex attention",
-      "description": ""
+      "description": "torch.nn.attention.flex_attention API. Use instead of module: nn for flex attention issues"
     },
     {
       "name": "module: floatx (formerly float8)",
@@ -853,7 +849,7 @@
     },
     {
       "name": "module: sdpa",
-      "description": "All things related to torch.nn.functional.scaled_dot_product_attentiion"
+      "description": "scaled_dot_product_attention and its backends (math, flash, mem_efficient, cudnn). Use instead of module: nn for SDPA issues"
     },
     {
       "name": "module: selective build",
@@ -1033,7 +1029,7 @@
     },
     {
       "name": "needs reproduction",
-      "description": "Ensure you have actionable steps to reproduce the issue. Someone else needs to confirm the repro."
+      "description": "Ensure you have actionable steps to reproduce the issue. Someone else needs to confirm the repro. Add when issue requires downloading external files (.zip, .pt, .pth, .pkl, .safetensors) or links to external storage (Google Drive, Dropbox) to reproduce."
     },
     {
       "name": "needs research",

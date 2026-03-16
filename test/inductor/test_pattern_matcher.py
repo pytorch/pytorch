@@ -3,7 +3,6 @@ import copy
 import os
 import unittest
 from collections.abc import Callable
-from typing import Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -141,7 +140,7 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -240,7 +239,7 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -287,7 +286,7 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -334,7 +333,8 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_fusion": False,
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -393,7 +393,8 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_fusion": False,
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -424,7 +425,8 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_fusion": False,
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -473,7 +475,8 @@ class TestPatternMatcher(TestCase):
 
         with inductor_config.patch(
             {
-                "benchmark_epilogue_fusion": "False",
+                "benchmark_fusion": False,
+                "benchmark_epilogue_fusion": False,
                 "max_autotune_gemm_backends": "TRITON",
                 "max_autotune_gemm": True,
             }
@@ -1212,6 +1215,23 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_unfuse_bias_addmm_half_dtypes(self, dtype):
+        args = [
+            torch.randn(20, device=GPU_TYPE, dtype=dtype),
+            torch.randn(10, 15, device=GPU_TYPE, dtype=dtype),
+            torch.randn(15, 20, device=GPU_TYPE, dtype=dtype),
+        ]
+
+        # addmm with pointwise consumer should not be unfused for half dtypes
+        # to avoid precision loss from extra truncation at the mm output
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
+
+        _, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        FileCheck().check("extern_kernels.addmm(").run(code[0])
+
     def test_addmm_alpha_beta_with_pointwise(self):
         # Test that addmm with alpha/beta != 1 is unfused correctly with pointwise ops
         # See https://github.com/pytorch/pytorch/issues/167313
@@ -1377,9 +1397,57 @@ class TestPatternMatcher(TestCase):
                 actual, (code) = run_and_get_code(opt_fn, args[0], args[1], args[2])
                 # pattern should match
                 self.assertEqual(counter, 1)
-                torch.testing.assert_close(actual, expected)
+                self.assertEqual(actual, expected)
                 # addmm should be replaced
                 FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    @inductor_config.patch(fx_graph_remote_cache=False)
+    def test_replace_by_example_in_pre_grad(self):
+        counter = 0
+        test_pass = PatternMatcherPass()
+
+        args = [
+            torch.randn(20, device=GPU_TYPE),
+            torch.randn(10, 15, device=GPU_TYPE),
+            torch.randn(15, 20, device=GPU_TYPE),
+        ]
+
+        def fn(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b)
+
+        # This graph pattern should successfully match all of the above functions
+        @register_graph_pattern(
+            CallFunction(
+                torch.ops.aten.addmm,
+                Arg(),
+                Arg(),
+                Arg(),
+                beta=KeywordArg("beta"),
+                alpha=KeywordArg("alpha"),
+            ),
+            pass_dict=test_pass,
+        )
+        def addmm_replacement(match: Match, inp, mat1, mat2, beta, alpha):
+            nonlocal counter
+            counter += 1
+
+            def repl(inp, x1, x2):
+                return (x1 @ x2) * alpha + inp * beta
+
+            match.replace_by_example(repl, [inp, mat1, mat2])
+
+        with inductor_config.patch(
+            pre_grad_custom_pass=lambda *args: test_pass.apply(*args)
+        ):
+            counter = 0
+            expected = fn(*copy.deepcopy(args))
+            opt_fn = torch.compile(fn)
+            actual, (code) = run_and_get_code(opt_fn, args[0], args[1], args[2])
+            # pattern should match
+            self.assertEqual(counter, 1)
+            self.assertEqual(actual, expected)
+            # addmm should be replaced
+            FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_addmm_dtype_mismatch(self):
         a = torch.nn.Linear(1024, 1024, bias=False).to(GPU_TYPE)
@@ -1607,7 +1675,8 @@ class TestPatternMatcher(TestCase):
 
     def test_mutation_op_matching(self):
         def check(type, func_name, args, kwargs, expect=True):
-            assert type in ["call_function", "call_method"]
+            if type not in ["call_function", "call_method"]:
+                raise AssertionError
             graph = torch.fx.Graph()
             getattr(graph, type)(func_name, args, kwargs)
             res = is_mutation_op(next(iter(graph.nodes)))
@@ -1706,7 +1775,7 @@ class TestPatternMatcher(TestCase):
             result: torch.Tensor,
             input: torch.Tensor,
             scale: torch.Tensor,
-            azp: Optional[torch.Tensor] = None,
+            azp: torch.Tensor | None = None,
         ) -> None:
             # bogus implementation doesn't matter
             _result = torch.mul(input, scale).to(torch.int8)

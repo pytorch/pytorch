@@ -2,7 +2,6 @@ import itertools
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Union
 
 import numpy as np
 from tabulate import tabulate
@@ -85,9 +84,10 @@ class CompositeMHA(torch.nn.Module):
 
         self.head_dim = embed_dim // num_heads
         self.embed_dim = embed_dim
-        assert self.head_dim * num_heads == self.embed_dim, (
-            "embed_dim must be divisible by num_heads"
-        )
+        if self.head_dim * num_heads != self.embed_dim:
+            raise AssertionError(
+                f"embed_dim ({self.embed_dim}) must be divisible by num_heads ({num_heads})"
+            )
 
         self.q_proj_weight = Parameter(
             torch.empty((embed_dim, embed_dim), **factory_kwargs)
@@ -106,7 +106,7 @@ class CompositeMHA(torch.nn.Module):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        mask: Union[torch.Tensor, CausalBias],
+        mask: torch.Tensor | CausalBias,
     ):
         query_projected = F.linear(query, self.q_proj_weight)
         key_projected = F.linear(key, self.k_proj_weight)

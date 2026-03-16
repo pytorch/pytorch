@@ -87,7 +87,8 @@ def check_codegen(
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
         self.assertTrue("def triton" in code, f"Failed to find triton kernel\n{code}")
 
-    assert called, "Ran graph without calling compile_fx"
+    if not called:
+        raise AssertionError("Ran graph without calling compile_fx")
 
     torch._dynamo.reset()
 
@@ -115,6 +116,7 @@ test_failures = {
     #
     # Failed to find dynamic for loop variable:
     #
+    "test_complex_conv2d_conj_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_conv1d_with_permute_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
         ("cpu",), is_skip=True
@@ -291,6 +293,7 @@ test_failures = {
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
+    "test_uniform_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),

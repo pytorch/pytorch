@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import warnings
 from contextlib import contextmanager
-from typing import Any, cast, Optional, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
 from torch._library.opaque_object import is_opaque_type
+from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -31,12 +32,13 @@ def process_inputs(
     flat_args: list[Any],
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
-    shape_env: Optional[ShapeEnv],
+    shape_env: ShapeEnv | None,
     ignore_shape_env: bool = False,
 ) -> FakifiedFlatArgs:
     with fake_mode:
 
         def convert(idx: int, x: Any) -> Any:
+            nonlocal ignore_shape_env
             if shape_env is not None and not ignore_shape_env:
                 from torch._dynamo.source import ConstantSource
 
@@ -66,11 +68,28 @@ def process_inputs(
                 return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
-                if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                    if all(getattr(x, attr).fake_mode is fake_mode for attr in attrs):
-                        return x
-                    # FakeTensor subclass from a different mode.
-                    # Fall through to refakify.
+                # See if all inner tensors are FakeTensors from this mode
+                all_this_fake = True
+                for a in attrs:
+                    match getattr(x, a):
+                        case FakeTensor() as v:
+                            if v.fake_mode is not fake_mode:
+                                # FakeTensor subclass from a different mode.
+                                # Fall through to refakify.
+                                all_this_fake = False
+                                break
+                        case torch.Tensor():
+                            all_this_fake = False
+                            break
+                        case OpaqueBase():
+                            pass
+                        case unexpected:
+                            raise AssertionError(
+                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            )
+
+                if all_this_fake:
+                    return x
 
             # see note [Tensor Fakification and Symbol Caching]
             symbolic_context = None
@@ -106,7 +125,7 @@ def process_inputs(
 
 def construct_fake_mode(
     flat_args: list[Any], aot_config: AOTConfig
-) -> tuple[FakeTensorMode, Optional[ShapeEnv]]:
+) -> tuple[FakeTensorMode, ShapeEnv | None]:
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
@@ -163,10 +182,13 @@ def _try_get_metadata_from_dynamo(
     static_input_indices = []
     # Collect the new inputs lifted by aotdispatch
     for i, name in enumerate(param_keys):
-        assert name in param_name_to_source, f"{name} not found."
+        if name not in param_name_to_source:
+            raise AssertionError(f"{name} not found in param_name_to_source")
         source = param_name_to_source[name]
-        assert source not in seen_sources, source
-        assert source is not None
+        if source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
+        if source is None:
+            raise AssertionError(f"source must not be None for {name}")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
@@ -176,12 +198,14 @@ def _try_get_metadata_from_dynamo(
     # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
     # matched tensors back into the Fx graph, this might not be necessary.
     for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-        assert hasattr(node, "_dynamo_source")
+        if not hasattr(node, "_dynamo_source"):
+            raise AssertionError(f"node {node} must have _dynamo_source attribute")
         source = node._dynamo_source
         # `source`` specifies the source from user code. ddp optimizer may have
         # intermediate values becoming submodule placeholders which does not
         # have a source
-        assert source is None or source not in seen_sources, source
+        if source is not None and source in seen_sources:
+            raise AssertionError(f"source {source} already in seen_sources")
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name if source else str(source)
@@ -204,7 +228,10 @@ def _try_get_metadata_from_dynamo(
                 "Non-static input pos %s for source %s", actual_pos, source_name
             )
 
-    assert full_args_num == len(aot_autograd_arg_pos_to_source)
+    if full_args_num != len(aot_autograd_arg_pos_to_source):
+        raise AssertionError(
+            f"full_args_num={full_args_num} != len(aot_autograd_arg_pos_to_source)={len(aot_autograd_arg_pos_to_source)}"
+        )
     return aot_autograd_arg_pos_to_source, static_input_indices
 
 

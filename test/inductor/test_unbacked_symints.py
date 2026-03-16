@@ -690,6 +690,89 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_triton_pow_type_mismatch(self, device):
+        """
+        Test that libdevice.pow handles mixed float32/float64 types correctly.
+
+        Reproducer: sqrt returns float32, but exponent is float64 from sympy.
+        This caused: KeyError: (triton.language.float32, triton.language.float64)
+
+        The bug only triggers with a NON-INTEGER float exponent (like 2.5).
+        Integer exponents (like 10.0) are printed differently and don't trigger
+        the type mismatch.
+        """
+        import math
+
+        def fn(x):
+            # sqrt(x.size(0)) creates OpaqueUnaryFn_sqrt -> printed as float32
+            # **2.5 creates FloatPow with sympy.Float(2.5) -> printed as float64
+            # This causes: KeyError: (triton.language.float32, triton.language.float64)
+            r = math.sqrt(x.size(0))
+            r = r**2.5  # Non-integer exponent is required to trigger the bug
+            return torch.tensor(math.trunc(r), dtype=torch.float64, device=device)
+
+        example_inputs = (torch.randn(4, device=device),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_triton_pow_symbolic_int_exponent(self, device):
+        """
+        Test that symbolic integer scalar exponents are cast before libdevice.pow.
+
+        Reproducer from https://github.com/pytorch/pytorch/issues/177131:
+        capture_scalar_outputs=True can pass a scalar like num_bits as an int64 ks*
+        kernel argument, which previously led Triton to reject libdevice.pow(2.0, ks0).
+        """
+
+        def calculate_range(num_bits, device):
+            bit_range = 2**num_bits
+            q_max = torch.tensor(bit_range / 2 - 1, device=device)
+            q_min = torch.tensor(-bit_range / 2, device=device)
+            return q_min, q_max
+
+        def fn(x, num_bits):
+            q_min, q_max = calculate_range(num_bits, x.device)
+            bit_range = q_max - q_min
+            max_val = torch.max(torch.abs(x))
+            scale = max_val / (float(bit_range) / 2)
+            scale = torch.where(
+                scale == 0,
+                torch.tensor(1e-10, device=x.device, dtype=x.dtype),
+                scale,
+            )
+            x_q = torch.clamp(torch.round(x / scale), q_min, q_max)
+            x_dq = x_q * scale
+            return (x_dq - x).abs().pow(2.4).sum(), scale, scale
+
+        example_inputs = (torch.randn(1, 1, 128, device=device, dtype=torch.float16), 8)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_triton_pow_symbolic_negative_int_exponent(self, device):
+        def fn(x, exponent_src):
+            exponent = exponent_src.max().to(torch.int64) - 1
+            return x * (2**exponent)
+
+        example_inputs = (
+            torch.randn(128, device=device, dtype=torch.float16),
+            torch.tensor([0], device=device, dtype=torch.int64),
+        )
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 

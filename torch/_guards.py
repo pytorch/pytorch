@@ -14,7 +14,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -512,7 +512,7 @@ class GuardsCheckpointState:
     def __init__(self, dynamo_guards: OrderedSet[Guard]) -> None:
         self.dynamo_guards = dynamo_guards
 
-    def diff(self, other: GuardsCheckpointState) -> Optional[OrderedSet[Guard]]:
+    def diff(self, other: GuardsCheckpointState) -> OrderedSet[Guard] | None:
         """
         Produces a delta against another GuardsCheckpointState.
 
@@ -635,11 +635,20 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: Optional[OrderedSet[Guard]] = None) -> None:
+    def __init__(self, inner: OrderedSet[Guard] | None = None) -> None:
         if inner is None:
             self.inner: OrderedSet[Guard] = OrderedSet()
         else:
             self.inner = inner
+        # Map from source to list of guards with that source. Incrementally
+        # built in `add` method.
+        self.source_to_guards: defaultdict[Source, list[Guard]] = defaultdict(list)
+        for guard in self.inner:
+            self.track_guard_by_source(guard)
+
+    def track_guard_by_source(self, guard: Guard) -> None:
+        source = guard.originating_source
+        self.source_to_guards[source].append(guard)
 
     def __iter__(self) -> Iterator[Guard]:
         return iter(self.inner)
@@ -655,6 +664,10 @@ class GuardsSet:
     def __bool__(self) -> bool:
         return bool(self.inner)
 
+    def clear(self) -> None:
+        self.inner = OrderedSet()
+        self.source_to_guards = defaultdict(list)
+
     def add(
         self, guard: Guard, *, collect_debug_stack: bool = True, skip: int = 0
     ) -> None:
@@ -666,11 +679,16 @@ class GuardsSet:
         if guard.user_stack is None:
             guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
+        self.track_guard_by_source(guard)
 
     def update(self, *others: set[Guard]) -> None:
         for o in others:
             for g in o:
                 self.add(g, skip=1)
+
+    def get_guards_for_source(self, source: Source) -> list[Guard]:
+        """Return all guards with the given originating_source."""
+        return list(self.source_to_guards[source])
 
     def remove_guards_with_source(self, source: Source) -> None:
         """Delete all guards that contains a given source"""
@@ -679,6 +697,11 @@ class GuardsSet:
         self.inner = OrderedSet(
             g for g in self.inner if not is_from_source(g.originating_source, source)
         )
+        # Rebuild the index since is_from_source walks the chain, so
+        # multiple source keys may need removal.
+        self.source_to_guards = defaultdict(list)
+        for guard in self.inner:
+            self.track_guard_by_source(guard)
 
 
 """
@@ -693,6 +716,16 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: list[GuardEnvExpr] = []
+        self.skip_install: bool = False
+
+    @contextlib.contextmanager
+    def skip_guard_install(self) -> Generator[None, None, None]:
+        old = self.skip_install
+        self.skip_install = True
+        try:
+            yield
+        finally:
+            self.skip_install = old
 
     def copy_graphstate(self) -> GuardsCheckpointState:
         return GuardsCheckpointState(OrderedSet(self.dynamo_guards.inner))
@@ -875,6 +908,15 @@ class CompileContext:
         return TraceId(self.compile_id, self.attempt)
 
 
+@dataclass
+class InlinedCodeCache:
+    """Cache for code-object-derived data used during inlining."""
+
+    instructions: list[Any]
+    indexof: dict[Any, int]
+    code_options: dict[str, Any]
+
+
 class TracingContext:
     """
     Provides the currently installed TracingContext, or None.
@@ -901,6 +943,8 @@ class TracingContext:
         self.global_context = GlobalContext()
         self.previously_inlined_functions: dict[Any, Any] = dict()
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
+        # Combined cache for inlined code data (instructions, indexof, code_options)
+        self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
         self.fake_mode: FakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
@@ -945,6 +989,7 @@ class TracingContext:
         self.hop_dispatch_set_cache = HopDispatchSetCache()
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
+        self.cudagraph_annotation: Any = None
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
@@ -952,6 +997,7 @@ class TracingContext:
         self.global_context.global_state = {}
         self.previously_inlined_functions.clear()
         self.previously_cleaned_instructions.clear()
+        self.inlined_code_cache.clear()
 
     @staticmethod
     @contextmanager
@@ -1214,6 +1260,13 @@ class Source:
         """True if you can guard on attributes of this"""
         return self.guard_source != GuardSource.SYNTHETIC_LOCAL
 
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        # Frozen dataclass, so returning self is effectively a clone.
+        # Subclasses with mutable state should override.
+        if transform_fn is not None:
+            return transform_fn(self)
+        return self
+
 
 # Subclasses can be found in torch/_dynamo/source.py
 @dataclass_with_cached_hash(frozen=True)
@@ -1259,6 +1312,19 @@ class ChainedSource(Source):
         del locals[tmpvar]
         cache[self] = value
         return value
+
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        cloned_fields: dict[str, Any] = {"base": self.base.clone(transform_fn)}
+        for f in dataclasses.fields(self):
+            if f.name == "base":
+                continue
+            val = getattr(self, f.name)
+            if isinstance(val, Source):
+                cloned_fields[f.name] = val.clone(transform_fn)
+        result = dataclasses.replace(self, **cloned_fields)
+        if transform_fn is not None:
+            result = transform_fn(result)
+        return result
 
 
 def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:

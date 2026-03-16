@@ -43,7 +43,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     IS_CI,
-    IS_FBCODE,
     IS_WINDOWS,
     LazyVal,
     TestCase,
@@ -57,7 +56,7 @@ log: logging.Logger = logging.getLogger(__name__)
 def test_cpu():
     try:
         CppCodeCache.load("")
-        return not IS_FBCODE
+        return True
     except (
         CalledProcessError,
         OSError,
@@ -109,7 +108,12 @@ RUN_CPU = HAS_CPU and any(
 )
 
 HAS_TPU = has_tpu_pallas()
-RUN_TPU = HAS_TPU
+# TPU is a privateuse1 backend that isn't in _desired_test_bases (it requires
+# runtime initialization before the test base is registered). Check the env var
+# directly, matching the same semantics as RUN_CPU/RUN_GPU: when the env var is
+# unset, run if the hardware is available; when set, only run if "tpu" is listed.
+_only_for = os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
+RUN_TPU = HAS_TPU and ("tpu" in _only_for.split(",") if _only_for else True)
 
 
 def _check_has_dynamic_shape(

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import warnings
 from collections import namedtuple
+from functools import cached_property
 from os.path import abspath, exists
 
 import torch
@@ -220,6 +221,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             "doctr_reco_predictor",
         }
 
+    @cached_property
+    def _fb_models_available(self):
+        """This property exists because importing IS_FBCODE causes some models to be
+        frozen out of setting certain config flags."""
+        return importlib.util.find_spec("torchbenchmark.models.fb") is not None
+
     def load_model(
         self,
         device,
@@ -234,11 +241,14 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
+
         candidates = [
             f"torchbenchmark.models.{model_name}",
             f"torchbenchmark.canary_models.{model_name}",
-            f"torchbenchmark.models.fb.{model_name}",
         ]
+        if self._fb_models_available:
+            candidates.append(f"torchbenchmark.models.fb.{model_name}")
+
         for c in candidates:
             try:
                 module = importlib.import_module(c)
@@ -357,7 +367,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # See https://github.com/pytorch/benchmark/issues/1561
         if model_name == "maml_omniglot":
             batch_size = 5
-            assert example_inputs[0].shape[0] == batch_size
+            if example_inputs[0].shape[0] != batch_size:
+                raise AssertionError(
+                    f"Expected batch size {batch_size}, but got {example_inputs[0].shape[0]}"
+                )
         if model_name == "vision_maskrcnn":
             batch_size = 1
         # global current_name, current_device
@@ -412,7 +425,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             yield model_name
 
     def pick_grad(self, name, is_training):
-        if is_training or name in ("maml",):
+        if is_training or name == "maml":
             return torch.enable_grad()
         else:
             return torch.no_grad()

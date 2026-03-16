@@ -33,14 +33,9 @@ namespace {
 // Initial pool size for CUDA events per device.
 constexpr size_t kInitialEventPoolSize = 8;
 
-at::cuda::CUDAEventPtr getEventFromPool(const at::DeviceIndex device_idx) {
-  static auto* event_pool = []() {
-    auto* pool = new at::cuda::EventPool();
-    // Pre-populate the pool with events to avoid stalls in creating events
-    pool->init_num_events(kInitialEventPoolSize);
-    return pool;
-  }();
-
+at::cuda::CUDAEventPool::Event getEventFromPool(const at::DeviceIndex device_idx) {
+  // Pre-populate the pool with events to avoid stalls in creating events
+  static auto* event_pool = new at::cuda::CUDAEventPool(kInitialEventPoolSize);
   return event_pool->get(device_idx);
 }
 
