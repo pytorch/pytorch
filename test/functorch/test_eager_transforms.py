@@ -1152,6 +1152,28 @@ class TestGradTransform(TestCase):
         (z,) = torch.autograd.grad(y, x)
         self.assertEqual(z, 2)
 
+    @skipIfTorchDynamo("internal API test")
+    def test_pop_dynamic_layer_stack_to_depth_single(self, device):
+        ft = torch._C._functorch
+        ft._grad_increment_nesting()
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 1)
+        ft.pop_dynamic_layer_stack_and_undo_to_depth(0)
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 0)
+
+    @skipIfTorchDynamo("internal API test")
+    def test_pop_dynamic_layer_stack_to_depth_mixed(self, device):
+        ft = torch._C._functorch
+        ft._vmap_increment_nesting(3, "error")
+        ft._grad_increment_nesting()
+        ft._jvp_increment_nesting()
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 3)
+        # Pop only jvp — must remove exactly one layer
+        ft.pop_dynamic_layer_stack_and_undo_to_depth(2)
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 2)
+        # Pop remaining
+        ft.pop_dynamic_layer_stack_and_undo_to_depth(0)
+        self.assertEqual(ft.get_dynamic_layer_stack_depth(), 0)
+
 
 @markDynamoStrictTest
 class TestAutogradFunction(TestCase):

@@ -416,9 +416,15 @@ static void dump_local_tls() {
 namespace {
 
 // Pop the DynamicLayer stack until it's at the given depth.
+// Used by Dynamo for error-recovery cleanup of the transform stack.
+//
+// NB: we peek at .back() to determine the type, then call the
+// type-specific decrement helper which does the actual pop.
+// Do NOT pop before the switch — the helpers call
+// popDynamicLayerAndDeleteMetadata() internally.
 void popDynamicLayerStackToDepth(size_t depth) {
   while (at::functorch::getDynamicLayerStack().size() > depth) {
-    const auto top = popDynamicLayer();
+    const auto& top = at::functorch::getDynamicLayerStack().back();
     switch (top.key()) {
       case at::functorch::TransformType::Vmap:
         _vmap_decrement_nesting();
