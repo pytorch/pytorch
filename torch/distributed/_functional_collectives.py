@@ -3,7 +3,7 @@ import contextlib
 import math
 import sys
 import warnings
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -91,14 +91,14 @@ Functional collectives can accept any of these types to describe the ranks parti
 
 The different types will be desugared to a canonical format
 """
-RANK_TYPES = Union[
-    list[int],
-    list[list[int]],
-    dist.ProcessGroup,
-    DeviceMesh,
-    tuple["dist.tensor.DeviceMesh", int],
-    c10d.GroupName,
-]
+RANK_TYPES = (
+    list[int]
+    | list[list[int]]
+    | dist.ProcessGroup
+    | DeviceMesh
+    | tuple["dist.tensor.DeviceMesh", int]
+    | c10d.GroupName
+)
 
 
 from torch._utils import _chunk_or_narrow_cat  # noqa: F401
@@ -1402,6 +1402,21 @@ def _wait_tensor_meta(self, *args):
     return torch.empty_like(self)
 
 
+def _isend_meta(self, *args):
+    return torch.empty(0, dtype=self.dtype, device=self.device)
+
+
+def _irecv_meta(self, *args):
+    return torch.empty_like(self)
+
+
+def _batch_p2p_ops_meta(op_list, peer_list, tag_list, tensors, group_name):
+    return [
+        t if op == "irecv" else torch.empty(0, dtype=t.dtype, device=t.device)
+        for op, t in zip(op_list, tensors)
+    ]
+
+
 def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):
     return _make_all_gather_out_tensor(shard, group_size)
 
@@ -1501,6 +1516,10 @@ lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
 lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
 lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
 lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+lib_impl.impl("isend", _isend_meta, "Meta")
+lib_impl.impl("irecv", _irecv_meta, "Meta")
+lib_impl.impl("batch_p2p_ops", _batch_p2p_ops_meta, "Meta")
+
 lib_impl.impl(
     "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
 )
@@ -1523,9 +1542,17 @@ lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 lib_impl.impl("broadcast", _broadcast_meta, "Meta")
 lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 
-# mark these ops has side effect so that they won't be removed by DCE
+# Mark these ops as side effectful so that DCE does not remove communication
+# whose result tensors are ignored by user code.
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)  # type: ignore[has-type]
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops.default)  # type: ignore[has-type]
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops)  # type: ignore[has-type]
+
 
 # Register legacy ops for backward compatibility
 # TODO(yifu): remove these in functional collective beta release
@@ -1536,6 +1563,9 @@ ops_defs = [
     "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
     "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
     "wait_tensor(Tensor self) -> Tensor",
+    "isend(Tensor self, int dst, int tag, str group_name) -> Tensor",
+    "irecv(Tensor self, int src, int tag, str group_name) -> Tensor",
+    "batch_p2p_ops(str[] op_list, int[] peer_list, int[] tag_list, Tensor[] tensors, str group_name) -> Tensor[]",
     "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
     "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
     "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
@@ -1700,13 +1730,90 @@ def all_gather_inplace(
     return tensor_list
 
 
-from torch.distributed.distributed_c10d import (
+def isend_inplace(
+    tensor: torch.Tensor,
+    dst: int,
+    tag: int = 0,
+    group: dist.ProcessGroup | None = None,
+    group_dst: int = -1,
+):
+    if group is None:
+        group = dist.group.WORLD
+    if group is None:
+        raise AssertionError("group cannot be None")
+    if group_dst != -1:
+        if dst is not None:
+            raise ValueError(
+                "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
+            )
+        global_dst = c10d.get_global_rank(group, group_dst)
+    else:
+        global_dst = dst
+
+    group_name = _resolve_group_name(group)
+    tensor = torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
+    if _are_we_tracing():
+        return tensor
+    return _maybe_wrap_tensor(tensor)
+
+
+def irecv_inplace(
+    tensor: torch.Tensor,
+    src: int,
+    tag: int = 0,
+    group: dist.ProcessGroup | None = None,
+    group_src: int = -1,
+):
+    if group is None:
+        group = dist.group.WORLD
+    if group is None:
+        raise AssertionError("group cannot be None")
+    if group_src != -1:
+        if src is not None:
+            raise ValueError(
+                "Cannot specify both 'src' and 'group_src' args as per eager impl"
+            )
+        global_src = c10d.get_global_rank(group, group_src)
+    else:
+        global_src = src
+    group_name = _resolve_group_name(group)
+    tensor = torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
+    return _maybe_wrap_tensor(tensor)
+
+
+def batch_p2p_ops_inplace(
+    op_list: list[str],
+    peer_list: list[int],
+    tag_list: list[int],
+    tensors: list[torch.Tensor],
+    group_name: RANK_TYPES,
+):
+    if not dist.is_initialized():
+        raise AssertionError("torch.distributed must be initialized")
+    if group_name is None or group_name == "":
+        group_name = c10d._get_default_group()
+    group_name = _resolve_group_name(group_name)
+    tensors = torch.ops._c10d_functional.batch_p2p_ops(
+        op_list, peer_list, tag_list, tensors, group_name
+    )
+    if _are_we_tracing():
+        return [
+            _maybe_wrap_tensor(t) if op == "irecv" else t
+            for op, t in zip(op_list, tensors)
+        ]
+    return list(map(_maybe_wrap_tensor, tensors))
+
+
+from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,
     all_gather_into_tensor as legacy_allgather,
     all_reduce as legacy_allreduce,
     all_to_all_single as legacy_all_to_all_single,
+    batch_isend_irecv as legacy_batch_p2p_ops,
+    irecv as legacy_irecv,
+    isend as legacy_isend,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -1755,6 +1862,26 @@ def _remapped_all_gather(*args, **kwargs):
     all_gather_inplace(*args, **kwargs)
 
 
+def _remapped_isend(*args, **kwargs):
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_isend should only be called during tracing")
+    return isend_inplace(*args, **kwargs)
+
+
+def _remapped_irecv(*args, **kwargs):
+    if not _are_we_tracing():
+        raise AssertionError("_remapped_irecv should only be called during tracing")
+    return irecv_inplace(*args, **kwargs)
+
+
+def _remapped_batch_p2p_ops(*args, **kwargs):
+    if not _are_we_tracing():
+        raise AssertionError(
+            "_remapped_batch_p2p_ops should only be called during tracing"
+        )
+    return batch_p2p_ops_inplace(*args, **kwargs)
+
+
 # This dict should contain sets of functions that dynamo is allowed to remap.
 # Functions in this set should accept the same args/kwargs 1:1 as their mapping.
 traceable_collective_remaps = {
@@ -1765,4 +1892,7 @@ traceable_collective_remaps = {
     legacy_all_gather: _remapped_all_gather,
     legacy_reduce_scatter_base: _remapped_reducescatter,
     legacy_all_gather_base: _remapped_allgather,
+    legacy_isend: _remapped_isend,
+    legacy_irecv: _remapped_irecv,
+    legacy_batch_p2p_ops: _remapped_batch_p2p_ops,
 }

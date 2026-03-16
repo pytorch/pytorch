@@ -132,12 +132,15 @@ If the issue involves extremal values or numerical precision differences:
 - Fuzzer-generated edge cases
 
 **IMPORTANT — avoid keyword-triggered mislabeling:**
-- Do NOT add `module: NaNs and Infs` just because the word "nan" or "inf" appears in the issue. Only add it when the core bug IS about NaN/Inf propagation or generation.
-  - Example: `torch.isclose(..., equal_nan=True)` failing due to broadcasting → this is a `module: python frontend` bug, NOT `module: NaNs and Infs`
-  - Example: Mixed precision training producing NaN loss → this IS `module: NaNs and Infs`
-- Do NOT add `module: edge cases` just because unusual values are mentioned. Only add it when the issue is fundamentally about behavior at extreme/boundary values.
-  - Example: `torch.istft` giving an unhelpful error message → this is `module: error checking`, NOT `module: edge cases`
-- Do NOT add `module: numerical-stability` for test tolerance failures. If a TEST is failing due to tolerance thresholds, that's `module: tests`, not a numerical stability issue.
+
+Label based on the **root cause**, not keywords that appear in the error or title. A keyword tells you what failed, not why.
+
+- An `undefined symbol: ncclAlltoAll` error at `import torch` is a **packaging** issue (`module: binaries`), not a distributed training bug — the user never ran distributed code.
+- A `nan` in a parameter name or tolerance check is not `module: NaNs and Infs` unless the bug is actually about NaN propagation.
+- A stack trace mentioning `autograd` does not mean `module: autograd` — check whether the bug is in autograd itself or just on the call path.
+- A test failure with tolerance thresholds is `module: tests`, not `module: numerical-stability`.
+
+Ask: "Where would the fix need to be made?" That determines the label.
 
 **Action:**
 1. Add `module: edge cases` label
@@ -151,16 +154,13 @@ If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), tra
 
 ### 2.5) PT2 Issues — Special Handling
 
-When triaging PT2 issues (torch.compile, dynamo, inductor), see [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling decisions.
+**PT2 is NOT a redirect.** `oncall: pt2` is not like the other oncall labels in Step 3. PT2 issues continue through Steps 4–7 for full triage — add `oncall: pt2`, then proceed to label with `module:` labels, mark `triaged`, etc.
 
-**Key differences from general triage:**
-- For PT2 issues, you MAY apply `module:` labels (e.g., `module: dynamo`, `module: inductor`, `module: dynamic shapes`)
-- Use the rubric to determine the correct component labels
-- Only redirect to `oncall: cpu inductor` for MKLDNN-specific issues; otherwise keep in PT2 queue
+See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling decisions on which `module:` labels to apply.
 
 ### 3) Redirect to Secondary Oncall
 
-**CRITICAL:** When redirecting issues to an oncall queue (**critical** with the exception of PT2), apply exactly one `oncall: ...` label and **STOP**. Do NOT:
+**CRITICAL:** When redirecting issues to a **non-PT2** oncall queue, apply exactly one `oncall: ...` label and **STOP**. Do NOT:
 - Add any `module:` labels
 - Mark it `triaged`
 - Do any further triage work
@@ -192,15 +192,18 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 
 Only if the issue stays in the general queue:
 - Add 1+ `module: ...` labels based on the affected area
-- If feature request: add `feature` (or `function request` for a new function or new arguments/modes)
-- If small improvement: add `enhancement`
+- Prefer specific labels over general ones when both exist. Check `labels.json` descriptions for guidance on when a specific label supersedes a general one (e.g., `module: sdpa` instead of `module: nn` for SDPA issues, `module: flex attention` instead of `module: nn` for flex attention).
+- `feature` — wholly new functionality that does not exist today in any form
+- `enhancement` — improvement to something that already works (e.g., adding a native backend kernel for an op that already runs via fallback/composite, performance optimization, better error messages). If the enhancement is about performance, also add `module: performance`.
+- `function request` — a new function or new arguments/modes for an existing function
+- If the issue says the operation "currently works" or "falls back to" a slower path, that is `enhancement`, not `feature`
 
 **Commonly missed labels — always check for these:**
 
 | Condition | Label |
 |-----------|-------|
 | Segfault, illegal memory access, SIGSEGV | `module: crash` |
-| Measurable performance regression or slowdown | `module: performance` |
+| Performance issue: regression, slowdown, or optimization request | `module: performance` |
 | Issue on Windows | `module: windows` |
 | Previously working feature now broken | `module: regression` |
 | Broken docs/links that previously worked | `module: docs` + `module: regression` (NOT `enhancement`) |

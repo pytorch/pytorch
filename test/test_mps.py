@@ -1672,6 +1672,18 @@ class TestMPS(TestCaseMPS):
         helper([10, 5, 10, 3])
         helper([10, 5, 10, 3, 20])
 
+        # Test scalar tensor (0-dimensional) - should preserve shape
+        x_mps = torch.tensor(0, device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+        mask_mps = torch.tensor(True, device="mps")
+        mask_cpu = mask_mps.detach().clone().cpu()
+        source_mps = torch.tensor([42], device="mps")
+        source_cpu = source_mps.detach().clone().cpu()
+        result_mps = x_mps.masked_scatter(mask_mps, source_mps)
+        result_cpu = x_cpu.masked_scatter(mask_cpu, source_cpu)
+        self.assertEqual(result_mps.shape, result_cpu.shape)
+        self.assertEqual(result_mps, result_cpu)
+
     def test_masked_scatter_raises(self):
         x_mps = torch.tensor([0, 0, 0], device="mps")
         mask_mps = torch.tensor([1, 1, 1], dtype=torch.bool, device="mps")
@@ -10037,6 +10049,26 @@ class TestSDPA(TestCaseMPS):
         s_len = 16
         q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
+
+    def test_sdpa_output_qv_shape_diff(self):
+        # This intentionally checks both output shape semantics and numerical consistency
+        # against CPU for Ev != E. It is stricter than a shape-only regression test.
+        # Regression test for https://github.com/pytorch/pytorch/issues/176767
+        test_cases = [
+            ((1, 16, 32), (1, 16, 32), (1, 16, 24)),
+            ((1, 1, 16, 32), (1, 1, 16, 32), (1, 1, 16, 24)),
+            ((2, 3, 1, 16, 32), (2, 3, 1, 16, 32), (2, 3, 1, 16, 24)),
+        ]
+
+        for q_shape, k_shape, v_shape in test_cases:
+            q = torch.randn(*q_shape, device="mps", dtype=torch.float32)
+            k = torch.randn(*k_shape, device="mps", dtype=torch.float32)
+            v = torch.randn(*v_shape, device="mps", dtype=torch.float32)
+
+            y_mps = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            y_cpu = torch.nn.functional.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu())
+
+            self.assertEqual(y_cpu, y_mps)
 
 
 

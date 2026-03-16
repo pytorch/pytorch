@@ -890,6 +890,12 @@ class BuiltinVariable(VariableTracker):
                         return VariableTracker.build(tx, op.__name__ != "is_")
                     if left is right:
                         return VariableTracker.build(tx, op(left, right))
+                    # VT identity is a reliable proxy for Python identity for
+                    # mutable containers created during tracing.  For types
+                    # like EnumVariable two distinct VTs can wrap the same
+                    # singleton, so we must not claim "is False" there.
+                    if isinstance(left, (ConstDictVariable, ListVariable)):
+                        return VariableTracker.build(tx, op(left, right))
                     if istype(left, variables.ObjectVariable) and istype(
                         right, variables.ObjectVariable
                     ):
@@ -2455,12 +2461,13 @@ class BuiltinVariable(VariableTracker):
         ):
             isinstance_type_tuple = isinstance_type
         else:
+            msg = VariableTracker.build(
+                tx, "isinstance() arg 2 must be a type, a tuple of types, or a union"
+            )
             raise_observed_exception(
                 TypeError,
                 tx,
-                args=[
-                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
-                ],
+                args=[msg],
             )
 
         try:
@@ -3044,6 +3051,20 @@ class BuiltinVariable(VariableTracker):
             return VariableTracker.build(tx, id(args[0].value))
         elif istype(args[0], variables.FunctoolsPartialVariable):
             return VariableTracker.build(tx, id(args[0].fake_value))
+        elif isinstance(
+            args[0],
+            (
+                ConstantVariable,
+                ConstDictVariable,
+                ListVariable,
+                TupleVariable,
+                SetVariable,
+                SymNodeVariable,
+            ),
+        ):
+            from .constant import FakeIdVariable
+
+            return FakeIdVariable(id(args[0]))
         else:
             unimplemented(
                 gb_type="id() with unsupported args",
@@ -3239,6 +3260,19 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
+
+        # Constant fold or_ for class/type variables (e.g. Shard | _StridedShard
+        # producing a types.UnionType for isinstance checks). This handles cases
+        # like OpaqueObjectClassVariable where is_python_constant() returns False
+        # but as_python_constant() works.
+        try:
+            a_const = a.as_python_constant()
+            b_const = b.as_python_constant()
+            if isinstance(a_const, type) and isinstance(b_const, type):
+                return VariableTracker.build(tx, a_const | b_const)
+        except NotImplementedError:
+            pass
+
         if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,

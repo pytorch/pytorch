@@ -3357,6 +3357,53 @@ if HAS_CUDA_AND_TRITON:
             # g2 and g3 use cudagraphs (2 graphs recorded)
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        def test_cudagraph_min_partition_size_skip_small(self):
+            """Partitions with fewer kernels than the threshold are skipped."""
+
+            # Simple function with few kernels
+            def fn(x):
+                return x * 2
+
+            inp = torch.randn(4, 4, device="cuda")
+
+            # Set threshold high enough to skip this simple function
+            with torch._inductor.config.patch(
+                {"triton.cudagraph_min_partition_size": 10}
+            ):
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                for _ in range(3):
+                    out = fn_compiled(inp)
+
+            self.assertEqual(out, inp * 2)
+            # Partition was too small, so no cudagraph recorded
+            self.assertIsNone(self.get_manager())
+
+        def test_cudagraph_min_partition_size_allow_large(self):
+            """Partitions with enough kernels pass the threshold."""
+
+            # Function with multiple operations -> more kernels
+            def fn(x):
+                y = x * 2
+                y = y + 1
+                y = y.sin()
+                y = y.cos()
+                y = y * x
+                return y @ y
+
+            inp = torch.randn(4, 4, device="cuda")
+
+            # Set threshold low enough to allow this function
+            with torch._inductor.config.patch(
+                {"triton.cudagraph_min_partition_size": 2}
+            ):
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                for _ in range(3):
+                    out = fn_compiled(inp)
+
+            # Partition was large enough, cudagraph should be recorded
+            self.assertIsNotNone(self.get_manager())
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         def test_tensor_constant_mutation(self):
             class Foo(torch.nn.Module):
                 def __init__(self) -> None:
@@ -3614,7 +3661,7 @@ if HAS_CUDA_AND_TRITON:
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
             FileCheck().check_count(
-                "Recording function=partition_0, cuda_graph_id=0",
+                "Recording function=partition_0, mode=INFERENCE, cuda_graph_id=0,",
                 1,
                 exactly=True,
             ).run(log_stream.getvalue())
@@ -3817,6 +3864,53 @@ if HAS_CUDA_AND_TRITON:
 
             # 2 graph partitions lead to 2 fwd cudagraphs and 1 bwd cudagraphs
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_backward_cpu_scalar_saved_tensor(self):
+            """
+            With graph_partition, a CPU graph input (e.g. a scalar parameter)
+            may be device-copied to CUDA for CG partition triton kernels.
+            The graph output must still reference the original CPU tensor so
+            the backward's CPU C++ kernel can dereference it safely.
+            """
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(4, 4, device="cuda")
+                    self.cpu_scale = torch.nn.Parameter(torch.tensor(1.0))
+
+                def forward(self, x):
+                    y = self.linear(x)
+                    cpu_val = y.sum().cpu() * self.cpu_scale
+                    return y + cpu_val.cuda()
+
+            model = Mod()
+            x = torch.randn(4, 4, device="cuda")
+
+            compiled_model = torch.compile(model, mode="reduce-overhead")
+
+            # Verify graph_partition produces the expected partitions.
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                compiled_model(x)
+            FileCheck().check("2 cudagraphable, 1 non-cudagraphable").run(
+                log_stream.getvalue()
+            )
+
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            for _ in range(5):
+                output = compiled_model(x)
+                loss = criterion(output, torch.randint(0, 4, (4,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            eager_out = model(x)
+            compiled_out = compiled_model(x)
+            self.assertEqual(compiled_out, eager_out)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):

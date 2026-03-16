@@ -27,6 +27,7 @@
 #include <ApproximateClock.h>
 #include <libkineto.h>
 #include <time_since_epoch.h>
+#include <torch/csrc/profiler/standalone/privateuse1_profiler.h>
 
 #ifndef _MSC_VER
 // TODO: TO be removed, once this properly works from libkineto
@@ -78,7 +79,8 @@ using torch::profiler::impl::variantShapesToStr;
 inline bool isKinetoCompatibleState(ProfilerState state) {
   return state == ProfilerState::KINETO ||
       state == ProfilerState::KINETO_GPU_FALLBACK ||
-      state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK;
+      state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
+      state == ProfilerState::KINETO_PRIVATEUSE1;
 }
 
 // Helper function to check if ProfilerState is valid for disabling profiler
@@ -640,11 +642,23 @@ void reportBackendEventToActiveKinetoProfiler(
 
 void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
-    const std::set<torch::profiler::impl::ActivityType>& activities) {
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    const ActivityFilter& activity_filter) {
   if (config.state == ProfilerState::NVTX ||
       config.state == ProfilerState::ITT) {
     return;
   }
+
+  // Forward registered PrivateUse1 profiler factory to Kineto.
+  // Only for KINETO_PRIVATEUSE1 state where backend provides its own
+  // IActivityProfiler.
+#ifdef USE_KINETO
+  if (config.state == ProfilerState::KINETO_PRIVATEUSE1) {
+    torch::profiler::impl::PrivateUse1ProfilerRegistry::instance()
+        .onKinetoInit();
+  }
+#endif // USE_KINETO
+
   TORCH_CHECK(
       isKinetoCompatibleState(config.state),
       "Supported only in Kineto profiler");
@@ -654,7 +668,8 @@ void prepareProfiler(
           c10::get_privateuse1_backend() != "privateuseone"),
       activities,
       config.experimental_config,
-      config.trace_id);
+      config.trace_id,
+      activity_filter);
 
   if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */

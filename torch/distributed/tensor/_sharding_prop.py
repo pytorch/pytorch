@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from functools import lru_cache
 from itertools import chain
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch._guards import detect_fake_mode
@@ -364,7 +364,7 @@ class ShardingPropagator:
         self,
         op_overload: OpOverload,
         strategy_info: _SingleDimStrategyInfo,
-        schema_info: Optional[RuntimeSchemaInfo] = None,
+        schema_info: RuntimeSchemaInfo | None = None,
     ):
         """
         Register a strategy over a single mesh-dim, relying on infra to automatically expand to the full mesh.
@@ -939,14 +939,15 @@ class ShardingPropagator:
         expected_input_schema = list(schema.args_schema)
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
-        expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
+        local_shape, _ = compute_local_shape_and_global_offset(
             out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )
+        expected_input_schema[shape_idx] = local_shape
 
         # adjust the stride arg for aten.new_empty_strided.default
         if stride_idx:
             expected_input_schema[stride_idx] = compute_local_stride(
-                out_tensor_meta.stride, spec.mesh, spec.placements
+                out_tensor_meta.stride, local_shape
             )
 
         return OpSchema(schema.op, tuple(expected_input_schema), schema.kwargs_schema)

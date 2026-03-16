@@ -31,7 +31,11 @@ from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    get_gcc_major_version,
     instantiate_parametrized_tests,
+    IS_ARM64,
+    IS_CPU_CAPABILITY_SVE256,
+    IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
     MI200_ARCH,
@@ -39,6 +43,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     slowTest,
     TEST_MKL,
+    xfailIf,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -2815,6 +2820,47 @@ class CPUReproTests(TestCase):
         actual = torch.compile(fn)(x)
         self.assertEqual(expected, actual, atol=1e-4, rtol=1e-4)
 
+    def test_two_step_variance(self):
+        M = 64
+        N = 1024
+
+        class L(torch.nn.Module):
+            def __init__(self, normalized_shape=N, eps=1e-5):
+                super().__init__()
+                self.layernorm = torch.nn.LayerNorm(normalized_shape, eps=eps)
+
+            def forward(self, x):
+                return self.layernorm(x)
+
+        mod = L().eval()
+        for mean, std in [
+            (0, 1e10),
+            (1e10, 10),
+            (1e10, 1e10),
+            (0, 1),
+            (0, 0.5),
+            (0.5, 1),
+            (0, 2),
+        ]:
+            x = torch.randn(M, N)
+            row_means = x.mean(dim=1, keepdim=True)
+            row_stds = x.std(dim=1, keepdim=True, unbiased=True)
+            x_norm = (x - row_means) / (row_stds + 1e-5)
+            x = x_norm * std + mean
+            input = (x,)
+            output_eager = mod(*input)
+            with torch.no_grad():
+                m = torch.compile(mod)
+                output_compiled = m(*input)
+            if mean == 1e10 or std == 1e10:
+                self.assertTrue(
+                    torch.allclose(output_eager, output_compiled, atol=1, rtol=1e-4)
+                )
+            else:
+                self.assertTrue(
+                    torch.allclose(output_eager, output_compiled, atol=1e-4, rtol=1e-4)
+                )
+
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
@@ -3428,6 +3474,8 @@ class CPUReproTests(TestCase):
                 3,
             )
 
+    @xfailIf(IS_ARM64 and not IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/142231
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
     def test_two_local_buffers_in_outer_loop_fusion(self):
         def fn(x):
@@ -3764,8 +3812,10 @@ class CPUReproTests(TestCase):
                     metrics.reset()
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
-                    check_metrics_vec_kernel_count(6)
+                    check_metrics_vec_kernel_count(8)
 
+    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/169958
     @requires_vectorization
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_transpose_copy(self):
@@ -4013,6 +4063,8 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(2)
 
+    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/170877
     def test_transpose_mxn_16_16_bf16_fp16(self):
         def fn(a, b):
             c = a * b
@@ -4657,6 +4709,7 @@ class CPUReproTests(TestCase):
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
+    @xfailIf(IS_ARM64)  # see https://github.com/pytorch/pytorch/issues/168972
     def test_float32_to_uint8(self):
         # https://github.com/pytorch/pytorch/issues/156788
         @torch.compile
@@ -4785,7 +4838,7 @@ class CPUReproTests(TestCase):
             _, code = run_and_get_cpp_code(opt_m, x)
             self.assertTrue(same(m(x), opt_m(x)))
             # Two kernels: one for reduction, one pointwises
-            check_metrics_vec_kernel_count(2)
+            check_metrics_vec_kernel_count(4)
             FileCheck().check_count(
                 "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
@@ -5121,6 +5174,10 @@ class CPUReproTests(TestCase):
                     "at::vec::VectorizedN<double,2>::loadu", 2, exactly=True
                 ).run(code)
 
+    @unittest.skipIf(
+        get_gcc_major_version() == 13,
+        "Fails under GCC 13 due to vector codegen (passes with GCC 11)",
+    )
     def test_convert_fp32_to_double_vec(self):
         def fn(x):
             return x.to(torch.double)
@@ -5352,6 +5409,9 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
+    @xfailIf(
+        IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED
+    )  # see https://github.com/pytorch/pytorch/issues/142134
     @parametrize("is_inference", (True, False))
     def test_disabled_amp(self, is_inference):
         class M(torch.nn.Module):
@@ -5937,7 +5997,7 @@ class CPUReproTests(TestCase):
         with torch.no_grad():
             metrics.reset()
             torch.compile(model)(*example_batch)
-            check_metrics_vec_kernel_count(3)
+            check_metrics_vec_kernel_count(5)
 
     def test_dropout(self):
         class Model(nn.Module):
@@ -6055,6 +6115,7 @@ class CPUReproTests(TestCase):
 
         torch.compile(fn)(torch.randn(2, 2))
 
+    @xfailIf(IS_ARM64)  # https://github.com/pytorch/pytorch/issues/176285
     @skipIfRocmArch(MI200_ARCH)
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @requires_vectorization

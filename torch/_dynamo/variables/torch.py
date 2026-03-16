@@ -349,15 +349,15 @@ def get_overridable_functions() -> set[Callable[..., Any]]:
     from itertools import chain
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
+    from torch.utils._device import _device_constructors
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
+    funcs.update(_device_constructors())
     more: set[Callable[..., Any]] = {
-        torch.ones,
         torch.ones_like,
-        torch.zeros,
         torch.zeros_like,
-        torch.empty,
-        torch.full,
+        torch.empty_like,
+        torch.full_like,
     }
     funcs.update(more)
     return funcs
@@ -697,6 +697,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch._dynamo.eval_frame._is_in_optimized_module,
             ):
                 tx.mark_inconsistent_side_effects()
+            # Read dynamically: the cached dict always has True, but
+            # is_exporting() should only be True during torch.export.
+            if self.value is torch.compiler.is_exporting:
+                return VariableTracker.build(tx, torch.compiler._is_exporting_flag)
             return VariableTracker.build(tx, tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)

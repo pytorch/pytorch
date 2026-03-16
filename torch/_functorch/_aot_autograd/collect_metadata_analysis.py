@@ -880,7 +880,9 @@ from a multi-output view call"
             subclass_inp_meta=create_subclass_meta(flat_args),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(
-                traced_tangents, count_symints=False, with_memory_format=True
+                traced_tangents,
+                count_symints=False,
+                with_memory_format=True,
             ),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,

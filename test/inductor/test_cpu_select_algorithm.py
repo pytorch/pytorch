@@ -3,7 +3,6 @@ import contextlib
 import functools
 import sys
 import unittest
-from typing import Optional
 from unittest.mock import patch
 
 import torch
@@ -100,7 +99,7 @@ def verify(dtype):
         yield atol, rtol
 
 
-def _get_epilogue(epilogue: str, other: Optional[torch.Tensor] = None):
+def _get_epilogue(epilogue: str, other: torch.Tensor | None = None):
     if epilogue == "none":
         return lambda x: x
     elif epilogue == "relu":
@@ -2437,6 +2436,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             ["silu", "mul"],
         ),
     )
+    @parametrize("loop_ordering_after_fusion", (True, False))
     def test_grouped_linear_epilogue(
         self,
         batch_size,
@@ -2445,6 +2445,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         input_3d,
         bias,
         epilogue,
+        loop_ordering_after_fusion,
     ):
         class M(torch.nn.Module):
             def __init__(self, in_feature, out_feature, bias, epilogue):
@@ -2485,6 +2486,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 verify(dtype) as (atol, rtol),
                 torch.autocast(device_type="cpu", dtype=dtype),
                 torch.no_grad(),
+                inductor_config.patch(
+                    {"loop_ordering_after_fusion": loop_ordering_after_fusion}
+                ),
             ):
                 self.common(mod, (v,), atol=atol, rtol=rtol)
             self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)

@@ -47,6 +47,7 @@ from .utils import counters
 if TYPE_CHECKING:
     import types
 
+    from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
 
     from .output_graph import DynamoTracerOutput
@@ -418,8 +419,8 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[Any] | None = None,
-    kwargs: dict[str, Any] | None = None,
+    args: list[VariableTracker] | None = None,
+    kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
     from .variables.builder import SourcelessBuilder
@@ -427,9 +428,7 @@ def raise_observed_exception(
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
-        tx,
-        [SourcelessBuilder.create(tx, a) for a in args] if args else [],
-        kwargs or {},
+        tx, args or [], kwargs or {}
     )
     assert isinstance(exception_vt, ExceptionVals)
     tx._attach_traceback_to_exception(exception_vt)

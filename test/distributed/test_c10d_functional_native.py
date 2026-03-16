@@ -4,7 +4,6 @@ import re
 import threading
 import unittest
 from datetime import timedelta
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -257,6 +256,35 @@ class TestWithNCCL(DistributedTestBase):
                     dtype=torch.bfloat16,
                 ),
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_functional_collectives_batched(self) -> None:
+        self._init_process_group()
+
+        def f(x):
+            if self.rank not in [0, 1]:
+                return
+            tensor = self.rank * x
+            return funcol.wait_tensor(
+                funcol.batch_p2p_ops_inplace(
+                    op_list=["isend" if self.rank == 0 else "irecv"],
+                    peer_list=[1 if self.rank == 0 else 0],
+                    tensors=[tensor],
+                    tag_list=[0],
+                    group_name="",
+                )[0]
+            )
+
+        with torch.inference_mode():
+            input = torch.ones((10), device=self.device)
+            output = f(input)
+            if self.rank == 0:
+                self.assertEqual(
+                    output,
+                    torch.empty(0, device=self.device, dtype=input.dtype),
+                )
+            else:
+                self.assertEqual(output, 0 * input)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -636,7 +664,7 @@ class _DummyWork(dist.Work):
         super().__init__()
         self.pg = pg
 
-    def wait(self, timeout: Optional[timedelta] = None) -> bool:
+    def wait(self, timeout: timedelta | None = None) -> bool:
         self.pg.waits += 1
         return True
 
@@ -722,7 +750,7 @@ class CrossThreadWaitTest(TestCase):
         than where the collective was registered.
         """
         wait_called = False
-        exception_in_thread: Optional[BaseException] = None
+        exception_in_thread: BaseException | None = None
 
         class MyWork(dist.Work):
             def wait(self, _=None):

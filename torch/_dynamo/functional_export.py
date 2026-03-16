@@ -795,6 +795,7 @@ def op_overload_wrapper({", ".join(arg_list)}):
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
         with (
+            _compiling_state_context(),
             torch._dynamo.config.patch(
                 replay_side_effects=False, side_effect_replay_policy="warn"
             ),

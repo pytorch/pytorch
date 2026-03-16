@@ -1,3 +1,4 @@
+import operator
 from typing import Any, TYPE_CHECKING, TypeAlias
 
 import torch.fx
@@ -23,6 +24,11 @@ aten = torch.ops.aten
 
 Node: TypeAlias = torch.fx.Node
 Graph: TypeAlias = torch.fx.Graph
+
+_SYNC_OPS = (
+    torch.ops.streams.record_event.default,
+    torch.ops.streams.wait_event.default,
+)
 
 
 def get_roofline_estimate(node: Node) -> float:
@@ -350,3 +356,158 @@ def populate_fw_metadata_with_stream_indices(
             stream_indices.append(None)
 
     fw_metadata.mutated_inp_stream_indices = stream_indices
+
+
+def _wrap_sync_node(
+    gm: torch.fx.GraphModule,
+    sync_node: Node,
+    deps_before_sync: list[Node],
+    visited: set[Node],
+) -> Node:
+    """
+    Core logic: wrap a single sync node in control_deps.
+
+    Returns the control_deps node that replaced the sync node.
+    ``visited`` is the set of nodes at or before the sync node in graph order,
+    used to distinguish pre-sync vs post-sync users.
+    """
+    from torch._inductor.fx_passes.control_dependencies import (
+        _create_subgraph_for_node,
+        control_deps,
+        get_subgraph_name,
+    )
+
+    graph = gm.graph
+
+    # Use dep.users to find deps with uses after the sync — avoids a forward walk.
+    deps_with_uses_after_sync = [
+        dep
+        for dep in deps_before_sync
+        if any(user not in visited for user in dep.users)
+    ]
+
+    # Create subgraph that executes sync and passes through only used dependencies
+    subgraph_module = _create_subgraph_for_node(
+        graph, sync_node, deps_with_uses_after_sync
+    )
+    subgraph_attr_name = get_subgraph_name(gm, sync_node.name)
+    setattr(gm, subgraph_attr_name, subgraph_module)
+
+    # Create control_deps call
+    # Note: sync nodes (record_event/wait_event) only take int args, no Node args.
+    with graph.inserting_before(sync_node):
+        get_subgraph = graph.get_attr(subgraph_attr_name)
+        control_deps_node = graph.call_function(
+            control_deps,
+            args=(
+                tuple(deps_before_sync),  # additional_deps (all deps for ordering)
+                get_subgraph,  # subgraph
+                *deps_with_uses_after_sync,  # only pass through deps that are used
+            ),
+            kwargs={},
+        )
+
+    # Mark newly created nodes as visited so subsequent syncs don't
+    # misclassify them as "after the sync" during replacement.
+    visited.add(get_subgraph)
+    visited.add(control_deps_node)
+
+    # The output is (sync_result, *deps_with_uses_after_sync)
+    # Create getitem nodes only for dependencies that have uses after sync
+    replacements: dict[Node, Node] = {}
+    with graph.inserting_after(control_deps_node):
+        for i, dep in enumerate(deps_with_uses_after_sync):
+            getitem_node = graph.call_function(
+                operator.getitem,
+                args=(control_deps_node, i + 1),  # +1 because index 0 is sync result
+            )
+            getitem_node.meta.update(dep.meta)
+            replacements[dep] = getitem_node
+            visited.add(getitem_node)
+
+    # Replace uses of dependencies that come after sync_node
+    for dep, getitem_node in replacements.items():
+        for user in list(dep.users.keys()):
+            if user is control_deps_node:
+                continue
+            if user in visited:
+                continue
+            user.args = tuple(getitem_node if arg is dep else arg for arg in user.args)
+            user.kwargs = {
+                k: getitem_node if v is dep else v for k, v in user.kwargs.items()
+            }
+
+    # Remove original sync node
+    sync_node.replace_all_uses_with(control_deps_node)
+    graph.erase_node(sync_node)
+    return control_deps_node
+
+
+def wrap_all_sync_nodes_with_control_deps(gm: torch.fx.GraphModule) -> None:
+    """
+    Single-pass wrap of all sync nodes in control_deps.
+
+    Iterates through the graph once, accumulating per-stream node lists.
+    When a sync node is encountered, it is wrapped using the accumulated deps
+    for that stream, then the deps are reset to the control_deps node
+    (maintaining the ordering chain for subsequent syncs on the same stream).
+    """
+    graph = gm.graph
+    if len(graph.nodes) == 0:
+        raise RuntimeError("Expected a non-empty graph")
+    stream_to_nodes: dict[int | None, list[Node]] = {}
+    # Maps event_index -> control_deps node that wrapped its record_event,
+    # so the corresponding wait_event can depend on the record.
+    event_to_ctrl: dict[int, Node] = {}
+    visited: set[Node] = set()
+    found_sync = False
+
+    # Walk the node linked-list manually so we can mutate the graph
+    # (wrapping sync nodes inserts/erases nodes) without losing our place.
+    node = next(iter(graph.nodes))
+    while node.op != "root":
+        next_node = node.next
+        visited.add(node)
+
+        if node.op == "call_function":
+            if node.target in _SYNC_OPS:
+                event_index: int = node.args[0]  # type: ignore[assignment]
+                sync_stream: int | None = node.args[1]  # type: ignore[assignment]
+                deps_before_sync = stream_to_nodes.get(sync_stream, [])
+
+                # For wait_events, add a cross-event dependency on the
+                # matching record_event's control_deps node so the wait
+                # cannot be reordered before the record.
+                if (
+                    node.target is torch.ops.streams.wait_event.default
+                    and event_index in event_to_ctrl
+                ):
+                    deps_before_sync = [
+                        event_to_ctrl[event_index],
+                        *deps_before_sync,
+                    ]
+
+                if deps_before_sync:
+                    found_sync = True
+                    ctrl_node = _wrap_sync_node(gm, node, deps_before_sync, visited)
+                else:
+                    ctrl_node = None
+
+                if (
+                    node.target is torch.ops.streams.record_event.default
+                    and ctrl_node is not None
+                ):
+                    event_to_ctrl[event_index] = ctrl_node
+
+                # Reset: ops between this sync and the next will accumulate
+                # fresh. Ordering with prior ops is already enforced because
+                # their uses were rewired through getitems from control_deps.
+                stream_to_nodes[sync_stream] = []
+            elif "val" in node.meta:
+                stream = get_stream(node)
+                stream_to_nodes.setdefault(stream, []).append(node)
+
+        node = next_node
+
+    if found_sync:
+        gm.recompile()

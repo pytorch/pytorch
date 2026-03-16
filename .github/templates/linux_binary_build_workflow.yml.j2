@@ -162,7 +162,7 @@ jobs:
       - name: Teardown XPU
         uses: ./.github/actions/teardown-xpu
     {%- else %}
-    runs-on: linux.rocm.gpu.mi250.1
+    runs-on: linux.rocm.gpu.gfx942.1
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     permissions:

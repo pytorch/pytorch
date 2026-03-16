@@ -180,8 +180,13 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         var_kwargs = ConstDictVariable(
             {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
         )
-        constant_args = var_args.as_python_constant()
-        constant_kwargs = var_kwargs.as_python_constant()
+        if should_hoist(self.value):
+            with tx.output.tracing_context.guards_context.skip_guard_install():
+                constant_args = var_args.as_python_constant()
+                constant_kwargs = var_kwargs.as_python_constant()
+        else:
+            constant_args = var_args.as_python_constant()
+            constant_kwargs = var_kwargs.as_python_constant()
         opaque_obj = self.value(  # pyrefly: ignore[not-callable]
             *constant_args, **constant_kwargs
         )
@@ -189,8 +194,15 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
             tx.output.fake_mode, opaque_obj
         )
 
+        # Capture sources from the VT args so subgraph reuse can apply
+        # source replacement to resolve new ctor arg values on stamp-out.
+        ctor_arg_sources = tuple(getattr(a, "source", None) for a in args)
+
         return TorchScriptObjectVariable.create(
-            opaque_obj, fake_script_obj, (constant_args, constant_kwargs)
+            opaque_obj,
+            fake_script_obj,
+            (constant_args, constant_kwargs),
+            ctor_arg_sources=ctor_arg_sources,
         )
 
 
@@ -199,13 +211,23 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     @classmethod
     def is_matching_cls(cls, user_cls: type) -> bool:
-        return issubclass(user_cls, torch.ScriptObject) or is_opaque_type(user_cls)
+        return (
+            issubclass(user_cls, torch.ScriptObject)
+            or is_opaque_type(user_cls)
+            or issubclass(user_cls, FakeScriptObject)
+        )
 
     @staticmethod
     def create(
-        proxy: Proxy, value: Any, ctor_args_kwargs: Any = None, **options: Any
+        proxy: Proxy,
+        value: Any,
+        ctor_args_kwargs: Any = None,
+        ctor_arg_sources: tuple[Source | None, ...] | None = None,
+        **options: Any,
     ) -> "TorchScriptObjectVariable":
-        return TorchScriptObjectVariable(proxy, value, ctor_args_kwargs, **options)
+        return TorchScriptObjectVariable(
+            proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
+        )
 
     def __init__(
         self,
@@ -213,6 +235,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         value: Any,
         ctor_args_kwargs: Any = None,
         source: Source | None = None,
+        ctor_arg_sources: tuple[Source | None, ...] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
@@ -223,6 +246,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         # If the OpaqueObject is sourceless, then this is
         # the constant (args, kwargs) that Dynamo used to construct it.
         self.ctor_args_kwargs = ctor_args_kwargs
+        # Sources of the constructor args, used by subgraph reuse to
+        # resolve new values via source replacement on stamp-out.
+        self.ctor_arg_sources = ctor_arg_sources
 
     def as_proxy(self) -> Proxy:
         if not isinstance(self.proxy, torch.fx.Proxy):
@@ -241,7 +267,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         "NYI: hoisted opaque objects that accept kwargs, please pass as args"
                     )
                 hoisted_vt = tx.output.synthetic_graph_input(
-                    type(self.proxy), self.ctor_args_kwargs[0]
+                    type(self.proxy),
+                    self.ctor_args_kwargs[0],
+                    ctor_arg_sources=self.ctor_arg_sources,
                 )
                 self.proxy = hoisted_vt.as_proxy()
 

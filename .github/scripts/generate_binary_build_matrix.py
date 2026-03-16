@@ -11,11 +11,12 @@ architectures:
     * Latest XPU
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
 from pathlib import Path
-from typing import Optional
 
 
 SCRIPT_DIR = Path(__file__).absolute().parent
@@ -54,7 +55,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
         "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "12.8": (
@@ -62,7 +63,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
         "nvidia-cudnn-cu12==9.19.0.56; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "12.9": (
@@ -70,7 +71,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=12.9.4,<13; platform_system == 'Linux' | "
         "nvidia-cudnn-cu12==9.17.1.4; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux'"
     ),
     "13.0": (
@@ -78,7 +79,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' | "
         "nvidia-cudnn-cu13==9.19.0.56; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.28.9; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.29.3; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'"
     ),
     "xpu": (
@@ -299,8 +300,8 @@ def list_without(in_list: list[str], without: list[str]) -> list[str]:
 def generate_libtorch_matrix(
     os: str,
     release_type: str,
-    arches: Optional[list[str]] = None,
-    libtorch_variants: Optional[list[str]] = None,
+    arches: list[str] | None = None,
+    libtorch_variants: list[str] | None = None,
 ) -> list[dict[str, str]]:
     if arches is None:
         arches = ["cpu"]
@@ -359,8 +360,8 @@ def generate_libtorch_matrix(
 
 def generate_wheels_matrix(
     os: str,
-    arches: Optional[list[str]] = None,
-    python_versions: Optional[list[str]] = None,
+    arches: list[str] | None = None,
+    python_versions: list[str] | None = None,
 ) -> list[dict[str, str]]:
     package_type = "wheel"
     if os == "linux" or os == "linux-aarch64" or os == "linux-s390x":
