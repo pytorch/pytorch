@@ -1418,5 +1418,34 @@ class TestNewEmptyStridedUneven(DTensorTestBase):
         )
 
 
+class DistNewShardingOpsTest(DTensorContinuousTestBase):
+    """E2E tests for ops with new sharding strategies (non-replicate-only)."""
+
+    world_size = 4
+
+    def test_log_normal_shard(self):
+        mesh = self.build_device_mesh()
+        t = torch.randn(8, 6, device=self.device_type)
+        dt = distribute_tensor(t, mesh, [Shard(0)])
+        result = torch.ops.aten.log_normal.default(dt)
+        self.assertEqual(result.placements, (Shard(0),))
+        self.assertEqual(result.shape, torch.Size([8, 6]))
+
+    def test_multinomial_shard_batch(self):
+        mesh = self.build_device_mesh()
+        probs = torch.rand(8, 10, device=self.device_type)
+        probs = probs / probs.sum(dim=-1, keepdim=True)
+        dt = distribute_tensor(probs, mesh, [Shard(0)])
+        result = torch.multinomial(dt, 3, replacement=True)
+        self.assertEqual(result.placements, (Shard(0),))
+        self.assertEqual(result.shape, torch.Size([8, 3]))
+
+
+DistNewShardingOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistNewShardingOpsTest,
+    base_class=LocalDTensorContinuousTestBase,
+)
+
+
 if __name__ == "__main__":
     run_tests()

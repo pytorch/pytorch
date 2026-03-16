@@ -30,6 +30,7 @@ from torch.distributed.tensor._ops.utils import (
     normalize_dim,
     normalize_dims,
     register_op_strategy,
+    replicate_op_strategy,
 )
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
@@ -1678,6 +1679,9 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
     if not isinstance(input_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
 
+    if input_strategy.ndim == 0:
+        return cast(OpStrategy, replicate_op_strategy(op_schema))
+
     dims_arg = args_schema[1]
     reduce_dims = _infer_reduction_dims(dims_arg, input_strategy.ndim)
     if reduce_dims is None:
@@ -1868,6 +1872,18 @@ def linalg_cross_strategy(
     return strategies
 
 
+@register_single_dim_strategy(
+    [aten.linalg_tensorsolve.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def linalg_tensorsolve_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Interpolation / upsample / pooling ops
 #
@@ -2035,3 +2051,66 @@ def group_norm_strategy(
     # weight and bias (if present) must be Replicate
     placements.extend([Replicate()] * (num_tensor_inputs - 1))
     return [placements]
+
+
+@register_single_dim_strategy(
+    [aten.quantile.default, aten.nanquantile.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def quantile_default_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # quantile(self, q, dim, keepdim) -> Tensor
+    # q is a 1-D tensor: output has extra leading dim from q.
+    # When dim is not None, reduce along dim; shard on all other dims.
+    self_meta = args_schema[0]
+    if not isinstance(self_meta, TensorMeta):
+        return []
+    ndim = len(self_meta.shape)
+    dim = args_schema[2] if len(args_schema) > 2 else None
+    if dim is None:
+        return []
+    dim = normalize_dim(cast(int, dim), ndim)
+    keepdim = cast(bool, args_schema[3]) if len(args_schema) > 3 else False
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d == dim:
+            continue
+        # output dim is shifted by +1 because q adds a leading dim
+        out_d = d + 1 if d < dim or keepdim else d
+        # output, self, q(Replicate)
+        strategies.append(
+            [_ShardingPlaceholder(out_d), _ShardingPlaceholder(d), Replicate()]
+        )
+    return strategies
+
+
+@register_single_dim_strategy(
+    [aten.quantile.scalar, aten.nanquantile.scalar],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def quantile_scalar_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # quantile(self, q_scalar, dim, keepdim) -> Tensor
+    # q is a scalar, no extra dim in output.
+    self_meta = args_schema[0]
+    if not isinstance(self_meta, TensorMeta):
+        return []
+    ndim = len(self_meta.shape)
+    dim = args_schema[2] if len(args_schema) > 2 else None
+    if dim is None:
+        return []
+    dim = normalize_dim(cast(int, dim), ndim)
+    keepdim = cast(bool, args_schema[3]) if len(args_schema) > 3 else False
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d == dim:
+            continue
+        out_d = d if (d < dim or keepdim) else d - 1
+        strategies.append([_ShardingPlaceholder(out_d), _ShardingPlaceholder(d)])
+    return strategies

@@ -452,6 +452,8 @@ def dim_tile(ndim: int, dims: tuple[int, ...]) -> DimMap:
 
 
 def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
+    if ndim == 0:
+        return ()
     dim1 = normalize_dim(dim1, ndim)
     dim2 = normalize_dim(dim2, ndim)
     if not dim1 < ndim:
@@ -465,18 +467,26 @@ def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
     return tuple(dimmap)
 
 
-def dim_squeeze(shape: Shape, dim: int | None = None) -> DimMap:
+def dim_squeeze(shape: Shape, dim: int | Sequence[int] | None = None) -> DimMap:
     # FIXME: this is wrong when dim=None and one of the dimensions
     # equals size of the mesh. For example squeeze(DTensor(tensor(4), Shard[0])) could
     # end up as squeeze(tensor(1)) if we have 4 devices; this would lead to
     # removal of a dimension that is not actually a singleton.
     from torch.fx.experimental.symbolic_shapes import guard_or_true
 
+    if isinstance(dim, (list, tuple)):
+        squeeze_dims = {normalize_dim(d, len(shape)) for d in dim}
+        return tuple(
+            InputDim(i)
+            for i, s in enumerate(shape)
+            if guard_or_true(s > 1) or i not in squeeze_dims
+        )
+
     return tuple(
         InputDim(i)
         for i, s in enumerate(shape)
         if guard_or_true(s > 1)
-        or (dim is not None and i != normalize_dim(dim, len(shape)))
+        or (dim is not None and i != normalize_dim(cast(int, dim), len(shape)))
     )
 
 

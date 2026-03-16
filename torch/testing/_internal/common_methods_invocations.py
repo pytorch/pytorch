@@ -21170,7 +21170,6 @@ op_db: list[OpInfo] = [
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_transpose_swapdims,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
                DecorateInfo(
                    unittest.expectedFailure,
                    'TestJit',

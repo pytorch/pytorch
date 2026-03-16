@@ -2032,5 +2032,245 @@ class TestSingleDimStrategyRegistration(TestCase):
         self.assertIsNone(result, "No-output op should return None")
 
 
+class TestNewTensorOpStrategies(TestCase):
+    """Strategy unit tests for ops broken out of replicate_only_single_dim_strategy."""
+
+    def setUp(self):
+        super().setUp()
+        self.world_size = 4
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def _check_strategy(self, aten_op, args_meta, kwargs_meta, expected):
+        funcs = DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
+        self.assertIn(aten_op, funcs)
+        strategies = funcs[aten_op](aten_op, args_meta, kwargs_meta)
+        from torch.utils._pytree import tree_map_only
+
+        resolved = tree_map_only(
+            _ShardingPlaceholder, lambda s: Shard(s.dim), strategies
+        )
+        self.assertEqual(resolved, expected)
+
+    def test_grid_sampler_3d(self):
+        inp = TensorMeta(
+            torch.Size([4, 3, 4, 4, 4]), (192, 64, 16, 4, 1), torch.float32
+        )
+        grid = TensorMeta(
+            torch.Size([4, 4, 4, 4, 3]), (192, 48, 12, 3, 1), torch.float32
+        )
+        self._check_strategy(
+            torch.ops.aten.grid_sampler_3d.default,
+            (inp, grid, 0, 0, True),
+            {},
+            [[Shard(0), Shard(0), Shard(0)]],
+        )
+
+    def test_multinomial(self):
+        meta = TensorMeta(torch.Size([4, 10]), (10, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.multinomial.default,
+            (meta, 3, True),
+            {},
+            [[Shard(0), Shard(0)]],
+        )
+
+    def test_scatter_reduce(self):
+        self_m = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        idx_m = TensorMeta(torch.Size([4, 6]), (6, 1), torch.long)
+        src_m = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.scatter_reduce.two,
+            (self_m, 1, idx_m, src_m, "sum"),
+            {},
+            [[Shard(0), Shard(0), Shard(0), Shard(0)]],
+        )
+
+    def test_index_reduce(self):
+        self_m = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        idx_m = TensorMeta(torch.Size([4]), (1,), torch.long)
+        src_m = TensorMeta(torch.Size([4, 4]), (4, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.index_reduce.default,
+            (self_m, 1, idx_m, src_m, "mean"),
+            {},
+            [[Shard(0), Shard(0), Replicate(), Shard(0)]],
+        )
+
+    def test_take_along_dim(self):
+        self_m = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        idx_m = TensorMeta(torch.Size([4, 2]), (2, 1), torch.long)
+        self._check_strategy(
+            torch.ops.aten.take_along_dim.default,
+            (self_m, idx_m, 1),
+            {},
+            [[Shard(0), Shard(0), Shard(0)]],
+        )
+
+    def test_searchsorted_tensor(self):
+        sorted_m = TensorMeta(torch.Size([4, 10]), (10, 1), torch.float32)
+        vals_m = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.searchsorted.Tensor,
+            (sorted_m, vals_m),
+            {},
+            [[Shard(0), Shard(0), Shard(0)]],
+        )
+
+    def test_diagonal_scatter(self):
+        self_m = TensorMeta(torch.Size([4, 6, 6]), (36, 6, 1), torch.float32)
+        src_m = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.diagonal_scatter.default,
+            (self_m, src_m, 0, 1, 2),
+            {},
+            [[Shard(0), Shard(0), Shard(0)]],
+        )
+
+    def test_diagonal_scatter_4d(self):
+        # 4D: self(2,3,4,5), dim1=0, dim2=2 → src has non-diag dims [1,3] + diag
+        self_m = TensorMeta(torch.Size([2, 3, 4, 5]), (60, 20, 5, 1), torch.float32)
+        src_m = TensorMeta(torch.Size([3, 5, 2]), (10, 2, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.diagonal_scatter.default,
+            (self_m, src_m, 0, 0, 2),
+            {},
+            [[Shard(1), Shard(1), Shard(0)], [Shard(3), Shard(3), Shard(1)]],
+        )
+
+    def test_cdist_forward(self):
+        x1_m = TensorMeta(torch.Size([4, 6, 8]), (48, 8, 1), torch.float32)
+        x2_m = TensorMeta(torch.Size([4, 4, 8]), (32, 8, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten._cdist_forward.default,
+            (x1_m, x2_m, 2.0, None),
+            {},
+            [[Shard(0), Shard(0), Shard(0)]],
+        )
+
+    def test_isin_tensor_tensor(self):
+        elem_m = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        test_m = TensorMeta(torch.Size([3]), (1,), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.isin.Tensor_Tensor,
+            (elem_m, test_m),
+            {},
+            [[Shard(0), Shard(0), Replicate()], [Shard(1), Shard(1), Replicate()]],
+        )
+
+    def test_isin_tensor_scalar(self):
+        meta = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.isin.Tensor_Scalar,
+            (meta, 2.0),
+            {},
+            [[Shard(0), Shard(0)], [Shard(1), Shard(1)]],
+        )
+
+    def test_addbmm(self):
+        # addbmm: self(N,M) + sum_b(batch1(B,N,K) @ batch2(B,K,M)) → (N,M)
+        # einsum "bnk,bkm->nm": b,k contracting; n lhs-free; m rhs-free
+        bias_m = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        b1_m = TensorMeta(torch.Size([2, 4, 3]), (12, 3, 1), torch.float32)
+        b2_m = TensorMeta(torch.Size([2, 3, 6]), (18, 6, 1), torch.float32)
+        strategies = self._get_strategies(
+            torch.ops.aten.addbmm.default,
+            (bias_m, b1_m, b2_m),
+            {},
+        )
+        # Should include: shard on n (lhs-free), shard on m (rhs-free),
+        # and contracting dims b,k producing Partial
+        has_shard_n = any(s[0] == Shard(0) and s[2] == Shard(1) for s in strategies)
+        has_shard_m = any(s[0] == Shard(1) and s[3] == Shard(2) for s in strategies)
+        has_partial = any(isinstance(s[0], Partial) for s in strategies)
+        self.assertTrue(has_shard_n, f"Missing n-dim strategy in {strategies}")
+        self.assertTrue(has_shard_m, f"Missing m-dim strategy in {strategies}")
+        self.assertTrue(has_partial, f"Missing Partial strategy in {strategies}")
+
+    def test_trilinear(self):
+        # bilinear pattern: i1(N,in1), i2(out,in1,in2), i3(N,in2)
+        # expand1=[1,3], expand2=[0], expand3=[1,2], sumdim=[2,3]
+        # virtual dims: [0=batch, 1=out, 2=in1, 3=in2]
+        # output dims: [0=batch, 1=out]
+        i1_m = TensorMeta(torch.Size([4, 3]), (3, 1), torch.float32)
+        i2_m = TensorMeta(torch.Size([2, 3, 5]), (15, 5, 1), torch.float32)
+        i3_m = TensorMeta(torch.Size([4, 5]), (5, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten._trilinear.default,
+            (i1_m, i2_m, i3_m, [1, 3], [0], [1, 2], [2, 3], 1),
+            {},
+            [
+                # batch dim 0: i1 Shard(0), i2 Replicate, i3 Shard(0)
+                [Shard(0), Shard(0), Replicate(), Shard(0)],
+                # out dim 1: i1 Replicate, i2 Shard(0), i3 Replicate
+                [Shard(1), Replicate(), Shard(0), Replicate()],
+                # contracting dim 2 (in1): Partial, i1 Shard(1), i2 Shard(1), i3 Replicate
+                [Partial(), Shard(1), Shard(1), Replicate()],
+                # contracting dim 3 (in2): Partial, i1 Replicate, i2 Shard(2), i3 Shard(1)
+                [Partial(), Replicate(), Shard(2), Shard(1)],
+            ],
+        )
+
+    def _get_strategies(self, aten_op, args_meta, kwargs_meta):
+        funcs = DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
+        self.assertIn(aten_op, funcs)
+        strategies = funcs[aten_op](aten_op, args_meta, kwargs_meta)
+        from torch.utils._pytree import tree_map_only
+
+        return tree_map_only(_ShardingPlaceholder, lambda s: Shard(s.dim), strategies)
+
+
+class TestNewMathOpStrategies(TestCase):
+    """Strategy unit tests for quantile/nanquantile ops."""
+
+    def setUp(self):
+        super().setUp()
+        self.world_size = 4
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def _check_strategy(self, aten_op, args_meta, kwargs_meta, expected):
+        funcs = DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
+        self.assertIn(aten_op, funcs)
+        strategies = funcs[aten_op](aten_op, args_meta, kwargs_meta)
+        from torch.utils._pytree import tree_map_only
+
+        resolved = tree_map_only(
+            _ShardingPlaceholder, lambda s: Shard(s.dim), strategies
+        )
+        self.assertEqual(resolved, expected)
+
+    def test_quantile_scalar(self):
+        meta = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.quantile.scalar,
+            (meta, 0.5, 1, False),
+            {},
+            [[Shard(0), Shard(0)]],
+        )
+
+    def test_quantile_default(self):
+        meta = TensorMeta(torch.Size([4, 6]), (6, 1), torch.float32)
+        q_meta = TensorMeta(torch.Size([2]), (1,), torch.float32)
+        self._check_strategy(
+            torch.ops.aten.quantile.default,
+            (meta, q_meta, 1, False),
+            {},
+            [[Shard(1), Shard(0), Replicate()]],
+        )
+
+
 if __name__ == "__main__":
     run_tests()

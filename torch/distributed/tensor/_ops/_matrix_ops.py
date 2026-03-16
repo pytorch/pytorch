@@ -447,6 +447,18 @@ def baddbmm_single_dim_strategy(
     return gen_single_dim_einsum_strategies("bmk,bkn->bmn", bias_shape=bias_meta.shape)
 
 
+@register_single_dim_strategy(aten.addbmm.default, allow_unbacked_sharding=True)
+def addbmm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    # addbmm: self(N,M) + sum_b(batch1(B,N,K) @ batch2(B,K,M))
+    # einsum "bnk,bkm->nm": b and k are contracting, n is lhs-free, m is rhs-free
+    bias_meta = args_schema[0]
+    if not isinstance(bias_meta, TensorMeta):
+        raise AssertionError
+    return gen_single_dim_einsum_strategies("bnk,bkm->nm", bias_shape=bias_meta.shape)
+
+
 @register_single_dim_strategy(aten._scaled_mm.default, allow_unbacked_sharding=True)
 def scaled_mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
