@@ -235,6 +235,7 @@ void OcclTransport::acceptLoop() {
       if (stop_.load()) {
         break; // listenFd_ was closed during shutdown
       }
+      TORCH_WARN("OCCL acceptLoop: accept() failed: ", strerror(errno));
       break;
     }
 
@@ -263,15 +264,19 @@ void OcclTransport::sendAll(int fd, const void* buf, size_t len) {
   size_t sent = 0;
   while (sent < len) {
     auto n = ::send(fd, ptr + sent, len - sent, 0);
-    if (n <= 0) {
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+    if (n > 0) {
+      sent += static_cast<size_t>(n);
+      continue;
+    }
+    if (n < 0 && errno == EINTR) {
+      continue;
+    }
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         C10_THROW_ERROR(DistBackendError, "OCCL send timed out");
       }
       C10_THROW_ERROR(
           DistBackendError,
           std::string("OCCL send failed: ") + strerror(errno));
-    }
-    sent += static_cast<size_t>(n);
   }
 }
 
@@ -280,18 +285,22 @@ void OcclTransport::recvAll(int fd, void* buf, size_t len) {
   size_t received = 0;
   while (received < len) {
     auto n = ::recv(fd, ptr + received, len - received, 0);
-    if (n <= 0) {
+    if (n > 0) {
+      received += static_cast<size_t>(n);
+      continue;
+    }
       if (n == 0) {
         C10_THROW_ERROR(DistBackendError, "OCCL recv: peer closed connection");
       }
+    if (errno == EINTR) {
+      continue;
+    }
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         C10_THROW_ERROR(DistBackendError, "OCCL recv timed out");
       }
       C10_THROW_ERROR(
           DistBackendError,
           std::string("OCCL recv failed: ") + strerror(errno));
-    }
-    received += static_cast<size_t>(n);
   }
 }
 

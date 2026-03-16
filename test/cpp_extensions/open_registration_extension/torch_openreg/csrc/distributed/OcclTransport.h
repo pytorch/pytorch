@@ -31,7 +31,7 @@ static_assert(sizeof(WireHeader) == 13, "WireHeader must be 13 bytes");
 // on first send/recv.
 //
 // This is the component vendors replace with their hardware-specific
-// transport (RDMA, NVLink, proprietary interconnect).
+// transport.
 class OcclTransport {
  public:
   OcclTransport(
