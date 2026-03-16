@@ -55,13 +55,13 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
     ops,
 )
 from torch.testing._internal.common_dtype import all_types_complex_float8_and
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,

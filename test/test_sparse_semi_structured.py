@@ -22,7 +22,6 @@ from torch.sparse._semi_structured_conversions import (
 )
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_SPARSE,
     xfailIfSM89PreCUDA13,
 )
@@ -31,6 +30,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_dtype import all_types_and_complex
+import torch._dynamo.test_case
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,

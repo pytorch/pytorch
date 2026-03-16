@@ -14,13 +14,13 @@ from torch.nn.attention.varlen import varlen_attn, varlen_attn_out
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_CK_SDPA,
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM100OrLater,
     SM120OrLater,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
+from torch.testing._internal.common_gpu import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     decorateIf,
     parametrize,
