@@ -1055,7 +1055,7 @@ class TestLinalg(TestCase):
         for shape in [(0, 3, 3), (2, 0, 0)]:
             A = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
             det = torch.linalg.det(A)
-            det.sum().backward()
+            det.backward(torch.ones_like(det))
             self.assertIsNotNone(A.grad)
             self.assertEqual(A.grad.shape, A.shape)
             self.assertEqual(A.grad, torch.zeros_like(A))
