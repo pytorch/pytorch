@@ -125,6 +125,19 @@ find_library(
   NO_DEFAULT_PATH
 )
 
+# Find Intel runtime library (libintlc), required when linking SYCL objects
+# with a non-icpx linker (e.g. g++). icpx adds this automatically, but g++
+# does not, leading to undefined reference to '_intel_fast_memcpy' etc.
+find_library(
+  SYCL_INTLC_LIBRARY
+  NAMES intlc
+  HINTS ${SYCL_LIBRARY_DIR}
+  NO_DEFAULT_PATH
+)
+if(SYCL_INTLC_LIBRARY)
+  list(APPEND SYCL_LIBRARY ${SYCL_INTLC_LIBRARY})
+endif()
+
 if((NOT SYCL_LIBRARY) OR (NOT OCL_LIBRARY))
   set(SYCL_FOUND False)
   set(SYCL_REASON_FAILURE "SYCL library is incomplete!!")
