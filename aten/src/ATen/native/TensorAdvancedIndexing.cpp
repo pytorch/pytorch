@@ -385,6 +385,20 @@ static void index_func_meta_impl(
       source.scalar_type(),
       ") must have the same scalar type");
   TORCH_CHECK(
+      index.device() == self.device(),
+      func,
+      "_(): index must be on the same device as self, but got index on ",
+      index.device(),
+      " and self on ",
+      self.device());
+  TORCH_CHECK(
+      source.device() == self.device(),
+      func,
+      "_(): source must be on the same device as self, but got source on ",
+      source.device(),
+      " and self on ",
+      self.device());
+  TORCH_CHECK(
       dim == 0 || dim < source.dim(),
       func,
       "_(): Indexing dim ",

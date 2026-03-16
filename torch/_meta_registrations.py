@@ -113,6 +113,13 @@ def check_inplace_broadcast(self_shape, *args_shape):
     )
 
 
+def _get_tensor_device(tensor):
+    """Get the actual device, handling FakeTensor which stores device in fake_device."""
+    if isinstance(tensor, torch._subclasses.FakeTensor):
+        return tensor.fake_device
+    return tensor.device
+
+
 @register_meta([aten.linspace, aten.logspace])
 @out_wrapper()
 def meta_linspace_logspace(
@@ -758,6 +765,18 @@ def meta_index_reduce(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    # Check that all tensors are on the same device
+    self_device = _get_tensor_device(self)
+    index_device = _get_tensor_device(index)
+    source_device = _get_tensor_device(source)
+    torch._check(
+        index_device == self_device,
+        lambda: f"index_reduce_(): index must be on the same device as self, but got index on {index_device} and self on {self_device}",  # noqa: B950
+    )
+    torch._check(
+        source_device == self_device,
+        lambda: f"index_reduce_(): source must be on the same device as self, but got source on {source_device} and self on {self_device}",  # noqa: B950
+    )
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
 
@@ -771,6 +790,18 @@ def meta_index_reduce_(
     *,
     include_self: bool = True,
 ) -> Tensor:
+    # Check that all tensors are on the same device
+    self_device = _get_tensor_device(self)
+    index_device = _get_tensor_device(index)
+    source_device = _get_tensor_device(source)
+    torch._check(
+        index_device == self_device,
+        lambda: f"index_reduce_(): index must be on the same device as self, but got index on {index_device} and self on {self_device}",  # noqa: B950
+    )
+    torch._check(
+        source_device == self_device,
+        lambda: f"index_reduce_(): source must be on the same device as self, but got source on {source_device} and self on {self_device}",  # noqa: B950
+    )
     return self
 
 
@@ -4559,6 +4590,23 @@ def meta_masked_scatter_backward(self, mask, sizes):
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
     return self
+
+
+@register_meta(aten.index_add.default)
+def meta_index_add(self, dim, index, source, *, alpha=1):
+    # Check that all tensors are on the same device
+    self_device = _get_tensor_device(self)
+    index_device = _get_tensor_device(index)
+    source_device = _get_tensor_device(source)
+    torch._check(
+        index_device == self_device,
+        lambda: f"index_add_(): index must be on the same device as self, but got index on {index_device} and self on {self_device}",  # noqa: B950
+    )
+    torch._check(
+        source_device == self_device,
+        lambda: f"index_add_(): source must be on the same device as self, but got source on {source_device} and self on {self_device}",  # noqa: B950
+    )
+    return self.new_empty(self.shape)
 
 
 def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype=None):
