@@ -1,1 +1,1 @@
-from . import rmsnorm  # noqa: F401
+from . import norm  # noqa: F401

@@ -40,7 +40,7 @@ def _get_device_major(device: torch.device) -> int:
 
 @functools.cache
 def _get_rmsnorm_kernels():
-    from ._kernels.norms import cutedsl_rmsnorm_bwd, cutedsl_rmsnorm_fwd
+    from .norms import cutedsl_rmsnorm_bwd, cutedsl_rmsnorm_fwd
 
     return cutedsl_rmsnorm_fwd, cutedsl_rmsnorm_bwd
 
