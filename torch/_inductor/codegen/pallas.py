@@ -4184,6 +4184,7 @@ from torch._inductor.runtime.runtime_utils import (
             f"def {main_name}({', '.join(ctx.full_kernel_params)}, stream=None):"
         )
         with code.indent():
+            code.writeline("jax.config.update('jax_enable_x64', False)")
             code.writeline("jax.clear_caches()")
 
             # Build JAX placeholders for all inputs
