@@ -187,7 +187,7 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'  && inputs.build-environment != 'linux-ppc64le-binary-manywheel' && steps.use-old-whl.outputs.reuse != 'true'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'  && inputs.build-environment != 'linux-ppc64le-binary-manywheel'
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
