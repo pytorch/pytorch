@@ -345,3 +345,162 @@ class MMKernelInputs(KernelInputs):
         if len(mat1_shape) >= 3:
             return mat1_shape[-3]  # Batch from third-to-last dimension
         return 1  # Non-batched operation
+
+
+class ConvKernelInputs(KernelInputs):
+    """
+    Specialized KernelInputs for convolution operations.
+    Stores input tensor (x), weight tensor, and optional bias along with
+    convolution parameters (stride, padding, dilation, groups, etc.).
+    """
+
+    def __init__(
+        self,
+        input_nodes: list[Any],
+        stride: tuple[int, ...],
+        padding: tuple[int, ...],
+        dilation: tuple[int, ...],
+        groups: int,
+        layout: Layout,
+        transposed: bool = False,
+        output_padding: tuple[int, ...] = (),
+        out_dtype: torch.dtype | None = None,
+    ):
+        """
+        Initialize with input nodes and convolution parameters.
+
+        Args:
+            input_nodes: List of input nodes [x, weight] or [x, weight, bias]
+            stride: Convolution stride
+            padding: Convolution padding
+            dilation: Convolution dilation
+            groups: Number of groups for grouped convolution
+            layout: Pre-computed output layout from conv_layout()
+            transposed: Whether this is a transposed convolution
+            output_padding: Output padding for transposed convolution
+            out_dtype: Optional output dtype
+        """
+        # Store conv params as scalars for key generation
+        # We stringify tuples for consistent key format
+        scalars: dict[str, float | int | str] = {
+            "stride": str(stride),
+            "padding": str(padding),
+            "dilation": str(dilation),
+            "groups": groups,
+        }
+        super().__init__(input_nodes, scalars, out_dtype)  # type: ignore[arg-type]
+
+        # Store convolution parameters
+        self._stride = stride
+        self._padding = padding
+        self._dilation = dilation
+        self._groups = groups
+        self._transposed = transposed
+        self._output_padding = output_padding
+        self._layout = layout
+
+        # Validate inputs: need at least x and weight
+        assert len(self._input_nodes) >= 2, "Expected at least 2 input nodes (x, weight)"
+
+    @property
+    def x(self) -> Any:
+        """Get the input tensor node."""
+        return self._input_nodes[0]
+
+    @property
+    def weight(self) -> Any:
+        """Get the weight tensor node."""
+        return self._input_nodes[1]
+
+    @property
+    def bias(self) -> Any | None:
+        """Get the bias tensor node if present."""
+        return self._input_nodes[2] if len(self._input_nodes) > 2 else None
+
+    @property
+    def stride(self) -> tuple[int, ...]:
+        """Get the convolution stride."""
+        return self._stride
+
+    @property
+    def padding(self) -> tuple[int, ...]:
+        """Get the convolution padding."""
+        return self._padding
+
+    @property
+    def dilation(self) -> tuple[int, ...]:
+        """Get the convolution dilation."""
+        return self._dilation
+
+    @property
+    def groups(self) -> int:
+        """Get the number of groups."""
+        return self._groups
+
+    @property
+    def transposed(self) -> bool:
+        """Check if this is a transposed convolution."""
+        return self._transposed
+
+    @property
+    def output_padding(self) -> tuple[int, ...]:
+        """Get the output padding for transposed convolution."""
+        return self._output_padding
+
+    def out_dtype(self) -> torch.dtype:
+        """
+        Get the output dtype, whether passed in or inferred from the input tensor.
+
+        Returns:
+            The output dtype
+        """
+        if self._out_dtype is not None:
+            return self._out_dtype
+        return self.x.get_dtype()
+
+    def output_layout(self, flexible: bool = True) -> Layout:
+        """
+        Get the output layout for convolution.
+
+        Args:
+            flexible: If True, return FlexibleLayout, otherwise FixedLayout
+
+        Returns:
+            The output layout
+        """
+        # Use pre-computed layout but respect flexible flag
+        if flexible and isinstance(self._layout, FixedLayout):
+            return FlexibleLayout(
+                self._layout.device,
+                self._layout.dtype,
+                self._layout.size,
+            )
+        elif not flexible and isinstance(self._layout, FlexibleLayout):
+            return FixedLayout(
+                self._layout.device,
+                self._layout.dtype,
+                self._layout.size,
+                self._layout.stride,
+            )
+        return self._layout
+
+    def kernel_shape_hinted(self) -> tuple[int, ...]:
+        """
+        Get the hinted kernel shape from the weight tensor.
+
+        Returns:
+            The kernel spatial dimensions as integers
+        """
+        weight_shape = self.shapes_hinted()[1]
+        # Weight shape is [out_channels, in_channels/groups, *kernel_shape]
+        return weight_shape[2:]
+
+    def ndim(self) -> int:
+        """
+        Get the number of spatial dimensions (1, 2, or 3).
+
+        Returns:
+            The number of spatial dimensions
+        """
+        weight_shape = self.weight.get_size()
+        return len(weight_shape) - 2  # Subtract out_channels and in_channels dims

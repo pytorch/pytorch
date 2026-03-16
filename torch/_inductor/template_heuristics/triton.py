@@ -17,6 +17,13 @@ from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config, config as inductor_config
 from ..kernel.bmm import bmm_template
+from ..kernel.conv import (
+    aten_conv1x1_via_mm,
+    aten_convolution,
+    conv2d_template,
+    conv3d_template,
+    depthwise_conv1d_template,
+)
 from ..kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
     get_scaling_options,
@@ -27,7 +34,7 @@ from ..kernel.mm import (
     scaled_mm_device_tma_main_loop_scaling_template,
 )
 from ..kernel.mm_plus_mm import mm_plus_mm_template
-from ..kernel_inputs import KernelInputs, MMKernelInputs
+from ..kernel_inputs import ConvKernelInputs, KernelInputs, MMKernelInputs
 from ..utils import (
     get_backend_num_stages,
     get_num_sms,
@@ -36,6 +43,7 @@ from ..utils import (
     using_b200,
 )
 from ..virtualized import V
+from .base import TemplateConfigHeuristics
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 from .registry import register_template_heuristic
 
@@ -3058,3 +3066,281 @@ class MTIAMMPlusMMTemplateConfigHeuristic(
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
         self.exhaustive_configs = self.mm_plus_mm_configs
+
+
+# Convolution template-specific mixin classes
+
+
+class ConvTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
+    """
+    Mixin class that generates configs for conv2d/conv3d templates.
+    Uses the conv_configs from BaseConfigHeuristic.
+    """
+
+    # Type annotations for mixin
+    get_conv_configs: Callable[[], partial[Generator[TritonConfig, None, None]]]
+
+    def get_extra_kwargs(
+        self, kernel_inputs: KernelInputs, op_name: str
+    ) -> dict[str, Any]:
+        """
+        Get operation-specific kwargs for conv templates.
+        These are fixed by the convolution operation, not tunable.
+        """
+        assert isinstance(kernel_inputs, ConvKernelInputs), (
+            f"{self.__class__.__name__} requires ConvKernelInputs"
+        )
+
+        kernel_shape = kernel_inputs.kernel_shape_hinted()
+        stride = kernel_inputs.stride
+        padding = kernel_inputs.padding
+        groups = kernel_inputs.groups
+        ndim = kernel_inputs.ndim()
+
+        # Check if all kernel dimensions are 1
+        unroll = all(k == 1 for k in kernel_shape)
+        allow_tf32 = torch.backends.cudnn.fp32_precision == "tf32"
+
+        if ndim == 2:
+            return {
+                "KERNEL_H": kernel_shape[0],
+                "KERNEL_W": kernel_shape[1],
+                "STRIDE_H": stride[0],
+                "STRIDE_W": stride[1],
+                "PADDING_H": padding[0],
+                "PADDING_W": padding[1],
+                "GROUPS": groups,
+                "UNROLL": unroll,
+                "ALLOW_TF32": allow_tf32,
+            }
+        else:  # ndim == 3
+            return {
+                "KERNEL_D": kernel_shape[0],
+                "KERNEL_H": kernel_shape[1],
+                "KERNEL_W": kernel_shape[2],
+                "STRIDE_D": stride[0],
+                "STRIDE_H": stride[1],
+                "STRIDE_W": stride[2],
+                "PADDING_D": padding[0],
+                "PADDING_H": padding[1],
+                "PADDING_W": padding[2],
+                "GROUPS": groups,
+                "UNROLL": unroll,
+                "ALLOW_TF32": allow_tf32,
+            }
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """Generate template configs for convolution."""
+        assert isinstance(kernel_inputs, ConvKernelInputs), (
+            f"{self.__class__.__name__} requires ConvKernelInputs"
+        )
+
+        configs = self.get_conv_configs()
+
+        # Extract dimensions for scaling configs
+        input_shapes = kernel_inputs.shapes_symbolic()
+        x_shape = input_shapes[0]  # Input tensor shape
+        weight_shape = input_shapes[1]  # Weight tensor shape
+
+        # For conv2d: x is [N, C, H, W], weight is [out_c, in_c, kH, kW]
+        # For conv3d: x is [N, C, D, H, W], weight is [out_c, in_c, kD, kH, kW]
+        ndim = kernel_inputs.ndim()
+
+        assert ndim in (2, 3), f"ConvTemplateConfigMixin only supports 2D/3D conv, got ndim={ndim}"
+
+        if ndim == 2:
+            batch = x_shape[0]
+            in_channels = x_shape[1]
+            h, w = x_shape[2], x_shape[3]
+            out_channels = weight_shape[0]
+            m = batch * h * w
+            n = out_channels
+            k = in_channels
+        else:  # ndim == 3
+            batch = x_shape[0]
+            in_channels = x_shape[1]
+            d, h, w = x_shape[2], x_shape[3], x_shape[4]
+            out_channels = weight_shape[0]
+            m = batch * d * h * w
+            n = out_channels
+            k = in_channels
+
+        for triton_config in configs(m, n, k, dtype_size=kernel_inputs.dtype().itemsize):
+            yield {
+                "BLOCK_M": triton_config.kwargs["BLOCK_M"],
+                "BLOCK_N": triton_config.kwargs["BLOCK_N"],
+                "BLOCK_K": triton_config.kwargs["BLOCK_K"],
+                "num_stages": triton_config.num_stages,
+                "num_warps": triton_config.num_warps,
+            }
+
+
+class DepthwiseConvTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
+    """
+    Mixin class that generates configs for depthwise conv1d template.
+    Uses the depthwise_conv_configs from BaseConfigHeuristic.
+    """
+
+    # Type annotations for mixin
+    depthwise_conv_configs: list[DepthwiseConvConfig]
+
+    def get_extra_kwargs(
+        self, kernel_inputs: KernelInputs, op_name: str
+    ) -> dict[str, Any]:
+        """
+        Get operation-specific kwargs for depthwise conv1d template.
+        These are fixed by the convolution operation, not tunable.
+        """
+        assert isinstance(kernel_inputs, ConvKernelInputs), (
+            f"{self.__class__.__name__} requires ConvKernelInputs"
+        )
+
+        kernel_shape = kernel_inputs.kernel_shape_hinted()
+        stride = kernel_inputs.stride
+        padding = kernel_inputs.padding
+
+        return {
+            "KERNEL_SIZE": kernel_shape[0],
+            "CONV_STRIDE": stride[0],
+            "PADDING": padding[0],
+        }
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """Generate template configs for depthwise conv1d."""
+        assert isinstance(kernel_inputs, ConvKernelInputs), (
+            f"{self.__class__.__name__} requires ConvKernelInputs"
+        )
+
+        for triton_config in self.get_depthwise_conv_configs():
+            yield {
+                "BLOCK_N": triton_config.kwargs["BLOCK_N"],
+                "BLOCK_L": triton_config.kwargs["BLOCK_L"],
+                "BLOCK_C": triton_config.kwargs["BLOCK_C"],
+                "num_stages": triton_config.num_stages,
+                "num_warps": triton_config.num_warps,
+            }
+
+
+# ATen convolution heuristic
+
+
+@register_template_heuristic(aten_convolution.uid, None)
+@register_template_heuristic(aten_conv1x1_via_mm.uid, None)
+class ATenConvConfigHeuristics(TemplateConfigHeuristics):
+    """Pseudo heuristic for ATen convolution - single choice with cpp binding kwargs."""
+
+    def get_extra_kwargs(
+        self, kernel_inputs: KernelInputs, op_name: str
+    ) -> dict[str, Any]:
+        """
+        Get kwargs needed for ATen convolution cpp kernel binding.
+        """
+        assert isinstance(kernel_inputs, ConvKernelInputs), (
+            f"{self.__class__.__name__} requires ConvKernelInputs"
+        )
+
+        # Build ordered_kwargs_for_cpp_kernel based on whether bias is present
+        ordered_kwargs_for_cpp_kernel = [
+            "stride",
+            "padding",
+            "dilation",
+            "transposed",
+            "output_padding",
+            "groups",
+        ]
+        if kernel_inputs.bias is None:
+            ordered_kwargs_for_cpp_kernel.insert(0, "bias")
+
+        result = {
+            "ordered_kwargs_for_cpp_kernel": ordered_kwargs_for_cpp_kernel,
+            "stride": kernel_inputs.stride,
+            "padding": kernel_inputs.padding,
+            "dilation": kernel_inputs.dilation,
+            "transposed": kernel_inputs.transposed,
+            "output_padding": kernel_inputs.output_padding,
+            "groups": kernel_inputs.groups,
+        }
+        # Only include bias in kwargs when it's None.
+        # When bias is present, it's already in input_nodes (positional args).
+        if kernel_inputs.bias is None:
+            result["bias"] = None
+        return result
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        yield dict()
+
+
+# CUDA convolution template-specific classes
+
+
+@register_template_heuristic(
+    conv2d_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+)
+class CUDAConv2dTemplateConfigHeuristic(ConvTemplateConfigMixin, CUDAConfigHeuristic):
+    """Conv2d template heuristic for CUDA."""
+
+
+@register_template_heuristic(
+    conv3d_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+)
+class CUDAConv3dTemplateConfigHeuristic(ConvTemplateConfigMixin, CUDAConfigHeuristic):
+    """Conv3d template heuristic for CUDA."""
+
+
+@register_template_heuristic(
+    depthwise_conv1d_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+)
+class CUDADepthwiseConv1dTemplateConfigHeuristic(
+    DepthwiseConvTemplateConfigMixin, CUDAConfigHeuristic
+):
+    """Depthwise conv1d template heuristic for CUDA."""
+
+
+# ROCm convolution template-specific classes
+
+
+@register_template_heuristic(
+    conv2d_template.uid,
+    "cuda",
+    register=torch.version.hip is not None,
+)
+class ROCmConv2dTemplateConfigHeuristic(ConvTemplateConfigMixin, ROCmConfigHeuristic):
+    """Conv2d template heuristic for ROCm."""
+
+
+@register_template_heuristic(
+    conv3d_template.uid,
+    "cuda",
+    register=torch.version.hip is not None,
+)
+class ROCmConv3dTemplateConfigHeuristic(ConvTemplateConfigMixin, ROCmConfigHeuristic):
+    """Conv3d template heuristic for ROCm."""
+
+
+@register_template_heuristic(
+    depthwise_conv1d_template.uid,
+    "cuda",
+    register=torch.version.hip is not None,
+)
+class ROCmDepthwiseConv1dTemplateConfigHeuristic(
+    DepthwiseConvTemplateConfigMixin, ROCmConfigHeuristic
+):
+    """Depthwise conv1d template heuristic for ROCm."""

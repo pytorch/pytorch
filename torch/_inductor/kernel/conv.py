@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, TypedDict
+from typing import Any, TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
+from ..ir import ChoiceCaller
+from ..kernel_inputs import ConvKernelInputs
 from ..lowering import (
     add_layout_constraint,
     constrain_to_fx_strides,
@@ -17,6 +19,7 @@ from ..lowering import (
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
+    KernelTemplate,
     SymbolicGridFn,
     TritonTemplate,
 )
@@ -578,36 +581,31 @@ def convolution(
         x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
         weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
 
-    ordered_kwargs_for_cpp_kernel = [
-        "stride",
-        "padding",
-        "dilation",
-        "transposed",
-        "output_padding",
-        "groups",
-    ]
     if bias is None:
         args = [x, weight]
         kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
-        ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
         args = [x, weight, bias]
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.guard_int_seq(bias.get_size())
 
-    choices = []
-    if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
-        choices = [
-            aten_convolution.bind(
-                args,
-                layout,
-                ordered_kwargs_for_cpp_kernel,
-                **kwargs,
-            )
-        ]
+    # Create ConvKernelInputs for unified template config retrieval
+    kernel_inputs = ConvKernelInputs(
+        args,
+        stride=stride,
+        padding=padding,
+        dilation=dilation,
+        groups=groups,
+        layout=layout,
+        transposed=transposed,
+        output_padding=output_padding,
+    )
 
-    if (
+    choices: list[ChoiceCaller] = []
+
+    # Check if templates are valid for this convolution
+    triton_templates_valid = (
         torch._inductor.utils._use_conv_autotune_backend("TRITON")
         and use_triton_template(layout)
         # templates only support these:
@@ -616,83 +614,43 @@ def convolution(
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
         and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
-    ):
+    )
+
+    # Build list of templates to use for unified config retrieval
+    templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
+
+    if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
+        templates_to_use.append(aten_convolution)
+
+    if triton_templates_valid:
         if (
             is_ones(kernel_shape)
             and is_ones(stride)
             and is_zeros(padding)
             and groups == 1
         ):
-            choices.append(aten_conv1x1_via_mm.bind(args, layout))
+            templates_to_use.append(aten_conv1x1_via_mm)
 
         is_depthwise = groups > 1 and in_chan == 1 and out_chan == groups
         if is_depthwise and ndim == 1:
-            depthwise_configs = V.choices.get_depthwise_conv_configs(device_type)
-            for cfg in depthwise_configs:
-                depthwise_conv1d_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(x, weight),
-                    layout=layout,
-                    KERNEL_SIZE=kernel_shape[0],
-                    CONV_STRIDE=stride[0],
-                    PADDING=padding[0],
-                    num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
-                    **cfg.kwargs,
-                )
+            templates_to_use.append(depthwise_conv1d_template)
 
-        conv_configs = V.choices.get_conv_configs(device_type)
+        if ndim == 2:
+            templates_to_use.append(conv2d_template)
+        elif ndim == 3:
+            templates_to_use.append(conv3d_template)
 
-        dtype_size = x.get_dtype().itemsize
-        for cfg in conv_configs(
-            sympy_product([x.get_size()[0], *x.get_size()[2:]]),
-            out_chan,
-            in_chan,
-            dtype_size=dtype_size,
-        ):
-            if ndim == 2:
-                conv2d_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(x, weight),
-                    layout=layout,
-                    KERNEL_H=kernel_shape[0],
-                    KERNEL_W=kernel_shape[1],
-                    STRIDE_H=stride[0],
-                    STRIDE_W=stride[1],
-                    PADDING_H=padding[0],
-                    PADDING_W=padding[1],
-                    GROUPS=groups,
-                    # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
-                    num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
-                    **cfg.kwargs,
-                )
-            elif ndim == 3:
-                conv3d_template.maybe_append_choice(
-                    choices,
-                    input_nodes=(x, weight),
-                    layout=layout,
-                    KERNEL_D=kernel_shape[0],
-                    KERNEL_H=kernel_shape[1],
-                    KERNEL_W=kernel_shape[2],
-                    STRIDE_D=stride[0],
-                    STRIDE_H=stride[1],
-                    STRIDE_W=stride[2],
-                    PADDING_D=padding[0],
-                    PADDING_H=padding[1],
-                    PADDING_W=padding[2],
-                    GROUPS=groups,
-                    # TODO(jansel): try unroll for bigger kernels once fixed:
-                    #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
-                    ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
-                    num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
-                    **cfg.kwargs,
-                )
+    # Use unified template config retrieval (enables lookup table support)
+    # Operation-specific params (KERNEL_H, GROUPS, etc.) are provided by
+    # the template heuristics via get_extra_kwargs()
+    choices.extend(
+        V.choices.get_template_configs(
+            kernel_inputs,
+            templates_to_use,
+            "convolution",
+        )
+    )
+
     if use_ck_conv_template(layout):
         CKGroupedConvFwdTemplate.add_ck_conv_choices(
             choices,

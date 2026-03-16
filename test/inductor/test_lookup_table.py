@@ -6,10 +6,12 @@ from typing import Any
 from unittest.mock import patch
 
 import torch
+import torch._inductor.kernel.conv
 import torch.nn as nn
 from torch._inductor import config as inductor_config
 from torch._inductor.choices import InductorChoices
-from torch._inductor.kernel_inputs import MMKernelInputs
+from torch._inductor.ir import FixedLayout
+from torch._inductor.kernel_inputs import ConvKernelInputs, MMKernelInputs
 from torch._inductor.lookup_table.choices import LookupTableChoices
 from torch._inductor.select_algorithm import (
     add_preprocessing_fn,
@@ -85,6 +87,54 @@ class MockMMKernelInputs(MMKernelInputs):
         return self.tensors[0].device.type
 
 
+class MockConvKernelInputs(ConvKernelInputs):
+    """Mock ConvKernelInputs that subclasses the real class and uses real tensors"""
+
+    def __init__(
+        self,
+        tensors: list[torch.Tensor],
+        stride: tuple[int, ...],
+        padding: tuple[int, ...],
+        dilation: tuple[int, ...],
+        groups: int,
+        transposed: bool = False,
+        output_padding: tuple[int, ...] = (),
+    ):
+        """Initialize with real tensors, creating mock nodes for the base class"""
+        mock_nodes = [MockTensorNode(t) for t in tensors]
+        # Create a mock layout - not used for key generation but required by base class
+        x = tensors[0]
+        mock_layout = FixedLayout(
+            x.device,
+            x.dtype,
+            list(x.size()),
+            list(x.stride()),
+        )
+        super().__init__(
+            mock_nodes,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            layout=mock_layout,
+            transposed=transposed,
+            output_padding=output_padding,
+        )
+        self.tensors = tensors  # Keep reference to original tensors
+
+    def shapes_hinted(self) -> tuple[tuple[int, ...], ...]:
+        """Delegate to symbolic since real tensors already have int shapes"""
+        return self.shapes_symbolic()
+
+    def strides_hinted(self) -> tuple[tuple[int, ...], ...]:
+        """Delegate to symbolic since real tensors already have int strides"""
+        return self.strides_symbolic()  # pyre-ignore
+
+    @property
+    def device_type(self) -> str | None:
+        return self.tensors[0].device.type
+
+
 class BaseLookupTableTest(TestCase):
     """Base class for lookup table tests with common setup and utilities"""
 
@@ -121,6 +171,39 @@ class BaseLookupTableTest(TestCase):
             tensors.append(tensor)
 
         return MockMMKernelInputs(tensors, scalars)
+
+    def create_mock_conv_kernel_inputs(
+        self,
+        x_shape: tuple[int, ...] | None = None,
+        weight_shape: tuple[int, ...] | None = None,
+        device: torch.device = torch.device("cuda"),
+        dtype: torch.dtype = torch.float32,
+        stride: tuple[int, ...] = (1, 1),
+        padding: tuple[int, ...] = (1, 1),
+        dilation: tuple[int, ...] = (1, 1),
+        groups: int = 1,
+        channels_last: bool = False,
+    ) -> MockConvKernelInputs:
+        """Create MockConvKernelInputs with real tensors for conv2d"""
+        if x_shape is None:
+            x_shape = (1, 64, 56, 56)  # Default: batch=1, channels=64, H=56, W=56
+        if weight_shape is None:
+            weight_shape = (128, 64, 3, 3)  # Default: out=128, in=64, kernel=3x3
+
+        x = torch.randn(x_shape, device=device, dtype=dtype)
+        weight = torch.randn(weight_shape, device=device, dtype=dtype)
+
+        if channels_last:
+            x = x.to(memory_format=torch.channels_last)
+            weight = weight.to(memory_format=torch.channels_last)
+
+        return MockConvKernelInputs(
+            [x, weight],
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+        )
 
     def create_lookup_key(self, method, kernel_inputs):
         """Create a lookup key using LookupTableChoices"""
@@ -678,6 +761,170 @@ class TestLookupTable(BaseLookupTableTest):
         # Device-agnostic key should be contained in device key (as a substring after device part)
         self.assertIn(device_agnostic_key.split("+mm")[0], device_key)
 
+    # =====================================================================
+    # Convolution Lookup Table Tests
+    # =====================================================================
+
+    def test_conv_lookup_mismatch(self):
+        """Test mismatch scenario in lookup table for convolution"""
+        kernel_inputs = self.create_mock_conv_kernel_inputs()
+
+        lookup_table_data = {
+            self.create_lookup_key("convolution", kernel_inputs): [
+                self.create_config("convolution2d")
+            ]
+        }
+
+        with patch.object(inductor_config.lookup_table, "table", lookup_table_data):
+            test_choices = LookupTableChoices()
+            # looking for conv3d but created the entry with convolution - should mismatch
+            result = test_choices.lookup_template_configs(
+                kernel_inputs, "conv3d", ["convolution3d"]
+            )
+            self.assertEqual(result, {})
+
+    def test_conv_successful_lookup_with_template_filtering(self):
+        """Test successful lookup that filters configs by template_id for convolution"""
+        kernel_inputs = self.create_mock_conv_kernel_inputs()
+
+        config_list = [
+            {
+                "template_id": "convolution2d",
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "BLOCK_K": 32,
+                "num_stages": 2,
+                "num_warps": 4,
+            },
+            {
+                "template_id": "convolution2d",
+                "BLOCK_M": 128,
+                "BLOCK_N": 128,
+                "BLOCK_K": 64,
+                "num_stages": 3,
+                "num_warps": 8,
+            },
+            {
+                "template_id": "aten::convolution",
+            },
+        ]
+
+        lookup_table_data = {
+            self.create_lookup_key("convolution", kernel_inputs): config_list
+        }
+
+        with patch.object(inductor_config.lookup_table, "table", lookup_table_data):
+            test_choices = LookupTableChoices()
+
+            # Test convolution2d template filtering
+            result = test_choices.lookup_template_configs(
+                kernel_inputs, "convolution", ["convolution2d"]
+            )
+            if result is None:
+                raise AssertionError("Result should not be None")
+            self.assertEqual(len(result["convolution2d"]), 2)
+            for config in result["convolution2d"]:
+                self.assertNotIn("template_id", config)
+                self.assertIn("BLOCK_M", config)
+
+            # Test aten template filtering
+            result = test_choices.lookup_template_configs(
+                kernel_inputs, "convolution", ["aten::convolution"]
+            )
+            if result is None:
+                raise AssertionError("Result should not be None")
+            self.assertEqual(len(result["aten::convolution"]), 1)
+            self.assertNotIn("template_id", result["aten::convolution"][0])
+
+    def test_conv_key_includes_conv_params(self):
+        """Test that convolution key includes stride, padding, dilation, groups"""
+        kernel_inputs = self.create_mock_conv_kernel_inputs(
+            stride=(2, 2),
+            padding=(1, 1),
+            dilation=(1, 1),
+            groups=1,
+        )
+
+        test_choices = LookupTableChoices()
+        key = test_choices.make_lookup_key(kernel_inputs, "convolution")
+
+        # Key should contain the conv parameters as part of the scalars
+        self.assertIsNotNone(key)
+        self.assertIn("stride", key)
+        self.assertIn("padding", key)
+        self.assertIn("dilation", key)
+        self.assertIn("groups", key)
+        self.assertIn("convolution", key)
+
+    def test_conv_cpu_input_returns_empty(self):
+        """Test that CPU tensor input returns empty dict for convolution"""
+        kernel_inputs = self.create_mock_conv_kernel_inputs(device=torch.device("cpu"))
+
+        lookup_table_data = {
+            self.create_lookup_key("convolution", kernel_inputs): [
+                {"template_id": "convolution2d", "BLOCK_M": 64}
+            ]
+        }
+
+        with patch.object(inductor_config.lookup_table, "table", lookup_table_data):
+            test_choices = LookupTableChoices()
+            result = test_choices.lookup_template_configs(
+                kernel_inputs, "convolution", ["convolution2d"]
+            )
+            self.assertEqual(result, {})  # Should return empty dict for CPU
+
+    def test_conv_different_params_different_keys(self):
+        """Test that different conv params produce different lookup keys"""
+        # Create two conv inputs with different strides
+        kernel_inputs_1 = self.create_mock_conv_kernel_inputs(
+            stride=(1, 1),
+            padding=(1, 1),
+        )
+        kernel_inputs_2 = self.create_mock_conv_kernel_inputs(
+            stride=(2, 2),
+            padding=(1, 1),
+        )
+
+        test_choices = LookupTableChoices()
+        key1 = test_choices.make_lookup_key(kernel_inputs_1, "convolution")
+        key2 = test_choices.make_lookup_key(kernel_inputs_2, "convolution")
+
+        # Keys should be different due to different strides
+        self.assertNotEqual(key1, key2)
+
+    def test_conv_template_hash_checking(self):
+        """Test template hash validation behavior for convolution"""
+        kernel_inputs = self.create_mock_conv_kernel_inputs()
+
+        config = {
+            "template_id": "convolution2d",
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+            "template_hash": "correct_hash",
+        }
+        template_hash_map = {"convolution2d": "correct_hash"}
+
+        lookup_table_data = {
+            self.create_lookup_key("convolution", kernel_inputs): [config]
+        }
+
+        with (
+            patch.object(inductor_config.lookup_table, "table", lookup_table_data),
+            patch.object(inductor_config.lookup_table, "check_src_hash", True),
+        ):
+            test_choices = LookupTableChoices()
+            result = test_choices.lookup_template_configs(
+                kernel_inputs, "convolution", ["convolution2d"], template_hash_map
+            )
+
+            # Should keep config with matching hash
+            if result is None:
+                raise AssertionError("Result should not be None")
+            self.assertIn("convolution2d", result)
+            self.assertEqual(len(result["convolution2d"]), 1)
+            # template_hash should be removed from returned config
+            self.assertNotIn("template_hash", result["convolution2d"][0])
+
 
 class UnifiedModel(nn.Module):
     """Unified model for different matrix operations"""
@@ -850,6 +1097,52 @@ class BaseE2ELookupTableTest(BaseLookupTableTest):
             torch.randn(512, 512, device=device, dtype=torch.float32),
             torch.randn(512, 512, device=device, dtype=torch.float32),
         ]
+
+    def setup_conv_lookup_table(self, kernel_inputs: MockConvKernelInputs, configs):
+        """Setup lookup table with conv2d configuration"""
+        flat_key = self.create_lookup_key("convolution", kernel_inputs)
+        inductor_config.lookup_table.table = {flat_key: configs}
+
+    def create_conv_config(self, template_id, **kwargs):
+        """Create configuration for conv template"""
+        config = {"template_id": template_id}
+
+        # Add minimal defaults for conv2d template
+        if template_id == torch._inductor.kernel.conv.conv2d_template.uid:
+            config.update(
+                {
+                    "BLOCK_M": 64,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 32,
+                    "num_stages": 2,
+                    "num_warps": 4,
+                }
+            )
+
+        config.update(kwargs)
+        return config
+
+    def run_conv_model(self, kernel_inputs: MockConvKernelInputs):
+        """Run compiled conv2d model with proper configuration for triton templates"""
+        stride = kernel_inputs.stride
+        padding = kernel_inputs.padding
+
+        class Conv2dModel(nn.Module):
+            def __init__(self, stride, padding):
+                super().__init__()
+                self.stride = stride
+                self.padding = padding
+
+            def forward(self, x, weight):
+                return torch.nn.functional.conv2d(
+                    x, weight, bias=None, stride=self.stride, padding=self.padding
+                )
+
+        model = Conv2dModel(stride=stride, padding=padding).to(self.device)
+        # Use max-autotune mode like existing conv tests
+        compiled_model = torch.compile(model, mode="max-autotune")
+        with torch.no_grad():
+            return compiled_model(*kernel_inputs.tensors)
 
 
 @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
@@ -1078,6 +1371,94 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         # Ensure hash checking is enabled
         with patch.object(inductor_config.lookup_table, "check_src_hash", True):
             self.run_model("mm", tensors)
+
+
+    @fresh_cache()
+    def test_conv2d_compiles_with_lookup_table(self):
+        """Test that conv2d model compiles and runs with lookup table configured"""
+        kernel_inputs = self.create_mock_conv_kernel_inputs(
+            dtype=torch.float16, channels_last=True
+        )
+        config = self.create_conv_config(
+            torch._inductor.kernel.conv.conv2d_template.uid
+        )
+
+        self.setup_conv_lookup_table(kernel_inputs, [config])
+        add_preprocessing_fn(
+            partial(verify_choice_names, pattern="convolution2d", expected_count=1)
+        )
+
+        # Verify the model compiles and runs successfully
+        result = self.run_conv_model(kernel_inputs)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.shape[0], kernel_inputs.tensors[0].shape[0])
+
+    @fresh_cache()
+    def test_conv2d_compiles_with_aten_lookup_table(self):
+        """Test that conv2d model compiles with aten convolution in lookup table"""
+        kernel_inputs = self.create_mock_conv_kernel_inputs(
+            dtype=torch.float16, channels_last=True
+        )
+        config = {"template_id": torch._inductor.kernel.conv.aten_convolution.uid}
+
+        self.setup_conv_lookup_table(kernel_inputs, [config])
+        add_preprocessing_fn(
+            partial(verify_choice_names, pattern="convolution", expected_count=1)
+        )
+
+        # Verify model compiles and runs
+        result = self.run_conv_model(kernel_inputs)
+        self.assertIsNotNone(result)
+
+    @fresh_cache()
+    def test_conv2d_compiles_with_multiple_configs(self):
+        """Test that conv2d model compiles with multiple configs in lookup table"""
+        kernel_inputs = self.create_mock_conv_kernel_inputs(
+            dtype=torch.float16, channels_last=True
+        )
+
+        config1 = self.create_conv_config(
+            torch._inductor.kernel.conv.conv2d_template.uid,
+            BLOCK_M=128,
+            BLOCK_N=128,
+            num_warps=8,
+        )
+        config2 = self.create_conv_config(
+            torch._inductor.kernel.conv.conv2d_template.uid,
+            BLOCK_M=64,
+            BLOCK_N=64,
+            num_warps=4,
+        )
+
+        self.setup_conv_lookup_table(kernel_inputs, [config1, config2])
+        add_preprocessing_fn(
+            partial(verify_choice_names, pattern="convolution2d", expected_count=2)
+        )
+
+        # Verify model compiles and runs with multiple configs
+        result = self.run_conv_model(kernel_inputs)
+        self.assertIsNotNone(result)
+
+    @fresh_cache()
+    def test_conv2d_compiles_without_lookup_table_match(self):
+        """Test that conv2d model compiles when lookup table has no match"""
+        kernel_inputs = self.create_mock_conv_kernel_inputs(
+            dtype=torch.float16, channels_last=True
+        )
+
+        # Setup lookup table with different size tensors to force no match
+        different_inputs = self.create_mock_conv_kernel_inputs(
+            x_shape=(1, 32, 56, 56),
+            weight_shape=(32, 32, 3, 3),
+            dtype=torch.float16,
+            channels_last=True,
+        )
+        self.setup_conv_lookup_table(different_inputs, [])
+
+        # Should still compile and run, falling back to heuristics
+        # No verify_choice_names here since we expect fallback behavior
+        result = self.run_conv_model(kernel_inputs)
+        self.assertIsNotNone(result)
 
 
 if __name__ == "__main__":
