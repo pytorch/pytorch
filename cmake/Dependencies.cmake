@@ -1089,7 +1089,7 @@ if(USE_ROCM)
       )
       if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
         set(CAFFE2_USE_HIPSPARSELT ${USE_HIPSPARSELT})
-      endif()	
+      endif()
     endif()
 
     # ---[ Kernel asserts
