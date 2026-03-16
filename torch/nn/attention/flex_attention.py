@@ -1003,12 +1003,14 @@ class BlockMask:
 
         return "\n".join(total_vis)
 
-    def to(self, device: torch.device | str) -> BlockMask:
+    def to(self, device: torch.device | str, **kwargs) -> BlockMask:
         """Moves the BlockMask to the specified device.
 
         Args:
             device (torch.device or str): The target device to move the BlockMask to.
                 Can be a torch.device object or a string (e.g., 'cpu', 'cuda:0').
+            **kwargs: Additional keyword arguments (eg., non_blocking) passed to the 
+                underlying tensor .to() calls.
 
         Returns:
             BlockMask: A new BlockMask instance with all tensor components moved
@@ -1022,7 +1024,7 @@ class BlockMask:
         """
         mapped_attributes = tree_map_only(
             torch.Tensor,
-            lambda x: x.to(device),
+            lambda x: x.to(device, **kwargs),
             self.as_tuple(flatten=False),
         )
         return BlockMask(*mapped_attributes)
