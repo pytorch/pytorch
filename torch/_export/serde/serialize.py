@@ -2751,7 +2751,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 name = (
                     serialized_node.outputs[0].as_tensor.name
                     if len(serialized_node.outputs) == 1
-                    and hasattr(serialized_node.outputs[0], "as_tensor")
+                    and serialized_node.outputs[0].type == "as_tensor"
                     and getattr(serialized_node, "is_hop_single_tensor_return", True)
                     else None
                 )
@@ -4354,8 +4354,8 @@ def canonicalize(
     def replace_output(out):
         if not _schema_isinstance(out, OutputSpec):
             raise AssertionError(f"expected OutputSpec, got {type(out).__name__}")
-        if spec.type == "user_output":
-            arg = spec.user_output.arg
+        if out.type == "user_output":
+            arg = out.user_output.arg
             if arg.type == "as_tensor":
                 t = arg.as_tensor
                 t.name = replace_table[t.name]
@@ -4379,31 +4379,31 @@ def canonicalize(
                 return
             else:
                 raise AssertionError(f"Unknown input type: {arg}")
-        elif spec.type == "loss_output":
-            t = spec.loss_output.arg
+        elif out.type == "loss_output":
+            t = out.loss_output.arg
             t.name = replace_table[t.name]
-        elif spec.type == "buffer_mutation":
-            t = spec.buffer_mutation.arg
+        elif out.type == "buffer_mutation":
+            t = out.buffer_mutation.arg
             t.name = replace_table[t.name]
-        elif spec.type == "parameter_mutation":
-            t = spec.parameter_mutation.arg
+        elif out.type == "parameter_mutation":
+            t = out.parameter_mutation.arg
             t.name = replace_table[t.name]
-        elif spec.type == "gradient_to_parameter":
-            t = spec.gradient_to_parameter.arg
+        elif out.type == "gradient_to_parameter":
+            t = out.gradient_to_parameter.arg
             t.name = replace_table[t.name]
-        elif spec.type == "gradient_to_user_input":
-            g = spec.gradient_to_user_input
+        elif out.type == "gradient_to_user_input":
+            g = out.gradient_to_user_input
             g.arg.name = replace_table[g.arg.name]
             g.user_input_name = replace_table[g.user_input_name]
-        elif spec.type == "user_input_mutation":
-            u = spec.user_input_mutation
+        elif out.type == "user_input_mutation":
+            u = out.user_input_mutation
             u.arg.name = replace_table[u.arg.name]
             u.user_input_name = replace_table[u.user_input_name]
-        elif spec.type == "token":
-            tok = spec.token.arg
+        elif out.type == "token":
+            tok = out.token.arg
             tok.name = replace_table[tok.name]
         else:
-            raise AssertionError(f"Unknown output type: {spec}")
+            raise AssertionError(f"Unknown output type: {out}")
 
     for spec in input_specs:
         replace_input(spec)
