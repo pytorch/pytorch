@@ -1,6 +1,5 @@
 import copy
 import heapq
-from typing import Optional as _Optional
 
 import torch.fx
 from torch.fx._compatibility import compatibility
@@ -100,7 +99,7 @@ def fuse_as_graphmodule(
     gm: GraphModule,
     nodes: NodeList,
     module_name: str,
-    partition_lookup_table: _Optional[dict[Node, _Optional[int]]] = None,
+    partition_lookup_table: dict[Node, int | None] | None = None,
     *,
     always_return_tuple: bool = False,
 ) -> tuple[GraphModule, tuple[Node, ...], tuple[Node, ...]]:
@@ -223,42 +222,48 @@ def insert_subgm(
     sub_gm: GraphModule,
     orig_inputs: tuple[Node, ...],
     orig_outputs: tuple[Node, ...],
+    insertion_point: Node | None = None,
 ) -> GraphModule:
     # add sub_gm into gm
     submodule_name = sub_gm.__class__.__name__
     gm.add_submodule(submodule_name, sub_gm)
 
-    def last_node(target_nodes: tuple[Node, ...]) -> Node | None:
+    # Use provided insertion point, or fall back to last output node for backwards compat
+    if insertion_point is None:
         for node in reversed(gm.graph.nodes):
-            if node in target_nodes:
-                return node
-        return None
-
-    last_output_node: Node | None = last_node(orig_outputs)
-    if last_output_node is None:
-        raise AssertionError("last_output_node is None")
+            if node in orig_outputs:
+                insertion_point = node
+                break
+        if insertion_point is None:
+            raise AssertionError(
+                "Cannot determine insertion point: no insertion_point provided and "
+                "orig_outputs is empty. Pass the last partition node as insertion_point."
+            )
 
     # Create a call_module node in main graph.
-    with gm.graph.inserting_after(last_output_node):
+    with gm.graph.inserting_after(insertion_point):
         module_node = gm.graph.call_module(
             submodule_name, args=orig_inputs, kwargs=None
         )
         output_node = sub_gm.graph.output_node()
 
-    next_node = module_node.next
-    with gm.graph.inserting_before(next_node):
-        if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
-            # main_remapping[comp.orig_outputs[0]] = module_node
-            orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
-        else:
-            for i, orig_output in enumerate(orig_outputs):
-                # Use Proxy to record getitem access.
-                proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
-                orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
+    # Replace uses of original outputs with the fused module outputs.
+    # If there are no external outputs, skip replacement (nothing to replace).
+    if orig_outputs:
+        next_node = module_node.next
+        with gm.graph.inserting_before(next_node):
+            if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
+                # main_remapping[comp.orig_outputs[0]] = module_node
+                orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
+            else:
+                for i, orig_output in enumerate(orig_outputs):
+                    # Use Proxy to record getitem access.
+                    proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
+                    orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
 
-            module_node.meta["val"] = tuple(
-                orig_output.meta.get("val", None) for orig_output in orig_outputs
-            )
+                module_node.meta["val"] = tuple(
+                    orig_output.meta.get("val", None) for orig_output in orig_outputs
+                )
     return gm
 
 
@@ -272,7 +277,7 @@ def erase_nodes(gm: GraphModule, nodes: NodeList) -> None:
 @compatibility(is_backward_compatible=False)
 def fuse_by_partitions(
     gm: GraphModule,
-    partitions: list[dict[Node, _Optional[int]]],
+    partitions: list[dict[Node, int | None]],
     prefix: str = "fused_",
     always_return_tuple: bool = False,
 ) -> GraphModule:
@@ -288,7 +293,7 @@ def fuse_by_partitions(
             always_return_tuple=always_return_tuple,
         )
 
-        insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)
+        insert_subgm(gm, sub_gm, orig_inputs, orig_outputs, sorted_nodes[-1])
 
         erase_nodes(gm, sorted_nodes)
 

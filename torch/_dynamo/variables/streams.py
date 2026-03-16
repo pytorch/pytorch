@@ -229,7 +229,7 @@ class SymbolicStreamState:
     def exit_stream(self) -> None:
         self.cur_stream_stack.pop()
 
-    def cur_stream(self, device: Optional[torch.device] = None) -> "StreamVariable":
+    def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
         if device is not None:
             for stream in reversed(self.cur_stream_stack):
                 if stream.device == device:
@@ -294,7 +294,7 @@ class StreamVariable(StreamContextVariable):
         self,
         proxy: Proxy,
         value: torch.Stream,
-        user_object_index: Optional[int] = None,
+        user_object_index: int | None = None,
         **kwargs: Any,
     ) -> None:
         # Index into the user object table
@@ -427,7 +427,7 @@ class EventVariable(VariableTracker):
         self,
         proxy: Proxy,
         value: torch.Event,
-        user_object_index: Optional[int],
+        user_object_index: int | None,
         **kwargs: Any,
     ) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:

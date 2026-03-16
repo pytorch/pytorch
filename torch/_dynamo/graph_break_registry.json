@@ -325,6 +325,16 @@
     {
       "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
       "Context": "var_getattr {self} {name}",
+      "Explanation": "Dynamo could not trace through the custom `__getattribute__` method on this `nn.Module`.",
+      "Hints": [
+        "Simplify your `__getattribute__` implementation, ",
+        "or replace it with a targeted `@property`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Custom __getattribute__ in nn.Module attribute access",
+      "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo does not support checking key existence on `nn.Module` instances that have a custom `__getattribute__` method defined.",
       "Hints": [
         "Avoid defining `__getattribute__` in your module.",
@@ -855,6 +865,17 @@
       "Hints": []
     }
   ],
+  "GB0719": [
+    {
+      "Gb_type": "Reconstruction of FakeIdVariable",
+      "Context": "str(self.value)",
+      "Explanation": "A fake id produced by id() on a compile-time container cannot be reconstructed across a graph break.",
+      "Hints": [
+        "Avoid using id() on containers in code that may graph-break.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0072": [
     {
       "Gb_type": "Inplace op on input tensor",
@@ -999,6 +1020,17 @@
       "Explanation": "Dynamo requires the attribute name passed to `super().__delattr__(...)` to be a constant (string).",
       "Hints": [
         "Ensure the attribute name is a string literal or a constant variable."
+      ]
+    }
+  ],
+  "GB7581": [
+    {
+      "Gb_type": "copy.deepcopy(tensor)",
+      "Context": "copy.deepcopy({self})",
+      "Explanation": "Dynamo does not support copy.deepcopy() on tensors.",
+      "Hints": [
+        "Avoid calling copy.deepcopy() on tensors inside compiled regions.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -1441,6 +1473,16 @@
       "Gb_type": "Unsupported Tensor.backward() call",
       "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB4695": [
+    {
+      "Gb_type": "torch.jit.script/freeze modules unsupported",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support tracing into torch.jit.script or torch.jit.freeze modules because they execute in the TorchScript runtime, not Python. Replace the ScriptModule submodule with the original eager nn.Module.",
       "Hints": [
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
       ]
@@ -2510,6 +2552,17 @@
       "Hints": []
     }
   ],
+  "GB2520": [
+    {
+      "Gb_type": "assume_constant_result argument conversion failed",
+      "Context": "function {name}, variable type {type(x).__name__}",
+      "Explanation": "Cannot convert argument of type {type(x).__name__} to a Python constant for function {name} marked with torch._dynamo.assume_constant_result. The variable tracker does not support constant conversion.",
+      "Hints": [
+        "Remove torch._dynamo.assume_constant_result from this function",
+        "Ensure all arguments passed to the function can be converted to constants"
+      ]
+    }
+  ],
   "GB0209": [
     {
       "Gb_type": "torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
@@ -2527,6 +2580,16 @@
       "Explanation": "The PyTorch package doesn't include torch.distributed when building from source.",
       "Hints": [
         "Set USE_DISTRIBUTED=1 to enable it when building PyTorch from source."
+      ]
+    }
+  ],
+  "GB2977": [
+    {
+      "Gb_type": "wrap_jit_function: missing _torchdynamo_inline",
+      "Context": "type: {type(value).__name__}",
+      "Explanation": "Dynamo expected a JIT function with a _torchdynamo_inline attribute, but the object does not have one.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -3018,6 +3081,16 @@
       "Hints": [
         "Ensure the name `{name}` is defined somewhere in {self.value}'s type hierarchy.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9860": [
+    {
+      "Gb_type": "P2POp mutation",
+      "Context": "object={self}, name={name}, value={value}",
+      "Explanation": "Dynamo does not support mutating torch.distributed.P2POp instances.",
+      "Hints": [
+        "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile."
       ]
     }
   ],
@@ -3624,6 +3697,54 @@
       ]
     }
   ],
+  "GB9300": [
+    {
+      "Gb_type": "P2P compilation disabled for batch_isend_irecv",
+      "Context": "{self.fn}",
+      "Explanation": "P2P compilation is disabled.",
+      "Hints": [
+        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB2696": [
+    {
+      "Gb_type": "P2P compilation disabled for isend/irecv",
+      "Context": "{self.fn}",
+      "Explanation": "P2P compilation is disabled.",
+      "Hints": [
+        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB9277": [
+    {
+      "Gb_type": "unsupported function.__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Dynamo only supports function.__get__(func, obj[, cls]) where func is a user-defined function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1750": [
+    {
+      "Gb_type": "P2P compilation disabled for P2POp construction",
+      "Context": "torch.distributed.P2POp",
+      "Explanation": "P2P compilation is disabled.",
+      "Hints": [
+        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB3343": [
+    {
+      "Gb_type": "Cannot reconstruct P2POpVariable",
+      "Context": "P2POpVariable.reconstruct",
+      "Explanation": "P2POpVariable does not support reconstruction.",
+      "Hints": []
+    }
+  ],
   "GB0301": [
     {
       "Gb_type": "HOP: non torch.Tensor leaf",
@@ -3756,16 +3877,6 @@
       "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB5799": [
-    {
-      "Gb_type": "unsupported function.__get__ call",
-      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
-      "Explanation": "Dynamo only supports function.__get__(func, obj[, cls]) where func is a user-defined function.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

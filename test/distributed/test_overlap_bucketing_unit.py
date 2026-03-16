@@ -799,6 +799,99 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         f.check("pre_bucket_all_gather").check("all_gather_into_tensor_out")
         f.run(graph_str)
 
+    def test_dead_fusible_code_no_crash(self):
+        """
+        Test that dead fusible code (fusion regions with no external outputs)
+        does not crash collapse_fusion_regions, and that collapse/expand
+        round-trips preserve the graph.
+
+        Regression test for the bug where dead code created a fusion region
+        with no external outputs, causing fuse_by_partitions to crash with
+        "AssertionError: last_output_node is None".
+        """
+
+        def func_with_dead_fusible_code(x, y):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                x, group_size, group_name
+            )
+
+            # Dead fusible chain - not consumed by output
+            dead1 = x + 1.0
+            dead2 = dead1 * 2.0
+            dead3 = dead2 + dead1  # noqa: F841
+
+            # Live fusible chain
+            live1 = y + 1.0
+            live2 = live1 * 2.0
+
+            mm_result = torch.mm(y, y)
+            live3 = mm_result + 1.0
+
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            return (live2 + live3 + ag_out).sum()
+
+        from torch._inductor.fx_passes.fusion_regions import (
+            build_fusion_regions,
+            collapse_fusion_regions,
+            expand_fusion_regions,
+        )
+
+        with FakeTensorMode():
+            x = torch.randn(16, 16)
+            y = torch.randn(16, 16)
+            gm = make_fx(func_with_dead_fusible_code)(x, y)
+
+        graph_str_before = gm.print_readable(print_output=False)
+
+        region_of = build_fusion_regions(gm)
+        new_region_of = collapse_fusion_regions(gm, region_of)
+
+        # Expand back and verify graph is preserved
+        expand_fusion_regions(gm, new_region_of)
+        gm.recompile()
+        graph_str_after = gm.print_readable(print_output=False)
+        self.assertEqual(graph_str_before, graph_str_after)
+
+    @torch._inductor.config.patch(deterministic=True)
+    def test_deterministic_mode_no_benchmark_error(self):
+        """
+        Test that deterministic mode doesn't error when running overlap scheduling.
+
+        Before the fix, deterministic mode would error when trying to benchmark
+        compute nodes. Now it uses analytical estimation instead.
+        """
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+
+            # Compute with gemm
+            mm_result = torch.mm(a, b)
+            pointwise = mm_result + 1.0
+
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            return (pointwise + ag_out).sum()
+
+        with FakeTensorMode():
+            a = torch.randn(16, 16, device=self.device)
+            b = torch.randn(16, 16, device=self.device)
+            gm = make_fx(func)(a, b)
+
+        # Should not error in deterministic mode (would have errored before fix)
+        schedule_overlap_bucketing(gm)
+
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

@@ -52,9 +52,15 @@ if(USE_CUDA)
     c10d_add_test(
       ProcessGroupNCCLTest.cpp
       LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(ProcessGroupNCCLTest PRIVATE USE_CUDA USE_NCCL)
     c10d_add_test(
       ProcessGroupNCCLErrorsTest.cpp
       LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(ProcessGroupNCCLErrorsTest PRIVATE USE_CUDA USE_NCCL)
+    c10d_add_test(
+      NCCLDevCommManagerTest.cpp
+      LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(NCCLDevCommManagerTest PRIVATE USE_CUDA USE_NCCL)
     if(INSTALL_TEST)
       install(TARGETS c10d_cuda_test DESTINATION lib)
     endif()

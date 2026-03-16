@@ -186,11 +186,63 @@ class TestDecompSharding(TestCase):
         out = aten.glu.default(x)
         self.assertEqual(out.placements, (Replicate(),))
 
+        # index_add: decomposes into index_put with accumulate=True
+        check_no_strategy(aten.index_add.default)
+        input = d_empty(4, 8, device_mesh=mesh, placements=[Shard(1)])
+        index = distribute_tensor(torch.tensor([0, 2]), mesh, [Replicate()])
+        source = d_empty(2, 8, device_mesh=mesh, placements=[Shard(1)])
+        out = aten.index_add.default(input, 0, index, source)
+        self.assertEqual(out.placements, (Shard(1),))
+
         # polar: force replicate
         check_no_strategy(aten.polar.default)
         x = d_empty(16, device_mesh=mesh, placements=[Partial()])
         y = d_empty(16, device_mesh=mesh, placements=[Partial()])
         out = aten.polar.default(x, y)
+        self.assertEqual(out.placements, (Replicate(),))
+
+    def test_roll_flip_strategies(self):
+        """roll and flip unshard on active dims, keep sharding on others."""
+        from torch.distributed.tensor import empty as d_empty
+
+        aten = torch.ops.aten
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+
+        # roll: sharded on non-roll dim stays sharded
+        x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(0)])
+        out = aten.roll.default(x, [2], [1])
+        self.assertEqual(out.placements, (Shard(0),))
+
+        # roll with no dims (flattened): always replicates
+        x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(0)])
+        out = aten.roll.default(x, [2], [])
+        self.assertEqual(out.placements, (Replicate(),))
+
+        # flip: sharded on non-flip dim stays sharded
+        x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(0)])
+        out = aten.flip.default(x, [1])
+        self.assertEqual(out.placements, (Shard(0),))
+
+        # flip: sharded on flip dim gets replicated
+        x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(0)])
+        out = aten.flip.default(x, [0])
+        self.assertEqual(out.placements, (Replicate(),))
+
+    def test_fft_strategies(self):
+        """FFT primitives unshard on transform dims, keep sharding on others."""
+        from torch.distributed.tensor import empty as d_empty
+
+        aten = torch.ops.aten
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+
+        # _fft_c2c: sharded on non-transform dim stays sharded
+        x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(0)], dtype=torch.cfloat)
+        out = aten._fft_c2c.default(x, [1], 0, True)
+        self.assertEqual(out.placements, (Shard(0),))
+
+        # _fft_c2c: sharded on transform dim gets replicated
+        x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(1)], dtype=torch.cfloat)
+        out = aten._fft_c2c.default(x, [1], 0, True)
         self.assertEqual(out.placements, (Replicate(),))
 
 

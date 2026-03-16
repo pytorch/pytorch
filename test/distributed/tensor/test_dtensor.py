@@ -343,6 +343,62 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
+    def test_from_local_grad_placements(self):
+        """Test that from_local with explicit grad_placements overrides the default
+        gradient placement normalization in backward.
+
+        Verifies:
+        - grad_placements=(Partial(),) with Replicate forward keeps gradient as Partial (no all-reduce)
+        - grad_placements=None (default) preserves existing behavior
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Test 1: Replicate(fwd) with grad_placements=(Partial(),)
+        # Default behavior would all-reduce Partial grad to Replicate, but
+        # grad_placements=(Partial(),) should keep gradient as Partial (no all-reduce)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(
+                local_tensor,
+                device_mesh,
+                [Replicate()],
+                grad_placements=[Partial()],
+            )
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type), device_mesh, [Partial()]
+            )
+            output.backward(grad)
+            # With grad_placements=(Partial(),), the backward should NOT all-reduce
+            # the Partial gradient to Replicate. The gradient stays Partial, so
+            # each rank gets its local partial gradient (ones * 2) without all-reduce.
+            self.assertEqual(local_tensor.grad, torch.ones(3, 3) * 2)
+        # No all-reduce should happen since grad_placements keeps it as Partial
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # Test 2: Replicate(fwd) with grad_placements=None (default behavior preserved)
+        # Partial grad_output should be all-reduced to Replicate (default normalization)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Replicate()])
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type), device_mesh, [Partial()]
+            )
+            output.backward(grad)
+            # Default: Partial grad should be all-reduced to Replicate
+            expected_grad = torch.ones(3, 3) * 2 * self.world_size
+            self.assertEqual(local_tensor.grad, expected_grad)
+        # Verify that an all-reduce happened (default Partial -> Replicate)
+        self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+
+    @with_comms
     def test_from_local_uneven_sharding(self):
         device_mesh = self.build_device_mesh()
 
@@ -467,7 +523,10 @@ class DTensorTest(DTensorTestBase):
         # test the case under no-grad we directly return the local tensor
         with torch.no_grad():
             local_no_grad = sharded_tensor.to_local()
-            assert local_no_grad is sharded_tensor._local_tensor
+            if local_no_grad is not sharded_tensor._local_tensor:
+                raise AssertionError(
+                    "Expected local_no_grad to be sharded_tensor._local_tensor"
+                )
 
     @with_comms
     def test_to_local_grad_hint(self):
@@ -837,7 +896,8 @@ class DTensorTest(DTensorTestBase):
 
             @staticmethod
             def backward(ctx, grad_out1, grad_out2):
-                assert grad_out2 is None
+                if grad_out2 is not None:
+                    raise AssertionError("grad_out2 should be None")
                 return grad_out1 * 2, grad_out2
 
         x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
@@ -849,6 +909,7 @@ class DTensorTest(DTensorTestBase):
 
         loss = out1.sum()
         loss.backward()
+
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(
     DTensorTest,

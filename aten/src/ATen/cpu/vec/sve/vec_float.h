@@ -22,7 +22,7 @@ namespace at::vec {
 // accessed as `at::vec`.
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_SVE)
+#if defined(CPU_CAPABILITY_SVE256)
 
 template <>
 struct is_vec_specialized_for<float> : std::bool_constant<true> {};
@@ -764,7 +764,7 @@ Vectorized<float> inline fnmsub(
   return svnmad_f32_x(ptrue, a, b, c);
 }
 
-#endif // defined(CPU_CAPABILITY_SVE)
+#endif // defined(CPU_CAPABILITY_SVE256)
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

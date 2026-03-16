@@ -32,7 +32,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, cast, Literal, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, TYPE_CHECKING
 
 import torch
 from torch import sym_float, sym_int
@@ -151,7 +151,7 @@ IN_PLACE_DESUGARING_MAP = {
 _HandlerCallback = Callable[
     ["InstructionTranslator", typing.Any, typing.Any], VariableTracker | None
 ]
-_TrackersType = Union[type[VariableTracker], tuple[type[VariableTracker], ...]]
+_TrackersType = type[VariableTracker] | tuple[type[VariableTracker], ...]
 polyfill_fn_mapping = {
     operator.eq: polyfills.cmp_eq,
     operator.ne: polyfills.cmp_ne,
@@ -889,6 +889,12 @@ class BuiltinVariable(VariableTracker):
                     if type(left) is not type(right):
                         return VariableTracker.build(tx, op.__name__ != "is_")
                     if left is right:
+                        return VariableTracker.build(tx, op(left, right))
+                    # VT identity is a reliable proxy for Python identity for
+                    # mutable containers created during tracing.  For types
+                    # like EnumVariable two distinct VTs can wrap the same
+                    # singleton, so we must not claim "is False" there.
+                    if isinstance(left, (ConstDictVariable, ListVariable)):
                         return VariableTracker.build(tx, op(left, right))
                     if istype(left, variables.ObjectVariable) and istype(
                         right, variables.ObjectVariable
@@ -2455,12 +2461,13 @@ class BuiltinVariable(VariableTracker):
         ):
             isinstance_type_tuple = isinstance_type
         else:
+            msg = VariableTracker.build(
+                tx, "isinstance() arg 2 must be a type, a tuple of types, or a union"
+            )
             raise_observed_exception(
                 TypeError,
                 tx,
-                args=[
-                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
-                ],
+                args=[msg],
             )
 
         try:
@@ -2730,7 +2737,12 @@ class BuiltinVariable(VariableTracker):
                 return variables.GetAttrVariable(obj, name, source=source)
         elif isinstance(obj, variables.TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
-            member = getattr(obj.value, name)
+            try:
+                member = getattr(obj.value, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+                raise
+
             if isinstance(
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
@@ -2749,12 +2761,6 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)  # type: ignore[arg-type, union-attr]
             return VariableTracker.build(tx, member, source)
-
-        elif istype(obj, variables.UserFunctionVariable) and name in (
-            "__name__",
-            "__module__",
-        ):
-            return VariableTracker.build(tx, getattr(obj.fn, name))
         else:
             try:
                 return obj.var_getattr(tx, name)
@@ -3045,6 +3051,20 @@ class BuiltinVariable(VariableTracker):
             return VariableTracker.build(tx, id(args[0].value))
         elif istype(args[0], variables.FunctoolsPartialVariable):
             return VariableTracker.build(tx, id(args[0].fake_value))
+        elif isinstance(
+            args[0],
+            (
+                ConstantVariable,
+                ConstDictVariable,
+                ListVariable,
+                TupleVariable,
+                SetVariable,
+                SymNodeVariable,
+            ),
+        ):
+            from .constant import FakeIdVariable
+
+            return FakeIdVariable(id(args[0]))
         else:
             unimplemented(
                 gb_type="id() with unsupported args",
@@ -3240,6 +3260,19 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
+
+        # Constant fold or_ for class/type variables (e.g. Shard | _StridedShard
+        # producing a types.UnionType for isinstance checks). This handles cases
+        # like OpaqueObjectClassVariable where is_python_constant() returns False
+        # but as_python_constant() works.
+        try:
+            a_const = a.as_python_constant()
+            b_const = b.as_python_constant()
+            if isinstance(a_const, type) and isinstance(b_const, type):
+                return VariableTracker.build(tx, a_const | b_const)
+        except NotImplementedError:
+            pass
+
         if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,

@@ -7,7 +7,7 @@ import pickle
 import shutil
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, nullcontext
-from typing import Any, Literal, Optional, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 import torch.fx
 from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
@@ -53,7 +53,7 @@ class CompiledArtifact(ABC):
     def __init__(
         self,
         compiled_fn: Callable[..., Any],
-        artifacts: Optional[tuple[bytes, CacheInfo]],
+        artifacts: tuple[bytes, CacheInfo] | None,
     ):
         self._compiled_fn = compiled_fn
         self._artifacts = artifacts
@@ -113,7 +113,7 @@ class CacheCompiledArtifact(CompiledArtifact):
     def __init__(
         self,
         compiled_fn: Callable[..., Any],
-        artifacts: Optional[tuple[bytes, CacheInfo]],
+        artifacts: tuple[bytes, CacheInfo] | None,
     ):
         self._compiled_fn = compiled_fn
         self._artifacts = artifacts

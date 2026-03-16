@@ -67,10 +67,15 @@ Use these GitHub MCP tools for triage:
 | `sev*` | Severity labels require human decision |
 | `merge blocking` | Requires human decision |
 | Any label containing "deprecated" | Obsolete |
+| `oncall: releng` | Not a triage redirect target. Use `module: ci` instead |
 
 **If blocked:** When a label is blocked by the hook, add ONLY `triage review` and stop. A human will handle it.
 
 These rules are enforced by a PreToolUse hook that validates all labels against `labels.json`.
+
+### Never Override Human Labels
+
+If a human has already applied labels (especially `ci: sev`, severity labels, or priority labels), do NOT remove or replace them. Your job is to supplement, not override.
 
 ---
 
@@ -107,6 +112,14 @@ Check if the issue body contains links to external files that users would need t
 3. Use the `needs_reproduction` template from `templates.json` to request a self-contained reproduction
 4. Do NOT add `triaged` — wait for the user to provide a reproducible example
 
+### 1.55) Needs Reproduction — Other Cases
+
+Also add `needs reproduction` when:
+- The user reports a hardware-specific issue (e.g., specific GPU model) without a self-contained repro script
+- The user references a specific model/checkpoint/dataset that is not publicly runnable in a few lines
+- The issue describes version-upgrade breakage but only provides a high-level description without a minimal script
+- The repro depends on a specific training setup, distributed environment, or non-trivial infrastructure
+
 ### 1.6) Edge Cases & Numerical Accuracy
 
 If the issue involves extremal values or numerical precision differences:
@@ -117,6 +130,17 @@ If the issue involves extremal values or numerical precision differences:
 - Differences between CPU and GPU results
 - Precision differences between dtypes (e.g., fp32 vs fp16)
 - Fuzzer-generated edge cases
+
+**IMPORTANT — avoid keyword-triggered mislabeling:**
+
+Label based on the **root cause**, not keywords that appear in the error or title. A keyword tells you what failed, not why.
+
+- An `undefined symbol: ncclAlltoAll` error at `import torch` is a **packaging** issue (`module: binaries`), not a distributed training bug — the user never ran distributed code.
+- A `nan` in a parameter name or tolerance check is not `module: NaNs and Infs` unless the bug is actually about NaN propagation.
+- A stack trace mentioning `autograd` does not mean `module: autograd` — check whether the bug is in autograd itself or just on the call path.
+- A test failure with tolerance thresholds is `module: tests`, not `module: numerical-stability`.
+
+Ask: "Where would the fix need to be made?" That determines the label.
 
 **Action:**
 1. Add `module: edge cases` label
@@ -130,16 +154,13 @@ If the issue belongs in another repo (vision/text/audio/RL/ExecuTorch/etc.), tra
 
 ### 2.5) PT2 Issues — Special Handling
 
-When triaging PT2 issues (torch.compile, dynamo, inductor), see [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling decisions.
+**PT2 is NOT a redirect.** `oncall: pt2` is not like the other oncall labels in Step 3. PT2 issues continue through Steps 4–7 for full triage — add `oncall: pt2`, then proceed to label with `module:` labels, mark `triaged`, etc.
 
-**Key differences from general triage:**
-- For PT2 issues, you MAY apply `module:` labels (e.g., `module: dynamo`, `module: inductor`, `module: dynamic shapes`)
-- Use the rubric to determine the correct component labels
-- Only redirect to `oncall: cpu inductor` for MKLDNN-specific issues; otherwise keep in PT2 queue
+See [pt2-triage-rubric.md](pt2-triage-rubric.md) for detailed labeling decisions on which `module:` labels to apply.
 
 ### 3) Redirect to Secondary Oncall
 
-**CRITICAL:** When redirecting issues to an oncall queue (**critical** with the exception of PT2), apply exactly one `oncall: ...` label and **STOP**. Do NOT:
+**CRITICAL:** When redirecting issues to a **non-PT2** oncall queue, apply exactly one `oncall: ...` label and **STOP**. Do NOT:
 - Add any `module:` labels
 - Mark it `triaged`
 - Do any further triage work
@@ -158,14 +179,40 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 | `oncall: profiler` | Profiler issues (CPU, GPU, Kineto) |
 | `oncall: visualization` | TensorBoard integration |
 
+**Common routing mistakes to avoid:**
+- **MPS ≠ Mobile.** MPS (Metal Performance Shaders) is the macOS/Apple Silicon GPU backend. Do NOT route MPS issues to `oncall: mobile`. MPS issues stay in the general queue with `module: mps`.
+- **DTensor → `oncall: distributed`.** DTensor issues should always be routed to `oncall: distributed`, even if they don't mention DDP/FSDP.
+- **ONNX → `module: onnx`.** There is no `oncall: onnx`. Use `module: onnx` and keep in the general queue.
+- **CI/releng → `module: ci`.** Do not use `oncall: releng`. Use `module: ci` for CI infrastructure issues.
+- **torch.compile + distributed.** When `torch.compile` mishandles a distributed op (e.g., `dist.all_reduce`), the issue typically needs BOTH `oncall: pt2` and `oncall: distributed` since the fix may span both codebases.
+
 **Note:** `oncall: cpu inductor` is a sub-queue of PT2. For general triage, just use `oncall: pt2`.
 
 ### 4) Label the issue (if NOT transferred/redirected)
 
 Only if the issue stays in the general queue:
 - Add 1+ `module: ...` labels based on the affected area
-- If feature request: add `feature` (or `function request` for a new function or new arguments/modes)
-- If small improvement: add `enhancement`
+- Prefer specific labels over general ones when both exist. Check `labels.json` descriptions for guidance on when a specific label supersedes a general one (e.g., `module: sdpa` instead of `module: nn` for SDPA issues, `module: flex attention` instead of `module: nn` for flex attention).
+- `feature` — wholly new functionality that does not exist today in any form
+- `enhancement` — improvement to something that already works (e.g., adding a native backend kernel for an op that already runs via fallback/composite, performance optimization, better error messages). If the enhancement is about performance, also add `module: performance`.
+- `function request` — a new function or new arguments/modes for an existing function
+- If the issue says the operation "currently works" or "falls back to" a slower path, that is `enhancement`, not `feature`
+
+**Commonly missed labels — always check for these:**
+
+| Condition | Label |
+|-----------|-------|
+| Segfault, illegal memory access, SIGSEGV | `module: crash` |
+| Performance issue: regression, slowdown, or optimization request | `module: performance` |
+| Issue on Windows | `module: windows` |
+| Previously working feature now broken | `module: regression` |
+| Broken docs/links that previously worked | `module: docs` + `module: regression` (NOT `enhancement`) |
+| Issue about a test failing (not the underlying functionality) | `module: tests` |
+| Backward pass / gradient computation bug | `module: autograd` (in addition to the op's module label) |
+| `torch.linalg` ops or linear algebra ops (solve, svd, eig, inv, etc.) | `module: linear algebra` |
+| `has workaround` | Only add when the workaround is **non-trivial and non-obvious**. If the issue is "X doesn't work for non-contiguous tensors," calling `.contiguous()` is the tautological inverse of the bug, not a workaround. A real workaround is something like installing a specific package version, adding a synchronization point, inserting `gc.collect()`, or using a different API that isn't obviously implied by the bug description. |
+
+**Label based on the actual bug, not keywords.** Read the issue to understand what is actually broken. A bug about broadcasting that happens to mention "nan" in a parameter name is a frontend bug, not a NaN/Inf bug.
 
 ### 5) High Priority — REQUIRES HUMAN REVIEW
 

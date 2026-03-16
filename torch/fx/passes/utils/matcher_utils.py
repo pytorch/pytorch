@@ -4,7 +4,7 @@ import logging
 import os
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch.fx import Graph, Node
@@ -251,7 +251,7 @@ class SubgraphMatcher:
         # match for `gn`
         match_found = True
 
-        def _match_args(args1: Union[list, tuple], args2: Union[list, tuple]) -> bool:
+        def _match_args(args1: list | tuple, args2: list | tuple) -> bool:
             if len(args1) != len(args2):
                 return False
 

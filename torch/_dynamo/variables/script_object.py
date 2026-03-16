@@ -22,7 +22,7 @@ import functools
 import inspect
 import types
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -102,7 +102,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         return False
 
     def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(self.value)
+        return is_opaque_value_type(self.value)  # pyrefly: ignore[bad-argument-type]
 
     def as_proxy(self) -> Any:
         return self.value
@@ -180,8 +180,13 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         var_kwargs = ConstDictVariable(
             {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
         )
-        constant_args = var_args.as_python_constant()
-        constant_kwargs = var_kwargs.as_python_constant()
+        if should_hoist(self.value):
+            with tx.output.tracing_context.guards_context.skip_guard_install():
+                constant_args = var_args.as_python_constant()
+                constant_kwargs = var_kwargs.as_python_constant()
+        else:
+            constant_args = var_args.as_python_constant()
+            constant_kwargs = var_kwargs.as_python_constant()
         opaque_obj = self.value(  # pyrefly: ignore[not-callable]
             *constant_args, **constant_kwargs
         )
@@ -189,8 +194,15 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
             tx.output.fake_mode, opaque_obj
         )
 
+        # Capture sources from the VT args so subgraph reuse can apply
+        # source replacement to resolve new ctor arg values on stamp-out.
+        ctor_arg_sources = tuple(getattr(a, "source", None) for a in args)
+
         return TorchScriptObjectVariable.create(
-            opaque_obj, fake_script_obj, (constant_args, constant_kwargs)
+            opaque_obj,
+            fake_script_obj,
+            (constant_args, constant_kwargs),
+            ctor_arg_sources=ctor_arg_sources,
         )
 
 
@@ -199,20 +211,31 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     @classmethod
     def is_matching_cls(cls, user_cls: type) -> bool:
-        return issubclass(user_cls, torch.ScriptObject) or is_opaque_type(user_cls)
+        return (
+            issubclass(user_cls, torch.ScriptObject)
+            or is_opaque_type(user_cls)
+            or issubclass(user_cls, FakeScriptObject)
+        )
 
     @staticmethod
     def create(
-        proxy: Proxy, value: Any, ctor_args_kwargs: Any = None, **options: Any
+        proxy: Proxy,
+        value: Any,
+        ctor_args_kwargs: Any = None,
+        ctor_arg_sources: tuple[Source | None, ...] | None = None,
+        **options: Any,
     ) -> "TorchScriptObjectVariable":
-        return TorchScriptObjectVariable(proxy, value, ctor_args_kwargs, **options)
+        return TorchScriptObjectVariable(
+            proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
+        )
 
     def __init__(
         self,
         proxy: Proxy,
         value: Any,
         ctor_args_kwargs: Any = None,
-        source: Optional[Source] = None,
+        source: Source | None = None,
+        ctor_arg_sources: tuple[Source | None, ...] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
@@ -223,6 +246,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         # If the OpaqueObject is sourceless, then this is
         # the constant (args, kwargs) that Dynamo used to construct it.
         self.ctor_args_kwargs = ctor_args_kwargs
+        # Sources of the constructor args, used by subgraph reuse to
+        # resolve new values via source replacement on stamp-out.
+        self.ctor_arg_sources = ctor_arg_sources
 
     def as_proxy(self) -> Proxy:
         if not isinstance(self.proxy, torch.fx.Proxy):
@@ -241,11 +267,23 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         "NYI: hoisted opaque objects that accept kwargs, please pass as args"
                     )
                 hoisted_vt = tx.output.synthetic_graph_input(
-                    type(self.proxy), self.ctor_args_kwargs[0]
+                    type(self.proxy),
+                    self.ctor_args_kwargs[0],
+                    ctor_arg_sources=self.ctor_arg_sources,
                 )
                 self.proxy = hoisted_vt.as_proxy()
 
         return self.proxy
+
+    def __str__(self) -> str:
+        value = (
+            self.value.real_obj
+            if isinstance(self.value, FakeScriptObject)
+            else self.value
+        )
+        return f"{self.__class__.__name__}({value})"
+
+    __repr__ = __str__
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
@@ -392,8 +430,14 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                         hints=[],
                     )
 
-                args_const = [x.as_python_constant() for x in args]
-                kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
+                def get_real_value(x: VariableTracker) -> Any:
+                    # For TorchScriptObjectVariable, get the real object directly
+                    if isinstance(x, TorchScriptObjectVariable):
+                        return x.get_real_value()
+                    return x.as_python_constant()
+
+                args_const = [get_real_value(x) for x in args]
+                kwargs_const = {k: get_real_value(v) for k, v in kwargs.items()}
 
                 method = getattr(real_obj, name)
 

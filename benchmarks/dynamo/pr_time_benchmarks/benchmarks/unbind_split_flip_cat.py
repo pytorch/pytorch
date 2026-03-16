@@ -73,6 +73,7 @@ class Benchmark(BenchmarkBase):
         torch.fx.experimental._config.aggressive_guard_free_semantics = (
             AggressiveGuardFreeMode.SKIP_RANGE_ANALYSIS
         )
+        torch.fx.config.do_not_emit_stack_traces = True
         torch.manual_seed(0)
 
         self.model = UnbindSplitFlipCatModel(

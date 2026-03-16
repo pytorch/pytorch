@@ -221,23 +221,6 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
-bool safeEventQuery(const std::shared_ptr<at::cuda::CUDAEvent>& event) {
-#ifdef USE_ROCM
-  try {
-    return event->query();
-  } catch (const c10::Error& e) {
-    const std::string msg = e.what_without_backtrace();
-    if (msg.find("hipErrorCapturedEvent") != std::string::npos ||
-        msg.find("hipErrorStreamCaptureUnsupported") != std::string::npos) {
-      return false;
-    }
-    throw;
-  }
-#else
-  return event->query();
-#endif
-}
-
 inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
   // parentheses avoid some compiler warnings
   static const uint64_t min_version =
@@ -661,7 +644,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
     return false;
   }
   // Checking the work's corresponding CUDA event's status
-  if (!safeEventQuery(ncclStartEvent_)) {
+  if (!ncclStartEvent_->query()) {
     return false;
   }
   return true;
@@ -674,7 +657,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // hang if another thread is holding the CUDA global context lock. For
   // example, when doing a `cudaDeviceSynchronize` or even
   // `cudaStreamSynchronize`.
-  if (!safeEventQuery(ncclEndEvent_)) {
+  if (!ncclEndEvent_->query()) {
     return false;
   }
   return true;
@@ -2027,12 +2010,17 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   //
   // Or we get stuck in destructors, we will sleep for some time before calling
   // std::abort() to kill the whole process.
-  if ((pg_->terminateProcessGroup_.load() || shouldDump_.load()) &&
-      !terminateHeartbeatMonitorThread_.load()) {
-    std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
-    LOG(INFO)
-        << pg_->logPrefix() << "slept for " << heartbeatTimeoutInSec_
-        << " because we want to wait longer to verify there is indeed a watchdog hang.";
+  if (pg_->terminateProcessGroup_.load() || shouldDump_.load()) {
+    for (int t = 0; t < heartbeatTimeoutInSec_; ++t) {
+      if (terminateHeartbeatMonitorThread_.load()) {
+        if (t > 0)
+          LOG(INFO)
+              << pg_->logPrefix() << "slept for " << t
+              << " seconds because we want to wait longer to verify there is indeed a watchdog hang.";
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
   }
 
   // At this point, we either already sleep for another `heartbeatTimeoutInSec_`

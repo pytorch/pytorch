@@ -175,7 +175,7 @@ def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def celu(
-    a: TensorLikeType, alpha: Optional[NumberType] = None, inplace: bool = False
+    a: TensorLikeType, alpha: NumberType | None = None, inplace: bool = False
 ) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.celu
@@ -322,8 +322,8 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
 def group_norm(
     input: Tensor,
     num_groups: int,
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
     eps: float = 1e-5,
 ) -> Tensor:
     """
@@ -362,8 +362,8 @@ def group_norm(
 def layer_norm(
     input: Tensor,
     normalized_shape: ShapeType,
-    weight: Optional[Tensor] = None,
-    bias: Optional[Tensor] = None,
+    weight: Tensor | None = None,
+    bias: Tensor | None = None,
     eps: float = 1e-5,
 ) -> Tensor:
     """
@@ -439,9 +439,9 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 # CompositeImplicitAutograd - don't register decomp
 def softmax(
     a: TensorLikeType,
-    dim: Optional[int] = None,
+    dim: int | None = None,
     _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> TensorLikeType:
     # The error is for compat with regular PyTorch, which has this behavior
     # deprecated.  For PrimTorch, it's fine to drop support for deprecated
@@ -454,9 +454,9 @@ def softmax(
 # CompositeImplicitAutograd - don't register decomp
 def softmin(
     a: TensorLikeType,
-    dim: Optional[int] = None,
+    dim: int | None = None,
     _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> TensorLikeType:
     # The error is for compat with regular PyTorch, which has this behavior
     # deprecated.  For PrimTorch, it's fine to drop support for deprecated
@@ -476,7 +476,7 @@ def softmin(
 )
 def softplus(
     a: TensorLikeType,
-    beta: Optional[NumberType] = None,
+    beta: NumberType | None = None,
     threshold: NumberType = 20,
     inplace: bool = False,
 ) -> TensorLikeType:
@@ -562,9 +562,7 @@ def _check_reduction_value(reduction: str):
 
 # This helper function maps depreciated arguments, "size_average" and "reduce"
 # to their corresponding "reduction" string argument
-def _get_string_reduction_arg(
-    *, size_average: Optional[bool], reduce: Optional[bool]
-) -> str:
+def _get_string_reduction_arg(*, size_average: bool | None, reduce: bool | None) -> str:
     if size_average is None:
         size_average = True
     if reduce is None:
@@ -586,8 +584,8 @@ def _get_string_reduction_arg(
 def l1_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     """
@@ -610,8 +608,8 @@ def l1_loss(
 def smooth_l1_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
     beta: float = 1.0,
 ) -> TensorLikeType:
@@ -640,9 +638,9 @@ def smooth_l1_loss(
 # CompositeImplicitAutograd - don't register decomp
 def log_softmax(
     a: TensorLikeType,
-    dim: Optional[int] = None,
+    dim: int | None = None,
     _stacklevel: int = 3,  # for compat when using TorchRefsMode(strict=True)
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> TensorLikeType:
     # The error is for compat with regular PyTorch, which has this behavior
     # deprecated.  For PrimTorch, it's fine to drop support for deprecated
@@ -678,8 +676,8 @@ def margin_ranking_loss(
 def mse_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     if size_average is not None or reduce is not None:
@@ -712,7 +710,7 @@ def hinge_embedding_loss(
 def _nll_loss_nd(
     input: TensorLikeType,
     target: TensorLikeType,
-    weight: Optional[TensorLikeType],
+    weight: TensorLikeType | None,
     reduction: str,
     ignore_index: int,
 ) -> TensorLikeType:
@@ -797,10 +795,10 @@ def _nll_loss_nd(
 def nll_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    weight: Optional[TensorLikeType] = None,
-    size_average: Optional[bool] = None,
+    weight: TensorLikeType | None = None,
+    size_average: bool | None = None,
     ignore_index: int = -100,
-    reduce: Optional[bool] = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     """
@@ -880,7 +878,7 @@ def nll_loss(
 def huber_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    reduction: Union[str, int] = "mean",
+    reduction: str | int = "mean",
     delta: float = 1.0,
 ) -> TensorLikeType:
     """
@@ -925,7 +923,7 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
 def threshold(
     a: TensorLikeType,
     threshold: NumberType,
-    value: Union[bool, int, float],
+    value: bool | int | float,
     inplace: bool = False,
 ) -> TensorLikeType:
     """
@@ -948,8 +946,8 @@ def triplet_margin_loss(
     p: float = 2,
     eps: float = 1e-6,
     swap: bool = False,
-    size_average: Optional[bool] = None,
-    reduce: Optional[bool] = None,
+    size_average: bool | None = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     if size_average is not None or reduce is not None:
@@ -981,9 +979,8 @@ def _triplet_margin_with_distance_loss(
     positive: TensorLikeType,
     negative: TensorLikeType,
     *,
-    distance_function: Optional[
-        Callable[[TensorLikeType, TensorLikeType], TensorLikeType]
-    ] = None,
+    distance_function: Callable[[TensorLikeType, TensorLikeType], TensorLikeType]
+    | None = None,
     margin: float = 1.0,
     swap: bool = False,
     reduction: str = "mean",
@@ -1097,9 +1094,9 @@ def poisson_nll_loss(
     target: TensorLikeType,
     log_input: bool = True,
     full: bool = False,
-    size_average: Optional[bool] = None,
+    size_average: bool | None = None,
     eps: float = 1e-8,
-    reduce: Optional[bool] = None,
+    reduce: bool | None = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
     """

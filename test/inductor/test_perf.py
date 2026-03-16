@@ -484,6 +484,18 @@ class FusionTests(TestCase):
         inp = (T(10, 10), T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """500""")
 
+    def test_copy_cat_fusion(self):
+        """copy_(cat(...)) should fuse: no intermediate allocation for cat."""
+
+        def f(dst, a, b):
+            dst.copy_(torch.cat([a, b]))
+
+        dst = T(20)
+        inp = (dst, T(10), T(10))
+        # 10 (read a) + 10 (read b) + 20 (write dst) = 40
+        # Without fusion cat would allocate intermediate: 80
+        self.assertExpectedInline(count_numel(f, *inp), """40""")
+
     def test_reduction_pointwise_multi_level_reduction(self):
         hidden_size = 4096
         layer_norm = torch.nn.LayerNorm(hidden_size).to(GPU_TYPE).float()

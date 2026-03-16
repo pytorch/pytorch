@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
@@ -376,7 +376,7 @@ class ConvLayoutParams(TypedDict):
 def conv_layout(
     x: TensorBox,
     weight: TensorBox,
-    bias: Optional[TensorBox],
+    bias: TensorBox | None,
     stride: Sequence[int],
     padding: tuple[int, ...],
     dilation: tuple[int, ...],
@@ -449,7 +449,7 @@ def convert_1x1_conv_to_mm(x, weight, bias):
 def convolution(
     x: TensorBox,
     weight: TensorBox,
-    bias: Optional[TensorBox],
+    bias: TensorBox | None,
     stride: Sequence[int],
     padding: Sequence[int],
     dilation: Sequence[int],
@@ -704,7 +704,8 @@ def convolution(
             groups=groups,
             n_spatial_dimensions=ndim,
         )
-    return autotune_select_algorithm("convolution", choices, args, layout)
+    node, _ = autotune_select_algorithm("convolution", choices, args, layout)
+    return node
 
 
 @register_lowering(aten._convolution)

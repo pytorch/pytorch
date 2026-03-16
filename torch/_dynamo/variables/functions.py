@@ -92,6 +92,7 @@ from .constant import (
     CONSTANT_VARIABLE_TRUE,
     ConstantVariable,
 )
+from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -114,6 +115,7 @@ if TYPE_CHECKING:
         TritonKernelType,
     )
 
+    from .dicts import DunderDictVariable
     from .lists import BaseListVariable, ListVariable
     from .tensor import TensorVariable
 
@@ -340,12 +342,14 @@ def _create_nested_fn(
 
 fn_known_dunder_attrs = {
     "__annotations__",
-    "__defaults__",
-    "__kwdefaults__",
-    "__code__",
-    "__globals__",
     "__closure__",
+    "__code__",
+    "__defaults__",
     "__doc__",
+    "__globals__",
+    "__kwdefaults__",
+    "__name__",
+    "__module__",
 }
 
 
@@ -369,6 +373,8 @@ def fn_var_getattr(
         raise_observed_exception(AttributeError, tx)
 
     # Special handling for known dunder attributes
+    # TODO(guilhermeleobas): this check should go through fn.__dict__ first as
+    # functools.partial can override it
     if name in fn_known_dunder_attrs:
         subobj = getattr(fn, name)
     if source:
@@ -377,11 +383,60 @@ def fn_var_getattr(
 
 
 class BaseUserFunctionVariable(VariableTracker):
+    def __init__(
+        self, dict_vt: "DunderDictVariable | None" = None, **kwargs: Any
+    ) -> None:
+        super().__init__(**kwargs)
+        self.dict_vt: DunderDictVariable | None = dict_vt
+
+    def get_source(self) -> Source | None:
+        return self.source
+
+    def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
+        if self.dict_vt is None:
+            dict_proxy: dict[str, VariableTracker] = {}
+
+            if not istype(self, NestedUserFunctionVariable):
+                fn = self.get_function()
+                dict_proxy = {
+                    name: VariableTracker.build(
+                        tx, value, source=self.source and AttrSource(self.source, name)
+                    )
+                    for name, value in fn.__dict__.items()
+                }
+            self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
+        return self.dict_vt
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__setattr__":
+            return self.get_dict_vt(tx).call_method(
+                tx, "__setitem__", list(args), kwargs
+            )
+        elif name == "__delattr__":
+            return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
+        return super().call_method(tx, name, list(args), kwargs)
+
     def get_filename(self) -> str:
         return self.get_code().co_filename
 
     def get_name(self) -> str:
         return self.get_code().co_name
+
+    def get_qualname(self) -> str:
+        if sys.version_info >= (3, 11):
+            return self.get_code().co_qualname
+        else:
+            return self.get_name()
+
+    def get_doc(self) -> str | None:
+        # stored in code.co_consts[0]
+        return self.get_code().co_consts[0]
 
     def get_globals(self) -> dict[str, Any]:
         raise NotImplementedError
@@ -392,8 +447,46 @@ class BaseUserFunctionVariable(VariableTracker):
     def has_self(self) -> bool:
         raise NotImplementedError
 
+    def get_function(self) -> types.FunctionType:
+        raise NotImplementedError
+
     def get_module(self) -> str:
         return self.get_globals()["__name__"]
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        fn_dict = self.get_dict_vt(tx)
+
+        # missing: __globals__, __closure__, __kwdefautls__, __defaults__
+        if name in ("__name__", "__qualname__", "__doc__", "__module__", "__code__"):
+            val = getattr(self, f"get_{name[2:-2]}")()
+            if fn_dict.contains(name):
+                return fn_dict.getitem(name)
+            return ConstantVariable.create(
+                val, source=self.source and AttrSource(self.source, name)
+            )
+        elif name == "__dict__":
+            return fn_dict
+        elif name == "__annotations__":
+            return fn_dict.getitem_or_default(
+                name,
+                lambda: variables.ConstDictVariable(
+                    {},
+                    mutation_type=ValueMutationNew(),
+                ),
+            )
+        elif name == "__type_params__":
+            return fn_dict.getitem_or_default(
+                name,
+                lambda: variables.TupleVariable(
+                    [],
+                    mutation_type=ValueMutationNew(),
+                ),
+            )
+        else:
+            if fn_dict.contains(name):
+                return fn_dict.getitem(name)
+            else:
+                raise_observed_exception(AttributeError, tx)
 
     def call_function(
         self,
@@ -415,11 +508,13 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> ConstantVariable:
         result = False
 
-        try:
-            result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
-        except NotImplementedError:
-            if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
-                result = True
+        if name in fn_known_dunder_attrs or name == "__dict__":
+            result = True
+        else:
+            try:
+                result = hasattr(self.get_function(), name)  # type: ignore[attr-defined]
+            except NotImplementedError:
+                result = False
         return VariableTracker.build(tx, result)
 
     def closure_vars(self, tx: "InstructionTranslator") -> dict[str, VariableTracker]:
@@ -580,7 +675,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name in cmp_name_to_op_mapping:
+        if name == "__dict__":
+            return super().var_getattr(tx, name)
+        elif name in cmp_name_to_op_mapping:
             return variables.GetAttrVariable(self, name)
         source = self.get_source()
         return fn_var_getattr(tx, self.fn, source, name)
@@ -627,6 +724,25 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     "Improper error_on_graph_break() call. Please fix your call to error_on_graph_break(). "
                     f"args: {args}, kwargs: {kwargs}"
                 ) from e
+        elif self.fn is torch._dynamo.override_cudagraphs:
+            try:
+                bound = inspect.signature(self.fn).bind(*args, **kwargs)
+                bound.apply_defaults()
+                fwd = bound.arguments["fwd"]
+                bwd = bound.arguments["bwd"]
+                if isinstance(fwd, VariableTracker):
+                    fwd = fwd.as_python_constant()
+                if isinstance(bwd, VariableTracker):
+                    bwd = bwd.as_python_constant()
+                return variables.CudagraphOverrideVariable(fwd, bwd)
+            except Exception as e:
+                raise RuntimeError(
+                    "Improper override_cudagraphs() call. Please fix your call to override_cudagraphs(). "
+                    f"args: {args}, kwargs: {kwargs}"
+                ) from e
+        elif self.fn is torch._dynamo.bytecode_debugger.breakpoint:
+            tx.output._emit_debugger_breakpoint = True
+            return variables.CONSTANT_VARIABLE_NONE
         # Handle a `nonstrict_trace(fn)` call
         elif self.fn is torch._dynamo.nonstrict_trace:
             bound = inspect.signature(self.fn).bind(*args, **kwargs)
@@ -1622,7 +1738,24 @@ def invoke_and_store_as_constant(
     def convert(x: VariableTracker) -> Any:
         if x.is_tensor():
             return cast("TensorVariable", x).get_real_value()
-        return x.as_python_constant()
+        if isinstance(x, UserDefinedObjectVariable):
+            if x.source is not None:
+                install_guard(x.make_guard(GuardBuilder.ID_MATCH))
+            return x.value
+        try:
+            return x.as_python_constant()
+        except AsPythonConstantNotImplementedError:
+            unimplemented(
+                gb_type="assume_constant_result argument conversion failed",
+                context=f"function {name}, variable type {type(x).__name__}",
+                explanation=f"Cannot convert argument of type {type(x).__name__} to a Python constant "
+                f"for function {name} marked with torch._dynamo.assume_constant_result. "
+                f"The variable tracker does not support constant conversion.",
+                hints=[
+                    "Remove torch._dynamo.assume_constant_result from this function",
+                    "Ensure all arguments passed to the function can be converted to constants",
+                ],
+            )
 
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
@@ -1647,7 +1780,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         f_globals: dict[str, Any],
         defaults: VariableTracker | None,
         kwdefaults: VariableTracker | None,
-        annotations: VariableTracker | None,
         closure: VariableTracker | None,
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
@@ -1665,7 +1797,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.f_globals = f_globals
         self.defaults = defaults
         self.kwdefaults = kwdefaults
-        self.annotations = annotations
         self.closure = closure
         self.wrapped_fn: VariableTracker | None = wrapped_fn
 
@@ -1754,8 +1885,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__defaults__ = self.defaults.as_python_constant()
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.as_python_constant()
-        if self.annotations:
-            annotations = self.annotations.as_python_constant()
+        if self.dict_vt and self.dict_vt.contains("__annotations__"):
+            annotations = self.dict_vt.getitem("__annotations__").as_python_constant()
             if isinstance(annotations, tuple):
                 from itertools import pairwise
 
@@ -1766,25 +1897,25 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__annotations__ = annotations
         return func
 
-    def call_setattr(
-        self,
-        tx: "InstructionTranslator",
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ) -> VariableTracker:
-        tx.output.side_effects.store_attr(self, name_var.value, val)  # type: ignore[attr-defined]
-        return CONSTANT_VARIABLE_NONE
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            return self.call_setattr(tx, *args)
-        return super().call_method(tx, name, list(args), kwargs)
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name in (
+            "__annotations__",
+            "__dict__",
+            "__doc__",
+            "__code__",
+            "__module__",
+            "__name__",
+            "__qualname__",
+            "__type_params__",
+        ):
+            return super().var_getattr(tx, name)
+        if name == "__defaults__":
+            d = getattr(self, "defaults", None)
+            return d.as_python_constant() if d else ConstantVariable.create(None)
+        elif name in cmp_name_to_op_mapping:
+            return variables.GetAttrVariable(self, name)
+        else:
+            return super().var_getattr(tx, name)
 
     def has_closure(self) -> bool:
         return self.closure is not None
@@ -1806,6 +1937,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return VariableTracker.build(tx, hasattr(self, "code"))
         if name == "__defaults__":
             return VariableTracker.build(tx, hasattr(self, "defaults"))
+        vt = ConstantVariable.create(name)
+        if vt in self.get_dict_vt(tx):
+            return CONSTANT_VARIABLE_TRUE
         return super().call_obj_hasattr(tx, name)
 
     def has_self(self) -> bool:
@@ -1866,14 +2000,15 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
-        if self.annotations:
+        if self.dict_vt and self.dict_vt.contains("__annotations__"):
+            annotations = self.dict_vt.getitem("__annotations__")
             try:
-                annotations = self.annotations.as_python_constant()
+                annotations = annotations.as_python_constant()
                 codegen.extend_output(
                     [codegen.create_load_const_unchecked(annotations)]
                 )
             except NotImplementedError:
-                codegen(self.annotations)
+                codegen(annotations)
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
@@ -1921,7 +2056,6 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
             wrapped.f_globals,
             wrapped.defaults,
             wrapped.kwdefaults,
-            wrapped.annotations,
             wrapped.closure,
             wrapped.wrapped_fn,
         )
@@ -2143,7 +2277,12 @@ class SkipFunctionVariable(VariableTracker):
                 )
                 # pyrefly: ignore [implicit-any]
                 hints = []
-            reason = self.reason if self.reason else "<missing reason>"
+            if self.reason:
+                reason = self.reason
+            else:
+                from ..trace_rules import get_skip_reason
+
+                reason = get_skip_reason(self.value)
             unimplemented(
                 gb_type="Attempted to call function marked as skipped",
                 context=f"module: {module_name}, qualname: {qualname}, skip reason: {reason}",
@@ -2205,7 +2344,7 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
         codegen.extend_output(create_call_function(1, False))
 
 
-class WrapperUserFunctionVariable(VariableTracker):
+class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     """
     Used to represent a wrapper object that contains the actual callable as an
     attribute. For example, torch.jit.script/trace have the original function at
@@ -2218,13 +2357,24 @@ class WrapperUserFunctionVariable(VariableTracker):
         self.wrapper_obj = wrapper_obj
         self.attr_to_trace = attr_to_trace
 
+    def get_module(self) -> str:
+        return self.wrapper_obj.__module__
+
+    def get_name(self) -> str:
+        return self.wrapper_obj.__name__
+
+    def get_code(self) -> types.CodeType:
+        return self.get_function().__code__
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == self.attr_to_trace:
             val = getattr(self.wrapper_obj, self.attr_to_trace)
             source = self.source and AttrSource(self.source, name)
             return VariableTracker.build(tx, val, source)
-
         return super().var_getattr(tx, name)
+
+    def get_function(self):
+        return getattr(self.wrapper_obj, self.attr_to_trace)
 
     def self_args(self) -> list[VariableTracker]:
         return []
@@ -2398,6 +2548,81 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 ],
             )
 
+        if self.fn == dist.batch_isend_irecv:
+            if not config.enable_p2p_compilation:
+                unimplemented(
+                    gb_type="P2P compilation disabled for batch_isend_irecv",
+                    context=f"{self.fn}",
+                    explanation="P2P compilation is disabled.",
+                    hints=[
+                        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable.",
+                    ],
+                )
+
+            p2p_ops = kwargs["p2p_op_list"]
+            if not isinstance(p2p_ops, variables.ListVariable):
+                raise torch._dynamo.exc.InternalTorchDynamoError(
+                    "`P2POp` used incorrectly"
+                )
+
+            ops = list()
+            peers = list()
+            tags = list()
+            tensors = list()
+            group_var: VariableTracker | None = None
+
+            for item in p2p_ops.items:
+                if item.python_type() is not dist.P2POp:
+                    raise torch._dynamo.exc.InternalTorchDynamoError(
+                        "`P2POp` used incorrectly"
+                    )
+
+                op_var = item.var_getattr(tx, "op")
+                if op_var.is_python_constant():
+                    op = op_var.as_python_constant()
+                    if op not in (dist.isend, dist.irecv):
+                        raise torch._dynamo.exc.InternalTorchDynamoError(
+                            f"unexpected P2POp op {op}"
+                        )
+                    op_var = variables.ConstantVariable.create(op.__name__)
+                elif hasattr(op_var, "get_name"):
+                    op_var = variables.ConstantVariable.create(op_var.get_name())
+                else:
+                    raise torch._dynamo.exc.InternalTorchDynamoError(
+                        f"unexpected P2POp op variable {op_var}"
+                    )
+
+                ops.append(op_var)
+                tensors.append(item.var_getattr(tx, "tensor"))
+                peers.append(item.var_getattr(tx, "peer"))
+                tags.append(item.var_getattr(tx, "tag"))
+                if group_var is None:
+                    group_var = item.var_getattr(tx, "group")
+
+            assert group_var is not None
+            new_args: tuple[VariableTracker, ...] = ()
+            new_kwargs: dict[str, VariableTracker] = {
+                "op_list": variables.ListVariable(ops),
+                "peer_list": variables.ListVariable(peers),
+                "tag_list": variables.ListVariable(tags),
+                "tensors": variables.ListVariable(tensors),
+                "group_name": group_var,
+            }
+            return self.replacement_var.call_function(tx, new_args, new_kwargs)
+
+        if self.fn in (dist.isend, dist.irecv):
+            if not config.enable_p2p_compilation:
+                unimplemented(
+                    gb_type="P2P compilation disabled for isend/irecv",
+                    context=f"{self.fn}",
+                    explanation="P2P compilation is disabled.",
+                    hints=[
+                        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable.",
+                    ],
+                )
+
+            return self.replacement_var.call_function(tx, args, kwargs)
+
         if self.fn in (
             dist.all_reduce,
             dist.reduce_scatter_tensor,
@@ -2414,32 +2639,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 raise ValueError(f"Unsupported all_reduce op: {reduce_op}")
             kwargs["op"] = VariableTracker.build(tx, REDUCE_OP_TO_STR[reduce_op])
         return self.replacement_var.call_function(tx, args, kwargs)
-
-
-class FunctoolsWrapsVariable(UserFunctionVariable):
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if not kwargs and len(args) == 1:
-
-            def wraps(fn: Any) -> VariableTracker:
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wrapped_fn=args[0])
-                unimplemented(
-                    gb_type="functools.wraps",
-                    context=f"{fn}",
-                    explanation="`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
-                    hints=[
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            return variables.LambdaVariable(wraps)
-
-        return super().call_function(tx, args, kwargs)
 
 
 class CollectionsNamedTupleFunction(UserFunctionVariable):

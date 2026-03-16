@@ -6,7 +6,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -61,7 +61,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
-    hint_override: Optional[int] = dataclasses.field(kw_only=True, default=None)
+    hint_override: int | None = dataclasses.field(kw_only=True, default=None)
 
 
 @dataclasses.dataclass
@@ -786,7 +786,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[Optional[int], ...]] = OrderedSet()
+        used: OrderedSet[tuple[int | None, ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -795,7 +795,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
-            key: tuple[Optional[int], ...] = (
+            key: tuple[int | None, ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
@@ -814,7 +814,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
 
             # Add TlxGemmConfig specific fields to key if present
-            if config.is_fbcode() and config.triton.enable_tlx_templates:
+            if config.is_fbcode() and config.triton.tlx_mode in ("allow", "force"):
                 from torch._inductor.fb.tlx_templates.registry import (
                     get_tlx_config_key_and_kwargs,
                 )
@@ -857,7 +857,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scale: float,
         has_int8_tensor: bool,
         exclude: Callable[[sympy.Integer, sympy.Integer, sympy.Integer], bool],
-        hint_override: Optional[int] = None,
+        hint_override: int | None = None,
     ) -> list[BaseConfig]:
         """
         Scales and filters matrix multiplication configs based on input size.
@@ -964,7 +964,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         self,
         has_sm_layout_conversion: bool,
         layout_conversion_byte_size: int,
-    ) -> Optional[Callable[[BaseConfig, int], bool]]:
+    ) -> Callable[[BaseConfig, int], bool] | None:
         """
         Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
         based on the config's theoretical maximum shared memory used.
@@ -1554,12 +1554,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4),
-            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 1, 8),
-            (torch.float16, 64): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 128): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 256): ROCmFlexConfig(32, 64, 1, 4),
+            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 2, 4),
+            (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 8),
+            (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 8),
+            (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4),
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1735,7 +1735,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(64, 64, 1, 4)
             else:
-                default_config = ROCmFlexConfig(128, 64, 1, 8)
+                default_config = ROCmFlexConfig(128, 64, 2, 4)
             default_config = self.default_flex_config.get(
                 (dtype, head_dim), default_config
             )
@@ -1743,7 +1743,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4)
             else:
-                default_config = ROCmFlexConfig(64, 32, 1, 4)
+                default_config = ROCmFlexConfig(64, 32, 2, 4)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -1766,7 +1766,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if head_dim == 64:
                 default_config = ROCmFlexBwDConfig(64, 64, 64, 64, 1, 4)
             elif head_dim == 128:
-                default_config = ROCmFlexBwDConfig(64, 128, 128, 64, 1, 8)
+                default_config = ROCmFlexBwDConfig(64, 128, 128, 64, 1, 4)
             else:
                 default_config = ROCmFlexBwDConfig(64, 64, 64, 64, 1, 4)
         else:

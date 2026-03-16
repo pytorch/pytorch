@@ -5,7 +5,7 @@ from torch._export.db.case import SupportLevel
 
 class TorchSymMin(torch.nn.Module):
     """
-    torch.sym_min operator is not supported in export.
+    torch.sym_min operator is supported in export.
     """
 
     def forward(self, x):
@@ -14,5 +14,5 @@ class TorchSymMin(torch.nn.Module):
 
 example_args = (torch.randn(3, 2),)
 tags = {"torch.operator"}
-support_level = SupportLevel.NOT_SUPPORTED_YET
+support_level = SupportLevel.SUPPORTED
 model = TorchSymMin()
