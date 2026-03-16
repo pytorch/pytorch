@@ -3424,12 +3424,6 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
-
-        is_deterministic = (
-            torch.are_deterministic_algorithms_enabled()
-            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
-        )
-
         if torch._inductor.config.test_configs.track_memory_lifecycle:
             out = (
                 f"{name} = tracked_empty_strided("
@@ -3439,14 +3433,14 @@ class PythonWrapperCodegen(CodeGen):
                 f"device='{device.type}', "
                 f"name='{name}')"
             )
-        elif device.type == "cpu" and is_pinned and not is_deterministic:
+        elif device.type == "cpu" and is_pinned:
             out = (
                 f"{name} = empty_strided_cpu_pinned("
                 f"{codegen_allocation_shape_tuple}, "
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
-        elif device.type in ("cpu", "cuda", "xpu", "mtia") and not is_deterministic:
+        elif device.type in ("cpu", "cuda", "xpu", "mtia"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             out = (
                 f"{name} = empty_strided_{device.type}("
@@ -3454,14 +3448,13 @@ class PythonWrapperCodegen(CodeGen):
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
-        # all other devices (or deterministic mode):
-        # NOTE: For deterministic mode, fallback to the slower path which correctly fills the buffer with NaN or MAX_INT
+        # all other devices:
         else:
             out = (
                 f"{name} = empty_strided("
                 f"{codegen_allocation_shape_tuple}, "
                 f"{codegen_stride_tuple}, "
-                f"device='{device.type}', dtype={dtype}, pin_memory={is_pinned})"
+                f"device='{device.type}', dtype={dtype})"
             )
         if codegen_shape_tuple != codegen_allocation_shape_tuple:
             # need an extra as_strided call

@@ -1040,6 +1040,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if guard_manager_wrapper.diff_guard_root:
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
+    def test_swap_tensors_subclass_not_blocked_by_metaconverter_refcycle(self):
+        """Checks that MetaConverter doesn't create refcycles of itself that blocks swap_tensor on subclass tensors"""
+        was_gc_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            from torch._subclasses.meta_utils import MetaConverter
+            from torch.utils.weak import WeakIdRef
+
+            w_a = torch.randn(4, 4)
+            w_b = w_a.clone()
+            # For custom tensor parameters, `nn.Parameter` returns the same custom tensor type
+            # and sets `_is_param`, which is what Module._apply uses to decide swap_tensors.
+            w = nn.Parameter(TwoTensor(w_a, w_b).requires_grad_())
+
+            def weak_id_ref_count(t: torch.Tensor) -> int:
+                return sum(isinstance(r, WeakIdRef) for r in weakref.getweakrefs(t))
+
+            baseline_weak_id_refs = weak_id_ref_count(w)
+            converter = MetaConverter()
+            _ = converter(w)
+            after_convert_weak_id_refs = weak_id_ref_count(w)
+            self.assertGreater(after_convert_weak_id_refs, baseline_weak_id_refs)
+
+            # If MetaConverter is collectable by refcount, the weakrefs go away immediately.
+            # If it's kept alive only by a refcycle, this weakref will persist while gc is
+            # disabled.
+            del _
+            del converter
+            self.assertEqual(weak_id_ref_count(w), baseline_weak_id_refs)
+        finally:
+            if was_gc_enabled:
+                gc.enable()
+            gc.collect()
+
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -8905,6 +8939,43 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         result = f(torch.tensor(0.0))
         self.assertEqual(result.item(), 4.0)
+
+    def test_enum_with_class_values(self):
+        # Enum whose members are user-defined classes; calling .value()
+        # instantiates the class, which Dynamo can't trace.
+        from enum import Enum
+
+        class AvgMetric:
+            def __init__(self):
+                self.sum = None
+                self.count = 0
+
+            def append(self, x):
+                if self.count > 0:
+                    self.sum = self.sum + x
+                else:
+                    self.sum = x.clone()
+                self.count += 1
+
+        class GlobalReduction(Enum):
+            AVG = AvgMetric
+
+        class ScalarLogger:
+            def __init__(self):
+                self.metrics = {}
+
+            def log(self, key, value, global_reduction):
+                if key not in self.metrics:
+                    self.metrics[key] = global_reduction.value()
+                self.metrics[key].append(value)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(logger, x):
+            logger.log("test", x, GlobalReduction.AVG)
+            return x + 1
+
+        logger = ScalarLogger()
+        fn(logger, torch.tensor(1.0))
 
 
 instantiate_parametrized_tests(ReproTests)

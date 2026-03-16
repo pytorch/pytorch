@@ -5188,23 +5188,30 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
-        if args and isinstance(args[0], NNModuleVariable):
-            module = parent.output.get_submodule(args[0].module_key)
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
-        # When we have inline_nn_module turned on, modules resolve to UnspecializedNNModuleVariable
-        if args and isinstance(args[0], UnspecializedNNModuleVariable):
-            module = args[0].value
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
+        # For unrealized lazy VTs, use peek_type to skip non-Module args
+        # without realizing them (which would install unnecessary guards).
+        if args:
+            arg0 = args[0]
+            should_check = True
+            if isinstance(arg0, LazyVariableTracker) and not arg0.is_realized():
+                if issubclass(arg0.peek_type(), torch.nn.Module):
+                    arg0 = arg0.realize()
+                else:
+                    should_check = False
+
+            if should_check:
+                if isinstance(arg0, NNModuleVariable):
+                    module = parent.output.get_submodule(arg0.module_key)
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
+                elif isinstance(arg0, UnspecializedNNModuleVariable):
+                    module = arg0.value
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
 
         assert not isinstance(func, SkipFunctionVariable)
         tracer: InliningInstructionTranslator

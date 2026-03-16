@@ -1358,26 +1358,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
-        @register(torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw)
-        def handle_guarding_hint_or_throw(
-            self,
-            tx: "InstructionTranslator",
-            expr: VariableTracker,
-        ) -> VariableTracker | None:
-            if isinstance(expr, SymNodeVariable):
-                return VariableTracker.build(
-                    tx,
-                    torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
-                        expr.sym_num
-                    ),
-                )
-            elif expr.is_python_constant():
-                return expr
-            else:
-                return None
-
-        @register(torch.fx.experimental.symbolic_shapes.optimization_hint)
-        def handle_optimization_hint(
+        @register(torch.fx.experimental.symbolic_shapes.size_hint)
+        def handle_size_hint(
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
@@ -1387,7 +1369,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if isinstance(expr, SymNodeVariable):
                 return VariableTracker.build(
                     tx,
-                    torch.fx.experimental.symbolic_shapes.optimization_hint(
+                    torch.fx.experimental.symbolic_shapes.size_hint(
                         expr.sym_num, fallback_int
                     ),
                 )

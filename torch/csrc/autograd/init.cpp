@@ -339,6 +339,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def(
       "_prepare_profiler",
       prepareProfiler,
+      py::arg("config"),
+      py::arg("activities"),
+      py::arg("activity_filter") = torch::autograd::profiler::ActivityFilter{},
       py::call_guard<py::gil_scoped_release>());
   m.def(
       "_toggle_collection_dynamic",

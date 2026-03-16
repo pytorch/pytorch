@@ -141,8 +141,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             if isinstance(sym_var, sympy.Symbol) and sym_var.name in sym_name_to_value:
                 result.append(sym_name_to_value[sym_var.name])
             else:
-                hint = V.graph.sizevars.shape_env.optimization_hint(sym_var, fallback=1)
-                result.append(int(hint))
+                hint = V.graph.sizevars.shape_env.size_hint(sym_var)
+                result.append(int(hint) if hint is not None else 1)
         return result
 
     def cache_decomposition(
@@ -169,6 +169,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
         log.debug("Benchmark compile %s: sym_inputs=%s", self.name, self.sym_inputs)
 
+        assert self.gm is not None
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=compile_inputs,
@@ -227,6 +228,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self._compiled_module.call([*self.sym_input_values, *args])
 
     def hash_key(self) -> str:
+        assert self.gm is not None
         return "-".join(
             [
                 self.name.rsplit("_", 1)[0],
@@ -237,6 +239,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
 
     def output_node(self) -> ir.TensorBox:
+        assert self.gm is not None
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,

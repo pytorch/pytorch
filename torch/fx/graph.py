@@ -190,7 +190,10 @@ class _Namespace:
 
         base, num = match.group(1, 2)
         if num is None or candidate in self._used_names:
-            num = self._base_count.get(candidate, 0)
+            # Look up `base` to match the key used in the store on line below;
+            # using `candidate` misses when it has a numeric suffix, making
+            # the while-loop quadratic.
+            num = self._base_count.get(base, 0)
             if _illegal_names.get(candidate, obj) is not obj:
                 num += 1
                 candidate = f"{base}_{num}"

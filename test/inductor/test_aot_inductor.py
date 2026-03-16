@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import itertools
 import logging
 import os
@@ -37,6 +38,10 @@ from torch._library import capture_triton
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.export import Dim, export
 from torch.export.pt2_archive._package import load_pt2
+from torch.nn.attention import (
+    activate_flash_attention_impl,
+    restore_flash_attention_impl,
+)
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
@@ -47,6 +52,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     requires_triton_ptxas_compat,
     SM80OrLater,
+    SM90OrLater,
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -93,6 +99,20 @@ from torch.utils._triton import (
     has_triton_experimental_host_tma,
     has_triton_tensor_descriptor_host_tma,
 )
+
+
+@contextlib.contextmanager
+def use_fa3():
+    try:
+        activate_flash_attention_impl("FA3")
+    except (ModuleNotFoundError, RuntimeError) as err:
+        raise unittest.SkipTest(
+            "FA3 backend not available (flash_attn_interface missing)"
+        ) from err
+    try:
+        yield
+    finally:
+        restore_flash_attention_impl()
 
 
 if HAS_GPU:
@@ -4780,6 +4800,67 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(not SM90OrLater, "FA3 requires SM90+")
+    def test_varlen_attn_paged_kv_cache(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        from torch.nn.attention.varlen import varlen_attn
+
+        batch_size, num_heads, head_dim = 2, 4, 64
+        page_size, max_pages_per_seq = 64, 2
+        cache_seqlen, new_seqlen = 32, 1
+
+        class Model(torch.nn.Module):
+            def forward(self, q, k_pages, v_pages, cu_seq_q, seqused_k, page_table):
+                return varlen_attn(
+                    query=q,
+                    key=k_pages,
+                    value=v_pages,
+                    cu_seq_q=cu_seq_q,
+                    cu_seq_k=None,
+                    max_q=new_seqlen,
+                    max_k=max_pages_per_seq * page_size,
+                    seqused_k=seqused_k,
+                    page_table=page_table,
+                )
+
+        total_new = new_seqlen * batch_size
+        total_pages = batch_size * max_pages_per_seq
+        example_inputs = (
+            torch.randn(
+                total_new, num_heads, head_dim, dtype=torch.bfloat16, device=self.device
+            ),
+            torch.randn(
+                total_pages,
+                page_size,
+                num_heads,
+                head_dim,
+                dtype=torch.bfloat16,
+                device=self.device,
+            ),
+            torch.randn(
+                total_pages,
+                page_size,
+                num_heads,
+                head_dim,
+                dtype=torch.bfloat16,
+                device=self.device,
+            ),
+            torch.arange(
+                0, total_new + 1, new_seqlen, dtype=torch.int32, device=self.device
+            ),
+            torch.full(
+                (batch_size,), cache_seqlen, dtype=torch.int32, device=self.device
+            ),
+            torch.arange(total_pages, dtype=torch.int32, device=self.device).reshape(
+                batch_size, max_pages_per_seq
+            ),
+        )
+
+        with use_fa3():
+            self.check_model(Model(), example_inputs)
+
     def test_aoti_runtime_asserts(self):
         from torch.export._draft_export import draft_export, FailureType
 
@@ -5046,7 +5127,11 @@ class AOTInductorTestsTemplate:
             dtype=torch.complex64,
             device=self.device,
         )
-        x2 = torch.tensor(128, dtype=torch.complex128, device=self.device)
+        x2 = torch.tensor(
+            128,
+            dtype=torch.complex128 if self.device != "mps" else torch.complex64,
+            device=self.device,
+        )
         inputs.append(x0)
         inputs.append(x1)
         inputs.append(x2)

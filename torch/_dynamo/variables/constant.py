@@ -390,6 +390,57 @@ CONSTANT_VARIABLE_TRUE = ConstantVariable(True)
 CONSTANT_VARIABLE_FALSE = ConstantVariable(False)
 
 
+class FakeIdVariable(VariableTracker):
+    """A compile-time-only id value that can be used as a dict key but cannot
+    be reconstructed across graph breaks.
+
+    When dynamo evaluates ``id(x)`` on a variable tracker that has no
+    corresponding runtime object (e.g. a ``ConstDictVariable`` created during
+    tracing), we mint a fake integer id.  This variable holds that id and
+    supports the minimal interface needed to participate as a dict key
+    (hashing and equality).  It intentionally blocks reconstruction so that a
+    graph break does not silently bake a stale id into the resumed bytecode.
+    """
+
+    def __init__(self, value: int, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def as_python_constant(self) -> int:
+        return self.value
+
+    def is_python_constant(self) -> bool:
+        return False
+
+    def python_type(self) -> type:
+        return int
+
+    def is_python_hashable(self) -> bool:
+        return True
+
+    def get_python_hash(self) -> int:
+        return hash(self.value)
+
+    def is_python_equal(self, other: object) -> bool:
+        if isinstance(other, (FakeIdVariable, ConstantVariable)):
+            return self.value == other.as_python_constant()
+        return False
+
+    def reconstruct(self, codegen: Any) -> None:
+        unimplemented(
+            gb_type="Reconstruction of FakeIdVariable",
+            context=str(self.value),
+            explanation=(
+                "A fake id produced by id() on a compile-time container "
+                "cannot be reconstructed across a graph break."
+            ),
+            hints=[
+                "Avoid using id() on containers in code that may graph-break.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+
 class EnumVariable(VariableTracker):
     """VariableTracker for enum.Enum and enum.IntEnum instances
 

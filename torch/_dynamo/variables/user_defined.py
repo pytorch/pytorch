@@ -46,7 +46,7 @@ import torch.nn
 from torch._guards import Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
-from .. import graph_break_hints, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
@@ -355,7 +355,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if ConstantVariable.is_literal(obj):
             return VariableTracker.build(tx, obj)
         elif isinstance(obj, enum.Enum):
-            return VariableTracker.build(tx, obj)
+            return VariableTracker.build(tx, obj, source)
         elif self.value is collections.OrderedDict:
             return variables.GetAttrVariable(self, name)
         elif name in getattr(self.value, "__dict__", {}) or (
@@ -536,6 +536,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from .ctx_manager import GenericContextWrappingVariable
 
         constant_args = check_constant_args(args, kwargs)
+
+        if torch.distributed.is_available() and self.value is torch.distributed.P2POp:
+            if not config.enable_p2p_compilation:
+                unimplemented(
+                    gb_type="P2P compilation disabled for P2POp construction",
+                    context="torch.distributed.P2POp",
+                    explanation="P2P compilation is disabled.",
+                    hints=[
+                        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable.",
+                    ],
+                )
+
+            var = tx.output.side_effects.track_new_user_defined_object(
+                SourcelessBuilder.create(tx, object),
+                self,
+                [],
+            )
+            var.call_method(tx, "__init__", list(args), kwargs)  # type: ignore[arg-type]
+            return var
 
         if self.can_constant_fold_through() and constant_args:
             # constant fold
@@ -991,6 +1010,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     [self, *args],
                     kwargs,
                 )
+
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self) -> bool:
@@ -1009,8 +1029,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     functools.partial(GuardBuilder.HASATTR, attr=name)
                 )
             )
-            return VariableTracker.build(tx, hasattr(self.value, name))
-        return super().call_obj_hasattr(tx, name)
+        return VariableTracker.build(tx, hasattr(self.value, name))
 
     def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
         if name == "__name__":
@@ -1114,6 +1133,8 @@ def call_random_fn(
     args = [x.as_python_constant() for x in args]
     kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
     random_call_index = len(tx.output.random_calls)
+    # NB: it is probably not important for the example_value to be exactly correct,
+    # we just need the right type
     example_value = fn(*args, **kwargs)
     source = RandomValueSource(random_call_index)
     tx.output.random_calls.append((fn, args, kwargs))  # type: ignore[arg-type]
@@ -1378,6 +1399,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             "Attempted setattr on a user-defined object that does not have "
             "an AttributeMutation mutation_type"
         )
+
+        if (
+            torch.distributed.is_available()
+            and type(self.value) is torch.distributed.P2POp
+            and (
+                tx.output.side_effects.has_pending_mutation_of_attr(self, name_str)
+                or name_str in self.value.__dict__
+            )
+        ):
+            unimplemented(
+                gb_type="P2POp mutation",
+                context=f"object={self}, name={name}, value={value}",
+                explanation="Dynamo does not support mutating torch.distributed.P2POp instances.",
+                hints=[
+                    "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile.",
+                ],
+            )
 
         if name_str == "__class__":
             unimplemented(

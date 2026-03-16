@@ -29,7 +29,6 @@ from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_dim_sharded,
-    is_tensor_evenly_shardable,
     is_tensor_partial,
     normalize_dim,
     register_op_strategy,
@@ -254,14 +253,6 @@ def new_factory_strategy(op_schema: OpSchema) -> StrategyType:
         )
 
         if tuple(input_shape) == tuple(output_shape) and input_spec.is_sharded():
-            # NOTE: for new_empty_strided, currently the non-replicate sharding
-            #       is supported only when the shape is evenly shardable
-            if (
-                op_schema.op == aten.new_empty_strided.default
-                and not is_tensor_evenly_shardable(input_shape, input_spec)
-            ):
-                continue
-
             new_factory_strategy.strategies.append(
                 OpSpec(
                     output_specs=input_spec,

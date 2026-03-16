@@ -1536,6 +1536,7 @@ class GraphLowering(torch.fx.Interpreter):
                     ir.EffectfulKernel,
                     ir.ShapeAsConstantBuffer,
                     TorchBindObject,
+                    ir.OpaqueMultiOutput,
                 ),
             )
             for x in result
@@ -1702,6 +1703,29 @@ class GraphLowering(torch.fx.Interpreter):
             schema_arg = schema_kwargs[key]
             maybe_propagate(schema_arg, old_arg, new_arg)
 
+    @staticmethod
+    def _get_node_stream(n: torch.fx.Node) -> int | None:
+        """Get the user-annotated stream index from FX node metadata."""
+        return n.meta.get("custom", {}).get("stream")
+
+    def _realize_inputs_at_stream_boundaries(self, n: torch.fx.Node) -> None:
+        """Realize IR inputs that are on a different stream.
+
+        Without this, pointwise ops across stream boundaries would be inlined
+        into each other during lowering, making it impossible for the scheduler
+        to split them into separate kernels.
+
+        None means the default stream, so it is compared like any other value.
+        """
+        node_stream = self._get_node_stream(n)
+        for input_node in n.all_input_nodes:
+            input_stream = self._get_node_stream(input_node)
+            if input_stream == node_stream:
+                continue
+            ir_value = self.env.get(input_node)
+            if isinstance(ir_value, ir.TensorBox):
+                ir_value.realize()
+
     def run_node(self, n: torch.fx.Node) -> object:
         """Lower and execute a single FX node into Inductor IR."""
 
@@ -1746,6 +1770,7 @@ class GraphLowering(torch.fx.Interpreter):
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
+            self._realize_inputs_at_stream_boundaries(n)
         with (
             ir.IRNode.current_origins(origins),
             self.set_current_node(n),
@@ -1868,7 +1893,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize()
 
             if (is_output or is_input_for_as_strided) and isinstance(
-                n.meta["val"], torch.Tensor
+                n.meta.get("val"), torch.Tensor
             ):
                 if is_user_visible:
                     strides = self.user_visible_output_strides.get(n)

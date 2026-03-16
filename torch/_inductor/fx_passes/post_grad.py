@@ -260,7 +260,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
-                config.bucket_reduce_scatters_fx,  # type: ignore[arg-type]
+                config.bucket_reduce_scatters_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -292,7 +292,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_all_gathers_fx_bucket_size_determinator,
-                config.bucket_all_gathers_fx,  # type: ignore[arg-type]
+                config.bucket_all_gathers_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -1530,6 +1530,11 @@ def should_prefer_unfused_addmm(match):
     extra_check=should_prefer_unfused_addmm,
 )
 def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
+    # Unfusing addmm introduces an extra bf16/fp16 truncation at the mm output
+    # that compounds through deep models and causes accuracy failures.
+    if inp.meta["val"].dtype in (torch.bfloat16, torch.float16):
+        return
+
     def repl(inp, x1, x2, alpha, beta):
         mm_result = x1 @ x2
         if alpha != 1:
@@ -1947,6 +1952,7 @@ class ConstructorMoverPass:
                     del cpu_indeg[user]
                 elif (
                     self.allow_inputs
+                    and self.is_on_target_device(user)
                     and self.all_inputs_are_cpu_scalar_or_on_target_device(user)
                 ):
                     # this node takes only cpu scalar tensors or gpu tensors as inputs

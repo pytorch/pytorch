@@ -776,6 +776,17 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
 
+        if name == "__deepcopy__":
+            unimplemented(
+                gb_type="copy.deepcopy(tensor)",
+                context=f"copy.deepcopy({self})",
+                explanation="Dynamo does not support copy.deepcopy() on tensors.",
+                hints=[
+                    "Avoid calling copy.deepcopy() on tensors inside compiled regions.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         # Only override builtin tensor methods
         # The user can manually add override handling
         # with a decorator for other methods (e.g. a dispatch subclass with other methods)
@@ -806,6 +817,22 @@ class TensorVariable(VariableTracker):
         # This is seen in inspect signature where we check if the value is a default value
         if name == "__eq__" and isinstance(args[0], UserDefinedClassVariable):
             return variables.CONSTANT_VARIABLE_FALSE
+
+        if name == "wait":
+            if args or kwargs:
+                raise torch._dynamo.exc.InternalTorchDynamoError(
+                    "`wait` and `wait_tensor` do not take any arguments"
+                )
+            from torch.distributed._functional_collectives import wait_tensor
+
+            from .builder import wrap_fx_proxy
+
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", wait_tensor, (self.as_proxy(),), {}
+                ),
+            )
 
         # For historical reasons, these ops decompose down to syntactically
         # invalid aten ops because they contain the python keyword `from`, see
@@ -1804,6 +1831,31 @@ class TensorVariable(VariableTracker):
         ):
             return self.call_method(tx, "new_empty", args, kwargs)
         return None
+
+    def method_new_tensor(
+        self: "TensorVariable",
+        tx: "InstructionTranslator",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if len(args) != 1:
+            return None
+        data_arg = args[0]
+        layout = kwargs.get("layout")
+        if layout is not None:
+            if not layout.is_python_constant():
+                return None
+            if layout.as_python_constant() != torch.strided:
+                return None
+        fwd_kwargs = dict(kwargs)
+        fwd_kwargs.pop("layout", None)
+        fwd_kwargs.setdefault("dtype", self.var_getattr(tx, "dtype"))
+        fwd_kwargs.setdefault("device", self.var_getattr(tx, "device"))
+        return variables.TorchInGraphFunctionVariable(torch.tensor).call_function(
+            tx,
+            [data_arg],
+            fwd_kwargs,
+        )
 
     def method_untyped_storage(
         self, tx: "InstructionTranslator"

@@ -517,6 +517,40 @@ command = [
 ]
 
 [[linter]]
+code = 'RAWTHROW'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    # Vendored code (do not modify)
+    'c10/util/flat_hash_map.h',
+    'c10/util/order_preserving_flat_hash_map.h',
+    'aten/src/ATen/native/quantized/cpu/qnnpack/**',
+    'aten/src/ATen/native/transformers/cuda/mem_eff_attention/**',
+    # Standalone code that cannot depend on c10
+    'torch/csrc/inductor/aoti_runtime/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=\bthrow\b',
+    '--allowlist-pattern=@allow-raw-throw',
+    '--linter-name=RAWTHROW',
+    '--error-name=raw throw statement',
+    """--error-description=\
+        Do not use raw `throw` in C++ code. Use TORCH_CHECK, \
+        TORCH_CHECK_WITH, C10_THROW_ERROR, or other error-reporting macros \
+        instead. See c10/util/Exception.h for available macros. If this is a \
+        re-throw (throw;), restructure the code to avoid try/catch/throw or \
+        add the file to the RAWTHROW exclude list in .lintrunner.toml with \
+        justification.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
 code = 'INCLUDE'
 include_patterns = [
     'c10/**',

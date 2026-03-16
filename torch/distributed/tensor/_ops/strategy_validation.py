@@ -667,14 +667,16 @@ def _extract_rules_from_op_strategy(
             continue
         if isinstance(spec.output_specs, tuple):
             output_plcs: list[Placement] = []
+            has_none = False
             for out_spec in spec.output_specs:
                 if out_spec is None:
-                    raise NotImplementedError(
-                        f"Strategy has None in output_specs, indicating mixed "
-                        f"tensor/non-tensor outputs which the validator does not "
-                        f"support. output_specs: {spec.output_specs}"
-                    )
+                    # None means the output placement is undefined for this
+                    # strategy (e.g. indices under P(max) reduction). Skip it.
+                    has_none = True
+                    break
                 output_plcs.append(out_spec.placements[0])
+            if has_none:
+                continue
         else:
             # Single DTensorSpec — the propagator duplicates it for all
             # outputs of multi-output ops, so we do the same here.
@@ -983,14 +985,12 @@ def _query_dtensor_rules(
         )
         if strategy_result:
             for combo in strategy_result:
-                if len(combo) >= num_tensors + 1:
-                    output_plc = combo[0]
-                    input_plcs = tuple(combo[1 : num_tensors + 1])
-                    # single_dim_strategy returns one output placement;
-                    # duplicate for all outputs (matches propagator behavior)
+                if len(combo) >= n_outputs + num_tensors:
+                    output_plcs = combo[:n_outputs]
+                    input_plcs = tuple(combo[n_outputs : n_outputs + num_tensors])
                     rule_key: ComboKey = (
                         tuple(str(p) for p in input_plcs),
-                        tuple(str(output_plc) for _ in range(n_outputs)),
+                        tuple(str(p) for p in output_plcs),
                     )
                     normalized_rule = normalize_combo_key(
                         rule_key, input_shapes, output_shapes

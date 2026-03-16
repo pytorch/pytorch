@@ -29,6 +29,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorContinuousTestBase,
     DTensorConverter,
+    DTensorTestBase,
     LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
     with_comms,
@@ -450,6 +451,13 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_3))
         self.assertFalse(input_tensor_2.is_same_size(dist_tensor_3))
 
+    def test_is_pinned(self):
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+
+        dt = DTensor.from_local(torch.ones(4, 4), device_mesh, shard_spec)
+        self.assertFalse(dt.is_pinned())
+
     def _test_op(self, mesh, op_call, *args, **kwargs):
         out = op_call(*args, **kwargs)
         dtc = DTensorConverter(mesh, args, kwargs)
@@ -507,16 +515,22 @@ class DistTensorOpsTest(DTensorContinuousTestBase):
         )
         self.assertTrue(new_empty_strided_dt.contiguous() is new_empty_strided_dt)
 
-        # output shape same as input shape, unevenly sharded input -> output replicated
+        # output shape same as input shape, unevenly sharded input -> output follows input
         global_tensor = torch.randn(12, 7)
         input_dt = distribute_tensor(global_tensor, device_mesh, placement)
         self.assertTrue(input_dt.shape[shard_dim] % self.world_size != 0)
         with comm_mode:
             new_empty_strided_dt = input_dt.new_empty_strided((12, 7), (7, 1))
             self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertEqual(new_empty_strided_dt.placements, (Replicate(),))
-        self.assertEqual(new_empty_strided_dt._local_tensor.size(), (12, 7))
-        self.assertEqual(new_empty_strided_dt._local_tensor.stride(), (7, 1))
+        self.assertEqual(new_empty_strided_dt.placements, placement)
+        self.assertEqual(
+            new_empty_strided_dt._local_tensor.size(),
+            input_dt._local_tensor.size(),
+        )
+        self.assertEqual(
+            new_empty_strided_dt._local_tensor.stride(),
+            input_dt._local_tensor.stride(),
+        )
 
         # output shape different from input shape -> output replicated
         global_tensor = torch.randn(12, 8)
@@ -1358,6 +1372,50 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
             self.assertEqual(hits, 0)
             self.assertEqual(misses, 2)
             self.assertEqual(result.shape, torch.Size([8, 8]))
+
+
+class TestNewEmptyStridedUneven(DTensorTestBase):
+    @with_comms
+    def test_backward_no_allgather(self):
+        """Backward on unevenly-sharded DTensor should not allgather (issue #107661)."""
+        mesh = self.build_device_mesh()
+        placement = (Shard(1),)
+        x = torch.randn(12, self.world_size * 2 + 1, requires_grad=True)
+        dt = distribute_tensor(x, mesh, placement)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            (dt.to_local() * 2).sum().backward()
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(dt.grad.placements, placement)
+        self.assertTrue(dt.grad._local_tensor.is_contiguous())
+        self.assertEqual(
+            dt.grad._local_tensor,
+            torch.full_like(dt.grad._local_tensor, 2.0),
+        )
+
+    @with_comms
+    def test_backward_channels_last(self):
+        """Backward preserves channels-last stride order for unevenly-sharded DTensor."""
+        mesh = self.build_device_mesh()
+        placement = (Shard(2),)
+        # H=2*world_size+1 ensures uneven sharding on dim 2
+        x = torch.randn(2, 3, self.world_size * 2 + 1, 4).to(
+            memory_format=torch.channels_last
+        )
+        x.requires_grad_(True)
+        dt = distribute_tensor(x, mesh, placement)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            (dt.to_local() * 2).sum().backward()
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(dt.grad.placements, placement)
+        self.assertTrue(
+            dt.grad._local_tensor.is_contiguous(memory_format=torch.channels_last)
+        )
+        self.assertEqual(
+            dt.grad._local_tensor,
+            torch.full_like(dt.grad._local_tensor, 2.0),
+        )
 
 
 if __name__ == "__main__":
