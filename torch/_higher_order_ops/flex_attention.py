@@ -86,7 +86,7 @@ def _permute_strides(out: torch.Tensor, query_strides: tuple[int, ...]) -> torch
         fill_order = [last_dim] + fill_order
         out_strides = _construct_strides(out.shape, fill_order)
 
-    new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
+    new_out = out.new_empty_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
 
