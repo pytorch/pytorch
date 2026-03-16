@@ -310,6 +310,12 @@ def is_tf32_supported() -> bool:
     # subgroup matrix multiply-accumulate operations.
     return torch.xpu.get_device_properties().has_subgroup_matrix_multiply_accumulate
 
+def is_flash_attention_supported() -> bool:
+    r"""Return a bool indicating if the current XPU device supports flash attention."""
+    if not is_available():
+        return False
+    return torch.xpu.get_device_properties().device_id in [0xE20B, 0xE20C, 0xE211, 0xE212, 0x0BD5, 0x0BDA]
+
 
 def is_initialized():
     r"""Return whether PyTorch's XPU state has been initialized."""
