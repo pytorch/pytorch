@@ -8,7 +8,6 @@ RMSNorm CuTE DSL kernel classes from quack
 
 import math
 from functools import partial
-from typing import Optional
 
 import cuda.bindings.driver as cuda
 
@@ -92,12 +91,12 @@ class RMSNorm:
     def __call__(
         self,
         mX: cute.Tensor,
-        mW: Optional[cute.Tensor],
-        mB: Optional[cute.Tensor],
-        mRes: Optional[cute.Tensor],
+        mW: cute.Tensor | None,
+        mB: cute.Tensor | None,
+        mRes: cute.Tensor | None,
         mO: cute.Tensor,
-        mResO: Optional[cute.Tensor],
-        mRstd: Optional[cute.Tensor],
+        mResO: cute.Tensor | None,
+        mRstd: cute.Tensor | None,
         eps: Float32,
         stream: cuda.CUstream,
     ):
@@ -151,12 +150,12 @@ class RMSNorm:
     def kernel(
         self,
         mX: cute.Tensor,
-        mW: Optional[cute.Tensor],
-        mB: Optional[cute.Tensor],
-        mRes: Optional[cute.Tensor],
+        mW: cute.Tensor | None,
+        mB: cute.Tensor | None,
+        mRes: cute.Tensor | None,
         mO: cute.Tensor,
-        mResO: Optional[cute.Tensor],
-        mRstd: Optional[cute.Tensor],
+        mResO: cute.Tensor | None,
+        mRstd: cute.Tensor | None,
         eps: Float32,
         tiler_mn: cute.Shape,
         tiled_copy: cute.TiledCopy,
@@ -318,12 +317,12 @@ _FWD_SCHEMA = (
 )
 def _rmsnorm_fwd(
     x: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     out: Tensor,
-    bias: Optional[Tensor] = None,
-    rstd: Optional[Tensor] = None,
-    residual: Optional[Tensor] = None,
-    residual_out: Optional[Tensor] = None,
+    bias: Tensor | None = None,
+    rstd: Tensor | None = None,
+    residual: Tensor | None = None,
+    residual_out: Tensor | None = None,
     eps: float = 1e-6,
 ) -> None:
     supported_types = {torch.float16, torch.bfloat16, torch.float32}
@@ -431,14 +430,14 @@ class RMSNormBackward:
     def __call__(
         self,
         mX: cute.Tensor,
-        mW: Optional[cute.Tensor],
+        mW: cute.Tensor | None,
         mdO: cute.Tensor,
-        mdResO: Optional[cute.Tensor],
+        mdResO: cute.Tensor | None,
         mRstd: cute.Tensor,
         mdX: cute.Tensor,
-        mdW: Optional[cute.Tensor],
-        mdRes: Optional[cute.Tensor],
-        mdB: Optional[cute.Tensor],
+        mdW: cute.Tensor | None,
+        mdRes: cute.Tensor | None,
+        mdB: cute.Tensor | None,
         sm_count: Int32,
         stream: cuda.CUstream,
     ):
@@ -489,14 +488,14 @@ class RMSNormBackward:
     def kernel(
         self,
         mX: cute.Tensor,
-        mW: Optional[cute.Tensor],
+        mW: cute.Tensor | None,
         mdO: cute.Tensor,
-        mdResO: Optional[cute.Tensor],
+        mdResO: cute.Tensor | None,
         mRstd: cute.Tensor,
         mdX: cute.Tensor,
-        mdW: Optional[cute.Tensor],
-        mdB: Optional[cute.Tensor],
-        mdRes: Optional[cute.Tensor],
+        mdW: cute.Tensor | None,
+        mdB: cute.Tensor | None,
+        mdRes: cute.Tensor | None,
         tiler_mn: cute.Shape,
         tiled_copy: cute.TiledCopy,
         threads_per_row: cutlass.Constexpr[int],
@@ -821,15 +820,15 @@ _BWD_SCHEMA = (
 )
 def _rmsnorm_bwd(
     x: Tensor,
-    weight: Optional[Tensor],
+    weight: Tensor | None,
     dout: Tensor,
     rstd: Tensor,
     dx: Tensor,
-    dw_partial: Optional[Tensor],
-    db_partial: Optional[Tensor] = None,
-    dresidual_out: Optional[Tensor] = None,
-    dresidual: Optional[Tensor] = None,
-    sm_count: Optional[int] = None,
+    dw_partial: Tensor | None,
+    db_partial: Tensor | None = None,
+    dresidual_out: Tensor | None = None,
+    dresidual: Tensor | None = None,
+    sm_count: int | None = None,
 ) -> None:
     assert x.dim() == 2, "Input must be 2D"
     assert x.is_cuda, "Input tensor must be on CUDA device"

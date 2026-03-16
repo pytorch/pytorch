@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import operator
 from collections.abc import Callable  # noqa: TC003
-from typing import Optional
 
 import cutlass
 import cutlass.cute as cute
@@ -22,7 +21,7 @@ from cutlass.cutlass_dsl import dsl_user_op, T
 
 def make_fake_tensor(
     dtype, shape, divisibility=1, leading_dim=-1
-) -> Optional[cute.Tensor]:
+) -> cute.Tensor | None:
     if leading_dim < 0:
         leading_dim = len(shape) + leading_dim
     if dtype is None:
@@ -61,7 +60,7 @@ def copy(
     src: cute.Tensor,
     dst: cute.Tensor,
     *,
-    pred: Optional[cute.Tensor] = None,
+    pred: cute.Tensor | None = None,
     is_async: bool = False,
     loc=None,
     ip=None,
@@ -186,7 +185,7 @@ def store_shared_remote(
 @cute.jit
 def fill_oob(
     tXsX: cute.Tensor,
-    tXpX: Optional[cute.Tensor],
+    tXpX: cute.Tensor | None,
     fill_value: cute.Numeric,
 ) -> None:
     tXrX_fill = cute.make_fragment_like(tXsX[(None, 0), None, 0])
@@ -225,7 +224,7 @@ def cluster_reduce(
     reduction_buffer: cute.Tensor,
     mbar_ptr: cute.Pointer,
     init_val: cute.Numeric = 0.0,
-    phase: Optional[Int32] = None,
+    phase: Int32 | None = None,
 ) -> cute.Numeric:
     """reduction_buffer has shape (num_warps / warps_per_row, (warps_per_row, cluster_n))"""
     cta_rank_in_cluster = cute.arch.block_idx_in_cluster()
@@ -265,8 +264,8 @@ def cluster_reduce(
 def block_or_cluster_reduce(
     val: cute.Numeric,
     reduction_buffer: cute.Tensor,
-    mbar_ptr: Optional[cute.Pointer],
-    phase: Optional[Int32] = None,
+    mbar_ptr: cute.Pointer | None,
+    phase: Int32 | None = None,
     init_val: cute.Numeric = 0.0,
 ) -> cute.Numeric:
     if const_expr(mbar_ptr is None):
@@ -285,11 +284,11 @@ def block_or_cluster_reduce(
 def row_reduce(
     x: cute.TensorSSA | cute.Numeric,
     threads_per_row: cutlass.Constexpr[int],
-    reduction_buffer: Optional[cute.Tensor] = None,
-    mbar_ptr: Optional[cute.Pointer] = None,
-    phase: Optional[Int32] = None,
+    reduction_buffer: cute.Tensor | None = None,
+    mbar_ptr: cute.Pointer | None = None,
+    phase: Int32 | None = None,
     init_val: cute.Numeric = 0.0,
-    hook_fn: Optional[Callable] = None,
+    hook_fn: Callable | None = None,
 ) -> cute.Numeric:
     """reduction_buffer must have shape (num_warps / warps_per_row, (warps_per_row, cluster_n))"""
     if const_expr(isinstance(x, cute.TensorSSA)):
@@ -366,7 +365,7 @@ def allocate_reduction_buffer_and_mbar(
     cluster_n: int,
     tv_layout: cute.Layout,
     is_persistent: bool = False,
-) -> tuple[cute.Tensor, Optional[cute.Pointer]]:
+) -> tuple[cute.Tensor, cute.Pointer | None]:
     reduction_buffer = smem.allocate_tensor(
         reduction_dtype,
         get_reduction_buffer_layout(stage, tv_layout, cluster_n),
