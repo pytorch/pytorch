@@ -8216,6 +8216,37 @@ torch._inductor.aoti_load_package("{model_path}")
             if os.path.exists(temp_stderr_path):
                 os.unlink(temp_stderr_path)
 
+    def test_combo_kernel_grid_mixed_types(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("combo kernels require GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                return a + b, c + d
+
+        # Non-contiguous (transposed) tensors force 2D Triton iteration,
+        # creating both x and y range trees in the combo kernel.
+        # Dynamic shapes on (a, b) make ynumel_0 dynamic (string in codegen),
+        # while static shapes on (c, d) keep ynumel_1 as int.
+        # This triggers GridExpr.maximum() with mixed [str, int] in C++ mode,
+        # which previously generated std::max(long, int) causing a template
+        # deduction error in the AOTInductor C++ wrapper.
+        example_inputs = (
+            torch.randn(30, 20, device=self.device),
+            torch.randn(20, 30, device=self.device).t(),
+            torch.randn(40, 30, device=self.device),
+            torch.randn(30, 40, device=self.device).t(),
+        )
+        dim0 = Dim("dim0", min=1, max=100)
+        dynamic_shapes = {
+            "a": {0: dim0, 1: None},
+            "b": {0: dim0, 1: None},
+            "c": None,
+            "d": None,
+        }
+        with config.patch({"combo_kernels": True}):
+            self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
