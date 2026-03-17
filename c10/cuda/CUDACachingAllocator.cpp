@@ -774,13 +774,13 @@ struct ExpandableSegment {
     C10_CUDA_CHECK(hipMemSetAccess(
         ptr() + begin * segment_size_,
         (end - begin) * segment_size_,
-        &desc,
+        &desc[0],
         num_desc));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
         ptr_ + begin * segment_size_,
         (end - begin) * segment_size_,
-        &desc,
+        &desc[0],
         num_desc));
 #endif
   }
