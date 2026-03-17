@@ -1439,6 +1439,32 @@ class TestProfiler(TestCase):
                     if e["name"] == "aten::add":
                         self.assertEqual(args["Input Strides"], [[17, 1], [25, 2], []])
 
+    def test_profiler_strides_without_concrete_inputs(self):
+        torch._C._profiler._set_record_concrete_inputs_enabled_val(False)
+        try:
+            base_tensor = torch.randn(1024, dtype=torch.float32)
+            a = base_tensor.as_strided((16, 16), (17, 1), 0)
+            b = base_tensor.as_strided((16, 16), (25, 2), 272)
+            with _profile(record_shapes=True) as prof:
+                c = torch.add(a, b)
+
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    j = json.load(f)
+                    op_events = [
+                        e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                    ]
+                    for e in op_events:
+                        args = e["args"]
+                        if e["name"] == "aten::add":
+                            self.assertIn("Input Strides", args)
+                            self.assertEqual(
+                                args["Input Strides"], [[17, 1], [25, 2], []]
+                            )
+        finally:
+            torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
             t1, t2 = (
@@ -2699,6 +2725,97 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                 y = torch.randn(10, 10)
                 z = torch.mm(x, y)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_backward_compat(self):
+        """Plain activities=[CPU] still works unchanged."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        events = p.events()
+        self.assertGreater(len(events), 0)
+        has_overhead = any(
+            "Lazy Function Loading" in e.name for e in events
+        )  # Lazy Function Loading is an OVERHEAD event
+        self.assertTrue(has_overhead)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_dict_syntax(self):
+        """Dict syntax collects only the requested activity types."""
+        with profile(
+            activities=[{ProfilerActivity.CUDA: ["GPU_MEMCPY", "CUDA_RUNTIME"]}],
+        ) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        events = p.events()
+        self.assertGreater(len(events), 0)
+        print(events)
+        # Verify we got GPU_MEMCPY events (HtoD copy from .to("cuda")).
+        has_memcpy = any("Memcpy" in e.name for e in events)
+        self.assertTrue(has_memcpy, "Expected GPU_MEMCPY events")
+        # Verify we got CUDA_RUNTIME events (e.g. cudaLaunchKernel).
+        has_runtime = any("cuda" in e.name for e in events)
+        self.assertTrue(has_runtime, "Expected CUDA_RUNTIME events")
+        # OVERHEAD events (e.g. Lazy Function Loading) should NOT appear.
+        has_overhead = any("Lazy Function Loading" in e.name for e in events)
+        self.assertFalse(has_overhead)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_mixed_syntax(self):
+        """Enum and dict entries can coexist for different activity groups."""
+        activities = [ProfilerActivity.CPU, {ProfilerActivity.CUDA: ["GPU_MEMCPY"]}]
+        with profile(activities=activities) as p:
+            with record_function("test_annotation"):
+                x = torch.randn(10, 10).to("cuda")
+                y = torch.mm(x, x)
+        self.assertGreater(len(p.events()), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_duplicate_raises(self):
+        """Same activity appearing more than once raises ValueError."""
+        with self.assertRaises(ValueError):
+            with profile(
+                activities=[
+                    ProfilerActivity.CPU,
+                    {ProfilerActivity.CPU: ["CPU_OP"]},
+                ],
+            ) as p:
+                pass
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_invalid_type_name(self):
+        """Invalid activity type name raises RuntimeError."""
+        with self.assertRaises(RuntimeError):
+            with profile(
+                activities=[{ProfilerActivity.CPU: ["NONEXISTENT_TYPE"]}],
+            ) as p:
+                x = torch.randn(10, 10)
+                y = torch.mm(x, x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_nonmember_type_name(self):
+        """Activity type name that is not a member of the requested activity group raises RuntimeError."""
+        with self.assertRaises(RuntimeError):
+            with profile(
+                activities=[{ProfilerActivity.CUDA: ["CPU_OP"]}],
+            ) as p:
+                x = torch.randn(10, 10)
+                y = torch.mm(x, x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_activity_filter_empty_list(self):
+        """Passing an empty list to activities means not collecting for the specified activity."""
+        with profile(
+            activities=[{ProfilerActivity.CUDA: []}],
+        ) as p:
+            x = torch.randn(10, 10).to("cuda")
+            y = torch.mm(x, x)
+        self.assertEqual(len(p.events()), 0)
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:
@@ -3559,6 +3676,62 @@ aten::mm""",
         n1 = names(prof1)
         n2 = names(prof2)
         self.assertEqual(n1, n2)
+
+
+class TestPrivateUse1ProfilerState(TestCase):
+    """Tests for PrivateUse1 profiler state selection logic."""
+
+    def test_kineto_privateuse1_state_with_use_kineto_true(self):
+        """Test that KINETO_PRIVATEUSE1 state is selected when use_kineto=True."""
+        from unittest.mock import patch
+
+        from torch._C._profiler import ProfilerState
+
+        with patch(
+            "torch.autograd.profiler._get_privateuse1_backend_name",
+            return_value="custom_backend",
+        ):
+            prof = _profile(
+                use_cpu=True,
+                use_device="custom_backend",
+                use_kineto=True,
+            )
+            self.assertEqual(prof.profiler_kind, ProfilerState.KINETO_PRIVATEUSE1)
+
+    def test_kineto_privateuse1_fallback_state_with_use_kineto_false(self):
+        """Test that KINETO_PRIVATEUSE1_FALLBACK is selected when use_kineto=False."""
+        from unittest.mock import patch
+
+        from torch._C._profiler import ProfilerState
+
+        with patch(
+            "torch.autograd.profiler._get_privateuse1_backend_name",
+            return_value="custom_backend",
+        ):
+            prof = _profile(
+                use_cpu=True,
+                use_device="custom_backend",
+                use_kineto=False,
+            )
+            self.assertEqual(
+                prof.profiler_kind, ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
+            )
+
+    def test_privateuse1_fallback_requires_use_cpu(self):
+        """Test that KINETO_PRIVATEUSE1_FALLBACK requires use_cpu=True."""
+        from unittest.mock import patch
+
+        with patch(
+            "torch.autograd.profiler._get_privateuse1_backend_name",
+            return_value="custom_backend",
+        ):
+            # When use_kineto=False and use_cpu=False, should raise AssertionError
+            with self.assertRaises(AssertionError):
+                _profile(
+                    use_cpu=False,
+                    use_device="custom_backend",
+                    use_kineto=False,
+                )
 
 
 if __name__ == "__main__":

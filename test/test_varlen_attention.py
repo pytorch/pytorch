@@ -10,8 +10,8 @@ from torch.nn.attention import (
     activate_flash_attention_impl,
     restore_flash_attention_impl,
 )
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.nn.attention.varlen import varlen_attn, varlen_attn_out
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import parametrize, run_tests, TEST_WITH_ROCM
@@ -563,142 +563,121 @@ class TestVarlenAttention(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("num_splits", [1, None])
     @parametrize(
         "window_size",
         [
             (-1, -1),
             (-1, 0),
-            (4, 0),
-            (-1, 4),
-            (0, 0),
-            (1, 0),
-            (0, 1),
-            (0, -1),
-            (4, 4),
-            (8, 2),
             (1025, 1025),
+            (384, 0),  # edge case
         ],
     )
-    @parametrize("num_perms", [1, 3, 5])
-    def test_batch_invariance(self, device, dtype, window_size, num_perms):
+    def test_batch_invariance(
+        self, device, dtype, num_splits, window_size, sdpa_backend=None
+    ):
+        if TEST_WITH_ROCM:
+            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+
         torch.manual_seed(42)
 
-        batch_size, max_seq_len = 4, 128
+        num_heads, head_dim = 2, 128
+        target_seq_len = 512
+        extra_seq_len = 1024
 
-        seq_lengths = []
-        for _ in range(batch_size):
-            length = torch.randint(1, max_seq_len // 64 + 1, (1,)).item() * 64
-            seq_lengths.append(min(length, max_seq_len))
-
-        sequences_qkv = [
-            [
-                torch.testing.make_tensor(
-                    (seq_len, 2, 128), device=device, dtype=dtype, requires_grad=True
-                )
-                for _ in range(3)
-            ]
-            for seq_len in seq_lengths
-        ]
-        sequences_q, sequences_k, sequences_v = map(list, zip(*sequences_qkv))
-
-        q_packed_orig = torch.cat(sequences_q, dim=0)
-        k_packed_orig = torch.cat(sequences_k, dim=0)
-        v_packed_orig = torch.cat(sequences_v, dim=0)
-
-        seq_lens = torch.tensor(seq_lengths, device=device)
-        cu_seq_orig = torch.zeros(batch_size + 1, device=device, dtype=torch.int32)
-        cu_seq_orig[1:] = seq_lens.cumsum(0)
-
-        original_output = varlen_attn(
-            q_packed_orig,
-            k_packed_orig,
-            v_packed_orig,
-            cu_seq_orig,
-            cu_seq_orig,
-            max_seq_len,
-            max_seq_len,
-            window_size=window_size,
+        target_q = torch.randn(
+            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+        target_k = torch.randn(
+            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+        target_v = torch.randn(
+            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
         )
 
-        original_grad_out = torch.randn_like(original_output)
-        original_grads = torch.autograd.grad(
-            outputs=original_output,
-            inputs=[q_packed_orig, k_packed_orig, v_packed_orig],
-            grad_outputs=original_grad_out,
+        extra_q = torch.randn(
+            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+        extra_k = torch.randn(
+            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
+        )
+        extra_v = torch.randn(
+            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
         )
 
-        for _ in range(num_perms):
-            perm = torch.randperm(batch_size)
-            permuted_sequences_q = [sequences_q[perm[i]] for i in range(batch_size)]
-            permuted_sequences_k = [sequences_k[perm[i]] for i in range(batch_size)]
-            permuted_sequences_v = [sequences_v[perm[i]] for i in range(batch_size)]
+        cu_seq_solo = torch.tensor(
+            [0, target_seq_len], device=device, dtype=torch.int32
+        )
+        cu_seq_batch = torch.tensor(
+            [0, target_seq_len, target_seq_len + extra_seq_len],
+            device=device,
+            dtype=torch.int32,
+        )
 
-            q_packed_perm = torch.cat(permuted_sequences_q, dim=0)
-            k_packed_perm = torch.cat(permuted_sequences_k, dim=0)
-            v_packed_perm = torch.cat(permuted_sequences_v, dim=0)
+        all_q = torch.cat([target_q, extra_q], dim=0)
+        all_k = torch.cat([target_k, extra_k], dim=0)
+        all_v = torch.cat([target_v, extra_v], dim=0)
 
-            permuted_seq_lens = torch.tensor(
-                [seq_lengths[perm[i]] for i in range(batch_size)], device=device
-            )
-            cu_seq_perm = torch.zeros(batch_size + 1, device=device, dtype=torch.int32)
-            cu_seq_perm[1:] = permuted_seq_lens.cumsum(0)
-
-            permuted_output = varlen_attn(
-                q_packed_perm,
-                k_packed_perm,
-                v_packed_perm,
-                cu_seq_perm,
-                cu_seq_perm,
-                max_seq_len,
-                max_seq_len,
+        with use_fa3(), torch.no_grad():
+            solo_output = varlen_attn(
+                target_q,
+                target_k,
+                target_v,
+                cu_seq_solo,
+                cu_seq_solo,
+                target_seq_len,
+                target_seq_len,
                 window_size=window_size,
+                num_splits=num_splits,
             )
 
-            for i in range(batch_size):
-                orig_idx = perm[i].item()
-
-                orig_start = cu_seq_orig[orig_idx].item()
-                orig_end = cu_seq_orig[orig_idx + 1].item()
-                orig_seq_output = original_output[orig_start:orig_end]
-
-                perm_start = cu_seq_perm[i].item()
-                perm_end = cu_seq_perm[i + 1].item()
-                perm_seq_output = permuted_output[perm_start:perm_end]
-
-                self.assertEqual(orig_seq_output, perm_seq_output)
-
-            permuted_grad_out = torch.zeros_like(permuted_output)
-            for i in range(batch_size):
-                orig_idx = perm[i].item()
-                orig_start = cu_seq_orig[orig_idx].item()
-                orig_end = cu_seq_orig[orig_idx + 1].item()
-
-                perm_start = cu_seq_perm[i].item()
-                perm_end = cu_seq_perm[i + 1].item()
-
-                permuted_grad_out[perm_start:perm_end] = original_grad_out[
-                    orig_start:orig_end
-                ]
-
-            permuted_grads = torch.autograd.grad(
-                outputs=permuted_output,
-                inputs=[q_packed_perm, k_packed_perm, v_packed_perm],
-                grad_outputs=permuted_grad_out,
+            batched_output = varlen_attn(
+                all_q,
+                all_k,
+                all_v,
+                cu_seq_batch,
+                cu_seq_batch,
+                extra_seq_len,
+                extra_seq_len,
+                window_size=window_size,
+                num_splits=num_splits,
             )
 
-            for original_grad, permuted_grad in zip(original_grads, permuted_grads):
-                for i in range(batch_size):
-                    orig_idx = perm[i].item()
+            solo_out_buf = torch.empty_like(target_q)
+            varlen_attn_out(
+                solo_out_buf,
+                target_q,
+                target_k,
+                target_v,
+                cu_seq_solo,
+                cu_seq_solo,
+                target_seq_len,
+                target_seq_len,
+                window_size=window_size,
+                num_splits=num_splits,
+            )
 
-                    orig_start = cu_seq_orig[orig_idx].item()
-                    orig_end = cu_seq_orig[orig_idx + 1].item()
-                    orig_seq_grad = original_grad[orig_start:orig_end]
+            batched_out_buf = torch.empty_like(all_q)
+            varlen_attn_out(
+                batched_out_buf,
+                all_q,
+                all_k,
+                all_v,
+                cu_seq_batch,
+                cu_seq_batch,
+                extra_seq_len,
+                extra_seq_len,
+                window_size=window_size,
+                num_splits=num_splits,
+            )
 
-                    perm_start = cu_seq_perm[i].item()
-                    perm_end = cu_seq_perm[i + 1].item()
-                    perm_seq_grad = permuted_grad[perm_start:perm_end]
-
-                    self.assertEqual(orig_seq_grad, perm_seq_grad)
+            if num_splits == 1:
+                self.assertEqual(solo_output, batched_output[:target_seq_len])
+                self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
+                self.assertEqual(solo_output, solo_out_buf)
+            else:
+                self.assertNotEqual(solo_output, batched_output[:target_seq_len])
+                self.assertNotEqual(solo_out_buf, batched_out_buf[:target_seq_len])
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

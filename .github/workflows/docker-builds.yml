@@ -72,6 +72,7 @@ jobs:
           pytorch-linux-jammy-tpu-py3.12-pallas,
           pytorch-linux-jammy-xpu-n-1-py3,
           pytorch-linux-noble-xpu-n-py3,
+          pytorch-linux-noble-xpu-n-py3-client,
           pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
           pytorch-linux-jammy-py3-clang18-asan,
           pytorch-linux-jammy-py3-clang15-onnx,

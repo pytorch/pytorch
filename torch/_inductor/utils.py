@@ -2603,7 +2603,12 @@ def run_and_get_kernels(
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
-        kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+        if config.cpp_wrapper and config.triton.autotune_at_compile_time is False:
+            # With lazy Triton kernel compilation, kernel sources are embedded
+            # inside C++ R"TRITON(...)TRITON" raw strings.
+            kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
+        else:
+            kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
         if remove_quote:
             kernels = [kernel[3:-3] for kernel in kernels]
     return result, kernels
@@ -3193,6 +3198,22 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
 
     assert static_arg_idxs == list(range(len(static_arg_idxs)))
     return len(static_arg_idxs)
+
+
+def get_static_bw_input_idxs(fx_g: torch.fx.GraphModule) -> list[int]:
+    """
+    Returns indices of backward graph inputs that are always at fixed
+    addresses: primals (parameters/buffers/user inputs saved for backward).
+    Excludes saved activations which may not be at fixed addresses when
+    the forward is partitioned for CUDA graphs.
+    """
+    static_idxs = []
+    for idx, n in enumerate(fx_g.graph.nodes):
+        if n.op != "placeholder":
+            break
+        if n.name.startswith("primals_"):
+            static_idxs.append(idx)
+    return static_idxs
 
 
 @dataclasses.dataclass
@@ -4405,6 +4426,9 @@ COLLECTIVE_OPS = OrderedSet(
         "torch.ops._c10d_functional_autograd.all_gather_into_tensor.default",
         "torch.ops._c10d_functional_autograd.reduce_scatter_tensor.default",
         "torch.ops._c10d_functional_autograd.all_to_all_single.default",
+        "torch.ops._c10d_functional.isend.default",
+        "torch.ops._c10d_functional.irecv.default",
+        "torch.ops._c10d_functional.batch_p2p_ops.default",
     ]
 )
 
