@@ -969,5 +969,57 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         onnx_testing.assert_onnx_program(onnx_program, args=(x, y))
 
 
+try:
+    import torchvision  # noqa: F401
+
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
+
+@common_utils.instantiate_parametrized_tests
+class TorchVisionExporterTest(common_utils.TestCase, _WithExport):
+    @common_utils.skipIfNoDynamoSupport
+    @pytest.mark.skipif(not HAS_TORCHVISION, reason="torchvision not available")
+    def test_torchvision_roi_align(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/175732."""
+
+        class RoiAlignModel(torch.nn.Module):
+            def forward(self, input: torch.Tensor, rois: torch.Tensor) -> torch.Tensor:
+                return torchvision.ops.roi_align(
+                    input, rois, output_size=(5, 5), spatial_scale=1.0, sampling_ratio=2
+                )
+
+        model = RoiAlignModel()
+        input = torch.rand(1, 1, 10, 10, dtype=torch.float32)
+        rois = torch.tensor([[0, 0, 0, 4, 4]], dtype=torch.float32)
+
+        onnx_program = self.export(model, (input, rois))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    @common_utils.skipIfNoDynamoSupport
+    @pytest.mark.skipif(not HAS_TORCHVISION, reason="torchvision not available")
+    def test_torchvision_roi_align_aligned(self):
+        """Verify roi_align with aligned=True uses coordinate_transformation_mode=half_pixel."""
+
+        class RoiAlignAlignedModel(torch.nn.Module):
+            def forward(self, input: torch.Tensor, rois: torch.Tensor) -> torch.Tensor:
+                return torchvision.ops.roi_align(
+                    input,
+                    rois,
+                    output_size=(5, 5),
+                    spatial_scale=1.0,
+                    sampling_ratio=2,
+                    aligned=True,
+                )
+
+        model = RoiAlignAlignedModel()
+        input = torch.rand(1, 1, 10, 10, dtype=torch.float32)
+        rois = torch.tensor([[0, 1.5, 1.5, 3, 3]], dtype=torch.float32)
+
+        onnx_program = self.export(model, (input, rois))
+        onnx_testing.assert_onnx_program(onnx_program)
+
+
 if __name__ == "__main__":
     common_utils.run_tests()
