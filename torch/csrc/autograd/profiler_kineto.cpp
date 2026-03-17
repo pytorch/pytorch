@@ -1092,6 +1092,43 @@ std::string KinetoEvent::metadataJson() const {
       [](const auto&) -> std::string { return std::string(""); }));
 }
 
+int64_t KinetoEvent::externalId() const {
+  // Mirrors ChromeTraceLogger::handleActivity() "External id" logic.
+  // ChromeTraceLogger checks op.linkedActivity() != nullptr; here we check
+  // linkedCorrelationId() > 0, which is equivalent because PyTorch correlation
+  // IDs are monotonically increasing from 1 (a valid linked activity always
+  // has a non-zero correlation ID).
+  uint64_t linked = linkedCorrelationId();
+  if (linked > 0) {
+    return static_cast<int64_t>(linked);
+  }
+
+  // Orphaned GPU activities (no linked CPU op) in these types should not get
+  // an External id, to avoid incorrect cross-linking in trace viewers.
+  static const std::set<libkineto::ActivityType> excludedTypes = {
+      libkineto::ActivityType::GPU_MEMCPY,
+      libkineto::ActivityType::GPU_MEMSET,
+      libkineto::ActivityType::CONCURRENT_KERNEL,
+      libkineto::ActivityType::CUDA_RUNTIME,
+      libkineto::ActivityType::CUDA_DRIVER,
+      libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
+      libkineto::ActivityType::PRIVATEUSE1_DRIVER};
+
+  auto type = static_cast<libkineto::ActivityType>(activityType());
+  if (excludedTypes.find(type) == excludedTypes.end()) {
+    return static_cast<int64_t>(result_->visit(c10::overloaded(
+        [](const ExtraFields<EventType::TorchOp>& e) -> uint64_t {
+          return e.correlation_id_;
+        },
+        [](const ExtraFields<EventType::Kineto>& e) -> uint64_t {
+          return e.correlation_id_;
+        },
+        [](const auto&) -> uint64_t { return 0; })));
+  }
+
+  return 0;
+}
+
 #define FORWARD_FROM_RESULT(method_name, result_expr)                        \
   decltype(std::declval<KinetoEvent>().method_name())                        \
   KinetoEvent::method_name() const {                                         \
