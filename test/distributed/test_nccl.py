@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 
 import torch
@@ -253,6 +254,37 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_rendezvous_many_allocations(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        tensors = [
+            symm_mem.empty(1, dtype=torch.float, device=self.device) for _ in range(256)
+        ]
+
+        # Rendezvous a subset twice so the repeated lookup path is covered
+        # while many allocations are still live.
+        sampled_tensors = tensors[::16]
+        for tensor in sampled_tensors:
+            handle = symm_mem.rendezvous(tensor, group=group_name)
+            self.assertEqual(handle.rank, self.rank)
+            self.assertEqual(handle.world_size, self.world_size)
+        for tensor in sampled_tensors:
+            symm_mem.rendezvous(tensor, group=group_name)
+
+        result = torch.ops.symm_mem.one_shot_all_reduce(
+            tensors[-1].fill_(self.rank), "sum", group_name
+        )
+        self.assertEqual(
+            result, torch.full_like(result, (self.world_size - 1) * self.world_size / 2)
+        )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @requires_nccl_version(
         (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
     )
@@ -327,6 +359,46 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_handle_signal(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+        tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        handle = symm_mem.rendezvous(tensor, group=group_name)
+
+        channel = 0
+        world_size = handle.world_size
+
+        c10d.barrier()
+
+        # Pair up ranks: odd ranks send to even ranks
+        # This allows the test to work with any number of GPUs
+        if self.rank % 2 == 1:
+            # Odd rank: send signal to previous even rank
+            dst_rank = self.rank - 1
+            handle.put_signal(dst_rank=dst_rank, channel=channel)
+            torch.cuda.synchronize()
+        elif self.rank % 2 == 0 and self.rank + 1 < world_size:
+            # Even rank: wait for signal from next odd rank (if it exists)
+            src_rank = self.rank + 1
+            # wait_signal blocks until the signal arrives
+            # If this completes without hanging, the test passes
+            handle.wait_signal(src_rank=src_rank, channel=channel)
+            torch.cuda.synchronize()
+
+        c10d.barrier()
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_get(self):
         symm_mem.set_backend("NCCL")
@@ -355,6 +427,35 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             # handle.wait_signal(src_rank=0)
             # TODO: remove after we have wait_signal
             c10d.barrier()
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
+    @skip_if_lt_x_gpu(2)
+    def test_put_wait_signal(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # Use this barrier to make sure all ranks are initialized.
+        c10d.barrier()
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+        src = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        dst = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(-1)
+        symm_mem.rendezvous(src, group=group_name)
+        hdl = symm_mem.rendezvous(dst, group=group_name)
+
+        # Pair ranks: odd ranks send to previous even ranks.
+        if self.rank % 2 == 1:
+            dst_rank = self.rank - 1
+            symm_mem.put_signal(src, hdl, dst_rank)
+        elif self.rank % 2 == 0 and self.rank + 1 < self.world_size:
+            src_rank = self.rank + 1
+            symm_mem.wait_signal(hdl, src_rank)
+            self.assertEqual(dst, torch.full_like(dst, float(src_rank)))
+
+        c10d.barrier()
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
@@ -413,6 +514,10 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_but_pass_in_sandcastle_if(
+        os.environ.get("NCCL_NVLS_ENABLE", "1") == "0",
+        "NCCL_NVLS_ENABLE=0",
+    )
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version(
         (2, 29), "NCCL Symmetric Memory multicast support from nccl 2.29"

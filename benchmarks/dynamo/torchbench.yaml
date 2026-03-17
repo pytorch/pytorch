@@ -43,7 +43,6 @@ tolerance:
     - doctr_reco_predictor
     - drq
     - phlippe_resnet
-    - pytorch_CycleGAN_and_pix2pix
 
   higher_bf16:
     - doctr_reco_predictor
@@ -219,6 +218,9 @@ skip:
     # Has never been working correctly
     # https://github.com/pytorch/pytorch/issues/172015#issuecomment-3730509098
     - modded_nanogpt
+    # Broken since mid-2025, eager_fail_to_run on all platforms.
+    # Legacy 2017 model providing zero CI signal.
+    - pytorch_CycleGAN_and_pix2pix
 
   device:
     cpu:

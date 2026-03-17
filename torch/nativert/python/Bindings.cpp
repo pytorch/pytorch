@@ -27,12 +27,14 @@ void initModelRunnerPybind(py::module& m) {
              py::args pyargs,
              const py::kwargs& pykwargs) {
             std::vector<c10::IValue> args;
+            args.reserve(pyargs.size());
             for (const auto i : c10::irange(pyargs.size())) {
               auto ivalue =
                   torch::jit::toIValue(pyargs[i], c10::AnyType::get());
               args.push_back(std::move(ivalue));
             }
             std::unordered_map<std::string, c10::IValue> kwargs;
+            kwargs.reserve(pykwargs.size());
             for (const auto& [key, pyarg] : pykwargs) {
               auto ivalue = torch::jit::toIValue(pyarg, c10::AnyType::get());
               kwargs[py::str(key)] = std::move(ivalue);
@@ -46,12 +48,14 @@ void initModelRunnerPybind(py::module& m) {
              py::args pyargs,
              const py::kwargs& pykwargs) {
             std::vector<c10::IValue> args;
+            args.reserve(pyargs.size());
             for (const auto i : c10::irange(pyargs.size())) {
               auto ivalue =
                   torch::jit::toIValue(pyargs[i], c10::AnyType::get());
               args.push_back(std::move(ivalue));
             }
             std::unordered_map<std::string, c10::IValue> kwargs;
+            kwargs.reserve(pykwargs.size());
             for (const auto& [key, pyarg] : pykwargs) {
               auto ivalue = torch::jit::toIValue(pyarg, c10::AnyType::get());
               kwargs[py::str(key)] = std::move(ivalue);
@@ -63,6 +67,7 @@ void initModelRunnerPybind(py::module& m) {
           "run_with_flat_inputs_and_outputs",
           [](torch::nativert::ModelRunner& self, py::args pyargs) {
             std::vector<c10::IValue> args;
+            args.reserve(pyargs.size());
             for (const auto i : c10::irange(pyargs.size())) {
               auto ivalue =
                   torch::jit::toIValue(pyargs[i], c10::AnyType::get());

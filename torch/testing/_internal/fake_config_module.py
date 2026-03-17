@@ -1,5 +1,4 @@
 import sys
-from typing import Optional
 
 from torch.utils._config_module import Config, install_config_module
 
@@ -12,8 +11,8 @@ e_list = [1]
 e_set = {1}
 e_tuple = (1,)
 e_dict = {1: 2}
-e_none: Optional[bool] = None
-e_optional: Optional[bool] = True
+e_none: bool | None = None
+e_optional: bool | None = True
 e_ignored = True
 _e_ignored = True
 magic_cache_config_ignored = True
@@ -31,6 +30,15 @@ e_env_default_str_empty: bool = Config(
 e_env_force: bool = Config(env_name_force="ENV_TRUE", default=False)
 e_aliased_bool: bool = Config(
     alias="torch.testing._internal.fake_config_module2.e_aliasing_bool"
+)
+e_deprecated: bool = Config(
+    default=True, deprecated=True, deprecation_message="is no longer needed"
+)
+e_not_deprecated: bool = Config(default=False)
+e_deprecated_alias: bool = Config(
+    alias="torch.testing._internal.fake_config_module.e_not_deprecated",
+    deprecated=True,
+    deprecation_message="use something else instead",
 )
 
 

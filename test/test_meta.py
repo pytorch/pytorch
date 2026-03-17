@@ -348,6 +348,9 @@ aten = torch.ops.aten
 
 CHECK_STRIDES = {
     torch.Tensor.__getitem__,
+    aten._fft_c2c.default,
+    aten._fft_c2r.default,
+    aten._fft_r2c.default,
 }
 
 CHECK_ALL_STRIDES = {
@@ -356,9 +359,6 @@ CHECK_ALL_STRIDES = {
 
 CHECK_STRIDES_SKIPS = {
     aten._conj_physical.default,
-    aten._fft_c2c.default,
-    aten._fft_c2r.default,
-    aten._fft_r2c.default,
     aten._linalg_svd.default,
     aten.binary_cross_entropy.default,
     aten.complex.default,
@@ -566,7 +566,8 @@ def run_meta_crossref(
             meta_args = (meta_args[0], args[1]) + meta_args[2:]
         elif func is torch.Tensor.__getitem__:
             # Ensure boolean tensors use original
-            assert len(args) == 2
+            if len(args) != 2:
+                raise AssertionError(f"expected len(args) == 2, got {len(args)}")
             flat_args = pytree.tree_leaves(args[1])
             flat_meta_args, spec = tree_flatten(meta_args[1])
             flat_new_args = []
@@ -1192,7 +1193,8 @@ class TestMeta(TestCase):
                     ref = func(*args, **kwargs)
 
                 # *_like functions take a Tensor as first argument
-                assert isinstance(args[0], torch.Tensor)
+                if not isinstance(args[0], torch.Tensor):
+                    raise AssertionError(f"expected args[0] to be Tensor, got {type(args[0])}")
                 with torch.random.fork_rng():
                     torch.manual_seed(123)
                     args[0] = args[0].to(device="meta")
@@ -1695,6 +1697,32 @@ class TestMeta(TestCase):
             offsets.to('meta'), offset2bag.to('meta'), mode, padding_idx
         )
         self.assertEqual(grad_weight.to('meta'), meta_grad_weight)
+
+    def _assert_fft_meta_stride_matches_eager(self, op, *args):
+        to_meta = MetaConverter()
+        meta_args = tree_map_only(torch.Tensor, to_meta, args)
+        ref_out = op(*args)
+        meta_out = op(*meta_args)
+        self.assertEqual(ref_out.size(), meta_out.size())
+        self.assertEqual(ref_out.stride(), meta_out.stride())
+
+    @onlyCUDA
+    @unittest.skipIf(torch.version.hip, "cuFFT-specific stride behavior")
+    def test_fft_multi_dim_cufft_stride_matches_meta(self, device):
+        self._assert_fft_meta_stride_matches_eager(
+            aten._fft_c2c.default,
+            torch.randn((5, 5, 5, 5, 5), device=device, dtype=torch.complex64),
+            [1, 2, 3, 4],
+            0,
+            True,
+        )
+        self._assert_fft_meta_stride_matches_eager(
+            aten._fft_c2r.default,
+            torch.randn((5, 5, 5, 5, 3), device=device, dtype=torch.complex64),
+            [0, 1, 2, 3, 4],
+            0,
+            5,
+        )
 
     # opinfo test is using aten.fill_, it's not testing aten.fill
     @onlyCUDA

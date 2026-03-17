@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -155,7 +155,7 @@ def tensorify_python_scalars(
         # cache constants, why not
         if isinstance(expr, (Integer, Number, BooleanAtom)):
             dtype = None
-            c: Union[bool, int, float]
+            c: bool | int | float
             if isinstance(expr, BooleanAtom):
                 dtype = torch.bool
                 c = bool(expr)
@@ -211,7 +211,8 @@ def tensorify_python_scalars(
             ):
                 dtype = node.args[0].meta["val"].dtype
 
-                assert isinstance(node.args[0], fx.Node), node.args[0]
+                if not isinstance(node.args[0], fx.Node):
+                    raise AssertionError(f"Expected fx.Node, got {node.args[0]}")
 
                 s = node.meta["val"].node.expr
 
@@ -374,7 +375,7 @@ def tensorify_python_scalars(
     # symfloat and thus we need to deduce specializations have happened
     # via shape_env.replacements. NB: there's an important invariant here
     # that symfloats keep consistent names across restarts.
-    for k, v in shape_env.var_to_val.items():
+    for k, v in shape_env.backed_var_to_val.items():
         if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
             name = str(k)
             if (

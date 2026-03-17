@@ -21,6 +21,8 @@
 
 namespace torch::inductor {
 
+AOTIModelContainerRunner::AOTIModelContainerRunner() = default;
+
 AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& model_so_path,
     size_t num_models,
@@ -126,9 +128,13 @@ consider rebuild your model with the latest AOTInductor.");
 }
 
 AOTIModelContainerRunner::~AOTIModelContainerRunner() {
-  AOTIRuntimeError result = delete_func_(container_handle_);
-  TORCH_CHECK(
-      result == AOTI_RUNTIME_SUCCESS, "AOTInductorModelContainerDelete failed");
+  // Custom device implementations don't set delete_func_
+  if (delete_func_ != nullptr) {
+    AOTIRuntimeError result = delete_func_(container_handle_);
+    TORCH_CHECK(
+        result == AOTI_RUNTIME_SUCCESS,
+        "AOTInductorModelContainerDelete failed");
+  }
 }
 
 std::vector<at::Tensor> AOTIModelContainerRunner::run_impl(

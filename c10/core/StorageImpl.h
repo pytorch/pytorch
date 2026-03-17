@@ -181,6 +181,24 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     refresh_has_data_ptr_check();
   }
 
+  void swap_data_ptr(StorageImpl& other) {
+    maybe_materialize_cow();
+    other.maybe_materialize_cow();
+    std::swap(data_ptr_, other.data_ptr_);
+    std::swap(size_bytes_, other.size_bytes_);
+    std::swap(
+        size_bytes_is_heap_allocated_, other.size_bytes_is_heap_allocated_);
+    std::swap(resizable_, other.resizable_);
+    std::swap(allocator_, other.allocator_);
+    std::swap(throw_on_immutable_data_ptr_, other.throw_on_immutable_data_ptr_);
+    std::swap(throw_on_mutable_data_ptr_, other.throw_on_mutable_data_ptr_);
+    std::swap(
+        warn_deprecated_on_mutable_data_ptr_,
+        other.warn_deprecated_on_mutable_data_ptr_);
+    refresh_has_data_ptr_check();
+    other.refresh_has_data_ptr_check();
+  }
+
   const void* data() const {
     if (C10_UNLIKELY(throw_on_immutable_data_ptr_)) {
       throw_data_ptr_access_error();

@@ -182,10 +182,16 @@ inline T val_at_offs(P ptr, long offs, ScalarType type) {
       return cast_to<T>(val_at_offs<char>(ptr, offs));
     case ScalarType::Short:
       return cast_to<T>(val_at_offs<short>(ptr, offs));
+    case ScalarType::UInt16:
+      return cast_to<T>(val_at_offs<uint16_t>(ptr, offs));
     case ScalarType::Int:
       return cast_to<T>(val_at_offs<int>(ptr, offs));
+    case ScalarType::UInt32:
+      return cast_to<T>(val_at_offs<uint32_t>(ptr, offs));
     case ScalarType::Long:
       return cast_to<T>(val_at_offs<long>(ptr, offs));
+    case ScalarType::UInt64:
+      return cast_to<T>(val_at_offs<uint64_t>(ptr, offs));
     // Floats
     case ScalarType::Float:
       return cast_to<T>(val_at_offs<float>(ptr, offs));
@@ -897,7 +903,6 @@ kernel void ternary_strided(
     constant long* other1_strides [[buffer(7)]],
     constant long* other2_strides [[buffer(8)]],
     constant uint& ndim [[buffer(9)]],
-    constant uint4& types [[buffer(10)]],
     uint index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T, T>;
@@ -996,7 +1001,6 @@ kernel void ternary_dense_cast(
           constant long* other1_strides,                                       \
           constant long* other2_strides,                                       \
           constant uint& ndim,                                                 \
-          constant uint4& types,                                               \
           uint tid);                                                           \
   template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
       metal::ternary_strided_cast<DTYPEI, NAME##_functor, OMT>(                \

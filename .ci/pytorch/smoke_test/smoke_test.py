@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import importlib
 import json
@@ -7,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Optional
 
 import torch
 import torch._dynamo
@@ -44,6 +45,15 @@ MODULES = [
         "repo_name": "audio",
     },
 ]
+
+
+def get_modules_for_package(package: str) -> list:
+    if package == "all":
+        return MODULES
+    elif package == "torch_torchvision":
+        return [m for m in MODULES if m["name"] == "torchvision"]
+    else:
+        return []
 
 
 class Net(nn.Module):
@@ -104,8 +114,8 @@ def check_version(package: str) -> None:
                 f"Torch version mismatch, expected {stable_version} for channel {channel}. But its {torch.__version__}"
             )
 
-        if release_version and package == "all":
-            for module in MODULES:
+        if release_version and package in ["all", "torch_torchvision"]:
+            for module in get_modules_for_package(package):
                 imported_module = importlib.import_module(module["name"])
                 module_version = imported_module.__version__
                 if not module_version.startswith(release_matrix[module["name"]]):
@@ -135,8 +145,8 @@ def check_nightly_binaries_date(package: str) -> None:
             f"the binaries are from {date_t_str} and are more than {NIGHTLY_ALLOWED_DELTA} days old!"
         )
 
-    if package == "all":
-        for module in MODULES:
+    if package in ["all", "torch_torchvision"]:
+        for module in get_modules_for_package(package):
             imported_module = importlib.import_module(module["name"])
             module_version = imported_module.__version__
             date_m_str = re.findall("dev\\d+", module_version)
@@ -196,7 +206,7 @@ def test_cuda_gds_errors_captured() -> None:
         )
 
 
-def find_pypi_package_version(package: str) -> Optional[str]:
+def find_pypi_package_version(package: str) -> str | None:
     from importlib import metadata
 
     dists = metadata.distributions()
@@ -235,8 +245,8 @@ def smoke_test_cuda(
     if not torch.cuda.is_available() and is_cuda_system:
         raise RuntimeError(f"Expected CUDA {gpu_arch_ver}. However CUDA is not loaded.")
 
-    if package == "all" and is_cuda_system:
-        for module in MODULES:
+    if package in ["all", "torch_torchvision"] and is_cuda_system:
+        for module in get_modules_for_package(package):
             imported_module = importlib.import_module(module["name"])
             # TBD for vision move extension module to private so it will
             # be _extention.
@@ -271,6 +281,18 @@ def smoke_test_cuda(
         print(f"cuDNN enabled? {torch.backends.cudnn.enabled}")
         torch_cudnn_version = cudnn_to_version_str(torch.backends.cudnn.version())
         print(f"Torch cuDNN version: {torch_cudnn_version}")
+
+        torch_cudnn_compile_version = torch._C._cudnn.getCompileVersion()
+        print(f"Torch cuDNN compile-time version: {torch_cudnn_compile_version}")
+        torch_cudnn_runtime_version = tuple(
+            [int(x) for x in torch_cudnn_version.split(".")]
+        )
+        if torch_cudnn_runtime_version != torch_cudnn_compile_version:
+            raise RuntimeError(
+                "cuDNN runtime version doesn't match comple version. "
+                f"Loaded: {torch_cudnn_runtime_version} "
+                f"Expected: {torch_cudnn_compile_version}"
+            )
 
         if sys.platform in ["linux", "linux2"]:
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
@@ -431,9 +453,9 @@ def smoke_test_nvshmem() -> None:
     print(f"NVSHMEM available at run time: {_is_nvshmem_available()}")
 
 
-def smoke_test_modules():
+def smoke_test_modules(package: str):
     cwd = os.getcwd()
-    for module in MODULES:
+    for module in get_modules_for_package(package):
         if module["repo"]:
             if not os.path.exists(f"{cwd}/{module['repo_name']}"):
                 print(f"Path does not exist: {cwd}/{module['repo_name']}")
@@ -471,7 +493,7 @@ def parse_args():
         "--package",
         help="Package to include in smoke testing",
         type=str,
-        choices=["all", "torchonly"],
+        choices=["all", "torch_torchvision", "torchonly"],
         default="all",
     )
     parser.add_argument(
@@ -517,8 +539,8 @@ def main() -> None:
         test_cuda_gds_errors_captured()
         test_sdpa("cuda")
 
-    if options.package == "all":
-        smoke_test_modules()
+    if options.package in ["all", "torch_torchvision"]:
+        smoke_test_modules(options.package)
 
     smoke_test_cuda(
         options.package,

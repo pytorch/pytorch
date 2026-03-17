@@ -7,7 +7,7 @@ import inspect
 import textwrap
 from collections.abc import Callable
 from types import FunctionType
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import torch
 from torch._sources import normalize_source_lines
@@ -48,7 +48,8 @@ class AST_Rewriter(ast.NodeTransformer):
         keys_before = set(globals_dict.keys())
         exec(code, globals_dict)
         new_keys = list(set(globals_dict.keys()) - keys_before)
-        assert len(new_keys) == 1
+        if len(new_keys) != 1:
+            raise AssertionError(f"Expected 1 new key, got {len(new_keys)}")
         fn_compiled = globals_dict[new_keys[0]]
 
         # return the compiled function with the original globals
@@ -77,9 +78,11 @@ class AST_Rewriter(ast.NodeTransformer):
         """
         # Create the Call node
         n = ast.parse("torch._assert()", mode="eval")
-        assert isinstance(n, ast.Expression)
+        if not isinstance(n, ast.Expression):
+            raise AssertionError(f"Expected ast.Expression, got {type(n)}")
         call_node = n.body
-        assert isinstance(call_node, ast.Call)
+        if not isinstance(call_node, ast.Call):
+            raise AssertionError(f"Expected ast.Call, got {type(call_node)}")
         msg = node.msg if node.msg else ast.Constant(value="", kind=None)
         call_node.args = [node.test, msg]
 
@@ -112,13 +115,13 @@ class AST_Rewriter(ast.NodeTransformer):
 class RewritingTracer(Tracer):
     def trace(
         self,
-        root: Union[torch.nn.Module, Callable],
-        concrete_args: Optional[dict[str, Any]] = None,
+        root: torch.nn.Module | Callable,
+        concrete_args: dict[str, Any] | None = None,
     ) -> Graph:
         return super().trace(_rewrite(root), concrete_args)
 
 
-def _rewrite(fn: Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:
+def _rewrite(fn: torch.nn.Module | Callable) -> torch.nn.Module | Callable:
     if isinstance(fn, torch.nn.Module):
         # Rewrite this module's `forward` as well as the `forward`s of
         # all of this module's recursive descendents. Return the new,

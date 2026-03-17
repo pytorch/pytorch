@@ -88,12 +88,11 @@ class Library:
         from torch.fx.operator_schemas import _SCHEMA_TO_SIGNATURE_CACHE
 
         if kind not in ("IMPL", "DEF", "FRAGMENT"):
-            raise ValueError("Unsupported kind: ", kind)
+            raise ValueError(f"Unsupported kind: {kind}")
 
         if ns in _reserved_namespaces and (kind == "DEF" or kind == "FRAGMENT"):
             raise ValueError(
-                ns,
-                " is a reserved namespace. Please try creating a library with another name.",
+                f"{ns} is a reserved namespace. Please try creating a library with another name."
             )
 
         frame = traceback.extract_stack(limit=2)[0]
@@ -1468,7 +1467,12 @@ def register_vmap(
         def wrapped_func(keyset, *args, **kwargs):
             interpreter = retrieve_current_functorch_interpreter()
             return custom_function_call_vmap_helper(
-                interpreter, func, op, *args, **kwargs
+                # pyrefly: ignore[bad-argument-type]
+                interpreter,
+                func,
+                op,
+                *args,
+                **kwargs,
             )
 
         lib.impl(opname, wrapped_func, "FuncTorchBatched", with_keyset=True)
