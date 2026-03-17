@@ -387,8 +387,13 @@ class _PreparedSingleDimStrategy:
             for placements, input_spec in zip(input_placements, input_specs)
         ]
         if not all(
-            is_tensor_shardable(spec.tensor_meta.shape, spec)
-            for spec in arg_specs
+            is_tensor_shardable(
+                spec.tensor_meta.shape,
+                spec,
+                allow_unbacked_sharding=self.allow_unbacked_sharding,
+            )
+            or (self.allow_uneven_sharding and input_spec.placements == spec.placements)
+            for spec, input_spec in zip(arg_specs, input_specs)
             if spec.tensor_meta is not None
         ):
             return None
@@ -841,6 +846,19 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         candidate_placements = tuple(tuple(ps) for ps in new_input_placements)
         if candidate_placements in visited:
             return
+        # Check that the NET transition (original -> proposed) is feasible.
+        # Individual hops may each be valid (e.g. S->R then R->P) while the
+        # net redistribution (S->P) is unsupported by the runtime planner.
+        original_p = initial_placements[input_idx][mesh_dim]
+        net_cost, _ = _compute_placement_transition_cost(
+            original_p,
+            new_placement,
+            mesh_topo,
+            mesh_dim,
+            initial_comm_bytes_gb[input_idx],
+        )
+        if net_cost == float("inf"):
+            return
         step_cost, new_comm_bytes = _compute_placement_transition_cost(
             old_placement,
             new_placement,
@@ -933,8 +951,11 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
     if _collect_all_matches is not None and first_result is not None:
         return first_result
 
-    raise AssertionError(
-        f"No valid strategy found for op_schema {op_schema} "
-        f"on {mesh}. "
-        f"Explored {len(visited)} strategy combinations."
+    logger.warning(
+        "Dijkstra search exhausted without finding a valid strategy for "
+        "%s on %s (explored %d combinations); falling back to full expansion",
+        op_schema,
+        mesh,
+        len(visited),
     )
+    return None

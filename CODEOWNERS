@@ -131,10 +131,10 @@ aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @sraikund16
-torch/autograd/profiler* @sraikund16
-torch/csrc/profiler/ @sraikund16
-torch/profiler/ @sraikund16
+torch/csrc/autograd/profiler* @scotts
+torch/autograd/profiler* @scotts
+torch/csrc/profiler/ @scotts
+torch/profiler/ @scotts
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
@@ -236,3 +236,6 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /torch/sparse/ @amjames @pearu @nikitaved
 /test/test_sparse.py @amjames @pearu @nikitaved
 /test/test_sparse_csr.py @amjames @pearu @nikitaved
+
+# Python/DSL native ops
+/torch/_native/ @slayton58 @drisspg

@@ -42,12 +42,10 @@ from typing import (
     Generic,
     NamedTuple,
     NoReturn,
-    Optional,
     TYPE_CHECKING,
     TypeAlias,
     TypeGuard,
     TypeVar,
-    Union,
 )
 from typing_extensions import deprecated, ParamSpec
 
@@ -128,8 +126,8 @@ from torch.fx.experimental._size_hinting import (
 
 
 def guarding_hint_or_throw(
-    a: Union[torch.SymInt, torch.SymBool, int, bool, SymNode],
-) -> Union[int, bool]:
+    a: torch.SymInt | torch.SymBool | int | bool | SymNode,
+) -> int | bool:
     """
     Return a concrete hint for a symbolic value, for use in guarding decisions.
 
@@ -151,9 +149,7 @@ def guarding_hint_or_throw(
     return a
 
 
-def optimization_hint(
-    a: Union[torch.SymInt, int], fallback: Optional[int] = None
-) -> int:
+def optimization_hint(a: torch.SymInt | int, fallback: int | None = None) -> int:
     """
     Return a concrete hint for a symbolic integer, for use in optimization decisions.
 
@@ -420,7 +416,7 @@ def create_contiguous(shape: Sequence[Int]) -> list[Int]:
     return list(reversed(strides))
 
 
-Scalar: TypeAlias = Union[torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool]
+Scalar: TypeAlias = torch.SymInt | torch.SymFloat | torch.SymBool | int | float | bool
 
 
 def has_guarding_hint(a: Scalar) -> bool:
@@ -4070,8 +4066,8 @@ class ShapeEnv:
 
         # Used by _get_unbacked_replacements / _sub_unbacked_exprs for
         # optimization_hint canonicalization of unbacked expressions.
-        self._equality_graph: Optional[dict[sympy.Expr, OrderedSet[sympy.Expr]]] = None
-        self._unbacked_replacements: Optional[dict[sympy.Expr, sympy.Expr]] = None
+        self._equality_graph: dict[sympy.Expr, OrderedSet[sympy.Expr]] | None = None
+        self._unbacked_replacements: dict[sympy.Expr, sympy.Expr] | None = None
 
         self.trace_asserts = trace_asserts
 
@@ -6921,8 +6917,59 @@ class ShapeEnv:
                     expr = new_expr
         return expr
 
+    # TODO: overload for allow_none literal
+    @deprecated(
+        "use guarding_hint_or_throw or optimization_hint instead",
+        category=FutureWarning,
+    )
     @lru_cache(256)
-    def guarding_hint_or_throw(self, expr: Union[sympy.Expr, int]) -> Union[int, bool]:
+    def size_hint(
+        self, expr: sympy.Basic, *, allow_none: bool = False
+    ) -> sympy.Basic | None:
+        """
+        Gets a size hint for a given expression from the underlying shapes we had.
+        Does not introduce a guard, so only use this when you can guarantee that
+        your code is still valid for arbitrary shapes (such as optimization decisions)
+        """
+        result_expr = safe_expand(expr).xreplace(self.backed_var_to_val)
+        if not result_expr.is_number:
+            from torch.utils._sympy.singleton_int import SingletonInt
+
+            if isinstance(result_expr, SingletonInt):
+                return None
+            r = self._maybe_evaluate_static(result_expr, compute_hint=True)
+            if r is not None:
+                return r
+            if allow_none:
+                return None
+
+            if self.real_tensor_prop_unbacked_vals:
+                unsound_expr = result_expr.xreplace(self.real_tensor_prop_unbacked_vals)
+                if not unsound_expr.free_symbols:
+                    log.warning(
+                        "propagate_real_tensors size_hint(%s) -> %s", expr, unsound_expr
+                    )
+                    trace_structured(
+                        "propagate_real_tensors",
+                        metadata_fn=lambda: {
+                            "expr": repr(expr),
+                            "result": repr(unsound_expr),
+                            "stack": structured.from_traceback(
+                                CapturedTraceback.extract(skip=1).summary()
+                            ),
+                        },
+                    )
+                    self.guard_or_defer_runtime_assert(
+                        sympy.Eq(result_expr, unsound_expr),
+                        f"propagate_real_tensors: {result_expr} == {unsound_expr}",
+                    )
+                    return unsound_expr
+
+            raise self._make_data_dependent_error(result_expr, expr)
+        return result_expr
+
+    @lru_cache(256)
+    def guarding_hint_or_throw(self, expr: sympy.Expr | int) -> int | bool:
         """
         Return a concrete hint for an expression.
 
@@ -6940,7 +6987,7 @@ class ShapeEnv:
         return True
 
     def optimization_hint(
-        self, expr: Union[sympy.Expr, int], fallback: Optional[int] = None
+        self, expr: sympy.Expr | int, fallback: int | None = None
     ) -> int:
         """
         Return a concrete integer hint for an expression.

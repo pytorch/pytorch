@@ -2312,6 +2312,63 @@ if HAS_CUDA_AND_TRITON:
 
             FileCheck().check("overwritten").check("x * x * x").run(repr(exc.exception))
 
+        def test_output_node_has_stack_traces_inference(self):
+            """Test that output_stack_traces on the output node provides
+            stack traces even when a post-grad pass strips them from arg nodes
+            in inference mode."""
+
+            def strip_stack_traces(graph):
+                for node in graph.nodes:
+                    if node.op not in ("placeholder", "output"):
+                        node.meta.pop("stack_trace", None)
+
+            with config.patch(post_grad_custom_post_pass=strip_stack_traces):
+
+                @torch.compile(mode="reduce-overhead")
+                def foo(x):
+                    return x * x * x
+
+                inp = torch.rand([4], device="cuda")
+                out = foo(inp).detach()
+                out2 = foo(inp).detach()
+
+                with self.assertRaises(Exception) as exc:
+                    out + out
+
+                self.assertIn("x * x * x", repr(exc.exception))
+
+        def test_output_node_has_stack_traces_training(self):
+            """Test that output_stack_traces on the output node provides
+            stack traces even when a post-grad pass strips them from arg nodes
+            in training mode (fwd/bwd graph split via partitioner)."""
+
+            def strip_stack_traces(graph):
+                for node in graph.nodes:
+                    if node.op not in ("placeholder", "output"):
+                        node.meta.pop("stack_trace", None)
+
+            with config.patch(post_grad_custom_post_pass=strip_stack_traces):
+
+                @torch.compile(mode="reduce-overhead")
+                def foo(x):
+                    return x * x * x
+
+                inp = torch.rand([4], device="cuda", requires_grad=True)
+                # Complete fwd+bwd to compile both graphs
+                torch.compiler.cudagraph_mark_step_begin()
+                foo(inp).sum().backward()
+
+                # Now trigger the dealloc error
+                torch.compiler.cudagraph_mark_step_begin()
+                out = foo(inp).detach()
+                torch.compiler.cudagraph_mark_step_begin()
+                out2 = foo(inp).detach()
+
+                with self.assertRaises(Exception) as exc:
+                    out + out
+
+                self.assertIn("x * x * x", repr(exc.exception))
+
         @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
         def test_conv_benchmark(self):
             with torch.backends.cudnn.flags(
@@ -3864,6 +3921,185 @@ if HAS_CUDA_AND_TRITON:
 
             # 2 graph partitions lead to 2 fwd cudagraphs and 1 bwd cudagraphs
             self.assertEqual(self.get_manager().new_graph_id().id, 3)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_used_in_cpu_op(self):
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(4, 4, device="cuda")
+                    self.cpu_scale = torch.nn.Parameter(torch.tensor(1.0))
+
+                def forward(self, x):
+                    y = self.linear(x)
+                    cpu_val = y.sum().cpu() * self.cpu_scale
+                    return y + cpu_val.cuda()
+
+            model = Mod()
+            x = torch.randn(4, 4, device="cuda")
+
+            compiled_model = torch.compile(model, mode="reduce-overhead")
+
+            # Verify graph_partition produces the expected partitions.
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
+                compiled_model(x)
+            FileCheck().check("2 cudagraphable, 1 non-cudagraphable").run(
+                log_stream.getvalue()
+            )
+
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            for _ in range(5):
+                output = compiled_model(x)
+                loss = criterion(output, torch.randint(0, 4, (4,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            eager_out = model(x)
+            compiled_out = compiled_model(x)
+            self.assertEqual(compiled_out, eager_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_cpu_scalar_as_output(self):
+            """
+            When a CPU scalar placeholder is moved to GPU by ConstructorMoverPass,
+            the forward graph's output must NOT replace the CPU placeholder with
+            the GPU copy.
+            """
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(4, 4, device="cuda")
+                    self.cpu_scale = torch.nn.Parameter(torch.tensor(1.0))
+
+                def forward(self, x):
+                    return self.linear(x) * self.cpu_scale
+
+            model = Mod()
+            x = torch.randn(4, 4, device="cuda")
+
+            compiled_model = torch.compile(model, mode="reduce-overhead")
+            compiled_model(x)
+
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            for _ in range(5):
+                output = compiled_model(x)
+                loss = criterion(output, torch.randint(0, 4, (4,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            eager_out = model(x)
+            compiled_out = compiled_model(x)
+            self.assertEqual(compiled_out, eager_out)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_saved_activation_not_static(self):
+            # When the forward is partitioned, saved activations produced
+            # by inline code between partitions (e.g., DeviceCopy) are
+            # NOT at fixed addresses. The backward must not mark them as
+            # static inputs, or it would re-record on every iteration.
+            # Primals (params/buffers) should still be marked static.
+            from unittest.mock import patch
+
+            from torch._inductor.utils import count_tangents, get_static_bw_input_idxs
+
+            bw_graph = None
+            orig_bw = torch._inductor.compile_fx.compile_fx_backward
+
+            def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
+                nonlocal bw_graph
+                bw_graph = gm
+                return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    a = x * 2
+                    # CPU round-trip creates a DeviceCopy partition boundary.
+                    # The .cuda() result is an activation saved for backward.
+                    b = a.cpu().cuda()
+                    c = b * b
+                    return self.linear(c)
+
+            model = Mod().cuda()
+            input_data = torch.randn(16, 16, device="cuda")
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            with patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
+                compiled_model = torch.compile(model, mode="reduce-overhead")
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            self.assertIsNotNone(bw_graph)
+            # count_tangents marks ALL saved tensors as static (old behavior)
+            all_static = list(range(count_tangents(bw_graph)))
+            # get_static_bw_input_idxs only marks primals as static
+            primal_static = get_static_bw_input_idxs(bw_graph)
+            # With a partitioned forward, only primals should be static,
+            # so primal_static should be a strict subset of all_static.
+            self.assertTrue(len(primal_static) < len(all_static))
+            for idx in primal_static:
+                self.assertIn(idx, all_static)
+
+            # Run a few more iterations to confirm stability
+            for _ in range(4):
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_no_partition_keeps_static(self):
+            # When graph_partition is enabled but the forward has no unsafe
+            # ops, forward_is_partitioned should be False and all saved
+            # tensors remain static in the backward.
+            from unittest.mock import patch
+
+            forward_partitioned = None
+            orig_bw = torch._inductor.compile_fx.compile_fx_backward
+
+            def intercept_bw(gm, example_inputs, compiler_config_extra, **kwargs):
+                nonlocal forward_partitioned
+                forward_partitioned = compiler_config_extra.forward_is_partitioned.value
+                return orig_bw(gm, example_inputs, compiler_config_extra, **kwargs)
+
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    return self.linear(x * x + 1)
+
+            model = Mod().cuda()
+            input_data = torch.randn(16, 16, device="cuda")
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+            with patch("torch._inductor.compile_fx.compile_fx_backward", intercept_bw):
+                compiled_model = torch.compile(model, mode="reduce-overhead")
+                output = compiled_model(input_data)
+                loss = criterion(output, torch.randint(0, 10, (16,)).cuda())
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+            self.assertFalse(forward_partitioned)
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):

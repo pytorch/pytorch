@@ -674,7 +674,7 @@ class SizeVarAllocator:
                 "Use expr.expr to extract the sympy expression from a SymNode."
             )
         return _guarding_hint_or_throw_base(
-            self.shape_env, expr, self.precomputed_replacements
+            self.shape_env, expr, self.inv_precomputed_replacements
         )
 
     def optimization_hint(self, expr: Expr | int, fallback: int | None = None) -> int:
@@ -695,7 +695,7 @@ class SizeVarAllocator:
         - NaN (sympy.nan): returns the fallback value.
         """
         return _optimization_hint_base(
-            self.shape_env, expr, self.precomputed_replacements, fallback
+            self.shape_env, expr, self.inv_precomputed_replacements, fallback
         )
 
     def optimization_hints(

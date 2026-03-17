@@ -1458,6 +1458,17 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         if graph is None:
             return None, cache_info
 
+        # Validate extern_libs (e.g. libdevice) match the current env.
+        if graph.extern_libs_key is not None:
+            try:
+                backend = torch.utils._triton.triton_backend()
+                current = torch.utils._triton._extern_libs_key(backend)
+            except Exception:
+                current = None
+            if current != graph.extern_libs_key:
+                cache_info["cache_status_detailed"] = "guard_miss"
+                return None, cache_info
+
         if pickled_content is not None:
             CacheArtifactManager.record_artifact(
                 InductorCacheArtifact.type(), key, pickled_content
@@ -1514,6 +1525,13 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
         )
+        try:
+            backend = torch.utils._triton.triton_backend()
+            compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
+                backend
+            )
+        except Exception:
+            pass
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 
@@ -3970,6 +3988,7 @@ class CUTLASSCodeCache:
     def cache_clear(cls) -> None:
         cls.cache.clear()
         cls.aot_kernels_o.clear()
+        cls.write.cache_clear()
 
     @staticmethod
     @lru_cache(maxsize=4)

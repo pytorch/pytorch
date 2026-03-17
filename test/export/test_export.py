@@ -1174,192 +1174,196 @@ graph():
         export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
 
     def test_dynamic_lstm(self):
-        from torch.export._patches import (
-            register_gru_while_loop_decomposition,
-            register_lstm_while_loop_decomposition,
-        )
-
-        # Test 1: Basic single-layer LSTM with dynamic sequence length
-        seqlen = 32
-        bs = 16
-        h = 512
-
-        class LSTM(torch.nn.Module):
-            def __init__(self, h):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(h, h)
-
-            def forward(self, x, h0, c0):
-                out, (_, _) = self.lstm(x, (h0, c0))
-                return out
-
-        x = torch.randn(seqlen, bs, h)
-        h0, c0 = torch.randn(1, bs, h), torch.randn(1, bs, h)
-
-        model = LSTM(h)
-        eager_out = model(x, h0, c0)
-        dynamic_shapes = {
-            "x": {0: Dim.DYNAMIC},
-            "h0": None,
-            "c0": None,
-        }
-
-        with register_lstm_while_loop_decomposition():
-            ep = export(model, (x, h0, c0), dynamic_shapes=dynamic_shapes)
-        ep_out = ep.module()(x, h0, c0)
-        self.assertEqual(eager_out, ep_out)
-        # test dynamic output with different sequence length
-        x_ = torch.randn(64, bs, h)
-        ep_out_dynamic = ep.module()(x_, h0, c0)
-        self.assertEqual(ep_out_dynamic, model(x_, h0, c0))
-
-        # Test 2: Bidirectional LSTM
-        class BiLSTM(torch.nn.Module):
-            def __init__(self, h):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(h, h, bidirectional=True)
-
-            def forward(self, x, h0, c0):
-                out, (_, _) = self.lstm(x, (h0, c0))
-                return out
-
-        h0_bi = torch.randn(2, bs, h)
-        c0_bi = torch.randn(2, bs, h)
-        model_bi = BiLSTM(h)
-        eager_out_bi = model_bi(x, h0_bi, c0_bi)
-        dynamic_shapes_bi = {
-            "x": {0: Dim.DYNAMIC},
-            "h0": None,
-            "c0": None,
-        }
-
-        with register_lstm_while_loop_decomposition():
-            ep_bi = export(
-                model_bi, (x, h0_bi, c0_bi), dynamic_shapes=dynamic_shapes_bi
+        # Disable mkldnn so eager uses the same pure-PyTorch LSTM/GRU as the
+        # while-loop decomposition, avoiding numerical divergence from the
+        # fused mkldnn kernel.
+        with torch.backends.mkldnn.flags(enabled=False):
+            from torch.export._patches import (
+                register_gru_while_loop_decomposition,
+                register_lstm_while_loop_decomposition,
             )
-        ep_out_bi = ep_bi.module()(x, h0_bi, c0_bi)
-        self.assertEqual(eager_out_bi, ep_out_bi)
-        # test with different sequence length
-        ep_out_bi_dynamic = ep_bi.module()(x_, h0_bi, c0_bi)
-        self.assertEqual(ep_out_bi_dynamic, model_bi(x_, h0_bi, c0_bi))
 
-        # Test 3: Multi-layer LSTM
-        class MultiLayerLSTM(torch.nn.Module):
-            def __init__(self, h, num_layers=2):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(h, h, num_layers=num_layers)
+            # Test 1: Basic single-layer LSTM with dynamic sequence length
+            seqlen = 32
+            bs = 16
+            h = 512
 
-            def forward(self, x, h0, c0):
-                out, (_, _) = self.lstm(x, (h0, c0))
-                return out
+            class LSTM(torch.nn.Module):
+                def __init__(self, h):
+                    super().__init__()
+                    self.lstm = torch.nn.LSTM(h, h)
 
-        num_layers = 2
-        h0_multi = torch.randn(num_layers, bs, h)
-        c0_multi = torch.randn(num_layers, bs, h)
-        model_multi = MultiLayerLSTM(h, num_layers)
-        eager_out_multi = model_multi(x, h0_multi, c0_multi)
-        dynamic_shapes_multi = {
-            "x": {0: Dim.DYNAMIC},
-            "h0": None,
-            "c0": None,
-        }
+                def forward(self, x, h0, c0):
+                    out, (_, _) = self.lstm(x, (h0, c0))
+                    return out
 
-        with register_lstm_while_loop_decomposition():
-            ep_multi = export(
-                model_multi,
-                (x, h0_multi, c0_multi),
-                dynamic_shapes=dynamic_shapes_multi,
+            x = torch.randn(seqlen, bs, h)
+            h0, c0 = torch.randn(1, bs, h), torch.randn(1, bs, h)
+
+            model = LSTM(h)
+            eager_out = model(x, h0, c0)
+            dynamic_shapes = {
+                "x": {0: Dim.DYNAMIC},
+                "h0": None,
+                "c0": None,
+            }
+
+            with register_lstm_while_loop_decomposition():
+                ep = export(model, (x, h0, c0), dynamic_shapes=dynamic_shapes)
+            ep_out = ep.module()(x, h0, c0)
+            self.assertEqual(eager_out, ep_out)
+            # test dynamic output with different sequence length
+            x_ = torch.randn(64, bs, h)
+            ep_out_dynamic = ep.module()(x_, h0, c0)
+            self.assertEqual(ep_out_dynamic, model(x_, h0, c0))
+
+            # Test 2: Bidirectional LSTM
+            class BiLSTM(torch.nn.Module):
+                def __init__(self, h):
+                    super().__init__()
+                    self.lstm = torch.nn.LSTM(h, h, bidirectional=True)
+
+                def forward(self, x, h0, c0):
+                    out, (_, _) = self.lstm(x, (h0, c0))
+                    return out
+
+            h0_bi = torch.randn(2, bs, h)
+            c0_bi = torch.randn(2, bs, h)
+            model_bi = BiLSTM(h)
+            eager_out_bi = model_bi(x, h0_bi, c0_bi)
+            dynamic_shapes_bi = {
+                "x": {0: Dim.DYNAMIC},
+                "h0": None,
+                "c0": None,
+            }
+
+            with register_lstm_while_loop_decomposition():
+                ep_bi = export(
+                    model_bi, (x, h0_bi, c0_bi), dynamic_shapes=dynamic_shapes_bi
+                )
+            ep_out_bi = ep_bi.module()(x, h0_bi, c0_bi)
+            self.assertEqual(eager_out_bi, ep_out_bi)
+            # test with different sequence length
+            ep_out_bi_dynamic = ep_bi.module()(x_, h0_bi, c0_bi)
+            self.assertEqual(ep_out_bi_dynamic, model_bi(x_, h0_bi, c0_bi))
+
+            # Test 3: Multi-layer LSTM
+            class MultiLayerLSTM(torch.nn.Module):
+                def __init__(self, h, num_layers=2):
+                    super().__init__()
+                    self.lstm = torch.nn.LSTM(h, h, num_layers=num_layers)
+
+                def forward(self, x, h0, c0):
+                    out, (_, _) = self.lstm(x, (h0, c0))
+                    return out
+
+            num_layers = 2
+            h0_multi = torch.randn(num_layers, bs, h)
+            c0_multi = torch.randn(num_layers, bs, h)
+            model_multi = MultiLayerLSTM(h, num_layers)
+            eager_out_multi = model_multi(x, h0_multi, c0_multi)
+            dynamic_shapes_multi = {
+                "x": {0: Dim.DYNAMIC},
+                "h0": None,
+                "c0": None,
+            }
+
+            with register_lstm_while_loop_decomposition():
+                ep_multi = export(
+                    model_multi,
+                    (x, h0_multi, c0_multi),
+                    dynamic_shapes=dynamic_shapes_multi,
+                )
+            ep_out_multi = ep_multi.module()(x, h0_multi, c0_multi)
+            self.assertEqual(eager_out_multi, ep_out_multi)
+            ep_out_multi_dynamic = ep_multi.module()(x_, h0_multi, c0_multi)
+            self.assertEqual(ep_out_multi_dynamic, model_multi(x_, h0_multi, c0_multi))
+
+            # Test 4: batch_first=True
+            class BatchFirstLSTM(torch.nn.Module):
+                def __init__(self, h):
+                    super().__init__()
+                    self.lstm = torch.nn.LSTM(h, h, batch_first=True)
+
+                def forward(self, x, h0, c0):
+                    out, (_, _) = self.lstm(x, (h0, c0))
+                    return out
+
+            x_batch_first = torch.randn(bs, seqlen, h)
+            model_batch_first = BatchFirstLSTM(h)
+            eager_out_batch_first = model_batch_first(x_batch_first, h0, c0)
+            dynamic_shapes_batch_first = {
+                "x": {1: Dim.DYNAMIC},  # dynamic dimension is now dim 1
+                "h0": None,
+                "c0": None,
+            }
+
+            with register_lstm_while_loop_decomposition():
+                ep_batch_first = export(
+                    model_batch_first,
+                    (x_batch_first, h0, c0),
+                    dynamic_shapes=dynamic_shapes_batch_first,
+                )
+            ep_out_batch_first = ep_batch_first.module()(x_batch_first, h0, c0)
+            self.assertEqual(eager_out_batch_first, ep_out_batch_first)
+            x_batch_first_dynamic = torch.randn(bs, 64, h)
+            ep_out_batch_first_dynamic = ep_batch_first.module()(
+                x_batch_first_dynamic, h0, c0
             )
-        ep_out_multi = ep_multi.module()(x, h0_multi, c0_multi)
-        self.assertEqual(eager_out_multi, ep_out_multi)
-        ep_out_multi_dynamic = ep_multi.module()(x_, h0_multi, c0_multi)
-        self.assertEqual(ep_out_multi_dynamic, model_multi(x_, h0_multi, c0_multi))
-
-        # Test 4: batch_first=True
-        class BatchFirstLSTM(torch.nn.Module):
-            def __init__(self, h):
-                super().__init__()
-                self.lstm = torch.nn.LSTM(h, h, batch_first=True)
-
-            def forward(self, x, h0, c0):
-                out, (_, _) = self.lstm(x, (h0, c0))
-                return out
-
-        x_batch_first = torch.randn(bs, seqlen, h)
-        model_batch_first = BatchFirstLSTM(h)
-        eager_out_batch_first = model_batch_first(x_batch_first, h0, c0)
-        dynamic_shapes_batch_first = {
-            "x": {1: Dim.DYNAMIC},  # dynamic dimension is now dim 1
-            "h0": None,
-            "c0": None,
-        }
-
-        with register_lstm_while_loop_decomposition():
-            ep_batch_first = export(
-                model_batch_first,
-                (x_batch_first, h0, c0),
-                dynamic_shapes=dynamic_shapes_batch_first,
+            self.assertEqual(
+                ep_out_batch_first_dynamic,
+                model_batch_first(x_batch_first_dynamic, h0, c0),
             )
-        ep_out_batch_first = ep_batch_first.module()(x_batch_first, h0, c0)
-        self.assertEqual(eager_out_batch_first, ep_out_batch_first)
-        x_batch_first_dynamic = torch.randn(bs, 64, h)
-        ep_out_batch_first_dynamic = ep_batch_first.module()(
-            x_batch_first_dynamic, h0, c0
-        )
-        self.assertEqual(
-            ep_out_batch_first_dynamic,
-            model_batch_first(x_batch_first_dynamic, h0, c0),
-        )
 
-        # Test 5: GRU with dynamic sequence length
-        class GRU(torch.nn.Module):
-            def __init__(self, h):
-                super().__init__()
-                self.gru = torch.nn.GRU(h, h)
+            # Test 5: GRU with dynamic sequence length
+            class GRU(torch.nn.Module):
+                def __init__(self, h):
+                    super().__init__()
+                    self.gru = torch.nn.GRU(h, h)
 
-            def forward(self, x, h0):
-                out, _ = self.gru(x, h0)
-                return out
+                def forward(self, x, h0):
+                    out, _ = self.gru(x, h0)
+                    return out
 
-        model_gru = GRU(h)
-        eager_out_gru = model_gru(x, h0)
-        dynamic_shapes_gru = {
-            "x": {0: Dim.DYNAMIC},
-            "h0": None,
-        }
+            model_gru = GRU(h)
+            eager_out_gru = model_gru(x, h0)
+            dynamic_shapes_gru = {
+                "x": {0: Dim.DYNAMIC},
+                "h0": None,
+            }
 
-        with register_gru_while_loop_decomposition():
-            ep_gru = export(model_gru, (x, h0), dynamic_shapes=dynamic_shapes_gru)
-        ep_out_gru = ep_gru.module()(x, h0)
-        self.assertEqual(eager_out_gru, ep_out_gru)
-        ep_out_gru_dynamic = ep_gru.module()(x_, h0)
-        self.assertEqual(ep_out_gru_dynamic, model_gru(x_, h0))
+            with register_gru_while_loop_decomposition():
+                ep_gru = export(model_gru, (x, h0), dynamic_shapes=dynamic_shapes_gru)
+            ep_out_gru = ep_gru.module()(x, h0)
+            self.assertEqual(eager_out_gru, ep_out_gru)
+            ep_out_gru_dynamic = ep_gru.module()(x_, h0)
+            self.assertEqual(ep_out_gru_dynamic, model_gru(x_, h0))
 
-        # Test 6: Bidirectional GRU
-        class BiGRU(torch.nn.Module):
-            def __init__(self, h):
-                super().__init__()
-                self.gru = torch.nn.GRU(h, h, bidirectional=True)
+            # Test 6: Bidirectional GRU
+            class BiGRU(torch.nn.Module):
+                def __init__(self, h):
+                    super().__init__()
+                    self.gru = torch.nn.GRU(h, h, bidirectional=True)
 
-            def forward(self, x, h0):
-                out, _ = self.gru(x, h0)
-                return out
+                def forward(self, x, h0):
+                    out, _ = self.gru(x, h0)
+                    return out
 
-        model_bigru = BiGRU(h)
-        eager_out_bigru = model_bigru(x, h0_bi)
-        dynamic_shapes_bigru = {
-            "x": {0: Dim.DYNAMIC},
-            "h0": None,
-        }
+            model_bigru = BiGRU(h)
+            eager_out_bigru = model_bigru(x, h0_bi)
+            dynamic_shapes_bigru = {
+                "x": {0: Dim.DYNAMIC},
+                "h0": None,
+            }
 
-        with register_gru_while_loop_decomposition():
-            ep_bigru = export(
-                model_bigru, (x, h0_bi), dynamic_shapes=dynamic_shapes_bigru
-            )
-        ep_out_bigru = ep_bigru.module()(x, h0_bi)
-        self.assertEqual(eager_out_bigru, ep_out_bigru)
-        ep_out_bigru_dynamic = ep_bigru.module()(x_, h0_bi)
-        self.assertEqual(ep_out_bigru_dynamic, model_bigru(x_, h0_bi))
+            with register_gru_while_loop_decomposition():
+                ep_bigru = export(
+                    model_bigru, (x, h0_bi), dynamic_shapes=dynamic_shapes_bigru
+                )
+            ep_out_bigru = ep_bigru.module()(x, h0_bi)
+            self.assertEqual(eager_out_bigru, ep_out_bigru)
+            ep_out_bigru_dynamic = ep_bigru.module()(x_, h0_bi)
+            self.assertEqual(ep_out_bigru_dynamic, model_bigru(x_, h0_bi))
 
     @testing.expectedFailureStrictV2
     def test_no_tensor_computation(self):
@@ -2456,6 +2460,49 @@ graph():
             sample_input,
             dynamic_shapes=auto_dynamic_shapes_from_args(sample_input),
         ).run_decompositions({})
+
+    def test_where_decomp_non_strict_inference_mode_dynamic_shapes(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.where(x > 0)
+
+        test_module = TestModule()
+        sample_input = (torch.rand(2, 10),)
+        dynamic_shapes = ({0: Dim("batch_size", max=100)},)
+
+        with torch.inference_mode():
+            ep = torch.export.export(
+                test_module,
+                sample_input,
+                strict=False,
+                dynamic_shapes=dynamic_shapes,
+            ).run_decompositions({})
+
+        self.assertEqual(ep.module()(*sample_input), test_module(*sample_input))
+
+        larger_input = (torch.rand(4, 10),)
+        self.assertEqual(ep.module()(*larger_input), test_module(*larger_input))
+
+    def test_where_decomp_non_bool_input(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.where(x)
+
+        test_module = TestModule()
+        sample_input = (torch.tensor([[0.0, 1.0], [2.0, 0.0]]),)
+        dynamic_shapes = ({0: Dim("batch_size", max=100)},)
+
+        ep = torch.export.export(
+            test_module,
+            sample_input,
+            strict=False,
+            dynamic_shapes=dynamic_shapes,
+        ).run_decompositions({})
+
+        self.assertEqual(ep.module()(*sample_input), test_module(*sample_input))
+
+        larger_input = (torch.tensor([[0.0, 3.0], [4.0, 0.0], [5.0, 6.0]]),)
+        self.assertEqual(ep.module()(*larger_input), test_module(*larger_input))
 
     def test_basic_non_strict_fake_tensor(self):
         class Basic(torch.nn.Module):
@@ -16038,6 +16085,21 @@ def forward(self, x):
         decomposed_program = exported_program.run_decompositions()
         for node in decomposed_program.graph.nodes:
             self.assertEqual(node.meta["custom"]["my_field"], "dummy")
+
+    def test_run_decompositions_leafspec_deepcopy(self):
+        # Regression test: run_decompositions internally deepcopies the module
+        # call graph which contains TreeSpec objects with LeafSpec nodes.
+        # and has uninitialized slots on Python 3.10
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        ep = export(SimpleModel(), (torch.randn(1, 10),))
+        ep.run_decompositions({})
 
     @testing.expectedFailureStrictV2
     def test_run_decompositions_keep_tensor_constant_metadata(self):

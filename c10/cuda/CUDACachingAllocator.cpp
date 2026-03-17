@@ -21,9 +21,13 @@
 #if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
+#ifndef _WIN32
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
+#else
+#include <process.h>
+#endif
 #endif
 
 #include <c10/util/Exception.h>
@@ -554,7 +558,11 @@ struct ExpandableSegment {
     // thereby ensuring that the handle can be correctly matched in
     // ipcMemHandle_to_devptr.
     ShareHeader header{};
+#ifdef _WIN32
+    header.pid = _getpid();
+#else
     header.pid = getpid();
+#endif
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
 
@@ -616,14 +624,20 @@ struct ExpandableSegment {
         device, std::nullopt, header.segment_size, std::move(peers));
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
 // but the kernel on the system might still support it.
+#ifndef _WIN32
 #ifndef SYS_pidfd_open
 #define SYS_pidfd_open 434
 #endif
 #ifndef SYS_pidfd_getfd
 #define SYS_pidfd_getfd 438
 #endif
+#endif // !_WIN32
     if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
         Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+#ifdef _WIN32
+      TORCH_CHECK(
+          false, "IPC expandable segments are not supported on Windows");
+#else
       auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
       TORCH_CHECK(
           pidfd != -1 || errno != ENOSYS,
@@ -656,14 +670,14 @@ struct ExpandableSegment {
         }
         CUmemGenericAllocationHandle handle = 0;
 #ifdef USE_ROCM
-        C10_CUDA_CHECK(hipMemImportFromShareableHandle(
-            &handle,
 #if ROCM_VERSION >= 70100
-            reinterpret_cast<void*>(static_cast<uintptr_t>(myfd)),
+        void* myfd_handle =
+            reinterpret_cast<void*>(static_cast<uintptr_t>(myfd));
 #else
-            (void*)(uintptr_t)&myfd,
+        void* myfd_handle = (void*)(uintptr_t)&myfd;
 #endif
-            hipMemHandleTypePosixFileDescriptor));
+        C10_CUDA_CHECK(hipMemImportFromShareableHandle(
+            &handle, myfd_handle, hipMemHandleTypePosixFileDescriptor));
 #else
         C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
             &handle,
@@ -676,6 +690,7 @@ struct ExpandableSegment {
         segment->handles_.emplace_back(Handle{handle, std::nullopt});
       }
       close(static_cast<int>(pidfd));
+#endif // !_WIN32
     } else {
 #ifdef USE_ROCM
       TORCH_INTERNAL_ASSERT(
@@ -748,7 +763,10 @@ struct ExpandableSegment {
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
 #ifdef USE_ROCM
     C10_CUDA_CHECK(hipMemSetAccess(
-        ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
+        ptr() + begin * segment_size_,
+        (end - begin) * segment_size_,
+        &desc,
+        1));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
         ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
@@ -759,7 +777,7 @@ struct ExpandableSegment {
     for (auto i : c10::irange(begin, end)) {
 #ifdef USE_ROCM
       C10_CUDA_CHECK(hipMemMap(
-          ptr_ + i * segment_size_,
+          ptr() + i * segment_size_,
           segment_size_,
           0,
           handles_.at(i).value().handle,
@@ -800,13 +818,15 @@ struct ExpandableSegment {
       Handle h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
 #ifdef USE_ROCM
-      C10_CUDA_CHECK(hipMemUnmap(ptr_ + segment_size_ * i, segment_size_));
+      C10_CUDA_CHECK(hipMemUnmap(ptr() + segment_size_ * i, segment_size_));
 #else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
           ptr_ + segment_size_ * i, segment_size_));
 #endif
       if (h.shareable_handle) {
+#ifndef _WIN32
         close(std::get<int>(*h.shareable_handle));
+#endif
       }
 #ifdef USE_ROCM
       C10_CUDA_CHECK(hipMemRelease(h.handle));
@@ -860,7 +880,11 @@ struct ExpandableSegment {
     std::optional<std::variant<int, CUmemFabricHandle>> shareable_handle;
   };
   struct ShareHeader {
+#ifdef _WIN32
+    int pid;
+#else
     pid_t pid;
+#endif
     size_t segment_size;
     size_t num_handles;
   };

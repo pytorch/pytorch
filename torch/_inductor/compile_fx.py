@@ -86,6 +86,7 @@ from torch._inductor.utils import (
     count_tangents,
     fresh_cache,
     get_all_devices,
+    get_static_bw_input_idxs,
     InputType,
     is_gpu,
     should_assume_input_aligned,
@@ -2271,6 +2272,7 @@ class CompilerConfigExtra:
     cudagraphs: BoxedBool
     graph_id: int
     forward_device: BoxedDeviceIndex
+    forward_is_partitioned: BoxedBool
     cudagraphs_bwd_override: bool | None = None
 
 
@@ -2320,11 +2322,17 @@ def create_compiler_config_extra(
     # See [Backward Generation Handling]
     forward_device = BoxedDeviceIndex(None)
 
+    # Set by the forward compilation when it is partitioned for CUDA graphs.
+    # The backward reads this to decide whether saved tensors can be assumed
+    # to have fixed addresses.
+    forward_is_partitioned = BoxedBool(False)
+
     return CompilerConfigExtra(
         cudagraphs=cudagraphs,
         graph_id=graph_id,
         forward_device=forward_device,
         cudagraphs_bwd_override=cudagraphs_bwd_override,
+        forward_is_partitioned=forward_is_partitioned,
     )
 
 
@@ -2362,6 +2370,18 @@ def compile_fx_forward(
                 print_output=False, include_stride=True, include_device=True
             ),
         )
+
+        # Snapshot stack traces on the output node before passes run,
+        # as later passes may strip stack_trace from individual nodes.
+        output = output_node(gm)
+        output.meta["output_stack_traces"] = [
+            (
+                arg.meta.get("stack_trace")
+                if isinstance(arg, torch.fx.node.Node)
+                else None
+            )
+            for arg in output.args[0]  # type: ignore[union-attr]
+        ]
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
         gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
@@ -2429,7 +2449,7 @@ def compile_fx_forward(
     _recursive_record_user_visible_output_idxs(gm)
 
     with cudagraph_annotation_context(compiler_config_extra.cudagraphs):
-        return inner_compile(
+        result = inner_compile(
             gm,
             example_inputs,
             static_input_idxs=get_static_input_idxs(fixed),
@@ -2438,6 +2458,16 @@ def compile_fx_forward(
             is_inference=is_inference,
             boxed_forward_device_index=compiler_config_extra.forward_device,
         )
+
+        if (
+            not is_inference
+            and isinstance(result, CompiledFxGraph)
+            and result.partition_maps
+            and len(result.partition_maps) > 1
+        ):
+            compiler_config_extra.forward_is_partitioned.value = True
+
+        return result
 
 
 def compile_fx_backward(
@@ -2476,6 +2506,13 @@ def compile_fx_backward(
         if compiler_config_extra.cudagraphs_bwd_override is not None:
             cudagraphs = BoxedBool(compiler_config_extra.cudagraphs_bwd_override)
 
+        # When the forward was partitioned, saved activations from inline
+        # code between partitions are NOT at fixed addresses. Only mark
+        # primals (params/buffers) as static.
+        if compiler_config_extra.forward_is_partitioned.value:
+            static_input_idxs: Sequence[int] = get_static_bw_input_idxs(gm)
+        else:
+            static_input_idxs = list(range(fixed))
         with (
             (
                 config.patch(get_cpp_wrapper_config())
@@ -2487,7 +2524,7 @@ def compile_fx_backward(
             return inner_compile(
                 gm,
                 example_inputs,
-                static_input_idxs=list(range(fixed)),
+                static_input_idxs=static_input_idxs,
                 cudagraphs=cudagraphs,
                 is_backward=True,
                 graph_id=compiler_config_extra.graph_id,
@@ -2890,12 +2927,6 @@ def _compile_fx_main(
             with V.set_fake_mode(fake_mode), compiled_autograd._disable(), context():
                 return inference_compiler(unlifted_gm, example_inputs_)
 
-        orig_fake_mode = V.get_fake_mode()
-
-        def wrapped_run_pre_grad_passes(*args):
-            with V.set_fake_mode(orig_fake_mode):
-                return run_pre_grad_passes(*args)
-
         with (
             V.set_fake_mode(fake_mode),
             torch._guards.tracing(tracing_context),
@@ -2916,7 +2947,7 @@ def _compile_fx_main(
                     cudagraphs=compiler_config_extra.cudagraphs,
                     boxed_forward_device_index=compiler_config_extra.forward_device,
                     ignore_shape_env=ignore_shape_env,
-                    pre_grad_passes=wrapped_run_pre_grad_passes,
+                    pre_grad_passes=run_pre_grad_passes,
                 )(model_, example_inputs_)
             except ShortenTraceback as e:
                 # We will also shorten the traceback inside dynamo.

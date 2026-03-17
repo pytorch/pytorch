@@ -1044,6 +1044,24 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    def test_det_backward(self, device, dtype):
+        # Regression test for #80761.
+        input = torch.tensor([[0.]], device=device, dtype=dtype, requires_grad=True)
+        self.assertTrue(torch.autograd.gradcheck(torch.det, inputs=input))
+
+        # When A has 0 elements (e.g. empty batch), backward should return a
+        # zeros tensor with the same shape as A, not an undefined tensor.
+        for shape in [(0, 3, 3), (2, 0, 0)]:
+            A = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+            det = torch.linalg.det(A)
+            det.backward(torch.ones_like(det))
+            self.assertIsNotNone(A.grad)
+            self.assertEqual(A.grad.shape, A.shape)
+            self.assertEqual(A.grad, torch.zeros_like(A))
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     def test_eigh(self, device, dtype):
@@ -7967,18 +7985,20 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("use_transpose_a", [True, False])
     @parametrize("use_transpose_b", [True, False])
     @parametrize("non_contig_type", [0, 1, 2])
-    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type):
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type, x_dtype):
         # non_contig_type:
         # 0: the whole data buffer is contiguous (can be transposed)
         # 1: stride of one dimension is 1, but the whole buffer is not contiguous
         # 2: Neither stride is 1
 
-        def genf_int_float(x, y, use_transpose, non_contig_type):
+        def genf_int_float(x, y, use_transpose, non_contig_type, dtype):
             if use_transpose:
                 x, y = y, x
             if non_contig_type != 0:
                 y = y * 2
-            x_int8 = torch.randint(-128, 127, (x, y), dtype=torch.int8, device=device)
+            dt_info = torch.iinfo(dtype)
+            x_int8 = torch.randint(dt_info.min, dt_info.max, (x, y), dtype=dtype, device=device)
             x_float = x_int8.to(torch.float32)
             if non_contig_type == 1:
                 x_int8 = x_int8[:, : y // 2]
@@ -7992,8 +8012,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         if non_contig_type != 0 and (m == 0 or k == 0):
             return
-        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type)
-        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type)
+        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
+        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
         c_int32 = torch._int_mm(a_int8, b_int8)
         self.assertTrue(c_int32.dtype is torch.int32)
         self.assertEqual(c_int32.device, torch.device(device))

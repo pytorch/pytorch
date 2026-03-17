@@ -406,8 +406,7 @@ def _broadcast_shapes(*_shapes):
     for shape in shapes:
         if not isinstance(shape, Sequence):
             raise RuntimeError(
-                "Input shapes should be of type ints, a tuple of ints, or a list of ints, got ",
-                shape,
+                f"Input shapes should be of type ints, a tuple of ints, or a list of ints, got {shape}"
             )
 
     # Computes common shape
@@ -2044,7 +2043,11 @@ def clamp_max(
 
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
-# TODO: implement where.default
+@register_decomposition(aten.where.default)
+def _where_default(pred: Tensor) -> tuple[Tensor, ...]:
+    return torch.nonzero(pred, as_tuple=True)
+
+
 @register_decomposition(aten.where.self)
 @register_decomposition(aten.where.ScalarSelf)
 @register_decomposition(aten.where.ScalarOther)
@@ -3461,6 +3464,10 @@ def native_layer_norm(
         + str(normalized_shape)
         + ", but got input of size "
         + str(input.shape),
+    )
+    torch._check(
+        not input.is_complex(),
+        lambda: "native_layer_norm does not support complex inputs",
     )
 
     input = contiguous(input)

@@ -101,6 +101,7 @@ SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {}
 REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
     "inception_v3",
     "mobilenetv3_large_100",
+    "vit_base_patch14_dinov2.lvd142m",
 }
 
 

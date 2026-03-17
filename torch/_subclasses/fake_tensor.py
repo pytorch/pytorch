@@ -965,16 +965,25 @@ class FakeTensor(Tensor):
             aten._foreach_copy.default,
         )
 
+        # These in-place ops keep the destination tensor's device even if the
+        # rhs was explicitly constructed on meta.
+        meta_rhs_mixed_device_fns = ordered_set(
+            aten.add_.Tensor,
+        )
+
         # list of ops not using zero dim cpu tensor logic to align with the eager mode.
         bypass_zero_dim_cpu_tensor_check_ops = ordered_set(
             aten.nextafter.default,
         )
 
-        def check_cpu_device(device: torch.device) -> bool:
+        def is_device_cpu(device: torch.device) -> bool:
             return device.type == "cpu"
 
+        def is_device_meta(device: torch.device) -> bool:
+            return device.type == "meta"
+
         def cpu_zero_dim(t: Tensor) -> bool:
-            return check_cpu_device(t.device) and t.dim() == 0
+            return is_device_cpu(t.device) and t.dim() == 0
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
@@ -1013,7 +1022,11 @@ class FakeTensor(Tensor):
             # device must be cpu in this case we will return from here without
             # throwing an error
             if func in mixed_device_fns:
-                if any(map(check_cpu_device, (common_device, t.device))):
+                if any(map(is_device_cpu, (common_device, t.device))):
+                    return
+
+            if func in meta_rhs_mixed_device_fns:
+                if any(map(is_device_meta, (common_device, t.device))):
                     return
 
             # if prefer_device_type is set, prefer that device type over others
@@ -2993,7 +3006,9 @@ class FakeTensorMode(TorchDispatchMode):
                 )
                 if not allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
-                        raise AssertionError("Mixing fake modes NYI")
+                        raise AssertionError(
+                            f"Mixing fake modes NYI x.fake_mode={x.fake_mode} vs self={self}"
+                        )
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
                     raise AssertionError(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
