@@ -953,38 +953,39 @@ def _fused_all_gather_matmul_native(
     A_signals = torch.zeros(world_size, dtype=torch.uint32, device=A_shard.device)
     A_shards = A.chunk(world_size)
 
-    # On ROCm the kernel can hang (cross-stream visibility / kernel wait logic).
-    # Run all copies and signals on current_stream, synchronize, then kernel.
+    A_shards[rank].copy_(A_shard)
+    if not torch.cuda.is_current_stream_capturing():
+        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+    else:
+        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
+
+    # ROCm needs an explicit cross-stream ordering edge here. CUDA's
+    # cuStreamWriteValue32 issues a system-level fence before the signal write,
+    # and this protocol relies on that visibility behavior. HIP does not have
+    # an equivalent documented guarantee, so backend_stream must wait for
+    # current_stream; otherwise an init write (e.g., zeros on A_signals) can
+    # clear a ready flag and the persistent kernel may spin forever.
     if torch.version.hip is not None:
-        for step in range(world_size):
-            src_rank = (rank + step) % world_size
-            src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
+        backend_stream.wait_stream(current_stream)
+
+    async_mm_chunk_pivot = rank
+    if torch.version.hip is not None:
+        # CK scheduler currently pivots signal-index mapping without pivoting
+        # the tile's M-coordinate itself. Keep pivot 0 so signal i always
+        # corresponds to data chunk i when communication overlaps compute.
+        async_mm_chunk_pivot = 0
+
+    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, async_mm_chunk_pivot)
+    for step in range(1, world_size):
+        src_rank = (rank + step) % world_size
+        src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
+        with backend_stream:
             A_shards[src_rank].copy_(src_buf)
             if not torch.cuda.is_current_stream_capturing():
+                # cuStreamWriteValue32 issues a system level fence before the write
                 _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
             else:
                 _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
-        current_stream.synchronize()
-        out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
-    else:
-        A_shards[rank].copy_(A_shard)
-        if not torch.cuda.is_current_stream_capturing():
-            _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
-        else:
-            _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
-
-        out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
-        for step in range(1, world_size):
-            src_rank = (rank + step) % world_size
-            src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
-            with backend_stream:
-                A_shards[src_rank].copy_(src_buf)
-                if not torch.cuda.is_current_stream_capturing():
-                    _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
-                else:
-                    _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
-
-        current_stream.wait_stream(backend_stream)
 
     current_stream.wait_stream(backend_stream)
     backend_stream.wait_stream(current_stream)
