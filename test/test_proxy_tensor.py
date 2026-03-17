@@ -2054,11 +2054,6 @@ only_fake_tensor_failures = {
 
 fake_tensor_failures = set()
 
-only_symbolic_tensor_failures = {
-    xfail('nanquantile', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('quantile', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-}
-
 symbolic_tensor_failures = {
     xfail('combinations', ''),
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
@@ -2181,7 +2176,7 @@ class TestProxyTensorOpInfo(TestCase):
 
     @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | only_symbolic_tensor_failures)
+             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
