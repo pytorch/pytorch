@@ -603,8 +603,16 @@ class TestLocalTensorRankWorld3(LocalTensorRankTest):
             # output_split_sizes for each rank
             output_split_sizes_per_rank = {
                 0: [2, 2, 2],  # rank 0 receives 2 rows from each rank
-                1: [3, 2, 1],  # rank 1 receives 3 from rank0, 2 from rank1, 1 from rank2
-                2: [1, 2, 3],  # rank 2 receives 1 from rank0, 2 from rank1, 3 from rank2
+                1: [
+                    3,
+                    2,
+                    1,
+                ],  # rank 1 receives 3 from rank0, 2 from rank1, 1 from rank2
+                2: [
+                    1,
+                    2,
+                    3,
+                ],  # rank 2 receives 1 from rank0, 2 from rank1, 3 from rank2
             }
             # input_split_sizes for each rank (must be consistent with output)
             # rank_i sends input_split_sizes[j] rows to rank_j
@@ -625,7 +633,9 @@ class TestLocalTensorRankWorld3(LocalTensorRankTest):
                 n = len(next(iter(per_rank_dict.values())))
                 result = []
                 for pos in range(n):
-                    node = LocalIntNode({r: per_rank_dict[r][pos] for r in per_rank_dict})
+                    node = LocalIntNode(
+                        {r: per_rank_dict[r][pos] for r in per_rank_dict}
+                    )
                     result.append(torch.SymInt(node))
                 return result
 
