@@ -909,7 +909,7 @@ class FxGraphHashDetails:
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable(ignore_private_configs=False)
         # Custom passes should provide an ID to hash.
-        if config.pre_grad_pass_timing == config.PreGradPassTiming.LATE:
+        if config.pre_grad_pass_timing == "late":
             self.pre_grad_custom_pass = self._get_custom_pass_detail(
                 config.pre_grad_custom_pass
             )
@@ -1586,7 +1586,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         """
         # Custom passes must implement the CustomGraphPass or we don't
         # know how to include them in the cache key calculation.
-        if config.pre_grad_pass_timing == config.PreGradPassTiming.LATE:
+        if config.pre_grad_pass_timing == "late":
             if config.pre_grad_custom_pass and (
                 not isinstance(config.pre_grad_custom_pass, CustomGraphPass)
                 or not config.pre_grad_custom_pass.uuid()

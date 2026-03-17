@@ -1133,8 +1133,7 @@ def aot_module_simplified(
         # "early" timing: run pre-grad passes before cache lookup so the
         # cache key is computed from the already-transformed graph.
         if (
-            torch._inductor.config.pre_grad_pass_timing
-            == torch._inductor.config.PreGradPassTiming.EARLY
+            torch._inductor.config.pre_grad_pass_timing == "early"
             and pre_grad_passes is not None
             and isinstance(mod, torch.fx.GraphModule)
         ):
@@ -1162,8 +1161,7 @@ def aot_module_simplified(
             # "late" timing (default): run pre-grad passes after cache lookup,
             # only on cache miss, to cache pre-grad transforms.
             if (
-                torch._inductor.config.pre_grad_pass_timing
-                == torch._inductor.config.PreGradPassTiming.LATE
+                torch._inductor.config.pre_grad_pass_timing == "late"
                 and pre_grad_passes is not None
                 and isinstance(mod, torch.fx.GraphModule)
             ):

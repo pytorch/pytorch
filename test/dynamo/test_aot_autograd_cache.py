@@ -2603,7 +2603,8 @@ class AOTAutogradCacheTests(InductorTestCase):
 
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch("enable_autograd_cache", True)
-    def test_pre_grad_passes_called_on_cache_miss_only(self):
+    @inductor_config.patch("pre_grad_pass_timing", "late")
+    def test_pre_grad_passes_late_timing(self):
         """
         Verify that pre_grad_passes are called on cache miss but not on cache hit.
         Also, verify that pre_grad_custom_pass is still considered correctly for the cache key.
@@ -2871,6 +2872,7 @@ class AOTAutogradCacheTests(InductorTestCase):
 
                 inductor_config.fx_graph_cache = True
                 inductor_config.fx_graph_remote_cache = False
+                inductor_config.pre_grad_pass_timing = "late"
                 torch._dynamo.reset()
 
                 class TestPreGradPass(CustomGraphPass):
