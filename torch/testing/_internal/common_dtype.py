@@ -182,7 +182,9 @@ def get_all_dtypes(
     if include_bool:
         dtypes.append(torch.bool)
     if include_complex:
-        dtypes += get_all_complex_dtypes(include_complex32, include_bcomplex32)
+        dtypes += get_all_complex_dtypes(
+            include_complex32=include_complex32, include_bcomplex32=include_bcomplex32
+        )
     if include_qint:
         dtypes += get_all_qint_dtypes()
     return dtypes
@@ -199,7 +201,7 @@ def get_all_math_dtypes(device) -> list[torch.dtype]:
 
 
 def get_all_complex_dtypes(
-    include_complex32=False, include_bcomplex32=False
+    *, include_complex32=False, include_bcomplex32=False
 ) -> list[torch.dtype]:
     dtypes = [torch.complex64, torch.complex128]
     if include_bcomplex32:
