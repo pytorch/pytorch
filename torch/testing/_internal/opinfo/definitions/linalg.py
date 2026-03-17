@@ -29,6 +29,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
+    floating_types,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
@@ -1936,15 +1937,13 @@ op_db: list[OpInfo] = [
         aten_name="linalg_qr",
         op=torch.linalg.qr,
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # In-place ops
         check_batched_gradgrad=False,
         sample_inputs_func=sample_inputs_linalg_qr_geqrf,
         decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-        ),
     ),
     OpInfo(
         "linalg.slogdet",
@@ -2517,6 +2516,7 @@ op_db: list[OpInfo] = [
         # to avoid any rank changes caused by the perturbations in the gradcheck
         op=lambda a, b: torch.linalg.pinv(a @ b.mT),
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -2545,12 +2545,6 @@ op_db: list[OpInfo] = [
                 "test_fn_gradgrad",
                 device_type="cuda",
                 dtypes=[torch.cdouble],
-            ),
-            # NotImplementedError: The operator 'aten::linalg_qr.out' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
             ),
         ),
     ),
@@ -2690,17 +2684,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_out_warning",
                 device_type="mps",
-            ),
-            # MPS: RuntimeError: svd_backward: The singular vectors in the
-            # complex case are specified up to multiplication by e^{i phi}. The
-            # specified loss function depends on this phase term, making it
-            # ill-defined.
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
         ),
     ),

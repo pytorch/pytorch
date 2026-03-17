@@ -335,6 +335,7 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.amax.out: "max",
     aten.amin.default: "min",
     aten.amin.out: "min",
+    aten.nansum.default: "sum",
 }
 
 # argmax/argmin return indices which cannot be combined with P(max/min).
@@ -439,8 +440,11 @@ def argmax_argmin_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
-@register_op_strategy(aten.cumsum.default, schema_info=RuntimeSchemaInfo(1))
-def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
+@register_op_strategy(
+    [aten.cumsum.default, aten.cumprod.default, aten.logcumsumexp.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def scan_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     if not isinstance(input_strategy, OpStrategy):
@@ -448,10 +452,94 @@ def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
     dim = args_schema[1]
     if not isinstance(dim, int):
         raise AssertionError(f"Expected int, got {type(dim)}")
-
     return common_reduction_strategy(
         input_strategy, [dim], keep_dim=True, reduction_linear=False
     )
+
+
+@register_op_strategy(
+    [aten.median.default, aten.nanmedian.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def global_median_strategy(op_schema: OpSchema) -> OpStrategy:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    reduce_dims = list(range(input_strategy.ndim))
+    return common_reduction_strategy(
+        input_strategy, reduce_dims, reduction_linear=False
+    )
+
+
+@register_single_dim_strategy(
+    [aten.median.dim, aten.nanmedian.dim, aten.mode.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def dim_reduction_with_indices_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+
+    ndim = len(input_meta.shape)
+    dim = normalize_dim(cast(int, args_schema[1]) if len(args_schema) > 1 else -1, ndim)
+    keep_dim = len(args_schema) > 2 and bool(args_schema[2])
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d == dim:
+            continue
+        out_d = d if keep_dim or d < dim else d - 1
+        strategies.append(
+            [
+                _ShardingPlaceholder(out_d),
+                _ShardingPlaceholder(out_d),
+                _ShardingPlaceholder(d),
+            ]
+        )
+    return strategies
+
+
+@register_single_dim_strategy(
+    [aten.kthvalue.default],
+    schema_info=RuntimeSchemaInfo(2),
+)
+def kthvalue_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_meta = args_schema[0]
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+
+    ndim = len(input_meta.shape)
+    dim = normalize_dim(cast(int, args_schema[2]) if len(args_schema) > 2 else -1, ndim)
+    keep_dim = len(args_schema) > 3 and bool(args_schema[3])
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for d in range(ndim):
+        if d == dim:
+            continue
+        out_d = d if keep_dim or d < dim else d - 1
+        strategies.append(
+            [
+                _ShardingPlaceholder(out_d),
+                _ShardingPlaceholder(out_d),
+                _ShardingPlaceholder(d),
+            ]
+        )
+    return strategies
+
+
+@register_op_strategy(
+    [aten.cummax.default, aten.cummin.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def cummax_cummin_strategy(op_schema: OpSchema) -> OpStrategy:
+    dim = cast(int, op_schema.args_schema[1])
+    return sort_strategy(op_schema, dim)
 
 
 @register_op_strategy(
@@ -685,6 +773,76 @@ def linalg_replicate_strategy(op_schema: OpSchema) -> OpStrategy:
         )
         output_strategies.append(replicate_strategy)
     return OpStrategy(output_strategies)
+
+
+# Maps each pooling op to its spatial rank (number of spatial dimensions).
+# Batched inputs have layout (N, C, *spatial) with ndim = spatial_rank + 2;
+# unbatched inputs drop the batch dim giving ndim = spatial_rank + 1.
+POOL_SPATIAL_RANK: dict[torch._ops.OpOverload, int] = {
+    aten.avg_pool1d.default: 1,
+    aten.avg_pool2d.default: 2,
+    aten.avg_pool3d.default: 3,
+    aten.adaptive_avg_pool1d.default: 1,
+    aten._adaptive_avg_pool2d.default: 2,
+    aten._adaptive_avg_pool3d.default: 3,
+    aten.adaptive_max_pool1d.default: 1,
+    aten.adaptive_max_pool2d.default: 2,
+    aten.adaptive_max_pool3d.default: 3,
+    aten.fractional_max_pool2d.default: 2,
+    aten.fractional_max_pool3d.default: 3,
+    aten.max_pool1d_with_indices.default: 1,
+    aten.max_pool2d_with_indices.default: 2,
+    aten.max_pool3d_with_indices.default: 3,
+}
+
+AVG_POOL_OPS = [
+    aten.avg_pool1d.default,
+    aten.avg_pool2d.default,
+    aten.avg_pool3d.default,
+    aten.adaptive_avg_pool1d.default,
+    aten._adaptive_avg_pool2d.default,
+    aten._adaptive_avg_pool3d.default,
+]
+
+MAX_POOL_OPS = [
+    aten.adaptive_max_pool1d.default,
+    aten.adaptive_max_pool2d.default,
+    aten.adaptive_max_pool3d.default,
+    aten.fractional_max_pool2d.default,
+    aten.fractional_max_pool3d.default,
+    aten.max_pool1d_with_indices.default,
+    aten.max_pool2d_with_indices.default,
+    aten.max_pool3d_with_indices.default,
+]
+
+
+@register_op_strategy(
+    AVG_POOL_OPS + MAX_POOL_OPS,
+    schema_info=RuntimeSchemaInfo(1),
+)
+def pooling_strategy(op_schema: OpSchema) -> OpStrategy:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    mesh = input_strategy.mesh
+    num_outputs = 2 if op_schema.op in MAX_POOL_OPS else 1
+    num_inputs = len(op_schema.args_strategy) + len(op_schema.kwargs_strategy)
+    n = num_outputs + num_inputs
+    single_mesh_dim_strategies: list[PlacementList] = [
+        [Replicate()] * n,
+        [Shard(0)] * n,
+    ]
+    # avg_pool is linear: Partial(sum) and Partial(avg) pass through unchanged.
+    if op_schema.op in AVG_POOL_OPS:
+        single_mesh_dim_strategies.append([Partial("sum")] * n)
+        single_mesh_dim_strategies.append([Partial("avg")] * n)
+    # S(1) is safe when dim 1 is the channel dim (pooling never touches it).
+    # Batched inputs have layout (N, C, *spatial) with ndim = spatial_rank + 2.
+    spatial_rank = POOL_SPATIAL_RANK[op_schema.op]
+    is_batched = input_strategy.ndim >= spatial_rank + 2
+    if is_batched:
+        single_mesh_dim_strategies.append([Shard(1)] * n)
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=num_outputs
+    )
 
 
 @register_op_strategy(
@@ -1002,13 +1160,17 @@ def nll_loss_backward_strategy(op_schema: OpSchema) -> OpStrategy:
                 generate_redistribute_costs(weight_strategy, weight_expected_spec)
             )
 
-        # total_weight should always be replicated
+        # total_weight is only used by the backward kernel for reduction='mean'.
+        # For reduction='sum' or 'none', it is unused, so no redistribution needed.
         total_weight_src_spec = total_weight_strategy.strategies[idx].output_spec
-        total_weight_expected_spec = DTensorSpec(
-            mesh=mesh,
-            placements=_replicate_dims_start_at(total_weight_src_spec.placements),
-            tensor_meta=total_weight_src_spec.tensor_meta,
-        )
+        if reduction == Reduction.MEAN.value:
+            total_weight_expected_spec = DTensorSpec(
+                mesh=mesh,
+                placements=_replicate_dims_start_at(total_weight_src_spec.placements),
+                tensor_meta=total_weight_src_spec.tensor_meta,
+            )
+        else:
+            total_weight_expected_spec = total_weight_src_spec
         op_args_target_specs.append(total_weight_expected_spec)
         redistribute_costs.append(
             generate_redistribute_costs(

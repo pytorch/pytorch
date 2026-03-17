@@ -1040,6 +1040,40 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         if guard_manager_wrapper.diff_guard_root:
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
 
+    def test_swap_tensors_subclass_not_blocked_by_metaconverter_refcycle(self):
+        """Checks that MetaConverter doesn't create refcycles of itself that blocks swap_tensor on subclass tensors"""
+        was_gc_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            from torch._subclasses.meta_utils import MetaConverter
+            from torch.utils.weak import WeakIdRef
+
+            w_a = torch.randn(4, 4)
+            w_b = w_a.clone()
+            # For custom tensor parameters, `nn.Parameter` returns the same custom tensor type
+            # and sets `_is_param`, which is what Module._apply uses to decide swap_tensors.
+            w = nn.Parameter(TwoTensor(w_a, w_b).requires_grad_())
+
+            def weak_id_ref_count(t: torch.Tensor) -> int:
+                return sum(isinstance(r, WeakIdRef) for r in weakref.getweakrefs(t))
+
+            baseline_weak_id_refs = weak_id_ref_count(w)
+            converter = MetaConverter()
+            _ = converter(w)
+            after_convert_weak_id_refs = weak_id_ref_count(w)
+            self.assertGreater(after_convert_weak_id_refs, baseline_weak_id_refs)
+
+            # If MetaConverter is collectable by refcount, the weakrefs go away immediately.
+            # If it's kept alive only by a refcycle, this weakref will persist while gc is
+            # disabled.
+            del _
+            del converter
+            self.assertEqual(weak_id_ref_count(w), baseline_weak_id_refs)
+        finally:
+            if was_gc_enabled:
+                gc.enable()
+            gc.collect()
+
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1182,6 +1216,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         eager_out = fn(x)
         compiled_fn = torch.compile(fn, backend="aot_eager_decomp_partition")
         compiled_out = compiled_fn(x)
+        self.assertEqual(eager_out, compiled_out)
+
+    # https://github.com/pytorch/pytorch/issues/166626
+    def test_inplace_add_from_meta_tensor_factory(self):
+        def fn(x):
+            log_det = torch.zeros(x.size(0), device=x.device)
+            log_det += torch.zeros(x.size(0), device="meta")
+            return log_det
+
+        x = torch.randn(2, 4)
+        eager_out = fn(x)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_out = compiled_fn(x)
+
+        self.assertEqual(eager_out.device, compiled_out.device)
         self.assertEqual(eager_out, compiled_out)
 
     # https://github.com/pytorch/pytorch/issues/109053
@@ -7953,6 +8002,43 @@ SavedForBackwardsAOTOutput(idx=5)""",
         with torch._dynamo.config.patch(error_on_recompile=True):
             linear(torch.randn(1, 2, device="cpu"))
 
+    def test_property_setter_with_dict_get_176608(self):
+        """
+        Test that property setters work correctly with __dict__.get() in compiled functions.
+        Regression test for https://github.com/pytorch/pytorch/issues/176608
+        """
+        from torch.compiler import disable
+
+        class Container:
+            def __init__(self):
+                self._len_value = 0
+
+            @property
+            def _len(self):
+                # Using __dict__.get instead of self._len_value triggers the bug
+                return self.__dict__.get("_len_value", 0)
+
+            @_len.setter
+            def _len(self, value):
+                self._len_value = value
+
+            def add(self, n):
+                self._len = self._len + n
+
+            @disable()
+            def __len__(self):
+                return self._len
+
+        c = Container()
+
+        @torch.compile(backend="eager")
+        def f(x):
+            c.add(x.shape[0])  # mutates c._len_value via property setter
+            return len(c)  # reads c._len via property getter -> __dict__.get
+
+        result = f(torch.randn(5))
+        self.assertEqual(result, 5)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):
@@ -8868,6 +8954,63 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         result = f(torch.tensor(0.0))
         self.assertEqual(result.item(), 4.0)
+
+    def test_enum_with_class_values(self):
+        from enum import Enum
+
+        class AvgMetric:
+            def __init__(self):
+                self.sum = None
+                self.count = 0
+
+            def append(self, x):
+                if self.count > 0:
+                    self.sum = self.sum + x
+                else:
+                    self.sum = x.clone()
+                self.count += 1
+
+        class GlobalReduction(Enum):
+            AVG = AvgMetric
+
+        class ScalarLogger:
+            def __init__(self):
+                self.metrics = {}
+
+            def log(self, key, value, global_reduction):
+                if key not in self.metrics:
+                    self.metrics[key] = global_reduction.value()
+                self.metrics[key].append(value)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(logger, x):
+            logger.log("test", x, GlobalReduction.AVG)
+            return x + 1
+
+        logger = ScalarLogger()
+        fn(logger, torch.tensor(1.0))
+
+    def test_class_attr_mutation_recompiles(self):
+        class GlobalState:
+            factor = 1.0
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            return x * GlobalState.factor
+
+        x = torch.tensor([4.0])
+
+        GlobalState.factor = 1.0
+        result1 = fn(x)
+        self.assertEqual(result1, torch.tensor([4.0]))
+        self.assertEqual(cnt.frame_count, 1)
+
+        GlobalState.factor = 10.0
+        result2 = fn(x)
+        self.assertEqual(result2, torch.tensor([40.0]))
+        self.assertEqual(cnt.frame_count, 2)
 
 
 instantiate_parametrized_tests(ReproTests)

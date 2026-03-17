@@ -3,7 +3,6 @@ import datetime
 import functools
 import unittest
 from collections import Counter
-from typing import Optional
 from unittest import mock
 from unittest.mock import patch
 
@@ -1549,7 +1548,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -1609,7 +1608,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_all_gather_bucket(self, bucket_mode):
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1658,7 +1657,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with (
             torch._inductor.config.patch(
                 {
-                    "bucket_all_gathers_fx": bucket_mode,
+                    "bucket_all_gathers_bucket_mode": bucket_mode,
                     "reorder_for_compute_comm_overlap": False,
                     "runtime_estimations_mms_benchmark": True,
                 }
@@ -1678,13 +1677,55 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         (
             FileCheck()
             .check("= torch.ops._c10d_functional.all_gather_into_tensor")
-            .check("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
+            .check_not("torch.ops._c10d_functional.all_gather_into_tensor_out.default(")
             .check("= torch.ops._c10d_functional.all_gather_into_tensor")
             .run(code)
         )
         out = compiled(*inputs, **self.get_world_trs())
         if not same(out, correct):
             raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_all_gather_bucket_copy_cat_fusion(self):
+        """Bucketed all_gather merge uses copy_(cat(...)) which inductor fuses
+        into 1 Triton kernel instead of N kernels from _foreach_copy_."""
+
+        def func(ag_0, ag_1, ag_2, *, tag, ranks, group_size):
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1, group_size, group_name
+            )
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2, group_size, group_name
+            )
+            return (
+                torch.ops.c10d_functional.wait_tensor(ag_0_out),
+                torch.ops.c10d_functional.wait_tensor(ag_1_out),
+                torch.ops.c10d_functional.wait_tensor(ag_2_out),
+            )
+
+        inputs = [torch.ones(64, device="cuda") for _ in range(3)]
+        with torch._inductor.config.patch(
+            {
+                "bucket_all_gathers_fx": "all",
+                "reorder_for_compute_comm_overlap": False,
+            }
+        ):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
+        # Bucketed merge should produce 1 copy kernel (fused copy_(cat(...))),
+        # not 3 separate kernels from _foreach_copy_.
+        num_triton_kernels = code.count("def triton_")
+        self.assertEqual(
+            num_triton_kernels,
+            1,
+            f"Expected 1 Triton kernel for fused copy_(cat(...)), got {num_triton_kernels}",
+        )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
@@ -1741,7 +1782,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reduce_scatter_bucket(self, bucket_mode):
         def func(x, w, rs_0, rs_1, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1783,7 +1824,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
             with torch._inductor.config.patch(
                 {
-                    "bucket_reduce_scatters_fx": bucket_mode,
+                    "bucket_reduce_scatters_fx": "all",
+                    "bucket_reduce_scatters_bucket_mode": bucket_mode,
                     "reorder_for_compute_comm_overlap": False,
                 }
             ):
@@ -1812,7 +1854,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all"])
+    @parametrize(
+        "bucket_mode", ["all"]
+    )  # "all" is just a placeholder, there is only one bucketmode
     def test_all_reduce_bucket(self, bucket_mode):
         def func(x, w, ar_0, ar_1, tag, ranks, group_size):
             y = torch.mm(x, w)
@@ -1868,7 +1912,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all_custom_ops_multidtype"])
+    @parametrize("bucket_mode", ["custom_ops_multidtype"])
     def test_all_gather_bucket_multidtype(self, bucket_mode):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -1901,7 +1945,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         with torch._inductor.config.patch(
             {
-                "bucket_all_gathers_fx": bucket_mode,
+                "bucket_all_gathers_fx": "all",
+                "bucket_all_gathers_bucket_mode": bucket_mode,
                 "reorder_for_compute_comm_overlap": False,
             }
         ):
@@ -1932,7 +1977,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all", "all_custom_ops"])
+    @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reorder_peak_memory_bucketed(self, bucket_mode):
         """
         Simulate the case where a bucketing pass ran and grouped several inputs into one bucketed allgather.
@@ -2021,7 +2066,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],
@@ -2053,9 +2098,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         with (
             torch._inductor.config.patch(
                 {
-                    "bucket_all_gathers_fx": bucket_mode,
+                    "bucket_all_gathers_fx": "all",
+                    "bucket_all_gathers_bucket_mode": bucket_mode,
                     "bucket_all_gathers_fx_bucket_size_determinator": lambda _: 2,
-                    "bucket_reduce_scatters_fx": bucket_mode,
+                    "bucket_reduce_scatters_fx": "all",
+                    "bucket_reduce_scatters_bucket_mode": bucket_mode,
                     "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                     "reorder_for_compute_comm_overlap": True,
                     "reorder_for_compute_comm_overlap_passes": [
@@ -2150,7 +2197,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = torch.ones(4, 4, device=self.device)
 
         # get stats directly from the internal helper without affecting the real pass's signature
-        node_stats: Optional[dict[BaseSchedulerNode, ReorderInfo]] = None
+        node_stats: dict[BaseSchedulerNode, ReorderInfo] | None = None
 
         def _reorder_communication_preserving_peak_memory(
             snodes: list[BaseSchedulerNode],

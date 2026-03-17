@@ -123,6 +123,7 @@ from ._aot_autograd.schemas import (  # noqa: F401
     InputAliasInfo,
     JointWithDescriptors,
     MutationType,
+    OpaqueMeta,
     OutputAliasInfo,
     OutputType,
     SerializableAOTDispatchCompiler,
@@ -140,6 +141,7 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
 )
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
+    _get_symint_hints,
     call_func_at_runtime_with_args,
     create_tree_flattened_fn,
     KNOWN_TYPES,
@@ -1084,6 +1086,11 @@ def aot_module_simplified(
     boxed_forward_device_index: BoxedDeviceIndex | None = None,
     ignore_shape_env: bool = False,
     disable_functionalization: bool = False,
+    # Optional callback to run passes on the module at the start of AOT autograd.
+    pre_grad_passes: Callable[
+        [torch.fx.GraphModule, Sequence[InputType]], torch.fx.GraphModule
+    ]
+    | None = None,
 ) -> Callable[..., Any]:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1146,6 +1153,10 @@ def aot_module_simplified(
                 )
 
         if compiled_fn is None:
+            # Run pre-grad passes after cache lookup to cache pre-grad transforms.
+            if pre_grad_passes is not None and isinstance(mod, torch.fx.GraphModule):
+                mod = pre_grad_passes(mod, fake_flat_args)
+
             stack.enter_context(compiled_autograd._disable())
             aot_state = create_aot_state(
                 stack,

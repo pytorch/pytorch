@@ -242,7 +242,7 @@ def config_of(
                 return False
             if x.expr is None:
                 return False
-            if isinstance(x.expr, float):
+            if isinstance(x.expr, (float, bool)):
                 return False
             return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
         if isinstance(x, WorkspaceArg):

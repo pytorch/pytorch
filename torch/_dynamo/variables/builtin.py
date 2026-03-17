@@ -2455,12 +2455,13 @@ class BuiltinVariable(VariableTracker):
         ):
             isinstance_type_tuple = isinstance_type
         else:
+            msg = VariableTracker.build(
+                tx, "isinstance() arg 2 must be a type, a tuple of types, or a union"
+            )
             raise_observed_exception(
                 TypeError,
                 tx,
-                args=[
-                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
-                ],
+                args=[msg],
             )
 
         try:
@@ -3239,6 +3240,19 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
+
+        # Constant fold or_ for class/type variables (e.g. Shard | _StridedShard
+        # producing a types.UnionType for isinstance checks). This handles cases
+        # like OpaqueObjectClassVariable where is_python_constant() returns False
+        # but as_python_constant() works.
+        try:
+            a_const = a.as_python_constant()
+            b_const = b.as_python_constant()
+            if isinstance(a_const, type) and isinstance(b_const, type):
+                return VariableTracker.build(tx, a_const | b_const)
+        except NotImplementedError:
+            pass
+
         if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
