@@ -68,43 +68,29 @@ class WhileLoopOp(HigherOrderOperator):
 
         all_inputs = carried_inputs + additional_inputs
 
+        def _needs_rematerialization(fn):
+            """Check if a GraphModule needs re-tracing to detect mutations.
+
+            check_input_alias_and_mutation_return_outputs only detects mutations
+            via call_function nodes targeting OpOverloads with is_write args.
+            Dynamo-level graphs may express mutations as call_method nodes
+            (e.g. tensor.add_()) which would be missed. Re-materialize to get
+            an ATen-level graph where all mutations are OpOverload calls.
+            """
+            if not isinstance(fn, torch.fx.GraphModule):
+                return True
+            return any(node.op == "call_method" for node in fn.graph.nodes)
+
         cond_gm: torch.fx.GraphModule = (
             cond_fn
-            if isinstance(cond_fn, torch.fx.GraphModule)
+            if isinstance(cond_fn, torch.fx.GraphModule) and not _needs_rematerialization(cond_fn)
             else materialize_as_graph(cond_fn, all_inputs)
         )
         body_gm: torch.fx.GraphModule = (
             body_fn
-            if isinstance(body_fn, torch.fx.GraphModule)
+            if isinstance(body_fn, torch.fx.GraphModule) and not _needs_rematerialization(body_fn)
             else materialize_as_graph(body_fn, all_inputs)
         )
-
-        # cond_gm = materialize_as_graph(cond_fn, all_inputs)
-        # body_gm = materialize_as_graph(body_fn, all_inputs)
-
-        # another try is to skip materialization if the function is already a aten op graph module
-        # def _maybe_materialize(fn, all_inputs):
-        #     if not isinstance(fn, torch.fx.GraphModule):
-        #         return materialize_as_graph(fn, all_inputs)
-        #     if _is_aten_graph(fn):
-        #         return fn
-        #     # return _retrace_as_aten(fn)
-        #     return materialize_as_graph(fn, all_inputs)
-
-        # cond_gm = _maybe_materialize(cond_fn, all_inputs)
-        # body_gm = _maybe_materialize(body_fn, all_inputs)
-
-        def _find_example_value(n, real_inp):
-            if "val" in n.meta:
-                return n.meta["val"]
-            elif "example_value" in n.meta:
-                return n.meta["example_value"]
-            else:
-                if isinstance(real_inp, torch.Tensor):
-                    raise AssertionError(
-                        "expected non-Tensor real_inp when no val/example_value in meta, got Tensor"
-                    )
-                return real_inp
 
         (
             _,
