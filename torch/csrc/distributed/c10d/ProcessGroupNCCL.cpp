@@ -11,7 +11,6 @@
 #include <utility>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGraph.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -220,30 +219,6 @@ std::string getExceptionMsgFromExceptionPtr(
   } catch (...) {
     return "Unknown exception type";
   }
-}
-
-bool safeEventQuery(const std::shared_ptr<at::cuda::CUDAEvent>& event) {
-#ifdef USE_ROCM
-  // hipEventQuery from a non-capturing thread while another thread has GLOBAL
-  // capture active poisons the capture session
-  // (hipErrorStreamCaptureUnsupported -> hipErrorStreamCaptureInvalidated).
-  // Avoid the call entirely when any capture is in progress.
-  if (at::cuda::is_graph_capture_active()) {
-    return false;
-  }
-  try {
-    return event->query();
-  } catch (const c10::Error& e) {
-    const std::string msg = e.what_without_backtrace();
-    if (msg.find("hipErrorCapturedEvent") != std::string::npos ||
-        msg.find("hipErrorStreamCaptureUnsupported") != std::string::npos) {
-      return false;
-    }
-    throw;
-  }
-#else
-  return event->query();
-#endif
 }
 
 inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
@@ -669,7 +644,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
     return false;
   }
   // Checking the work's corresponding CUDA event's status
-  if (!safeEventQuery(ncclStartEvent_)) {
+  if (!ncclStartEvent_->query()) {
     return false;
   }
   return true;
@@ -682,7 +657,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // hang if another thread is holding the CUDA global context lock. For
   // example, when doing a `cudaDeviceSynchronize` or even
   // `cudaStreamSynchronize`.
-  if (!safeEventQuery(ncclEndEvent_)) {
+  if (!ncclEndEvent_->query()) {
     return false;
   }
   return true;
@@ -917,7 +892,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       options_(std::move(options)),
       terminateProcessGroup_(false),
       local_id_(process_group_id++),
-      intraNodeComm_(initIntraNodeComm()) {
+      intraNodeComm_(nullptr) {
   TORCH_CHECK_WITH(
       ValueError,
       at::cuda::getNumGPUs() != 0,
@@ -1223,7 +1198,10 @@ c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     return nullptr;
   }
   auto prefixStore = c10::make_intrusive<PrefixStore>("IntraNodeComm", store_);
-  auto comm = c10::make_intrusive<IntraNodeComm>(prefixStore, rank_, size_);
+  const std::string groupName =
+      options_->group_name.empty() ? "0" : options_->group_name;
+  auto comm = c10::make_intrusive<IntraNodeComm>(
+      prefixStore, rank_, size_, std::nullopt, groupName);
   if (comm->rendezvous()) {
     return comm;
   } else {
@@ -2318,14 +2296,7 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
 
       // Then check if work has timed out
       // Skip if work has encountered an error
-      bool timedout = false;
-#ifdef USE_ROCM
-      if (!at::cuda::is_graph_capture_active()) {
-        timedout = !work.exception() && work.checkTimeout();
-      }
-#else
-      timedout = !work.exception() && work.checkTimeout();
-#endif
+      bool timedout = !work.exception() && work.checkTimeout();
 
       // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
       // turned on; otherwise, run() is no-op)
@@ -4533,12 +4504,17 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   }
   check_gpu_single_tensor(tensor);
 
-  if (intraNodeComm_ != nullptr && opts.reduceOp == ReduceOp::SUM) {
+  if (opts.reduceOp == ReduceOp::SUM) {
     using namespace intra_node_comm;
-    auto algo = intraNodeComm_->selectAllReduceAlgo(tensor);
-    if (algo != intra_node_comm::AllReduceAlgo::NONE) {
-      intraNodeComm_->allReduce(tensor, algo);
-      return c10::make_intrusive<IntraNodeCommWork>();
+    if (intraNodeComm_ == nullptr && IntraNodeComm::isEnabled()) {
+      intraNodeComm_ = initIntraNodeComm();
+    }
+    if (intraNodeComm_ != nullptr) {
+      auto algo = intraNodeComm_->selectAllReduceAlgo(tensor);
+      if (algo != intra_node_comm::AllReduceAlgo::NONE) {
+        intraNodeComm_->allReduce(tensor, algo);
+        return c10::make_intrusive<IntraNodeCommWork>();
+      }
     }
   }
   TORCH_CHECK(

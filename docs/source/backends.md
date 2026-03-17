@@ -106,10 +106,6 @@ These backends include:
 ```
 
 ```{eval-rst}
-.. autofunction:: torch.backends.cuda.is_ck_sdpa_available
-```
-
-```{eval-rst}
 .. autofunction:: torch.backends.cuda.preferred_linalg_library
 ```
 

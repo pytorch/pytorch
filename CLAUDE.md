@@ -1,3 +1,7 @@
+# PR Review
+
+When asked to review a PR, always use the /pr-review skill.
+
 # Environment
 
 If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.

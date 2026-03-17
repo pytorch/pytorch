@@ -53,10 +53,6 @@ static PyObject* THCPEvent_pynew(
       (external ? cudaEventExternal : cudaEventDefault);
 
   new (&self->cuda_event) at::cuda::CUDAEvent(flags);
-  new (&self->event) c10::Event(
-      c10::DeviceType::CUDA,
-      enable_timing ? c10::EventFlag::BACKEND_DEFAULT
-                    : c10::EventFlag::PYTORCH_DEFAULT);
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -99,8 +95,6 @@ static PyObject* THCPEvent_from_ipc_handle(
   cudaIpcEventHandle_t handle{};
   std::memcpy(&handle, handle_string.c_str(), handle_string.size());
   new (&self->cuda_event) at::cuda::CUDAEvent(device.index(), &handle);
-  new (&self->event)
-      c10::Event(c10::DeviceType::CUDA, c10::EventFlag::PYTORCH_DEFAULT);
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -110,7 +104,6 @@ static void THCPEvent_dealloc(THCPEvent* self) {
   {
     pybind11::gil_scoped_release no_gil{};
     self->cuda_event.~CUDAEvent();
-    self->event.~Event();
   }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }

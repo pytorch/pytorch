@@ -1456,6 +1456,16 @@
       ]
     }
   ],
+  "GB4695": [
+    {
+      "Gb_type": "torch.jit.script/freeze modules unsupported",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support tracing into torch.jit.script or torch.jit.freeze modules because they execute in the TorchScript runtime, not Python. Replace the ScriptModule submodule with the original eager nn.Module.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0124": [
     {
       "Gb_type": "Unsupported Tensor.item() call with capture_scalar_outputs=False",
@@ -2551,6 +2561,16 @@
       ]
     }
   ],
+  "GB2977": [
+    {
+      "Gb_type": "wrap_jit_function: missing _torchdynamo_inline",
+      "Context": "type: {type(value).__name__}",
+      "Explanation": "Dynamo expected a JIT function with a _torchdynamo_inline attribute, but the object does not have one.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0211": [
     {
       "Gb_type": "torch.nn.Module with a non-function custom __getattr__",
@@ -3039,6 +3059,16 @@
       "Hints": [
         "Ensure the name `{name}` is defined somewhere in {self.value}'s type hierarchy.",
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB9860": [
+    {
+      "Gb_type": "P2POp mutation",
+      "Context": "object={self}, name={name}, value={value}",
+      "Explanation": "Dynamo does not support mutating torch.distributed.P2POp instances.",
+      "Hints": [
+        "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile."
       ]
     }
   ],
@@ -3645,6 +3675,54 @@
       ]
     }
   ],
+  "GB9300": [
+    {
+      "Gb_type": "P2P compilation disabled for batch_isend_irecv",
+      "Context": "{self.fn}",
+      "Explanation": "P2P compilation is disabled.",
+      "Hints": [
+        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB2696": [
+    {
+      "Gb_type": "P2P compilation disabled for isend/irecv",
+      "Context": "{self.fn}",
+      "Explanation": "P2P compilation is disabled.",
+      "Hints": [
+        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB9277": [
+    {
+      "Gb_type": "unsupported function.__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "Dynamo only supports function.__get__(func, obj[, cls]) where func is a user-defined function.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1750": [
+    {
+      "Gb_type": "P2P compilation disabled for P2POp construction",
+      "Context": "torch.distributed.P2POp",
+      "Explanation": "P2P compilation is disabled.",
+      "Hints": [
+        "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable."
+      ]
+    }
+  ],
+  "GB3343": [
+    {
+      "Gb_type": "Cannot reconstruct P2POpVariable",
+      "Context": "P2POpVariable.reconstruct",
+      "Explanation": "P2POpVariable does not support reconstruction.",
+      "Hints": []
+    }
+  ],
   "GB0301": [
     {
       "Gb_type": "HOP: non torch.Tensor leaf",
@@ -3777,16 +3855,6 @@
       "Explanation": "Expected `operands` to be a list/tuple of pytrees that only consists of tensor leaves.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB5799": [
-    {
-      "Gb_type": "unsupported function.__get__ call",
-      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
-      "Explanation": "Dynamo only supports function.__get__(func, obj[, cls]) where func is a user-defined function.",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

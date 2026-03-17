@@ -598,7 +598,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 raise_observed_exception(
                     type(e),
                     tx,
-                    args=[list(map(variables.ConstantVariable.create, e.args))],
+                    args=list(map(variables.ConstantVariable.create, e.args)),
                 )
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",

@@ -10050,6 +10050,26 @@ class TestSDPA(TestCaseMPS):
         q, k, v = self.generate_qkv(batch, NH, q_len, s_len, head_dim, layout, dtype)
         self.run_fast_attention_test(q, k, v, with_mask)
 
+    def test_sdpa_output_qv_shape_diff(self):
+        # This intentionally checks both output shape semantics and numerical consistency
+        # against CPU for Ev != E. It is stricter than a shape-only regression test.
+        # Regression test for https://github.com/pytorch/pytorch/issues/176767
+        test_cases = [
+            ((1, 16, 32), (1, 16, 32), (1, 16, 24)),
+            ((1, 1, 16, 32), (1, 1, 16, 32), (1, 1, 16, 24)),
+            ((2, 3, 1, 16, 32), (2, 3, 1, 16, 32), (2, 3, 1, 16, 24)),
+        ]
+
+        for q_shape, k_shape, v_shape in test_cases:
+            q = torch.randn(*q_shape, device="mps", dtype=torch.float32)
+            k = torch.randn(*k_shape, device="mps", dtype=torch.float32)
+            v = torch.randn(*v_shape, device="mps", dtype=torch.float32)
+
+            y_mps = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            y_cpu = torch.nn.functional.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu())
+
+            self.assertEqual(y_cpu, y_mps)
+
 
 
 class TestSDPAMetaDispatchMode(TorchDispatchMode):

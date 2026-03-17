@@ -42,6 +42,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value, OpaqueType
 from torch._logging import trace_structured
+from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
@@ -288,7 +289,14 @@ def set_proxy_slot(
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         if not isinstance(proxy, Proxy):
             raise AssertionError(f"Expected Proxy, got {type(proxy)}")
-        tracer.script_object_tracker[obj] = proxy
+        # ScriptObject (actual C++ torchbind) uses _WeakHashRef-keyed tracker
+        # because the same C++ IValue can produce different Python wrappers.
+        # FakeScriptObject/OpaqueBase uses WeakIdRef-keyed tracker because
+        # value-equal objects (e.g. primal vs tangent) must be tracked separately.
+        if isinstance(obj, torch.ScriptObject):
+            tracer.script_object_tracker[obj] = proxy
+        else:
+            tracer.opaque_tracker[obj] = proxy
     else:
         # NB: Never clobber pre-existing proxy.  Although the proxies
         # are in principle equivalent, when we do graph partitioning
@@ -426,7 +434,10 @@ def get_proxy_slot(
     if isinstance(obj, Tensor):
         tracker = tracer.tensor_tracker
     elif isinstance(obj, _AnyScriptObject) or is_opaque_value(obj):
-        tracker = tracer.script_object_tracker
+        if isinstance(obj, torch.ScriptObject):
+            tracker = tracer.script_object_tracker
+        else:
+            tracker = tracer.opaque_tracker
     else:
         if not isinstance(obj, py_sym_types):
             raise AssertionError(f"Expected py_sym_types, got {type(obj)}")
@@ -1318,7 +1329,12 @@ class _SympyExprTrackerValue:
 
 
 class PythonKeyTracer(Tracer):
-    script_object_tracker: MutableMapping[_AnyScriptObjectType | OpaqueType, Proxy]
+    # ScriptObject uses _WeakHashRef because the same C++ IValue can produce
+    # different Python wrapper objects, so Python id() won't match.
+    script_object_tracker: MutableMapping[torch.ScriptObject, Proxy]
+    # FakeScriptObject/OpaqueBase uses WeakIdRef because distinct objects that
+    # are value-equal (e.g. primal vs tangent opaques) must be tracked separately.
+    opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase | OpaqueType, Proxy]
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
@@ -1332,6 +1348,7 @@ class PythonKeyTracer(Tracer):
         self.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
+        self.opaque_tracker = WeakIdKeyDictionary()
         self.sympy_expr_tracker = {}
 
         # Stores the torch function that was called during tracing
@@ -1604,6 +1621,9 @@ def wrap_key(
         out = pytree.tree_map_only(Tensor, get_tensor_proxy_slot, out)
         out = pytree.tree_map_only(
             _AnyScriptObject, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out
+        )
+        out = pytree.tree_map_only(
+            OpaqueBase, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out
         )
 
         def get_sym_proxy_slot(t: PySymType) -> Proxy:
@@ -1883,7 +1903,8 @@ def _compute_proxy(
 
 
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
-    script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
+    script_object_tracker: MutableMapping[torch.ScriptObject, Proxy]
+    opaque_tracker: MutableMapping[FakeScriptObject | OpaqueBase | OpaqueType, Proxy]
     symnode_tracker: MutableMapping[PySymType, _PySymProxyType]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
@@ -1899,6 +1920,7 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
         self.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
+        self.opaque_tracker = WeakIdKeyDictionary()
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None
         # Stores the counts for every torch function called. This is to help

@@ -4,7 +4,7 @@ import math
 import traceback
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -164,7 +164,7 @@ def is_bw() -> bool:
 
 @dataclass
 class ShardPlacementResult:
-    placement: Optional[Shard]
+    placement: Shard | None
     mesh_info: FSDPMeshInfo
 
 

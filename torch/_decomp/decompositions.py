@@ -506,6 +506,12 @@ def _nll_loss_backward(
     if reduction == Reduction.MEAN.value:
         grad_output = grad_output / total_weight
 
+    # When self is 1D (no batch dim), the C++ kernel only uses target[0].
+    # Reduce target to a scalar so the subsequent unsqueeze produces a 1D
+    # tensor matching self's dimensionality.
+    if self.dim() == 1 and target.dim() > 0:
+        target = target[0]
+
     target = target.unsqueeze(channel_dim)
     safe_target = torch.where(target != ignore_index, target, 0)
     grad_input = torch.zeros_like(self)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import importlib
 import json
@@ -7,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Optional
 
 import torch
 import torch._dynamo
@@ -205,7 +206,7 @@ def test_cuda_gds_errors_captured() -> None:
         )
 
 
-def find_pypi_package_version(package: str) -> Optional[str]:
+def find_pypi_package_version(package: str) -> str | None:
     from importlib import metadata
 
     dists = metadata.distributions()
