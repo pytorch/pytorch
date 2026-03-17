@@ -3349,23 +3349,25 @@ def _reduction_configs(
     ]
 
     if torch.version.hip:
-        # Skip large-XBLOCK HIP configs when a combo kernel has a persistent
-        # sub-kernel with a large hardcoded R0_BLOCK.  The persistent tile size
-        # (XBLOCK * max_persistent_rblock) would otherwise cause pathological
-        # ROCm compilation times (e.g. 1024 * 1024 = 1M elements → 20+ min).
-        # Use the same 4096-element threshold as _persistent_reduction_configs.
-        max_persistent_rblock = inductor_meta.get("max_persistent_rblock", 0)
         hip_configs = [
             make_config(1024, 8, num_warps=4, num_stages=1, waves_per_eu=2),
             make_config(512, 8, num_warps=4, num_stages=1, waves_per_eu=1),
         ]
+        result_configs.extend(hip_configs)
+
+        # Filter ALL configs (not just HIP-specific ones) when a combo kernel
+        # has a persistent sub-kernel with a large hardcoded R0_BLOCK.  The
+        # persistent tile size (XBLOCK * max_persistent_rblock) causes
+        # pathological ROCm compilation times (e.g. 64 * 1024 = 64K elements
+        # → 60+ min triton.compile).  Use the same 4096-element threshold as
+        # _persistent_reduction_configs.
+        max_persistent_rblock = inductor_meta.get("max_persistent_rblock", 0)
         if max_persistent_rblock > 0:
-            hip_configs = [
+            result_configs = [
                 c
-                for c in hip_configs
+                for c in result_configs
                 if c.kwargs.get("XBLOCK", 0) * max_persistent_rblock <= 4096
             ]
-        result_configs.extend(hip_configs)
 
     return result_configs
 
