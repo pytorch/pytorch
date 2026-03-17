@@ -2896,6 +2896,7 @@ class TritonTemplate(KernelTemplate):
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
+                "epilogue_subtile": kwargs.get("EPILOGUE_SUBTILE", 0),
                 **{
                     k: kwargs[k]
                     for k in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS
