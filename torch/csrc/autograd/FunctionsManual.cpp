@@ -4928,6 +4928,16 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   auto gO = gO_t.reshape_symint({M, N});
   auto save_mean = save_mean_t.reshape_symint({M, c10::SymInt(1)});
   auto save_invstd = save_invstd_t.reshape_symint({M, c10::SymInt(1)});
+  if (at::GradMode::is_enabled() && input.requires_grad()) {
+    // save_mean and save_invstd have no autograd history, error instead
+    // of silently giving wrong results for higher-order derivatives.
+    auto err = std::make_shared<DelayedError>(
+        "layer_norm does not support 3rd+ order derivatives.",
+        /* num inputs */ 3);
+    auto result = err->apply({save_mean, save_invstd, input});
+    save_mean = result[0];
+    save_invstd = result[1];
+  }
 
   bool affine = isDefined(gamma);
   Tensor gamma_expanded;
