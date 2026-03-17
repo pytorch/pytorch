@@ -4119,14 +4119,14 @@ class TestBufferProtocol(TestCase):
 #   The implementation itself is based on the Python Array API:
 #   https://data-apis.org/array-api/latest/API_specification/creation_functions.html
 def get_another_device(device):
-    device_type = torch.device(device).type
-    if device_type == "cpu":
-        # Return first available accelerator, or None if none available
-        if torch.accelerator.is_available():
-            return torch.accelerator.current_accelerator().type
-        return None
-    else:
+    device = torch.device(device)
+
+    if device.type != "cpu":
         return "cpu"
+
+    acc = torch.accelerator.current_accelerator(True)
+
+    return acc.type if acc is not None else None
 
 def identity(tensor):
     return tensor
@@ -4241,9 +4241,6 @@ class TestAsArray(TestCase):
 
         # Copy is forced because of different device
         other = get_another_device(device)
-        # Skip cross-device test on macOS (MPS doesn't support all dtypes like float64)
-        if other is not None and sys.platform == "darwin":
-            other = None
         if other is not None:
             check(same_device=False, device=other, dtype=dtype)
             check(same_device=False, device=other, dtype=dtype, copy=True)
