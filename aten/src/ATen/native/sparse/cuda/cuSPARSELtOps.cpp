@@ -24,11 +24,10 @@ thread_local bool handle_initialized = false;
 /////////////////////////////////////////////////////////////////////
 
 struct SparseInputDescriptorCacheKey {
-  int m = 0;
-  int k = 0;
-  bool is_contiguous = true;
+  int dim0 = 0;
+  int dim1 = 0;
   bool is_dense = false;
-  int32_t input_type = 0;
+  int32_t cuda_type = 0;
 };
 
 using SparseInputDescriptorCacheKeyHash = ParamsHash<SparseInputDescriptorCacheKey>;
@@ -112,71 +111,51 @@ SparseInputDescriptorCache& getSparseInputDescriptorCache() {
   return *sparse_input_descriptor_cache;
 }
 
-static cusparseLtMatDescriptor_t* _get_sparse_input_descriptor_ptr(
+enum class MatDescriptorKind { Dense, Sparse };
+
+static cusparseLtMatDescriptor_t* _get_input_descriptor_ptr(
     cusparseLtHandle_t& handle,
-    int64_t m,
-    int64_t k,
-    cudaDataType input_type) {
+    MatDescriptorKind kind,
+    int64_t rows,
+    int64_t cols,
+    int64_t ld,
+    cudaDataType cuda_type,
+    int64_t alignment = 16,
+    cusparseOrder_t order = CUSPARSE_ORDER_ROW) {
   SparseInputDescriptorCacheKey key{};
-  key.m = m;
-  key.k = k;
-  key.is_contiguous = true;
-  key.is_dense = false;
-  key.input_type = static_cast<int32_t>(input_type);
+  key.dim0 = static_cast<int>(rows);
+  key.dim1 = static_cast<int>(cols);
+  key.is_dense = (kind == MatDescriptorKind::Dense);
+  key.cuda_type = static_cast<int32_t>(cuda_type);
   auto cached = getSparseInputDescriptorCache().lookup(key);
   if (cached.has_value()) {
     return *cached;
-  } 
-  cusparseLtMatDescriptor_t sparse_input_descriptor;
-  TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
-      &handle,
-      &sparse_input_descriptor,
-      m,
-      k,
-      k,
-      16,
-      input_type,
-      CUSPARSE_ORDER_ROW,
-      CUSPARSELT_SPARSITY_50_PERCENT));
-      
+  }
+  cusparseLtMatDescriptor_t descriptor;
+  if (kind == MatDescriptorKind::Sparse) {
+    TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
+        &handle,
+        &descriptor,
+        rows,
+        cols,
+        ld,
+        alignment,
+        cuda_type,
+        order,
+        CUSPARSELT_SPARSITY_50_PERCENT));
+  } else {
+    TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
+        &handle,
+        &descriptor,
+        rows,
+        cols,
+        ld,
+        alignment,
+        cuda_type,
+        order));
+  }
   CachedSparseInputDescriptor cached_descriptor;
-  cached_descriptor.descriptor = sparse_input_descriptor;
-  cached_descriptor.has_descriptor = true;
-  getSparseInputDescriptorCache().insert(std::move(key), std::move(cached_descriptor));
-  cached = getSparseInputDescriptorCache().lookup(key);
-  return *cached;
-}
-
-
-static cusparseLtMatDescriptor_t* _get_dense_input_descriptor_ptr(
-    cusparseLtHandle_t& handle,
-    int64_t k,
-    int64_t n,
-    bool is_contiguous,
-    cudaDataType input_type) {
-  SparseInputDescriptorCacheKey key{};
-  key.m = n;
-  key.k = k;
-  key.is_contiguous = is_contiguous;
-  key.is_dense = true;
-  key.input_type = static_cast<int32_t>(input_type);
-  auto cached = getSparseInputDescriptorCache().lookup(key);
-  if (cached.has_value()) {
-    return *cached;
-  } 
-  cusparseLtMatDescriptor_t dense_input_descriptor;
-  TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
-      &handle,
-      &dense_input_descriptor,
-      is_contiguous ? k : n,
-      is_contiguous ? n : k,
-      is_contiguous ? n : k,
-      16,
-      input_type,
-      CUSPARSE_ORDER_ROW));
-      
-  CachedSparseInputDescriptor cached_descriptor;
-  cached_descriptor.descriptor = dense_input_descriptor;
+  cached_descriptor.descriptor = descriptor;
   cached_descriptor.has_descriptor = true;
   getSparseInputDescriptorCache().insert(std::move(key), std::move(cached_descriptor));
   cached = getSparseInputDescriptorCache().lookup(key);
@@ -474,48 +453,51 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   int64_t n = dense_B.size(1);
   int64_t m = compressed_A.size(0);
 
-  //////////////////////////////////////////////////////////////
-  // initialize sparse descriptor
-  // auto t3 = std::chrono::steady_clock::now();
+  // _get_input_descriptor_ptr(
+  //   cusparseLtHandle_t& handle,
+  //   MatDescriptorKind kind,
+  //   int64_t rows,
+  //   int64_t cols,
+  //   int64_t ld,
+  //   cudaDataType input_type,
+  //   int64_t alignment = 16,
+  //   cusparseOrder_t order = CUSPARSE_ORDER_ROW
+
   cusparseLtMatDescriptor_t* sparse_input_descriptor_ptr =
-    _get_sparse_input_descriptor_ptr(handle, m, k, input_type);
-  // auto t4 = std::chrono::steady_clock::now();
-  // double duration_sparse_input_descriptor = std::chrono::duration<double, std::milli>(t4 - t3).count();
-  // std::cout << "duration_sparse_input_descriptor = " << duration_sparse_input_descriptor << std::endl;
-  /////////////////////////////////////////////////////////////
+    _get_input_descriptor_ptr(handle, MatDescriptorKind::Sparse, m, k, k, input_type);
 
   // initialize dense input descriptor
-  cusparseLtMatDescriptor_t* dense_input_descriptor_ptr = 
-    _get_dense_input_descriptor_ptr(handle, k, n, dense_B.is_contiguous(), input_type);
-  
+  int64_t dense_rows = dense_B.is_contiguous() ? k : n;
+  int64_t dense_cols = dense_B.is_contiguous() ? n : k;
+  cusparseLtMatDescriptor_t* dense_input_descriptor_ptr =
+    _get_input_descriptor_ptr(handle, MatDescriptorKind::Dense, dense_rows, dense_cols, dense_cols, input_type);
+
   // create result tensor
   auto res_tensor_options =
       c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
   at::Tensor res = (transpose_result) ? at::empty({n, m}, res_tensor_options)
                                       : at::empty({m, n}, res_tensor_options);
 
-  cusparseLtMatDescriptor_t res_descriptor;
-  TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
-      &handle,
-      &res_descriptor,
-      m,
-      n,
-      (transpose_result) ? m : n,
-      16,
-      output_type,
-      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
-
+  cusparseLtMatDescriptor_t* res_descriptor_ptr =
+    _get_input_descriptor_ptr(handle,
+        MatDescriptorKind::Dense,
+        m,
+        n,
+        transpose_result ? m : n,
+        output_type,
+        16,
+        transpose_result ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW);
+  
   // For float8, need fp16 C_descriptor, can't use FP8 for this matrix
-  cusparseLtMatDescriptor_t C_descriptor;
-  TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
-      &handle,
-      &C_descriptor,
-      m,
-      n,
-      (transpose_result) ? m : n,
-      16,
-      C_type,
-      (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
+  cusparseLtMatDescriptor_t*  C_descriptor_ptr =
+    _get_input_descriptor_ptr(handle,
+        MatDescriptorKind::Dense,
+        m,
+        n,
+        transpose_result ? m : n,
+        C_type,
+        16,
+        transpose_result ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW);
 
   // initialize matmul
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
@@ -526,8 +508,8 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
                                 : CUSPARSE_OPERATION_TRANSPOSE,
       sparse_input_descriptor_ptr,
       dense_input_descriptor_ptr,
-      &C_descriptor,
-      &res_descriptor,
+      C_descriptor_ptr,
+      res_descriptor_ptr,
       compute_type));
 
   // set bias pointer for matmul, need to assign to get location
@@ -675,7 +657,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   //     cusparseLtMatDescriptorDestroy(&sparse_input_descriptor));
   // TORCH_CUDASPARSE_CHECK(
   //     cusparseLtMatDescriptorDestroy(&dense_input_descriptor));
-  TORCH_CUDASPARSE_CHECK(cusparseLtMatDescriptorDestroy(&res_descriptor));
+  // TORCH_CUDASPARSE_CHECK(cusparseLtMatDescriptorDestroy(&res_descriptor));
   // destroy plan
   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanDestroy(&plan));
 
