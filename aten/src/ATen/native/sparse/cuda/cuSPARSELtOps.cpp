@@ -21,8 +21,6 @@ namespace at::native {
 thread_local cusparseLtHandle_t handle;
 thread_local bool handle_initialized = false;
 
-/////////////////////////////////////////////////////////////////////
-
 // One cache key for the full matmul descriptor bundle and plan.
 struct MatDescriptorCacheKey {
   int m = 0;
@@ -43,7 +41,15 @@ struct MatDescriptorCacheKey {
 using MatDescriptorCacheKeyHash = ParamsHash<MatDescriptorCacheKey>;
 using MatDescriptorCacheKeyEqual = ParamsEqual<MatDescriptorCacheKey>;
 
-// One cached entry holds all descriptors and plan for a matmul config (built in-place).
+struct MatDescriptorPtrs {
+  cusparseLtMatmulDescriptor_t* matmul = nullptr;
+  cusparseLtMatmulAlgSelection_t* alg_sel = nullptr;
+  cusparseLtMatmulPlan_t* plan = nullptr;
+};
+
+// Cached entry holds matmul, alg_sel, plan (exposed via ptrs) plus the operand
+// descriptors (sparse_input, dense_input, res, C) which must stay alive because
+// the library retains pointers to them; they are not exposed in MatDescriptorPtrs.
 struct CachedMatDescriptor {
   cusparseLtMatDescriptor_t sparse_input;
   cusparseLtMatDescriptor_t dense_input;
@@ -52,6 +58,7 @@ struct CachedMatDescriptor {
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulAlgSelection_t alg_sel;
   cusparseLtMatmulPlan_t plan;
+  MatDescriptorPtrs ptrs;
   bool has_descriptors = false;
 
   CachedMatDescriptor() = default;
@@ -74,6 +81,7 @@ struct CachedMatDescriptor {
         matmul(other.matmul),
         alg_sel(other.alg_sel),
         plan(other.plan),
+        ptrs(other.ptrs),
         has_descriptors(other.has_descriptors) {
     other.has_descriptors = false;
   }
@@ -94,6 +102,7 @@ struct CachedMatDescriptor {
       matmul = other.matmul;
       alg_sel = other.alg_sel;
       plan = other.plan;
+      ptrs = other.ptrs;
       has_descriptors = other.has_descriptors;
       other.has_descriptors = false;
     }
@@ -101,16 +110,6 @@ struct CachedMatDescriptor {
   }
   CachedMatDescriptor(const CachedMatDescriptor&) = delete;
   CachedMatDescriptor& operator=(const CachedMatDescriptor&) = delete;
-};
-
-struct MatDescriptorPtrs {
-  cusparseLtMatDescriptor_t* sparse_input = nullptr;
-  cusparseLtMatDescriptor_t* dense_input = nullptr;
-  cusparseLtMatDescriptor_t* res = nullptr;
-  cusparseLtMatDescriptor_t* C = nullptr;
-  cusparseLtMatmulDescriptor_t* matmul = nullptr;
-  cusparseLtMatmulAlgSelection_t* alg_sel = nullptr;
-  cusparseLtMatmulPlan_t* plan = nullptr;
 };
 
 constexpr size_t MatDescriptorCacheMaxSize = 128;
@@ -123,32 +122,25 @@ using MatDescriptorCacheMap = std::unordered_map<
     MatDescriptorCacheKeyHash,
     MatDescriptorCacheKeyEqual>;
 
-// One cache for the 4-descriptor bundle (sparse_input, dense_input, res, C).
+// Cache for matmul descriptor, alg selection, and plan (keyed by shape/dtype/alg).
 struct MatDescriptorCache {
   MatDescriptorLruList lru_list;
   MatDescriptorCacheMap cache_map;
 
-  std::optional<MatDescriptorPtrs> lookup(const MatDescriptorCacheKey& key) {
+  MatDescriptorPtrs* lookup(const MatDescriptorCacheKey& key) {
     auto it = cache_map.find(key);
     if (it == cache_map.end()) {
-      return std::nullopt;
+      return nullptr;
     }
     lru_list.splice(lru_list.begin(), lru_list, it->second);
     CachedMatDescriptor& entry = it->second->second;
-    MatDescriptorPtrs ptrs;
-    ptrs.sparse_input = &entry.sparse_input;
-    ptrs.dense_input = &entry.dense_input;
-    ptrs.res = &entry.res;
-    ptrs.C = &entry.C;
-    ptrs.matmul = &entry.matmul;
-    ptrs.alg_sel = &entry.alg_sel;
-    ptrs.plan = &entry.plan;
-    return ptrs;
+    entry.ptrs.matmul = &entry.matmul;
+    entry.ptrs.alg_sel = &entry.alg_sel;
+    entry.ptrs.plan = &entry.plan;
+    return &entry.ptrs;
   }
 
-  // Build a new cache entry in-place (no move); create plan once per entry.
-  std::optional<MatDescriptorPtrs> getOrCreate(
-      const MatDescriptorCacheKey& key,
+  MatDescriptorPtrs* getOrCreate(
       cusparseLtHandle_t& handle,
       int64_t m,
       int64_t k,
@@ -159,11 +151,26 @@ struct MatDescriptorCache {
       cudaDataType output_type,
       cudaDataType C_type,
       cusparseComputeType compute_type,
+      bool has_bias,
       int alg_id,
       int split_k,
       int split_k_mode) {
-    auto result = lookup(key);
-    if (result.has_value()) {
+    MatDescriptorCacheKey key{};
+    key.m = static_cast<int>(m);
+    key.k = static_cast<int>(k);
+    key.n = static_cast<int>(n);
+    key.dense_is_contiguous = dense_is_contiguous;
+    key.transpose_result = transpose_result;
+    key.input_type = static_cast<int32_t>(input_type);
+    key.output_type = static_cast<int32_t>(output_type);
+    key.C_type = static_cast<int32_t>(C_type);
+    key.compute_type = static_cast<int32_t>(compute_type);
+    key.has_bias = has_bias;
+    key.alg_id = static_cast<int32_t>(alg_id);
+    key.split_k = static_cast<int32_t>(split_k);
+    key.split_k_mode = static_cast<int32_t>(split_k_mode);
+    MatDescriptorPtrs* result = lookup(key);
+    if (result != nullptr) {
       return result;
     }
     if (lru_list.size() >= MatDescriptorCacheMaxSize) {
@@ -262,9 +269,12 @@ struct MatDescriptorCache {
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanInit(
         &handle, &entry.plan, &entry.matmul, &entry.alg_sel));
 
+    entry.ptrs.matmul = &entry.matmul;
+    entry.ptrs.alg_sel = &entry.alg_sel;
+    entry.ptrs.plan = &entry.plan;
     entry.has_descriptors = true;
     cache_map[lru_list.front().first] = lru_list.begin();
-    return lookup(key);
+    return &lru_list.front().second.ptrs;
   }
 
   void insert(MatDescriptorCacheKey key, CachedMatDescriptor descriptor) {
@@ -286,63 +296,6 @@ MatDescriptorCache& getMatDescriptorCache() {
   }
   return *mat_descriptor_cache;
 }
-
-// Returns descriptor pointers and plan for this matmul config (cache built in-place).
-static MatDescriptorPtrs _get_matmul_descriptor_ptrs(
-    cusparseLtHandle_t& handle,
-    int64_t m,
-    int64_t k,
-    int64_t n,
-    bool dense_is_contiguous,
-    bool transpose_result,
-    cudaDataType input_type,
-    cudaDataType output_type,
-    cudaDataType C_type,
-    cusparseComputeType compute_type,
-    bool has_bias,
-    int alg_id,
-    int split_k,
-    int split_k_mode) {
-  MatDescriptorCacheKey key{};
-  key.m = static_cast<int>(m);
-  key.k = static_cast<int>(k);
-  key.n = static_cast<int>(n);
-  key.dense_is_contiguous = dense_is_contiguous;
-  key.transpose_result = transpose_result;
-  key.input_type = static_cast<int32_t>(input_type);
-  key.output_type = static_cast<int32_t>(output_type);
-  key.C_type = static_cast<int32_t>(C_type);
-  key.compute_type = static_cast<int32_t>(compute_type);
-  key.has_bias = has_bias;
-  key.alg_id = static_cast<int32_t>(alg_id);
-  key.split_k = static_cast<int32_t>(split_k);
-  key.split_k_mode = static_cast<int32_t>(split_k_mode);
-
-  auto result = getMatDescriptorCache().getOrCreate(
-      key,
-      handle,
-      m,
-      k,
-      n,
-      dense_is_contiguous,
-      transpose_result,
-      input_type,
-      output_type,
-      C_type,
-      compute_type,
-      alg_id,
-      split_k,
-      split_k_mode);
-  TORCH_CHECK(
-      result.has_value(),
-      "cuSPARSELt: mat descriptor cache getOrCreate failed");
-  return *result;
-}
-
-
-
-//////////////////////////////////////////////////////////////////////
-
 
 #ifdef USE_ROCM
 // Single global flag for platform-wide hipSparseLt support
@@ -626,7 +579,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   int64_t n = dense_B.size(1);
   int64_t m = compressed_A.size(0);
 
-  MatDescriptorPtrs desc_ptrs = _get_matmul_descriptor_ptrs(
+  MatDescriptorPtrs* desc_ptrs = getMatDescriptorCache().getOrCreate(
       handle,
       m,
       k,
@@ -641,32 +594,9 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       alg_id,
       split_k,
       split_k_mode);
-
-  // bool not_null_sparse_input = (desc_ptrs.sparse_input != nullptr);
-  // bool not_null_dense_input = (desc_ptrs.dense_input != nullptr);
-  // bool not_null_res = (desc_ptrs.res != nullptr);
-  // bool not_null_C = (desc_ptrs.C != nullptr);
-  // bool not_null_alg_sel = (desc_ptrs.alg_sel != nullptr);
-  // std::cout << "not_null_sparse_input=" << not_null_sparse_input
-  //           << " not_null_dense_input=" << not_null_dense_input
-  //           << " not_null_res=" << not_null_res
-  //           << " not_null_C=" << not_null_C
-  //           << " not_null_alg_sel=" << not_null_alg_sel
-  //           << std::endl;
-
-  // // initialize matmul
-  // TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
-  //     &handle,
-  //     &matmul,
-  //     CUSPARSE_OPERATION_NON_TRANSPOSE,
-  //     (dense_B.is_contiguous()) ? CUSPARSE_OPERATION_NON_TRANSPOSE
-  //                               : CUSPARSE_OPERATION_TRANSPOSE,
-  //     desc_ptrs.sparse_input,
-  //     desc_ptrs.dense_input,
-  //     desc_ptrs.C,
-  //     desc_ptrs.res,
-  //     compute_type));
-
+  TORCH_CHECK(
+      desc_ptrs != nullptr,
+      "cuSPARSELt: mat descriptor cache getOrCreate failed");
 
   // set bias pointer for matmul, need to assign to get location
   if (bias_opt.has_value()) {
@@ -674,19 +604,11 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     void* dBias = bias.data_ptr();
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
         &handle,
-        desc_ptrs.matmul,
+        desc_ptrs->matmul,
         CUSPARSELT_MATMUL_BIAS_POINTER,
         &dBias,
         sizeof(dBias)));
   }
-
-
-  // auto ta1 = std::chrono::steady_clock::now();  ~.285545
-  // TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSelectionInit(
-  //     &handle, &alg_sel, &matmul, CUSPARSELT_MATMUL_ALG_DEFAULT));
-  // auto ta2 = std::chrono::steady_clock::now();
-  // double duration_alg_init = std::chrono::duration<double, std::milli>(ta2 - ta1).count();
-  // std::cout << "duration_alg_init = " << duration_alg_init << std::endl;
 
   cusparseLtSplitKMode_t splitKMode;
   int max_alg_id;
@@ -701,7 +623,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       int tensor_alpha_mode = 1;
       TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
           &handle,
-          desc_ptrs.matmul,
+          desc_ptrs->matmul,
           CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING,
           &tensor_alpha_mode,
           sizeof(tensor_alpha_mode)));
@@ -711,7 +633,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
 
   size_t workspace_size;
   TORCH_CUDASPARSE_CHECK(
-      cusparseLtMatmulGetWorkspace(&handle, desc_ptrs.plan, &workspace_size));
+      cusparseLtMatmulGetWorkspace(&handle, desc_ptrs->plan, &workspace_size));
 
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -728,7 +650,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     // run matmul search
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulSearch(
         &handle,
-        desc_ptrs.plan,
+        desc_ptrs->plan,
         alpha_ptr,
         compressed_A.data_ptr(),
         dense_B.data_ptr(),
@@ -743,28 +665,28 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     // get matmul params used
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle,
-        desc_ptrs.alg_sel,
+        desc_ptrs->alg_sel,
         CUSPARSELT_MATMUL_ALG_CONFIG_ID,
         &alg_id,
         sizeof(alg_id)));
 
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle,
-        desc_ptrs.alg_sel,
+        desc_ptrs->alg_sel,
         CUSPARSELT_MATMUL_SPLIT_K,
         &split_k,
         sizeof(split_k)));
 
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle,
-        desc_ptrs.alg_sel,
+        desc_ptrs->alg_sel,
         CUSPARSELT_MATMUL_SPLIT_K_MODE,
         &splitKMode,
         sizeof(splitKMode)));
 
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgGetAttribute(
         &handle,
-        desc_ptrs.alg_sel,
+        desc_ptrs->alg_sel,
         CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
         &max_alg_id,
         sizeof(max_alg_id)));
@@ -773,7 +695,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     // do normal matmul
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmul(
         &handle,
-        desc_ptrs.plan,
+        desc_ptrs->plan,
         alpha_ptr,
         compressed_A.data_ptr(),
         dense_B.data_ptr(),
