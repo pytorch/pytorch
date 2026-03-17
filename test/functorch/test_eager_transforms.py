@@ -1174,6 +1174,82 @@ class TestGradTransform(TestCase):
         ft.pop_dynamic_layer_stack_and_undo_to_depth(0)
         self.assertEqual(ft.get_dynamic_layer_stack_depth(), 0)
 
+    def test_inference_mode_outside_grad(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            y = grad(lambda x: (x**2).sum())(x)
+        self.assertEqual(y, 2 * x)
+
+    def test_inference_mode_nograd_outside_grad(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            with torch.no_grad():
+                y = grad(lambda x: (x**2).sum())(x)
+        self.assertEqual(y, 2 * x)
+
+    def test_inference_mode_outside_vjp(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            out, vjp_fn = vjp(lambda x: (x**2).sum(), x)
+            (y,) = vjp_fn(torch.tensor(1.0, device=device))
+        self.assertEqual(y, 2 * x)
+
+    def test_inference_mode_outside_jvp(self, device):
+        x = torch.randn(3, device=device)
+        t = torch.ones(3, device=device)
+        with torch.inference_mode():
+            _, y = jvp(lambda x: (x**2).sum(), (x,), (t,))
+        self.assertEqual(y, (2 * x * t).sum())
+
+    def test_inference_mode_outside_jacrev(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            y = jacrev(lambda x: x**2)(x)
+        self.assertEqual(y, torch.diag(2 * x))
+
+    def test_inference_mode_outside_vmap_grad(self, device):
+        xs = torch.randn(5, 3, device=device)
+        with torch.inference_mode():
+            ys = vmap(grad(lambda x: (x**2).sum()))(xs)
+        self.assertEqual(ys, 2 * xs)
+
+    def test_inference_mode_outside_grad_vmap(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            y = grad(lambda x: vmap(lambda x: (x**2).sum())(x).sum())(x)
+        self.assertEqual(y, 2 * x)
+
+    def test_inference_mode_nested_grad(self, device):
+        x = torch.randn([], device=device)
+        with torch.inference_mode():
+            y = grad(grad(lambda x: x**3))(x)
+        self.assertEqual(y, 6 * x)
+
+    def test_inference_mode_jacrev_grad(self, device):
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            H = jacrev(grad(lambda x: (x**3).sum()))(x)
+        self.assertEqual(H, torch.diag(6 * x))
+
+    def test_inference_mode_inside_grad(self, device):
+        def f(x):
+            with torch.inference_mode():
+                c = x**2
+            return x - c
+
+        x = torch.randn(3, device=device)
+        with torch.inference_mode():
+            y = grad(lambda x: f(x).sum())(x)
+        self.assertEqual(y, torch.ones_like(x))
+
+    def test_inference_mode_restored(self, device):
+        self.assertTrue(not torch.is_inference_mode_enabled())
+        with torch.inference_mode():
+            self.assertTrue(torch.is_inference_mode_enabled())
+            grad(lambda x: (x**2).sum())(torch.randn(3, device=device))
+            self.assertTrue(torch.is_inference_mode_enabled())
+        self.assertTrue(not torch.is_inference_mode_enabled())
+
 
 @markDynamoStrictTest
 class TestAutogradFunction(TestCase):
