@@ -169,6 +169,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
         log.debug("Benchmark compile %s: sym_inputs=%s", self.name, self.sym_inputs)
 
+        assert self.gm is not None
         bm_graph_lowering = GraphLowering(
             gm=self.gm,
             example_inputs=compile_inputs,
@@ -227,6 +228,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self._compiled_module.call([*self.sym_input_values, *args])
 
     def hash_key(self) -> str:
+        assert self.gm is not None
         return "-".join(
             [
                 self.name.rsplit("_", 1)[0],
@@ -237,6 +239,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
 
     def output_node(self) -> ir.TensorBox:
+        assert self.gm is not None
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,

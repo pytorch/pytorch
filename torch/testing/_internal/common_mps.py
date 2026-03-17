@@ -87,6 +87,7 @@ if torch.backends.mps.is_available():
             "isfinite",
             "isinf",
             "isreal",
+            "istft",
             "item",
             "kron",
             "linalg.cross",
@@ -315,7 +316,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "cholesky_solve": None,
             "frexp": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode

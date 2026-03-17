@@ -889,7 +889,7 @@ class TestOpaqueObject(TestCase):
         self.assertEqual(size, 0)
 
     def test_custom_op_reference_return(self):
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="inductor", fullgraph=True)
         def f(x):
             c1 = torch.ops._TestOpaqueObject.create_counter(0, 10)
             c2, c3 = torch.ops._TestOpaqueObject.create_counter2(0, 10)
@@ -2918,14 +2918,13 @@ def forward(self, L_x_ : torch.Tensor):
         res.sum().backward()
 
         actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
-        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))
         self.assertExpectedInline(
             actual,
-            f"""\
+            """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_scale_obj_ : {fx_class}, L_x_: "f32[2, 2]"):
-        l_scale_obj_ = L_scale_obj_
+    def forward(self, L_x_: "f32[2, 2]", L_scale_obj_ : __main___OpaqueMultiplier):
         l_x_ = L_x_
+        l_scale_obj_ = L_scale_obj_
 
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_scale_obj_, l_x_);  subgraph_0 = l_scale_obj_ = l_x_ = None
@@ -2935,7 +2934,7 @@ class GraphModule(torch.nn.Module):
         return (add,)
 
     class subgraph_0(torch.nn.Module):
-        def forward(self, l_scale_obj_ : {fx_class}, l_x_: "f32[2, 2]"):
+        def forward(self, l_scale_obj_ : __main___OpaqueMultiplier, l_x_: "f32[2, 2]"):
             result: "f32[2, 2]" = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
 
             result_1: "f32[2, 2]" = result * 2;  result = None

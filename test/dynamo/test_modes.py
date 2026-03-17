@@ -599,6 +599,33 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_torch_function_mode_mutated_state(self):
+        class CounterMode(TorchFunctionMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                self.count += 1
+                return func(*args, **(kwargs or {}))
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return x.sin()
+
+        with CounterMode() as mode:
+            f(torch.randn(3))
+            first_count = mode.count
+            first_frame_count = cnt.frame_count
+
+            # count changed, should recompile
+            f(torch.randn(3))
+
+        self.assertEqual(first_frame_count, 1)
+        self.assertGreater(first_count, 0)
+        self.assertEqual(cnt.frame_count, 2)
+
     # Needs larger cache size since we recompile for each op
     @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):

@@ -969,7 +969,11 @@ def create_functionalized_fn(
                                 raise AssertionError(
                                     f"expected both before and after to be Tensors, got {type(before)} and {type(after)}"
                                 )
-                            before.copy_(after)
+                            # no_grad prevents the FakeTensor's requires_grad from
+                            # triggering check_inplace during tracing.  The
+                            # requires_grad case is checked at runtime instead
+                            with torch.no_grad():
+                                before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
                         )
