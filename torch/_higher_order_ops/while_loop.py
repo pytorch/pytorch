@@ -26,15 +26,6 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-def _is_aten_graph(gm: torch.fx.GraphModule) -> bool:
-    for node in gm.graph.nodes:
-        if node.op == "call_function" and not isinstance(
-            node.target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
-        ):
-            return False
-    return True
-
-
 class WhileLoopOp(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("while_loop")
