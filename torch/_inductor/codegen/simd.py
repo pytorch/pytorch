@@ -856,11 +856,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
                     )
                 else:
-                    if current_group < len(remaining):
-                        return_getters.append(
-                            # pyrefly: ignore [bad-argument-type]
-                            operator.itemgetter(add_range(current_group, size))
-                        )
+                    if current_group >= len(remaining):
+                        raise CantSplit(size, 0)
+                    return_getters.append(
+                        # pyrefly: ignore [bad-argument-type]
+                        operator.itemgetter(add_range(current_group, size))
+                    )
             return_getters_groups.append(return_getters)
 
         assert all(
