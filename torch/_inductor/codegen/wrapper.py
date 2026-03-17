@@ -1341,6 +1341,7 @@ class PythonWrapperCodegen(CodeGen):
                 inductor_ops = torch.ops.inductor
                 _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                assert_size_stride_grouped = torch._C._dynamo.guards.assert_size_stride_grouped
                 assert_alignment = torch._C._dynamo.guards.assert_alignment
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
@@ -1511,6 +1512,9 @@ class PythonWrapperCodegen(CodeGen):
         return V.graph.graph_outputs
 
     def codegen_input_size_asserts(self) -> None:
+        items = []
+        sizes = []
+        strides = []
         for name, buf in self.get_graph_inputs().items():
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
@@ -1526,7 +1530,16 @@ class PythonWrapperCodegen(CodeGen):
                 continue
             size = self.codegen_python_shape_tuple(buf.get_size())
             stride = self.codegen_python_shape_tuple(buf.get_stride())
-            self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
+            items.append(name)
+            sizes.append(size)
+            strides.append(stride)
+        if items:
+            items_str = "[" + ", ".join(items) + "]"
+            sizes_str = "[" + ", ".join(sizes) + "]"
+            strides_str = "[" + ", ".join(strides) + "]"
+            self.prefix.writeline(
+                f"assert_size_stride_grouped({items_str}, {sizes_str}, {strides_str})"
+            )
 
     def codegen_input_nan_asserts(self) -> None:
         self.prefix.writeline("# make sure graph inputs are not nan/inf")

@@ -485,6 +485,11 @@ def assert_size_stride(
     stride: torch.types._size,
     op_name: str | None = None,
 ) -> None: ...
+def assert_size_stride_grouped(
+    items: list[torch.Tensor],
+    sizes: list[torch.types._size],
+    strides: list[torch.types._size],
+) -> None: ...
 def assert_alignment(
     item: torch.Tensor,
     alignment: int,
