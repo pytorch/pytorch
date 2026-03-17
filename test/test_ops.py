@@ -1541,6 +1541,13 @@ class TestCommon(TestCase):
             unittest.skip("Does not support complex32")
 
         for sample in op.sample_inputs(device, dtype):
+            # MPS doesn't support float64
+            if torch.float64 in (
+                *sample.args,
+                *sample.kwargs.values(),
+            ) and not op.supports_dtype(torch.float64, device):
+                continue
+
             actual = op(sample.input, *sample.args, **sample.kwargs)
             # sample.transform applies the lambda to torch.Tensor and torch.dtype.
             # However, we only want to apply it to Tensors with dtype `torch.complex32`..
