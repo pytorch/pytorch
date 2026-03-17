@@ -484,9 +484,13 @@ _flash_attention_forward_impl(
     const std::optional<Tensor>& _seqused_k,
     const std::optional<Tensor>& _alibi_slopes,
     const std::optional<Tensor>& _block_table,
-    std::optional<Tensor> out
+    std::optional<Tensor> out,
+    std::optional<int64_t> num_splits
     ) {
 #if defined(USE_FLASH_ATTENTION)
+  TORCH_CHECK(
+      !num_splits.has_value(),
+      "num_splits requires FA3. Register FA3 with `register_flash_attention_fa3()` to set num_splits.");
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).expect_float();
 
@@ -1303,7 +1307,8 @@ _flash_attention_forward(
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
     const std::optional<Tensor>& _alibi_slopes,
-    const std::optional<Tensor>& _block_table
+    const std::optional<Tensor>& _block_table,
+    std::optional<int64_t> num_splits
     ) {
   return _flash_attention_forward_impl(
       query, key, value,
@@ -1312,7 +1317,7 @@ _flash_attention_forward(
       dropout_p, is_causal, return_debug_mask,
       scale, window_size_left, window_size_right,
       _seqused_k, _alibi_slopes, _block_table,
-      /*out=*/std::nullopt);
+      /*out=*/std::nullopt, num_splits);
 }
 
 Tensor
@@ -1333,7 +1338,8 @@ _flash_attention_forward_no_dropout_inplace(
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
     const std::optional<Tensor>& _alibi_slopes,
-    const std::optional<Tensor>& _block_table
+    const std::optional<Tensor>& _block_table,
+    std::optional<int64_t> num_splits
     ) {
   TORCH_CHECK(dropout_p == 0.0);
   auto [output, logsumexp, philox_seed, philox_offset, debug_attn_mask] =
@@ -1344,7 +1350,7 @@ _flash_attention_forward_no_dropout_inplace(
           dropout_p, is_causal, return_debug_mask,
           scale, window_size_left, window_size_right,
           _seqused_k, _alibi_slopes, _block_table,
-          /*out=*/std::make_optional(out));
+          /*out=*/std::make_optional(out), num_splits);
   return logsumexp;
 }
 

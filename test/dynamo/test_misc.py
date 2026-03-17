@@ -1004,6 +1004,127 @@ graph():
         self.assertEqual(res.grad, ref.grad)
         self.assertEqual(res.foo, ref.foo)
 
+    def test_input_tensor_custom_attr_mutation(self):
+        def f(x, flag):
+            x.offloading_activation = flag
+            return x + 1
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.ones(5)
+
+        res = opt_f(x, True)
+        self.assertEqual(res, torch.ones(5) + 1)
+        self.assertTrue(x.offloading_activation)
+
+    def test_intermediate_tensor_custom_attr_mutation(self):
+        def f(x, flag):
+            y = x + 1
+            y.offloading_activation = flag
+            return y
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.ones(5)
+
+        res = opt_f(x, True)
+        self.assertEqual(res, torch.ones(5) + 1)
+        self.assertTrue(res.offloading_activation)
+
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "requires Hopper+ (SM >= 9.0) for TMA",
+    )
+    @unittest.skipIf(
+        not torch.utils._triton.has_triton()
+        or not hasattr(__import__("triton"), "set_allocator"),
+        "requires triton with set_allocator support",
+    )
+    def test_triton_set_allocator_no_graph_break(self):
+        """set_allocator inside torch.compile does not graph break and
+        replays correctly at runtime (including cache hits)."""
+        import triton
+        import triton.language as tl
+        from triton.runtime._allocation import NullAllocator
+
+        @triton.jit
+        def tma_copy_kernel(
+            x_ptr,
+            out_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            desc = tl.make_tensor_descriptor(
+                x_ptr,
+                shape=[M, N],
+                strides=[stride_m, stride_n],
+                block_shape=[BLOCK_M, BLOCK_N],
+            )
+            block = tl.load_tensor_descriptor(desc, [pid * BLOCK_M, 0])
+            out_desc = tl.make_tensor_descriptor(
+                out_ptr,
+                shape=[M, N],
+                strides=[stride_m, stride_n],
+                block_shape=[BLOCK_M, BLOCK_N],
+            )
+            tl.store_tensor_descriptor(out_desc, [pid * BLOCK_M, 0], block)
+
+        M, N, BLOCK_M, BLOCK_N = 128, 64, 64, 64
+
+        def run_kernel(x):
+            out = torch.empty_like(x)
+            tma_copy_kernel[(M // BLOCK_M,)](
+                x,
+                out,
+                M,
+                N,
+                x.stride(0),
+                x.stride(1),
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+            )
+            return out
+
+        x = torch.randn(M, N, device="cuda")
+
+        from contextlib import contextmanager
+
+        from triton.runtime._allocation import _allocator
+
+        @contextmanager
+        def triton_allocator(allocator):
+            prev = _allocator.get()
+            triton.set_allocator(allocator)
+            try:
+                yield
+            finally:
+                triton.set_allocator(prev)
+
+        def fn_with_set_allocator(x):
+            triton.set_allocator(
+                lambda size, alignment, stream: torch.empty(
+                    size, device="cuda", dtype=torch.int8
+                )
+            )
+            return run_kernel(x)
+
+        opt_fn = torch.compile(
+            fn_with_set_allocator, backend="aot_eager", fullgraph=True
+        )
+
+        # set_allocator inside compiled region does NOT graph break
+        with triton_allocator(NullAllocator()):
+            out = opt_fn(x)
+            self.assertEqual(out, x)
+
+            # Verify set_allocator replays on cache hit (not just tracing)
+            triton.set_allocator(NullAllocator())
+            out2 = opt_fn(x)
+            self.assertEqual(out2, x)
+
     def test_closure_recompiles(self):
         cnt = CompileCounter()
 
@@ -6406,6 +6527,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn(torch.int16, torch.ShortTensor)
         opt_fn(torch.bool, torch.BoolTensor)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_or_union_type_opaque_class(self):
+        # Test that or_ on opaque class types (e.g. Shard | _StridedShard)
+        # doesn't cause a graph break.
+        from torch.distributed.tensor import Shard
+        from torch.distributed.tensor.placement_types import _StridedShard
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            _ = Shard | _StridedShard
+            return x + 1
+
+        x = torch.randn(4)
+        result = fn(x)
+        self.assertEqual(result, x + 1)
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_nan(self):
         def f(x, n):
             return x * 2 + n
@@ -7675,6 +7815,60 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
+
+    def test_custom_instancecheck_does_not_cause_extra_init(self):
+        # When __new__ returns an object whose type is not a subclass of cls,
+        # CPython's type.__call__ skips __init__. The polyfill
+        # instantiate_user_defined_class_object must match this behavior even
+        # when the metaclass defines a custom __instancecheck__ that would
+        # return True for isinstance().
+        class Meta(type):
+            def __instancecheck__(cls, instance):
+                return isinstance(instance, Base) and instance.tag == cls._tag
+
+        class Base:
+            def __init__(self, tag="default"):
+                self.tag = tag
+
+        class Child(Base, metaclass=Meta):
+            _tag = "child"
+
+            def __new__(cls):
+                # Returns a Base (not a Child), like ByteStorage.__new__
+                return Base(tag="child")
+
+        def fn():
+            obj = Child()
+            return obj.tag
+
+        ref = fn()
+        self.assertEqual(ref, "child")
+
+        opt_fn = torch.compile(fn, backend="eager")
+        res = opt_fn()
+        self.assertEqual(res, "child")
+
+    def test_custom_instancecheck_init_not_called(self):
+        class AlwaysTrueMeta(type):
+            def __instancecheck__(cls, instance):
+                return True
+
+        class Child(metaclass=AlwaysTrueMeta):
+            def __new__(cls):
+                return object()
+
+            def __init__(self):
+                raise AssertionError("should NOT be called")
+
+        def fn():
+            return Child()
+
+        ref = fn()
+        self.assertIsInstance(ref, object)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        res = opt_fn()
+        self.assertIsInstance(res, object)
 
     def test_variable_tracker_recursively_contains(self):
         # VariableTracker.recursively_contains should be updated correctly when mutation happens
@@ -10275,6 +10469,30 @@ def ___make_guard_fn():
         compiled_out = compiled_fn()
         self.assertEqual(fn_out, compiled_out)
         self.assertEqual(fn_out, (True, False, True, False, True, False))
+
+    def test_class_hasattr_sourceless_descriptor(self):
+        """Test that hasattr on sourceless UserDefinedClassVariable does not graph break."""
+
+        class FlagDescriptor:
+            def __get__(self, instance, owner):
+                if hasattr(owner, "flag"):
+                    return 1
+                return 0
+
+        class WithFlag:
+            flag = True
+            prop = FlagDescriptor()
+
+        class WithoutFlag:
+            prop = FlagDescriptor()
+
+        def fn(x, obj):
+            return x + obj.prop
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        x = torch.randn(3)
+        self.assertEqual(fn(x, WithFlag()), compiled_fn(x, WithFlag()))
+        self.assertEqual(fn(x, WithoutFlag()), compiled_fn(x, WithoutFlag()))
 
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
@@ -14148,6 +14366,39 @@ fn
         ref = f(x)
         res = opt_f(x)
         self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_new_tensor_break(self):
+        a = torch.tensor([1, 0, 0, 5])
+
+        cases = {
+            "scalar": lambda a: a.new_tensor([a.nonzero().squeeze(-1).numel()]),
+            "multi": lambda a: (
+                n := a.nonzero().squeeze(-1).numel(),
+                a.new_tensor([n, n + 1, n * 2]),
+            )[-1],
+            "mixed_shape": lambda a: (
+                n := a.nonzero().squeeze(-1).numel(),
+                a.new_tensor([n * a.shape[0], n + a.shape[0], a.shape[0] - n]),
+            )[-1],
+            "nested": lambda a: (
+                n := a.nonzero().squeeze(-1).numel(),
+                a.new_tensor([[n, n + 1], [n * 2, n - 1]]),
+            )[-1],
+            "with_zero": lambda a: (
+                n := a.nonzero().squeeze(-1).numel(),
+                a.new_tensor([0, n, n * n]),
+            )[-1],
+        }
+
+        for name, fn in cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(
+                    torch.compile(fn, fullgraph=True, backend="eager")(a),
+                    fn(a),
+                )
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_builtin_bool_on_tensor(self):

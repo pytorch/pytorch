@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
 from typing import Any, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import ParamSpec
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -178,6 +178,11 @@ def assume_constant_result(fn):  # type: ignore[no-untyped-def]
     return fn
 
 
+@deprecated(
+    "torch._dynamo.allow_in_graph is deprecated and will be removed in a future version. "
+    "Use torch._dynamo.nonstrict_trace instead.",
+    category=FutureWarning,
+)
 def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     """
     Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
@@ -1355,6 +1360,25 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
         t._dynamo_static_input_type = "unguarded"  # type: ignore[attr-defined]
 
 
+def _patch_einops_symint_compat(einops_mod: Any) -> None:
+    """Backport the SymInt lru_cache fix from einops 0.7.0 into einops <= 0.6.1."""
+    for name in ("_reconstruct_from_shape", "_prepare_transformation_recipe"):
+        cached = getattr(einops_mod, name)
+        uncached = cached.__wrapped__
+
+        def make_wrapper(cached_fn: Any, uncached_fn: Any) -> Any:
+            @functools.wraps(cached_fn)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                try:
+                    return cached_fn(*args, **kwargs)
+                except TypeError:
+                    return uncached_fn(*args, **kwargs)
+
+            return wrapper
+
+        setattr(einops_mod, name, make_wrapper(cached, uncached))
+
+
 # One day, Dynamo will support tracing into einops directly (no allow_in_graph needed)
 # Note that PyTorch supports multiple versions of einops, so when that day comes,
 # we still need to be really careful about version matches.
@@ -1379,7 +1403,10 @@ def _allow_in_graph_einops() -> None:
 
         # einops > 0.6.1 will call the op registration logic as it is imported.
     except ImportError:
-        # einops <= 0.6.1
+        # einops <= 0.6.1 doesn't handle unhashable SymInt in its lru_cache'd
+        # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
+        # so allow_in_graph works during fake tensor validation.
+        _patch_einops_symint_compat(einops.einops)  # type: ignore[attr-defined]
         allow_in_graph(einops.rearrange)
         allow_in_graph(einops.reduce)
         if hasattr(einops, "repeat"):

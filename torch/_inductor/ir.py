@@ -42,7 +42,8 @@ from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
-from torch._library.opaque_object import is_opaque_type
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -118,7 +119,6 @@ from .virtualized import ops, OpsValue, V
 
 
 if TYPE_CHECKING:
-    from torch._library.fake_class_registry import FakeScriptObject
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
@@ -257,6 +257,7 @@ def validate_ir(node_or_nodes: _NodeOrNodes | None) -> None:
                     int,
                     EffectfulKernel,
                     ShapeAsConstantBuffer,
+                    OpaqueMultiOutput,
                 ),
             ), (
                 f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
@@ -584,6 +585,9 @@ class IRNode:
                 TemplateBuffer,
             ),
         )
+
+    def wrap_for_lowering(self) -> IRNode:
+        return TensorBox.create(self)
 
     def _post_init_setattr(self, attr: str, value: Any) -> None:
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
@@ -5214,6 +5218,7 @@ class TemplateBuffer(OperationBuffer):
         make_kernel_render: Callable[..., Any] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
+        named_inputs: dict[str, IRNode] | None = None,
     ) -> None:
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
@@ -5222,6 +5227,19 @@ class TemplateBuffer(OperationBuffer):
         V.graph.register_operation(self)
         # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
         self.annotations: dict[str, Any] = {}
+
+        # Output buffer names eligible for epilogue fusion.
+        # Maps buffer name → kernel parameter name (e.g. "buf3" → "result").
+        self.epilogue_fusable_outputs: dict[str, str] = {}
+        # For multi-output kernels: maps child buffer name → MultiOutput
+        # node.  Used by call_kernel to emit tuple-unpacking lines.
+        self._multi_output_children: dict[str, MultiOutput] = {}
+        # Maps kernel parameter name → IRNode for each tensor input.
+        # Used by ExternalTritonTemplateKernel to set up prologue fusion and
+        # by HelionTemplateBuffer to resolve call arguments.
+        self._named_inputs: dict[str, IRNode] = (
+            dict(named_inputs) if named_inputs else {}
+        )
 
         # Inputs that the kernel mutates in-place
         self.mutated_inputs = mutated_inputs
@@ -5261,6 +5279,30 @@ class TemplateBuffer(OperationBuffer):
         return reads
 
     def extract_read_writes(self, normalize: bool = False) -> dependencies.ReadWrites:
+        """Extract read/write dependencies for this TemplateBuffer.
+
+        When the layout is MultiOutputLayout (multi-output templates), the
+        buffer itself has no data layout, so we cannot build an indexer.
+        Instead, synthesize a trivial write dep and derive read deps from
+        the named tensor inputs (``_named_inputs``).  For single-output
+        templates with a concrete layout, fall through to the standard path.
+        """
+        if isinstance(self.layout, MultiOutputLayout):
+            writes: OrderedSet[dependencies.Dep] = OrderedSet(
+                [
+                    dependencies.MemoryDep(
+                        self.get_name(), sympy.Integer(0), var_names=(), size=()
+                    ),
+                ]
+            )
+            return dependencies.ReadWrites(
+                reads=self._read_deps_from_inputs(normalize),
+                writes=writes,
+                index_exprs=OrderedSet(),
+                range_vars=None,
+                var_ranges=None,
+            )
+
         name = self.get_name()
         indexer = self.get_layout().make_indexer()
 
@@ -5303,6 +5345,62 @@ class TemplateBuffer(OperationBuffer):
     def get_allowed_prologue_inps(self) -> OrderedSet[str]:
         return self.allowed_prologue_inps
 
+    @classmethod
+    def realize_template_input(cls, tb: TensorBox) -> IRNode:
+        """Realize a TensorBox, preserving MultiOutput layout (unlike ExternKernel.realize_input)."""
+        if isinstance(tb, TensorBox) and isinstance(tb.data, MultiOutput):
+            return tb.data
+        result = ExternKernel.realize_input(tb)
+        if isinstance(result, StorageBox):
+            result = result.data
+        if isinstance(result.layout, FlexibleLayout):  # type: ignore[union-attr]
+            result.freeze_layout()
+        return result
+
+    @classmethod
+    def build_multi_outputs(
+        cls,
+        template_buf: TemplateBuffer,
+        structured: object,
+        *,
+        direct_alias_at_leaf: dict[int, IRNode] | None = None,
+        on_tensor_leaf: Callable[[str, MultiOutput, list[tuple[type, int]], int], None]
+        | None = None,
+        on_non_tensor_leaf: Callable[[int], None] | None = None,
+    ) -> tuple[TensorBox, ...]:
+        """Walk a structured output tree, creating MultiOutput nodes for tensor leaves."""
+        seen_outputs: dict[int, TensorBox] = {}
+        leaf_counter = itertools.count()
+
+        def walk(output: object, indices: list[tuple[type, int]]) -> list[TensorBox]:
+            if isinstance(output, (list, tuple)):
+                results: list[TensorBox] = []
+                for i, item in enumerate(output):
+                    results.extend(walk(item, [*indices, (type(output), i)]))
+                return results
+            leaf_idx = next(leaf_counter)
+            if isinstance(output, torch.Tensor):
+                if direct_alias_at_leaf and leaf_idx in direct_alias_at_leaf:
+                    return [TensorBox.create(direct_alias_at_leaf[leaf_idx])]
+                tid = id(output)
+                if tid in seen_outputs:
+                    return [seen_outputs[tid]]
+                mo = MultiOutput(
+                    FallbackKernel.tensor_to_layout(output), template_buf, indices
+                )
+                template_buf._multi_output_children[mo.get_name()] = mo
+                if on_tensor_leaf is not None:
+                    on_tensor_leaf(mo.get_name(), mo, indices, leaf_idx)
+                tb = TensorBox(mo)
+                seen_outputs[tid] = tb
+                return [tb]
+            # Non-tensor leaf (int, SymInt, None, etc.)
+            if on_non_tensor_leaf is not None:
+                on_non_tensor_leaf(leaf_idx)
+            return []
+
+        return tuple(walk(structured, []))
+
 
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
@@ -5329,6 +5427,8 @@ class TritonTemplateBuffer(TemplateBuffer):
             mutated_inputs=mutated_inputs,
             allowed_prologue_inps=allowed_prologue_inps,
         )
+        assert self.name is not None
+        self.epilogue_fusable_outputs = {self.name: self.name}
 
         self.subgraph_inps: list[IRNode | sympy.Expr | None] | None = None
         self.subgraph_outs: list[IRNode | None] | None = None
@@ -5398,6 +5498,11 @@ class ChoiceCaller:
         # Use this to shuttle information between ChoieCaller generation
         # and the end of benchmarking
         self.annotations: dict[Any, Any] = {}
+        # Subclass-overridden attributes for subgraph-based choices
+        self.gm: torch.fx.GraphModule | None = None
+        self.decomposition: Callable[..., Any] | None = None
+        self.decomposition_kwargs: dict[str, Any] = {}
+        self.config_patches: dict[str, Any] = {}
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
@@ -6293,6 +6398,8 @@ class ExternKernel(InputsKernel):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, TorchBindObject):
                 example_args.append(x.get_value())
+            elif isinstance(x, OpaqueMultiOutput):
+                example_args.append(x.opaque_example_value)
             elif isinstance(x, torch._inductor.ir.GeneratorState):
                 device_index = x.device.index
                 assert x.device.type == "cuda" and device_index is not None
@@ -6449,7 +6556,7 @@ class ExternKernel(InputsKernel):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
             return x
-        if isinstance(x, (NonTensorObj, ShapeAsConstantBuffer)):
+        if isinstance(x, (NonTensorObj, ShapeAsConstantBuffer, OpaqueMultiOutput)):
             return x
         return cls.copy_input(x)
 
@@ -8314,6 +8421,10 @@ class FallbackKernel(ExternKernelAlloc):
             return devices[0]
         if isinstance(example_output, torch.Tensor):
             return example_output.device
+        if isinstance(
+            example_output, (torch._C.ScriptObject, FakeScriptObject)
+        ) or is_opaque_value(example_output):
+            return torch.device("cpu")
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
                 # pyrefly: ignore [bad-argument-type]
@@ -8324,6 +8435,8 @@ class FallbackKernel(ExternKernelAlloc):
             devices = [device for device in device_set if device]
             if len(devices) == 1:
                 return devices[0]
+            if not devices:
+                return None
             for device in devices:
                 assert isinstance(device, torch.device)
                 if is_gpu(device.type):
@@ -8716,6 +8829,15 @@ class FallbackKernel(ExternKernelAlloc):
                 return output
             elif isinstance(output, torch.SymInt):
                 return output.node.expr
+            elif isinstance(
+                output, (torch._C.ScriptObject, FakeScriptObject)
+            ) or is_opaque_value(output):
+                return OpaqueMultiOutput(
+                    NoneLayout(device=device),
+                    packed,
+                    indices,
+                    output,
+                )
             else:
                 assert output is None, (
                     f"FallbackKernel output type {type(output)} is not supported"
@@ -8850,6 +8972,8 @@ class MultiOutput(ExternKernel):
 
         # Writes: build proper MemoryDep from our FixedLayout so the
         # scheduler can match our write with downstream epilogue reads.
+        # Normalize using the same policy as SchedulerNode so that the
+        # index expressions are directly comparable during fusion checks.
         name = self.get_name()
         indexer = self.get_layout().make_indexer()
 
@@ -8857,10 +8981,49 @@ class MultiOutput(ExternKernel):
             assert len(rindex) == 0
             return ops.store(name, indexer(index), "fake")
 
-        write_rw = dependencies.extract_read_writes(dummy, self.get_size(), ())
+        device = self.get_device()
+        should_normalize = (
+            not config.loop_ordering_after_fusion
+            or device is None
+            or not is_gpu(device.type)
+        )
+        write_rw = dependencies.extract_read_writes(
+            dummy, self.get_size(), (), normalize=should_normalize
+        )
         return dependencies.ReadWrites(
             reads=reads,
             writes=write_rw.writes,
+            index_exprs=OrderedSet(),
+        )
+
+
+class OpaqueMultiOutput(MultiOutput):
+    """MultiOutput for opaque objects."""
+
+    def __init__(
+        self,
+        layout: OutputSpec,
+        input: IRNode,
+        indices: list[tuple[Any, ...]],
+        opaque_value: Any,
+    ) -> None:
+        super().__init__(layout, input, indices, skip_size_stride_alignment_checks=True)
+        self.opaque_example_value = opaque_value
+
+    def wrap_for_lowering(self) -> OpaqueMultiOutput:
+        return self
+
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        reads: OrderedSet[dependencies.Dep] = OrderedSet()
+        for inp in self.inputs:
+            if isinstance(inp, IRNode):
+                reads.add(dependencies.StarDep(inp.get_name()))
+        writes: OrderedSet[dependencies.Dep] = OrderedSet(
+            [dependencies.StarDep(self.get_name())]
+        )
+        return dependencies.ReadWrites(
+            reads=reads,
+            writes=writes,
             index_exprs=OrderedSet(),
         )
 
@@ -10070,7 +10233,7 @@ class TorchBindObject(NonTensorObj):
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
 
-        if is_opaque_type(type(real_script_obj)):
+        if is_opaque_value(real_script_obj):
             return 0
 
         assert hasattr(real_script_obj, "__obj_flatten__")

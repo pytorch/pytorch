@@ -30,7 +30,7 @@ import types
 import warnings
 from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, cast, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -1600,7 +1600,9 @@ def get_testing_overrides() -> dict[Callable, Callable]:
     return ret
 
 
-def wrap_torch_function(dispatcher: Callable):
+def wrap_torch_function(
+    dispatcher: Callable[_P, Iterable[Any]],
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Wraps a given function with ``__torch_function__`` -related functionality.
 
     Parameters
@@ -1624,16 +1626,18 @@ def wrap_torch_function(dispatcher: Callable):
     ...     return a + 0
     """
 
-    def inner(func):
+    def inner(func: Callable[_P, _R]) -> Callable[_P, _R]:
         @functools.wraps(func)
-        def wrapped(*args, **kwargs):
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             relevant_args = dispatcher(*args, **kwargs)
             if has_torch_function(relevant_args):
-                return handle_torch_function(wrapped, relevant_args, *args, **kwargs)
+                return handle_torch_function(
+                    cast(Callable[_P, _R], wrapped), relevant_args, *args, **kwargs
+                )
 
             return func(*args, **kwargs)
 
-        return wrapped
+        return cast(Callable[_P, _R], wrapped)
 
     return inner
 
@@ -1718,11 +1722,11 @@ def _get_overloaded_args(
 
 
 def handle_torch_function(
-    public_api: Callable,
+    public_api: Callable[_P, _R],
     relevant_args: Iterable[Any],
-    *args,
-    **kwargs,
-) -> Any:
+    *args: _P.args,
+    **kwargs: _P.kwargs,
+) -> _R:
     """Implement a function with checks for ``__torch_function__`` overrides.
 
     See torch::autograd::handle_torch_function for the equivalent of this

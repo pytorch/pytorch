@@ -1527,6 +1527,28 @@ class GraphModule(torch.nn.Module):
             "Expected control_deps nodes in backward graph for stream synchronization",
         )
 
+    def test_sync_dealloc_has_fake_impl(self):
+        """Test that sync_dealloc has a registered fake impl.
+
+        Without a fake impl, Inductor's backward compilation crashes when the
+        backward graph contains cross-stream sync_dealloc ops.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            t = torch.randn(4)
+            # Should not raise "no fake impl registered"
+            torch.ops.streams.sync_dealloc.default(0, 1, t)
+
+    def test_record_stream_has_fake_impl(self):
+        """Test that record_stream's fake impl has the correct signature."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            t = torch.randn(4)
+            # Should not raise due to signature mismatch
+            torch.ops.streams.record_stream.default(t, 0)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

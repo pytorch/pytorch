@@ -1337,14 +1337,20 @@ PyTreeSpec: TypeAlias = TreeSpec
     "use `isinstance(treespec, TreeSpec) and treespec.is_leaf()` instead.",
     category=FutureWarning,
 )
-@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False, slots=True)
+@dataclasses.dataclass(init=False, frozen=True, eq=False, repr=False, slots=True)
 class LeafSpec(TreeSpec):
     type: Any = dataclasses.field(default=None, init=False)
     _context: Context = dataclasses.field(default=None, init=False)
     _children: list[Self] = dataclasses.field(default_factory=list, init=False)
 
-    def __post_init__(self) -> None:
-        # Override `__post_init__` for `num_leaves` derivation.
+    def __init__(self) -> None:
+        # On Python 3.10.0, the dataclass-generated __init__ for frozen+slots
+        # dataclasses doesn't populate init=False fields with simple defaults,
+        # causing copy.deepcopy to fail with AttributeError. Avoid the bug by
+        # providing a custom __init__ (init=False above) instead.
+        object.__setattr__(self, "type", None)
+        object.__setattr__(self, "_context", None)
+        object.__setattr__(self, "_children", [])
         object.__setattr__(self, "num_nodes", 1)
         object.__setattr__(self, "num_leaves", 1)
         object.__setattr__(self, "num_children", 0)

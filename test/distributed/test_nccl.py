@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 
 import torch
@@ -513,6 +514,10 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_but_pass_in_sandcastle_if(
+        os.environ.get("NCCL_NVLS_ENABLE", "1") == "0",
+        "NCCL_NVLS_ENABLE=0",
+    )
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version(
         (2, 29), "NCCL Symmetric Memory multicast support from nccl 2.29"

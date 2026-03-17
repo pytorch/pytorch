@@ -214,6 +214,10 @@ def _codegen_subclass_wrapper_source(
             )
             _codegen_unwrap_subclass(state, meta, inp_var, indent=1)
 
+    # Pass through any trailing args not covered by inp_metas
+    # (e.g. rng seed/offset added by FunctionalizedRngRuntimeWrapper).
+    num_inp_metas = len(inp_metas)
+    state.emit(f"unwrapped_args.extend(args[{num_inp_metas}:])")
     state.emit("args.clear()")
 
     # --- Call compiled function ---
