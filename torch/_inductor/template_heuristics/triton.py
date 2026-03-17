@@ -1802,6 +1802,10 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
 
     def __init__(self) -> None:
         super().__init__()
+        self.mm_configs = self.mm_configs + [
+            GemmConfig(32, 64, 128, 2, 2),
+            GemmConfig(64, 64, 32, 2, 8),
+        ]
         self.xpu_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 1, 16),
             (torch.float32, 128): FlexConfig(128, 32, 1, 16),
