@@ -64,7 +64,7 @@ RUN yum -y install epel-release && \
       libxml2-devel \
       openssl-devel \
       valgrind
-  
+
 
 # Ensure the correct Python version is used
 ENV PATH=/opt/python/cp312-cp312/bin:$PATH
@@ -107,7 +107,7 @@ RUN pip-3.12 install typing_extensions
 # Install required Python packages
 RUN pip install --upgrade pip
 RUN pip install pyyaml setuptools
- 
+
 ADD ./common/patch_libstdc.sh patch_libstdc.sh
 RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
 

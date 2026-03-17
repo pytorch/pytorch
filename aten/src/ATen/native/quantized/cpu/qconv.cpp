@@ -1626,7 +1626,7 @@ static at::Tensor _quantized_convolution_onednn(
     kSpatialDim, "D convolution.");
   bool is_fp8 = weight.scalar_type() == c10::ScalarType::Float8_e4m3fn;
 
-#if defined(__x86_64__) || defined(_M_X64)  
+#if defined(__x86_64__) || defined(_M_X64)
   #ifdef ONEDNN_FP8_QCONV_SUPPORTED
     if (is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
   #else
