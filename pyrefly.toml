@@ -39,11 +39,13 @@ project-excludes = [
   "torch/_appdirs.py",
   "torch/multiprocessing/pool.py",
   "torch/overrides.py",
-  "torch/_native/ops/**",
   "*/__pycache__/**",
   "*/.*",
   "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
   "torch/_inductor/kernel/vendored_templates/cutedsl/dense_blockscaled_gemm_persistent.py",
+  # CuTe DSL code; Pyrefly cannot understand const_expr compile-time branching
+  "torch/_native/ops/norm/_cute_utils.py",
+  "torch/_native/ops/norm/_rmsnorm_kernels.py",
 ]
 ignore-missing-imports = [
     # XPU memory symbols not present for builds without XPU support
