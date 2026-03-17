@@ -148,6 +148,22 @@ else:
         """
         return getattr(torch, device_type, None)
 
+    def _get_nccl_device(
+        backend: Optional[str] = None,
+        fallback_backend: Optional[str] = None,
+    ) -> Optional[torch.device]:
+        """Get current device for NCCL process group initialization."""
+        effective_backend = backend if backend is not None else fallback_backend
+        if effective_backend != "nccl":
+            return None
+
+        for device_type in ["cuda", "xpu", "hpu"]:
+            device_handle = _get_device_handle(device_type)
+            if device_handle and device_handle.is_initialized():
+                return torch.device(device_type, device_handle.current_device())
+
+        return None
+
     class DeviceMesh:
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
@@ -517,15 +533,8 @@ else:
                 # Otherwise, create new pg.
                 ranks = list(range(get_world_size()))
                 if torch.cuda.is_available() and get_backend(default_group) == "gloo":
-                    # Get current device_id for proper initialization
-                    device_id_arg = None
-                    effective_backend = backend if backend is not None else "nccl"
-                    if effective_backend == "nccl":
-                        for device_type in ["cuda", "xpu", "hpu"]:
-                            device_handle = _get_device_handle(device_type)
-                            if device_handle and device_handle.is_initialized():
-                                device_id_arg = torch.device(device_type, device_handle.current_device())
-                                break
+                    # Get device for NCCL initialization
+                    device_id_arg = _get_nccl_device(backend, "nccl")
                     dim_group = new_group(
                         backend=backend,
                         ranks=ranks,
@@ -572,17 +581,8 @@ else:
             # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
             # along with appending information to the `dim_group_names` list whenever necessary.
             pg_name = None
-
-            # Get current device_id to pass to new_group for proper NCCL initialization
-            device_id_to_pass = None
-            effective_backend = backend if backend is not None else "nccl"
-            if effective_backend == "nccl":
-                # Try to get the current device from any available accelerator
-                for device_type in ["cuda", "xpu", "hpu"]:
-                    device_handle = _get_device_handle(device_type)
-                    if device_handle and device_handle.is_initialized():
-                        device_id_to_pass = torch.device(device_type, device_handle.current_device())
-                        break
+            # Get device for NCCL initialization
+            device_id_to_pass = _get_nccl_device(backend, "nccl")
 
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
