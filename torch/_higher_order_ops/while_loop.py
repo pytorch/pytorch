@@ -83,12 +83,14 @@ class WhileLoopOp(HigherOrderOperator):
 
         cond_gm: torch.fx.GraphModule = (
             cond_fn
-            if isinstance(cond_fn, torch.fx.GraphModule) and not _needs_rematerialization(cond_fn)
+            if isinstance(cond_fn, torch.fx.GraphModule)
+            and not _needs_rematerialization(cond_fn)
             else materialize_as_graph(cond_fn, all_inputs)
         )
         body_gm: torch.fx.GraphModule = (
             body_fn
-            if isinstance(body_fn, torch.fx.GraphModule) and not _needs_rematerialization(body_fn)
+            if isinstance(body_fn, torch.fx.GraphModule)
+            and not _needs_rematerialization(body_fn)
             else materialize_as_graph(body_fn, all_inputs)
         )
 
@@ -270,6 +272,8 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 def while_loop_dense(
     cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
+    from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+
     carried_vals = carried_inputs
 
     def _validate_cond_output(pred):
@@ -306,6 +310,11 @@ def while_loop_dense(
             )
 
     outputs: list[list[torch.Tensor]] = [[] for _ in carried_vals]
+    # During make_fx tracing, inputs may contain uninitialized data (from
+    # torch.empty_strided in materialize_as_graph), which can cause infinite
+    # loops. We only need one body iteration to determine output metadata,
+    # so bail out early.
+    is_tracing = _CURRENT_MAKE_FX_TRACER is not None
 
     while should_loop:
         out = body_fn(*carried_vals, *additional_inputs)
@@ -320,6 +329,8 @@ def while_loop_dense(
                 f"body_fn should return the same number of elements as carried_inputs, got {len(out)} vs {len(carried_inputs)}"
             )
         carried_vals = out
+        if is_tracing:
+            break
 
         should_loop = cond_fn(*carried_vals, *additional_inputs)
 
