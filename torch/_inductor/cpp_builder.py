@@ -1063,7 +1063,10 @@ class CppOptions(BuildOptionsBase):
 
 
 def _get_torch_cpp_wrapper_definition() -> list[str]:
-    return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    defs = ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    if config.cpp_cache_precompile_headers:
+        defs.append("TORCH_INDUCTOR_PRECOMPILE_HEADERS")
+    return defs
 
 
 def _use_custom_generated_macros() -> list[str]:
@@ -1078,6 +1081,11 @@ def _use_fb_internal_macros() -> list[str]:
                 "C10_USE_MINIMAL_GLOG",
                 "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             ]
+            if platform.machine() == "x86_64":
+                fb_internal_macros += [
+                    "ATEN_MKL_ENABLED_FBCODE=1",
+                    "ATEN_MKLDNN_ENABLED_FBCODE=1",
+                ]
             return fb_internal_macros
         else:
             return []
@@ -2098,7 +2106,7 @@ class CppBuilder:
         self,
     ) -> None:
         with dynamo_timed("compile_file"):
-            command = self.get_command_line().split()
+            command = shlex.split(self.get_command_line())
             try:
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
@@ -2112,9 +2120,14 @@ class CppBuilder:
                         shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))
                     dest_include_path = os.path.join(tmp_dir, "include")
                     shutil.copytree(torch_includes_path, dest_include_path)
-                    # Run the build
+                    # Run the build, raising RuntimeError on failure instead of
+                    # SkipFrame so compilation errors propagate rather than
+                    # silently falling back to eager execution.
                     tmp_output_path = _run_build_command(
-                        command, tmp_dir, os.path.basename(output_path)
+                        command,
+                        tmp_dir,
+                        os.path.basename(output_path),
+                        exception_class=RuntimeError,
                     )
                     # Copy output from the build
                     if os.path.exists(output_path):
@@ -2125,8 +2138,7 @@ class CppBuilder:
                     elif output_path.endswith(".so"):
                         os.chmod(output_path, 0o755)
             except subprocess.CalledProcessError as e:
-                output = e.output.decode("utf-8")
-                raise exc.CppCompileError(command, output) from e
+                raise exc.CppCompileError(command, e.output.decode("utf-8")) from e
 
     def build(self) -> None:
         """

@@ -4312,9 +4312,19 @@ Tensor linalg_det_backward(
     const Tensor& LU,
     const Tensor& pivots) {
   at::NoTF32Guard disable_tf32;
-  // A.numel() == 0 necessary for the singular case
-  if (!grad.defined() || A.sym_numel() == 0) {
+  if (!grad.defined()) {
     return {};
+  }
+  if (A.sym_numel() == 0) {
+    return at::zeros_like(A);
+  }
+
+  // Special case handling for 1 x 1 matrix, to ensure mathematically correct.
+  // d(det)/dA = 1, so gradient = grad * ones_like(A)
+  // See #80761
+  if (A.sym_size(-2) == 1 && A.sym_size(-1) == 1) {
+    // For batched 1x1 matrices, broadcast grad to match A's shape
+    return grad.unsqueeze(-1).unsqueeze(-1).expand_as(A);
   }
 
   // The gradient G is the matrix solving

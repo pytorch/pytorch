@@ -1918,7 +1918,7 @@ class DictItemsVariable(DictViewVariable):
         return False
 
 
-kV = Union[ConstDictVariable._HashableTracker, str]
+kV = ConstDictVariable._HashableTracker | str
 
 
 class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
@@ -2042,7 +2042,7 @@ class DunderDictVariable(ConstDictVariable):
             return self.getitem(name)
         return super().getitem_const(tx, arg)
 
-    def maybe_getitem_const(self, arg: VariableTracker) -> Optional[VariableTracker]:
+    def maybe_getitem_const(self, arg: VariableTracker) -> VariableTracker | None:
         name = arg.as_python_constant()
         if self.contains(name):
             return self.getitem(name)

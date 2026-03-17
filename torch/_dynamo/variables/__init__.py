@@ -81,7 +81,7 @@ from .functions import (
     SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
-    TritonSetAllocatorSkipVariable,
+    TritonSetAllocatorVariable,
     UserFunctionVariable,
     UserMethodVariable,
     WrapperUserFunctionVariable,

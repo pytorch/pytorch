@@ -26,7 +26,7 @@ import torch._logging
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
-from torch._prims_common import is_integer_dtype
+from torch._prims_common import is_integer_dtype, type_to_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import (
@@ -1018,6 +1018,22 @@ def low_precision_fp_var(var: CSEVariable | Any) -> bool:
     return low_precision_fp(dtype) if isinstance(dtype, torch.dtype) else False
 
 
+def triton_arg_dtype(arg: Any) -> torch.dtype | None:
+    if isinstance(arg, CSEVariable):
+        return arg.dtype
+    if isinstance(arg, torch._prims_common.Number):
+        return type_to_dtype(type(arg))
+    return None
+
+
+def needs_upcast_to_float32(arg: Any) -> bool:
+    return (
+        not config.triton.codegen_upcast_to_fp32
+        and isinstance(arg, CSEVariable)
+        and arg.dtype in (torch.float16, torch.bfloat16)
+    )
+
+
 class TritonCSEVariable(CSEVariable):
     def __init__(
         self,
@@ -1058,15 +1074,8 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
     This decorates tl.math/libdevice codegen functions.
     """
 
-    def needs_upcast(var) -> bool:
-        return (
-            not config.triton.codegen_upcast_to_fp32
-            and isinstance(var, CSEVariable)
-            and var.dtype in (torch.float16, torch.bfloat16)
-        )
-
     def maybe_upcast_arg(var) -> str:
-        upcast_string = ".to(tl.float32)" if needs_upcast(var) else ""
+        upcast_string = ".to(tl.float32)" if needs_upcast_to_float32(var) else ""
         return f"{var}{upcast_string}"
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -1081,7 +1090,8 @@ def maybe_upcast_float32(convert_output: bool = True) -> Callable[[_T], _T]:
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
             any_needs_upcast = convert_output and any(
-                needs_upcast(var) for var in itertools.chain(args, kwargs.values())
+                needs_upcast_to_float32(var)
+                for var in itertools.chain(args, kwargs.values())
             )
             result_dtype = (
                 None
@@ -1210,6 +1220,14 @@ class TritonOverrides(OpOverrides):
     @classmethod
     def constant(cls, value, dtype):
         return cls._shaped_constant(value, dtype, shape=[])
+
+    @classmethod
+    def _cast_libdevice_arg(cls, arg, dtype: torch.dtype) -> str:
+        if isinstance(arg, torch._prims_common.Number):
+            return cls.constant(arg, dtype)
+        if triton_arg_dtype(arg) == dtype:
+            return f"{arg}"
+        return f"({arg}).to({triton_type(dtype)})"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -1763,10 +1781,40 @@ class TritonOverrides(OpOverrides):
     def fmod(a, b):
         return f"libdevice.fmod({a}, {b})"
 
-    @staticmethod
-    @maybe_upcast_float32()
-    def pow(a, b):
-        return f"libdevice.pow({a}, {b})"
+    @classmethod
+    def pow(cls, a, b):
+        result_dtype = get_dtype_handler().pow(a, b)
+        if result_dtype is not None and is_integer_dtype(result_dtype):
+            base = cls._cast_libdevice_arg(a, result_dtype)
+            exponent = (
+                cls.constant(b, torch.int64)
+                if isinstance(b, torch._prims_common.Number)
+                else f"{b}"
+            )
+            return f"triton_helpers.pow_integer({base}, {exponent})"
+
+        any_needs_upcast = needs_upcast_to_float32(a) or needs_upcast_to_float32(b)
+        pow_dtype = result_dtype
+        if pow_dtype not in (torch.float32, torch.float64):
+            # libdevice.pow only accepts fp32/fp64. Keep low-precision floating
+            # cases on the existing fp32 path, and otherwise fall back to fp64
+            # for symbolic integer scalar pow expressions like 2 ** ks0.
+            pow_dtype = (
+                torch.float32
+                if low_precision_fp(result_dtype) or any_needs_upcast
+                else torch.float64
+            )
+
+        cast_a = cls._cast_libdevice_arg(a, pow_dtype)
+        cast_b = cls._cast_libdevice_arg(b, pow_dtype)
+        result = f"libdevice.pow({cast_a}, {cast_b})"
+        if result_dtype is not None and result_dtype != pow_dtype:
+            if low_precision_fp(result_dtype):
+                if any_needs_upcast:
+                    result = f"{result}.to({triton_type(result_dtype)})"
+            else:
+                result = f"{result}.to({triton_type(result_dtype)})"
+        return result
 
     @staticmethod
     @maybe_upcast_float32()
@@ -1838,6 +1886,9 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.ceil({x})"
 
 
+# Register the custom pow override after class creation so type checkers see
+# a plain callable instead of the class-body staticmethod descriptor.
+OpDtypeSupport.register_upcast(TritonOverrides.pow, True)
 TritonOverrides._initialize_pointwise_overrides("triton")
 
 
