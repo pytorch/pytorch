@@ -3681,7 +3681,7 @@ add_docstr_all(
     r"""
 norm(p=2, dim=None, keepdim=False) -> Tensor
 
-See :func:`torch.norm`
+See :func:`torch.norm`. Note: `torch.norm` is deprecated, use :func:`torch.linalg.norm` instead.
 """,
 )
 
