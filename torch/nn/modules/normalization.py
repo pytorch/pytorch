@@ -231,8 +231,8 @@ class LayerNorm(Module):
 
     def extra_repr(self) -> str:
         return (
-            "{normalized_shape}, eps={eps}, "
-            "elementwise_affine={elementwise_affine}".format(**self.__dict__)
+            "{normalized_shape}, eps={eps}, elementwise_affine={elementwise_affine}, "
+            "bias={use_bias}".format(**self.__dict__, use_bias=self.bias is not None)
         )
 
 
@@ -334,8 +334,9 @@ class GroupNorm(Module):
         return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
 
     def extra_repr(self) -> str:
-        return "{num_groups}, {num_channels}, eps={eps}, affine={affine}".format(
-            **self.__dict__
+        return (
+            "{num_groups}, {num_channels}, eps={eps}, affine={affine}, "
+            "bias={use_bias}".format(**self.__dict__, use_bias=self.bias is not None)
         )
 
 

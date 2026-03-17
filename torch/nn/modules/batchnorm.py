@@ -109,7 +109,9 @@ class _NormBase(Module):
     def extra_repr(self):
         return (
             "{num_features}, eps={eps}, momentum={momentum}, affine={affine}, "
-            "track_running_stats={track_running_stats}".format(**self.__dict__)
+            "bias={use_bias}, track_running_stats={track_running_stats}".format(
+                **self.__dict__, use_bias=self.bias is not None
+            )
         )
 
     def _load_from_state_dict(
