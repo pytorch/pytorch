@@ -2604,6 +2604,7 @@ def miopen_batch_norm_backward(
         [True, True, True],
     )
 
+
 @register_decomposition(aten.hipdnn_batch_norm_backward)
 @out_wrapper("out0", "out1", "out2")
 def hipdnn_batch_norm_backward(
