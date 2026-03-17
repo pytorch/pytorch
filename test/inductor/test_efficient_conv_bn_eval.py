@@ -18,15 +18,12 @@ from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import tf32_on_and_off
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
 
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
-
-from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
-    copy_tests,
-)
 
 
 class ConvOp(nn.Module):
@@ -98,7 +95,7 @@ class EfficientConvBNEvalTemplate(TestCase):
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     @functorch_config.patch({"enable_autograd_cache": False})
-    def test_basic(self):
+    def test_basic(self, device):
         def test_conv_bn_eval(
             test_class, use_bias, module, sync_bn, decompose_nn_module
         ):
@@ -112,7 +109,7 @@ class EfficientConvBNEvalTemplate(TestCase):
                 use_bias,
                 3,
                 32,
-                self.device,
+                device,
                 **kwargs,
             ).eval()
             # Copy module to test backward
@@ -135,7 +132,7 @@ class EfficientConvBNEvalTemplate(TestCase):
                 inps += [spatial_d] * 2
             if module[0] is nn.Conv3d or module[0] is nn.ConvTranspose3d:
                 inps += [spatial_d] * 3
-            inp = torch.rand(inps).to(self.device)
+            inp = torch.rand(inps).to(device)
 
             if decompose_nn_module:
                 with enable_python_dispatcher():
@@ -203,21 +200,7 @@ class EfficientConvBNEvalTemplate(TestCase):
             )
 
 
-if HAS_CPU and not torch.backends.mps.is_available():
-
-    class EfficientConvBNEvalCpuTests(TestCase):
-        device = "cpu"
-
-    copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalCpuTests, "cpu")
-
-if HAS_GPU:
-
-    class EfficientConvBNEvalGpuTests(TestCase):
-        device = GPU_TYPE
-
-    copy_tests(EfficientConvBNEvalTemplate, EfficientConvBNEvalGpuTests, GPU_TYPE)
-
-del EfficientConvBNEvalTemplate
+instantiate_device_type_tests(EfficientConvBNEvalTemplate, globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

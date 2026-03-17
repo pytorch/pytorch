@@ -27,6 +27,7 @@ from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import (
@@ -37,12 +38,8 @@ from torch.testing._internal.triton_utils import (
 
 try:
     from .test_aot_inductor_utils import AOTIRunnerUtil
-    from .test_torchinductor import copy_tests
 except ImportError:
-    from test_aot_inductor_utils import AOTIRunnerUtil
-    from test_torchinductor import (
-        copy_tests,  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
-    )
+    from test_aot_inductor_utils import AOTIRunnerUtil  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
 
 
 trace_log = logging.getLogger("torch.__trace")
@@ -824,8 +821,8 @@ class TestProvenanceTracingStackTraces(TestCase):
             self.assertTrue("aoti_torch_cpu_convolution" in keys)
 
 
-class ProvenanceTracingKernelContextTemplate:
-    def test_jit_inductor_with_flag(self):
+class ProvenanceTracingKernelContextTemplate(TestCase):
+    def test_jit_inductor_with_flag(self, device):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -842,11 +839,11 @@ class ProvenanceTracingKernelContextTemplate:
                 z = torch.nn.functional.gelu(y)
                 return x, z
 
-        model = Model().to(self.device)
-        x = torch.randn(8, 10).to(self.device)
-        a = torch.randn(10, 20).to(self.device)
-        b = torch.randn(20, 30).to(self.device)
-        c = torch.randn(10, 30).to(self.device)
+        model = Model().to(device)
+        x = torch.randn(8, 10).to(device)
+        a = torch.randn(10, 20).to(device)
+        b = torch.randn(20, 30).to(device)
+        c = torch.randn(10, 30).to(device)
         example_inputs = (x, a, b, c)
 
         with config.patch(
@@ -857,7 +854,7 @@ class ProvenanceTracingKernelContextTemplate:
             torch.compile(model)(*example_inputs)
 
     @unittest.skipIf(sys.platform == "darwin", "Different kernel names on MacOS")
-    def test_aoti_python_stack_traces(self):
+    def test_aoti_python_stack_traces(self, device):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -874,12 +871,12 @@ class ProvenanceTracingKernelContextTemplate:
                 z = torch.nn.functional.gelu(y)
                 return x, z
 
-        x = torch.randn(8, 10).to(self.device)
-        a = torch.randn(10, 20).to(self.device)
-        b = torch.randn(20, 30).to(self.device)
-        c = torch.randn(10, 30).to(self.device)
+        x = torch.randn(8, 10).to(device)
+        a = torch.randn(10, 20).to(device)
+        b = torch.randn(20, 30).to(device)
+        c = torch.randn(10, 30).to(device)
         example_inputs = (x, a, b, c)
-        model = Model().to(self.device)
+        model = Model().to(device)
 
         ep = torch.export.export(model, example_inputs)
         _, code = run_and_get_cpp_code(torch._inductor.aoti_compile_and_package, ep)
@@ -902,7 +899,7 @@ class ProvenanceTracingKernelContextTemplate:
                 code
             )
 
-            if self.device == "cuda":
+            if device == "cuda":
                 FileCheck().check(
                     """KernelContextGuard _ctx("aoti_torch_cuda_mm_out", R"("""
                 ).check("AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_cuda_mm_out(").check(
@@ -930,28 +927,7 @@ class ProvenanceTracingKernelContextTemplate:
             self.assertEqual(result, model(*example_inputs))
 
 
-class TestProvenanceTracingKernelContextCpu(TestCase):
-    device = "cpu"
-
-
-copy_tests(
-    ProvenanceTracingKernelContextTemplate,
-    TestProvenanceTracingKernelContextCpu,
-    "cpu",
-)
-
-
-@unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-@unittest.skipIf(not torch.cuda.is_available(), "No CUDA")
-class TestProvenanceTracingKernelContextGpu(TestCase):
-    device = "cuda"
-
-
-copy_tests(
-    ProvenanceTracingKernelContextTemplate,
-    TestProvenanceTracingKernelContextGpu,
-    "cuda",
-)
+instantiate_device_type_tests(ProvenanceTracingKernelContextTemplate, globals())
 
 
 if __name__ == "__main__":
