@@ -9110,10 +9110,10 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                     mat2_fp4,
                     [scale1, global_scale1],
                     [ScalingType.BlockWise1x16, ScalingType.TensorWise],
-                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
                     [scale2, global_scale2],
                     [ScalingType.BlockWise1x16, ScalingType.TensorWise],
-                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
                     None,  # bias
                     torch.bfloat16,  # out_dtype
                 )
