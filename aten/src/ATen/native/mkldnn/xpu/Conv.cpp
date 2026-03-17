@@ -384,9 +384,20 @@ Tensor _convolution_out(
   at::MemoryFormat mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input.ndimension())
       : at::MemoryFormat::Contiguous;
-  auto bias = bias_r.defined() ? bias_r.contiguous() : bias_r;
-  input = input.contiguous(mfmt);
-  weight = weight.contiguous(mfmt);
+  auto make_zero_offset = [](const Tensor& t, std::optional<at::MemoryFormat> fmt) {
+    if (!t.defined()) {
+      return t;
+    }
+    auto out = fmt.has_value() ? t.contiguous(*fmt) : t.contiguous();
+    if (out.storage_offset() != 0) {
+      out = out.clone();
+    }
+    return out;
+  };
+
+  auto bias = make_zero_offset(bias_r, std::nullopt);
+  input = make_zero_offset(input, mfmt);
+  weight = make_zero_offset(weight, mfmt);
   check_shape_forward(input, weight, bias, params, true);
 
   Tensor output;
@@ -591,9 +602,16 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   auto mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
-  grad_output_ = grad_output_.contiguous(mfmt);
-  weight_ = weight_.contiguous(mfmt);
-  input_ = input_.contiguous(mfmt);
+  auto make_zero_offset = [](const Tensor& t, at::MemoryFormat fmt) {
+    auto out = t.contiguous(fmt);
+    if (out.storage_offset() != 0) {
+      out = out.clone();
+    }
+    return out;
+  };
+  grad_output_ = make_zero_offset(grad_output_, mfmt);
+  weight_ = make_zero_offset(weight_, mfmt);
+  input_ = make_zero_offset(input_, mfmt);
 
   auto opt = grad_output_.options();
   Tensor grad_input;
