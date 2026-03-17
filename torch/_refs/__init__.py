@@ -406,8 +406,7 @@ def _broadcast_shapes(*_shapes):
     for shape in shapes:
         if not isinstance(shape, Sequence):
             raise RuntimeError(
-                "Input shapes should be of type ints, a tuple of ints, or a list of ints, got ",
-                shape,
+                f"Input shapes should be of type ints, a tuple of ints, or a list of ints, got {shape}"
             )
 
     # Computes common shape

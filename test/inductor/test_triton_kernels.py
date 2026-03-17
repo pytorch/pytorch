@@ -1173,6 +1173,13 @@ def forward(self, x_1, output_1):
             else f"empty_strided_{GPU_TYPE}((10, ), (1, ), torch.float32)"
         )
         num_bufs_allocated = code.count(code_string)
+        if (
+            inductor_config.cpp_wrapper
+            and inductor_config.triton.autotune_at_compile_time is False
+        ):
+            # Lazy compile emits aoti_torch_empty_strided for scratch space
+            # allocation (global_scratch + profile_scratch) per unique kernel wrapper
+            num_bufs_allocated -= 4
         self.assertEqual(num_bufs_allocated, 2)
 
         # Check we're reusing buffers if not allocating.
@@ -1865,9 +1872,6 @@ def forward(self, x_1, output_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
-        if inductor_config.cpp_wrapper:
-            self.skipTest("cpp_wrapper doesn't support TMA")
-
         kernel = (
             add_kernel_on_device_tma_new_api
             if tma_version == "new"
@@ -1967,8 +1971,6 @@ def forward(self, x_1, output_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
-        if inductor_config.cpp_wrapper:
-            self.skipTest("cpp_wrapper doesn't support TMA")
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
@@ -2071,8 +2073,6 @@ def forward(self, arg0_1, arg1_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
-        if inductor_config.cpp_wrapper:
-            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_with_tma_1d_new_api
@@ -2130,8 +2130,6 @@ def forward(self, arg0_1, arg1_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
-        if inductor_config.cpp_wrapper and backend == "inductor":
-            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_with_tma_1d_new_api
@@ -2198,8 +2196,6 @@ def forward(self, arg0_1, arg1_1):
             self.skipTest("requires triton.tools.tensor_descriptor TMA support")
         if tma_version == "old" and not has_triton_experimental_host_tma():
             self.skipTest("requires triton.tools.experimental_descriptor TMA support")
-        if inductor_config.cpp_wrapper:
-            self.skipTest("cpp_wrapper doesn't support TMA")
 
         kernel = (
             add_kernel_with_tma_1d_new_api
@@ -2248,9 +2244,53 @@ def forward(self, arg0_1, arg1_1):
 
         # 2 calls: one for two inputs (dedupped), one for the output
         if tma_version == "new":
-            self.assertEqual(code.count("TensorDescriptor.from_tensor("), 2)
+            if (
+                not inductor_config.cpp_wrapper
+                or inductor_config.triton.autotune_at_compile_time
+            ):
+                # Lazy kernel compilation implicitly calls TensorDescriptor.from_tensor
+                # when calling run_triton_kernel_with_autotune
+                self.assertEqual(code.count("TensorDescriptor.from_tensor("), 2)
         else:
             self.assertEqual(code.count("create_1d_tma_descriptor("), 2)
+
+    @requires_gpu
+    def test_wrap_tma_args_skips_constexpr(self):
+        if not has_triton_tensor_descriptor_host_tma():
+            self.skipTest("requires triton.tools.tensor_descriptor TMA support")
+
+        from unittest.mock import Mock
+
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        from torch._inductor.runtime.triton_lazy_compile import _wrap_tma_args
+
+        # Simulate a signature where constexpr entries appear before TMA
+        # descriptor params. The signature includes constexpr entries but
+        # runtime args exclude them, so _wrap_tma_args must account for the
+        # index offset.
+        kernel_fn = Mock()
+        kernel_fn.triton_meta = {
+            "signature": {
+                "ADD_ALPHA": "constexpr",
+                "in_desc_ptr0": "tensordesc<fp32[256]>",
+                "in_desc_ptr1": "tensordesc<fp32[256]>",
+                "out_desc_ptr": "tensordesc<fp32[256]>",
+                "BLOCK_SIZE": "constexpr",
+            }
+        }
+
+        t0 = torch.randn(256, device=GPU_TYPE)
+        t1 = torch.randn(256, device=GPU_TYPE)
+        t2 = torch.zeros(256, device=GPU_TYPE)
+        args = [t0, t1, t2]
+
+        wrapped = _wrap_tma_args(args, kernel_fn)
+
+        self.assertEqual(len(wrapped), 3)
+        self.assertIsInstance(wrapped[0], TensorDescriptor)
+        self.assertIsInstance(wrapped[1], TensorDescriptor)
+        self.assertIsInstance(wrapped[2], TensorDescriptor)
 
     @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
@@ -4503,8 +4543,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("autotune_at_compile_time", [True, False])
     def test_triton_kernel_reset_to_zero(self, backend, autotune_at_compile_time):
-        if inductor_config.cpp_wrapper:
-            self.skipTest("cpp_wrapper to be enhanced")
         if autotune_at_compile_time and backend != "inductor":
             raise unittest.SkipTest("compile-time autotuning only exists in inductor")
 
@@ -4611,8 +4649,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by(self, backend, with_perf_model, non_strict):
-        if inductor_config.cpp_wrapper:
-            self.skipTest("cpp_wrapper to be enhanced")
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
@@ -4705,8 +4741,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by_recompile(self, backend, with_perf_model):
-        if inductor_config.cpp_wrapper:
-            self.skipTest("cpp_wrapper to be enhanced")
         """
         We want to recompile if anyone changes configs in the autotuner object
         In short if for example the following sequence of events happens:
@@ -4803,8 +4837,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     def test_triton_kernel_heuristic(
         self, backend, autotune_at_compile_time, non_strict
     ):
-        if inductor_config.cpp_wrapper:
-            self.skipTest("cpp_wrapper to be enhanced")
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"

@@ -537,7 +537,12 @@ class ConfigModule(ModuleType):
                 continue
             if self._config[key].alias is not None:
                 continue
+
+            curr_entry = self._config[key]
+            has_been_warned = curr_entry._deprecation_warned
+            curr_entry._deprecation_warned = True
             config[key] = copy.deepcopy(getattr(self, key))
+            curr_entry._deprecation_warned = has_been_warned
 
         return config
 

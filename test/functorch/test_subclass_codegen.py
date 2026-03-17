@@ -4,6 +4,7 @@ import logging
 from contextlib import contextmanager
 
 import torch
+import torch._functorch.config
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.two_tensor import TwoTensor
 
@@ -66,6 +67,7 @@ def inner_fn(args):
     assert type(_inp_0) is _expected_type_1, f'expected {_expected_type_1}, got {type(_inp_0)}'
     unwrapped_args.append(_inp_0.a)
     unwrapped_args.append(_inp_0.b)
+    unwrapped_args.extend(args[1:])
     args.clear()
     unwrapped_outs = compiled_fn(unwrapped_args)
     wrapped_outs = []
@@ -112,6 +114,7 @@ def inner_fn(args):
     _inner_3 = _inp_0.b
     unwrapped_args.append(_inner_3.a)
     unwrapped_args.append(_inner_3.b)
+    unwrapped_args.extend(args[1:])
     args.clear()
     unwrapped_outs = compiled_fn(unwrapped_args)
     wrapped_outs = []
@@ -124,6 +127,89 @@ def inner_fn(args):
     wrapped_outs.append(_out_15)
     return tuple(wrapped_outs)""",
         )
+
+    def test_trailing_args_forwarded(self):
+        """Extra trailing args (e.g. rng seed/offset) are forwarded to compiled_fn."""
+        # Build SubclassCreationMeta manually to avoid __post_init__ fake tensor check
+        from dataclasses import dataclass
+        from typing import Any
+
+        from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+        from torch._functorch._aot_autograd.subclass_codegen import (
+            _codegen_subclass_wrapper_source,
+        )
+
+        @dataclass
+        class _TestSubclassMeta:
+            flat_tensor_start_idx: int
+            arg_count: int
+            included_subclass_symints: bool
+            attrs: dict
+            outer_size: tuple
+            outer_stride: tuple
+            meta: Any
+            original_subclass: Any
+            original_subclass_type: type
+
+        inp_meta = _TestSubclassMeta(
+            flat_tensor_start_idx=0,
+            arg_count=2,
+            included_subclass_symints=True,
+            attrs={
+                "a": PlainTensorMeta(unwrapped_idx=0),
+                "b": PlainTensorMeta(unwrapped_idx=1),
+            },
+            outer_size=(4,),
+            outer_stride=(1,),
+            meta=None,
+            original_subclass=None,
+            original_subclass_type=TwoTensor,
+        )
+        out_meta = _TestSubclassMeta(
+            flat_tensor_start_idx=0,
+            arg_count=2,
+            included_subclass_symints=True,
+            attrs={
+                "a": PlainTensorMeta(unwrapped_idx=0),
+                "b": PlainTensorMeta(unwrapped_idx=1),
+            },
+            outer_size=(4,),
+            outer_stride=(1,),
+            meta=None,
+            original_subclass=None,
+            original_subclass_type=TwoTensor,
+        )
+
+        source, globals_dict = _codegen_subclass_wrapper_source(
+            inp_metas=[inp_meta],
+            out_metas=[out_meta],
+            num_fw_outs_saved_for_bw=None,
+        )
+
+        received_args = []
+
+        def mock_compiled_fn(args):
+            received_args.extend(args)
+            return [args[0] * 2, args[1] * 2]
+
+        globals_dict["compiled_fn"] = mock_compiled_fn
+        local_dict = {}
+        exec(compile(source, "<test>", "exec"), globals_dict, local_dict)  # noqa: S102
+        wrapper = local_dict["inner_fn"]
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        tt = TwoTensor(a, b)
+        seed = torch.tensor(42)
+        offset = torch.tensor(0)
+        # Simulate FunctionalizedRngRuntimeWrapper appending rng state
+        wrapper([tt, seed, offset])
+
+        self.assertEqual(len(received_args), 4)
+        self.assertEqual(received_args[0], a)
+        self.assertEqual(received_args[1], b)
+        self.assertIs(received_args[2], seed)
+        self.assertIs(received_args[3], offset)
 
 
 if __name__ == "__main__":

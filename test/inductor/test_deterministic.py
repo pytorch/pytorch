@@ -14,6 +14,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
     skipIfXpu,
 )
@@ -21,7 +22,6 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU_AND_TRITON,
     IS_BIG_GPU,
-    IS_FBCODE,
 )
 
 

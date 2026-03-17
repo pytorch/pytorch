@@ -937,8 +937,8 @@ def analyze_kernel_access(
     }
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
 
-    write_stack: list[Union[Param, Intermediate]] = []
-    read_stack: list[Union[Param, Intermediate]] = []
+    write_stack: list[Param | Intermediate] = []
+    read_stack: list[Param | Intermediate] = []
 
     ops = functions[fn_name]
     tma_stores = get_tma_stores(functions, fn_name)
@@ -998,7 +998,7 @@ def analyze_kernel_access(
                 read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
 
     def _find_arg_access_count(
-        initial_stack: list[Union[Param, Intermediate]],
+        initial_stack: list[Param | Intermediate],
         skip_loads: bool,
     ) -> dict[int, int]:
         """DFS traversal to find argument indices that are accessed (and how many times they are accessed)."""

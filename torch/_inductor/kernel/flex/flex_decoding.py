@@ -413,7 +413,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         8: create_indices_fake,
     }
 
-    buf_ACC = autotune_select_algorithm(
+    buf_ACC, _ = autotune_select_algorithm(
         "flex_decoding",
         choices,
         inputs_for_flex_decoding,

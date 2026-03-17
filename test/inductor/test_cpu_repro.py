@@ -31,6 +31,7 @@ from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    get_gcc_major_version,
     instantiate_parametrized_tests,
     IS_ARM64,
     IS_CPU_CAPABILITY_SVE256,
@@ -5173,6 +5174,10 @@ class CPUReproTests(TestCase):
                     "at::vec::VectorizedN<double,2>::loadu", 2, exactly=True
                 ).run(code)
 
+    @unittest.skipIf(
+        get_gcc_major_version() == 13,
+        "Fails under GCC 13 due to vector codegen (passes with GCC 11)",
+    )
     def test_convert_fp32_to_double_vec(self):
         def fn(x):
             return x.to(torch.double)

@@ -690,11 +690,13 @@ print(t.is_pinned())
             torch.backends.cuda.preferred_blas_library(1.0)
         # check env var override
         custom_envs = [
-            {"TORCH_BLAS_PREFER_CUBLASLT": "1"},
-            {"TORCH_BLAS_PREFER_HIPBLASLT": "1"},
+            ({"TORCH_BLAS_PREFER_CUBLASLT": "1"}, "_BlasBackend.Cublaslt"),
+            ({"TORCH_BLAS_PREFER_HIPBLASLT": "1"}, "_BlasBackend.Cublaslt"),
+            ({"TORCH_BLAS_PREFER_CUBLASLT": "0"}, "_BlasBackend.Cublas"),
+            ({"TORCH_BLAS_PREFER_HIPBLASLT": "0"}, "_BlasBackend.Cublas"),
         ]
         test_script = "import torch;print(torch.backends.cuda.preferred_blas_library())"
-        for env_config in custom_envs:
+        for env_config, expected in custom_envs:
             env = os.environ.copy()
             for key, value in env_config.items():
                 env[key] = value
@@ -703,7 +705,15 @@ print(t.is_pinned())
                 .decode("ascii")
                 .strip()
             )
-            self.assertEqual("_BlasBackend.Cublaslt", r)
+            self.assertEqual(expected, r)
+
+        # explicitly check default when no env vars are set
+        if not any(
+            os.environ.get(v)
+            for v in ("TORCH_BLAS_PREFER_CUBLASLT", "TORCH_BLAS_PREFER_HIPBLASLT")
+        ):
+            torch.backends.cuda.preferred_blas_library("default")
+            _check_default()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @serialTest()
@@ -4175,7 +4185,7 @@ print(ret)
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
-class TestCudaMallocAsync(TestCase):
+class TestCudaAllocator(TestCase):
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
@@ -5060,6 +5070,14 @@ print(value, end="")
 
     def test_allocator_fuzz(self):
         # fuzz
+        if (
+            torch.version.hip
+            and "expandable_segments:True"
+            in torch._C._accelerator_getAllocatorSettings()
+        ):
+            raise unittest.SkipTest(
+                "ROCm needs https://github.com/ROCm/rocm-systems/pull/3023"
+            )
         state = random.getstate()
         random.seed(123)
         N = 10000
@@ -6662,7 +6680,6 @@ class TestMemPool(TestCase):
             "graph_capture_record_stream_reuse:False"
         )
 
-    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
         torch.cuda.empty_cache()
@@ -8565,7 +8582,7 @@ class TestFXMemoryProfiler(TestCase):
 
 
 instantiate_parametrized_tests(TestCuda)
-instantiate_parametrized_tests(TestCudaMallocAsync)
+instantiate_parametrized_tests(TestCudaAllocator)
 instantiate_parametrized_tests(TestCompileKernel)
 instantiate_parametrized_tests(TestCachingHostAllocatorCudaGraph)
 instantiate_device_type_tests(TestCudaOptims, globals())

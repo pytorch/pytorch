@@ -2685,17 +2685,6 @@ op_db: list[OpInfo] = [
                 "test_out_warning",
                 device_type="mps",
             ),
-            # MPS: RuntimeError: svd_backward: The singular vectors in the
-            # complex case are specified up to multiplication by e^{i phi}. The
-            # specified loss function depends on this phase term, making it
-            # ill-defined.
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
         ),
     ),
     OpInfo(
