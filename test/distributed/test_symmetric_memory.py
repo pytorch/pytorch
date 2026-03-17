@@ -896,7 +896,6 @@ class AsyncTPTest(MultiProcContinuousTest):
                     f"Expected mm_output_0.stride() to be truthy, got {mm_output_0.stride()}"
                 )
 
-    # @skip_if_rocm_multiprocess  # this requires async_input_mm support
     @skipIf(
         not SM90OrLater,
         "_fused_all_gather_matmul_native currently only supports sm>=90",
@@ -952,10 +951,16 @@ class AsyncTPTest(MultiProcContinuousTest):
             )
 
         if not TEST_WITH_ROCM:
+            # CK's scheduler is a runtime struct, not a kernel template parameter,
+            # so it doesn't appear in HIP profiler symbols. Scheduler correctness
+            # on ROCm is validated by TORCH_CHECK in AsyncMM.cu + assert_close below.
             self.assertTrue(
-                any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
+                any(
+                    "PersistentAsyncInputScheduler" in event.key
+                    for event in prof.events()
+                )
             )
-
+        
         torch.testing.assert_close(ag_target, ag_baseline)
         torch.testing.assert_close(mm_target[0], mm_baseline[0])
         os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "0"
