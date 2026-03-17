@@ -575,7 +575,7 @@ else:
 
             # Get current device_id to pass to new_group for proper NCCL initialization
             device_id_to_pass = None
-            effective_backend = backend if backend is not None else get_backend(default_group)
+            effective_backend = backend if backend is not None else "nccl"
             if effective_backend == "nccl":
                 # Try to get the current device from any available accelerator
                 for device_type in ["cuda", "xpu", "hpu"]:
