@@ -20,11 +20,9 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
 )
 
 
-if torch.accelerator.is_available():
-    DEVICE_TYPE = torch.accelerator.current_accelerator().type
-else:
-    # use cuda as default device type for testing when accelerator is not available
-    DEVICE_TYPE = "cuda"
+DEVICE_TYPE = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -38,7 +36,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 class TestReshard(ShardedTensorTestBase):
     def _run_sharded_tensor_reshard(self, sharding_spec, reshard_spec, input_size):
         torch.manual_seed(0)
-        local_tensor = torch.rand(*input_size).to(torch.device(self.rank))
+        local_tensor = torch.rand(*input_size).to(self.rank)
         st = _shard_tensor(local_tensor, sharding_spec)
         st_compare = _shard_tensor(local_tensor, reshard_spec)
         st.reshard(reshard_spec)

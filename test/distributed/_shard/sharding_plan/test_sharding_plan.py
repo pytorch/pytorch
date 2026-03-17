@@ -31,11 +31,9 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-if torch.accelerator.is_available():
-    DEVICE_TYPE = torch.accelerator.current_accelerator().type
-else:
-    # use cuda as default device type for testing when accelerator is not available
-    DEVICE_TYPE = "cuda"
+DEVICE_TYPE = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
 
 
@@ -71,7 +69,7 @@ class TestShardingPlan(ShardedTensorTestBase):
             output_plan={"": rowwise_sharding_spec},
         )
 
-        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).to(torch.device(self.rank))
+        megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).to(self.rank)
 
         with self.assertRaisesRegex(
             TypeError, "Only `ShardingSpec` and `Sharder` are supported to shard"
@@ -115,7 +113,7 @@ class TestShardingPlan(ShardedTensorTestBase):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_custom_sharding_planner(self):
         megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]], rank=self.rank).to(
-            torch.device(self.rank)
+            self.rank
         )
         planner = ChunkAllShardingPlanner(device_count=TEST_GPU_NUM)
         sharding_plan = planner.build_plan(megatron_lm)
