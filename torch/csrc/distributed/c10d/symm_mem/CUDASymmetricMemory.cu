@@ -1,8 +1,8 @@
-#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -638,10 +638,10 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     LOG(INFO) << "using fabric handle to import symmetric memory handles.";
   }
 
-  auto group = resolve_process_group(group_name);
-  auto rank = group->getRank();
-  auto world_size = group->getSize();
-  auto store = group->getStore();
+  auto& group_info = c10d::symmetric_memory::get_group_info(group_name);
+  auto rank = group_info.rank;
+  auto world_size = group_info.world_size;
+  auto store = group_info.store;
 
   // Currently, IpcChannel is using a file based socket for inter-process
   // communication
