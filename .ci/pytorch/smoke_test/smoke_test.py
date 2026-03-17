@@ -223,7 +223,9 @@ def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS and extracts the cudnn version
     for the given CUDA version (e.g. "12.6").
     """
-    matrix_script = PYTORCH_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+    matrix_script = (
+        PYTORCH_ROOT / ".github" / "scripts" / "generate_binary_build_matrix.py"
+    )
     if not matrix_script.exists():
         print(f"Warning: {matrix_script} not found, skipping cuDNN version check")
         return None

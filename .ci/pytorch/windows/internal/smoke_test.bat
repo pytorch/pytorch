@@ -1,4 +1,5 @@
 set SRC_DIR=%~dp0
+set TARGET_OS=windows
 
 pushd %SRC_DIR%\..
 
