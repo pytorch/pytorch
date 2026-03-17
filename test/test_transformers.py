@@ -4665,8 +4665,9 @@ class TestSDPACudaOnly(NNTestCase):
                 out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
             with sdpa_kernel(backends=[SDPBackend.MATH]):
                 # High Precision Math Reference
-                out_ref = F.scaled_dot_product_attention(
-                    query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale)
+                with tf32_off():
+                    out_ref = F.scaled_dot_product_attention(
+                        query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
                     query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
@@ -4701,9 +4702,10 @@ class TestSDPACudaOnly(NNTestCase):
                 nt_stack.append(torch.cat(batch_stack))
             nested_dropout_mask = torch.nested.nested_tensor(nt_stack)
             # High Precision Math Reference
-            out_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref, key_ref, value_ref, dropout_p=dropout_p,
-                is_causal=is_causal, scale=scale, dropout_mask=nested_dropout_mask)[0]
+            with tf32_off():
+                out_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                    query_ref, key_ref, value_ref, dropout_p=dropout_p,
+                    is_causal=is_causal, scale=scale, dropout_mask=nested_dropout_mask)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
@@ -4712,7 +4714,8 @@ class TestSDPACudaOnly(NNTestCase):
         upstream_grad = out.detach().clone().contiguous()
 
         out.backward(upstream_grad)
-        out_ref.backward(upstream_grad.to(out_ref.dtype))
+        with tf32_off():
+            out_ref.backward(upstream_grad.to(out_ref.dtype))
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
         dropout_fudge_factor = 1.0 if dropout_p == 0.0 else 2.0
