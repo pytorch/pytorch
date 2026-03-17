@@ -981,9 +981,6 @@ class TestOperators(TestCase):
                     "masked.softmax",
                     device_type="cpu",
                 ),
-                xfail(
-                    "nanquantile", device_type="cpu"
-                ),  # vmap not implemented for at::equal.
                 xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
                 # got a batched tensor as input while the running_mean or running_var,
                 # which will be updated in place, were not batched.
@@ -1035,9 +1032,6 @@ class TestOperators(TestCase):
                 xfail("normal"),  # calls random op
                 xfail("normal", "number_mean"),  # calls random op
                 xfail("pca_lowrank"),  # calls random op
-                xfail(
-                    "quantile", device_type="cpu"
-                ),  # Batching rule not implemented for `at::equal`
                 xfail(
                     "scatter_reduce", "prod"
                 ),  # vmap (looks like you are calling item/data-dependent)
