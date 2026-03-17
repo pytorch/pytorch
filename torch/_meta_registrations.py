@@ -2609,8 +2609,7 @@ def meta_conv(
     else:
         memory_format = torch.contiguous_format
 
-    out = input_tensor.new_empty(shape_out)
-    out = out.to(memory_format=memory_format)
+    out = input_tensor.new_empty(shape_out, memory_format=memory_format)
     return out
 
 
