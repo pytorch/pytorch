@@ -12593,6 +12593,14 @@ op_db: list[OpInfo] = [
                            unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
                            device_type='cuda', dtypes=(torch.complex64,)
                        ),
+                       DecorateInfo(
+                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_inplace',
+                           device_type='xpu', dtypes=(torch.complex64,)
+                       ),
+                       DecorateInfo(
+                           unittest.expectedFailure, 'TestSparseCSR', 'test_sparse_csr_unary_out',
+                           device_type='xpu', dtypes=(torch.complex64,)
+                       ),
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(
                            unittest.expectedFailure, 'TestOutputConsistencyFullGraph', 'test_complex_output_match_opinfo_',
