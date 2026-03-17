@@ -553,7 +553,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable.",
                     ],
                 )
-
             var = tx.output.side_effects.track_new_user_defined_object(
                 SourcelessBuilder.create(tx, object),
                 self,
@@ -893,7 +892,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
                     default_kwargs[field.name] = var_tracker
             kwargs.update(default_kwargs)
-
             var = tx.output.side_effects.track_new_user_defined_object(
                 SourcelessBuilder.create(tx, object),
                 self,
@@ -1018,7 +1016,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
         elif issubclass(self.value, BaseException):
             return variables.ExceptionVariable(self.value, tuple(args), kwargs)
-        
+
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self) -> bool:
@@ -2409,11 +2407,6 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         ctor = self.python_type()
         return ctor(*args, **kwargs)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name in self.fields:
-            return self.fields[name]
-        return super().var_getattr(tx, name)
-
     def reconstruct(self, codegen: "PyCodegen") -> None:
         from dataclasses import fields
 
@@ -2496,7 +2489,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         directly_update_dict: bool = False,
     ) -> VariableTracker:
         self.fields[name.as_python_constant()] = value
-        return variables.CONSTANT_VARIABLE_NONE
+        return super().method_setattr_standard(tx, name, value, directly_update_dict)
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"

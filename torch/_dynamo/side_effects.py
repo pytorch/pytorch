@@ -836,7 +836,7 @@ class SideEffects:
                 var.source = TempLocalSource(cg.tempvars[var])
 
                 if isinstance(var, variables.FrozenDataClassVariable):
-                    for name, value in var.fields.items():
+                    for name, value in self.store_attr_mutations.get(var, {}).items():
                         cg.load_import_from("builtins", "object")
                         cg.load_method("__setattr__")
                         cg(var.source)  # type: ignore[attr-defined]
@@ -1017,6 +1017,12 @@ class SideEffects:
 
         suffixes = []
         for var in self._get_modified_vars():
+            # These frozen attribute initializations are handled in codegen_save_tempvars
+            # and don't need to be reset in the suffix.
+            if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
+                var, variables.FrozenDataClassVariable
+            ):
+                continue
             # When replay_side_effects=False, only update variables with TempLocalSource
             if not config.replay_side_effects and not isinstance(
                 var.source, TempLocalSource
