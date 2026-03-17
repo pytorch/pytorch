@@ -939,14 +939,15 @@ class ShardingPropagator:
         expected_input_schema = list(schema.args_schema)
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
-        expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
+        local_shape, _ = compute_local_shape_and_global_offset(
             out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )
+        expected_input_schema[shape_idx] = local_shape
 
         # adjust the stride arg for aten.new_empty_strided.default
         if stride_idx:
             expected_input_schema[stride_idx] = compute_local_stride(
-                out_tensor_meta.stride, spec.mesh, spec.placements
+                out_tensor_meta.stride, local_shape
             )
 
         return OpSchema(schema.op, tuple(expected_input_schema), schema.kwargs_schema)

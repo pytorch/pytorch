@@ -15,7 +15,6 @@ import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
-from torch.fx import symbolic_trace
 from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._import_utils import import_dill
 
@@ -866,11 +865,63 @@ class TestNodeStateSerialization(TestCase):
                 y = torch.neg(x)
                 return y + 1
 
-        gm = symbolic_trace(M())
+        gm = torch.fx.symbolic_trace(M())
         node = next(n for n in gm.graph.nodes if n.op == "call_function")
         node.type = torch.Tensor
         state = node.__getstate__()
         self.assertIs(state["type"], torch.Tensor)
+
+
+@unittest.skipUnless(HAS_DILL, "dill not available")
+class TestIgnoreRawNode(TestCase):
+    """Tests for the ignore_raw_node option in GraphPickler.Options."""
+
+    def setUp(self):
+        super().setUp()
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import GraphPickler, Options
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        self.GraphPickler = GraphPickler
+        self.Options = Options
+        self.fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    def _make_graph_with_raw_node_in_meta(self):
+        """Return a graph module whose first call_function node has a raw
+        torch.fx.Node stored in its metadata under the key 'raw_ref'."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(M())
+        call_node = next((n for n in gm.graph.nodes if n.op == "call_function"), None)
+        self.assertIsNotNone(call_node)
+        # Store a raw Node reference in meta – this is the problematic case.
+        call_node.meta["raw_ref"] = call_node
+        return gm
+
+    def test_raw_node_in_meta_raises_by_default(self):
+        """Pickling should raise AssertionError when a raw Node is in metadata
+        and ignore_raw_node is False (the default)."""
+        gm = self._make_graph_with_raw_node_in_meta()
+        with self.assertRaises(AssertionError) as cm:
+            self.GraphPickler.dumps(gm)
+        self.assertIn("raw Node", str(cm.exception))
+
+    def test_raw_node_in_meta_with_ignore_raw_node(self):
+        """With ignore_raw_node=True, pickling should succeed and the raw Node
+        should be replaced with None after round-trip deserialization."""
+        gm = self._make_graph_with_raw_node_in_meta()
+        options = self.Options(ignore_raw_node=True)
+        data = self.GraphPickler.dumps(gm, options)
+        restored = self.GraphPickler.loads(data, self.fake_mode)
+        self.assertIsInstance(restored, torch.fx.GraphModule)
+        call_node = next(
+            (n for n in restored.graph.nodes if n.op == "call_function"), None
+        )
+        self.assertIsNotNone(call_node)
+        self.assertIsNone(call_node.meta.get("raw_ref"))
 
 
 if __name__ == "__main__":

@@ -151,8 +151,12 @@ class DefaultSavePlanner(SavePlanner):
             merged_mappings = dict(ChainMap(*planner_data_dict))
             metadata = dataclasses.replace(metadata, planner_data=merged_mappings)
 
-        if not _validate_global_plan(global_plan, metadata):
-            raise ValueError("Failed to validate global plan")
+        validation_errors = _validate_global_plan(global_plan, metadata)
+        if validation_errors:
+            error_summary = "; ".join(validation_errors)
+            if len(error_summary) > 500:
+                error_summary = error_summary[:500] + "... (truncated)"
+            raise ValueError(f"Failed to validate global plan: {error_summary}")
 
         return global_plan, metadata
 
@@ -644,8 +648,9 @@ def _check_box_bounds(
     return True
 
 
-def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bool:
-    all_good = True
+def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> list[str]:
+    """Validate the global plan and return a list of error messages (empty if valid)."""
+    errors: list[str] = []
     for key, value in metadata.state_dict_metadata.items():
         if isinstance(value, BytesStorageMetadata):
             continue
@@ -656,16 +661,12 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
         for chunk in chunks:
             # Compute the volume
             if not _check_box_bounds(value.size, chunk):
-                logger.warning(
-                    """
-                        key:%s has out of bounds chunk:
-                        tensor-size:%s chunk: %s
-                    """,
-                    key,
-                    value.size,
-                    chunk,
+                msg = (
+                    f"key:{key} has out of bounds chunk: "
+                    f"tensor-size:{value.size} chunk: {chunk}"
                 )
-                all_good = False
+                logger.warning(msg)
+                errors.append(msg)
             chunks_volume += math.prod(chunk.sizes)
 
         if len(chunks) > 1:
@@ -691,28 +692,20 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
                 for _, other_idx in active:
                     other = chunks[other_idx]
                     if _check_box_overlap(current, other):
-                        logger.warning(
-                            "key:%s has overlapping chunks: %s %s",
-                            key,
-                            current,
-                            other,
-                        )
-                        all_good = False
+                        msg = f"key:{key} has overlapping chunks: {current} {other}"
+                        logger.warning(msg)
+                        errors.append(msg)
 
                 insort(active, (end, idx))
 
         # Check whether combined chunk cover the whole tensor
         tensor_volume = math.prod(value.size)
         if len(global_plan) > 1 and chunks_volume != tensor_volume:
-            logger.warning(
-                """
-                    key:%s invalid fill tensor-volume:
-                    %s chunks-volume: %s
-                """,
-                key,
-                tensor_volume,
-                chunks_volume,
+            msg = (
+                f"key:{key} invalid fill tensor-volume: "
+                f"{tensor_volume} chunks-volume: {chunks_volume}"
             )
-            all_good = False
+            logger.warning(msg)
+            errors.append(msg)
 
-    return all_good
+    return errors

@@ -211,7 +211,11 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
     @classmethod
     def is_matching_cls(cls, user_cls: type) -> bool:
-        return issubclass(user_cls, torch.ScriptObject) or is_opaque_type(user_cls)
+        return (
+            issubclass(user_cls, torch.ScriptObject)
+            or is_opaque_type(user_cls)
+            or issubclass(user_cls, FakeScriptObject)
+        )
 
     @staticmethod
     def create(

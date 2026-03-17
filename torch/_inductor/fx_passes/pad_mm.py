@@ -375,11 +375,15 @@ def get_non_view_def(node: torch.fx.Node) -> torch.fx.Node:
 
 
 def should_exclude_padding_time(match: Match, arg_name: str) -> bool:
+    from torch._prims_common import is_contiguous_or_false
+
     node_def = get_non_view_def(match.kwargs[arg_name])
 
     # constant padding converts tensors to contiguous so even if the input tensor
     # can be planned layout transform is not free. TODO - way to pad and preserve layout ?
-    if not fetch_fake_tensors(match, (arg_name,))[0].is_contiguous():
+    # Use is_contiguous_or_false to avoid guarding on data-dependent expressions
+    # with unbacked symints - returns False instead of raising an error.
+    if not is_contiguous_or_false(fetch_fake_tensors(match, (arg_name,))[0]):
         return False
 
     # TODO - see issue https://github.com/pytorch/pytorch/issues/128889

@@ -1,5 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Histogram.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -33,7 +33,6 @@ void histogramdd_kernel_impl(Tensor& hist_output,
                              const TensorList& bin_edges,
                              const Tensor& input,
                              const std::optional<Tensor>& weight) {
-  TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
   constexpr uint8_t bin_selection_algorithm = algorithm;
@@ -167,9 +166,15 @@ static void histogramdd_out_mps_template(const Tensor& self,
     bin_edges_contig[dim] = bin_edges[dim].contiguous();
   }
 
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "histogram_mps", [&]() {
-    mps::histogramdd_kernel_impl<scalar_t, bin_algorithm>(hist, bin_edges_contig, reshaped_input, reshaped_weight);
-  });
+  AT_DISPATCH_V2(self.scalar_type(),
+                 "histogram_mps",
+                 AT_WRAP([&]() {
+                   mps::histogramdd_kernel_impl<scalar_t, bin_algorithm>(
+                       hist, bin_edges_contig, reshaped_input, reshaped_weight);
+                 }),
+                 kFloat,
+                 kHalf,
+                 kBFloat16);
 
   /* Divides each bin's value by the total count/weight in all bins,
    * and by the bin's volume.
@@ -211,6 +216,7 @@ static void histogramdd_linear_kernel(const Tensor& self,
   if (local_search) {
     // histogramdd codepath: both hist and bin_edges are eventually returned as output,
     // so we'll keep them consistent
+    TORCH_CHECK(self.scalar_type() == kFloat, "histogram is only supported for float32");
     mps::histogramdd_out_mps_template<mps::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH>(
         self, weight, density, hist, bin_edges);
   } else {

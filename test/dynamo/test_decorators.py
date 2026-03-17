@@ -221,6 +221,11 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 5)
 
+    def test_allow_in_graph_deprecation_warning(self):
+        with self.assertWarnsRegex(FutureWarning, "nonstrict_trace"):
+            torch._dynamo.allow_in_graph(my_custom_function)
+        torch._dynamo.disallow_in_graph(my_custom_function)
+
     def test_allow_in_graph_no_id_reuse(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

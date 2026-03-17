@@ -313,6 +313,8 @@ def _collect_tensors_with_sources(
     Used by handle_autograd_grad to collect tensors from the outputs and inputs
     arguments for grad_fn reachability analysis.
     """
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
     from .lazy import LazyVariableTracker
     from .lists import BaseListVariable
     from .tensor import TensorVariable
@@ -320,7 +322,27 @@ def _collect_tensors_with_sources(
     results: list[tuple[torch.Tensor, str | None]] = []
     if isinstance(var, TensorVariable):
         fake_tensor = var.as_proxy().node.meta.get("example_value")
-        assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
+        assert isinstance(fake_tensor, torch.Tensor)
+        if isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor):
+            pass
+        elif is_traceable_wrapper_subclass(fake_tensor):
+            # For tensor subclasses (e.g. DTensor), verify the inner tensors
+            # are FakeTensors but keep the original subclass for grad_fn
+            # reachability analysis.
+            plain: list[object] = []
+            torch._subclasses.fake_tensor.get_plain_tensors(
+                fake_tensor,  # pyrefly: ignore[bad-argument-type]
+                out=plain,  # pyrefly: ignore[bad-argument-type]
+            )
+            assert all(
+                isinstance(t, torch._subclasses.fake_tensor.FakeTensor) for t in plain
+            ), (
+                f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"
+            )
+        else:
+            raise AssertionError(
+                f"Expected FakeTensor or subclass, got {type(fake_tensor)}"
+            )
         source_name = var.source.name if var.source else None
         results.append((fake_tensor, source_name))
     elif isinstance(var, LazyVariableTracker):
@@ -349,15 +371,15 @@ def get_overridable_functions() -> set[Callable[..., Any]]:
     from itertools import chain
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
+    from torch.utils._device import _device_constructors
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
+    funcs.update(_device_constructors())
     more: set[Callable[..., Any]] = {
-        torch.ones,
         torch.ones_like,
-        torch.zeros,
         torch.zeros_like,
-        torch.empty,
-        torch.full,
+        torch.empty_like,
+        torch.full_like,
     }
     funcs.update(more)
     return funcs
@@ -697,6 +719,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch._dynamo.eval_frame._is_in_optimized_module,
             ):
                 tx.mark_inconsistent_side_effects()
+            # Read dynamically: the cached dict always has True, but
+            # is_exporting() should only be True during torch.export.
+            if self.value is torch.compiler.is_exporting:
+                return VariableTracker.build(tx, torch.compiler._is_exporting_flag)
             return VariableTracker.build(tx, tracing_state_functions()[self.value])
 
         @register(*dispatch_key_set_functions)
@@ -1239,7 +1265,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 get_rank,
                 get_world_size,
             )
-            from torch.distributed.tensor import DTensor
 
             @register(
                 _get_group_size_by_name,
@@ -1300,66 +1325,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
                 # guard propagation via options is the best we can do.
                 return VariableTracker.build(tx, invocation_result)
-
-            @register(DTensor.from_local)
-            def handle_from_local(
-                self,
-                tx: "InstructionTranslator",
-                *args: VariableTracker,
-                **kwargs: VariableTracker,
-            ) -> VariableTracker:
-                # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
-                # and rewrite args to have only proxyable args, then insert call_function
-                placements_vt = kwargs.get("placements")
-
-                if placements_vt is None and len(args) >= 3:
-                    placements_vt = args[2]
-
-                if placements_vt is None:
-                    placements_vt = CONSTANT_VARIABLE_NONE
-                elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
-                    placements_vt = VariableTracker.build(tx, tuple).call_function(
-                        tx, [placements_vt], {}
-                    )
-
-                new_args = list(args)
-                if len(new_args) >= 3:
-                    new_args[2] = placements_vt
-                elif kwargs.get("placements") is not None:
-                    kwargs["placements"] = placements_vt
-
-                args_as_value = [x.as_python_constant() for x in new_args[1:]]
-                kwargs_as_value = {
-                    k: v.as_python_constant()
-                    for k, v in kwargs.items()
-                    if k not in ["shape", "stride"]
-                }
-
-                kwargs_to_be_proxied = {
-                    k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
-                }
-
-                def fn_with_prim_types(
-                    x: Any, shape: Any | None = None, stride: Any | None = None
-                ) -> Any:
-                    return self.value(
-                        x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
-                    )
-
-                # attach the same function name for better debugging
-                fn_with_prim_types.__name__ = "prim " + self.value.__name__
-
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        fn_with_prim_types,
-                        *proxy_args_kwargs(
-                            [args[0]],
-                            kwargs_to_be_proxied,
-                        ),
-                    ),
-                )
 
         @register(torch.nested.nested_tensor)
         def handle_nested_tensor(
@@ -1810,6 +1775,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> StreamVariable:
+            from .streams import CudaStreamVariable
+
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented(
                     gb_type="unsupported arguments to torch.accelerator.current_stream",
@@ -1827,7 +1794,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 else:
                     device = None
 
-                return tx.symbolic_stream_state.cur_stream(device)
+                stream_var = tx.symbolic_stream_state.cur_stream(device)
+                if self.value is torch.cuda.current_stream and not isinstance(
+                    stream_var, CudaStreamVariable
+                ):
+                    stream_var = CudaStreamVariable(
+                        stream_var.proxy,
+                        stream_var.value,
+                        stream_var.user_object_index,
+                        source=stream_var.source,
+                    )
+                return stream_var
             except Exception as e:
                 unimplemented(
                     gb_type="bad device argument to torch.accelerator.current_stream",

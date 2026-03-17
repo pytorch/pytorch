@@ -398,7 +398,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides: dict[str, dict[str, Any]] = {}
-    if use_aten_gemm_kernels():
+
+    # Check if TLX force mode is enabled (fbcode only)
+    tlx_force_mode = (
+        inductor_config.is_fbcode() and inductor_config.triton.tlx_mode == "force"
+    )
+
+    # Add ATEN kernels unless in TLX force mode (force mode uses only TLX)
+    if use_aten_gemm_kernels() and not tlx_force_mode:
         templates_to_use.append(aten_handler)
         if aten_extra_kwargs:
             kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
@@ -417,22 +424,31 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         # To be conservative we increase this threshold for N/M by 2.
         is_exhaustive = inductor_config.max_autotune_gemm_search_space == "exhaustive"
         if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
-            templates_to_use.append(mm_template)
+            # In TLX force mode, skip non-TLX templates
+            if not tlx_force_mode:
+                templates_to_use.append(mm_template)
 
-            if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
-                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-            elif use_triton_tma_template(mat1, mat2, output_layout=layout):
-                templates_to_use.append(persistent_tma_mm_template)
-
-            if (
-                inductor_config.is_fbcode()
-                and inductor_config.triton.enable_tlx_templates
-            ):
-                from torch._inductor.fb.tlx_templates.mm_templates import append_tlx
-
-                templates_to_use = append_tlx(templates_to_use)
+                if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
+                    templates_to_use.append(
+                        blackwell_ws_persistent_device_tma_mm_template
+                    )
+                elif use_triton_tma_template(mat1, mat2, output_layout=layout):
+                    templates_to_use.append(persistent_tma_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
+
+    # TLX templates hook (fbcode only)
+    if inductor_config.is_fbcode():
+        from torch._inductor.fb.tlx_templates.mm_templates import apply_tlx_templates
+
+        templates_to_use = apply_tlx_templates(
+            templates_to_use,
+            m,
+            n,
+            k,
+            use_decompose_k_choice,
+            decompose_k_subgraph_template,
+        )
 
     choices.extend(
         V.choices.get_template_configs(
@@ -540,13 +556,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         return box
 
-    return autotune_select_algorithm(
+    node, _ = autotune_select_algorithm(
         name,
         choices,
         kernel_inputs.nodes(),
         layout,
         best_config_future=best_config_future,
     )
+    return node
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
@@ -595,7 +612,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             choices, layout, kernel_inputs.nodes(), fuseable=True, non_fuseable=True
         )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
@@ -654,7 +672,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 name,
             )
         )
-        return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+        node, _ = autotune_select_algorithm(
+            name, choices, kernel_inputs.nodes(), layout
+        )
+        return node
 
     # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
@@ -719,7 +740,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             has_bias=True,
         )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
@@ -766,9 +788,10 @@ def tuned_sparse_semi_structured_mm(
             choices, layout, [mat1, mat2, mat1_meta], fuseable=True, non_fuseable=True
         )
 
-    return autotune_select_algorithm(
+    node, _ = autotune_select_algorithm(
         "sparse_semi_structured_mm", choices, (mat1, mat1_meta, mat2), layout
     )
+    return node
 
 
 scaling_pairs = [
@@ -1018,7 +1041,8 @@ def tuned_scaled_mm(
 
     # Early return for MX variants
     if scale_a.dtype != torch.float32:
-        return autotune_select_algorithm(name, choices, input_nodes, layout)
+        node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
+        return node
 
     if (
         is_nonzero
@@ -1035,7 +1059,8 @@ def tuned_scaled_mm(
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @functools.cache

@@ -87,6 +87,7 @@ if torch.backends.mps.is_available():
             "isfinite",
             "isinf",
             "isreal",
+            "istft",
             "item",
             "kron",
             "linalg.cross",
@@ -315,7 +316,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "cholesky_solve": None,
             "frexp": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
@@ -623,7 +623,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
             ],
             # Unsupported dtypes
-            "histc": [torch.float16, torch.bfloat16],
             # GEMM on MPS is not supported for integral types
             "nn.functional.linear": [
                 torch.int16,
@@ -927,8 +926,6 @@ if torch.backends.mps.is_available():
             "nextafter": None,
             # derivative for aten::floor_divide is not implemented on CPU
             "floor_divide": [torch.float16, torch.float32],
-            # derivative for aten::narrow_copy is not implemented on CPU
-            "narrow_copy": [torch.float16, torch.float32],
             # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
             "histogramdd": [torch.float16, torch.float32],
             # derivative for aten::histogram is not implemented

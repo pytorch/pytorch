@@ -62,6 +62,16 @@ class NoEnterTorchFunctionMode(BaseTorchFunctionMode):
         pass
 
 
+# Used by WrappedUserFunctionVariable and similar to inline decorated function
+# calls with bytecode backing. Without this, the context enter/exit happens in
+# Python-level VT code, so a nested graph break inside `fn` would skip applying
+# the context in the compiled fn/resume. By inlining through this polyfill, the
+# `with` statement has real bytecode that the resume function can continue from.
+def _fn_with_ctx(ctx: Any, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    with ctx:
+        return fn(*args, **kwargs)
+
+
 def index(
     iterator: Iterator[T], item: T, start: int = 0, end: int | None = None
 ) -> int:
@@ -404,9 +414,12 @@ def instantiate_user_defined_class_object(
 ) -> T:
     obj = cls.__new__(cls, *args, **kwargs)
 
-    # Only call __init__ if the object is an instance of the class
+    # Only call __init__ if the object's type is a subclass of cls.
+    # CPython uses PyType_IsSubtype(Py_TYPE(obj), type) at the C level, which does NOT
+    # go through metaclass __instancecheck__. Using isinstance() here would be wrong
+    # for classes with custom __instancecheck__ (e.g. torch.ByteStorage).
     # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
-    if isinstance(obj, cls):
+    if issubclass(type(obj), cls):
         obj.__init__(*args, **kwargs)
     return obj
 
@@ -531,12 +544,6 @@ def foreach_pow_scalar(
     scalar: Any, exps: Sequence[bool | complex | float | int]
 ) -> tuple[torch.Tensor, ...]:
     return torch._foreach_pow([scalar for _ in exps], exps)
-
-
-def addcmul_inplace(
-    self, tensor1: torch.Tensor, tensor2: torch.Tensor, value: Any
-) -> None:
-    return self.add_(tensor1 * tensor2 * value)
 
 
 def predicate(obj: object) -> bool:

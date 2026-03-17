@@ -814,7 +814,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
 
             # Add TlxGemmConfig specific fields to key if present
-            if config.is_fbcode() and config.triton.enable_tlx_templates:
+            if config.is_fbcode() and config.triton.tlx_mode in ("allow", "force"):
                 from torch._inductor.fb.tlx_templates.registry import (
                     get_tlx_config_key_and_kwargs,
                 )
@@ -1554,12 +1554,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4),
-            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 1, 4),
-            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 1, 4),
-            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 1, 4),
-            (torch.float16, 64): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 128): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 256): ROCmFlexConfig(32, 64, 1, 4),
+            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 2, 4),
+            (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 8),
+            (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 8),
+            (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4),
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1735,7 +1735,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(64, 64, 1, 4)
             else:
-                default_config = ROCmFlexConfig(128, 64, 1, 8)
+                default_config = ROCmFlexConfig(128, 64, 2, 4)
             default_config = self.default_flex_config.get(
                 (dtype, head_dim), default_config
             )
@@ -1743,7 +1743,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4)
             else:
-                default_config = ROCmFlexConfig(64, 32, 1, 4)
+                default_config = ROCmFlexConfig(64, 32, 2, 4)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
