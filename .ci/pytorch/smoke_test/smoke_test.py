@@ -24,7 +24,7 @@ gpu_arch_type = os.getenv("MATRIX_GPU_ARCH_TYPE")
 channel = os.getenv("MATRIX_CHANNEL")
 package_type = os.getenv("MATRIX_PACKAGE_TYPE")
 target_os = os.getenv("TARGET_OS", sys.platform)
-BASE_DIR = Path(__file__).parent.parent.parent
+BASE_DIR = Path(__file__).parent.parent.parent.parent
 
 is_cuda_system = gpu_arch_type == "cuda"
 NIGHTLY_ALLOWED_DELTA = 3
@@ -222,9 +222,7 @@ def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     Reads PYTORCH_EXTRA_INSTALL_REQUIREMENTS and extracts the cudnn version
     for the given CUDA version (e.g. "12.6").
     """
-    matrix_script = (
-        BASE_DIR / ".github" / "scripts" / "generate_binary_build_matrix.py"
-    )
+    matrix_script = BASE_DIR / ".github" / "scripts" / "generate_binary_build_matrix.py"
     if not matrix_script.exists():
         print(f"Warning: {matrix_script} not found, skipping cuDNN version check")
         return None
@@ -234,7 +232,7 @@ def get_expected_cudnn_version_linux(cuda_version: str) -> str | None:
     # and extract major.minor.patch (dropping the build number)
     pattern = (
         rf'"{re.escape(cuda_version)}":\s*\(\s*'
-        r'[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+'
+        r"[\s\S]*?nvidia-cudnn-cu\d+==(\d+\.\d+\.\d+)\.\d+"
     )
     match = re.search(pattern, content)
     if match:
@@ -248,7 +246,9 @@ def get_expected_cudnn_version_windows(cuda_version: str) -> str | None:
     Reads the batch file and extracts EXPECTED_CUDNN_VERSION for the given
     CUDA version (e.g. "12.6" maps to CUDA_VER 126).
     """
-    bat_file = BASE_DIR / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    bat_file = (
+        BASE_DIR / ".ci" / "pytorch" / "windows" / "internal" / "cuda_install.bat"
+    )
     if not bat_file.exists():
         print(f"Warning: {bat_file} not found, skipping cuDNN version check")
         return None
