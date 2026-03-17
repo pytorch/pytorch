@@ -2731,8 +2731,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         import tempfile
         import textwrap
 
-        cache_dir = tempfile.mkdtemp()
-        try:
+        with tempfile.TemporaryDirectory() as cache_dir:
             script = textwrap.dedent(
                 """
                 import json
@@ -2759,37 +2758,31 @@ class AOTAutogradCacheTests(InductorTestCase):
 
             env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": cache_dir}
 
-            # First subprocess - expect cache miss
-            out1 = (
-                subprocess.check_output(
-                    [sys.executable, "-c", script],
-                    env=env,
-                    stderr=subprocess.DEVNULL,
-                )
-                .decode()
-                .strip()
-            )
             import json
 
-            counters1 = json.loads(out1.splitlines()[-1])
+            # First subprocess - expect cache miss
+            result1 = subprocess.run(
+                [sys.executable, "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result1.returncode, 0, result1.stderr)
+            counters1 = json.loads(result1.stdout.strip().splitlines()[-1])
             self.assertEqual(counters1.get("autograd_cache_miss", 0), 1)
             self.assertEqual(counters1.get("autograd_cache_hit", 0), 0)
 
             # Second subprocess - expect cache hit
-            out2 = (
-                subprocess.check_output(
-                    [sys.executable, "-c", script],
-                    env=env,
-                    stderr=subprocess.DEVNULL,
-                )
-                .decode()
-                .strip()
+            result2 = subprocess.run(
+                [sys.executable, "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
             )
-            counters2 = json.loads(out2.splitlines()[-1])
+            self.assertEqual(result2.returncode, 0, result2.stderr)
+            counters2 = json.loads(result2.stdout.strip().splitlines()[-1])
             self.assertEqual(counters2.get("autograd_cache_miss", 0), 0)
             self.assertEqual(counters2.get("autograd_cache_hit", 0), 1)
-        finally:
-            shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})
