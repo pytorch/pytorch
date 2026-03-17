@@ -1634,14 +1634,15 @@ def speculate_subgraph_with_auto_output_flattening(
         )
 
     try:
-        # ensure guards on args get installed in parent subgraph
-        f, sub_args, sub_kwargs = LazyVariableTracker.realize_all(
-            (f, sub_args, sub_kwargs),
-        )
-
         with tx.output.subtracer(source_target, tracer, description) as subtracer:
             args = get_hop_args(
-                tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
+                tx,
+                f,
+                subtracer,
+                list(sub_args),
+                sub_kwargs,
+                set_subgraph_inputs,
+                description,
             )
 
             # Special case - if users uses

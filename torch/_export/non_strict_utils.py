@@ -26,6 +26,7 @@ from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value
+from torch._opaque_base import OpaqueBase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -257,11 +258,18 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
 
         # Propagate outer tensor constraints to inner tensors if not already present
         for attr in attrs:
-            inner_tensor = getattr(t, attr)
-            inner_source = AttrSource(source, attr)
-            inner_contexts[attr] = _create_symbolic_context_for_tensor(
-                inner_tensor, inner_source, t_constraints, sources, mode
-            )
+            match getattr(t, attr):
+                case torch.Tensor() as inner_value:
+                    inner_source = AttrSource(source, attr)
+                    inner_contexts[attr] = _create_symbolic_context_for_tensor(
+                        inner_value, inner_source, t_constraints, sources, mode
+                    )
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
 
         symbolic_context = SubclassSymbolicContext(
             dynamic_sizes=dynamic_sizes,

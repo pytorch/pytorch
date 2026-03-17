@@ -466,9 +466,8 @@ class ConstDictVariable(VariableTracker):
                     f"Debug representation of the key is {arg.debug_repr()!r}"
                 )
             except Exception:
-                error_message = VariableTracker.build(
-                    tx, f"Dict key lookup failed for {str(arg)}"
-                )
+                error_message = f"Dict key lookup failed for {str(arg)}"
+            error_message = VariableTracker.build(tx, error_message)
             raise_observed_exception(KeyError, tx, args=[error_message])
         return self.items[key]
 
@@ -898,9 +897,10 @@ class ConstDictVariable(VariableTracker):
                 new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
                 return new_dict_vt
             else:
-                err_msg = (
+                err_msg = VariableTracker.build(
+                    tx,
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
-                    f"and '{other.python_type().__name__}'"
+                    f"and '{other.python_type().__name__}'",
                 )
                 raise_observed_exception(TypeError, tx, args=[err_msg])
         elif name == "__ior__":
@@ -1918,7 +1918,7 @@ class DictItemsVariable(DictViewVariable):
         return False
 
 
-kV = Union[ConstDictVariable._HashableTracker, str]
+kV = ConstDictVariable._HashableTracker | str
 
 
 class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
@@ -2042,7 +2042,7 @@ class DunderDictVariable(ConstDictVariable):
             return self.getitem(name)
         return super().getitem_const(tx, arg)
 
-    def maybe_getitem_const(self, arg: VariableTracker) -> Optional[VariableTracker]:
+    def maybe_getitem_const(self, arg: VariableTracker) -> VariableTracker | None:
         name = arg.as_python_constant()
         if self.contains(name):
             return self.getitem(name)
@@ -2080,6 +2080,13 @@ class DunderDictVariable(ConstDictVariable):
                 return DictKeysVariable(merged_dict)
             elif name == "values":
                 return DictValuesVariable(merged_dict)
+        elif name == "get":
+            if len(args) not in (1, 2):
+                raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
+            name = args[0].as_python_constant()
+            if self.contains(name):
+                return self.getitem(name)
+            return CONSTANT_VARIABLE_NONE if len(args) == 1 else args[1]
         return super().call_method(tx, name, args, kwargs)
 
     def _get_merged_dict(

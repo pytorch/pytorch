@@ -553,6 +553,24 @@ bool Graph::cleanupDeadNodes() {
 
   const bool mutated = !toRemove.empty();
 
+  if (mutated && VLOG_IS_ON(1)) {
+    c10::FastMap<std::string_view, int> removedByTarget;
+    for (const auto* n : toRemove) {
+      removedByTarget[n->target()]++;
+    }
+    VLOG(1) << "cleanupDeadNodes: removing " << toRemove.size()
+            << " dead nodes. Breakdown by op:";
+    // Sort by count descending for readability
+    std::vector<std::pair<std::string_view, int>> sorted(
+        removedByTarget.begin(), removedByTarget.end());
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+      return a.second > b.second;
+    });
+    for (const auto& [target, count] : sorted) {
+      VLOG(1) << "  " << target << ": " << count;
+    }
+  }
+
   // Remove nodes in reverse order to handle input/output dependencies
   for (auto it = toRemove.rbegin(); it != toRemove.rend(); ++it) {
     removeNode(*it);

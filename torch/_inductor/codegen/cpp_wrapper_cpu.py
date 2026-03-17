@@ -1581,8 +1581,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def _generate_symbolic_call_arg_helper(
         self, arg: SymbolicCallArg, graph: GraphLowering
     ) -> None:
-        if (arg.inner, graph) not in self.kernel_numel_expr:
-            # declare expr once in each graph (scope)
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if enable_kernel_profile or (arg.inner, graph) not in self.kernel_numel_expr:
+            # When enable_kernel_profile is on, each kernel call is wrapped in
+            # its own {} scope block, so we must redeclare the variable each
+            # time since prior declarations are no longer visible.
             self.kernel_numel_expr.add((arg.inner, graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:

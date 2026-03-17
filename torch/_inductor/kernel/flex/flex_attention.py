@@ -485,7 +485,7 @@ def flex_attention(
         8: create_indices_fake,
     }
 
-    out = autotune_select_algorithm(
+    out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
         # Need to filter out symbols since there is an invariant
@@ -1012,7 +1012,7 @@ def flex_attention_backward(*args, **kwargs):
         15: create_indices_fake,
     }
 
-    broadcasted_grad_key = autotune_select_algorithm(
+    broadcasted_grad_key, _ = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
         [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],

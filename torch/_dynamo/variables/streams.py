@@ -188,6 +188,15 @@ def sync_dealloc(
     torch.ops.streams.wait_event.default(wait_event_index, src_stream_index)
 
 
+@sync_dealloc.register_fake
+def _(
+    wait_event_index: int,
+    src_stream_index: int,
+    to_dealloc: torch.Tensor,
+) -> None:
+    pass
+
+
 has_side_effect(torch.ops.streams.sync_dealloc.default)
 
 
@@ -198,9 +207,8 @@ def record_stream(tensor: torch.Tensor, stream_index: int) -> None:
 
 @record_stream.register_fake
 def _(
-    src_stream_index: int,
-    wait_event_index: int,
-    to_dealloc: torch.Tensor,
+    tensor: torch.Tensor,
+    stream_index: int,
 ) -> None:
     pass
 

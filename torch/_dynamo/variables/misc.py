@@ -2026,16 +2026,15 @@ class DebuggingVariable(VariableTracker):
             and obj in torch._dynamo.config.reorderable_logging_functions
         )
 
-    # type: ignore[override]
     def call_function(
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> None:
+    ) -> VariableTracker:
         if tx.export:
             # For export cases, we can just make debugging functions no-ops
-            return
+            return CONSTANT_VARIABLE_NONE
 
         if not self.can_reorder_logs(self.value, args, kwargs):
             unimplemented(
@@ -2049,6 +2048,7 @@ class DebuggingVariable(VariableTracker):
             )
 
         tx.debug_locals.append((self, list(args)))
+        return CONSTANT_VARIABLE_NONE
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         assert self.source is not None

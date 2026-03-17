@@ -2952,6 +2952,10 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     def test_new_group_local_sync_duplicate_pg(self):
         self._test_new_group_local_sync_duplicate_pg(backend="gloo")
 
+    @requires_gloo()
+    def test_new_group_ordered(self):
+        self._test_new_group_ordered(backend="gloo")
+
 
 if __name__ == "__main__":
     if torch.cuda._initialized:

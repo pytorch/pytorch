@@ -446,25 +446,26 @@ def try_find_mesh_from_args(
 
 
 def compute_local_stride(
-    global_stride: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+    global_stride: ShapeType, local_shape: ShapeType
 ) -> tuple[int, ...]:
     """
-    Compute the stride of a local tensor shard, given the global stride of the DTensor.
-    NOTE: Currently this function is assuming the DTensor is evenly shardable.
+    Compute the stride of a local tensor shard, given the global stride and local shape.
+
+    Derives strides by preserving the memory layout (dimension ordering) implied
+    by the global strides, then computing contiguous strides for the local shape
+    in that order.  Assumes the global tensor is non-overlapping and dense.
     """
-    stride_divisors = [1] * len(global_stride)
-    for mesh_idx, p in enumerate(placements):
-        if p.is_shard():
-            i = cast(Shard, p).dim
-            # tensor dimension i is sharded on mesh dimension mesh_idx,
-            # so we need to divide all the strides larger than stride[i]
-            # (by the submesh size)
-            for j in range(len(global_stride)):
-                if global_stride[j] > global_stride[i]:
-                    stride_divisors[j] *= mesh.size(mesh_idx)
-    return tuple(
-        global_stride[i] // stride_divisors[i] for i in range(len(global_stride))
-    )
+    ndim = len(global_stride)
+    # Sort dims by global stride descending to recover memory layout order.
+    # Stable sort preserves original dim order for ties, which only occur
+    # on size-1 dims where the stride value is semantically irrelevant.
+    perm = sorted(range(ndim), key=lambda d: global_stride[d], reverse=True)
+    local_strides = [0] * ndim
+    s = 1
+    for d in reversed(perm):
+        local_strides[d] = s
+        s *= local_shape[d]
+    return tuple(local_strides)
 
 
 def normalize_to_torch_size(size) -> torch.Size:  # type: ignore[no-untyped-def]

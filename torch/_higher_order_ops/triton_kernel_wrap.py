@@ -21,7 +21,6 @@ import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import redirect_to_mode
-from torch._inductor.dependencies import Dep, ReadWrites, StarDep
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -45,6 +44,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.constant import ConstantVariable
     from torch._dynamo.variables.functions import TritonKernelVariable
+    from torch._inductor.dependencies import ReadWrites
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
     from torch.fx.proxy import Proxy
     from torch.utils._triton import has_triton
@@ -894,7 +894,7 @@ def get_tma_stores(
 
 @dataclasses.dataclass
 class TensorAccesses:
-    read_writes: ReadWrites
+    read_writes: "ReadWrites"
     can_fuse_epilogue: bool
 
 
@@ -916,6 +916,8 @@ def analyze_kernel_access(
 
     Returns ReadWrites with StarDep objects for each accessed tensor.
     """
+    from torch._inductor.dependencies import Dep, ReadWrites, StarDep
+
     # Name of mutation op to mutated parameter indices
     # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
     # All the OPs that have MemWrite trait.
@@ -931,11 +933,12 @@ def analyze_kernel_access(
     READ_OPS = {
         "tt.load": [0],
         "tt.load_tensor_descriptor": [0],
+        "tt.descriptor_load": [0],
     }
     UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
 
-    write_stack: list[Union[Param, Intermediate]] = []
-    read_stack: list[Union[Param, Intermediate]] = []
+    write_stack: list[Param | Intermediate] = []
+    read_stack: list[Param | Intermediate] = []
 
     ops = functions[fn_name]
     tma_stores = get_tma_stores(functions, fn_name)
@@ -995,7 +998,7 @@ def analyze_kernel_access(
                 read_stack.extend(op.args[idx] for idx in READ_OPS.get(op.name, []))
 
     def _find_arg_access_count(
-        initial_stack: list[Union[Param, Intermediate]],
+        initial_stack: list[Param | Intermediate],
         skip_loads: bool,
     ) -> dict[int, int]:
         """DFS traversal to find argument indices that are accessed (and how many times they are accessed)."""
@@ -1069,6 +1072,7 @@ def identify_accessed_tensors(
     2) Parses the TTIR and creates a control flow graph
     3) Analyzes the graph to detect which input tensors are read and/or written
     """
+    from torch._inductor.dependencies import Dep, ReadWrites, StarDep
 
     ttir_module = None
     functions = None
