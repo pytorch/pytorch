@@ -1,4 +1,0 @@
-ERROR
-  Pallas backend does not support indirect_indexing patterns used by
-  max_pool2d_with_indices_backward lowering (dilation=[1,2] variant).
-  Same root cause as backward/backward2/backward3/backward4.

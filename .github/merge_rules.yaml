@@ -41,7 +41,6 @@
 - name: OSS CI
   patterns:
   - .github/**
-  - .circleci/**
   - .ci/**
   - scripts/**
   - tools/**

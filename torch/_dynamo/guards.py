@@ -2438,7 +2438,20 @@ class GuardBuilder(GuardBuilderBase):
     )
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
         value = self.get(guard)
-        original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
+
+        # Deepcopying SymInts result in an error from copying FakeTensors.
+        # Instead we just always assume the metadata is the same.
+        class _AnyCompare:
+            def __eq__(self, other: object) -> bool:
+                return True
+
+            def __ne__(self, other: object) -> bool:
+                return False
+
+        metadata = value.__tensor_flatten__()[1]
+        original_metadata = deepcopy(
+            pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
+        )
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
             cls = type(value)
@@ -4207,38 +4220,43 @@ class CheckFunctionManager:
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
 
-        if guard_filter_fn:
-            # If we're filtering guards, we need to build it an extra time first
-            # because filtering depends on the builder/guard_manager results
+        # Disable __torch_function__ dispatch during guard construction so
+        # modes with mutable state aren't triggered.  We exit the context
+        # before the guard sanity check so GlobalStateGuard.check() sees
+        # the true runtime state.
+        with torch._C.DisableTorchFunction():
+            if guard_filter_fn:
+                # If we're filtering guards, we need to build it an extra time first
+                # because filtering depends on the builder/guard_manager results
+                builder, guard_manager = self.build_guards(
+                    sorted_guards,
+                    existing_diff_guard_sources,
+                    f_code,
+                    output_graph,
+                    False,
+                )
+
+                filter_results = guard_filter_fn(
+                    [make_guard_filter_entry(guard, builder) for guard in sorted_guards]
+                )
+                assert len(filter_results) == len(sorted_guards)
+                assert all(type(x) is bool for x in filter_results)
+                sorted_guards = [
+                    guard for i, guard in enumerate(sorted_guards) if filter_results[i]
+                ]
+
+            # Redo the guards because filtering relies on the results from the last guard builder.
             builder, guard_manager = self.build_guards(
                 sorted_guards,
                 existing_diff_guard_sources,
                 f_code,
                 output_graph,
-                False,
+                save_guards,
+                guard_filter_fn=guard_filter_fn,
             )
 
-            filter_results = guard_filter_fn(
-                [make_guard_filter_entry(guard, builder) for guard in sorted_guards]
-            )
-            assert len(filter_results) == len(sorted_guards)
-            assert all(type(x) is bool for x in filter_results)
-            sorted_guards = [
-                guard for i, guard in enumerate(sorted_guards) if filter_results[i]
-            ]
-
-        # Redo the guards because filtering relies on the results from the last guard builder.
-        builder, guard_manager = self.build_guards(
-            sorted_guards,
-            existing_diff_guard_sources,
-            f_code,
-            output_graph,
-            save_guards,
-            guard_filter_fn=guard_filter_fn,
-        )
-
-        self.guard_manager = guard_manager
-        self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
+            self.guard_manager = guard_manager
+            self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
