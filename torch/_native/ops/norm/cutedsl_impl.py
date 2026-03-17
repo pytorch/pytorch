@@ -125,18 +125,12 @@ def _cutedsl_fused_rms_norm_backward_impl(
 
 
 def register_cutedsl_rmsnorm_overrides() -> None:
-    if not cu.runtime_available():
-        return
-
-    try:
+    if torch.cuda.is_available():
         fwd_fallback = torch.library.get_kernel("aten::_fused_rms_norm", "CUDA")
         bwd_fallback = torch.library.get_kernel(
             "aten::_fused_rms_norm_backward", "CUDA"
         )
-    except RuntimeError:
-        log.info(
-            "Skipping CuTeDSL RMSNorm override registration: CUDA kernels unavailable"
-        )
+    else:
         return
 
     fwd_impl = functools.partial(
