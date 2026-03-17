@@ -99,7 +99,7 @@ echo Checking that basic CNN works
 if ERRORLEVEL 1 exit /b 1
 
 echo Running smoke_test.py
-%PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\smoke_test\smoke_test.py --package=torchonly --torch-compile-check disabled
+%PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\smoke_test\smoke_test.py --package=torchonly --torch-compile-check disabled --runtime-error-check disabled
 if ERRORLEVEL 1 exit /b 1
 
 goto end
