@@ -2947,6 +2947,8 @@
   autogen: _grid_sampler_2d_cpu_fallback.out
 
 - func: _grid_sampler_2d_cpu_fallback_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
+  dispatch:
+    CompositeExplicitAutograd: _grid_sampler_2d_cpu_fallback_backward
 
 - func: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   dispatch:
