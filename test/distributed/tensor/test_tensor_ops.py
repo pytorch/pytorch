@@ -1484,9 +1484,10 @@ class DistTensorCppPyTree(DTensorContinuousTestBase):
     def test_coalesced_matches_per_tensor_redistribute(self):
         """Coalesced and per-tensor redistribution must produce identical results.
 
-        This is the key invariant: if the per-tensor paths in placement_types
-        (Shard._reduce_shard_tensor, Shard._to_replicate_tensor) evolve,
-        this test catches any divergence from the coalesced paths.
+        Calls redistribute_local_tensors (which attempts coalescing) and
+        redistribute_local_tensor (per-tensor, no coalescing) on the same
+        inputs, then asserts the outputs match.  This catches bugs where
+        the coalesced collective paths drift from the per-tensor paths.
         """
         from torch.distributed.tensor._dtensor_spec import DTensorSpec
         from torch.distributed.tensor._redistribute import (

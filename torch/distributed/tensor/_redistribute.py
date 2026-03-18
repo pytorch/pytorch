@@ -1502,8 +1502,14 @@ def _try_coalesced_redistribute(
     first_src, first_dst = items[0][1], items[0][2]
     assert_no_mixed_partial_types(first_src.placements)
     assert_no_mixed_partial_types(first_dst.placements)
+    # During tracing, SymInts in tensor_meta are not hashable, so we must
+    # use the non-cached version (same pattern as redistribute_local_tensor).
+    if _are_we_tracing():
+        transform_infos = _gen_transform_infos_non_cached(first_src, first_dst, None)
+    else:
+        transform_infos = _gen_transform_infos(first_src, first_dst, None)
     optimized = _optimize_transform_infos(
-        _gen_transform_infos(first_src, first_dst, None),
+        transform_infos,
         mesh,
         first_src.placements,
         first_dst.placements,
