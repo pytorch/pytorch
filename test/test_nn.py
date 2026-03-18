@@ -6463,10 +6463,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     for input_requires_grad in [False, True]:
                         test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
-    def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self):
-
-        device_list = ['cpu']
-        if TEST_CUDA:
+    def test_grid_sample_nearest_neighbor_rounding_mode_consistency(self, device):
         def normalize_indices(indices_unnormalized: torch.Tensor, dim_size: int, align_corners: bool):
             if align_corners:
                 indices_normalized = 2 * indices_unnormalized / (dim_size - 1) - 1
