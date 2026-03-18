@@ -640,7 +640,7 @@ class OpDispatcher:
             items = [(t, src, dst) for _, t, src, dst in reshard_requests]
             resharded = redistribute_local_tensors(items)
             for (idx, _, arg_spec, reshard_arg_spec), result in zip(
-                reshard_requests, resharded
+                reshard_requests, resharded, strict=True
             ):
                 if debug_mode is not None:
                     with debug_mode.record_redistribute_calls(  # type: ignore[union-attr]

@@ -1479,7 +1479,7 @@ def redistribute_local_tensors(
         if len(indices) > 1:
             coalesced = _try_coalesced_redistribute([items[i] for i in indices])
             if coalesced is not None:
-                for idx, result in zip(indices, coalesced):
+                for idx, result in zip(indices, coalesced, strict=True):
                     results[idx] = result
                 continue
         for idx in indices:
@@ -1655,9 +1655,7 @@ def _coalesced_reduce_scatter(
             padded_tensors.append(torch.cat(scattered_list, dim=shard_dim))
             pad_sizes_list.append(pad_sizes)
         else:
-            padded_tensors.append(
-                tensor.contiguous() if not tensor.is_contiguous() else tensor
-            )
+            padded_tensors.append(tensor.contiguous())
             pad_sizes_list.append(None)
 
     results = funcol.reduce_scatter_tensor_coalesced(
