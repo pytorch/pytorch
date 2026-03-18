@@ -21,7 +21,6 @@ import torch._logging
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.tiling_utils import analyze_memory_coalescing
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
@@ -2521,7 +2520,9 @@ class SIMDScheduling(BaseScheduling):
         if (
             len(pointwise_ranges) <= 1
             and len(reduction_ranges) <= 1
-            or free_unbacked_symbols(pointwise_ranges + reduction_ranges)
+            or not V.graph.sizevars.all_unbacked_explicitly_hinted(
+                pointwise_ranges + reduction_ranges
+            )
         ):
             return []
 
