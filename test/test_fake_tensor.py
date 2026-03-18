@@ -267,20 +267,54 @@ class FakeTensorTest(TestCase):
         # dim_order should be (0, 2, 3, 4, 1), not (0, 1, 2, 3, 4)
         self.assertEqual(fake_out.dim_order(), (0, 2, 3, 4, 1))
 
-    def test_conv_nhwc_channels_last_weight_only(self):
-        # channels_last format propagated from weight even when input is contiguous
-        x = torch.randn([1, 1024, 16, 16])
-        w = torch.randn([256, 1024, 4, 4]).to(memory_format=torch.channels_last)
+    def test_conv_nhwc_channels_last_propagation(self):
+        # Test memory format propagation under FakeTensorMode for conv2d.
+        # Cover:
+        #   1) weight only channels_last
+        #   2) activation only channels_last
+        #   3) both activation and weight contiguous (should stay contiguous)
+        x_base = torch.randn([1, 1024, 16, 16])
+        w_base = torch.randn([256, 1024, 4, 4])
         b = torch.randn([256])
+
+        cases = [
+            ("weight_only_channels_last", x_base, w_base.to(memory_format=torch.channels_last), torch.channels_last),
+            ("activation_only_channels_last", x_base.to(memory_format=torch.channels_last), w_base, torch.channels_last),
+            ("both_contiguous", x_base, w_base, torch.contiguous_format),
+        ]
+
+        for case, x, w, expected_fmt in cases:
+            with self.subTest(case=case):
+                with FakeTensorMode(allow_non_fake_inputs=True):
+                    fake_out = torch.ops.aten.convolution(
+                        x, w, b, [1, 1], [0, 0], [1, 1], False, [0, 0], 1
+                    )
+
+                self.assertTrue(
+                    fake_out.is_contiguous(memory_format=expected_fmt),
+                    f"Expected {expected_fmt} output, got strides {fake_out.stride()}",
+                )
+
+                if expected_fmt == torch.channels_last:
+                    # NHWC dim_order should be (0, 2, 3, 1), not (0, 1, 2, 3)
+                    self.assertEqual(fake_out.dim_order(), (0, 2, 3, 1))
+
+    def test_conv_ndhwc_channels_last_3d_activation_only(self):
+        # Additional coverage: activation-only channels_last_3d should still yield channels_last_3d output.
+        x = torch.randn([1, 2, 6, 6, 6]).to(memory_format=torch.channels_last_3d)
+        w = torch.randn([4, 2, 3, 3, 3])  # contiguous weight
+        b = torch.randn([4])
 
         with FakeTensorMode(allow_non_fake_inputs=True):
             fake_out = torch.ops.aten.convolution(
-                x, w, b, [1, 1], [0, 0], [1, 1], False, [0, 0], 1
+                x, w, b, [1, 1, 1], [0, 0, 0], [1, 1, 1], False, [0, 0, 0], 1
             )
+
         self.assertTrue(
-            fake_out.is_contiguous(memory_format=torch.channels_last),
-            f"Expected channels_last output, got strides {fake_out.stride()}",
+            fake_out.is_contiguous(memory_format=torch.channels_last_3d),
+            f"Expected channels_last_3d output, got strides {fake_out.stride()}",
         )
+        self.assertEqual(fake_out.dim_order(), (0, 2, 3, 4, 1))
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
