@@ -25,6 +25,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import detect_fake_mode
+from torch._inductor.codecache import resolve_pre_grad_pass_timing
 from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
@@ -1067,12 +1068,6 @@ def prepare_aot_module_simplified(
     )
 
 
-def _resolve_default_pre_grad_pass_timing() -> Literal["early", "late"]:
-    from torch._inductor.codecache import resolve_pre_grad_pass_timing
-
-    return resolve_pre_grad_pass_timing()
-
-
 def aot_module_simplified(
     mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
     args: Iterable[Any],
@@ -1136,9 +1131,7 @@ def aot_module_simplified(
 
         compiled_fn = None
 
-        pre_grad_pass_timing: Literal["early", "late"] = (
-            _resolve_default_pre_grad_pass_timing()
-        )
+        pre_grad_pass_timing: Literal["early", "late"] = resolve_pre_grad_pass_timing()
 
         if (
             pre_grad_pass_timing == "early"
