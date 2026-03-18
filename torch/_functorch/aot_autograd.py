@@ -25,7 +25,6 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import detect_fake_mode
-from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
@@ -1069,32 +1068,9 @@ def prepare_aot_module_simplified(
 
 
 def _resolve_default_pre_grad_pass_timing() -> Literal["early", "late"]:
-    """Return (run_early, run_late) for pre-grad passes."""
+    from torch._inductor.codecache import resolve_pre_grad_pass_timing
 
-    pass_timing: Literal["early", "late", "default"] = (
-        torch._inductor.config.pre_grad_pass_timing
-    )
-    custom_pass = torch._inductor.config.pre_grad_custom_pass
-    has_uuid = (
-        custom_pass
-        and isinstance(custom_pass, CustomGraphPass)
-        and custom_pass.uuid() is not None
-    )
-
-    # Resolve default timing.
-    if pass_timing == "default":
-        supports_late = custom_pass is None or has_uuid
-        pass_timing = "late" if supports_late else "early"
-
-    # Expect custom passes to have UUID to run late.
-    if pass_timing == "late" and custom_pass and not has_uuid:
-        raise RuntimeError(
-            "pre_grad_custom_pass must implement uuid() to run late "
-            "(after cache lookup). Either implement uuid() or set "
-            "pre_grad_pass_timing to 'early'."
-        )
-
-    return pass_timing
+    return resolve_pre_grad_pass_timing()
 
 
 def aot_module_simplified(

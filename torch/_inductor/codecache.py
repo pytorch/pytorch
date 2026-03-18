@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
 import torch
@@ -781,6 +781,38 @@ class BypassFxGraphCache(Exception):
     """
 
 
+def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
+    """Resolve the effective pre-grad pass timing from the config.
+
+    "default" is resolved based on whether the custom pass provides a UUID:
+    passes with a UUID (or no custom pass) run "late" (after cache lookup),
+    passes without a UUID run "early" (before cache lookup).
+
+    Raises RuntimeError if a custom pass without a UUID is explicitly set to
+    run "late", since the cache key cannot account for it.
+    """
+    timing: Literal["early", "late", "default"] = config.pre_grad_pass_timing
+    custom_pass = config.pre_grad_custom_pass
+    has_uuid = (
+        custom_pass
+        and isinstance(custom_pass, CustomGraphPass)
+        and custom_pass.uuid() is not None
+    )
+
+    if timing == "default":
+        supports_late = custom_pass is None or has_uuid
+        timing = "late" if supports_late else "early"
+
+    if timing == "late" and custom_pass and not has_uuid:
+        raise RuntimeError(
+            "pre_grad_custom_pass must implement uuid() to run late "
+            "(after cache lookup). Either implement uuid() or set "
+            "pre_grad_pass_timing to 'early'."
+        )
+
+    return timing
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -908,8 +940,8 @@ class FxGraphHashDetails:
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable(ignore_private_configs=False)
-        # Custom passes should provide an ID to hash.
-        if config.pre_grad_pass_timing == "late":
+        # Custom passes should provide an ID to hash when they run late (after cache lookup).
+        if resolve_pre_grad_pass_timing() != "early":
             self.pre_grad_custom_pass = self._get_custom_pass_detail(
                 config.pre_grad_custom_pass
             )
@@ -1588,7 +1620,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # know how to include them in the cache key calculation.
         # When timing is EARLY, pre-grad passes already ran before the cache
         # lookup so there's nothing to validate here.
-        if config.pre_grad_pass_timing != "early":
+        if resolve_pre_grad_pass_timing() != "early":
             if config.pre_grad_custom_pass and (
                 not isinstance(config.pre_grad_custom_pass, CustomGraphPass)
                 or not config.pre_grad_custom_pass.uuid()
