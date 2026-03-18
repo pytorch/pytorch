@@ -1676,8 +1676,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     def test_known_tensor_methods_traced(self):
         # Verify that known tensor methods (in all_tensor_attrs) are still
-        # traced into the graph after removing the unrestricted fallthrough
-        # (see #140591).
+        # traced into the graph via the generic proxy path.
         cnt = torch._dynamo.testing.CompileCounter()
 
         @torch.compile(backend=cnt, fullgraph=True)
@@ -1687,6 +1686,30 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = fn(torch.randn(4))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
+
+    def test_unknown_tensor_method_graph_break(self):
+        # Methods not in all_tensor_attrs should graph break rather than
+        # being silently proxied through the generic call_method fallthrough.
+        # The function name must match the attribute name so dynamo recognizes
+        # it as a bound tensor method (reaching TensorVariable.call_method)
+        # rather than inlining it as a user function.
+        def _dynamo_test_method(self):
+            return self + 1
+
+        torch.Tensor._dynamo_test_method = _dynamo_test_method
+        try:
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            @torch.compile(backend=cnt)
+            def fn(x):
+                y = x._dynamo_test_method()
+                return y + 1
+
+            result = fn(torch.randn(4))
+            # Graph break on unknown method means multiple frames
+            self.assertGreater(cnt.frame_count, 1)
+        finally:
+            del torch.Tensor._dynamo_test_method
 
     def test_shape_unpack(self):
         def fn(x):
