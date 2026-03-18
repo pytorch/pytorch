@@ -777,7 +777,6 @@ def reorder_for_locality(graph: torch.fx.Graph):
         def check():
             return True
 
-
     def consumes_rng_state(node: torch.fx.Node) -> bool:
         return (
             node.op == "call_function"
