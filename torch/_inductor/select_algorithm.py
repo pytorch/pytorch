@@ -2478,6 +2478,17 @@ class TritonTemplate(KernelTemplate):
                     if k in kwargs
                 },
                 **{k: kwargs[k] for k in CONV_TUNABLE_KEYS if k in kwargs},
+                "_lookup_table_kwargs": {
+                    **{
+                        k: v
+                        for k, v in kwargs.items()
+                        if isinstance(v, (int, float, bool, str, type(None)))
+                    },
+                    "num_stages": num_stages,
+                    "num_warps": num_warps,
+                },
+                "_template_uid": self.uid,
+                "_template_src_hash": self.src_hash,
             },
             mutated_inputs=mutated_inputs,
             workspace_arg=workspace_arg,
