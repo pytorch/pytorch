@@ -1017,12 +1017,6 @@ class SideEffects:
 
         suffixes = []
         for var in self._get_modified_vars():
-            # These frozen attribute initializations are handled in codegen_save_tempvars
-            # and don't need to be reset in the suffix.
-            if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
-                var, variables.FrozenDataClassVariable
-            ):
-                continue
             # When replay_side_effects=False, only update variables with TempLocalSource
             if not config.replay_side_effects and not isinstance(
                 var.source, TempLocalSource
@@ -1204,6 +1198,12 @@ class SideEffects:
                         ]
                     )
                     _maybe_log_side_effect(var._dict_vt)
+                elif isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
+                    var, variables.FrozenDataClassVariable
+                ):
+                    # These frozen attribute initializations are handled in codegen_save_tempvars
+                    # and don't need to be reset in the suffix.
+                    continue
                 elif isinstance(
                     var,
                     variables.UserDefinedListVariable,

@@ -1014,8 +1014,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     [self, *args],
                     kwargs,
                 )
-        elif issubclass(self.value, BaseException):
-            return variables.ExceptionVariable(self.value, tuple(args), kwargs)
 
         return super().call_function(tx, args, kwargs)
 
@@ -1062,6 +1060,16 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
     def fn(self) -> type[object]:
         return self.value
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+        ) -> VariableTracker:
+        real_args = [a.as_python_constant() for a in args]
+        real_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        return VariableTracker.build(tx, self.value(*real_args, **real_kwargs))
 
 
 class UserDefinedEnumClassVariable(UserDefinedClassVariable):
