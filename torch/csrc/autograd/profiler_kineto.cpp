@@ -1093,8 +1093,8 @@ std::string KinetoEvent::metadataJson() const {
 }
 
 int64_t KinetoEvent::externalId() const {
-  // Mirrors ChromeTraceLogger::handleActivity() "External id" logic.
-  // ChromeTraceLogger checks op.linkedActivity() != nullptr; here we check
+  // Mirrors libkineto::ChromeTraceLogger::handleActivity() "External id" logic.
+  // libkineto::ChromeTraceLogger checks op.linkedActivity() != nullptr; here we check
   // linkedCorrelationId() > 0, which is equivalent because PyTorch correlation
   // IDs are monotonically increasing from 1 (a valid linked activity always
   // has a non-zero correlation ID).
