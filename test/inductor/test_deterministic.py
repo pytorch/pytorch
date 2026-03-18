@@ -114,7 +114,7 @@ class DeterministicTest(TestCase):
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] == 0)
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
-                
+
     def test_reorder_for_locality_preserves_randint_order(self):
         with inductor_config.patch(fallback_random=True):
 
