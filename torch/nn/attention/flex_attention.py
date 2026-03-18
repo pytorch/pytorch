@@ -22,6 +22,7 @@ from torch._higher_order_ops.flex_attention import flex_attention as flex_attent
 from torch._higher_order_ops.utils import setup_compilation_env
 from torch.nn.attention._utils import _validate_sdpa_input
 from torch.utils._pytree import GetAttrKey, tree_map_only
+from torch.utils._typing_utils import copy_method_params
 
 
 if typing.TYPE_CHECKING:
@@ -1003,14 +1004,11 @@ class BlockMask:
 
         return "\n".join(total_vis)
 
-    def to(self, device: torch.device | str, **kwargs) -> BlockMask:
+    @copy_method_params(torch.Tensor.to)
+    def to(self, *args: Any, **kwargs: Any) -> BlockMask:
         """Moves the BlockMask to the specified device.
 
-        Args:
-            device (torch.device or str): The target device to move the BlockMask to.
-                Can be a torch.device object or a string (e.g., 'cpu', 'cuda:0').
-            **kwargs: Additional keyword arguments (eg., non_blocking) passed to the 
-                underlying tensor .to() calls.
+        It has similar signature as :meth:`torch.Tensor.to`
 
         Returns:
             BlockMask: A new BlockMask instance with all tensor components moved
@@ -1024,7 +1022,7 @@ class BlockMask:
         """
         mapped_attributes = tree_map_only(
             torch.Tensor,
-            lambda x: x.to(device, **kwargs),
+            lambda x: x.to(*args, **kwargs),
             self.as_tuple(flatten=False),
         )
         return BlockMask(*mapped_attributes)
