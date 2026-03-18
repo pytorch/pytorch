@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     requires_mkl,
+    requires_onednn,
     TEST_MKL,
     xfailIf,
 )
@@ -1620,6 +1621,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @requires_onednn
     @dtypes(torch.bfloat16)
     @parametrize(
         "batch_size",
@@ -1686,6 +1688,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True, "cpp.enable_concat_linear": True})
     @patches
     @torch.no_grad
+    @requires_onednn
     @dtypes(torch.bfloat16)
     @parametrize(
         "batch_size",
