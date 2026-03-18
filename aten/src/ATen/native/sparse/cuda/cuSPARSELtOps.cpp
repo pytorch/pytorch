@@ -33,6 +33,7 @@ struct MatDescriptorCacheKey {
   int32_t C_type = 0;
   int32_t compute_type = 0;
   bool has_bias = false;
+  bool has_alpha = false;
   int32_t alg_id = 0;
   int32_t split_k = 1;
   int32_t split_k_mode = -1;
@@ -151,11 +152,11 @@ struct MatDescriptorCache {
       cudaDataType output_type,
       cudaDataType C_type,
       cusparseComputeType compute_type,
-      bool has_bias,
       int alg_id,
       int split_k,
       int split_k_mode,
-      const std::optional<Tensor>& bias_opt) {
+      const std::optional<Tensor>& bias_opt,
+      const std::optional<Tensor>& alpha_opt) {
     MatDescriptorCacheKey key{};
     key.m = static_cast<int>(m);
     key.k = static_cast<int>(k);
@@ -166,11 +167,13 @@ struct MatDescriptorCache {
     key.output_type = static_cast<int32_t>(output_type);
     key.C_type = static_cast<int32_t>(C_type);
     key.compute_type = static_cast<int32_t>(compute_type);
-    key.has_bias = has_bias;
+    key.has_bias = bias_opt.has_value();
+    key.has_alpha = alpha_opt.has_value() && alpha_opt.value().numel() != 1;
     key.alg_id = static_cast<int32_t>(alg_id);
     key.split_k = static_cast<int32_t>(split_k);
     key.split_k_mode = static_cast<int32_t>(split_k_mode);
     MatDescriptorPtrs* result = lookup(key);
+
     if (result == nullptr) {
       if (lru_list.size() >= MatDescriptorCacheMaxSize) {
         auto& back = lru_list.back();
@@ -178,17 +181,13 @@ struct MatDescriptorCache {
         lru_list.pop_back();
       }
       lru_list.push_front({key, CachedMatDescriptor{}});
-    }
-    // Both paths leave the target entry at the front of lru_list:
-    // lookup() splices a hit there; a miss push_front's the new entry.
-    CachedMatDescriptor& entry = lru_list.front().second;
-    if (result == nullptr) {
+      CachedMatDescriptor& entry = lru_list.front().second;
       int64_t dense_rows = dense_is_contiguous ? k : n;
       int64_t dense_cols = dense_is_contiguous ? n : k;
       int64_t res_ld = transpose_result ? m : n;
       cusparseOrder_t res_order =
           transpose_result ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
-  
+
       TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
           &handle,
           &entry.sparse_input,
@@ -242,7 +241,7 @@ struct MatDescriptorCache {
           &entry.alg_sel,
           &entry.matmul,
           CUSPARSELT_MATMUL_ALG_DEFAULT));
-  
+
       TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
           &handle,
           &entry.alg_sel,
@@ -267,30 +266,38 @@ struct MatDescriptorCache {
               sizeof(splitKMode)));
         }
       }
+
+      entry.ptrs.matmul = &entry.matmul;
+      entry.ptrs.alg_sel = &entry.alg_sel;
+      entry.ptrs.plan = &entry.plan;
+      entry.has_descriptors = true;
+      cache_map[lru_list.front().first] = lru_list.begin();
+      result = &entry.ptrs;
     }
-    
+
     if (bias_opt.has_value()) {
       auto& bias = bias_opt.value();
       void* dBias = bias.data_ptr();
       TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
           &handle,
-          &entry.matmul,
+          result->matmul,
           CUSPARSELT_MATMUL_BIAS_POINTER,
           &dBias,
           sizeof(dBias)));
     }
+    if (alpha_opt.has_value() && alpha_opt.value().numel() != 1) {
+      int tensor_alpha_mode = 1;
+      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+          &handle,
+          result->matmul,
+          CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING,
+          &tensor_alpha_mode,
+          sizeof(tensor_alpha_mode)));
+    }
 
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanInit(
-        &handle, &entry.plan, &entry.matmul, &entry.alg_sel));
-
-    entry.ptrs.matmul = &entry.matmul;
-    entry.ptrs.alg_sel = &entry.alg_sel;
-    entry.ptrs.plan = &entry.plan;
-    entry.has_descriptors = true;
-    if (result == nullptr) {
-      cache_map[lru_list.front().first] = lru_list.begin();
-    }
-    return &entry.ptrs;
+        &handle, result->plan, result->matmul, result->alg_sel));
+    return result;
   }
 
   void insert(MatDescriptorCacheKey key, CachedMatDescriptor descriptor) {
@@ -607,41 +614,22 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       output_type,
       C_type,
       compute_type,
-      bias_opt.has_value(),
       alg_id,
       split_k,
       split_k_mode,
-      bias_opt);
+      bias_opt,
+      alpha_opt);
   TORCH_CHECK(
       desc_ptrs != nullptr,
       "cuSPARSELt: mat descriptor cache getOrCreate failed");
 
-  // // set bias pointer for matmul, need to assign to get location
-  // if (bias_opt.has_value()) {
-  //   auto& bias = bias_opt.value();
-  //   void* dBias = bias.data_ptr();
-  //   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
-  //       &handle,
-  //       desc_ptrs->matmul,
-  //       CUSPARSELT_MATMUL_BIAS_POINTER,
-  //       &dBias,
-  //       sizeof(dBias)));
-  // }
-
-  // set tensor_alpha_mode and alpha pointer for matmul
+  // set alpha pointer for matmul
   const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt : Tensor{};
   auto alpha_ptr = &alpha;
   if (alpha_opt.has_value()) {
     if (alpha_tensor.numel() == 1) {
       alpha = alpha_tensor.item<float>();
     } else {
-      int tensor_alpha_mode = 1;
-      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
-          &handle,
-          desc_ptrs->matmul,
-          CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING,
-          &tensor_alpha_mode,
-          sizeof(tensor_alpha_mode)));
       alpha_ptr = static_cast<float*>(alpha_tensor.data_ptr());
     }
   }
