@@ -615,7 +615,6 @@ Tensor squeeze_nested(const Tensor& self) {
   "squeeze(): For nested tensors, squeeze without the dim argument is not supported ",
   "at the moment, however you can use squeeze(Tensor self, int dim) instead ",
   "if you need this feature, please open an issue on github describing your use case.");
-  return self;
 }
 
 Tensor squeeze_dim_nested(const Tensor& self, IntArrayRef dims) {
