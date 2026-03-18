@@ -587,7 +587,7 @@ else:
             # along with appending information to the `dim_group_names` list whenever necessary.
             pg_name = None
             # Get device for NCCL initialization
-            device_id_to_pass = _get_nccl_device(backend, "nccl")
+            device_id_to_pass = _get_nccl_device(backend, get_backend(default_group))
 
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
