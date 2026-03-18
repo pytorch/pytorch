@@ -4187,6 +4187,10 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
             outputs = V.graph.graph_outputs
         return outputs
 
+    def codegen_input_size_asserts(self) -> None:
+        # Parent graph already asserted on all inputs it passes to this subgraph.
+        pass
+
     def codegen_allocation(self, buffer: ir.Buffer):
         name = buffer.get_name()
         if (signature := self.partition_signatures) and name in signature.input_nodes:
