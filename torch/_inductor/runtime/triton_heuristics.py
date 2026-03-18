@@ -2741,6 +2741,10 @@ def _handle_combo_kernel_per_subkernel_blocks(
     using the same heuristics as standalone Triton kernels. The final config uses
     the maximum num_warps and num_stages across all sub-kernels.
 
+    When autotuning is enabled (i.e. the heuristic returns multiple configs),
+    generates O(N*K) phase configs that vary one sub-kernel's block sizes at a
+    time, feeding into the standard autotune_to_one_config path.
+
     Returns:
         List of configs if combo kernel with combo_grid_meta and per-subkernel
         blocks enabled, None otherwise.
@@ -2759,12 +2763,15 @@ def _handle_combo_kernel_per_subkernel_blocks(
     all_num_stages: list[int] = []
     unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
 
+    all_subkernel_cfgs: list[list[Config]] = []
+    all_skip_rblock: list[bool] = []
+
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
         size_hints_i = combo_meta[f"size_hints_{i}"]
 
         if subkernel_heuristic == "pointwise":
-            cfg = pointwise(
+            cfgs = pointwise(
                 size_hints_i,
                 triton_meta=triton_meta,
                 tile_hint=TileHint.SQUARE
@@ -2774,31 +2781,32 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 min_elem_per_thread=min_elem_per_thread,
                 inductor_meta=inductor_meta_clean,
                 return_configs=True,
-            )[0]
+            )
             skip_rblock = False
         elif subkernel_heuristic == "reduction":
-            cfg = reduction(
+            cfgs = reduction(
                 size_hints_i,
                 reduction_hint=reduction_hint,
                 triton_meta=triton_meta,
                 filename=filename,
                 inductor_meta=inductor_meta_clean,
                 return_configs=True,
-            )[0]
+            )
             skip_rblock = False
         elif subkernel_heuristic == "persistent_reduction":
-            cfg = persistent_reduction(
+            cfgs = persistent_reduction(
                 size_hints_i,
                 reduction_hint=reduction_hint,
                 triton_meta=triton_meta,
                 filename=filename,
                 inductor_meta=inductor_meta_clean,
                 return_configs=True,
-            )[0]
+            )
             skip_rblock = True  # persistent reduction embeds RBLOCK in kernel body
         else:
             raise ValueError(f"Unknown heuristic: {subkernel_heuristic}")
 
+        cfg = cfgs[0]
         for key, value in cfg.kwargs.items():
             if skip_rblock and key.startswith("R") and "BLOCK" in key:
                 continue
@@ -2807,10 +2815,38 @@ def _handle_combo_kernel_per_subkernel_blocks(
         all_num_warps.append(cfg.num_warps)
         all_num_stages.append(cfg.num_stages)
         unique_warp_stage_pairs.add((cfg.num_warps, cfg.num_stages))
+        all_subkernel_cfgs.append(cfgs)
+        all_skip_rblock.append(skip_rblock)
 
     unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
 
-    return [
+    phase_configs: list[Config] = []
+    base_num_warps = max(all_num_warps)
+    base_num_stages = max(all_num_stages)
+
+    for phase_idx in range(num_kernels):
+        phase_cfgs = all_subkernel_cfgs[phase_idx]
+        skip_rblock = all_skip_rblock[phase_idx]
+
+        if len(phase_cfgs) <= 1:
+            continue
+
+        for cfg in phase_cfgs[1:]:
+            phase_kwargs = dict(combined_kwargs)
+            for key, value in cfg.kwargs.items():
+                if skip_rblock and key.startswith("R") and "BLOCK" in key:
+                    continue
+                phase_kwargs[f"{key}_{phase_idx}"] = value
+
+            phase_configs.append(
+                triton.Config(
+                    phase_kwargs,
+                    num_warps=base_num_warps,
+                    num_stages=base_num_stages,
+                )
+            )
+
+    base_configs = [
         triton.Config(
             combined_kwargs,
             num_warps=num_warps,
@@ -2818,6 +2854,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
         )
         for num_warps, num_stages in unique_warp_stage_pairs
     ]
+    return base_configs + phase_configs
 
 
 def triton_config_tiled_reduction(
