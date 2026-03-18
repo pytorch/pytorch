@@ -782,7 +782,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
         return (
             node.op == "call_function"
             and isinstance(node.target, torch._ops.OpOverload)
-            and torch.Tag.nondeterministic_seeded in getattr(node.target, "tags", ())
+            and torch.Tag.nondeterministic_seeded in node.target.tags
         )
 
     def visit(other_node):
