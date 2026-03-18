@@ -2,10 +2,21 @@
 
 #include <include/openreg.h>
 
+#include <cstdlib>
 #include <map>
 #include <mutex>
 
 namespace {
+
+// When set, device memory is allocated as normal read/write memory instead of
+// being mprotect(PROT_NONE)'d. This disables the simulation of GPU memory
+// isolation, which is useful when running PyTorch's test suite against openreg
+// (where the segfaults from mprotect are noise, not signal).
+static bool memory_protection_disabled() {
+  static const bool disabled =
+      std::getenv("OPENREG_DISABLE_MEMORY_PROTECTION") != nullptr;
+  return disabled;
+}
 
 struct Block {
   orMemoryType type = orMemoryType::orMemoryTypeUnmanaged;
@@ -38,9 +49,11 @@ class MemoryManager {
       mem = openreg::mmap(aligned_size);
       if (mem == nullptr)
         return orErrorUnknown;
-      if (openreg::mprotect(mem, aligned_size, F_PROT_NONE) != 0) {
-        openreg::munmap(mem, aligned_size);
-        return orErrorUnknown;
+      if (!memory_protection_disabled()) {
+        if (openreg::mprotect(mem, aligned_size, F_PROT_NONE) != 0) {
+          openreg::munmap(mem, aligned_size);
+          return orErrorUnknown;
+        }
       }
     } else {
       if (openreg::alloc(&mem, page_size, aligned_size) != 0) {
@@ -64,7 +77,9 @@ class MemoryManager {
 
     const auto& info = it->second;
     if (info.type == orMemoryType::orMemoryTypeDevice) {
-      openreg::mprotect(info.pointer, info.size, F_PROT_READ | F_PROT_WRITE);
+      if (!memory_protection_disabled()) {
+        openreg::mprotect(info.pointer, info.size, F_PROT_READ | F_PROT_WRITE);
+      }
       openreg::munmap(info.pointer, info.size);
     } else {
       openreg::free(info.pointer);
@@ -155,7 +170,7 @@ class MemoryManager {
 
   orError_t unprotectNoLock(Block* info) {
     if (info && info->type == orMemoryType::orMemoryTypeDevice) {
-      if (info->refcount == 0) {
+      if (!memory_protection_disabled() && info->refcount == 0) {
         if (openreg::mprotect(
                 info->pointer, info->size, F_PROT_READ | F_PROT_WRITE) != 0) {
           return orErrorUnknown;
@@ -170,7 +185,7 @@ class MemoryManager {
 
   orError_t protectNoLock(Block* info) {
     if (info && info->type == orMemoryType::orMemoryTypeDevice) {
-      if (info->refcount == 1) {
+      if (!memory_protection_disabled() && info->refcount == 1) {
         if (openreg::mprotect(info->pointer, info->size, F_PROT_NONE) != 0) {
           return orErrorUnknown;
         }
