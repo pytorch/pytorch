@@ -1296,6 +1296,21 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         dense_result = dense_result.to(dtype)
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
 
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_cusparselt_matmul_cache_multiple_shapes(self, device, dtype):
+        configs = [(128, 64, 32), (256, 128, 64)]
+        triples = []
+        for m, k, n in configs:
+            A = rand_sparse_semi_structured_mask(m, k, dtype=dtype, device=device)
+            A_sparse = to_sparse_semi_structured(A)
+            B = torch.rand(k, n, device=device, dtype=dtype)
+            triples.append((A_sparse, B, torch.mm(A, B)))
+        for _ in range(4):
+            for A_sparse, B, expected in triples:
+                torch.testing.assert_close(
+                    torch.mm(A_sparse, B), expected, **atol_rtol_kw[dtype]
+                )
+
     def test_cusparselt_backend(self):
         if not torch.backends.cusparselt.is_available():
             raise AssertionError("cusparselt backend should be available")
