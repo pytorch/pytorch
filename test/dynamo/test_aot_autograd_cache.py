@@ -2734,73 +2734,23 @@ class AOTAutogradCacheTests(InductorTestCase):
             ):
                 compiled_fn(x, y)
 
-    def test_cache_hit_across_processes(self):
+    @parametrize(
+        "pre_grad_pass_timing,has_uuid,expect_miss_on_different_uuid",
+        [
+            subtest(("early", True, False), name="early_with_uuid"),
+            subtest(("late", True, True), name="late_with_uuid"),
+            subtest(("default", True, True), name="default_with_uuid"),
+            subtest(("early", False, False), name="early_without_uuid"),
+            # late + no uuid raises RuntimeError, tested separately
+            subtest(("default", False, False), name="default_without_uuid"),
+        ],
+    )
+    def test_cache_hit_across_processes_pre_grad_custom_pass(
+        self, pre_grad_pass_timing, has_uuid, expect_miss_on_different_uuid
+    ):
         """
-        Verify that a second subprocess gets a cache hit from the first subprocess's
-        compilation, using a shared cache directory.
-        """
-        import subprocess
-        import sys
-        import tempfile
-        import textwrap
-
-        with tempfile.TemporaryDirectory() as cache_dir:
-            script = textwrap.dedent(
-                """
-                import json
-                import torch
-                import torch._dynamo
-                from torch._dynamo.utils import counters
-                from torch._inductor import config as inductor_config
-
-                inductor_config.fx_graph_cache = True
-                inductor_config.fx_graph_remote_cache = False
-                torch._dynamo.reset()
-
-                def fn(x, y):
-                    return x + y
-
-                compiled_fn = torch.compile(fn)
-                x = torch.randn(10)
-                y = torch.randn(10)
-                compiled_fn(x, y)
-
-                print(json.dumps(dict(counters["aot_autograd"])))
-                """
-            )
-
-            env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": cache_dir}
-
-            import json
-
-            # First subprocess - expect cache miss
-            result1 = subprocess.run(
-                [sys.executable, "-c", script],
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result1.returncode, 0, result1.stderr)
-            counters1 = json.loads(result1.stdout.strip().splitlines()[-1])
-            self.assertEqual(counters1.get("autograd_cache_miss", 0), 1)
-            self.assertEqual(counters1.get("autograd_cache_hit", 0), 0)
-
-            # Second subprocess - expect cache hit
-            result2 = subprocess.run(
-                [sys.executable, "-c", script],
-                env=env,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result2.returncode, 0, result2.stderr)
-            counters2 = json.loads(result2.stdout.strip().splitlines()[-1])
-            self.assertEqual(counters2.get("autograd_cache_miss", 0), 0)
-            self.assertEqual(counters2.get("autograd_cache_hit", 0), 1)
-
-    def test_cache_hit_across_processes_pre_grad_custom_pass(self):
-        """
-        Verify that different pre-grad custom passes produce different cache keys
-        across processes, and that the same pass produces a cache hit.
+        Verify cache behavior across processes for different pre-grad pass
+        timing and UUID configurations.
         """
         import subprocess
         import sys
@@ -2808,7 +2758,6 @@ class AOTAutogradCacheTests(InductorTestCase):
         import textwrap
 
         with tempfile.TemporaryDirectory() as cache_dir:
-            # Script template that accepts a custom pass UUID
             script_template = textwrap.dedent(
                 """
                 import json
@@ -2821,13 +2770,10 @@ class AOTAutogradCacheTests(InductorTestCase):
 
                 inductor_config.fx_graph_cache = True
                 inductor_config.fx_graph_remote_cache = False
-                inductor_config.pre_grad_pass_timing = "late"
+                inductor_config.pre_grad_pass_timing = "{pre_grad_pass_timing}"
                 torch._dynamo.reset()
 
                 class TestPreGradPass(CustomGraphPass):
-                    def __init__(self, pass_uuid):
-                        self._uuid = pass_uuid
-
                     def __call__(self, g):
                         for n in g.nodes:
                             if n.op == "call_function" and n.target is operator.mul:
@@ -2837,9 +2783,9 @@ class AOTAutogradCacheTests(InductorTestCase):
                                     g.erase_node(n)
 
                     def uuid(self):
-                        return self._uuid
+                        return {pass_uuid}
 
-                inductor_config.pre_grad_custom_pass = TestPreGradPass("{pass_uuid}")
+                inductor_config.pre_grad_custom_pass = TestPreGradPass()
 
                 def fn(x, y):
                     return 1 * x + y
@@ -2856,7 +2802,10 @@ class AOTAutogradCacheTests(InductorTestCase):
             env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": cache_dir}
 
             def run_script(pass_uuid):
-                script = script_template.format(pass_uuid=pass_uuid)
+                script = script_template.format(
+                    pre_grad_pass_timing=pre_grad_pass_timing,
+                    pass_uuid=repr(pass_uuid),
+                )
                 result = subprocess.run(
                     [sys.executable, "-c", script],
                     env=env,
@@ -2868,20 +2817,28 @@ class AOTAutogradCacheTests(InductorTestCase):
 
                 return json.loads(result.stdout.splitlines()[-1])
 
-            # First run with pass_uuid_A - expect cache miss
-            c1 = run_script("pass_uuid_A")
+            uuid_a = "pass_uuid_A" if has_uuid else None
+            uuid_b = "pass_uuid_B" if has_uuid else None
+
+            # First run - expect cache miss
+            c1 = run_script(uuid_a)
             self.assertEqual(c1.get("autograd_cache_miss", 0), 1)
             self.assertEqual(c1.get("autograd_cache_hit", 0), 0)
 
-            # Second run with same pass_uuid_A - expect cache hit
-            c2 = run_script("pass_uuid_A")
+            # Second run with same pass - expect cache hit
+            c2 = run_script(uuid_a)
             self.assertEqual(c2.get("autograd_cache_miss", 0), 0)
             self.assertEqual(c2.get("autograd_cache_hit", 0), 1)
 
-            # Third run with different pass_uuid_B - expect cache miss
-            c3 = run_script("pass_uuid_B")
-            self.assertEqual(c3.get("autograd_cache_miss", 0), 1)
-            self.assertEqual(c3.get("autograd_cache_hit", 0), 0)
+            # Third run with different pass UUID - miss only when UUID is
+            # part of the cache key (late timing with UUID)
+            c3 = run_script(uuid_b)
+            if expect_miss_on_different_uuid:
+                self.assertEqual(c3.get("autograd_cache_miss", 0), 1)
+                self.assertEqual(c3.get("autograd_cache_hit", 0), 0)
+            else:
+                self.assertEqual(c3.get("autograd_cache_miss", 0), 0)
+                self.assertEqual(c3.get("autograd_cache_hit", 0), 1)
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})
