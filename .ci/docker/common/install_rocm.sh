@@ -160,11 +160,7 @@ EOF
         pushd rocm-systems/
         git sparse-checkout init --cone
         git sparse-checkout set projects/rocprofiler-sdk shared/rocprofiler-compute
-        git checkout develop
-        git checkout rocm-7.2.0
-        git config --global user.email "you@example.com"
-        git config --global user.name "Your Name"
-        git cherry-pick a71cc3cc88ed68b24c40cefec77d764053044862
+        git checkout therock-7.11
         sudo apt install -y cmake libdw-dev libsqlite3-dev
         cmake                                         \
               -B rocprofiler-sdk-build                \
