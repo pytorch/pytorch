@@ -298,22 +298,28 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
             return carry, []
 
         num_elems = xs[0].shape[dim]
-        ind = 0
-
-        # Compute dummy shapes for the pre-allocation
         num_init_leaves = len(init)
-        dummy_carry, dummy_out = _extract_carry_and_out(
+
+        # Process element 0 first: this both infers output shapes for
+        # pre-allocation AND computes the first real output.  The original
+        # approach used a separate first_slice_copy() call for shape
+        # inference and then re-processed element 0 in the main loop,
+        # causing operator to be called num_elems+1 times total.  That
+        # extra call is problematic for operators with side effects (e.g.
+        # RDMA-based MoE dispatch kernels).  Processing element 0 here
+        # reduces the total call count to exactly num_elems.
+        carry, out_0 = _extract_carry_and_out(
             call_operator(
                 operator,
                 *carry,
-                *[first_slice_copy(elem, dim) for elem in xs],
+                *[elem.select(dim, 0) for elem in xs],
                 *additional_inputs,
             ),
             num_init_leaves,
         )
 
-        out_tensor_mask = get_tensor_mask(dummy_out)
-        dummy_out_masked = mask_list(out_tensor_mask, dummy_out)
+        out_tensor_mask = get_tensor_mask(out_0)
+        out_0_masked = mask_list(out_tensor_mask, out_0)
 
         # Pre-allocate
         # outs -> Output matrix
@@ -326,11 +332,11 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
                 dtype=e.dtype,
                 device=e.device,
             )
-            for i, e in enumerate(dummy_out_masked)
+            for e in out_0_masked
         ]
         idxs = [
             torch.ones_like(e, dtype=torch.int64).unsqueeze(0)
-            for i, e in enumerate(dummy_out_masked)
+            for e in out_0_masked
         ]
 
         def store_out_in_outs(out, ind):
@@ -342,20 +348,21 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
                 # essentially: o[ind][n][k] = x[0][n][k]
                 o.scatter_(0, ind * idx, x.unsqueeze(0))
 
-        for i in range(num_elems):
-            ind = i
+        # Store element 0's result, then continue from element 1.
+        store_out_in_outs(out_0_masked, 0)
+
+        for i in range(1, num_elems):
             carry, out = _extract_carry_and_out(
                 call_operator(
                     operator,
                     *carry,
-                    *[elem.select(dim, ind) for elem in xs],
+                    *[elem.select(dim, i) for elem in xs],
                     *additional_inputs,
                 ),
                 num_init_leaves,
             )
 
-            # Store the inits in the outs matrix.
-            store_out_in_outs(mask_list(out_tensor_mask, out), ind)
+            store_out_in_outs(mask_list(out_tensor_mask, out), i)
 
         # Expand outs with None depending on the tensor mask of the output
         outs_expanded = [outs.pop(0) if out_m else None for out_m in out_tensor_mask]
