@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <dlfcn.h>
 #include <vector>
 #include <ATen/ceil_div.h>
@@ -48,7 +49,6 @@ namespace c10d::nvshmem_extension {
 #else
 #define WARP_SIZE 32
 #endif
-
 
 extern "C" void nvshmem_init() __attribute__((weak));
 
@@ -234,6 +234,27 @@ static int get_a2a_nblocks(size_t size, int world_size, bool intra_node) {
 }
 
 #if defined(USE_ROCM)
+// ROCm-only offset writeback kernel.
+//
+// On ROCm, allToAllV is a regular multi-block kernel with no grid-wide barrier.
+// Writing source_offsets in-kernel can race with other blocks still reading it for
+// remote gets. We therefore compute output offsets in a separate kernel after
+// allToAllV has completed on the stream.
+__global__ void writeOutputOffsets1d(int64_t* out_splits_offsets, int npes) {
+  auto output_splits = out_splits_offsets;
+  auto output_offsets = out_splits_offsets + npes;
+  int tid = threadIdx.x;
+
+  CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+  __shared__ int64_t peer_offsets[THREADS_PER_BLOCK];
+  prefixSum(peer_offsets, output_splits, npes);
+  __syncthreads();
+
+  if (tid < npes) {
+    output_offsets[tid] = peer_offsets[tid];
+  }
+}
+
 // ROCm: team is host-allocated and cannot be dereferenced on device. Use
 // (mype, npes, global_ranks) instead; barrier is done on host after kernel.
 __global__ void exchangeSplitAndOffset(
@@ -299,9 +320,6 @@ __global__ void allToAllV(
         (char*)send_data + source_offset,
         block_size,
         peer_global);
-  }
-  if (bid == 0 && tid < npes) {
-    source_offsets[tid] = peer_offsets[tid];
   }
   rocshmem_quiet();
 }
@@ -481,6 +499,12 @@ void all_to_all_vdev(
       stride_bytes, mype, npes, global_ranks_ptr);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   C10_CUDA_CHECK(hipStreamSynchronize(stream));
+  // `allToAllV` reads source_offsets while fetching remote shards. Since ROCm has
+  // no grid-wide sync here, writing output offsets in the same kernel can race
+  // with those reads. Write output offsets in a follow-up kernel instead.
+  writeOutputOffsets1d<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      out_splits_offsets_ptr, npes);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   void* args1[] = {
       &input_ptr,
