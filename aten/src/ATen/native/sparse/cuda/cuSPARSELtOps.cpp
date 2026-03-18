@@ -154,7 +154,8 @@ struct MatDescriptorCache {
       bool has_bias,
       int alg_id,
       int split_k,
-      int split_k_mode) {
+      int split_k_mode,
+      const std::optional<Tensor>& bias_opt) {
     MatDescriptorCacheKey key{};
     key.m = static_cast<int>(m);
     key.k = static_cast<int>(k);
@@ -170,100 +171,113 @@ struct MatDescriptorCache {
     key.split_k = static_cast<int32_t>(split_k);
     key.split_k_mode = static_cast<int32_t>(split_k_mode);
     MatDescriptorPtrs* result = lookup(key);
-    if (result != nullptr) {
-      return result;
+    if (result == nullptr) {
+      if (lru_list.size() >= MatDescriptorCacheMaxSize) {
+        auto& back = lru_list.back();
+        cache_map.erase(back.first);
+        lru_list.pop_back();
+      }
+      lru_list.push_front({key, CachedMatDescriptor{}});
     }
-    if (lru_list.size() >= MatDescriptorCacheMaxSize) {
-      auto& back = lru_list.back();
-      cache_map.erase(back.first);
-      lru_list.pop_back();
-    }
-    lru_list.push_front({key, CachedMatDescriptor{}});
+    // Both paths leave the target entry at the front of lru_list:
+    // lookup() splices a hit there; a miss push_front's the new entry.
     CachedMatDescriptor& entry = lru_list.front().second;
-
-    int64_t dense_rows = dense_is_contiguous ? k : n;
-    int64_t dense_cols = dense_is_contiguous ? n : k;
-    int64_t res_ld = transpose_result ? m : n;
-    cusparseOrder_t res_order =
-        transpose_result ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
-
-    TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
-        &handle,
-        &entry.sparse_input,
-        m,
-        k,
-        k,
-        16,
-        input_type,
-        CUSPARSE_ORDER_ROW,
-        CUSPARSELT_SPARSITY_50_PERCENT));
-    TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
-        &handle,
-        &entry.dense_input,
-        dense_rows,
-        dense_cols,
-        dense_cols,
-        16,
-        input_type,
-        CUSPARSE_ORDER_ROW));
-    TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
-        &handle,
-        &entry.res,
-        m,
-        n,
-        res_ld,
-        16,
-        output_type,
-        res_order));
-    TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
-        &handle,
-        &entry.C,
-        m,
-        n,
-        res_ld,
-        16,
-        C_type,
-        res_order));
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
-        &handle,
-        &entry.matmul,
-        CUSPARSE_OPERATION_NON_TRANSPOSE,
-        dense_is_contiguous ? CUSPARSE_OPERATION_NON_TRANSPOSE
-                            : CUSPARSE_OPERATION_TRANSPOSE,
-        &entry.sparse_input,
-        &entry.dense_input,
-        &entry.C,
-        &entry.res,
-        compute_type));
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSelectionInit(
-        &handle,
-        &entry.alg_sel,
-        &entry.matmul,
-        CUSPARSELT_MATMUL_ALG_DEFAULT));
-
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
-        &handle,
-        &entry.alg_sel,
-        CUSPARSELT_MATMUL_ALG_CONFIG_ID,
-        &alg_id,
-        sizeof(alg_id)));
-    if (split_k != 1) {
+    if (result == nullptr) {
+      int64_t dense_rows = dense_is_contiguous ? k : n;
+      int64_t dense_cols = dense_is_contiguous ? n : k;
+      int64_t res_ld = transpose_result ? m : n;
+      cusparseOrder_t res_order =
+          transpose_result ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
+  
+      TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
+          &handle,
+          &entry.sparse_input,
+          m,
+          k,
+          k,
+          16,
+          input_type,
+          CUSPARSE_ORDER_ROW,
+          CUSPARSELT_SPARSITY_50_PERCENT));
+      TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
+          &handle,
+          &entry.dense_input,
+          dense_rows,
+          dense_cols,
+          dense_cols,
+          16,
+          input_type,
+          CUSPARSE_ORDER_ROW));
+      TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
+          &handle,
+          &entry.res,
+          m,
+          n,
+          res_ld,
+          16,
+          output_type,
+          res_order));
+      TORCH_CUDASPARSE_CHECK(cusparseLtDenseDescriptorInit(
+          &handle,
+          &entry.C,
+          m,
+          n,
+          res_ld,
+          16,
+          C_type,
+          res_order));
+      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescriptorInit(
+          &handle,
+          &entry.matmul,
+          CUSPARSE_OPERATION_NON_TRANSPOSE,
+          dense_is_contiguous ? CUSPARSE_OPERATION_NON_TRANSPOSE
+                              : CUSPARSE_OPERATION_TRANSPOSE,
+          &entry.sparse_input,
+          &entry.dense_input,
+          &entry.C,
+          &entry.res,
+          compute_type));
+      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSelectionInit(
+          &handle,
+          &entry.alg_sel,
+          &entry.matmul,
+          CUSPARSELT_MATMUL_ALG_DEFAULT));
+  
       TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
           &handle,
           &entry.alg_sel,
-          CUSPARSELT_MATMUL_SPLIT_K,
-          &split_k,
-          sizeof(split_k)));
-      if (split_k_mode > 0) {
-        cusparseLtSplitKMode_t splitKMode =
-            static_cast<cusparseLtSplitKMode_t>(split_k_mode);
+          CUSPARSELT_MATMUL_ALG_CONFIG_ID,
+          &alg_id,
+          sizeof(alg_id)));
+      if (split_k != 1) {
         TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
             &handle,
             &entry.alg_sel,
-            CUSPARSELT_MATMUL_SPLIT_K_MODE,
-            &splitKMode,
-            sizeof(splitKMode)));
+            CUSPARSELT_MATMUL_SPLIT_K,
+            &split_k,
+            sizeof(split_k)));
+        if (split_k_mode > 0) {
+          cusparseLtSplitKMode_t splitKMode =
+              static_cast<cusparseLtSplitKMode_t>(split_k_mode);
+          TORCH_CUDASPARSE_CHECK(cusparseLtMatmulAlgSetAttribute(
+              &handle,
+              &entry.alg_sel,
+              CUSPARSELT_MATMUL_SPLIT_K_MODE,
+              &splitKMode,
+              sizeof(splitKMode)));
+        }
       }
+    }
+    
+    if (bias_opt.has_value()) {
+      auto& bias = bias_opt.value();
+      void* dBias = bias.data_ptr();
+      TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+          &handle,
+          &entry.matmul,
+          CUSPARSELT_MATMUL_BIAS_POINTER,
+          &dBias,
+          sizeof(dBias)));
     }
 
     TORCH_CUDASPARSE_CHECK(cusparseLtMatmulPlanInit(
@@ -273,8 +287,10 @@ struct MatDescriptorCache {
     entry.ptrs.alg_sel = &entry.alg_sel;
     entry.ptrs.plan = &entry.plan;
     entry.has_descriptors = true;
-    cache_map[lru_list.front().first] = lru_list.begin();
-    return &lru_list.front().second.ptrs;
+    if (result == nullptr) {
+      cache_map[lru_list.front().first] = lru_list.begin();
+    }
+    return &entry.ptrs;
   }
 
   void insert(MatDescriptorCacheKey key, CachedMatDescriptor descriptor) {
@@ -594,22 +610,23 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       bias_opt.has_value(),
       alg_id,
       split_k,
-      split_k_mode);
+      split_k_mode,
+      bias_opt);
   TORCH_CHECK(
       desc_ptrs != nullptr,
       "cuSPARSELt: mat descriptor cache getOrCreate failed");
 
-  // set bias pointer for matmul, need to assign to get location
-  if (bias_opt.has_value()) {
-    auto& bias = bias_opt.value();
-    void* dBias = bias.data_ptr();
-    TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
-        &handle,
-        desc_ptrs->matmul,
-        CUSPARSELT_MATMUL_BIAS_POINTER,
-        &dBias,
-        sizeof(dBias)));
-  }
+  // // set bias pointer for matmul, need to assign to get location
+  // if (bias_opt.has_value()) {
+  //   auto& bias = bias_opt.value();
+  //   void* dBias = bias.data_ptr();
+  //   TORCH_CUDASPARSE_CHECK(cusparseLtMatmulDescSetAttribute(
+  //       &handle,
+  //       desc_ptrs->matmul,
+  //       CUSPARSELT_MATMUL_BIAS_POINTER,
+  //       &dBias,
+  //       sizeof(dBias)));
+  // }
 
   // set tensor_alpha_mode and alpha pointer for matmul
   const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt : Tensor{};
