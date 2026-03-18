@@ -778,11 +778,11 @@ def reorder_for_locality(graph: torch.fx.Graph):
             return True
 
 
-    def is_random_op(node: torch.fx.Node) -> bool:
+    def consumes_rng_state(node: torch.fx.Node) -> bool:
         return (
             node.op == "call_function"
             and isinstance(node.target, torch._ops.OpOverload)
-            and node.target is torch.ops.aten.randint.low
+            and torch.Tag.nondeterministic_seeded in getattr(node.target, "tags", ())
         )
 
     def visit(other_node):
@@ -794,9 +794,9 @@ def reorder_for_locality(graph: torch.fx.Graph):
             == get_mutation_region_id(graph, other_node)
             and check()
         ):
-            # RNG ops are order-sensitive because they consume global RNG state.
-            # Do not reorder them during locality optimization.
-            if is_random_op(other_node):
+            # Ops that consume RNG state are order-sensitive and must not be
+            # reordered during locality optimization.
+            if consumes_rng_state(other_node):
                 return
 
             # move node's producers right before it
