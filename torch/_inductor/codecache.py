@@ -1621,11 +1621,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # When timing is EARLY, pre-grad passes already ran before the cache
         # lookup so there's nothing to validate here.
         if resolve_pre_grad_pass_timing() != "early":
-            if config.pre_grad_custom_pass and (
-                not isinstance(config.pre_grad_custom_pass, CustomGraphPass)
-                or not config.pre_grad_custom_pass.uuid()
-            ):
-                raise BypassFxGraphCache("Unsupported pre grad custom pass")
+            assert not config.pre_grad_custom_pass or (
+                isinstance(config.pre_grad_custom_pass, CustomGraphPass)
+                and config.pre_grad_custom_pass.uuid()
+            ), "Unsupported pre grad custom pass"
         for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
