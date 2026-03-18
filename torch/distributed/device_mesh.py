@@ -149,9 +149,9 @@ else:
         return getattr(torch, device_type, None)
 
     def _get_nccl_device(
-        backend: Optional[str] = None,
-        fallback_backend: Optional[str] = None,
-    ) -> Optional[torch.device]:
+        backend: str | None = None,
+        fallback_backend: str | None = None,
+    ) -> torch.device | None:
         """Get current device for NCCL process group initialization."""
         effective_backend = backend if backend is not None else fallback_backend
         if effective_backend != "nccl":
