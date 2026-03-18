@@ -61,7 +61,7 @@ goto cuda_download
 :cuda132
 set CUDA_INSTALL_EXE=cuda_13.2.0_windows.exe
 set "ARGS="
-set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda13-archive
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda13-archive
 goto cuda_download
 
 :: Common download logic for CUDA toolkit, cuDNN, and ZLIB
@@ -180,8 +180,8 @@ if %CUDA_VER% EQU 130 (
     set EXPECTED_CUDNN_VERSION=9.20.0
 )
 if %CUDA_VER% EQU 132 (
-    set CUDNN_FOLDER=cudnn-windows-x86_64-9.19.0.56_cuda13-archive
-    set EXPECTED_CUDNN_VERSION=9.19.0
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.20.0
 )
 set "CUDNN_INSTALL_ZIP=%CUDNN_FOLDER%.zip"
 
