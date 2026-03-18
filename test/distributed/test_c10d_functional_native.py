@@ -70,7 +70,7 @@ class TestWithNCCL(DistributedTestBase):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(self.rank)
+        return torch.device(torch.accelerator.current_accelerator().type, self.rank)
 
     def _init_process_group(self) -> None:
         self.create_pg(self.device.type)

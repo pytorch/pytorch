@@ -149,7 +149,7 @@ def skip_if_no_gpu(func):
     test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if not (TEST_CUDA or TEST_HPU or TEST_XPU):
+        if not (TEST_CUDA or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         world_size = int(os.environ["WORLD_SIZE"])
         if TEST_CUDA and torch.cuda.device_count() < world_size:
@@ -157,6 +157,8 @@ def skip_if_no_gpu(func):
         if TEST_HPU and torch.hpu.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
         if TEST_XPU and torch.xpu.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
+        if TEST_PRIVATEUSE1 and torch.accelerator.device_count() < world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
@@ -275,7 +277,9 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
                 return func(*args, **kwargs)
             if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
-            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU):
+            if TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= x:
+                return func(*args, **kwargs)
+            if allow_cpu and not (torch.cuda.is_available() or TEST_HPU or TEST_XPU or TEST_PRIVATEUSE1):
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
@@ -504,7 +508,7 @@ def requires_accelerator_dist_backend(backends=None):
     """
     if backends is None:
         backends = ACCELERATOR_DIST_BACKENDS
-    
+
     _backend_availability_checks = {
         "nccl": c10d.is_nccl_available,
         "xccl": c10d.is_xccl_available,
@@ -746,6 +750,8 @@ def init_multigpu_helper(world_size: int, backend: str):
         nGPUs = torch.hpu.device_count()
     if TEST_XPU:
         nGPUs = torch.xpu.device_count()
+    if TEST_PRIVATEUSE1:
+        nGPUs = torch.accelerator.device_count()
     visible_devices = range(nGPUs)
 
     # If rank is less than or equal to number of available GPU's
@@ -2052,6 +2058,9 @@ class MultiProcContinuousTest(TestCase):
 
         # Ensure processes are spawned (lazy initialization for instantiate_device_type_tests)
         self.__class__._ensure_processes_spawned()
+
+        for hook in _test_env_setup_hooks:
+            hook(world_size=self.world_size)
 
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK
