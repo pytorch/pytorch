@@ -1088,7 +1088,7 @@ if(USE_ROCM)
         roc::hipsparselt
       )
       if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.12.0")
-        set(CAFFE2_USE_HIPSPARSELT ${USE_HIPSPARSELT})
+	 set(CAFFE2_USE_HIPSPARSELT ON)
       endif()
     endif()
 
