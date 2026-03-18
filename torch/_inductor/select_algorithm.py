@@ -1907,9 +1907,301 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # Call emission state, populated by _setup_fusion_hooks / external render
         self._call_preamble: list[str] = []
         self._call_args: list[str] = []
+        # Epilogues that could not be fused into the kernel
+        self._unfused_epilogues: list[Any] = []
+        # Reference to the scheduler, set by _compute_fusion_metadata;
+        # used in call_kernel() to codegen unfused epilogue nodes
+        self._scheduling_ref: Any = None
+
+    def get_unfused_epilogues(self) -> list[Any]:
+        return self._unfused_epilogues
+
+    def _compute_fusion_metadata(
+        self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
+    ):
+        """Compute fusion metadata for external backends.
+
+        Determines eligible epilogues/prologues, builds epilogue specs,
+        and computes prologue sources — all before render().
+
+        Hook setup (_setup_epilogue_hook / _setup_prologue_hook) cannot
+        happen here because it requires V.kernel context, which is only
+        active during codegen_template_body → render().
+        """
+        self._scheduling_ref = scheduling
+        from torch._inductor.dependencies import MemoryDep
+
+        tb = self._template_buffer
+        self._eligible_epilogues = self._find_eligible_epilogues(
+            epilogue_nodes, tb.epilogue_fusable_outputs
+        )
+        self._epilogue_nodes_by_subgraph = defaultdict(
+            list,
+            {i: [sn] for i, (sn, _, _, _) in enumerate(self._eligible_epilogues)},
+        )
+        fused_ids = OrderedSet(id(sn) for sn, _, _, _ in self._eligible_epilogues)
+        self._unfused_epilogues = [
+            n
+            for n in epilogue_nodes
+            if id(n) not in fused_ids and not isinstance(n.node, ir.MultiOutput)
+        ]
+        self._prologue_sources = {
+            buf_name: frozenset(
+                d.name for d in pro_node.read_writes.reads if isinstance(d, MemoryDep)
+            )
+            for buf_name, pro_nodes in buf_name_to_prologue_group.items()
+            for pro_node in pro_nodes
+        }
+
+        # Build simplified epilogue interface: _epilogue_idx_by_param,
+        # _epilogue_keep_store, and _extra_store_targets.
+        from torch._inductor.codegen.common import RemovedArg
+
+        scheduler = V.graph.scheduler
+        epilogues = self._eligible_epilogues
+
+        # Compute fused node names for buffer removability
+        fused_node_names = None
+        if scheduler is not None:
+            all_store_names = OrderedSet([tb.get_name()])
+            all_store_names.update(tb._multi_output_children)
+            all_store_names.update(st for _, _, _, st in epilogues if st)
+            fused_node_names = OrderedSet(
+                scheduler.name_to_buf[n].defining_op_name()
+                for n in all_store_names
+                if n in scheduler.name_to_buf
+            )
+
+        # Pre-register store_target buffers so we know their param names
+        for _, _, _, store_target in epilogues:
+            if (
+                store_target is not None
+                and store_target not in self.args.output_buffers
+            ):
+                self.args.output(store_target)
+
+        # Build per-epilogue metadata
+        for i, (_, output_buf, output_param, store_target) in enumerate(epilogues):
+            self._epilogue_idx_by_param[output_param] = i
+
+            can_remove = (
+                store_target is not None
+                and fused_node_names is not None
+                and scheduler.can_buffer_be_removed_through_fusion(
+                    output_buf, fused_node_names
+                )
+            )
+
+            store_target_param_raw = (
+                self.args.output_buffers.get(store_target)
+                if store_target is not None
+                else None
+            )
+            store_target_param = (
+                None
+                if isinstance(store_target_param_raw, RemovedArg)
+                else store_target_param_raw
+            )
+
+            if store_target_param is not None:
+                self._extra_store_targets[store_target] = store_target_param
+                if can_remove:
+                    self.removed_buffers.add(output_buf)
+                else:
+                    self._epilogue_keep_store.add(output_param)
+
+    def _setup_fusion_hooks(self):
+        """Set up epilogue/prologue render hooks and mark prologue buffers.
+
+        Must be called during render() (inside V.kernel context), after
+        _compute_fusion_metadata has run.
+        """
+        tb = self._template_buffer
+
+        # Mark prologue buffers on the kernel.
+        for pro_buf, source_bufs in self._prologue_sources.items():
+            self.store_buffer_names.add(pro_buf)
+            if not source_bufs:
+                self.removed_buffers.add(pro_buf)
+
+        # Set up epilogue hooks.
+        epilogues = self._eligible_epilogues
+        for epilogue_idx in range(len(tb.epilogue_fusable_outputs)):
+            epi = epilogues[epilogue_idx] if epilogue_idx < len(epilogues) else None
+            self._setup_epilogue_hook(
+                output_buf=epi[1] if epi else None,
+                output_param=epi[2] if epi else None,
+            )
+
+        # Set up prologue hooks.
+        for param_name in tb._named_inputs:
+            self._setup_prologue_hook(
+                param_name, prologue_sources=self._prologue_sources
+            )
+
+        # Register no-op <DEF_KERNEL> hook (standard path requires it).
+        self.render_hooks["<DEF_KERNEL>"] = lambda: ""
+
+    def _find_eligible_epilogues(self, epilogue_nodes, output_param_mapping):
+        """Compute fusion eligibility and register extra inputs.
+
+        Returns list of eligible epilogue tuples:
+            [(snode, output_buf, output_param, store_target), ...]
+        """
+        from torch._inductor.dependencies import MemoryDep
+
+        # Filter eligible epilogues
+        epilogues = []
+        for epilogue_node in epilogue_nodes:
+            if isinstance(epilogue_node.node, ir.MultiOutput):
+                continue
+            dep_names = OrderedSet(
+                d.name
+                for d in epilogue_node.read_writes.reads
+                if isinstance(d, MemoryDep) and d.name in output_param_mapping
+            )
+            if len(dep_names) != 1:
+                continue
+            output_buf = next(iter(dep_names))
+            epilogue_writes = epilogue_node.read_writes.writes
+            raw_st = next(iter(epilogue_writes)).name if epilogue_writes else None
+            epilogues.append(
+                (
+                    epilogue_node,
+                    output_buf,
+                    output_param_mapping[output_buf],
+                    raw_st if raw_st != output_buf else None,
+                )
+            )
+
+        # Register extra inputs needed by fused epilogues
+        for snode, _, _, _ in epilogues:
+            for dep in snode.read_writes.reads:
+                if isinstance(dep, MemoryDep) and dep.name not in output_param_mapping:
+                    if dep.name not in self._extra_inputs:
+                        param = f"_extra_input_{len(self._extra_inputs)}"
+                        self._extra_inputs[dep.name] = param
+                        self.args.input_buffers[dep.name] = param
+
+        return epilogues
+
+    def _setup_epilogue_hook(self, output_buf=None, output_param=None):
+        store_idx = next(self.store_output_ctr)
+        subgraph_name = self._get_store_output_subgraph_name(store_idx)
+        if output_buf is None:
+            self.subgraph_bodies[subgraph_name] = SubgraphInfo(body=IndentedBuffer())
+            self.render_hooks[subgraph_name] = lambda: ""
+            return
+
+        n_dims = len(self._template_buffer.get_size())
+        indices = [f"x_epilogue{store_idx}_{d}" for d in range(n_dims)]
+        val = f"_kernel_val_{store_idx}"
+        mask = f"_tile_mask_{store_idx}"
+
+        buf = output_buf
+        node = V.graph.get_buffer(buf) if buf else None
+        output_size = (
+            list(node.get_size())
+            if node is not None
+            else list(self.output_node.get_size())
+        )
+        self._make_independent_subgraph(subgraph_name, sympy_product(output_size))
+        with self.set_subgraph_body(subgraph_name):
+            indices = list(map(OpOverrides.paren, indices))
+            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
+            lengths = [V.graph.sizevars.simplify(s) for s in output_size]
+            assert len(indices) == len(lengths)
+            self.template_out = val
+            self._setup_contiguous_index_state(
+                indices,
+                index_symbols,
+                lengths,
+                mask,
+                xindex_name=f"x_epilogue{store_idx}_index",
+            )
+            self.template_out_shape = val
+
+            # Set up CSE state for epilogue codegen
+            block_shape = tuple(
+                f"{rt.prefix.upper()}BLOCK"
+                for rt in self.range_trees
+                if not rt.is_reduction
+            )
+            if not block_shape:
+                block_shape = ("XBLOCK",)
+            self.cse.store_cache[buf] = self.cse.namedvar(
+                val, dtype=torch.float32, shape=block_shape
+            )
+            assert output_param is not None
+            self.args.output_buffers[buf] = output_param
+
+        self.render_hooks[subgraph_name] = self._make_codegen_hook(subgraph_name)
+
+    def _setup_prologue_hook(self, input_name, prologue_sources=None):
+        ir_node = self._template_buffer._named_inputs.get(input_name)
+        if ir_node is None:
+            return
+        self.named_input_nodes[input_name] = ir_node
+        input_buf = ir_node.get_name()
+        source_bufs = (
+            prologue_sources.get(input_buf) if prologue_sources is not None else None
+        )
+        if source_bufs is None:
+            return
+        source_buffer = next(iter(source_bufs)) if source_bufs else None
+        self._prologue_source_buffers[input_name] = source_buffer
+        if source_buffer is not None:
+            self.args.input_buffers[source_buffer] = input_name
+        for src in source_bufs:
+            if src != source_buffer:
+                if src not in self._extra_inputs:
+                    self._extra_inputs[src] = f"_extra_input_{len(self._extra_inputs)}"
+                self.args.input_buffers[src] = self._extra_inputs[src]
+
+        subgraph_name = f"<LOAD_INPUT_{input_name}>"
+        result_var = f"_prologue_{input_name}_result"
+
+        # Compute prologue variable names once and store them.
+        renames = {
+            "xindex": f"_prologue_{input_name}_xindex",
+            "xmask": f"_prologue_{input_name}_xmask",
+        }
+        self._prologue_vars[input_name] = {
+            "xindex": renames["xindex"],
+            "xmask": renames["xmask"],
+            "result": result_var,
+        }
+
+        class _CaptureStoreHandler(V.WrapperHandler):  # type: ignore[name-defined]
+            def store(self, name, index, value, mode=None):
+                V.kernel.store_buffer_names.add(name)
+                V.kernel.cse.store_cache[name] = value
+                V.kernel.compute.writeline(f"{result_var} = {value}")
+
+        self._make_independent_subgraph(
+            subgraph_name,
+            sympy_product(ir_node.get_size()),
+            ops_handler=_CaptureStoreHandler,
+            root_var_renames=renames,
+        )
+
+        def hook(_name=subgraph_name, _input=input_name, _self=self):
+            with _self.set_subgraph_body(_name):
+                _self.codegen_body()
+                _self.cse.invalidate(OrderedSet())
+                body = _self.body.getvalue()
+            # Rename range-tree root variables (xindex/xmask) to avoid collisions
+            # across prologue subgraphs.  tmp/x0 names are already unique (shared
+            # kernel-level counters).  Read renames from the subgraph info.
+            subgraph = _self.subgraph_bodies[_name]
+            for orig, renamed in subgraph.root_var_renames.items():
+                body = re.sub(rf"\b{orig}\b", renamed, body)
+            return body.rstrip()
+
+        self.render_hooks[f"<LOAD_INPUT_{input_name}>"] = hook
 
     def call_kernel(self, name, node=None, deallocate_ws=True):
-        """Emit the kernel call and multi-output unpacking."""
+        """Emit the kernel call, multi-output unpacking, and unfused epilogues."""
         tb = self._template_buffer
         wrapper = V.graph.wrapper_code
         for line in self._call_preamble:
@@ -1923,6 +2215,9 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
                 for _, idx in mo.indices:
                     idx_str = f"{idx_str}[{idx}]"
                 wrapper.writeline(f"{mo_name} = {idx_str}")
+        # Unfused epilogues are codegen'd separately after the kernel call
+        for epi_node in self._unfused_epilogues:
+            self._scheduling_ref.codegen_node(epi_node)
 
     def emit_kernel_override(
         self,
@@ -2601,6 +2896,7 @@ class TritonTemplate(KernelTemplate):
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
+                "epilogue_subtile": kwargs.get("EPILOGUE_SUBTILE", 0),
                 **{
                     k: kwargs[k]
                     for k in AlgorithmSelectorCache.FLEX_ATTENTION_TUNABLE_KEYS
@@ -4430,7 +4726,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     "All-reduce timeout when collecting benchmark results"
                 )
 
-            timing = time_tensor.item()
+            timing = cast(float, time_tensor.item())
 
             log.info(
                 "Collective benchmark for %s: %.6f ms",

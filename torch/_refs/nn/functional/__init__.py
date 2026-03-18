@@ -260,7 +260,11 @@ def elu(
         lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
     )
 
-    return torch.where(a > 0, scale * a, (alpha * scale) * torch.expm1(a * input_scale))
+    return torch.where(
+        a > 0,
+        scale * a,
+        (alpha * scale) * torch.expm1(a * input_scale),
+    )
 
 
 @register_decomposition(aten.relu)

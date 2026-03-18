@@ -4363,74 +4363,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
 
-    def test_id_of_container_as_dict_key(self):
-        MY_DICT = {"a": 1, "b": 2}
-
-        def fn(x):
-            memo = {}
-            memo[id(MY_DICT)] = True
-            if id(MY_DICT) in memo:
-                return x + 1.0
-            return x + 2.0
-
-        x = torch.randn(4)
-        correct = fn(x)
-        result = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(result, correct)
-
-    def test_id_of_list_as_dict_key(self):
-        MY_LIST = [1.0, 2.0]
-
-        def fn(x):
-            memo = {}
-            memo[id(MY_LIST)] = True
-            if id(MY_LIST) in memo:
-                return x + 1.0
-            return x + 2.0
-
-        x = torch.randn(4)
-        correct = fn(x)
-        result = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(result, correct)
-
-    def test_deepcopy_dict(self):
-        MY_DICT = {"a": 1, "b": 2.0, "c": None}
-
-        def fn(x):
-            d = copy.deepcopy(MY_DICT)
-            d["b"] = 3.0
-            return x + d["b"]
-
-        x = torch.randn(4)
-        correct = fn(x)
-        result = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(result, correct)
-
-    def test_deepcopy_nested_dict(self):
-        NESTED = {"a": {"b": 1.0}, "c": [2.0, 3.0]}
-
-        def fn(x):
-            d = copy.deepcopy(NESTED)
-            return x + d["a"]["b"] + d["c"][0]
-
-        x = torch.randn(4)
-        correct = fn(x)
-        result = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(result, correct)
-
-    def test_deepcopy_list(self):
-        MY_LIST = [1.0, 2.0, 3.0]
-
-        def fn(x):
-            lst = copy.deepcopy(MY_LIST)
-            lst[0] = 5.0
-            return x + lst[0]
-
-        x = torch.randn(4)
-        correct = fn(x)
-        result = torch.compile(fn, fullgraph=True)(x)
-        self.assertEqual(result, correct)
-
     def test_global_state_guard_serialization(self):
         GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
         guards = GlobalStateGuard()
@@ -7883,6 +7815,60 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
+
+    def test_custom_instancecheck_does_not_cause_extra_init(self):
+        # When __new__ returns an object whose type is not a subclass of cls,
+        # CPython's type.__call__ skips __init__. The polyfill
+        # instantiate_user_defined_class_object must match this behavior even
+        # when the metaclass defines a custom __instancecheck__ that would
+        # return True for isinstance().
+        class Meta(type):
+            def __instancecheck__(cls, instance):
+                return isinstance(instance, Base) and instance.tag == cls._tag
+
+        class Base:
+            def __init__(self, tag="default"):
+                self.tag = tag
+
+        class Child(Base, metaclass=Meta):
+            _tag = "child"
+
+            def __new__(cls):
+                # Returns a Base (not a Child), like ByteStorage.__new__
+                return Base(tag="child")
+
+        def fn():
+            obj = Child()
+            return obj.tag
+
+        ref = fn()
+        self.assertEqual(ref, "child")
+
+        opt_fn = torch.compile(fn, backend="eager")
+        res = opt_fn()
+        self.assertEqual(res, "child")
+
+    def test_custom_instancecheck_init_not_called(self):
+        class AlwaysTrueMeta(type):
+            def __instancecheck__(cls, instance):
+                return True
+
+        class Child(metaclass=AlwaysTrueMeta):
+            def __new__(cls):
+                return object()
+
+            def __init__(self):
+                raise AssertionError("should NOT be called")
+
+        def fn():
+            return Child()
+
+        ref = fn()
+        self.assertIsInstance(ref, object)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        res = opt_fn()
+        self.assertIsInstance(res, object)
 
     def test_variable_tracker_recursively_contains(self):
         # VariableTracker.recursively_contains should be updated correctly when mutation happens

@@ -269,10 +269,10 @@ struct AddGenericMetadata : public MetadataBase {
     if (arg_data.hasData) {
       if (get_record_concrete_inputs_enabled()) {
         addMetadata("Input Dims", variantShapesToStr(arg_data.shapes));
-        addMetadata("Input Strides", variantShapesToStr(arg_data.strides));
       } else {
         addMetadata("Input Dims", shapesToStr(arg_data.shapesForKinetoEvent));
       }
+      addMetadata("Input Strides", variantShapesToStr(arg_data.strides));
       addMetadata("Input type", strListToStr(arg_data.dtypes));
       if (!arg_data.concreteInputs.empty()) {
         addMetadata(

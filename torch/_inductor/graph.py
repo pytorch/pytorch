@@ -24,7 +24,7 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import (
@@ -1522,6 +1522,10 @@ class GraphLowering(torch.fx.Interpreter):
             # nested subgraphs can have singleton outputs
             result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
+        result = [
+            ir.OpaqueValueTypeConstant(value=x) if is_opaque_value_type(type(x)) else x
+            for x in result
+        ]
         assert all(
             isinstance(
                 x,
@@ -1537,6 +1541,7 @@ class GraphLowering(torch.fx.Interpreter):
                     ir.ShapeAsConstantBuffer,
                     TorchBindObject,
                     ir.OpaqueMultiOutput,
+                    ir.OpaqueValueTypeConstant,
                 ),
             )
             for x in result
@@ -2007,6 +2012,19 @@ class GraphLowering(torch.fx.Interpreter):
                     if user.op == "output":
                         # pyrefly: ignore [missing-attribute]
                         if isinstance(result.data.data, (Pointwise, Reduction)):
+                            # Cheap-to-recompute nodes (0 buffer reads, e.g.
+                            # index arithmetic or constant fills) can be
+                            # deferred to realize_input at output processing.
+                            # This prevents cascade materialization where
+                            # shared constants inflate downstream read counts.
+                            if (
+                                config.delay_realize_cheap_outputs
+                                # pyrefly: ignore [missing-attribute]
+                                and result.data.num_reads() == 0
+                                # pyrefly: ignore [missing-attribute]
+                                and not result.data.has_large_inner_fn()
+                            ):
+                                continue
                             result.realize()
 
                 _data = result.data  # type: ignore[attr-defined]

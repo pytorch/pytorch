@@ -1530,9 +1530,10 @@ def should_prefer_unfused_addmm(match):
     extra_check=should_prefer_unfused_addmm,
 )
 def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
-    # Unfusing addmm introduces an extra bf16/fp16 truncation at the mm output
-    # that compounds through deep models and causes accuracy failures.
-    if inp.meta["val"].dtype in (torch.bfloat16, torch.float16):
+    if config.keep_addmm_fused_for_half_dtypes and inp.meta["val"].dtype in (
+        torch.bfloat16,
+        torch.float16,
+    ):
         return
 
     def repl(inp, x1, x2, alpha, beta):
@@ -1876,7 +1877,8 @@ class ConstructorMoverPass:
                         lambda x: x
                         not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
                         + unsqueezed_nodes
-                        and x.target != torch.ops.aten.copy_.default,
+                        and x.target != torch.ops.aten.copy_.default
+                        and x.target != "output",
                     )
                     last_node = gpu_node
 

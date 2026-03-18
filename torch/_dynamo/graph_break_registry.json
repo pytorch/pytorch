@@ -718,7 +718,7 @@
   "GB8656": [
     {
       "Gb_type": "Opaque object with custom __getattr__ not supported",
-      "Context": "{value_type.__name__} with custom __getattr__",
+      "Context": "{real_obj_type.__name__} with custom __getattr__",
       "Explanation": "Dynamo does not support opaque objects types with custom __getattr__ methods",
       "Hints": []
     }
@@ -865,17 +865,6 @@
       "Hints": []
     }
   ],
-  "GB0719": [
-    {
-      "Gb_type": "Reconstruction of FakeIdVariable",
-      "Context": "str(self.value)",
-      "Explanation": "A fake id produced by id() on a compile-time container cannot be reconstructed across a graph break.",
-      "Hints": [
-        "Avoid using id() on containers in code that may graph-break.",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
-    }
-  ],
   "GB0072": [
     {
       "Gb_type": "Inplace op on input tensor",
@@ -1020,17 +1009,6 @@
       "Explanation": "Dynamo requires the attribute name passed to `super().__delattr__(...)` to be a constant (string).",
       "Hints": [
         "Ensure the attribute name is a string literal or a constant variable."
-      ]
-    }
-  ],
-  "GB7581": [
-    {
-      "Gb_type": "copy.deepcopy(tensor)",
-      "Context": "copy.deepcopy({self})",
-      "Explanation": "Dynamo does not support copy.deepcopy() on tensors.",
-      "Hints": [
-        "Avoid calling copy.deepcopy() on tensors inside compiled regions.",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -2456,6 +2434,15 @@
     }
   ],
   "GB8843": [
+    {
+      "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
+      "Context": "Opaque object type: {real_obj_type}. Method name: '{name}'",
+      "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
+      "Hints": [
+        "Register member '{name}' with MemberType.INLINED in ",
+        "register_opaque_type({real_obj_type}, members=...)."
+      ]
+    },
     {
       "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
       "Context": "Opaque object type: {value_type}. Method name: '{name}'",

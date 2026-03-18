@@ -1,4 +1,5 @@
 set SRC_DIR=%~dp0
+set TARGET_OS=windows
 
 pushd %SRC_DIR%\..
 
@@ -96,6 +97,10 @@ if ERRORLEVEL 1 exit /b 1
 
 echo Checking that basic CNN works
 %PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\test_example_code\cnn_smoke.py
+if ERRORLEVEL 1 exit /b 1
+
+echo Running smoke_test.py
+%PYTHON_EXEC% %PYTORCH_ROOT%\.ci\pytorch\smoke_test\smoke_test.py --package=torchonly --torch-compile-check disabled --runtime-error-check disabled
 if ERRORLEVEL 1 exit /b 1
 
 goto end

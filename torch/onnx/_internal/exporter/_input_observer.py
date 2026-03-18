@@ -6,6 +6,7 @@ __all__ = ["InputObserver"]
 import contextlib
 import inspect
 import time
+import typing
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -1193,17 +1194,20 @@ class InputObserver:
                         success = False
                         error = "not the same type"
                         break
-                    err = (torch_tensor - ort_tensor).abs().max().item()
+                    err = typing.cast(
+                        float, (torch_tensor - ort_tensor).abs().max().item()
+                    )
                     err_abs = max(err_abs, err)
                     if err_abs > atol:
                         success = False
-                    err = (
+                    err = typing.cast(
+                        float,
                         (
                             (torch_tensor - ort_tensor).abs()
                             / (torch_tensor.abs() + rtol)
                         )
                         .max()
-                        .item()
+                        .item(),
                     )
                     err_rel = max(err_rel, err)
                     if err_rel > rtol:

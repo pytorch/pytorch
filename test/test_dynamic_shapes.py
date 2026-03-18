@@ -29,11 +29,11 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_bool,
     guard_float,
     guard_int,
+    guarding_hint_or_throw,
     GuardOnDataDependentSymNode,
     has_free_symbols,
     is_symbolic,
     ShapeEnv,
-    size_hint,
     StatelessSymbolicContext,
     statically_known_false,
     statically_known_true,
@@ -3161,16 +3161,24 @@ class TestGuardsExpressions(TestCase):
 
         guards = shape_env.produce_guards_expression([s0])
 
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s1)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s2)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s1)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s2)])
+        )
 
     def test_guards_float_print(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 3)
         guard_bool(2 / s0 == 2 / 3)
         guards = shape_env.produce_guards_expression([s0])
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3314,8 +3322,12 @@ class TestGuardsExpressions(TestCase):
 
         self.assertIn("math.trunc(", guards)
         self.assertIn("float(", guards)
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s1)]))
+        self.assertTrue(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s0)])
+        )
+        self.assertFalse(
+            shape_env.evaluate_guards_expression(guards, [guarding_hint_or_throw(s1)])
+        )
 
     @unittest.skipIf(
         TEST_XPU, "Skipped on XPU"
@@ -4838,15 +4850,21 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
     def test_hint_override_consistent_stride1(self):
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
-            a = torch.fx.experimental.symbolic_shapes.size_hint(x.size()[2])
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[1])
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.size()[2]
+            )
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[1]
+            )
             torch._check(a == b)
             torch._check(a == 6)
 
-            a = torch.fx.experimental.symbolic_shapes.size_hint(
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
                 x.size()[1] * x.size()[2]
             )
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[0])
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[0]
+            )
             torch._check(a == b)
             torch._check(a == 120)
 
@@ -4864,10 +4882,12 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
             # only one of the sizes has hint overridden.
-            a = torch.fx.experimental.symbolic_shapes.size_hint(
+            a = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
                 x.size()[1] * x.size()[2]
             )
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[0])
+            b = torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                x.stride()[0]
+            )
             torch._check(a == b)
             torch._check(a == 24)
 
@@ -4880,20 +4900,20 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.mark_dynamic(x, 2, hint_override=6)
         func(x)
 
-    def test_size_hint(self):
+    def test_optimization_hint(self):
         @torch.compile(fullgraph=True)
         def func(x):
             u0 = x.item()
             a = torch.ones([u0])
             torch._check(
-                torch.fx.experimental.symbolic_shapes.size_hint(
+                torch.fx.experimental.symbolic_shapes.optimization_hint(
                     a.size()[0], fallback=300
                 )
                 == 300
             )
             b = torch.ones([x.item() * 2])
             torch._check(
-                torch.fx.experimental.symbolic_shapes.size_hint(
+                torch.fx.experimental.symbolic_shapes.optimization_hint(
                     b.size()[0], fallback=300
                 )
                 == 600
@@ -4903,13 +4923,16 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         func(torch.tensor([33]))
 
-    def test_size_hint_no_fallback(self):
+    def test_guarding_hint_or_throw(self):
         @torch.compile(fullgraph=True)
         def func(x):
             u0 = x.item()
             a = torch.ones([u0])
             torch._check(
-                torch.fx.experimental.symbolic_shapes.size_hint(a.size()[0]) == 300
+                torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                    a.size()[0]
+                )
+                == 300
             )
 
             return a * 10

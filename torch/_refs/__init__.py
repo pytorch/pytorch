@@ -387,9 +387,9 @@ def handle_noncontiguous_outputs(input_tlist, output):
 def _broadcast_shapes(*_shapes):
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
-        has_hint,
+        guarding_hint_or_throw,
+        has_guarding_hint,
         is_nested_int,
-        size_hint,
     )
 
     backed_so = torch.fx.experimental._config.backed_size_oblivious
@@ -433,9 +433,13 @@ def _broadcast_shapes(*_shapes):
                 #           specialize(s0) to be 1.
                 #      s0:4, s1:1 ==>
                 #           specialize(s1) to be 1.
-                if backed_so and has_hint(shape[idx]) and has_hint(common_shape[idx]):
-                    a = size_hint(shape[idx])
-                    b = size_hint(common_shape[idx])
+                if (
+                    backed_so
+                    and has_guarding_hint(shape[idx])
+                    and has_guarding_hint(common_shape[idx])
+                ):
+                    a = guarding_hint_or_throw(shape[idx])
+                    b = guarding_hint_or_throw(common_shape[idx])
                     if a == 1 and b != 1:
                         torch._check(shape[idx] == 1)
                     if b == 1 and a != 1:
@@ -2039,7 +2043,11 @@ def clamp_max(
 
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
-# TODO: implement where.default
+@register_decomposition(aten.where.default)
+def _where_default(pred: Tensor) -> tuple[Tensor, ...]:
+    return torch.nonzero(pred, as_tuple=True)
+
+
 @register_decomposition(aten.where.self)
 @register_decomposition(aten.where.ScalarSelf)
 @register_decomposition(aten.where.ScalarOther)
@@ -3116,8 +3124,8 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
-        has_hint,
-        size_hint,
+        guarding_hint_or_throw,
+        has_guarding_hint,
         sym_or,
     )
 
@@ -3161,9 +3169,13 @@ def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
             #            The non-broadcast path is picked
             #      x:1, requested_length:4 ==>
             #           specialize(x) to be 1.
-            if backed_so and has_hint(x) and has_hint(requested_length):
-                x_hint = size_hint(x)
-                requested_hint = size_hint(requested_length)
+            if (
+                backed_so
+                and has_guarding_hint(x)
+                and has_guarding_hint(requested_length)
+            ):
+                x_hint = guarding_hint_or_throw(x)
+                requested_hint = guarding_hint_or_throw(requested_length)
                 if x_hint == 1 and requested_hint != 1:
                     torch._check(x == 1)
 
@@ -3452,6 +3464,10 @@ def native_layer_norm(
         + str(normalized_shape)
         + ", but got input of size "
         + str(input.shape),
+    )
+    torch._check(
+        not input.is_complex(),
+        lambda: "native_layer_norm does not support complex inputs",
     )
 
     input = contiguous(input)

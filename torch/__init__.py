@@ -61,7 +61,7 @@ from torch.torch_version import __version__ as __version__
 
 
 if TYPE_CHECKING:
-    from torch.types import Device, IntLikeType
+    from torch.types import Device, FloatLikeType, IntLikeType
 
 
 __all__ = [
@@ -550,19 +550,55 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise TypeError("type stub not overridden")
 
-    def __add__(self, other) -> "SymInt":
+    @_overload
+    def __add__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __add__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __add__(self, other: complex) -> complex: ...
+    @_overload
+    def __add__(self, other: "Tensor") -> "Tensor": ...
+
+    def __add__(self, other):
         raise TypeError("type stub not overridden")
 
-    def __radd__(self, other) -> "SymInt":
+    @_overload
+    def __radd__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __radd__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __radd__(self, other: complex) -> complex: ...
+    @_overload
+    def __radd__(self, other: "Tensor") -> "Tensor": ...
+
+    def __radd__(self, other):
         raise TypeError("type stub not overridden")
 
-    def __rmul__(self, other) -> "SymInt":
+    @_overload
+    def __mul__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __mul__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __mul__(self, other: complex) -> complex: ...
+    @_overload
+    def __mul__(self, other: "Tensor") -> "Tensor": ...
+
+    def __mul__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __rmul__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __rmul__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __rmul__(self, other: complex) -> complex: ...
+    @_overload
+    def __rmul__(self, other: "Tensor") -> "Tensor": ...
+
+    def __rmul__(self, other):
         raise TypeError("type stub not overridden")
 
     def __mod__(self, other: "IntLikeType") -> "SymInt":
-        raise TypeError("type stub not overridden")
-
-    def __mul__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __pow_by_natural__(self, other) -> "SymInt":
@@ -592,13 +628,34 @@ class SymInt:
     def __sym_float__(self):
         raise TypeError("type stub not overridden")
 
-    def __neg__(self):
+    def __neg__(self) -> "SymInt":
         raise TypeError("type stub not overridden")
 
-    def __sub__(self, other: "IntLikeType") -> "SymInt":
+    def __abs__(self) -> "SymInt":
         raise TypeError("type stub not overridden")
 
-    def __rsub__(self, other: "IntLikeType") -> "SymInt":
+    @_overload
+    def __sub__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __sub__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __sub__(self, other: complex) -> complex: ...
+    @_overload
+    def __sub__(self, other: "Tensor") -> "Tensor": ...
+
+    def __sub__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __rsub__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __rsub__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __rsub__(self, other: complex) -> complex: ...
+    @_overload
+    def __rsub__(self, other: "Tensor") -> "Tensor": ...
+
+    def __rsub__(self, other):
         raise TypeError("type stub not overridden")
 
     def __and__(self, other) -> "SymInt":
@@ -710,6 +767,72 @@ class SymFloat:
         raise TypeError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __add__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __add__(self, other: complex) -> complex: ...
+    @_overload
+    def __add__(self, other: "Tensor") -> "Tensor": ...
+
+    def __add__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __radd__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __radd__(self, other: complex) -> complex: ...
+    @_overload
+    def __radd__(self, other: "Tensor") -> "Tensor": ...
+
+    def __radd__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __sub__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __sub__(self, other: complex) -> complex: ...
+    @_overload
+    def __sub__(self, other: "Tensor") -> "Tensor": ...
+
+    def __sub__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __rsub__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __rsub__(self, other: complex) -> complex: ...
+    @_overload
+    def __rsub__(self, other: "Tensor") -> "Tensor": ...
+
+    def __rsub__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __mul__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __mul__(self, other: complex) -> complex: ...
+    @_overload
+    def __mul__(self, other: "Tensor") -> "Tensor": ...
+
+    def __mul__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __rmul__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __rmul__(self, other: complex) -> complex: ...
+    @_overload
+    def __rmul__(self, other: "Tensor") -> "Tensor": ...
+
+    def __rmul__(self, other):
+        raise TypeError("type stub not overridden")
+
+    def __neg__(self) -> "SymFloat":
+        raise TypeError("type stub not overridden")
+
+    def __abs__(self) -> "SymFloat":
         raise TypeError("type stub not overridden")
 
     def __float_pow__(self, other) -> "SymFloat":

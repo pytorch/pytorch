@@ -27,9 +27,11 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_FBCODE,
+    MI350_ARCH,
     parametrize,
     serialTest,
     skipIfRocm,
+    skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
 )
@@ -135,6 +137,16 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
     copy_tests(
         DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
+
+    if HAS_GPU and hasattr(
+        DynamicShapesGPUTests, "test_conv_with_as_strided_dynamic_shapes_cuda"
+    ):
+        # gfx950 shows a deterministic numerical mismatch for this generated test.
+        DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda = (
+            skipIfRocmArch(MI350_ARCH)(
+                DynamicShapesGPUTests.test_conv_with_as_strided_dynamic_shapes_cuda
+            )
+        )
 
 
 class TestInductorDynamic(TestCase):

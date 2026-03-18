@@ -275,6 +275,12 @@ def get_supported_param_types():
     result = []
     for line in data:
         result.extend(derived_types(*line))
+
+    # Backward compat: types.Number includes SymInt/SymFloat, but downstream
+    # libraries (e.g. torchao) may have annotations using int | float | bool
+    # directly, so accept that as Scalar too.
+    result.extend(derived_types(int | float | bool, "Scalar", True, False, False))
+
     return dict(result)
 
 

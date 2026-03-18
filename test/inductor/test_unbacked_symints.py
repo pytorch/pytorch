@@ -312,6 +312,23 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch(
+        {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
+    )
+    def test_repeat_interleave_with_unbacked_scalar(self, device):
+        def fn(x, repeats):
+            return x.repeat_interleave(repeats.item())
+
+        example_inputs = (
+            torch.arange(4, device=device),
+            torch.scalar_tensor(3, dtype=torch.int64, device=device),
+        )
+
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize("dynamic", [False, True, None])
     def test_unbacked_slice_on_subclass(self, device, dynamic):
@@ -719,6 +736,41 @@ class TestUnbackedSymints(InductorTestCase):
         actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
+
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_triton_trunc_large_float_scalar_tensor(self, device):
+        import math
+
+        def fn(x):
+            r = math.sqrt(x.size(0))
+            r = r**70
+            return torch.tensor(math.trunc(r), dtype=torch.float64, device=device)
+
+        example_inputs = (torch.randn(4, device=device),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_triton_trunc_float_scalar_tensor_preserves_positive_zero(self, device):
+        import math
+
+        def fn(x):
+            r = math.sqrt(x.size(0)) - 2.5
+            return torch.signbit(
+                torch.tensor(math.trunc(r), dtype=torch.float64, device=device)
+            )
+
+        example_inputs = (torch.randn(4, device=device),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        self.assertEqual(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
