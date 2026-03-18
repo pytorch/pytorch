@@ -22,6 +22,10 @@
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 // TODO(NS): Investigate why FP8 conversion intrinsics end up being slower
+// or in CUDA 13.2 which has numerical issues with the non-intrinsic path
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 13020
+#define AT_USE_NV_CVT_INTRINSICS
+#endif
 #ifdef AT_USE_NV_CVT_INTRINSICS
 #include <cuda_fp8.h>
 #endif
@@ -76,7 +80,12 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
     switch (other_dtype) {
       case kFloat:
          gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
+#ifdef AT_USE_NV_CVT_INTRINSICS
+             const auto x =  __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E4M3);
+             return Float8_e4m3fn(x);
+#else
              return Float8_e4m3fn(value);
+#endif
          });
          break;
       case kHalf:
