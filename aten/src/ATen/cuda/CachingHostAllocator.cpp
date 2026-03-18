@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDAMiscFunctions.h>
 
 #include <cuda_runtime_api.h>
 #include <future>
@@ -117,7 +118,22 @@ struct CUDACachingHostAllocatorImpl
       std::optional<std::vector<CUDAEventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = create_event_internal(stream.device_index());
-    event->record(stream);
+    try {
+      event->record(stream);
+    } catch (const c10::Error& e) {
+      // record_stream is called from tensor destructors. In a sticky CUDA error
+      // state (e.g., device-side assert, illegal memory access), event->record()
+      // also fails with the sticky error. Letting this exception escape a
+      // destructor causes std::terminate via the implicit noexcept on ~IValue()
+      // and ~StorageImpl().
+      //
+      // Suppress sticky GPU errors; re-throw non-sticky ones (e.g., invalid
+      // argument).
+      if (c10::cuda::isStickyGpuError(e.what())) {
+        return;
+      }
+      throw;
+    }
     events->push_back(std::move(event));
   }
 
