@@ -886,6 +886,18 @@ class TensorVariable(VariableTracker):
                     from_exc=e,
                 )
 
+        # Only allow methods that are known tensor methods (defined on
+        # torch.Tensor or torch._C.TensorBase). Unknown methods should not
+        # be silently traced into the graph.
+        if name not in all_tensor_attrs:
+            unimplemented(
+                gb_type="Unhandled tensor method",
+                context=f"call_method {self} {name} {args} {kwargs}",
+                explanation=f"Tensor method `{name}` is not a known torch.Tensor "
+                "method and does not have an explicit handler in TensorVariable.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         from .builder import wrap_fx_proxy
 
         proxy = tx.output.create_proxy(

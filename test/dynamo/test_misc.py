@@ -1674,6 +1674,20 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = fn(torch.ones(1))
         self.assertEqual(torch.ones(1) + 2, result)
 
+    def test_known_tensor_methods_traced(self):
+        # Verify that known tensor methods (in all_tensor_attrs) are still
+        # traced into the graph after removing the unrestricted fallthrough
+        # (see #140591).
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x.abs().cos()
+
+        result = fn(torch.randn(4))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()
