@@ -852,7 +852,7 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       hidden = cell_(input, hidden, params, pre_compute_input);
       step_outputs.emplace_back(hidden_as_output(hidden));
     }
-    return {step_outputs, hidden};
+    return {std::move(step_outputs), std::move(hidden)};
   }
 
   output_type operator()(
@@ -1111,7 +1111,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
     }
   }
 
-  return {layer_input, final_hiddens};
+  return {std::move(layer_input), std::move(final_hiddens)};
 }
 
 ////////////////////////////////////////////////////////////////////////////////

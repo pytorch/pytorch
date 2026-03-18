@@ -768,7 +768,22 @@ multiple processes per node for distributed training.
 
 ```{eval-rst}
 .. automodule:: torch.distributed.launch
+```
 
+```{eval-rst}
+.. currentmodule:: torch.distributed.launch
+```
+
+```{eval-rst}
+.. autofunction:: launch
+```
+
+```{eval-rst}
+.. autofunction:: main
+```
+
+```{eval-rst}
+.. autofunction:: parse_args
 ```
 
 ## Spawn utility
@@ -1388,6 +1403,8 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.launcher.api
+
+.. autofunction:: torch.distributed.launcher.api.launch_agent
 ```
 
 ```{eval-rst}

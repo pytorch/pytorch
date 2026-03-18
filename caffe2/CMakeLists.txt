@@ -826,7 +826,7 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML
   endif()
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
   foreach(generated_file IN LISTS GENERATED_CXX_TORCH)
-    set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+    set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes;-mllvm;-openmp-opt-disable")
   endforeach()
   foreach(source_file IN LISTS TORCH_CPU_SOURCES)
     get_filename_component(source_file "${source_file}" REALPATH)
@@ -943,7 +943,7 @@ if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
-  if(USE_FLASH_ATTENTION)
+  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
@@ -952,6 +952,12 @@ if(USE_ROCM)
   if(USE_NCCL)
     target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
+  endif()
+
+  # IntraNodeComm loads libamd_smi at runtime via dlopen (avoids linking amd_smi
+  # which would cause bus errors if Python amdsmi loads a different copy).
+  if(USE_DISTRIBUTED)
+    target_link_libraries(torch_hip PRIVATE ${CMAKE_DL_LIBS})
   endif()
 
   if(USE_PRECOMPILED_HEADERS)
@@ -1042,7 +1048,7 @@ elseif(USE_CUDA)
     add_library(torch_nvshmem SHARED
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu"
-        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
     # Add torch_cpu as a dependency to ensure ATen headers are available
@@ -1365,6 +1371,7 @@ if(BUILD_TEST)
     add_subdirectory(${TORCH_ROOT}/test/cpp/lazy ${CMAKE_BINARY_DIR}/test_lazy)
     # NativeRT is disabled
     # add_subdirectory(${TORCH_ROOT}/test/cpp/nativert ${CMAKE_BINARY_DIR}/test_nativert)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/profiler ${CMAKE_BINARY_DIR}/test_profiler)
     add_subdirectory(${TORCH_ROOT}/test/inductor ${CMAKE_BINARY_DIR}/test_inductor)
     add_subdirectory(${TORCH_ROOT}/test/cpp/aoti_abi_check ${CMAKE_BINARY_DIR}/test_aoti_abi_check)
     if(BUILD_AOT_INDUCTOR_TEST)

@@ -404,7 +404,10 @@ def _subprocess_disable_guard_check():
                 raise AssertionError("Guard check should have failed")
             compiled_fn.disable_guard_check()
             actual = compiled_fn(*inputs)
-            assert torch.allclose(actual, expected)
+            if not torch.allclose(actual, expected):
+                raise AssertionError(
+                    f"Expected tensors to be close, got {actual} vs {expected}"
+                )
         finally:
             torch.set_grad_enabled(prev_grad)
 
@@ -435,7 +438,10 @@ def _subprocess_grad_mode_after_prior_compile():
         with torch.no_grad():
             actual = compiled_fn(*inputs)
             expected = target_fn(*inputs)
-            assert torch.allclose(actual, expected)
+            if not torch.allclose(actual, expected):
+                raise AssertionError(
+                    f"Expected tensors to be close, got {actual} vs {expected}"
+                )
 
 
 def _subprocess_aot_compile_module():
@@ -473,7 +479,10 @@ def _subprocess_aot_compile_module():
                 args=(torch.randn(3, 3),), kwargs={}, contexts=[train_mode(model)]
             ),
         ]
-        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
+        if not isinstance(model, torch._dynamo.eval_frame.OptimizedModule):
+            raise AssertionError(
+                f"Expected OptimizedModule, got {type(model).__name__}"
+            )
         model._aot_compile(inputs)
 
         with torch.compiler.set_stance("fail_on_recompile"):
@@ -481,7 +490,10 @@ def _subprocess_aot_compile_module():
             eager_inputs = (torch.randn(3, 3),)
             expected = mod(*eager_inputs)
             actual = model(*eager_inputs)
-            assert torch.allclose(expected, actual)
+            if not torch.allclose(expected, actual):
+                raise AssertionError(
+                    f"Expected tensors to be close, got {actual} vs {expected}"
+                )
             model.train()
             expected.sum().backward()
 
@@ -497,7 +509,10 @@ def _subprocess_aot_compile_module():
                     "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
                 },
             )
-            assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
+            if not isinstance(model, torch._dynamo.eval_frame.OptimizedModule):
+                raise AssertionError(
+                    f"Expected OptimizedModule, got {type(model).__name__}"
+                )
             with open(path, "rb") as f:
                 data = f.read()
                 model._load_aot_compiled_module(data)
@@ -507,7 +522,10 @@ def _subprocess_aot_compile_module():
                 eager_inputs = (torch.randn(3, 3),)
                 expected = mod(*eager_inputs)
                 actual = model(*eager_inputs)
-                assert torch.allclose(expected, actual)
+                if not torch.allclose(expected, actual):
+                    raise AssertionError(
+                        f"Expected tensors to be close, got {actual} vs {expected}"
+                    )
 
 
 class RedistributeModel(torch.nn.Module):
@@ -643,7 +661,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         def check_inputs(fn):
             def _fn(*args, **kwargs):
                 for arg in args:
-                    assert arg.shape[0] > 1
+                    assert arg.shape[0] > 1  # noqa: S101
 
                 return fn(*args, **kwargs)
 
@@ -695,7 +713,7 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             @functools.wraps(fn)
             def _fn(*args, **kwargs):
                 for arg in args:
-                    assert arg.shape[0] > 1
+                    assert arg.shape[0] > 1  # noqa: S101
 
                 return fn(*args, **kwargs)
 
@@ -812,7 +830,7 @@ from user code:
         def check_inputs(fn):
             def _fn(*args, **kwargs):
                 for arg in args:
-                    assert arg.shape[0] > 1
+                    assert arg.shape[0] > 1  # noqa: S101
 
                 return fn(*args, **kwargs)
 
@@ -881,7 +899,8 @@ from user code:
                 torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
             )
         )
-        assert hasattr(backend_result.compiled_fn, "serialize")
+        if not hasattr(backend_result.compiled_fn, "serialize"):
+            raise AssertionError("Expected compiled_fn to have 'serialize' attribute")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
 
     def test_aot_compile_portable_guards_unsafe(self):
@@ -919,7 +938,8 @@ from user code:
                 torch._dynamo.aot_compile.BundledAOTAutogradSerializableCallable,
             )
         )
-        assert hasattr(backend_result.compiled_fn, "serialize")
+        if not hasattr(backend_result.compiled_fn, "serialize"):
+            raise AssertionError("Expected compiled_fn to have 'serialize' attribute")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
 
     def test_fullgraph_capture_with_pytree_module(self):
@@ -1315,6 +1335,27 @@ from user code:
         actual = compiled_fn(*test_inputs)
         self.assertEqual(expected.x, actual.x)
 
+    def test_builtins_dict_survives_serialization(self):
+        """Test that __builtins_dict__ is preserved through serialize/deserialize."""
+
+        def fn(x):
+            return x + 1, type
+
+        x = torch.randn(4)
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(((x,), {}))
+
+        # Save and reload without f_globals
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            loaded_fn = torch.compiler.load_compiled_function(
+                f, f_globals=fn.__globals__
+            )
+
+        expected = fn(x)
+        actual = loaded_fn(x)
+        self.assertEqual(expected[0], actual[0])
+        self.assertEqual(expected[1], actual[1])
+
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_cross_aot_compile(self):
         """Test cross-compilation using fake cuda tensors and backward correctness"""
@@ -1481,9 +1522,7 @@ from user code:
 
             from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
-            gm = dynamo_graph_capture_for_export(model, restore_state_dict=True)(
-                input_ids_dt
-            )
+            gm = dynamo_graph_capture_for_export(model)(input_ids_dt)
 
             fake_mode = gm.meta["fake_mode"]
 

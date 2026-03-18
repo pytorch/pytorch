@@ -1,6 +1,6 @@
 import copy
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -32,7 +32,7 @@ class HopArgumentInfoGen:
         example_value: Any,
         *,
         name: str = "",
-        default_value: Optional[Any] = None,
+        default_value: Any | None = None,
         is_mutated: bool = False,
         kw_only: bool = False,
     ) -> HopArgumentInfo:
@@ -104,18 +104,18 @@ class HopSchemaGenerator:
     def __init__(self, hop: torch._ops.HigherOrderOperator):
         self.arg_infos: list[HopArgumentInfo] = []
         self.example_outputs: list[Any] = []
-        self.schema_tree_spec: Optional[pytree.TreeSpec] = None
+        self.schema_tree_spec: pytree.TreeSpec | None = None
         self.hop = hop
 
     def add_arg(
         self,
         name: str,
         example_value: Any,
-        default_value: Optional[Any] = None,
+        default_value: Any | None = None,
         is_mutated: bool = False,
         kw_only: bool = False,
     ) -> None:
-        if callable(example_value):
+        if callable(example_value) and not is_opaque_type(type(example_value)):
             if not isinstance(
                 example_value, (torch.fx.GraphModule, torch._ops.OperatorBase)
             ):
@@ -212,7 +212,7 @@ class CFunctionSchemaGen:
         op_name: str,
         inp_argument_info: list[HopArgumentInfo],
         out_argument_info: HopArgumentInfo,
-        schema_tree_spec: Optional[pytree.TreeSpec],
+        schema_tree_spec: pytree.TreeSpec | None,
     ) -> Any:
         args = []
         for i, arg_info in enumerate(inp_argument_info):
@@ -265,7 +265,7 @@ class HopSchema(torch._C.FunctionSchema):
         returns: list[torch._C.Argument],
         is_vararg: bool,
         is_varret: bool,
-        schema_tree_spec: Optional[pytree.TreeSpec],
+        schema_tree_spec: pytree.TreeSpec | None,
     ):
         self.tree_spec = schema_tree_spec
         self.is_vararg = is_vararg

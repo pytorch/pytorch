@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import logging
 from functools import lru_cache
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor import config
@@ -40,7 +40,7 @@ class LookupTableChoices(InductorChoices):
 
     @staticmethod
     @lru_cache
-    def _get_device_key(device: torch.device) -> Optional[str]:
+    def _get_device_key(device: torch.device) -> str | None:
         """
         Generate a device key for lookup table indexing.
         For CPU devices, returns None.
@@ -89,7 +89,7 @@ class LookupTableChoices(InductorChoices):
 
     def make_lookup_key(
         self, kernel_inputs: KernelInputs, op_name: str, include_device: bool = False
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Create a flattened lookup key from kernel inputs and operation name.
         Override this method to customize key generation.
@@ -124,7 +124,7 @@ class LookupTableChoices(InductorChoices):
 
     def make_lookup_key_variants(
         self, kernel_inputs: KernelInputs, op_name: str
-    ) -> tuple[Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None]:
         """
         Generate both device-specific and device-agnostic lookup keys.
         Override this method to customize key variant generation.
@@ -147,7 +147,7 @@ class LookupTableChoices(InductorChoices):
     def _entry_is_valid(
         cfg: dict[str, Any],
         template_id: str,
-        template_hash_map: Optional[dict[str, Optional[str]]],
+        template_hash_map: dict[str, str | None] | None,
     ) -> bool:
         """
         Check if a config entry is valid based on template hash validation.
@@ -208,7 +208,7 @@ class LookupTableChoices(InductorChoices):
         kernel_inputs: KernelInputs,
         op_name: str,
         template_uids: list[str],
-        template_hash_map: Optional[dict[str, Optional[str]]] = None,
+        template_hash_map: dict[str, str | None] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         """
         Unified function to look up template configurations for multiple templates.
@@ -313,9 +313,9 @@ class LookupTableChoices(InductorChoices):
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+        kwarg_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> list[KernelTemplateChoice]:
         """Check lookup table for hits, use those if found, otherwise fall back to parent."""
         # 1. Collect template src_hashes for validation
@@ -364,9 +364,9 @@ class LookupTableChoices(InductorChoices):
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
-        kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+        kwarg_overrides: dict[str, dict[str, Any]] | None = None,
     ) -> list[KernelTemplateChoice]:
         """Fallback to parent if no lookup table or no matches."""
         # NOTE: this is broken out, so that subclasses are able to override this
@@ -383,7 +383,7 @@ class LookupTableChoices(InductorChoices):
     def _create_lookup_choices(
         self,
         lookup_results: dict[str, list[dict[str, Any]]],
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> list[KernelTemplateChoice]:

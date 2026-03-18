@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from ctypes import cdll, wintypes
 from ctypes.util import find_library
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -654,13 +654,13 @@ class BuildOptionsBase:
     def __init__(
         self,
         compiler: str = "",
-        definitions: Optional[list[str]] = None,
-        include_dirs: Optional[list[str]] = None,
-        cflags: Optional[list[str]] = None,
-        ldflags: Optional[list[str]] = None,
-        libraries_dirs: Optional[list[str]] = None,
-        libraries: Optional[list[str]] = None,
-        passthrough_args: Optional[list[str]] = None,
+        definitions: list[str] | None = None,
+        include_dirs: list[str] | None = None,
+        cflags: list[str] | None = None,
+        ldflags: list[str] | None = None,
+        libraries_dirs: list[str] | None = None,
+        libraries: list[str] | None = None,
+        passthrough_args: list[str] | None = None,
         aot_mode: bool = False,
         use_relative_path: bool = False,
         compile_only: bool = False,
@@ -679,7 +679,7 @@ class BuildOptionsBase:
 
         # Optionally, the path to a precompiled header which should be included on the
         # build command line.
-        self.precompiled_header: Optional[str] = None
+        self.precompiled_header: str | None = None
 
         self._aot_mode: bool = aot_mode
         self._use_relative_path: bool = use_relative_path
@@ -770,7 +770,7 @@ def _get_warning_all_cflag(warning_all: bool = True) -> list[str]:
         return []
 
 
-def _get_cpp_std_cflag(std_num: str = "c++17") -> list[str]:
+def _get_cpp_std_cflag(std_num: str = "c++20") -> list[str]:
     if _IS_WINDOWS:
         """
         On Windows, only c++20 can support `std::enable_if_t`.
@@ -1063,7 +1063,10 @@ class CppOptions(BuildOptionsBase):
 
 
 def _get_torch_cpp_wrapper_definition() -> list[str]:
-    return ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    defs = ["TORCH_INDUCTOR_CPP_WRAPPER", "STANDALONE_TORCH_HEADER"]
+    if config.cpp_cache_precompile_headers:
+        defs.append("TORCH_INDUCTOR_PRECOMPILE_HEADERS")
+    return defs
 
 
 def _use_custom_generated_macros() -> list[str]:
@@ -1078,6 +1081,11 @@ def _use_fb_internal_macros() -> list[str]:
                 "C10_USE_MINIMAL_GLOG",
                 "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
             ]
+            if platform.machine() == "x86_64":
+                fb_internal_macros += [
+                    "ATEN_MKL_ENABLED_FBCODE=1",
+                    "ATEN_MKLDNN_ENABLED_FBCODE=1",
+                ]
             return fb_internal_macros
         else:
             return []
@@ -1623,7 +1631,7 @@ def _set_gpu_runtime_env() -> None:
 
 
 @functools.lru_cache(8)
-def _find_libcudart_static(path: str) -> Optional[Path]:
+def _find_libcudart_static(path: str) -> Path | None:
     lib_dirs = list(Path(path).rglob("libcudart_static.a"))
     if lib_dirs:
         return lib_dirs[0].resolve().parent
@@ -1638,7 +1646,7 @@ def _transform_cuda_paths(lpaths: list[str]) -> None:
     # 2. Linux machines may have CUDA installed under either lib64/ or lib/
     for i, path in enumerate(lpaths):
         if "CUDA_HOME" in os.environ and path.startswith(os.environ["CUDA_HOME"]):
-            lib_dir: Optional[Path] = _find_libcudart_static(path)
+            lib_dir: Path | None = _find_libcudart_static(path)
             if lib_dir is None:
                 continue
             lpaths[i] = str(lib_dir)
@@ -1906,7 +1914,7 @@ class CppBuilder:
     def __init__(
         self,
         name: str,
-        sources: Union[str, list[str]],
+        sources: str | list[str],
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
     ) -> None:
@@ -2098,7 +2106,7 @@ class CppBuilder:
         self,
     ) -> None:
         with dynamo_timed("compile_file"):
-            command = self.get_command_line().split()
+            command = shlex.split(self.get_command_line())
             try:
                 output_path = self._target_file
                 # When we build remotely, we need to make sure to carefully copy any files
@@ -2112,9 +2120,14 @@ class CppBuilder:
                         shutil.copy(src, os.path.join(tmp_dir, os.path.basename(src)))
                     dest_include_path = os.path.join(tmp_dir, "include")
                     shutil.copytree(torch_includes_path, dest_include_path)
-                    # Run the build
+                    # Run the build, raising RuntimeError on failure instead of
+                    # SkipFrame so compilation errors propagate rather than
+                    # silently falling back to eager execution.
                     tmp_output_path = _run_build_command(
-                        command, tmp_dir, os.path.basename(output_path)
+                        command,
+                        tmp_dir,
+                        os.path.basename(output_path),
+                        exception_class=RuntimeError,
                     )
                     # Copy output from the build
                     if os.path.exists(output_path):
@@ -2125,8 +2138,7 @@ class CppBuilder:
                     elif output_path.endswith(".so"):
                         os.chmod(output_path, 0o755)
             except subprocess.CalledProcessError as e:
-                output = e.output.decode("utf-8")
-                raise exc.CppCompileError(command, output) from e
+                raise exc.CppCompileError(command, e.output.decode("utf-8")) from e
 
     def build(self) -> None:
         """

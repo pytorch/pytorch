@@ -6,13 +6,14 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
 import torch
 from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config, config as inductor_config
@@ -61,7 +62,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
-    hint_override: Optional[int] = dataclasses.field(kw_only=True, default=None)
+    hint_override: int | None = dataclasses.field(kw_only=True, default=None)
 
 
 @dataclasses.dataclass
@@ -74,6 +75,21 @@ class GemmConfig(BaseConfig):
 
 
 ConvConfig = BaseConfig
+
+
+@dataclasses.dataclass
+class DepthwiseConvConfig:
+    """
+    Configuration for depthwise conv1d Triton template.
+    Uses BLOCK_N x BLOCK_L x BLOCK_C tiling (channels-last NLC layout).
+    Matches the hand-written NLC kernel from depthwise_conv1d_benchmark.py.
+    """
+
+    block_n: int
+    block_l: int
+    block_c: int
+    num_stages: int
+    num_warps: int
 
 
 @dataclasses.dataclass
@@ -654,6 +670,63 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             ConvConfig(128, 256, 128, 2, 8),
         ]
 
+        # Depthwise conv1d configs: BLOCK_N x BLOCK_L x BLOCK_C tiling
+        # Derived from autotuning results on H100 for depthwise conv1d
+        # channels-last (NLC) layout with shape x=[3072, 128, 202]
+        # Matches _nlc_autotune_configs from depthwise_conv1d_benchmark.py
+        self.depthwise_conv_configs: list[DepthwiseConvConfig] = [
+            # BLOCK_C=32, BLOCK_L=32
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=32, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=32, block_c=32, num_stages=5, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=32, block_c=32, num_stages=4, num_warps=4
+            ),
+            # BLOCK_C=32, BLOCK_L=64
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=32, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=64, block_c=32, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=32, BLOCK_L=256
+            DepthwiseConvConfig(
+                block_n=16, block_l=256, block_c=32, num_stages=5, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=256, block_c=32, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=32, block_l=256, block_c=32, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=64
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=64, num_stages=4, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=64, num_stages=4, num_warps=4
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=64, block_c=64, num_stages=3, num_warps=8
+            ),
+            # BLOCK_C=128
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=128, num_stages=3, num_warps=8
+            ),
+            DepthwiseConvConfig(
+                block_n=16, block_l=32, block_c=128, num_stages=3, num_warps=4
+            ),
+        ]
+
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
             FlexConfig(128, 64, 3, 4),
             FlexConfig(128, 128, 3, 4),
@@ -714,7 +787,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         """
         Finalizes configs after scaling, applying additional constraints.
         """
-        used: OrderedSet[tuple[Optional[int], ...]] = OrderedSet()
+        used: OrderedSet[tuple[int | None, ...]] = OrderedSet()
 
         max_mm_configs = config.test_configs.max_mm_configs
 
@@ -723,7 +796,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             num_warps = min(conf.num_warps, conf.block_m * conf.block_n // 256)
 
             # Construct key for finding duplicate configs
-            key: tuple[Optional[int], ...] = (
+            key: tuple[int | None, ...] = (
                 conf.block_m,
                 conf.block_n,
                 conf.block_k,
@@ -785,7 +858,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         scale: float,
         has_int8_tensor: bool,
         exclude: Callable[[sympy.Integer, sympy.Integer, sympy.Integer], bool],
-        hint_override: Optional[int] = None,
+        hint_override: int | None = None,
     ) -> list[BaseConfig]:
         """
         Scales and filters matrix multiplication configs based on input size.
@@ -892,7 +965,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         self,
         has_sm_layout_conversion: bool,
         layout_conversion_byte_size: int,
-    ) -> Optional[Callable[[BaseConfig, int], bool]]:
+    ) -> Callable[[BaseConfig, int], bool] | None:
         """
         Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
         based on the config's theoretical maximum shared memory used.
@@ -1018,6 +1091,21 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         return partial(
             self.preprocess_mm_configs, configs=self.conv_configs, op_name="conv"
         )
+
+    def get_depthwise_conv_configs(self) -> list[TritonConfig]:
+        """Return TritonConfig list for depthwise conv1d autotuning."""
+        return [
+            TritonConfig(
+                {
+                    "BLOCK_N": cfg.block_n,
+                    "BLOCK_L": cfg.block_l,
+                    "BLOCK_C": cfg.block_c,
+                },
+                num_stages=cfg.num_stages,
+                num_warps=cfg.num_warps,
+            )
+            for cfg in self.depthwise_conv_configs
+        ]
 
     # Flex attn helpers
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
@@ -1467,12 +1555,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4),
-            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 1, 8),
-            (torch.float16, 64): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 128): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 256): ROCmFlexConfig(32, 64, 1, 4),
+            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 2, 4),
+            (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 8),
+            (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 8),
+            (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4),
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1648,7 +1736,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(64, 64, 1, 4)
             else:
-                default_config = ROCmFlexConfig(128, 64, 1, 8)
+                default_config = ROCmFlexConfig(128, 64, 2, 4)
             default_config = self.default_flex_config.get(
                 (dtype, head_dim), default_config
             )
@@ -1656,7 +1744,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4)
             else:
-                default_config = ROCmFlexConfig(64, 32, 1, 4)
+                default_config = ROCmFlexConfig(64, 32, 2, 4)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -1679,7 +1767,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if head_dim == 64:
                 default_config = ROCmFlexBwDConfig(64, 64, 64, 64, 1, 4)
             elif head_dim == 128:
-                default_config = ROCmFlexBwDConfig(64, 128, 128, 64, 1, 8)
+                default_config = ROCmFlexBwDConfig(64, 128, 128, 64, 1, 4)
             else:
                 default_config = ROCmFlexBwDConfig(64, 64, 64, 64, 1, 4)
         else:
@@ -1953,7 +2041,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Moved from mm_common.mm_options.
         """
         # Calculate EVEN_K symbolic. (It isn't worth guarding on this)
-        even_k_symbolic = (k % triton_config.kwargs["BLOCK_K"]) == 0
+        even_k_symbolic = sympy.Eq(Mod(k, triton_config.kwargs["BLOCK_K"]), 0)
         even_k_symbolic = V.graph.sizevars.statically_known_true(even_k_symbolic)
 
         # Build options dict

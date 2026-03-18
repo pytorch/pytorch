@@ -191,6 +191,33 @@ class FakeTensorTest(TestCase):
             x = torch.empty(2, 2, device="meta")
             self.assertEqual(repr(x), "FakeTensor(..., device='meta', size=(2, 2))")
 
+    def test_fake_device_property_normalization(self):
+        """Test that fake_device property normalizes device on assignment."""
+        with FakeTensorMode() as mode:
+            # Test CPU device - should remain unchanged
+            cpu_tensor = torch.empty(2, 2, device="meta")
+            fake_cpu = FakeTensor(mode, cpu_tensor, torch.device("cpu"))
+            self.assertEqual(fake_cpu.fake_device, torch.device("cpu"))
+
+            # Test device with explicit index - should remain unchanged
+            cuda_device_with_index = torch.device("cuda:0")
+            fake_cuda = FakeTensor(mode, cpu_tensor, cuda_device_with_index)
+            self.assertEqual(fake_cuda.fake_device, torch.device("cuda:0"))
+
+            # Test MPS device without index - should normalize to mps:0
+            mps_device = torch.device("mps")
+            fake_mps = FakeTensor(mode, cpu_tensor, mps_device)
+            self.assertEqual(fake_mps.fake_device, torch.device("mps:0"))
+
+            # Test property setter normalization with MPS
+            fake_tensor = FakeTensor(mode, cpu_tensor, torch.device("cpu"))
+            fake_tensor.fake_device = torch.device("mps")
+            self.assertEqual(fake_tensor.fake_device, torch.device("mps:0"))
+
+            # Test property setter normalization with CUDA
+            fake_tensor.fake_device = torch.device("cuda")
+            self.assertEqual(fake_tensor.fake_device, torch.device("cuda:0"))
+
     def test_convert_fake_to_real(self):
         x = torch.ones([20])
         with FakeTensorMode(allow_non_fake_inputs=True) as m:
@@ -2832,6 +2859,70 @@ class FakeTensorPreferDeviceType(TestCase):
                 result = x + y
                 self.assertEqual(result.device.type, "cpu")
                 self.assertTrue(isinstance(result, FakeTensor))
+
+
+class FakeTensorMetaDevicePropagation(TestCase):
+    @parametrize("device", ["cpu", "cuda"])
+    def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
+        if device == "cuda" and not RUN_CUDA:
+            self.skipTest("requires cuda")
+
+        with FakeTensorMode():
+            log_det = torch.zeros(2, device=device)
+            log_det += torch.zeros(2, device="meta")
+
+            self.assertEqual(log_det.device.type, device)
+            self.assertTrue(isinstance(log_det, FakeTensor))
+
+
+instantiate_parametrized_tests(FakeTensorMetaDevicePropagation)
+
+
+class FakeTensorViewCopy(TestCase):
+    def test_expand_then_view_copy_matches_eager_mode(self):
+        x = torch.arange(7)
+        y = x.expand(12, 7)
+
+        # Eager baseline
+        eager = torch.ops.aten.view_copy.default(y, [84])
+        self.assertEqual(eager.shape, (84,))
+        self.assertIsNone(eager._base)  # non-aliasing
+
+        # FakeTensor behavior should match eager
+        with FakeTensorMode():
+            xf = torch.arange(7)
+            yf = xf.expand(12, 7)
+            fake = torch.ops.aten.view_copy.default(yf, [84])
+            self.assertEqual(fake.shape, (84,))
+            self.assertIsNone(fake._base)  # non-aliasing
+
+    def test_expand_then_view_still_not_allowed(self):
+        with FakeTensorMode():
+            xf = torch.arange(7)
+            yf = xf.expand(12, 7)
+            with self.assertRaisesRegex(
+                ValueError, "Cannot view a tensor with shape *"
+            ):
+                _ = yf.view(-1)
+
+    def test_expand_then_view_copy_unbacked_matches_eager_mode(self):
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            with FakeTensorMode():
+                xf = torch.arange(7)
+                yf = xf.expand(12, 7)
+                fake = torch.ops.aten.view_copy.default(yf, [84])
+                self.assertEqual(fake.shape, (84,))
+                self.assertIsNone(fake._base)  # non-aliasing
+
+    def test_expand_then_view_unbacked_still_not_allowed(self):
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            with FakeTensorMode():
+                xf = torch.arange(7)
+                yf = xf.expand(12, 7)
+                with self.assertRaisesRegex(
+                    ValueError, "Cannot view a tensor with shape *"
+                ):
+                    _ = yf.view(-1)
 
 
 if __name__ == "__main__":

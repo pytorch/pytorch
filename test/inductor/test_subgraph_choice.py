@@ -74,9 +74,10 @@ class TestSubgraphChoice(TestCase):
 
             # Only return decomposeK case for codegen
             choices = [choices[1]]
-            return autotune_select_algorithm(
+            node, _ = autotune_select_algorithm(
                 "test_subgraph_choice", choices, [a, b], layout
             )
+            return node
 
         a_in = torch.randn(
             mat1_shape, dtype=torch.float16, device=torch.device(f"{GPU_TYPE}:0")
@@ -119,7 +120,8 @@ class TestSubgraphChoice(TestCase):
         def _(a, b):
             _, _, _, layout, mat1, mat2 = mm_args(a, b)
             mat1_layout = mat1.layout
-            assert isinstance(mat1_layout, FlexibleLayout)
+            if not isinstance(mat1_layout, FlexibleLayout):
+                raise AssertionError
             mat1_stride = mat1_layout.stride
 
             choices = []
@@ -138,21 +140,25 @@ class TestSubgraphChoice(TestCase):
             )
 
             choice = choices[0]
-            assert isinstance(mat1.layout, FixedLayout)
+            if not isinstance(mat1.layout, FixedLayout):
+                raise AssertionError
 
             # Creating the subgraph choice should have frozen the layout
             # We ensure padding so the stride should differ
-            assert mat1.layout.stride != mat1_stride
+            if mat1.layout.stride == mat1_stride:
+                raise AssertionError
 
             for example_stride, layout_stride in zip(
                 choice.example_inputs[0].stride(), mat1.layout.stride
             ):
                 # Example inputs should have same stride as current layout
-                assert example_stride == layout_stride
+                if example_stride != layout_stride:
+                    raise AssertionError
 
-            return autotune_select_algorithm(
+            node, _ = autotune_select_algorithm(
                 "test_subgraph_choice", choices, [a, b], layout
             )
+            return node
 
         def func(mat1, mat2):
             return torch.ops.mylib.matmul_decompose_padding((mat1 + 1.0), mat2)

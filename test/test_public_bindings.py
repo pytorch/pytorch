@@ -357,6 +357,7 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc.rpc_test",
             "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
             "torch.testing._internal.distributed.rpc_utils",
+            "torch.testing._internal.py312_intrinsics",
             "torch._inductor.codegen.cutlass.cuda_template",
             "torch._inductor.codegen.cutedsl._cutedsl_utils",
             "torch._inductor.codegen.cuda.gemm_template",
@@ -364,7 +365,10 @@ class TestPublicBindings(TestCase):
             "torch._inductor.codegen.cpp_gemm_template",
             "torch._inductor.codegen.cpp_micro_gemm",
             "torch._inductor.codegen.cpp_template_kernel",
-            "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass_cppgen
+            "torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_gemm",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.dense_blockscaled_gemm_persistent",  # depends on cutlass
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers",  # depends on cutlass_api
+            "torch._inductor.kernel.vendored_templates.cutedsl.wrappers.dense_blockscaled_gemm_kernel",  # depends on cutlass_api
             "torch._inductor.runtime.triton_helpers",
             "torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity",
             "torch.backends._coreml.preprocess",

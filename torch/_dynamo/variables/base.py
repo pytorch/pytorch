@@ -19,7 +19,7 @@ import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from contextvars import ContextVar
 from enum import Enum
-from typing import Any, NoReturn, Optional, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 from torch._guards import Guard
 from torch.fx.proxy import Node
@@ -43,8 +43,11 @@ log = logging.getLogger(__name__)
 
 # Tracks active method calls on VariableTracker instances to detect self-referential
 # calls (e.g., as_python_constant on a list that contains itself). Maps
-# (id(instance), method_name) tuples to track which calls are in progress.
-_vt_active_calls: ContextVar[set[tuple[int, str]] | None] = ContextVar(
+# (id(instance), id(original_method)) tuples to track which calls are in progress.
+# We use id(original_method) rather than the method name string so that super()
+# delegation within a class hierarchy (e.g. TorchScriptObjectVariable.as_python_constant
+# calling UserDefinedObjectVariable.as_python_constant) is not a false positive.
+_vt_active_calls: ContextVar[set[tuple[int, int]] | None] = ContextVar(
     "_vt_active_calls", default=None
 )
 
@@ -195,7 +198,7 @@ class AttributeMutationNew(AttributeMutation):
     the Python world.
     """
 
-    def __init__(self, cls_source: Optional[Source] = None) -> None:
+    def __init__(self, cls_source: Source | None = None) -> None:
         super().__init__(SourceType.New)
         self.cls_source = cls_source
 
@@ -296,7 +299,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cls,
         fn: Callable[["VariableTracker"], None],
         value: Any,
-        cache: Optional[dict[int, Any]] = None,
+        cache: dict[int, Any] | None = None,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
@@ -449,7 +452,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def as_proxy(self) -> Any:
         raise NotImplementedError(str(self))
 
-    def maybe_fx_node(self) -> Optional[Node]:
+    def maybe_fx_node(self) -> Node | None:
         try:
             proxy = self.as_proxy()
             import torch.fx
@@ -595,7 +598,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 raise_observed_exception(
                     type(e),
                     tx,
-                    args=[list(map(variables.ConstantVariable.create, e.args))],
+                    args=list(map(variables.ConstantVariable.create, e.args)),
                 )
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
@@ -821,7 +824,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def build(
         tx: Any,
         value: Any,
-        source: Optional[Source] = None,
+        source: Source | None = None,
         realize: bool = False,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
@@ -896,8 +899,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def __init__(
         self,
         *,
-        source: Optional[Source] = None,
-        mutation_type: Optional[MutationType] = None,
+        source: Source | None = None,
+        mutation_type: MutationType | None = None,
     ) -> None:
         super().__init__()
         self.source = source
@@ -976,7 +979,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 active = set()
                 _vt_active_calls.set(active)
 
-            key = (id(self), method)
+            key = (id(self), id(original_method))
             if key in active:
                 callback(self)
 

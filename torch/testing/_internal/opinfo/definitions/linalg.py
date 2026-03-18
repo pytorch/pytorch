@@ -29,6 +29,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
+    floating_types,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
@@ -1169,16 +1170,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
-            # RuntimeError: Failed to create function state object for: cross_float2
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
-                dtypes=(torch.complex64,),
-            ),
         ),
     ),
     OpInfo(
@@ -1946,15 +1937,13 @@ op_db: list[OpInfo] = [
         aten_name="linalg_qr",
         op=torch.linalg.qr,
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # In-place ops
         check_batched_gradgrad=False,
         sample_inputs_func=sample_inputs_linalg_qr_geqrf,
         decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-        ),
     ),
     OpInfo(
         "linalg.slogdet",
@@ -2169,13 +2158,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
-            # Exception: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
             # RuntimeError: linalg.solve.triangular(); Only float is supported!
             DecorateInfo(
                 unittest.expectedFailure,
@@ -2294,13 +2276,6 @@ op_db: list[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="cpu",
             ),
-            # IndexError: index -1085850505 is out of bounds for dimension 0 with size 5
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
             # Exception: linalg.lu_factor(): MPS only supports floats.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
@@ -2376,13 +2351,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # IndexError: index -1085850505 is out of bounds for dimension 0 with size 5
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
             # Exception: linalg.lu_factor(): MPS only supports floats.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
@@ -2405,12 +2373,6 @@ op_db: list[OpInfo] = [
         skips=(
             skipCPUIfNoLapack,
             # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
@@ -2554,6 +2516,7 @@ op_db: list[OpInfo] = [
         # to avoid any rank changes caused by the perturbations in the gradcheck
         op=lambda a, b: torch.linalg.pinv(a @ b.mT),
         dtypes=floating_and_complex_types(),
+        dtypesIfMPS=floating_types(),
         supports_out=False,
         check_batched_grad=False,
         check_batched_gradgrad=False,
@@ -2582,12 +2545,6 @@ op_db: list[OpInfo] = [
                 "test_fn_gradgrad",
                 device_type="cuda",
                 dtypes=[torch.cdouble],
-            ),
-            # NotImplementedError: The operator 'aten::linalg_qr.out' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                device_type="mps",
             ),
         ),
     ),
@@ -2686,27 +2643,6 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
                 "TestFakeTensor",
                 "test_fake_crossref_backward_amp",
                 device_type="cuda",
@@ -2720,24 +2656,6 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
-            ),
-            # MPS: AssertionError: The values for attribute 'shape' do not match: torch.Size([0, 0]) != torch.Size([0, 1]).
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            # MPS: RuntimeError: svd_backward: The singular vectors in the
-            # complex case are specified up to multiplication by e^{i phi}. The
-            # specified loss function depends on this phase term, making it
-            # ill-defined.
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-                dtypes=(torch.complex64,),
             ),
         ),
     ),
@@ -2831,27 +2749,8 @@ op_db: list[OpInfo] = [
                 "test_output_match",
                 device_type="mps",
             ),
-            # Exception: index ????? is out of bounds for dimension 0 with size 6
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
-            # Exception: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
         ],
         skips=(
-            DecorateInfo(
-                unittest.skip("Unsupported on MPS for now"),
-                "TestCommon",
-                "test_numpy_ref_mps",
-            ),
             # Exception: linalg.lu_factor(): MPS only supports floats.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
@@ -2885,14 +2784,14 @@ python_ref_db: list[OpInfo] = [
                 "TestCommon",
                 "test_python_ref",
                 device_type="mps",
-                dtypes=(torch.bfloat16, torch.complex64, torch.float16),
+                dtypes=(torch.bfloat16, torch.float16),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_python_ref_torch_fallback",
                 device_type="mps",
-                dtypes=(torch.bfloat16, torch.complex64, torch.float16),
+                dtypes=(torch.bfloat16, torch.float16),
             ),
         ),
     ),

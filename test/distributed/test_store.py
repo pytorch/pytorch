@@ -303,7 +303,8 @@ class FileStoreTest(TestCase, StoreTestBase):
                 "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
             )
             dist.destroy_process_group()
-            assert os.path.exists(file.name)
+            if not os.path.exists(file.name):
+                raise AssertionError(f"Expected file {file.name} to exist")
 
             rpc.shutdown()
             os.remove(file.name)
@@ -314,9 +315,11 @@ class FileStoreTest(TestCase, StoreTestBase):
             store2 = dist.FileStore(file.name, 1)
 
             del store
-            assert os.path.exists(file.name)
+            if not os.path.exists(file.name):
+                raise AssertionError(f"Expected file {file.name} to exist")
             del store2
-            assert not os.path.exists(file.name)
+            if os.path.exists(file.name):
+                raise AssertionError(f"Expected file {file.name} to not exist")
 
     @property
     def num_keys_total(self):
@@ -470,7 +473,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
         del os.environ["USE_LIBUV"]
-        assert "USE_LIBUV" not in os.environ
+        if "USE_LIBUV" in os.environ:
+            raise AssertionError("Expected USE_LIBUV to not be in os.environ")
         rpc.shutdown()
         dist.destroy_process_group()
 
@@ -1232,7 +1236,8 @@ class TestClientProtocol(TestCase):
 
 if __name__ == "__main__":
     if device_type != "cpu":
-        assert not torch.get_device_module()._initialized, (
-            f"test_distributed must not have initialized {device_type} context on main process"
-        )
+        if torch.get_device_module()._initialized:
+            raise AssertionError(
+                f"test_distributed must not have initialized {device_type} context on main process"
+            )
     run_tests()

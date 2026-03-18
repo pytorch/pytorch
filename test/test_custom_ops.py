@@ -903,11 +903,13 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.float32]
         if typ is torch.device:
             return [torch.device("cpu")]
-        if typ == torch.types.Number:
+        # int | float | bool is the BC alias for torch.types.Number (before
+        # it included SymInt/SymFloat); infer_schema accepts both.
+        if typ == torch.types.Number or typ == (int | float | bool):
             return [2.718]
         if typ is torch.Tensor:
             return [torch.tensor(3)]
-        if typ == Optional[torch.types.Number]:
+        if typ == Optional[torch.types.Number] or typ == Optional[int | float | bool]:
             return [None, 2.718]
         origin = typing.get_origin(typ)
         if origin is Union:
@@ -4500,6 +4502,32 @@ Please use `add.register_fake` to add an fake impl.""",
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
 
 
+class TestLibrarySourceLocation(TestCase):
+    def test_library_source_location(self):
+        # Library.__init__ uses sys._getframe(1) to capture the caller's
+        # filename and line number. Verify this works correctly by creating
+        # a Library and checking the source location in the error message
+        # that appears when a duplicate DEF library is created.
+        script = """\
+import torch
+lib1 = torch.library.Library("_test_loc", "DEF")
+lib1.define("foo(Tensor x) -> Tensor")
+try:
+    lib2 = torch.library.Library("_test_loc", "DEF")
+except RuntimeError as e:
+    print(str(e))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The error message should reference <string>:2, since
+        # lib1 = torch.library.Library(...) is on line 2 of the script.
+        self.assertIn("<string>:2", result.stdout)
+
+
 class MiniOpTestOther(CustomOpTestCaseBase):
     test_ns = "mini_op_test"
 
@@ -4795,10 +4823,10 @@ class TestTypeConversion(TestCase):
 
     def test_mixed_types(self):
         result_type = tuple_to_list(Tuple[int, float])
-        self.assertEqual(result_type, list[typing.Union[int, float]])
+        self.assertEqual(result_type, list[int | float])
 
         result_type = tuple_to_list(Tuple[int, float, str])
-        self.assertEqual(result_type, list[typing.Union[int, float, str]])
+        self.assertEqual(result_type, list[int | float | str])
 
 
 class TestOpProfiles(TestCase):

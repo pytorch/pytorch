@@ -19,7 +19,7 @@ import os
 import tempfile
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
 import numpy.typing as npt
@@ -34,11 +34,11 @@ from torch.types import Number
 
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
-_NumericType = Union[Number, torch.Tensor, np.ndarray]
-_ModelType = Union[torch.nn.Module, torch.jit.ScriptModule]
-_InputArgsType = Union[torch.Tensor, tuple[Any, ...]]
+_NumericType = Number | torch.Tensor | np.ndarray
+_ModelType = torch.nn.Module | torch.jit.ScriptModule
+_InputArgsType = torch.Tensor | tuple[Any, ...]
 _InputKwargsType = Mapping[str, Any]
-_OutputsType = Union[Sequence[_NumericType], Sequence]
+_OutputsType = Sequence[_NumericType] | Sequence
 
 
 class OnnxBackend(enum.Enum):
@@ -227,7 +227,10 @@ def _compare_onnx_pytorch_outputs_in_np(
             # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
             if not options.check_shape:
                 # Allow different but broadcastable output shapes.
-                ort_out, pt_out = np.broadcast_arrays(ort_out, pt_out)
+                ort_out, pt_out = np.broadcast_arrays(
+                    ort_out,  # pyrefly: ignore[bad-argument-type]
+                    pt_out,  # pyrefly: ignore[bad-argument-type]
+                )
             torch.testing.assert_close(
                 ort_out,
                 pt_out,
@@ -239,7 +242,9 @@ def _compare_onnx_pytorch_outputs_in_np(
         except AssertionError as e:
             if acceptable_error_percentage:
                 error_percentage = 1 - np.sum(
-                    np.isclose(ort_out, pt_out, rtol=options.rtol, atol=options.atol)
+                    np.isclose(  # pyrefly: ignore[no-matching-overload]
+                        ort_out, pt_out, rtol=options.rtol, atol=options.atol
+                    )
                 ) / np.prod(ort_out.shape)  # pyrefly: ignore [missing-attribute]
                 if error_percentage <= acceptable_error_percentage:
                     warnings.warn(

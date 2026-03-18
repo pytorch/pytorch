@@ -112,6 +112,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/standalone/itt_observer.cpp",
     "torch/csrc/profiler/standalone/nvtx_observer.cpp",
     "torch/csrc/profiler/standalone/privateuse1_observer.cpp",
+    "torch/csrc/profiler/standalone/privateuse1_profiler.cpp",
     "torch/csrc/profiler/stubs/base.cpp",
     "torch/csrc/profiler/orchestration/vulkan.cpp",
     "torch/csrc/profiler/perf.cpp",
@@ -785,7 +786,7 @@ libtorch_nvshmem_sources = [
     "torch/csrc/distributed/c10d/cuda/utils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
     "torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cu",
-    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu",
+    "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -1473,6 +1474,8 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/RowwisePrune.cpp",
     "aten/src/ATen/native/SegmentReduce.cpp",
     "aten/src/ATen/native/Scalar.cpp",
+    "aten/src/ATen/native/ScaledBlas.cpp",
+    "aten/src/ATen/native/ScaledBlasUtils.cpp",
     "aten/src/ATen/native/SobolEngineOps.cpp",
     "aten/src/ATen/native/SobolEngineOpsUtils.cpp",
     "aten/src/ATen/native/SoftMax.cpp",

@@ -5,7 +5,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, TYPE_CHECKING
 
 from sympy import Expr, symbols
 
@@ -82,19 +82,17 @@ class CUTLASSKernel(Kernel):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.layout_args: dict[str, list[LayoutArg]] = defaultdict(list)
-        self.size_args: list[Union[Expr, int]] = []
+        self.size_args: list[Expr | int] = []
         # Mapping from arg name to IRNode.
         self.named_nodes: dict[str, IRNode] = {}
 
-    def find_symbol(
-        self, node: IRNode, attr: ValidLayoutAttrs, dim: int
-    ) -> Optional[str]:
+    def find_symbol(self, node: IRNode, attr: ValidLayoutAttrs, dim: int) -> str | None:
         arg = self.find_layout_arg(node, attr, dim)
         return arg.symbol if arg else None
 
     def find_layout_arg(
         self, node: IRNode, attr: ValidLayoutAttrs, dim: int
-    ) -> Optional[LayoutArg]:
+    ) -> LayoutArg | None:
         matches = [
             arg
             for arg in itertools.chain.from_iterable(self.layout_args.values())
@@ -151,7 +149,7 @@ class CUTLASSKernel(Kernel):
             self.add_layout_arg("ldc", Bias, "stride", ldc_dim)
         self.add_layout_arg("ldd", Y, "stride", ldd_dim)
 
-    def get_layout_args(self) -> tuple[Union[Expr, int], ...]:
+    def get_layout_args(self) -> tuple[Expr | int, ...]:
         X = self.named_nodes["X"]
         W = self.named_nodes["W"]
         Y = self.named_nodes["Y"]
@@ -160,7 +158,7 @@ class CUTLASSKernel(Kernel):
         ndim = _normalize_idx(-1, len(W.get_size()))
         kdim = _normalize_idx(-1, len(X.get_size()))
 
-        def get_ld(node) -> Union[Expr, int]:
+        def get_ld(node) -> Expr | int:
             dim = self.find_ld_idx(node)
             return node.get_stride()[dim]
 
@@ -174,7 +172,7 @@ class CUTLASSKernel(Kernel):
         LDD = get_ld(Y)
         return (M, N, K, B, LDA, LDB, LDC, LDD)
 
-    def get_dynamic_shape_args(self) -> list[Union[Expr, int]]:
+    def get_dynamic_shape_args(self) -> list[Expr | int]:
         return [*self.get_layout_args(), *self.size_args]
 
     def get_offset_args(self) -> list[Expr]:
@@ -251,7 +249,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         inputs: list[IRNode],
         outputs: list[IRNode],
         names_str: str = "",
-        input_reorder: Optional[list[int]] = None,
+        input_reorder: list[int] | None = None,
     ) -> str:
         """
         Hook called from template code to generate function definition and
@@ -410,7 +408,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         if ws:
             wrapper.generate_workspace_deallocation(ws)
 
-    def dtype(self, node: IRNode) -> Optional[str]:
+    def dtype(self, node: IRNode) -> str | None:
         """
         Generates code which represents dtype of a given node.
         """
@@ -419,7 +417,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
 
-    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> Optional[str]:
+    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> str | None:
         # Helper method, called into from CUTLASSGemmTemplate
         if node is None:
             return default_dtype
@@ -452,7 +450,7 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         self,
         node: IRNode,
         start_index: int,
-        end_index: Optional[int] = None,
+        end_index: int | None = None,
         default_value: int = 0,
     ) -> str:
         """
@@ -581,15 +579,13 @@ class CUTLASSTemplateCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         make_kernel_render: Callable[
-            [CUTLASSTemplateBuffer, Optional[list[BaseSchedulerNode]]],
+            [CUTLASSTemplateBuffer, list[BaseSchedulerNode] | None],
             tuple[CUTLASSTemplateKernel, functools.partial[str]],
         ],
         bmreq: CUTLASSBenchmarkRequest,
         supports_epilogue_fusion: bool,
         template: "CUTLASSTemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[
-            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
-        ],  # type: ignore[type-arg]
+        info_kwargs: dict[str, PrimitiveInfoType | list[PrimitiveInfoType]] | None,  # type: ignore[type-arg]
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
@@ -645,7 +641,7 @@ class CUTLASSTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """
         Information returned here is logged to the autotune log file when that is enabled.
 

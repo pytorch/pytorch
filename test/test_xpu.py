@@ -126,6 +126,8 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
         self.assertTrue(device_capability["local_mem_size"] > 0)
+        self.assertTrue(device_capability["memory_clock_rate"] > 0)
+        self.assertTrue(device_capability["memory_bus_width"] > 0)
         self.assertEqual(
             device_properties.driver_version, device_capability["driver_version"]
         )
@@ -243,6 +245,49 @@ if __name__ == "__main__":
         # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
         rc = check_output(test_script).splitlines()[-1]
         self.assertEqual(rc, str(torch.xpu.device_count()))
+
+    @unittest.skipIf(
+        IS_WINDOWS, "Only for lazy initialization on Linux, not applicable on Windows."
+    )
+    def test_no_xpu_device_query_on_inductor_import(self):
+        """Validate that importing torch._inductor.lowering does not trigger XPU device queries"""
+
+        def check_output(script: str) -> str:
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+            )
+
+        test_script = """\
+import torch
+from unittest.mock import patch
+
+call_count = 0
+original_getDeviceCount = torch._C._xpu_getDeviceCount
+
+def counting_getDeviceCount():
+    global call_count
+    call_count += 1
+    return original_getDeviceCount()
+
+with patch.object(torch._C, '_xpu_getDeviceCount', counting_getDeviceCount):
+    import torch._inductor.lowering
+
+print(call_count)
+print(torch.xpu.is_initialized())
+"""
+        rc = check_output(test_script).splitlines()
+        self.assertEqual(
+            rc[0],
+            "0",
+            "Importing torch._inductor.lowering should not query XPU device count",
+        )
+        self.assertEqual(
+            rc[1],
+            "False",
+            "Importing torch._inductor.lowering should not initialize XPU",
+        )
 
     def test_streams(self):
         s0 = torch.xpu.Stream()

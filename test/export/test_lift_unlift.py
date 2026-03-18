@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: export"]
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch._export.passes.lift_constants_pass import (
@@ -64,7 +64,7 @@ class GraphBuilder:
         self.nodes[out] = node
 
     def constant(
-        self, name: str, value: Any, target: Optional[str] = None, module_fqn: str = ""
+        self, name: str, value: Any, target: str | None = None, module_fqn: str = ""
     ):
         if target is None:
             target = name
@@ -119,9 +119,11 @@ class GraphBuilder:
     # NOTE: does not handle non-user-outputs atm
     def gen_graph_signature(self) -> ExportGraphSignature:
         output = [n for n in self.graph.nodes if n.op == "output"]
-        assert len(output) == 1
+        if len(output) != 1:
+            raise AssertionError(f"Expected 1 output node, got {len(output)}")
         output = output[0]
-        assert len(output.args) == 1, "multiple outputs NYI"
+        if len(output.args) != 1:
+            raise AssertionError(f"multiple outputs NYI, got {len(output.args)}")
 
         return ExportGraphSignature(
             input_specs=self.create_input_specs(),

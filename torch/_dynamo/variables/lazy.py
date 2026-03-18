@@ -257,7 +257,7 @@ class LazyConstantVariable(LazyVariableTracker):
     supported_types = (int, float, bool, str)
 
     @staticmethod
-    def create(  # pyrefly: ignore[bad-override]
+    def create(
         value: Any,
         source: Any,
         **options: Any,

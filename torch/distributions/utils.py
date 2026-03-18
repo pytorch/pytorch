@@ -1,3 +1,4 @@
+import typing
 from collections.abc import Callable, Sequence
 from functools import update_wrapper
 from typing import Any, Final, Generic, overload, TypeVar
@@ -213,7 +214,7 @@ def vec_to_tril_matrix(vec: Tensor, diag: int = 0) -> Tensor:
             f"The size of last dimension is {vec.shape[-1]} which cannot be expressed as "
             + "the lower triangular part of a square D x D matrix."
         )
-    n = round(n.item()) if isinstance(n, torch.Tensor) else round(n)
+    n = round(typing.cast(float, n.item())) if isinstance(n, torch.Tensor) else round(n)
     mat = vec.new_zeros(vec.shape[:-1] + torch.Size((n, n)))
     arange = torch.arange(n, device=vec.device)
     tril_mask = arange < arange.view(-1, 1) + (diag + 1)

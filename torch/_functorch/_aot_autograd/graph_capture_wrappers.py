@@ -14,7 +14,7 @@ import warnings
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -23,6 +23,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
+from torch._opaque_base import OpaqueBase
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
@@ -240,7 +241,7 @@ def fn_prepped_for_autograd(
             # Also, only tensor outputs should participate in the backward
             # (in particular, Symint outputs in the forward graph shouldn't get tangents)
             and issubclass(meta.output_info[i].raw_type, Tensor)
-            and meta.output_info[i].requires_grad
+            and meta.output_info[i].requires_grad_for_backward
             for (i, x) in enumerate(outs)
         ]
 
@@ -291,7 +292,7 @@ class JointFnHandle:
 #     (the way this is handled is that we ensure any inputs that normally get mutated are cloned first)
 def create_joint(
     fn: Callable[..., Any],
-    primals_descs: Optional[list[AOTInput]] = None,
+    primals_descs: list[AOTInput] | None = None,
     *,
     aot_config: AOTConfig,
 ) -> Callable[..., Any]:
@@ -303,8 +304,8 @@ def create_joint(
     def inner_fn(
         primals: list[FxValue], tangents: list[FxValue]
     ) -> tuple[
-        tuple[list[FxValue], list[Optional[Tensor]]],
-        tuple[list[AOTOutput], list[Optional[AOTOutput]]],
+        tuple[list[FxValue], list[Tensor | None]],
+        tuple[list[AOTOutput], list[AOTOutput | None]],
     ]:
         outs_descs = None
         if primals_descs is None:
@@ -478,8 +479,8 @@ def create_joint(
     def inner_fn_with_anomaly(
         primals: list[FxValue], tangents: list[FxValue]
     ) -> tuple[
-        tuple[list[FxValue], list[Optional[Tensor]]],
-        tuple[list[AOTOutput], list[Optional[AOTOutput]]],
+        tuple[list[FxValue], list[Tensor | None]],
+        tuple[list[AOTOutput], list[AOTOutput | None]],
     ]:
         with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
             warnings.filterwarnings("ignore", "Anomaly Detection has been enabled.")
@@ -489,8 +490,8 @@ def create_joint(
     def joint_helper(
         primals: list[FxValue], tangents: list[FxValue]
     ) -> tuple[
-        tuple[list[FxValue], list[Optional[Tensor]]],
-        tuple[list[AOTOutput], list[Optional[AOTOutput]]],
+        tuple[list[FxValue], list[Tensor | None]],
+        tuple[list[AOTOutput], list[AOTOutput | None]],
     ]:
         return inner_fn_with_anomaly(primals, tangents)
 
@@ -516,13 +517,13 @@ def create_functionalized_rng_ops_wrapper(
         fake_mode = fake_mode_det
 
     def override_get_rng_state(
-        device: Union[int, str, torch.device] = "cuda",
+        device: int | str | torch.device = "cuda",
     ) -> Tensor:
         out = PhiloxStateTracker.get_state_as_tensor()
         return out
 
     def override_set_rng_state(
-        x: Tensor, device: Union[int, str, torch.device] = "cuda"
+        x: Tensor, device: int | str | torch.device = "cuda"
     ) -> None:
         PhiloxStateTracker.set_state_from_tensor(x)
 
@@ -671,7 +672,15 @@ def sc_visit(
             return
 
         for a in e.__tensor_flatten__()[0]:
-            visit(getattr(e, a))
+            match getattr(e, a):
+                case torch.Tensor() as inner:
+                    visit(inner)
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
 
     visit(t)
     return accum
@@ -718,8 +727,8 @@ def apply_in_graph_mutations(
     inpt_new: Tensor,
     f_inpt: Tensor,
     input_idx: int,
-    mcs: Optional[MutationCounters] = None,
-    applied_mcs: Optional[MutationCounters] = None,
+    mcs: MutationCounters | None = None,
+    applied_mcs: MutationCounters | None = None,
 ) -> None:
     if input_info.mutation_type != MutationType.MUTATED_IN_GRAPH:
         raise AssertionError(
@@ -843,11 +852,11 @@ def create_functionalized_fn(
     meta: ViewAndMutationMeta,
     aot_config: AOTConfig,
     trace_joint: bool,
-    joint_fn_handle: Optional[JointFnHandle] = None,
+    joint_fn_handle: JointFnHandle | None = None,
 ) -> Any:
     primals_after_forward = None
     f_args_after_forward = None
-    f_args_mutation_counters_after_forward: Optional[list[MutationCounters]] = None
+    f_args_mutation_counters_after_forward: list[MutationCounters] | None = None
     inputs_mutated_in_graph = [
         info.mutation_type == MutationType.MUTATED_IN_GRAPH for info in meta.input_info
     ]
@@ -856,7 +865,7 @@ def create_functionalized_fn(
     @simple_wraps(fn)
     def _functionalized_f_helper(
         *args: list[FxValue],
-    ) -> tuple[tuple[list[FxValue], list[Tensor]], list[Optional[AOTOutput]]]:
+    ) -> tuple[tuple[list[FxValue], list[Tensor]], list[AOTOutput | None]]:
         with maybe_enable_thunkify():
             # See Note [Disabling Functionalize TLS Above Python Functionalization]
             disable_above = torch._C._ExcludeDispatchKeyGuard(
@@ -960,7 +969,11 @@ def create_functionalized_fn(
                                 raise AssertionError(
                                     f"expected both before and after to be Tensors, got {type(before)} and {type(after)}"
                                 )
-                            before.copy_(after)
+                            # no_grad prevents the FakeTensor's requires_grad from
+                            # triggering check_inplace during tracing.  The
+                            # requires_grad case is checked at runtime instead
+                            with torch.no_grad():
+                                before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
                         )
@@ -1100,7 +1113,7 @@ def create_functionalized_fn(
                         != MutationType.MUTATED_IN_GRAPH
                     ):
                         continue
-                    mcs: Optional[MutationCounters] = None
+                    mcs: MutationCounters | None = None
                     if f_args_mutation_counters_after_forward is not None:
                         # This could happen for subclasses tracing
                         # Subclasses support for mutations in fw and bw is TBD.
@@ -1271,6 +1284,11 @@ def handle_effect_tokens_fn(
     else:
         args = [*additional_fwd_token_inputs, *args]
         args_descs = [*additional_fwd_token_inputs_descs, *args_descs]
+
+        if num_tokens > 0:
+            meta.static_input_indices = [
+                idx + num_tokens for idx in meta.static_input_indices
+            ]
     return inner_fn, args, args_descs
 
 
@@ -1285,9 +1303,9 @@ def handle_effect_tokens_fn(
 #   Why do we need this? We need to collect updated ViewAndMutationMeta on our new dense -> dense functions.
 #   In particular, we need this to tell the partitioner how many dense forward outputs there are.
 def aot_dispatch_subclass(
-    flat_fn_maybe_joint: Union[JointTraceFn, TraceFn],
-    args: Union[list[FxValue], tuple[list[FxValue], list[FxValue]]],
-    args_descs: Union[list[AOTInput], tuple[list[AOTInput], list[AOTInput]]],
+    flat_fn_maybe_joint: JointTraceFn | TraceFn,
+    args: list[FxValue] | tuple[list[FxValue], list[FxValue]],
+    args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]],
     *,
     is_joint_structure: bool,
     meta: ViewAndMutationMeta,
@@ -1383,7 +1401,7 @@ def aot_dispatch_subclass(
             append_symints=True,
         )
         # We pass append_symints=False here because the partitioner will
-        # capture and add any extra argument
+        # capture and add any extra argument.
         tangents_unwrapped_pair = unwrap_tensor_subclasses(
             args[1],  # type: ignore[arg-type]
             args_descs[1],  # type: ignore[arg-type]
