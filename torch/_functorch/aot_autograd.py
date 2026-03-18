@@ -5,7 +5,7 @@ import itertools
 import time
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
@@ -1067,6 +1067,12 @@ def prepare_aot_module_simplified(
     )
 
 
+def _resolve_default_pre_grad_pass_timing() -> Literal["early", "late"]:
+    from torch._inductor.codecache import resolve_pre_grad_pass_timing
+
+    return resolve_pre_grad_pass_timing()
+
+
 def aot_module_simplified(
     mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
     args: Iterable[Any],
@@ -1130,11 +1136,13 @@ def aot_module_simplified(
 
         compiled_fn = None
 
-        # "early" timing: run pre-grad passes before cache lookup so the
-        # cache key is computed from the already-transformed graph.
+        pre_grad_pass_timing: Literal["early", "late"] = (
+            _resolve_default_pre_grad_pass_timing()
+        )
+
         if (
-            torch._inductor.config.pre_grad_pass_timing == "early"
-            and pre_grad_passes is not None
+            pre_grad_pass_timing == "early"
+            and pre_grad_passes
             and isinstance(mod, torch.fx.GraphModule)
         ):
             mod = pre_grad_passes(mod, fake_flat_args)
@@ -1158,11 +1166,9 @@ def aot_module_simplified(
                 )
 
         if compiled_fn is None:
-            # "late" timing (default): run pre-grad passes after cache lookup,
-            # only on cache miss, to cache pre-grad transforms.
             if (
-                torch._inductor.config.pre_grad_pass_timing == "late"
-                and pre_grad_passes is not None
+                pre_grad_pass_timing == "late"
+                and pre_grad_passes
                 and isinstance(mod, torch.fx.GraphModule)
             ):
                 mod = pre_grad_passes(mod, fake_flat_args)

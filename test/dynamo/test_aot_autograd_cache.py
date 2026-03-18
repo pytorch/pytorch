@@ -2785,6 +2785,145 @@ class AOTAutogradCacheTests(InductorTestCase):
 
             self.assertEqual(result1, result2)
 
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_pre_grad_passes_default_timing_with_uuid(self):
+        """
+        With default timing and a custom pass that has a UUID, passes run late
+        (only on cache miss).
+        """
+        from torch._inductor.compile_fx import run_pre_grad_passes
+
+        def fn(x, y):
+            return 1 * x + y
+
+        pre_grad_call_count = 0
+
+        def wrap_run_pre_grad_passes(
+            model: GraphModule, example_inputs: Sequence[InputType]
+        ) -> GraphModule:
+            nonlocal pre_grad_call_count
+            pre_grad_call_count += 1
+            run_pre_grad_passes(model, example_inputs)
+            return model
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.compile_fx.run_pre_grad_passes",
+                wrap_run_pre_grad_passes,
+            ),
+            inductor_config.patch(
+                "pre_grad_custom_pass", custom_pre_grad_pass_remove_ident_muls
+            ),
+        ):
+            self._clear_all_caches()
+
+            compiled_fn = torch.compile(fn)
+            result1 = compiled_fn(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(pre_grad_call_count, 1)
+
+            torch._dynamo.reset()
+
+            # Cache hit — passes should NOT run (late timing)
+            compiled_fn2 = torch.compile(fn)
+            result2 = compiled_fn2(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(pre_grad_call_count, 1)
+
+            self.assertEqual(result1, result2)
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_pre_grad_passes_default_timing_without_uuid(self):
+        """
+        With default timing and a custom pass without a UUID, passes run early
+        (on every compile, even cache hits).
+        """
+        from torch._inductor.compile_fx import run_pre_grad_passes
+
+        class NoUuidPass(CustomGraphPass):
+            def __call__(self, g: torch.fx.Graph) -> None:
+                pass
+
+            def uuid(self):
+                return None
+
+        def fn(x, y):
+            return x + y
+
+        pre_grad_call_count = 0
+
+        def wrap_run_pre_grad_passes(
+            model: GraphModule, example_inputs: Sequence[InputType]
+        ) -> GraphModule:
+            nonlocal pre_grad_call_count
+            pre_grad_call_count += 1
+            run_pre_grad_passes(model, example_inputs)
+            return model
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.compile_fx.run_pre_grad_passes",
+                wrap_run_pre_grad_passes,
+            ),
+            inductor_config.patch("pre_grad_custom_pass", NoUuidPass()),
+        ):
+            self._clear_all_caches()
+
+            compiled_fn = torch.compile(fn)
+            result1 = compiled_fn(x, y)
+            self.assertEqual(pre_grad_call_count, 1)
+
+            torch._dynamo.reset()
+
+            # Cache hit — passes should STILL run (early timing)
+            compiled_fn2 = torch.compile(fn)
+            result2 = compiled_fn2(x, y)
+            self.assertEqual(pre_grad_call_count, 2)
+
+            self.assertEqual(result1, result2)
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    @inductor_config.patch("pre_grad_pass_timing", "late")
+    def test_pre_grad_pass_late_timing_without_uuid_raises(self):
+        """
+        Explicitly setting late timing with a pass that has no UUID should
+        raise a RuntimeError.
+        """
+
+        class NoUuidPass(CustomGraphPass):
+            def __call__(self, g: torch.fx.Graph) -> None:
+                pass
+
+            def uuid(self):
+                return None
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        with inductor_config.patch("pre_grad_custom_pass", NoUuidPass()):
+            self._clear_all_caches()
+            compiled_fn = torch.compile(fn)
+            with self.assertRaisesRegex(
+                RuntimeError, "pre_grad_custom_pass must implement uuid"
+            ):
+                compiled_fn(x, y)
+
     def test_cache_hit_across_processes(self):
         """
         Verify that a second subprocess gets a cache hit from the first subprocess's
