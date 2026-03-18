@@ -718,7 +718,7 @@
   "GB8656": [
     {
       "Gb_type": "Opaque object with custom __getattr__ not supported",
-      "Context": "{value_type.__name__} with custom __getattr__",
+      "Context": "{real_obj_type.__name__} with custom __getattr__",
       "Explanation": "Dynamo does not support opaque objects types with custom __getattr__ methods",
       "Hints": []
     }
@@ -2434,6 +2434,15 @@
     }
   ],
   "GB8843": [
+    {
+      "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
+      "Context": "Opaque object type: {real_obj_type}. Method name: '{name}'",
+      "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
+      "Hints": [
+        "Register member '{name}' with MemberType.INLINED in ",
+        "register_opaque_type({real_obj_type}, members=...)."
+      ]
+    },
     {
       "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
       "Context": "Opaque object type: {value_type}. Method name: '{name}'",
