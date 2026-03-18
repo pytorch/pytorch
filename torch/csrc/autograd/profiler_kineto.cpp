@@ -1105,17 +1105,14 @@ int64_t KinetoEvent::externalId() const {
 
   // Orphaned GPU activities (no linked CPU op) in these types should not get
   // an External id, to avoid incorrect cross-linking in trace viewers.
-  static const std::set<libkineto::ActivityType> excludedTypes = {
-      libkineto::ActivityType::GPU_MEMCPY,
-      libkineto::ActivityType::GPU_MEMSET,
-      libkineto::ActivityType::CONCURRENT_KERNEL,
-      libkineto::ActivityType::CUDA_RUNTIME,
-      libkineto::ActivityType::CUDA_DRIVER,
-      libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
-      libkineto::ActivityType::PRIVATEUSE1_DRIVER};
-
   auto type = static_cast<libkineto::ActivityType>(activityType());
-  if (excludedTypes.find(type) == excludedTypes.end()) {
+  if (type != libkineto::ActivityType::GPU_MEMCPY &&
+      type != libkineto::ActivityType::GPU_MEMSET &&
+      type != libkineto::ActivityType::CONCURRENT_KERNEL &&
+      type != libkineto::ActivityType::CUDA_RUNTIME &&
+      type != libkineto::ActivityType::CUDA_DRIVER &&
+      type != libkineto::ActivityType::PRIVATEUSE1_RUNTIME &&
+      type != libkineto::ActivityType::PRIVATEUSE1_DRIVER) {
     return static_cast<int64_t>(result_->visit(c10::overloaded(
         [](const ExtraFields<EventType::TorchOp>& e) -> uint64_t {
           return e.correlation_id_;
