@@ -399,13 +399,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
     kwarg_overrides: dict[str, dict[str, Any]] = {}
 
-    # Check if TLX force mode is enabled (fbcode only)
-    tlx_force_mode = (
-        inductor_config.is_fbcode() and inductor_config.triton.tlx_mode == "force"
-    )
-
-    # Add ATEN kernels unless in TLX force mode (force mode uses only TLX)
-    if use_aten_gemm_kernels() and not tlx_force_mode:
+    if use_aten_gemm_kernels():
         templates_to_use.append(aten_handler)
         if aten_extra_kwargs:
             kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
@@ -436,19 +430,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                     templates_to_use.append(persistent_tma_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
-
-    # TLX templates hook (fbcode only)
-    if inductor_config.is_fbcode():
-        from torch._inductor.fb.tlx_templates.mm_templates import apply_tlx_templates
-
-        templates_to_use = apply_tlx_templates(
-            templates_to_use,
-            m,
-            n,
-            k,
-            use_decompose_k_choice,
-            decompose_k_subgraph_template,
-        )
 
     choices.extend(
         V.choices.get_template_configs(
