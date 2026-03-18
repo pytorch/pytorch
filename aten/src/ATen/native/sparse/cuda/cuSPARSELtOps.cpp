@@ -579,6 +579,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   int64_t n = dense_B.size(1);
   int64_t m = compressed_A.size(0);
 
+  // set up matmul descriptors and cache them or retrieve from cache.
   MatDescriptorPtrs* desc_ptrs = getMatDescriptorCache().getOrCreate(
       handle,
       m,
@@ -610,9 +611,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
         sizeof(dBias)));
   }
 
-  cusparseLtSplitKMode_t splitKMode;
-  int max_alg_id;
-
   // set tensor_alpha_mode and alpha pointer for matmul
   const auto alpha_tensor = alpha_opt.has_value() ? *alpha_opt : Tensor{};
   auto alpha_ptr = &alpha;
@@ -635,7 +633,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   TORCH_CUDASPARSE_CHECK(
       cusparseLtMatmulGetWorkspace(&handle, desc_ptrs->plan, &workspace_size));
 
-
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto workspacePtr = allocator.allocate(workspace_size);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -645,6 +642,10 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   c10::TensorOptions().dtype(out_dtype).device(dense_B.device());
   at::Tensor res = (transpose_result) ? at::empty({n, m}, res_tensor_options)
                                     : at::empty({m, n}, res_tensor_options);
+
+  // these are not used unless search_alg_id == true.
+  cusparseLtSplitKMode_t splitKMode = (cusparseLtSplitKMode_t)0;
+  int max_alg_id = 0;
 
   if (search_alg_id) {
     // run matmul search
@@ -707,8 +708,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
         &stream,
         1));
   }
-
-  // plan and descriptors are cached; no destroy here
 
   return {
       res,
