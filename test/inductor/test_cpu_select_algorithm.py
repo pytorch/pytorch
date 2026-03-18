@@ -249,7 +249,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (384, 385))
@@ -756,7 +756,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @requires_mkl
+    @requires_onednn
     @set_num_threads(1)
     @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
     @parametrize("batch_size", (256,))
@@ -1022,6 +1022,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @inductor_config.patch({"freezing": True})
     @patches
+    @requires_onednn
     @torch.no_grad
     @parametrize("batch_size", (8,))
     @parametrize("in_features", (3,))
@@ -1315,7 +1316,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @requires_mkl
+    @requires_onednn
     @parametrize(
         "batch_size",
         (
@@ -1395,7 +1396,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
-    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (32,))
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64, 65))
@@ -2330,7 +2331,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
-    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32,))
@@ -2381,7 +2382,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
-    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32,))
@@ -2433,7 +2434,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
-    @requires_mkl
+    @requires_onednn
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32,))
@@ -2701,7 +2702,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @requires_mkl
+    @requires_onednn
     @parametrize("bs", (1,))
     @parametrize("Mdim", (192,))
     @parametrize("Kdim", (196,))
@@ -2828,7 +2829,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
     @patches
     @torch.no_grad
-    @requires_mkl
+    @requires_onednn
     @parametrize("bs", (5,))
     @parametrize("Mdim", (3, 64))  # Test small Mdim which uses reshaped weights
     @dtypes(torch.float)
