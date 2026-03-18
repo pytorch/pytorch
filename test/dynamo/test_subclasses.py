@@ -2313,6 +2313,7 @@ class GraphModule(torch.nn.Module):
             boxed_forward_device_index: BoxedDeviceIndex | None = None,
             layout_opt: bool | None = None,
             extern_node_serializer: Callable[[list[Any]], Any] | None = None,
+            **kwargs: Any,
         ):
             if dynamic:
                 self.assertEqual(static_input_idxs, [2, 3, 4])
@@ -2350,6 +2351,7 @@ class GraphModule(torch.nn.Module):
             boxed_forward_device_index: BoxedDeviceIndex | None = None,
             layout_opt: bool | None = None,
             extern_node_serializer: Callable[[list[Any]], Any] | None = None,
+            **kwargs: Any,
         ):
             # Important bit: there are 3 params: linear.weight.a, linear.weight.b, linear.bias,
             # which are the first 3 args of the graph.
