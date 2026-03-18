@@ -122,6 +122,12 @@ class Adam(Optimizer):
             group.setdefault("differentiable", False)
             group.setdefault("decoupled_weight_decay", False)
             fused = group.setdefault("fused", None)
+            if fused is None and group["foreach"] is None:
+                fused, _ = _default_to_fused_or_foreach(
+                    group["params"], group["differentiable"], use_fused=True
+                )
+            if fused is None:
+                fused = False
             for p in group["params"]:
                 p_state = self.state.get(p, [])
                 if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
@@ -132,7 +138,7 @@ class Adam(Optimizer):
                             dtype=_get_scalar_dtype(is_fused=fused),
                             device=p.device,
                         )
-                        if group["capturable"] or group["fused"]
+                        if group["capturable"] or fused
                         else torch.tensor(step_val, dtype=_get_scalar_dtype())
                     )
 
@@ -147,6 +153,15 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
+        # Resolve the fused/foreach default once, before iterating params,
+        # so step tensors are placed on-device if and only if fused is used.
+        fused = group["fused"]
+        if fused is None and group["foreach"] is None:
+            fused, _ = _default_to_fused_or_foreach(
+                group["params"], group["differentiable"], use_fused=True
+            )
+        if fused is None:
+            fused = False
         for p in group["params"]:
             if p.grad is not None:
                 has_complex |= torch.is_complex(p)
@@ -168,10 +183,10 @@ class Adam(Optimizer):
                     state["step"] = (
                         torch.zeros(
                             (),
-                            dtype=_get_scalar_dtype(is_fused=group["fused"]),
+                            dtype=_get_scalar_dtype(is_fused=fused),
                             device=p.device,
                         )
-                        if group["capturable"] or group["fused"]
+                        if group["capturable"] or fused
                         else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
                     # Exponential moving average of gradient values
@@ -931,12 +946,11 @@ def adam(
     See :class:`~torch.optim.Adam` for details.
     """
     # Respect when the user inputs False/True for foreach or fused. We only want to change
-    # the default when neither have been user-specified. Note that we default to foreach
-    # and pass False to use_fused. This is not a mistake--we want to give the fused impl
-    # bake-in time before making it the default, even if it is typically faster.
+    # the default when neither have been user-specified. We default to fused when all
+    # params are floating point and on supported devices, otherwise we fall back to foreach.
     if fused is None and foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
+        fused, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=True
         )
         # Do not flip on foreach for the unsupported case where lr is a Tensor and capturable=False.
         if foreach and isinstance(lr, Tensor) and not capturable:

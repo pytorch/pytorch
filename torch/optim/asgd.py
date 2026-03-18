@@ -97,6 +97,9 @@ class ASGD(Optimizer):
                 state = self.state[p]
                 # State initialization
                 if len(state) == 0:
+                    # step, eta, mu are on device even when capturable=False, because
+                    # they interact with params in foreach ops. We should treat them
+                    # like Python scalars when capturable=False as a next step for perf.
                     state["step"] = torch.zeros(
                         (), device=p.device, dtype=_get_scalar_dtype()
                     )

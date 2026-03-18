@@ -77,15 +77,24 @@ class Adagrad(Optimizer):
             self._step_supports_amp_scaling = True
 
         for group in self.param_groups:
+            # Resolve the fused default so step tensors are placed on-device
+            # if and only if fused is used.
+            fused = group["fused"]
+            if fused is None and group["foreach"] is None:
+                fused, _ = _default_to_fused_or_foreach(
+                    group["params"], group["differentiable"], use_fused=True
+                )
+            if fused is None:
+                fused = False
             for p in group["params"]:
                 state = self.state[p]
                 state["step"] = (
                     torch.zeros(
                         (),
-                        dtype=_get_scalar_dtype(is_fused=group["fused"]),
+                        dtype=_get_scalar_dtype(is_fused=fused),
                         device=p.device,
                     )
-                    if group["fused"]
+                    if fused
                     else torch.tensor(0.0, dtype=_get_scalar_dtype())
                 )
                 init_value = (
@@ -99,14 +108,18 @@ class Adagrad(Optimizer):
 
     def __setstate__(self, state):
         super().__setstate__(state)
-        #  define "fused" for
-        #  MYPY error: Name "fused" may be undefined
-        fused = None
         for group in self.param_groups:
             group.setdefault("foreach", None)
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
-            fused = group.setdefault("fused", None)
+            group.setdefault("fused", None)
+            fused = group["fused"]
+            if fused is None and group["foreach"] is None:
+                fused, _ = _default_to_fused_or_foreach(
+                    group["params"], group["differentiable"], use_fused=True
+                )
+            if fused is None:
+                fused = False
 
             for p in group["params"]:
                 p_state = self.state.get(p, [])
@@ -118,19 +131,9 @@ class Adagrad(Optimizer):
                             dtype=_get_scalar_dtype(is_fused=fused),
                             device=p.device,
                         )
-                        if group["fused"]
+                        if fused
                         else torch.tensor(step_val, dtype=_get_scalar_dtype())
                     )
-
-        state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["step"]
-        )
-        if not step_is_tensor:
-            for s in state_values:
-                s["step"] = torch.tensor(
-                    float(s["step"]), dtype=_get_scalar_dtype(is_fused=fused)
-                )
 
     def share_memory(self) -> None:
         """Calls tensor.share_memory_() on the state sum tensors."""
@@ -313,12 +316,11 @@ def adagrad(
         )
 
     # Respect when the user inputs False/True for foreach or fused. We only want to change
-    # the default when neither have been user-specified. Note that we default to foreach
-    # and pass False to use_fused. This is not a mistake--we want to give the fused impl
-    # bake-in time before making it the default, even if it is typically faster.
+    # the default when neither have been user-specified. We default to fused when all
+    # params are floating point and on supported devices, otherwise we fall back to foreach.
     if fused is None and foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            params, differentiable, use_fused=False
+        fused, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=True
         )
 
     if fused is None:

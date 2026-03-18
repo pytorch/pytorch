@@ -139,6 +139,7 @@ class SGD(Optimizer):  # noqa: D101
                 fused=group["fused"],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
+                differentiable=group["differentiable"],
             )
 
             if group["momentum"] != 0:
@@ -267,21 +268,21 @@ def sgd(
     dampening: float,
     nesterov: bool,
     maximize: bool,
+    differentiable: bool = False,
 ) -> None:
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
     """
     # Respect when the user inputs False/True for foreach or fused. We only want to change
-    # the default when neither have been user-specified. Note that we default to foreach
-    # and pass False to use_fused. This is not a mistake--we want to give the fused impl
-    # bake-in time before making it the default, even if it is typically faster.
+    # the default when neither have been user-specified. We default to fused when all
+    # params are floating point and on supported devices, otherwise we fall back to foreach.
     if foreach is None and fused is None:
         # why must we be explicit about an if statement for torch.jit.is_scripting here?
         # because JIT can't handle Optionals nor fancy conditionals when scripting
         if not torch.jit.is_scripting():
             fused, foreach = _default_to_fused_or_foreach(
-                params, differentiable=False, use_fused=False
+                params, differentiable=differentiable, use_fused=True
             )
         else:
             foreach = False
