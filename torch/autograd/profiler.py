@@ -634,7 +634,10 @@ class profile:
 
         # Create and return FunctionEvent list, which contains all function events
         # Here 2 function events are created:
-        # all_function_events contains all events associated with each kineto event from result
+        # Python function events are collected but separated out to preserve
+        # backward compatibility of events(). Access via
+        # events(include_python_events=True).
+        python_function_events = []
         all_function_events = []
         # frontend_function_events contains the events in aten or torch frontend level,
         # whose correlation id is 0
@@ -649,6 +652,9 @@ class profile:
                 _filter_name(kineto_event.name())
                 or getattr(kineto_event, "is_hidden_event", lambda: False)()
             ):
+                continue
+            if kineto_event.is_python_function():
+                python_function_events.append(kineto_event)
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
             rel_end_ns = kineto_event.end_ns() - trace_start_ns
@@ -807,6 +813,7 @@ class profile:
         all_function_events.sort(
             key=lambda evt: [evt.time_range.start, -evt.time_range.end]
         )
+        self._python_function_events = python_function_events
         return all_function_events
 
 

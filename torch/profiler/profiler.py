@@ -26,6 +26,7 @@ from torch._C._profiler import (
 from torch._environment import is_fbcode
 from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
+from torch.autograd.profiler_util import EventList
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
 
@@ -413,14 +414,24 @@ class _KinetoProfile:
             group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
 
-    def events(self):
+    def events(self, include_python_events=False):
         """
         Returns the list of unaggregated profiler events,
         to be used in the trace callback or after the profiling is finished
         """
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before accessing events")
-        return self.profiler.function_events
+        events = self.profiler.function_events
+        if include_python_events:
+            python_events = getattr(self.profiler, "_python_function_events", [])
+            if python_events:
+                return EventList(
+                    list(events) + list(python_events),
+                    use_device=events._use_device,
+                    profile_memory=events._profile_memory,
+                    with_flops=events._with_flops,
+                )
+        return events
 
     def add_metadata(self, key: str, value: str) -> None:
         """
