@@ -6,7 +6,7 @@ import itertools
 import os
 import sys
 import unittest
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -123,7 +123,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         optim_class: type[torch.optim.Optimizer],
         multi_tensor: bool,
         sharding_strategy: ShardingStrategy,
-        backward_prefetch: Optional[BackwardPrefetch],
+        backward_prefetch: BackwardPrefetch | None,
         cpu_offload: CPUOffload,
     ) -> tuple[FSDP, torch.optim.Optimizer]:
         """
@@ -341,7 +341,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         optim_class: type[torch.optim.Optimizer],
         multi_tensor: bool,
         set_to_none: bool,
-        backward_prefetch: Optional[BackwardPrefetch],
+        backward_prefetch: BackwardPrefetch | None,
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy,
         skip_writeback_check: bool,

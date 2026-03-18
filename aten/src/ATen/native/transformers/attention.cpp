@@ -264,7 +264,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(q_k_v_s.size() == 3);
-  return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
+  return std::make_tuple(std::move(q_k_v_s[0]), std::move(q_k_v_s[1]), std::move(q_k_v_s[2]));
 }
 
 std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
@@ -443,12 +443,7 @@ int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Ten
   return static_cast<int64_t>(backend);
 }
 
-REGISTER_ARCH_DISPATCH(_fused_sdp_choice_stub, DEFAULT, &_fused_sdp_choice_cpp)
-REGISTER_AVX2_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_AVX512_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_VSX_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_ZVECTOR_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
-REGISTER_SVE256_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
+REGISTER_ALL_CPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cpp)
 REGISTER_HPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_meta)
 
 int64_t _fused_sdp_choice_meta(

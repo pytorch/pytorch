@@ -2861,5 +2861,69 @@ class FakeTensorPreferDeviceType(TestCase):
                 self.assertTrue(isinstance(result, FakeTensor))
 
 
+class FakeTensorMetaDevicePropagation(TestCase):
+    @parametrize("device", ["cpu", "cuda"])
+    def test_inplace_add_with_meta_rhs_keeps_destination_device(self, device):
+        if device == "cuda" and not RUN_CUDA:
+            self.skipTest("requires cuda")
+
+        with FakeTensorMode():
+            log_det = torch.zeros(2, device=device)
+            log_det += torch.zeros(2, device="meta")
+
+            self.assertEqual(log_det.device.type, device)
+            self.assertTrue(isinstance(log_det, FakeTensor))
+
+
+instantiate_parametrized_tests(FakeTensorMetaDevicePropagation)
+
+
+class FakeTensorViewCopy(TestCase):
+    def test_expand_then_view_copy_matches_eager_mode(self):
+        x = torch.arange(7)
+        y = x.expand(12, 7)
+
+        # Eager baseline
+        eager = torch.ops.aten.view_copy.default(y, [84])
+        self.assertEqual(eager.shape, (84,))
+        self.assertIsNone(eager._base)  # non-aliasing
+
+        # FakeTensor behavior should match eager
+        with FakeTensorMode():
+            xf = torch.arange(7)
+            yf = xf.expand(12, 7)
+            fake = torch.ops.aten.view_copy.default(yf, [84])
+            self.assertEqual(fake.shape, (84,))
+            self.assertIsNone(fake._base)  # non-aliasing
+
+    def test_expand_then_view_still_not_allowed(self):
+        with FakeTensorMode():
+            xf = torch.arange(7)
+            yf = xf.expand(12, 7)
+            with self.assertRaisesRegex(
+                ValueError, "Cannot view a tensor with shape *"
+            ):
+                _ = yf.view(-1)
+
+    def test_expand_then_view_copy_unbacked_matches_eager_mode(self):
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            with FakeTensorMode():
+                xf = torch.arange(7)
+                yf = xf.expand(12, 7)
+                fake = torch.ops.aten.view_copy.default(yf, [84])
+                self.assertEqual(fake.shape, (84,))
+                self.assertIsNone(fake._base)  # non-aliasing
+
+    def test_expand_then_view_unbacked_still_not_allowed(self):
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            with FakeTensorMode():
+                xf = torch.arange(7)
+                yf = xf.expand(12, 7)
+                with self.assertRaisesRegex(
+                    ValueError, "Cannot view a tensor with shape *"
+                ):
+                    _ = yf.view(-1)
+
+
 if __name__ == "__main__":
     run_tests()

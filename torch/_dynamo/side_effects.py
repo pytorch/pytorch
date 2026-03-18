@@ -35,6 +35,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
@@ -45,7 +46,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
-from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
+from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
@@ -159,6 +160,9 @@ class SideEffects:
         # Used for temporary mutations in contexts like torch.func.functional_call,
         # where module parameters/buffers are modified but later restored.
         self.ignore_mutation_on_these_variables: set[VariableTracker] = set()
+        # Sources mutated during tracing: AttrSource for attribute
+        # mutations, var.source for value mutations (list/dict/etc).
+        self.mutated_sources: OrderedSet[Source] = OrderedSet()
 
     def ignore_mutations_on(self, var: VariableTracker) -> None:
         """Mutations to this variable will be executed but not not tracked,
@@ -256,6 +260,19 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
+    def _maybe_record_side_effect(self, item: VariableTracker) -> None:
+        """Record the first externally-visible side effect on the current tracer."""
+        if item.mutation_type is not None and not is_side_effect_safe(
+            item.mutation_type
+        ):
+            output_graph = self.output_graph_weakref()
+            if output_graph:
+                tracer = output_graph.current_tx.output.current_tracer
+                if tracer.side_effect_stack is None:
+                    tracer.side_effect_stack = (
+                        torch._guards.TracingContext.extract_stack()
+                    )
+
     def check_allowed_side_effect(self, item: VariableTracker) -> bool:
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
@@ -264,8 +281,10 @@ class SideEffects:
         if isinstance(item, AutogradFunctionContextVariable):
             return True
         if self.should_allow_externally_visible_side_effects_in_subtracer():
+            self._maybe_record_side_effect(item)
             return True
         if self.should_allow_side_effects_in_hop():
+            self._maybe_record_side_effect(item)
             return True
         if self.is_reconstructing_generator():
             # This is missing the case where one mutates a tensor. See
@@ -306,6 +325,9 @@ class SideEffects:
         self.store_attr_mutations[item][name] = value
         # Capture user stack for this mutation
         self._capture_user_stack(item)
+        item_source = getattr(item, "source", None)
+        if item_source is not None:
+            self.mutated_sources.add(AttrSource(item_source, name))
 
     def load_attr(
         self,
@@ -340,6 +362,16 @@ class SideEffects:
 
     def load_cell(self, cellvar: VariableTracker) -> VariableTracker:
         assert isinstance(cellvar, variables.CellVariable)
+        # Track the cell_contents source during subgraph tracing so that
+        # mutations (e.g. nonlocal counter = 3) are detected by the reuse
+        # mechanism via set intersection with mutated_sources.
+        output_graph = self.output_graph_weakref()
+        if output_graph:
+            cell_source = getattr(cellvar, "source", None)
+            if cell_source is not None:
+                output_graph.current_tx.output.current_tracer.traced_sources.add(
+                    AttrSource(cell_source, "cell_contents")
+                )
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
@@ -704,6 +736,8 @@ class SideEffects:
 
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
+        if var.source is not None:
+            self.mutated_sources.add(var.source)
         if (
             var.source
             and isinstance(var, variables.ConstDictVariable)

@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, Generic, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVar
 
 import sympy
@@ -165,11 +165,11 @@ class IterationRangesRoot(IterationRanges):
         prefix: str,
         index: int,
         kernel: SIMDKernel,
-        pid_cache: Optional[dict[str, str]] = None,
+        pid_cache: dict[str, str] | None = None,
         *,
         is_loop: bool,
-        tensor_dim: Optional[int],
-        grid_dim: Optional[int],
+        tensor_dim: int | None,
+        grid_dim: int | None,
         has_zdim: bool,
     ) -> None:
         if pid_cache is None:
@@ -352,7 +352,7 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
-def constant_repr(value: Union[int, float]) -> str:
+def constant_repr(value: int | float) -> str:
     if value == float("inf"):
         return 'float("inf")'
     elif value == float("-inf"):
@@ -400,10 +400,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self,
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
-        pid_cache: Optional[dict[str, str]] = None,
-        override_persistent_reduction: Optional[bool] = None,
-        override_cooperative_reduction: Optional[bool] = None,
-        tiling_scores: Optional[dict[str, sympy.Expr]] = None,
+        pid_cache: dict[str, str] | None = None,
+        override_persistent_reduction: bool | None = None,
+        override_cooperative_reduction: bool | None = None,
+        tiling_scores: dict[str, sympy.Expr] | None = None,
         mix_order_reduction: bool = False,
     ) -> None:
         if pid_cache is None:
@@ -425,7 +425,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if override_cooperative_reduction is not None
             else self.should_use_cooperative_reduction()
         )
-        self.tiling_scores: Optional[dict[str, sympy.Expr]] = tiling_scores
+        self.tiling_scores: dict[str, sympy.Expr] | None = tiling_scores
         self.tiling: dict[str, sympy.Expr] = tiling
         self.persistent_reduction: bool = (
             override_persistent_reduction
@@ -434,7 +434,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         )
         self.mix_order_reduction: bool = mix_order_reduction
         self.no_x_dim = self.want_no_x_dim()
-        self.code_hash: Optional[str] = None
+        self.code_hash: str | None = None
         # Info to enable multiple store_output calls for epilogue subtiling
         self.store_output_ctr = itertools.count()
         self.is_native_matmul = False
@@ -463,7 +463,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         self.rsplit_size = 0
         self.saved_partial_accumulate: list[PartialAccumulate] = []
 
-    def codegen_template_override(
+    def codegen_template_body(
         self,
         scheduling,
         template_node,
@@ -472,14 +472,26 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         buf_name_to_prologue_group,
         prologue_preserves_zero_mask_fn,
         render,
-        only_gen_src_code: bool,
-    ) -> str | None:
-        """Override template codegen. Return None to use default flow.
+    ) -> str:
+        """Generate template source code with fused prologues and epilogues.
 
-        External template handlers (e.g. Helion) can override this method
-        to implement custom code generation.
+        Subclasses override this to implement custom code generation.
+        The default implementation raises NotImplementedError — the actual
+        standard path lives in ``TritonTemplateKernel.codegen_template_body``.
         """
-        return None
+        raise NotImplementedError
+
+    def get_unfused_epilogues(self) -> list[Any]:
+        """Return epilogue nodes that were not fused into the kernel.
+
+        These nodes need separate codegen (via ``call_kernel``) and must
+        be excluded from ``mark_run`` in ``_codegen_single_template``.
+
+        The standard path fuses all epilogues, so this returns ``[]``.
+        ``ExternalTritonTemplateKernel`` overrides this for epilogues that
+        don't read exactly one template output and cannot be fused.
+        """
+        return []
 
     def _get_store_output_subgraph_name(self, i: int) -> str:
         return f"<STORE_OUTPUT_{i}>"
@@ -509,7 +521,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def construct_range_trees(
         self,
-        pid_cache: Optional[dict[str, str]],
+        pid_cache: dict[str, str] | None,
         inside_reduction: bool,
         is_reduction: bool,
         numels: dict[str, sympy.Expr],
@@ -851,9 +863,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
             return_getters_groups.append(return_getters)
 
-        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
-            f"failed to set ranges {remaining} {lengths}"
-        )
+        assert all(
+            V.graph.sizevars.guarding_hint_or_throw(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
         # pyrefly: ignore [bad-return]
         return new_ranges, return_getters_groups
 
@@ -1063,14 +1075,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             wrapper.generate_workspace_deallocation(ws)
 
     def call_kernel(
-        self, name: str, node: Optional[IRNode] = None, deallocate_ws: bool = True
+        self, name: str, node: IRNode | None = None, deallocate_ws: bool = True
     ) -> None:
         raise NotImplementedError("NYI: call_kernel")
 
     @contextlib.contextmanager
-    def mask_loads(
-        self, mask: Union[str, OpsWrapper], value: Union[int, float]
-    ) -> Iterator[str]:
+    def mask_loads(self, mask: str | OpsWrapper, value: int | float) -> Iterator[str]:
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
         prior_val = self._load_other
@@ -1117,7 +1127,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return tuple(map(fn, value))
         return fn(value)
 
-    def estimate_flops(self) -> Optional[int]:
+    def estimate_flops(self) -> int | None:
         flops = [
             node.estimate_flops()
             for node in NodeScheduleMarker.only_nodes(self.features.node_schedule)
@@ -1474,7 +1484,7 @@ class SIMDScheduling(BaseScheduling):
         # reduction loop has ended
         not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
         current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
-        maybe_split_index: Optional[int] = None
+        maybe_split_index: int | None = None
 
         def fits_in_main_body(n):
             _, (node_numel, node_rnumel) = n.group
@@ -1638,7 +1648,7 @@ class SIMDScheduling(BaseScheduling):
         return kernel, ws_name, src_code
 
     def benchmark_codegened_module(
-        self, mod, n_spills_threshold=8, node_names: Optional[OrderedSet[str]] = None
+        self, mod, n_spills_threshold=8, node_names: OrderedSet[str] | None = None
     ) -> tuple[float, str]:
         raise NotImplementedError
 
@@ -1769,7 +1779,7 @@ class SIMDScheduling(BaseScheduling):
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 
-            stride_str = f"{nsplit} * {rnumel}"
+            stride_str = f"({nsplit}) * ({rnumel})"
             start = f"{idx} * {stride_str}"
             end = f"({idx} + 1) * {stride_str}"
             reduction_type2op = {
@@ -1800,7 +1810,7 @@ class SIMDScheduling(BaseScheduling):
     def _codegen_nodes(
         self,
         nodes: Sequence[scheduler.SchedulerNode],
-        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
+        coalesce_analysis: CoalesceVarAnalysis | None = None,
     ):
         assert self.scheduler
         nodes = [
@@ -1818,7 +1828,7 @@ class SIMDScheduling(BaseScheduling):
         )
 
     def codegen_node(
-        self, node: Union[scheduler.FusedSchedulerNode, scheduler.SchedulerNode]
+        self, node: scheduler.FusedSchedulerNode | scheduler.SchedulerNode
     ):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
@@ -1845,9 +1855,7 @@ class SIMDScheduling(BaseScheduling):
     @staticmethod
     def can_use_32bit_indexing(
         numel: sympy.Expr,
-        buffers: Iterable[
-            Union[ir.Buffer, ir.TensorBox, ir.TorchBindObject, ir.IRNode]
-        ],
+        buffers: Iterable[ir.Buffer | ir.TensorBox | ir.TorchBindObject | ir.IRNode],
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
 
@@ -1946,7 +1954,7 @@ class SIMDScheduling(BaseScheduling):
             kernel.code_hash = code_hash(src_code)
         del kernel
 
-        final_kernel: Union[SIMDKernel, MultiKernel]
+        final_kernel: SIMDKernel | MultiKernel
         if len(kernels) > 1:
             final_kernel = MultiKernel(kernels)
         else:
@@ -2073,8 +2081,15 @@ class SIMDScheduling(BaseScheduling):
         # all prologue groups should have finalized with use in template
         assert len(prologue_group) == 0
 
-        # External template handlers (e.g. Helion) can override codegen
-        result = kernel.codegen_template_override(
+        # Remove prologue-fused inputs from input_buffers so that
+        # remove_kernel_local_buffers can remove them.
+        for buf_name in kernel.prologue_fused_inputs:
+            kernel.args.input_buffers.pop(buf_name, None)
+
+        # Dispatch to the kernel for source generation.  TritonTemplateKernel
+        # handles the standard Triton path; ExternalTritonTemplateKernel
+        # handles external backends (e.g. Helion).
+        src_code = kernel.codegen_template_body(
             self,
             template_node,
             epilogue_nodes,
@@ -2082,110 +2097,35 @@ class SIMDScheduling(BaseScheduling):
             buf_name_to_prologue_group,
             prologue_preserves_zero_mask,
             render,
-            only_gen_src_code,
         )
-        if result is not None:
-            return result
 
-        with kernel:
-            if not only_gen_src_code:
-                # prologue nodes can only be fused if their only use is in the template,
-                # so they are necessarily not allocated
-                for node in [template_node, *epilogue_nodes]:
-                    node.mark_run()
+        if config.benchmark_kernel:
+            num_gb = kernel.estimate_kernel_num_bytes() / 1e9
+            src_code = (
+                f"{kernel.imports_for_benchmark_kernel()}\n"
+                f"{src_code}\n"
+                f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
+            )
 
-            partial_code = render()
+        node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
 
-            num_store_subgraphs = kernel.get_store_output_count()
-            for i in range(num_store_subgraphs):
-                subgraph_name = kernel._get_store_output_subgraph_name(i)
-                with kernel.set_subgraph_body(subgraph_name):
-                    for node in epilogue_nodes:
-                        node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                    kernel.cse.invalidate(OrderedSet())
+        if only_gen_src_code:
+            return src_code
 
-            for input_name, buffer in kernel.named_input_nodes.items():
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                if prologue_group := buf_name_to_prologue_group.get(
-                    buffer.get_name(), []
-                ):
-                    can_codegen_without_upcast = all(
-                        p_n.can_codegen_without_upcasts() for p_n in prologue_group
-                    )
-
-                    # TODO - this doesn't work with libdevice calls, potentially other bugs
-                    # upcasting to fp32 and downcasting gives large slowdown
-                    with config.patch(
-                        "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
-                    ):
-                        with kernel.set_subgraph_body(subgraph_name):
-                            for prologue_node in prologue_group:
-                                if (
-                                    len(prologue_node.get_buffer_names()) == 1
-                                    and len(prologue_group) == 1
-                                ):
-                                    if prologue_preserves_zero_mask(prologue_node):
-                                        kernel.prologue_fused_inputs_preserve_zero |= (
-                                            prologue_node.get_buffer_names()
-                                        )
-
-                                prologue_node.codegen(
-                                    kernel.split_and_set_ranges(
-                                        prologue_node.get_ranges()
-                                    )
-                                )
-                            kernel.cse.invalidate(OrderedSet())
-
-        # Template hooks must be finalised after kernel.remove_kernel_local_buffers
-        # is called (this is called when the kernel context is exited above), and when
-        # the kernel handler is set (as below). This is because the hooks may add
-        # DeferredLine type lines, which preclude lines involving buffers that have
-        # been removed
-
-        # finalize must be called after adding epilogue above
+        # Unfused epilogues are codegen'd separately in call_kernel;
+        # exclude them from mark_run.
+        unfused_set = OrderedSet([id(n) for n in kernel.get_unfused_epilogues()])
         with V.set_kernel_handler(kernel):
-            if not isinstance(partial_code, str):
-                # This is used to calculate flops in TritonTemplateKernels
-                with ir.IRNode.current_origins(template_node.node.origins):
-                    partial_code.finalize_hook("<DEF_KERNEL>")
-                partial_code.finalize_hook("<ARGDEFS>", strict=False)
+            template_node.mark_run()
+            for node in epilogue_nodes:
+                if id(node) not in unfused_set:
+                    node.mark_run()
+            for node in prologue_nodes:
+                node.mark_run()
 
-            # TODO: Maybe unify CUTLASSTemplateKernel to also use PartialRender for flexible epilogue fusion.
+        kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
 
-            for input_name in kernel.named_input_nodes:
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-
-                partial_code.finalize_hook(subgraph_name, strict=False)
-
-            num_store_subgraphs = kernel.get_store_output_count()
-            for i in range(num_store_subgraphs):
-                subgraph_name = kernel._get_store_output_subgraph_name(i)
-
-                partial_code.finalize_hook(subgraph_name)
-
-            if isinstance(partial_code, str):
-                src_code = partial_code
-            else:
-                # Ensure all hooks are finalized before the kernel is defined.
-                # Note: some of these hooks may have been registered by a kernel subclass
-                src_code = partial_code.finalize_remaining()
-
-            node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
-
-            if config.benchmark_kernel:
-                num_gb = kernel.estimate_kernel_num_bytes() / 1e9
-                src_code = (
-                    f"{kernel.imports_for_benchmark_kernel()}\n"
-                    f"{src_code}\n"
-                    f"{kernel.codegen_kernel_benchmark(num_gb).getvalue()}"
-                )
-
-            if only_gen_src_code:
-                return src_code
-
-            kernel.kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-
-            return kernel
+        return kernel
 
     def _get_multikernel_shapes(
         self, node: MultiTemplateBuffer
@@ -2243,8 +2183,8 @@ class SIMDScheduling(BaseScheduling):
         prologue_nodes,
         *,
         only_gen_src_code=False,
-        hint_override: Optional[int] = None,
-    ) -> Optional[str]:
+        hint_override: int | None = None,
+    ) -> str | None:
         """
         Codegen a triton template with multi-kernel dispatch support
 
@@ -2358,7 +2298,7 @@ class SIMDScheduling(BaseScheduling):
         enable_autotune: bool,
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
-    ) -> list[tuple[Optional[str], Any, Any]]:
+    ) -> list[tuple[str | None, Any, Any]]:
         """
         Generate kernel code for combo kernel partitions.
 
@@ -2803,11 +2743,11 @@ class SIMDScheduling(BaseScheduling):
         pointwise_numel: sympy.Expr,
         reduction_numel: sympy.Expr,
         coalesce_analysis: CoalesceVarAnalysis,
-    ) -> tuple[dict[str, sympy.Expr], Optional[dict[str, sympy.Expr]]]:
+    ) -> tuple[dict[str, sympy.Expr], dict[str, sympy.Expr] | None]:
         """
         Generates a tiling, and a score of each tile according to each tile's coalesced memory accesses.
         """
-        tiling_var: Optional[sympy.Expr] = (
+        tiling_var: sympy.Expr | None = (
             None
             if not coalesce_analysis.suggested_split
             else coalesce_analysis.suggested_split.var
@@ -3053,7 +2993,7 @@ class SIMDScheduling(BaseScheduling):
         node_schedule,
         numel,
         reduction_numel=sympy.S.One,
-        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
+        coalesce_analysis: CoalesceVarAnalysis | None = None,
     ) -> dict[str, sympy.Expr]:
         return cls.get_tiling_and_scores(
             node_schedule, numel, reduction_numel, coalesce_analysis
@@ -3065,8 +3005,8 @@ class SIMDScheduling(BaseScheduling):
         node_schedule,
         numel,
         reduction_numel=sympy.S.One,
-        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
-    ) -> tuple[dict[str, sympy.Expr], Optional[dict[str, sympy.Expr]]]:
+        coalesce_analysis: CoalesceVarAnalysis | None = None,
+    ) -> tuple[dict[str, sympy.Expr], dict[str, sympy.Expr] | None]:
         """
         Heuristics to decide how to tile kernels.
         Currently, we tile based on stride-1 dimensions.
@@ -3153,7 +3093,7 @@ class SIMDScheduling(BaseScheduling):
 
             def convert_tiling_to_3d(
                 tiling0: dict[str, sympy.Expr], tiling1: dict[str, sympy.Expr]
-            ) -> Optional[dict[str, sympy.Expr]]:
+            ) -> dict[str, sympy.Expr] | None:
                 a0, a1 = tiling0["x"], tiling0.get("y", 1)
                 b0, b1 = tiling1["x"], tiling1.get("y", 1)
 
@@ -3216,7 +3156,7 @@ class SIMDScheduling(BaseScheduling):
         return False
 
     def generate_kernel_code_from_nodes(
-        self, nodes, benchmark_kernel=False, hint_override: Optional[int] = None
+        self, nodes, benchmark_kernel=False, hint_override: int | None = None
     ):
         if not any(n.is_template() for n in nodes):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
@@ -3260,7 +3200,7 @@ class SIMDScheduling(BaseScheduling):
 class CandidateTiling:
     tiling: dict[str, sympy.Expr]
     score: int  # higher is better
-    name: Optional[str] = None
+    name: str | None = None
 
     @staticmethod
     def is_good_size(s):

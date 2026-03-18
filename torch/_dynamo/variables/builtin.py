@@ -1629,6 +1629,18 @@ class BuiltinVariable(VariableTracker):
             # - https://github.com/python/cpython/blob/3.12/Objects/floatobject.c#L878-L882
             assert istype(arg.sym_num, (torch.SymInt, torch.SymFloat))
             return SymNodeVariable.create(tx, arg.as_proxy() != 0)
+        if isinstance(arg, ConstDictVariable):
+            return ConstantVariable.build(tx, bool(arg.items))
+        if isinstance(arg, variables.UserDefinedObjectVariable):
+            # for user-defined objects, first try __bool__ if defined, else
+            # __len__. If neither is defined, then any instance is considered True
+            if arg.call_obj_hasattr(tx, "__bool__").value:
+                return arg.call_method(tx, "__bool__", [], {})
+            elif arg.call_obj_hasattr(tx, "__len__").value:
+                length = arg.call_method(tx, "__len__", [], {})
+                return ConstantVariable.create(length.value > 0)  # type: ignore[missing-attr]
+            else:
+                return ConstantVariable.create(True)
 
         # TODO handle more cases and merge this with this with `generic_jump`.
         return None
@@ -2455,12 +2467,13 @@ class BuiltinVariable(VariableTracker):
         ):
             isinstance_type_tuple = isinstance_type
         else:
+            msg = VariableTracker.build(
+                tx, "isinstance() arg 2 must be a type, a tuple of types, or a union"
+            )
             raise_observed_exception(
                 TypeError,
                 tx,
-                args=[
-                    "isinstance() arg 2 must be a type, a tuple of types, or a union"
-                ],
+                args=[msg],
             )
 
         try:
@@ -2730,7 +2743,12 @@ class BuiltinVariable(VariableTracker):
                 return variables.GetAttrVariable(obj, name, source=source)
         elif isinstance(obj, variables.TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
-            member = getattr(obj.value, name)
+            try:
+                member = getattr(obj.value, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+                raise
+
             if isinstance(
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
@@ -2749,12 +2767,6 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)  # type: ignore[arg-type, union-attr]
             return VariableTracker.build(tx, member, source)
-
-        elif istype(obj, variables.UserFunctionVariable) and name in (
-            "__name__",
-            "__module__",
-        ):
-            return VariableTracker.build(tx, getattr(obj.fn, name))
         else:
             try:
                 return obj.var_getattr(tx, name)
@@ -3240,6 +3252,19 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
+
+        # Constant fold or_ for class/type variables (e.g. Shard | _StridedShard
+        # producing a types.UnionType for isinstance checks). This handles cases
+        # like OpaqueObjectClassVariable where is_python_constant() returns False
+        # but as_python_constant() works.
+        try:
+            a_const = a.as_python_constant()
+            b_const = b.as_python_constant()
+            if isinstance(a_const, type) and isinstance(b_const, type):
+                return VariableTracker.build(tx, a_const | b_const)
+        except NotImplementedError:
+            pass
+
         if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
@@ -3316,6 +3341,9 @@ class BuiltinVariable(VariableTracker):
             a = a.dv_dict
         if isinstance(a, (ListVariable, ConstDictVariable)):
             return VariableTracker.build(tx, len(a.items) == 0)
+        if isinstance(a, UserDefinedObjectVariable):
+            bool_result = self.call_bool(tx, a)
+            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
 
         return None
 

@@ -37,7 +37,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, NamedTuple
 from collections.abc import Callable
 
 import torch
@@ -66,6 +66,7 @@ from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBI
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
 
 from torch.fx.proxy import TraceError
+from torch.testing._internal.common_cuda import blas_library_context
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -451,11 +452,11 @@ class TestFX(JitTestCase):
             def create_node(
                 self,
                 kind: str,
-                target: Union[str, Callable],
+                target: str | Callable,
                 args: tuple[Argument, ...],
                 kwargs: dict[str, Any],
-                name: Optional[str] = None,
-                type_expr: Optional[Any] = None,
+                name: str | None = None,
+                type_expr: Any | None = None,
             ) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == "_":
@@ -815,22 +816,6 @@ class TestFX(JitTestCase):
         restored_n = next(iter(restored_graph.nodes))
         self.assertEqual(restored_n.type, torch.Tensor)
 
-    def test_graph_pickle_find_nodes(self):
-        g = Graph()
-        x = g.placeholder("x")
-        y = g.placeholder("y")
-        add = g.call_function(operator.add, (x, y))
-        neg = g.call_function(operator.neg, (add,))
-        g.output(neg)
-
-        restored = pickle.loads(pickle.dumps(g))
-        self.assertEqual(len(restored.find_nodes(op="placeholder")), 2)
-        self.assertEqual(len(restored.find_nodes(op="call_function", target=operator.add)), 1)
-        self.assertEqual(len(restored.find_nodes(op="call_function", target=operator.neg)), 1)
-        self.assertEqual(len(restored.find_nodes(op="output")), 1)
-        node_names = [n.name for n in restored.nodes]
-        self.assertEqual(node_names, ["x", "y", "add", "neg", "output"])
-
     def test_lineno_map(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -930,7 +915,7 @@ class TestFX(JitTestCase):
 
             target_to_name = {operator.add: "add", operator.mul: "mul"}
 
-            output_node: Optional[Node] = None
+            output_node: Node | None = None
             # For each instruction, create a triple
             # (instruction_name : str, inputs : List[str], output : str)
             # to feed into the C++ interpreter
@@ -1092,11 +1077,11 @@ class TestFX(JitTestCase):
             def create_node(
                 self,
                 kind: str,
-                target: Union[str, Callable],
+                target: str | Callable,
                 args: tuple[Argument, ...],
                 kwargs: dict[str, Any],
-                name: Optional[str] = None,
-                type_expr: Optional[Any] = None,
+                name: str | None = None,
+                type_expr: Any | None = None,
             ) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = "foo"
@@ -1972,8 +1957,8 @@ class TestFX(JitTestCase):
 
         # Make sure we're testing all opcodes
         opcodes = set()
-        output_shape: Optional[torch.Shape] = None
-        output_stride: Optional[tuple[int]] = None
+        output_shape: torch.Shape | None = None
+        output_stride: tuple[int] | None = None
         for node in tc_traced.graph.nodes:
             opcodes.add(node.op)
             if node.op == "output":
@@ -4209,11 +4194,11 @@ class TestFX(JitTestCase):
             def create_node(
                 self,
                 kind: str,
-                target: Union[str, Callable],
+                target: str | Callable,
                 args: tuple[Argument, ...],
                 kwargs: dict[str, Any],
-                name: Optional[str] = None,
-                type_expr: Optional[Any] = None,
+                name: str | None = None,
+                type_expr: Any | None = None,
             ) -> Node:
                 n = super().create_node(kind, target, args, kwargs, name)
                 n.tag = "foo"
@@ -4444,6 +4429,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    @blas_library_context("cublaslt")
     def test_profiler_stack_trace_augmentation(self):
         """
         Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
@@ -4851,6 +4837,11 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         # Forward ref
         if isinstance(t, str):
+            # Normalize "X | None" string annotations to Optional format
+            if t.endswith(" | None"):
+                inner = t[: -len(" | None")]
+                result = f"Optional[{inner}]"
+                return result if recursive else f"'{result}'"
             if recursive:
                 return t
             else:
@@ -4890,7 +4881,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         if origin in {tuple, tuple}:
             return f"Tuple{contained_type_str}"
-        if origin == typing.Union:
+        if origin == typing.Union or isinstance(t, types.UnionType):
             # Annoying hack to detect Optional
             if len(contained) == 2 and (contained[0] is type(None)) ^ (
                 contained[1] is type(None)

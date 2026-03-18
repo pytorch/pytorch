@@ -19,8 +19,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
-    MI200_ARCH,
-    skipIfRocmArch,
     skipIfXpu,
     TEST_WITH_SLOW_GRADCHECK,
 )
@@ -748,7 +746,7 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
-    @skipIfRocmArch(MI200_ARCH)
+    @torch._inductor.config.patch(layout_optimization=True)
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self, groups):

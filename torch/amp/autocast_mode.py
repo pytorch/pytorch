@@ -2,7 +2,7 @@
 import collections
 import functools
 import warnings
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.types import _dtype
@@ -222,9 +222,9 @@ class autocast:
     def __init__(
         self,
         device_type: str,
-        dtype: Optional[_dtype] = None,
+        dtype: _dtype | None = None,
         enabled: bool = True,
-        cache_enabled: Optional[bool] = None,
+        cache_enabled: bool | None = None,
     ):
         if not isinstance(device_type, str):
             raise ValueError(
@@ -382,6 +382,13 @@ class autocast:
     def __call__(self, func):
         if torch._jit_internal.is_scripting():
             return func
+        if not callable(func):
+            raise TypeError(
+                f"autocast()(func) requires a callable, but got {type(func).__name__}. "
+                f"Did you mean to use autocast as a context manager? For example:\n"
+                f"    with torch.autocast(device_type=...):\n"
+                f"        output = model(input)"
+            )
         return autocast_decorator(self, func)
 
 
@@ -442,7 +449,7 @@ def custom_fwd(
     fwd=None,
     *,
     device_type: str,
-    cast_inputs: Optional[_dtype] = None,
+    cast_inputs: _dtype | None = None,
 ):
     """
     Create a helper decorator for ``forward`` methods of custom autograd functions.

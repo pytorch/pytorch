@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import os
 from collections.abc import Callable
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility
@@ -26,8 +26,8 @@ class GraphTransformObserver:
         self,
         gm: GraphModule,
         passname: str,
-        subsystem: Optional[str] = None,
-        log_url: Optional[str] = None,
+        subsystem: str | None = None,
+        log_url: str | None = None,
     ):
         """
         log_url is inferred to be torch._inductor.config.trace.log_url_for_graph_xform unless otherwise specified
@@ -76,7 +76,7 @@ class GraphTransformObserver:
     def get_current_pass_count(cls):
         return cls.__pass_count
 
-    def apply_gm_pass(self, pass_fn: Callable[[GraphModule], T]) -> Optional[T]:
+    def apply_gm_pass(self, pass_fn: Callable[[GraphModule], T]) -> T | None:
         from torch._dynamo.utils import dynamo_timed
 
         with self:
@@ -89,7 +89,7 @@ class GraphTransformObserver:
             ):
                 return pass_fn(self.gm)
 
-    def apply_graph_pass(self, pass_fn: Callable[[Graph], T]) -> Optional[T]:
+    def apply_graph_pass(self, pass_fn: Callable[[Graph], T]) -> T | None:
         from torch._dynamo.utils import dynamo_timed
 
         with self:

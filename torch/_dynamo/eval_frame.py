@@ -883,6 +883,16 @@ class _TorchDynamoContext:
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
+            if type(fn) is torch.jit._script.RecursiveScriptModule:
+                raise RuntimeError(
+                    "torch.compile does not support compiling torch.jit.script or "
+                    "torch.jit.freeze models directly.\n\n"
+                    "Workaround: compile the original eager module instead:\n"
+                    "  model = torch.nn.Linear(3, 3)\n"
+                    "  compiled_model = torch.compile(model)  # compile the eager module\n\n"
+                    "torch.jit.script and torch.jit.freeze are deprecated in favor of "
+                    "torch.compile. See https://pytorch.org/docs/main/jit.html for details."
+                )
             mod = fn
             new_mod = OptimizedModule(mod, self)
             # Save the function pointer to find the original callable while nesting
@@ -951,6 +961,12 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
+            # NB: function calls here could change global state (e.g. random state)
+            # and that can result in different behavior between eager and compiled!
+            # In particular, we don't have control over internal functions like justknobs_check
+            # called in _maybe_set_eval_frame.
+            # Unlike in eval_frame_cpp.cpp/convert_frame.py, we don't attempt to restore global state
+            # due to additional overhead costs.
             prior = set_eval_frame(None)
             prior_eval_frame_override: _EvalFrameOverride | None = None
             if self.fullgraph:
@@ -1018,7 +1034,7 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
-                except (Unsupported, UncapturedHigherOrderOpError) as e:
+                except (Unsupported, UncapturedHigherOrderOpError, UserError) as e:
                     if config.verbose:
                         raise
                     # strip internal tracebacks from causes

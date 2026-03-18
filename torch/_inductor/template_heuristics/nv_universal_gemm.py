@@ -268,16 +268,20 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             torch.bfloat16: "T",
             torch.float8_e4m3fn: "Q",
             torch.float8_e5m2: "R",
+            torch.float4_e2m1fn_x2: "F4",
         }
         a_char = dtype_to_cublas.get(dtype_a, "H")
         b_char = dtype_to_cublas.get(dtype_b or dtype_a, a_char)
         out_char = dtype_to_cublas.get(out_dtype or dtype_a, a_char)
         acc_char = dtype_to_cublas.get(accumulator_type, "S")
 
-        # 3-letter {input}{compute}{output}: used when A=B (standard GEMM).
-        # 5-letter {A}{B}{C}{compute}{D}: used when A≠B or for FP8/FP4
-        # (nvMatmulHeuristics discovery sets only have 5-letter entries for these).
-        if a_char != b_char or a_char in ("Q", "R", "O"):
+        # nvMatmulHeuristics precision string formats:
+        # - 3-letter {A}{B}{out}: used for standard GEMM and multi-char tokens (F4, BF)
+        # - 5-letter {A}{B}{C}{compute}{D}: used for single-char FP8 types (Q, R, O)
+        has_multichar = any(len(c) > 1 for c in (a_char, b_char, out_char))
+        if has_multichar:
+            precision = f"{a_char}{b_char}{out_char}"
+        elif a_char != b_char or a_char in ("Q", "R", "O"):
             precision = f"{a_char}{b_char}{out_char}{acc_char}{out_char}"
         else:
             precision = f"{a_char}{acc_char}{out_char}"

@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import itertools
 import logging
 import os
@@ -37,6 +38,10 @@ from torch._library import capture_triton
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.export import Dim, export
 from torch.export.pt2_archive._package import load_pt2
+from torch.nn.attention import (
+    activate_flash_attention_impl,
+    restore_flash_attention_impl,
+)
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
@@ -47,6 +52,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     requires_triton_ptxas_compat,
     SM80OrLater,
+    SM90OrLater,
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -95,6 +101,20 @@ from torch.utils._triton import (
 )
 
 
+@contextlib.contextmanager
+def use_fa3():
+    try:
+        activate_flash_attention_impl("FA3")
+    except (ModuleNotFoundError, RuntimeError) as err:
+        raise unittest.SkipTest(
+            "FA3 backend not available (flash_attn_interface missing)"
+        ) from err
+    try:
+        yield
+    finally:
+        restore_flash_attention_impl()
+
+
 if HAS_GPU:
     import triton  # @manual
     from triton import language as tl
@@ -115,6 +135,7 @@ if HAS_GPU:
         add_kernel_with_tma_2d_new_api,
         add_kernel_with_tma_2d_old_api,
         create_tensor_descriptor_shim,
+        masked_add_kernel_with_bool_tensor,
         mul2_inplace_kernel,
         strange_config_matmul_kernel,
         sub_kernel_autotuned,
@@ -250,6 +271,31 @@ class AOTInductorTestsTemplate:
                 return out
 
         inputs = (torch.randn(4, device=self.device),)
+        self.check_model(Model(), inputs)
+
+    def test_triton_kernel_bool_tensor_arg(self):
+        if self.device != GPU_TYPE or self.device == "mps":
+            raise unittest.SkipTest("requires GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y, mask):
+                out = torch.zeros_like(x)
+                n = x.numel()
+                masked_add_kernel_with_bool_tensor[(n,)](
+                    in_ptr0=x,
+                    in_ptr1=y,
+                    mask_ptr=mask,
+                    out_ptr=out,
+                    n_elements=n,
+                    BLOCK_SIZE=1024,
+                )
+                return out
+
+        n = 128
+        x = torch.randn(n, device=self.device)
+        y = torch.randn(n, device=self.device)
+        mask = torch.arange(n, device=self.device) < n // 2
+        inputs = (x, y, mask)
         self.check_model(Model(), inputs)
 
     @unittest.skipIf(
@@ -3524,18 +3570,20 @@ class AOTInductorTestsTemplate:
                 torch.export.export(Model(), example_inputs, strict=True)
             )
         )
-        try:
-            torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(context=None)
-            for _ in range(10):
-                optimized(*example_inputs)
-        finally:
-            torch.cuda.memory._record_memory_history(False)
-        segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertTrue(
-            any(seg["requested_size"] == 400 for seg in segments),
-            f"Expected segment with size 400, got: {[s['requested_size'] for s in segments]}",
-        )
+        expected = torch.sin(example_inputs[0])
+
+        # Warm up to trigger any one-time allocations
+        result = optimized(*example_inputs)
+        torch.cuda.synchronize()
+
+        mem_before = torch.cuda.memory_allocated()
+        for _ in range(10):
+            result = optimized(*example_inputs)
+        torch.cuda.synchronize()
+        mem_after = torch.cuda.memory_allocated()
+
+        self.assertEqual(result, expected)
+        self.assertEqual(mem_before, mem_after)
 
     def test_view_outputs(self):
         class Model(torch.nn.Module):
@@ -4752,6 +4800,67 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(not SM90OrLater, "FA3 requires SM90+")
+    def test_varlen_attn_paged_kv_cache(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        from torch.nn.attention.varlen import varlen_attn
+
+        batch_size, num_heads, head_dim = 2, 4, 64
+        page_size, max_pages_per_seq = 64, 2
+        cache_seqlen, new_seqlen = 32, 1
+
+        class Model(torch.nn.Module):
+            def forward(self, q, k_pages, v_pages, cu_seq_q, seqused_k, page_table):
+                return varlen_attn(
+                    query=q,
+                    key=k_pages,
+                    value=v_pages,
+                    cu_seq_q=cu_seq_q,
+                    cu_seq_k=None,
+                    max_q=new_seqlen,
+                    max_k=max_pages_per_seq * page_size,
+                    seqused_k=seqused_k,
+                    page_table=page_table,
+                )
+
+        total_new = new_seqlen * batch_size
+        total_pages = batch_size * max_pages_per_seq
+        example_inputs = (
+            torch.randn(
+                total_new, num_heads, head_dim, dtype=torch.bfloat16, device=self.device
+            ),
+            torch.randn(
+                total_pages,
+                page_size,
+                num_heads,
+                head_dim,
+                dtype=torch.bfloat16,
+                device=self.device,
+            ),
+            torch.randn(
+                total_pages,
+                page_size,
+                num_heads,
+                head_dim,
+                dtype=torch.bfloat16,
+                device=self.device,
+            ),
+            torch.arange(
+                0, total_new + 1, new_seqlen, dtype=torch.int32, device=self.device
+            ),
+            torch.full(
+                (batch_size,), cache_seqlen, dtype=torch.int32, device=self.device
+            ),
+            torch.arange(total_pages, dtype=torch.int32, device=self.device).reshape(
+                batch_size, max_pages_per_seq
+            ),
+        )
+
+        with use_fa3():
+            self.check_model(Model(), example_inputs)
+
     def test_aoti_runtime_asserts(self):
         from torch.export._draft_export import draft_export, FailureType
 
@@ -5018,7 +5127,11 @@ class AOTInductorTestsTemplate:
             dtype=torch.complex64,
             device=self.device,
         )
-        x2 = torch.tensor(128, dtype=torch.complex128, device=self.device)
+        x2 = torch.tensor(
+            128,
+            dtype=torch.complex128 if self.device != "mps" else torch.complex64,
+            device=self.device,
+        )
         inputs.append(x0)
         inputs.append(x1)
         inputs.append(x2)
@@ -5475,6 +5588,52 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
 
             self.check_model(Model(N, K, self.device), example_inputs)
+
+    @unittest.skipIf(
+        sys.platform not in ["linux", "win32"],
+        "enable_kernel_profile only supported on linux and win32",
+    )
+    def test_kernel_profile_repeated_kernel_numel(self):
+        # When enable_kernel_profile is on, each kernel call is wrapped in its
+        # own {} scope block. If the same kernel is called multiple times with
+        # symbolic numel, the int64_t declaration must be emitted each time
+        # (not just on first use) since prior declarations go out of scope.
+        class Model(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.cat([x, y, z], dim=0)
+
+        example_inputs = tuple(torch.randn(4, 8, device=self.device) for _ in range(3))
+        dim0 = Dim("dim0", min=1, max=32)
+        dynamic_shapes = {"x": {0: dim0}, "y": {0: dim0}, "z": {0: dim0}}
+
+        with config.patch({"cpp.enable_kernel_profile": True}):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile,
+                Model(),
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
+            # When profiling is enabled, every kernel numel variable must have
+            # the int64_t type declaration since each kernel call lives in its
+            # own scope block. Verify no bare assignment (without int64_t)
+            # appears for numel variables.
+            if self.device == GPU_TYPE:
+                # Match bare numel assignments like "foo_xnumel = expr;"
+                # but not declarations like "int64_t foo_xnumel = expr;"
+                bare_numel_assign = re.compile(r"^\s*(\w+_[xr]numel)\s*=\s*.+;$")
+                for line in code.splitlines():
+                    m = bare_numel_assign.match(line)
+                    if m:
+                        self.fail(
+                            f"Found numel assignment without int64_t declaration "
+                            f"in profiling mode: {line.strip()}"
+                        )
+
+            self.check_model(
+                Model(),
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+            )
 
     def test_aoti_user_defined_triton_kernel_profiling(self):
         if self.device != GPU_TYPE or self.device == "mps":

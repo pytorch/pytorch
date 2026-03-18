@@ -18,7 +18,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
-from typing import Any, NamedTuple, Union
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -257,7 +257,7 @@ ddp_suggest_debug_mode_str = (
 class DDPUnevenTestInput(NamedTuple):
     name: str
     model: nn.Module
-    inp: Union[torch.tensor, tuple]
+    inp: torch.Tensor | tuple
     sync_interval: int
     throw_on_early_termination: bool = False
     hook: Callable = None
@@ -1018,7 +1018,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the world_size set by init_process_group",
+                f"Rank {world_size} is out of range",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[0, 1], [world_size, 2]]
@@ -1034,7 +1034,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the world_size set by init_process_group",
+                r"Rank -\d+ is out of range",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[-1, -2], [-3, -4]]

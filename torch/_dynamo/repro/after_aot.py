@@ -651,6 +651,8 @@ if "__compile_source__" in globals():
             writer.tensor(placeholder, arg)
         elif arg is None:
             writer.const(placeholder)
+        elif isinstance(arg, FakeScriptObject):
+            writer.opaque(placeholder, arg.script_class_name)
         else:
             writer.unsupported(placeholder, arg)
 

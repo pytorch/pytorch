@@ -3,7 +3,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch.distributed.checkpoint.stateful import StatefulT
@@ -122,7 +122,7 @@ class BytesStorageMetadata:
     pass
 
 
-STORAGE_TYPES = Union[TensorStorageMetadata, BytesStorageMetadata]
+STORAGE_TYPES = TensorStorageMetadata | BytesStorageMetadata
 STATE_DICT_TYPE = dict[str, StatefulT | Any]
 
 

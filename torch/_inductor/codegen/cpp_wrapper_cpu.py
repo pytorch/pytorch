@@ -217,13 +217,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if not V.graph.aot_mode:
             self.header.splice(
-                """
+                '''
                 import torch
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
-                r'''
-                """
+                r"""
+                '''
             )
 
         for device in V.graph.device_types:
@@ -1175,11 +1175,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if config.cpp_wrapper_build_separate:
             # Close the wrapper code block, then write any kernel definitions.
-            result.splice("'''\n)")
+            result.splice('"""\n)')
             if self.kernel_declarations:
-                result.splice("\nkernel_src = (\nr'''")
+                result.splice('\nkernel_src = (\nr"""')
                 result.splice(self.kernel_declarations.getvalue())
-                result.splice("'''\n)")
+                result.splice('"""\n)')
             else:
                 result.splice(
                     """
@@ -1191,7 +1191,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             result.splice(self.kernel_declarations.getvalue())
             self.kernel_declarations.clear()
             # Close the wrapper code block
-            result.splice("'''\n)")
+            result.splice('"""\n)')
 
         kernel_code = "kernel_src" if config.cpp_wrapper_build_separate else "None"
         # Cpp entry function for JIT with cpp wrapper
@@ -1581,8 +1581,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def _generate_symbolic_call_arg_helper(
         self, arg: SymbolicCallArg, graph: GraphLowering
     ) -> None:
-        if (arg.inner, graph) not in self.kernel_numel_expr:
-            # declare expr once in each graph (scope)
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if enable_kernel_profile or (arg.inner, graph) not in self.kernel_numel_expr:
+            # When enable_kernel_profile is on, each kernel call is wrapped in
+            # its own {} scope block, so we must redeclare the variable each
+            # time since prior declarations are no longer visible.
             self.kernel_numel_expr.add((arg.inner, graph))
             self.writeline(f"int64_t {arg.inner} = {cexpr(arg.inner_expr)};")
         else:
@@ -2521,6 +2527,9 @@ if (!custom_op_wrapper) {
             return f"{val}"
 
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
+        """Generate C++ code that converts a single operator argument into a Python
+        object and inserts it into a PyTuple at the given index."""
+
         def generate_py_arg_inner(lines, raw_arg, arg_type):
             def handle_scalar(scalar):
                 if isinstance(scalar, int):
@@ -2598,19 +2607,31 @@ if (!custom_op_wrapper) {
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
                 )
 
-        lines = []
-        if isinstance(arg_type, torch.ListType):
-            assert isinstance(raw_arg, (list, tuple)), str(raw_arg) + " is not a list"
-            lines.append(
+        def handle_sequence_arg(raw_arg_, arg_type_, lines_):
+            assert isinstance(raw_arg_, (list, tuple)), str(raw_arg) + " is not a list"
+            lines_.append(
                 f"PyObject* {py_args_var}_{idx} = PyList_New({len(raw_arg)});\n"
             )
-            for i, elem in enumerate(raw_arg):
-                lines.append(
-                    f"PyList_SetItem({py_args_var}_{idx}, {i}, {generate_py_arg_inner(lines, elem, arg_type.getElementType())});\n"
+            for i, elem in enumerate(raw_arg_):
+                lines_.append(
+                    f"PyList_SetItem({py_args_var}_{idx}, {i}, {generate_py_arg_inner(lines, elem, arg_type_.getElementType())});\n"
                 )
-            lines.append(
+            lines_.append(
                 f"PyTuple_SetItem({py_args_var}, {idx}, {py_args_var}_{idx});\n"
             )
+
+        lines = []
+        if isinstance(arg_type, torch.ListType):
+            handle_sequence_arg(raw_arg, arg_type, lines)
+        elif isinstance(arg_type, torch.OptionalType) and isinstance(
+            arg_type.getElementType(), torch.ListType
+        ):
+            if raw_arg is None:
+                lines.append(
+                    f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(lines, raw_arg, arg_type)});\n"
+                )
+            else:
+                handle_sequence_arg(raw_arg, arg_type.getElementType(), lines)
         else:
             lines.append(
                 f"PyTuple_SetItem({py_args_var}, {idx}, {generate_py_arg_inner(lines, raw_arg, arg_type)});\n"

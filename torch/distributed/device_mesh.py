@@ -6,7 +6,7 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed import is_available
@@ -201,7 +201,7 @@ else:
         _rank_map: torch.Tensor
         _mesh_dim_names: tuple[str, ...] | None
         _layout: _MeshLayout
-        _root_mesh: Optional["DeviceMesh"] = None
+        _root_mesh: "DeviceMesh | None" = None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
         # Registry mapping group names to ProcessGroup objects (to avoid C++ lookup)
@@ -210,7 +210,7 @@ else:
         def __init__(
             self,
             device_type: str,
-            mesh: Union[torch.Tensor, "ArrayLike"] | None = None,
+            mesh: "torch.Tensor | ArrayLike | None" = None,
             *,
             mesh_dim_names: tuple[str, ...] | None = None,
             backend_override: tuple[BackendConfig, ...] | None = None,
@@ -218,7 +218,7 @@ else:
             _rank: int | None = None,
             _layout: _MeshLayout | None = None,
             _rank_map: torch.Tensor | None = None,
-            _root_mesh: Optional["DeviceMesh"] = None,
+            _root_mesh: "DeviceMesh | None" = None,
         ) -> None:
             # no-op in OSS, logs API usage metrics in meta-internal runs
             torch._C._log_api_usage_once(
@@ -244,15 +244,19 @@ else:
                         "The mesh argument is required except for PRIVATE USAGE ONLY!"
                     )
 
-            assert _layout.check_non_overlap(), (
-                "Please use a non-overlapping layout when creating a DeviceMesh."
-            )
-            assert _rank_map.ndim == 1, "The rank map must be 1-dimensional"
-            assert _rank_map.is_contiguous(), "The rank map must be contiguous"
-            assert _rank_map.numel() >= _layout.cosize(), (
-                f"The rank map contains {_rank_map.numel()} element, "
-                f"which isn't large enough for layout {_layout}"
-            )
+            if not _layout.check_non_overlap():
+                raise AssertionError(
+                    "Please use a non-overlapping layout when creating a DeviceMesh."
+                )
+            if _rank_map.ndim != 1:
+                raise AssertionError("The rank map must be 1-dimensional")
+            if not _rank_map.is_contiguous():
+                raise AssertionError("The rank map must be contiguous")
+            if _rank_map.numel() < _layout.cosize():
+                raise AssertionError(
+                    f"The rank map contains {_rank_map.numel()} element, "
+                    f"which isn't large enough for layout {_layout}"
+                )
 
             self._device_type = device_type
             self._layout = _layout
@@ -329,7 +333,7 @@ else:
 
                 self._coordinate_on_dim = self._compute_coordinate_on_dim()
 
-            self._hash: Optional[int] = None
+            self._hash: int | None = None
 
         @staticmethod
         def _compute_coordinates_from_mesh(
@@ -608,9 +612,10 @@ else:
                 )
             # Filter out None values. If any are None then they should all be None.
             dim_non_none_group_names = [n for n in dim_group_names if n is not None]
-            assert not dim_non_none_group_names or len(dim_non_none_group_names) == len(
+            if dim_non_none_group_names and len(dim_non_none_group_names) != len(
                 dim_group_names
-            )
+            ):
+                raise AssertionError
             return dim_non_none_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
@@ -723,14 +728,22 @@ else:
                 sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
                 # When using FakeTensorMode to trace the model, `_create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
-                # `unset_fake_temporarily()` will allow us to materialize the tensors
-                # within `_create_sub_mesh`, which should not affect modling.
+                # `unset_fake_temporarily()` and `disable_proxy_modes_tracing()`
+                # will allow us to materialize the tensors within
+                # `_create_sub_mesh`, which should not affect modling.
                 #
                 # Note that this should be orthogonal to torch.compile(). But whether
                 # we can compile device_mesh `slicing` (no graph break) is not verified
                 # yet and need a follow-up,
                 # TODO: compiler + device_mesh slicing.
-                with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                from torch.fx.experimental.proxy_tensor import (
+                    disable_proxy_modes_tracing,
+                )
+
+                with (
+                    torch._subclasses.fake_tensor.unset_fake_temporarily(),
+                    disable_proxy_modes_tracing(),
+                ):
                     submesh = self._create_sub_mesh(sliced_mesh_layout, mesh_dim_names)
                 return submesh
 
@@ -800,12 +813,11 @@ else:
             root_mesh = self._get_root_mesh()
             slice_dim_group_name = []
             if len(self._dim_group_names) > 0:
-                assert len(self._dim_group_names) == len(
-                    not_none(self._mesh_dim_names)
-                ), (
-                    "The number of dim_group_names and mesh_dim_names "
-                    "should have the same length if the rank is in the mesh."
-                )
+                if len(self._dim_group_names) != len(not_none(self._mesh_dim_names)):
+                    raise AssertionError(
+                        "The number of dim_group_names and mesh_dim_names "
+                        "should have the same length if the rank is in the mesh."
+                    )
                 for name in submesh_dim_names:
                     if name in not_none(self._mesh_dim_names):
                         slice_dim_group_name.append(
@@ -1025,7 +1037,7 @@ else:
         def from_group(
             group: ProcessGroup | list[ProcessGroup],
             device_type: str,
-            mesh: Union[torch.Tensor, "ArrayLike"] | None = None,
+            mesh: "torch.Tensor | ArrayLike | None" = None,
             *,
             mesh_dim_names: tuple[str, ...] | None = None,
         ) -> "DeviceMesh":
@@ -1214,7 +1226,8 @@ else:
 
             if not detect_fake_mode() or not config.compile_on_one_rank:
                 # This is only valid when the current rank is part of the mesh.
-                assert self._coordinate_on_dim is not None
+                if self._coordinate_on_dim is None:
+                    raise AssertionError
                 return self._coordinate_on_dim[index]
 
             # This will cause the ops to be registered - so don't let RUFF
@@ -1362,7 +1375,7 @@ else:
                 raise ValueError(
                     f"dim {dim} specified in `_unflatten` is out of range {self.ndim}"
                 )
-            elif isinstance(dim, str) and dim in not_none(self.mesh_dim_names):
+            elif isinstance(dim, str) and dim not in not_none(self.mesh_dim_names):
                 raise ValueError(
                     f"dim {dim} specified in `_unflatten` is not in {self.mesh_dim_names}"
                 )
@@ -1519,14 +1532,14 @@ else:
         if mesh_dim_names is not None:
             if len(set(mesh_dim_names)) != len(mesh_dim_names):
                 raise RuntimeError(
-                    "Each mesh_dim_name must be unique.",
-                    f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}",
+                    "Each mesh_dim_name must be unique. "
+                    f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}"
                 )
 
             if len(mesh_shape) != len(mesh_dim_names):
                 raise RuntimeError(
-                    "mesh_shape and mesh_dim_names should have same length!",
-                    f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
+                    "mesh_shape and mesh_dim_names should have same length! "
+                    f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}."
                 )
 
         if backend_override is not None:
@@ -1624,8 +1637,8 @@ def _register_distributed_opaque_types():
             "_sym_get_coordinate": MemberType.USE_REAL,
             "_get_mesh_dim_by_name": MemberType.USE_REAL,
             "_get_root_mesh": MemberType.INLINED,
+            "__getitem__": MemberType.INLINED,
             "_get_slice_mesh_layout": MemberType.INLINED,
             "_create_sub_mesh": MemberType.INLINED,
-            "__getitem__": MemberType.INLINED,
         },
     )

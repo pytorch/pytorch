@@ -116,15 +116,6 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks)
-    CUDA_VERSION=12.8.1
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    VISION=yes
-    KATEX=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
@@ -204,12 +195,16 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-  pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
+  pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     VISION=yes
     XPU_VERSION=2025.3
-    XPU_DRIVER_TYPE=LTS
+    if [[ $tag =~ "client" ]]; then
+      XPU_DRIVER_TYPE=CLIENT
+    else
+      XPU_DRIVER_TYPE=LTS
+    fi
     NINJA_VERSION=1.9.0
     TRITON=yes
     if [[ $tag =~ "benchmarks" ]]; then

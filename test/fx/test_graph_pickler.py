@@ -15,7 +15,6 @@ import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
-from torch.fx import symbolic_trace
 from torch.testing._internal.inductor_utils import HAS_CPU
 from torch.utils._import_utils import import_dill
 
@@ -680,6 +679,33 @@ class TestDillSerializationFeatures(TestCase):
             self.assertIn("nested_closure", node.meta)
             self.assertEqual(node.meta["nested_closure"](3), 3 + 5 + 20)
 
+    def test_node_with_slice(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        def foo(x):
+            return x[0 : x.shape[0]]
+
+        gm = torch.fx.symbolic_trace(foo)
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    getattr_1 = x.shape
+    getitem = getattr_1[0];  getattr_1 = None
+    getitem_1 = x[slice(0, getitem, None)];  x = getitem = None
+    return getitem_1""",
+        )
+        options = self.Options(node_metadata_key_filter=None)
+        serialized = self.GraphPickler.dumps(gm, options)
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        deserialized = self.GraphPickler.loads(serialized, fake_mode)
+        deserialized.recompile()
+
+        self.assertEqual(gm.code, deserialized.code)
+
     def test_lambda_with_default_arguments(self):
         """
         Test that lambdas with default arguments can be serialized. Standard
@@ -839,11 +865,63 @@ class TestNodeStateSerialization(TestCase):
                 y = torch.neg(x)
                 return y + 1
 
-        gm = symbolic_trace(M())
+        gm = torch.fx.symbolic_trace(M())
         node = next(n for n in gm.graph.nodes if n.op == "call_function")
         node.type = torch.Tensor
         state = node.__getstate__()
         self.assertIs(state["type"], torch.Tensor)
+
+
+@unittest.skipUnless(HAS_DILL, "dill not available")
+class TestIgnoreRawNode(TestCase):
+    """Tests for the ignore_raw_node option in GraphPickler.Options."""
+
+    def setUp(self):
+        super().setUp()
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import GraphPickler, Options
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        self.GraphPickler = GraphPickler
+        self.Options = Options
+        self.fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    def _make_graph_with_raw_node_in_meta(self):
+        """Return a graph module whose first call_function node has a raw
+        torch.fx.Node stored in its metadata under the key 'raw_ref'."""
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(M())
+        call_node = next((n for n in gm.graph.nodes if n.op == "call_function"), None)
+        self.assertIsNotNone(call_node)
+        # Store a raw Node reference in meta – this is the problematic case.
+        call_node.meta["raw_ref"] = call_node
+        return gm
+
+    def test_raw_node_in_meta_raises_by_default(self):
+        """Pickling should raise AssertionError when a raw Node is in metadata
+        and ignore_raw_node is False (the default)."""
+        gm = self._make_graph_with_raw_node_in_meta()
+        with self.assertRaises(AssertionError) as cm:
+            self.GraphPickler.dumps(gm)
+        self.assertIn("raw Node", str(cm.exception))
+
+    def test_raw_node_in_meta_with_ignore_raw_node(self):
+        """With ignore_raw_node=True, pickling should succeed and the raw Node
+        should be replaced with None after round-trip deserialization."""
+        gm = self._make_graph_with_raw_node_in_meta()
+        options = self.Options(ignore_raw_node=True)
+        data = self.GraphPickler.dumps(gm, options)
+        restored = self.GraphPickler.loads(data, self.fake_mode)
+        self.assertIsInstance(restored, torch.fx.GraphModule)
+        call_node = next(
+            (n for n in restored.graph.nodes if n.op == "call_function"), None
+        )
+        self.assertIsNotNone(call_node)
+        self.assertIsNone(call_node.meta.get("raw_ref"))
 
 
 if __name__ == "__main__":

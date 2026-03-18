@@ -17,6 +17,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
+    AuxRequest,
     create_block_mask,
     flex_attention,
 )
@@ -1221,6 +1222,44 @@ class TestFlexFlash(InductorTestCase):
             "FLASH backend backward does not support differentiating through logsumexp",
         ):
             loss.backward()
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_backend_raises_on_return_max_scores(self, device, dtype):
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Returning max scores is not supported with BACKEND='FLASH'",
+        ):
+            flex_attention(
+                q,
+                k,
+                v,
+                return_aux=AuxRequest(max_scores=True),
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: IS_SM90,
+    )
+    @torch._inductor.config.patch(max_autotune=True)
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "score_mod_fn",
+        [_times_two, _rel_bias],
+        name_fn=lambda fn: fn.__name__,
+    )
+    def test_max_autotune_score_mod(self, device, dtype, score_mod_fn):
+        q, k, v = create_test_tensors(
+            batch_size=2,
+            num_heads=4,
+            seq_len=257,
+            dim=64,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        flash_vs_triton(q, k, v, score_mod=score_mod_fn)
 
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")

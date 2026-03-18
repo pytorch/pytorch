@@ -10,7 +10,6 @@ import tempfile
 import textwrap
 import unittest
 from contextlib import contextmanager
-from typing import Optional, Union
 from typing_extensions import override
 from unittest import mock
 
@@ -2392,7 +2391,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             def __call__(self, graph: torch.fx.graph.Graph) -> None:
                 return None
 
-            def uuid(self) -> Optional[Union[bytes, str]]:
+            def uuid(self) -> bytes | str | None:
                 return "uuid"
 
         def fn(a, b):
@@ -2445,7 +2444,7 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
     ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
         return gm, gm  # Dummy implementation
 
-    def uuid(self) -> Optional[Union[bytes, str]]:
+    def uuid(self) -> bytes | str | None:
         return self._uuid
 
 
@@ -2750,7 +2749,7 @@ class TestFxGraphCacheHashing(TestCase):
             def __call__(self, graph: torch.fx.graph.Graph) -> None:
                 return None
 
-            def uuid(self) -> Optional[Union[bytes, str]]:
+            def uuid(self) -> bytes | str | None:
                 return self._uuid
 
         custom_pass = TestCustomGraphPass()
@@ -2786,7 +2785,7 @@ class TestFxGraphCacheHashing(TestCase):
             def __call__(self, gm: torch.fx.GraphModule) -> None:
                 return None
 
-            def uuid(self) -> Optional[Union[bytes, str]]:
+            def uuid(self) -> bytes | str | None:
                 return self._uuid
 
         custom_pass = TestCustomGraphModulePass()
@@ -3067,9 +3066,6 @@ class TestAutotuneCache(TestCase):
 
     @requires_cuda_and_triton
     @unittest.skipIf(not SM80OrLater, "Requires SM80+")
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "Requires static cuda launcher, which does not support ROCM"
-    )
     @config.patch({"use_static_triton_launcher": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})

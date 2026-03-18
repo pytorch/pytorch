@@ -2738,7 +2738,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         model = ToyModel()
         x = torch.zeros((3, 4))
         obj = CustomClass(model)
-        out = torch.compile(obj, fullgraph=True)(x)
+        out = torch.compile(obj, fullgraph=True, backend="eager")(x)
         self.assertEqual(out, (x + 1) * (x + 1))
 
     def test_module_dict_iter_name(self):
@@ -2810,7 +2810,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             x = torch.randn(1, 3)
             return models(x)
 
-        run = torch.compile(run, fullgraph=True)
+        run = torch.compile(run, fullgraph=True, backend="eager")
         run()
         self.assertTrue(models[0].abc)
 
@@ -2822,7 +2822,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return self.text_encoding
 
         mod = MyModule()
-        out = torch.compile(mod, fullgraph=True)(torch.randn(10))
+        out = torch.compile(mod, fullgraph=True, backend="eager")(torch.randn(10))
         if mod.text_encoding is not out:
             raise AssertionError("Expected mod.text_encoding to be out")
 
@@ -3110,7 +3110,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return x + 1
 
         model = Mod()
-        compiled_model = torch.compile(model)
+        compiled_model = torch.compile(model, backend="eager")
         compiled_model.foo = 42
         del compiled_model.foo
 
@@ -3304,7 +3304,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @torch._dynamo.config.patch("skip_tensor_guards_with_matching_dict_tags", False)
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_param_requires_grad(self):
         def adjust_model(model):
@@ -3350,6 +3349,67 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         # Check that we have recompiled twice, which leads to 3 frames
         self.assertEqual(cnt.frame_count, 3)
+
+    @torch._dynamo.config.patch("use_recursive_dict_tags_for_guards", False)
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_param_requires_grad_no_recursive_dict_tags(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = MyModule()
+        model.linear.weight.requires_grad_(False)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_model = torch.compile(model, backend=cnt, fullgraph=True)
+
+        x = torch.randn(4, 4)
+        opt_model(x).sum().backward()
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIsNone(model.linear.weight.grad)
+
+        model.linear.weight.requires_grad_(True)
+        opt_model(x).sum().backward()
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertIsNotNone(model.linear.weight.grad)
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_param_requires_grad_submodule(self):
+        class Inner(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, 3, 1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        class Outer(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = Inner()
+
+            def forward(self, x):
+                return self.inner(x)
+
+        model = Outer()
+        model.inner.conv.weight.requires_grad_(False)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_model = torch.compile(model, backend=cnt, fullgraph=True)
+
+        x = torch.randn(1, 3, 10, 10)
+        opt_model(x).sum().backward()
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIsNone(model.inner.conv.weight.grad)
+
+        model.inner.conv.weight.requires_grad_(True)
+        opt_model(x).sum().backward()
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertIsNotNone(model.inner.conv.weight.grad)
 
     def test_branch_on_nn_module_custom_len(self):
         class Cache(torch.nn.Module):
@@ -3506,7 +3566,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         model_to_compile.linear.register_forward_pre_hook(pre_forward_rename_hook)
         model_to_compile.linear.register_forward_hook(post_forward_restore_hook)
 
-        compiled_model = torch.compile(model_to_compile, fullgraph=True)
+        compiled_model = torch.compile(
+            model_to_compile, fullgraph=True, backend="eager"
+        )
         compiled_output = compiled_model(input_tensor)
         if not hasattr(model.linear, "weight"):
             raise AssertionError("Expected model.linear to have weight")
@@ -3552,7 +3614,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             layer.linear.register_forward_hook(noop_hook, with_kwargs=True)
 
         for i, layer in model.layers.named_children():
-            model.layers.register_module(i, torch.compile(layer, fullgraph=True))
+            model.layers.register_module(
+                i, torch.compile(layer, fullgraph=True, backend="eager")
+            )
 
         output = model(inp)
         self.assertEqual(output_eager, output)
@@ -3607,7 +3671,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_call_count, 7)
 
         for i, layer in model.layers.named_children():
-            model.layers.register_module(i, torch.compile(layer, fullgraph=True))
+            model.layers.register_module(
+                i, torch.compile(layer, fullgraph=True, backend="eager")
+            )
 
         call_count[0] = 0
         output = model(inp)

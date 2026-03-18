@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from base64 import b64encode
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import cast, Optional
+from typing import cast
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
 
@@ -176,7 +176,7 @@ class RendezvousStateTest(TestCase):
 
 
 class FakeRendezvousBackend(RendezvousBackend):
-    _state: Optional[bytes]
+    _state: bytes | None
     _token: int
 
     def __init__(self) -> None:
@@ -187,15 +187,15 @@ class FakeRendezvousBackend(RendezvousBackend):
     def name(self) -> str:
         return "fake_backend"
 
-    def get_state(self) -> Optional[tuple[bytes, Token]]:
+    def get_state(self) -> tuple[bytes, Token] | None:
         if self._token == 0:
             return None
 
         return self._state, self._token  # type: ignore[return-value]
 
     def set_state(
-        self, state: bytes, token: Optional[Token] = None
-    ) -> Optional[tuple[bytes, Token, bool]]:
+        self, state: bytes, token: Token | None = None
+    ) -> tuple[bytes, Token, bool] | None:
         if token is None:
             token = 0
 
@@ -513,7 +513,7 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
 
 class FakeRendezvousStateHolder(_RendezvousStateHolder):
     _state: _RendezvousState
-    _dirty: Optional[bool]
+    _dirty: bool | None
 
     def __init__(self) -> None:
         self._state = _RendezvousState()
@@ -527,7 +527,7 @@ class FakeRendezvousStateHolder(_RendezvousStateHolder):
     def state(self, value) -> None:
         self._state = value
 
-    def sync(self) -> Optional[bool]:
+    def sync(self) -> bool | None:
         self._dirty, dirty = None, self._dirty
 
         return dirty
@@ -582,7 +582,7 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
         )
 
     def _create_op_executor(
-        self, settings: Optional[RendezvousSettings] = None
+        self, settings: RendezvousSettings | None = None
     ) -> _DistributedRendezvousOpExecutor:
         self._state_holder.state = self._state
 
@@ -1156,9 +1156,9 @@ class DynamicRendezvousHandlerTest(TestCase):
         self._min_nodes = 1
         self._max_nodes = 1
 
-        self._join_timeout: Optional[timedelta] = None
-        self._close_timeout: Optional[timedelta] = None
-        self._heartbeat_timeout: Optional[timedelta] = None
+        self._join_timeout: timedelta | None = None
+        self._close_timeout: timedelta | None = None
+        self._heartbeat_timeout: timedelta | None = None
 
         self._keep_alive_interval = timedelta(seconds=30)
 
@@ -1505,7 +1505,7 @@ class DynamicRendezvousHandlerFromBackendTest(TestCase):
         self._backend = DummyRendezvousBackend()
         self._min_nodes = 3
         self._max_nodes = 6
-        self._timeout: Optional[RendezvousTimeout] = RendezvousTimeout()
+        self._timeout: RendezvousTimeout | None = RendezvousTimeout()
 
     def _create_handler(self) -> DynamicRendezvousHandler:
         return DynamicRendezvousHandler.from_backend(
