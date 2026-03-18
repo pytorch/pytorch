@@ -624,10 +624,11 @@ def meta_sparse_structured_linear(
             raise AssertionError(
                 f"out_dtype is only supported for i8i8->i32 linear operator, got input.dtype={input.dtype}, out_dtype={out_dtype}"
             )
-    output = input.new_empty(
+    output = input.new_empty_strided(
         output_sizes,
+        transposed_strides,
         dtype=input.dtype if out_dtype is None else out_dtype,
-    ).as_strided(output_sizes, transposed_strides)
+    )
 
     return output
 

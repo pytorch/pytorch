@@ -40,7 +40,11 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value, OpaqueType
+from torch._library.opaque_object import (
+    is_opaque_value,
+    is_opaque_value_type,
+    OpaqueType,
+)
 from torch._logging import trace_structured
 from torch._opaque_base import OpaqueBase
 from torch._ops import HigherOrderOperator
@@ -2655,6 +2659,10 @@ class _MakefxTracer:
                         source=source,
                     )
                 elif isinstance(x, torch.ScriptObject) or is_opaque_value(x):
+                    if is_opaque_value_type(
+                        type(x)  # pyrefly: ignore[bad-argument-type]
+                    ):
+                        return x
                     return torch._library.fake_class_registry.maybe_to_fake_obj(
                         self.fake_tensor_mode, x
                     )

@@ -1246,7 +1246,7 @@ def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(S, M), make_arg(M))
 
 def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, low=-1, high=+1, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
     yield SampleInput(make_arg(M, S, M), make_arg(M, M, S))
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
@@ -19239,14 +19239,6 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
-                            device_type='mps', dtypes=[torch.float32]),
-               # The operator 'aten::take' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
            )),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(

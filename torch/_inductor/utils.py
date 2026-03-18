@@ -277,7 +277,7 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
             [s.elapsed_time(e) for s, e in zip(start_event, end_event)]
         )
 
-    res = torch.mean(times).item()
+    res = cast(float, torch.mean(times).item())
     log.debug("raw events")
     log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
     filtered_events = EventList(
@@ -652,7 +652,7 @@ def print_performance(
     )
     took = torch.median(timings) / times
     print(f"{took / baseline:.6f}")
-    return took.item()
+    return cast(float, took.item())
 
 
 def precompute_method(obj: Any, method: str) -> None:

@@ -294,6 +294,8 @@ class MixOrderReductionTest(TestBase):
     @parametrize("max_autotune", (False, True))
     @parametrize("initial_xblock", (1, 2))
     @parametrize("add_1dim", (False, True))
+    # The test OOM in CI sometimes. Ask for more memory to make it stable.
+    @largeTensorTest("16GB", device=GPU_TYPE, inductor=True)
     def test_rms_norm_bwd(
         self,
         wdtype,

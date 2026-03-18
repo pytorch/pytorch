@@ -773,6 +773,17 @@ class DistributedDataParallel(Module, Joinable):
                     This requires that unused parameters remain the same across all ranks throughout
                     the entire training process. If this condition is not met, it may cause
                     desynchronization and result in training hang.
+        batched_grad_copy (bool): When set to ``True``, individual per-parameter
+                    gradient-to-bucket copy and division operations are deferred
+                    and flushed as a single ``_foreach_copy_`` plus one flat
+                    ``div_`` when a bucket becomes ready. This reduces per-parameter
+                    kernel launches down to 2 kernels per bucket, which can improve
+                    throughput for models with many small parameters. The
+                    optimization is most effective with
+                    ``optimizer.zero_grad(set_to_none=True)`` (the default), where
+                    ``gradient_as_bucket_view`` alone cannot avoid copies because
+                    the bucket view alias is destroyed every iteration.
+                    (default: ``False``)
 
 
     Attributes:
@@ -808,6 +819,7 @@ class DistributedDataParallel(Module, Joinable):
         device_mesh=None,
         skip_all_reduce_unused_params=False,
         bucket_cap_mb_list: list[int] | None = None,
+        batched_grad_copy=False,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -936,6 +948,7 @@ class DistributedDataParallel(Module, Joinable):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
+        self.batched_grad_copy = batched_grad_copy
         self.mixed_precision = mixed_precision
         if self.mixed_precision is not None:
             logger.warning("Received mixed precision config %s", self.mixed_precision)
@@ -1390,6 +1403,7 @@ class DistributedDataParallel(Module, Joinable):
             self.skip_all_reduce_unused_params,
             self._use_python_reducer,
             bucket_size_limits_for_rebuilding,
+            self.batched_grad_copy,
         )
 
         self.logger = dist.Logger(self.reducer)

@@ -2643,27 +2643,6 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
                 "TestFakeTensor",
                 "test_fake_crossref_backward_amp",
                 device_type="cuda",
@@ -2677,13 +2656,6 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
-            ),
-            # MPS: AssertionError: The values for attribute 'shape' do not match: torch.Size([0, 0]) != torch.Size([0, 1]).
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
             ),
         ),
     ),

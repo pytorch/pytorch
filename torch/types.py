@@ -62,10 +62,10 @@ py_sym_types = (SymInt, SymFloat, SymBool)  # left un-annotated intentionally
 PySymType: TypeAlias = SymInt | SymFloat | SymBool
 
 # Meta-type for "numeric" things; matches our docs
-Number: TypeAlias = int | float | bool
+Number: TypeAlias = int | float | bool | SymInt | SymFloat
 # tuple for isinstance(x, Number) checks.
 # FIXME: refactor once python 3.9 support is dropped.
-_Number = (int, float, bool)
+_Number = (int, float, bool, SymInt, SymFloat)
 
 FileLike: TypeAlias = str | os.PathLike[str] | IO[bytes]
 

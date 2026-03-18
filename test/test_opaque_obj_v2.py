@@ -343,11 +343,7 @@ register_opaque_type(
 )
 register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
-register_opaque_type(
-    SizeStore,
-    typ="value",
-    members={"size": MemberType.USE_REAL, "increment_size": MemberType.USE_REAL},
-)
+register_opaque_type(SizeStore, typ="value")
 register_opaque_type(NestedValueSize, typ="value")
 register_opaque_type(OpaqueMultiplier, typ="reference")
 register_opaque_type(Color, typ="reference")
@@ -998,6 +994,25 @@ def forward(self, arg0_1, arg1_1):
         )
 
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
+    def test_make_fx_value_type(self, make_fx_tracing_mode):
+        def f(x, cfg):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        cfg = ValueConfig("square")
+        gm = make_fx(f, tracing_mode=make_fx_tracing_mode)(x, cfg)
+        self.assertEqual(gm(x, cfg), f(x, cfg))
+
+        self.assertExpectedInline(
+            gm.code.strip("\n"),
+            """\
+def forward(self, x_1, cfg_1):
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(x_1, cfg_1);  x_1 = cfg_1 = None
+    return process_with_config
+    """,  # noqa: B950
+        )
+
+    @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_bad_fake(self, make_fx_tracing_mode):
         torch.library.define(
             "_TestOpaqueObject::bad_fake",
@@ -1428,24 +1443,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 NestedCounters(Counter(1, 5)), torch.ones(2, 3)
             )
 
-        config = ValueConfig("double")
-
-        def foo(mode, x):
-            return config.mode
-
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
-        ):
-            torch.compile(foo, backend="eager")(config, torch.ones(2, 3))
-
-        def bar(mode, x):
-            config.print_mode()
-
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
-        ):
-            torch.compile(bar, backend="eager")(config, torch.ones(2, 3))
-
     def test_export_joint(self):
         torch.library.define(
             "_TestOpaqueObject::module_mul",
@@ -1791,6 +1788,26 @@ def forward(self, arg0_1):
     cat = torch.ops.aten.cat.default([arg0_1, ones]);  arg0_1 = ones = None
     add = torch.ops.aten.add.Tensor(cat, 3);  cat = None
     return (add,)""",  # noqa: B950
+        )
+
+    def test_value_type_unregistered_method(self):
+        # Unregistered methods on value types should inline (no error)
+        def foo(x):
+            cfg = ValueConfig("square")
+            return x + len(cfg.mode)
+
+        x = torch.randn(3)
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        res = opt_f(x)
+        self.assertEqual(res, foo(x))
+
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 6);  arg0_1 = None
+    return (add,)""",
         )
 
     def test_weakref_cleanup(self):

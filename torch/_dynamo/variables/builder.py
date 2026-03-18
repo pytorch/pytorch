@@ -1609,6 +1609,7 @@ class VariableBuilder:
                 self.tx.output.fake_mode, value
             )
             if is_opaque_value_type(type(value)) and not should_hoist(type(value)):
+                fake_script_obj = value
                 proxy = value
 
             elif config.install_free_tensors and (
@@ -3501,7 +3502,10 @@ def handle_traced_output(
     elif is_opaque_type(type(example_value)):
         # This is for handling opaque objects in custom ops
         if is_opaque_value_type(type(example_value)):
-            proxy = example_value  # pyrefly: ignore[bad-assignment]
+            return TorchScriptObjectVariable.create(
+                example_value,  # pyrefly: ignore[bad-argument-type]
+                example_value,
+            )
         fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
             tx.output.fake_mode, example_value
         )
@@ -4204,7 +4208,9 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        elif is_opaque_type(type(value)):
+        elif is_opaque_value_type(type(value)):
+            return TorchScriptObjectVariable.create(value, value)
+        elif is_opaque_reference_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 tx.output.fake_mode, value

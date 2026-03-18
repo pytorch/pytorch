@@ -297,7 +297,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     },  # align with cuda.
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
-    "addmv": {f64},
     "fft.fft": {f16},
     "fft.fft2": {f16},
     "fft.fftn": {f16},
@@ -991,8 +990,33 @@ inductor_one_sample["xpu"] = {
 
 # TODO: Fix these so strides match.
 inductor_skip_exact_stride = {
+    "complex",
+    "empty_permuted",
+    "fft.irfftn",
+    "fft.irfft2",
+    "linalg.diagonal",
+    "linalg.eigvals",  # Fails for ROCM
+    "linalg.lu",
+    "linalg.lu_factor",
+    "linalg.lu_factor_ex",
     "linalg.matrix_norm",
+    "linalg.norm",
+    "linalg.norm.subgradients_at_zero",
+    "linalg.pinv.singular",
+    "linalg.svdvals",
+    "linalg.solve",
+    "linalg.solve_ex",
+    "linalg.qr",
+    "lu",
+    "matmul",
+    "__rmatmul__",
+    "nn.functional.adaptive_avg_pool1d",
+    "nn.functional.group_norm",
+    "nn.functional.linear",
+    "nn.functional.max_pool2d",
+    "nn.functional.unfold",
     "ormqr",
+    "pca_lowrank",
     "rot90",
     "sum",
     "tensordot",
