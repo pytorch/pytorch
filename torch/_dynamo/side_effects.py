@@ -1143,7 +1143,13 @@ class SideEffects:
                     _maybe_log_side_effect(var)
 
             elif self.is_attribute_mutation(var):
-                if isinstance(
+                if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
+                    var, variables.FrozenDataClassVariable
+                ):
+                    # These frozen attribute initializations are handled in codegen_save_tempvars
+                    # and don't need to be reset in the suffix.
+                    continue
+                elif isinstance(
                     var,
                     variables.UserDefinedDictVariable,
                 ) and self.is_modified(var._dict_vt):
@@ -1198,12 +1204,6 @@ class SideEffects:
                         ]
                     )
                     _maybe_log_side_effect(var._dict_vt)
-                elif isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
-                    var, variables.FrozenDataClassVariable
-                ):
-                    # These frozen attribute initializations are handled in codegen_save_tempvars
-                    # and don't need to be reset in the suffix.
-                    continue
                 elif isinstance(
                     var,
                     variables.UserDefinedListVariable,
