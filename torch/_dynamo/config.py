@@ -17,7 +17,7 @@ import sysconfig
 import tempfile
 from collections.abc import Callable
 from os.path import abspath, dirname
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, TYPE_CHECKING
 
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
@@ -31,7 +31,7 @@ from torch.utils._config_module import Config, get_tristate_env, install_config_
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 # the name of a file to write the logs to
 # [@compile_ignored: debug]
-log_file_name: Optional[str] = None
+log_file_name: str | None = None
 
 # [@compile_ignored: debug] Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
@@ -44,7 +44,7 @@ verify_correctness = False
 #   - Individual IDs: "0,5,10"
 #   - Ranges: "10-20" (inclusive)
 #   - Comparisons: ">10", ">=10", "<5", "<=5"
-# Backends can be: "eager", "aot_eager", "inductor", "inductor:reduce-overhead", etc.
+# Backends can be: "eager", "aot_eager", "inductor", etc.
 # Examples:
 #   ">10:eager"                    - Run graphs with frame_id > 10 in dynamo eager backend
 #   "<=5:aot_eager;>5:inductor"    - First 6 graphs use aot_eager, rest use inductor
@@ -60,6 +60,17 @@ debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", 
 # [@compile_ignored: debug]
 debug_inductor_config_override: str = os.environ.get(
     "TORCH_COMPILE_OVERRIDE_INDUCTOR_CONFIGS", ""
+)
+
+# Override dynamo config for specific graphs (for debugging/bisecting).
+# Format: "filter1:config1;filter2:config2;..." where filter uses same syntax as
+# debug_backend_override, and config is "key=value" or "key=value,key2=value2".
+# Examples:
+#   "0-5:specialize_float=True"  - Specialize floats for graphs 0-5
+#   ">10:automatic_dynamic_shapes=False"  - Disable dynamic shapes for graphs > 10
+# [@compile_ignored: debug]
+debug_dynamo_config_override: str = os.environ.get(
+    "TORCH_COMPILE_OVERRIDE_DYNAMO_CONFIGS", ""
 )
 
 # Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
@@ -107,8 +118,9 @@ recompile_limit = 8
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
 accumulated_recompile_limit = 256
 
-# [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit (deprecated: does not do anything)
-skip_code_recursive_on_recompile_limit_hit = True
+skip_code_recursive_on_recompile_limit_hit: bool = Config(
+    default=True, deprecated=True, deprecation_message="does not do anything"
+)
 
 # raise a hard error if cache limit is hit.  If you are on a model where you
 # know you've sized the cache correctly, this can help detect problems when
@@ -122,10 +134,12 @@ accumulated_cache_size_limit: int = Config(
     alias="torch._dynamo.config.accumulated_recompile_limit"
 )
 
-# (deprecated: does not do anything)
 skip_code_recursive_on_cache_limit_hit: bool = Config(
-    alias="torch._dynamo.config.skip_code_recursive_on_recompile_limit_hit"
+    alias="torch._dynamo.config.skip_code_recursive_on_recompile_limit_hit",
+    deprecated=True,
+    deprecation_message="does not do anything",
 )
+
 fail_on_cache_limit_hit: bool = Config(
     alias="torch._dynamo.config.fail_on_recompile_limit_hit"
 )
@@ -374,15 +388,15 @@ allow_unspec_int_on_nn_module = False
 # Note that to avoid breaking the existing usage, mode 1 and mode 4 can be
 # specified with a boolean value. True is using ddp_optimizer and False is
 # no optimization.
-optimize_ddp: Union[
-    bool,
-    Literal[
+optimize_ddp: (
+    bool
+    | Literal[
         "ddp_optimizer",
         "python_reducer",
         "python_reducer_without_compiled_forward",
         "no_optimization",
-    ],
-] = True
+    ]
+) = True
 
 # By default, Dynamo emits runtime asserts (e.g. torch._check) in the graph.
 # In some cases those asserts could be performance costly
@@ -782,6 +796,11 @@ Example::
 # NCCL timeout.
 enable_compiler_collectives = os.environ.get("TORCH_COMPILER_COLLECTIVES", "0") == "1"
 
+# Allow for experimental support of compiled p2p ops
+enable_p2p_compilation = (
+    os.environ.get("TORCHDYNAMO_ENABLE_P2P_COMPILATION", "0") == "1"
+)
+
 # Enables a local, filesystem "profile" which can be used for automatic
 # dynamic decisions, analogous to profile-guided optimization.  This config
 # ONLY has an effect if torch.compiler.config.workflow_id is specified,
@@ -810,7 +829,7 @@ automatic_dynamic_local_pgo: bool = Config(
 )
 
 # Like above, but using remote cache
-automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
+automatic_dynamic_remote_pgo: bool | None = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
 )
 
@@ -820,7 +839,7 @@ _unsafe_skip_fsdp_module_guards = (
 )
 
 # Common prefix to append to the id of each compile run to filter out data
-pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", None)
+pt2_compile_id_prefix: str | None = os.environ.get("PT2_COMPILE_ID_PREFIX", None)
 
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
@@ -846,11 +865,17 @@ record_runtime_overhead = True
 enable_aot_compile = False
 
 # HACK: this is for testing custom ops profiling only
-_custom_ops_profile: Optional[Any] = None
+_custom_ops_profile: Any | None = None
 
 # Experimental flag to enable regional compile on invoke_subgraph HOP.
 # For testing only!
 enable_invoke_subgraph_regional_compile: bool = False
+
+# When True, run a post-tracing pass that inlines all invoke_subgraph HOPs
+# back into the parent graph, producing a flat FX graph. Useful when
+# downstream compilers (like vllm-compile) don't support HOPs or prefer a
+# flat graph.
+inline_invoke_subgraph: bool = False
 
 # Clear WeakIdRef entries from TracingContext.tensor_to_context and
 # MetaTensorDescriber.lookup_tensor at the end of compile. These weakrefs
@@ -859,7 +884,7 @@ enable_invoke_subgraph_regional_compile: bool = False
 #   don't clear for custom backends (to support standalone_compile, etc.)
 # - True: always clear regardless of backend
 # - False: never clear regardless of backend
-invalidate_compile_context_weakrefs: Optional[bool] = None
+invalidate_compile_context_weakrefs: bool | None = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

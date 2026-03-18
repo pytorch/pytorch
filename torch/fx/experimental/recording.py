@@ -5,7 +5,7 @@ import itertools
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
@@ -84,15 +84,15 @@ class ShapeEnvEvent:
     f: Callable
 
     # Arguments and keyword arguments called with.
-    args: Optional[list[Any]] = None
-    kwargs: Optional[dict[str, Any]] = None
+    args: list[Any] | None = None
+    kwargs: dict[str, Any] | None = None
 
     # List of tracked_fakes at the time the method was called.
-    tracked_fakes: Optional[list[Any]] = None
+    tracked_fakes: list[Any] | None = None
 
     # Name of the captured event.
     # Used for special handling of particular methods.
-    name: Optional[str] = None
+    name: str | None = None
 
     # Replay itself, but using shape_env as self.
     def run(self, shape_env=None) -> Any:
@@ -199,7 +199,7 @@ NEST = 0
 def _extract_shape_env_and_assert_equal(args, kwargs):
     from torch.fx.experimental.symbolic_shapes import is_symbolic, ShapeEnv, SymTypes
 
-    def assert_equal(old: Optional[ShapeEnv], new: ShapeEnv) -> ShapeEnv:
+    def assert_equal(old: ShapeEnv | None, new: ShapeEnv) -> ShapeEnv:
         if old is not None:
             if old is not new:
                 raise AssertionError("call with different ShapeEnv")
@@ -240,7 +240,7 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 #   - ShapeEnv.evaluate_expr
 #   - ShapeEnv.guard_or_defer_runtime_assert
 def record_shapeenv_event(
-    *, save_tracked_fakes: bool = False, name: Optional[str] = None
+    *, save_tracked_fakes: bool = False, name: str | None = None
 ) -> Callable:
     def decorator(fn: Callable) -> Callable:
         if not callable(fn):
@@ -376,18 +376,18 @@ def replay_shape_env_events(events):
 # ShapeEnv.produce_guards.
 @dataclass
 class FakeTensorMeta:
-    tensor_size: tuple[Union[int, torch.SymInt], ...]
-    tensor_stride: tuple[Union[int, torch.SymInt], ...]
-    tensor_storage_offset: Union[int, torch.SymInt]
+    tensor_size: tuple[int | torch.SymInt, ...]
+    tensor_stride: tuple[int | torch.SymInt, ...]
+    tensor_storage_offset: int | torch.SymInt
     is_nested: bool
 
-    def size(self) -> tuple[Union[int, torch.SymInt], ...]:
+    def size(self) -> tuple[int | torch.SymInt, ...]:
         return self.tensor_size
 
-    def stride(self) -> tuple[Union[int, torch.SymInt], ...]:
+    def stride(self) -> tuple[int | torch.SymInt, ...]:
         return self.tensor_stride
 
-    def storage_offset(self) -> Union[int, torch.SymInt]:
+    def storage_offset(self) -> int | torch.SymInt:
         return self.tensor_storage_offset
 
     def dim(self) -> int:

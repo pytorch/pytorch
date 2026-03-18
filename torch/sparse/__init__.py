@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # The Tensor classes are added to this module by python_tensor.cpp
 # A workaround to support both TorchScript and MyPy:
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch import Tensor
@@ -19,11 +19,11 @@ from .semi_structured import (
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[int | tuple[int, ...] | list[int]]
+    DimOrDims = int | tuple[int, ...] | list[int] | None
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = Optional[tuple[int]]
+    DimOrDims = tuple[int] | None
 
 
 __all__ = [

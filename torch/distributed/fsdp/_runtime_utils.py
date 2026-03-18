@@ -600,7 +600,7 @@ def _root_pre_forward(
             args_tuple, kwargs_tuple = _to_kwargs(
                 args, kwargs, state.compute_device, False
             )
-        args = args_tuple[0] if args_tuple else tuple()
+        args = args_tuple[0] if args_tuple else ()
         kwargs = kwargs_tuple[0] if kwargs_tuple else {}
 
         return _root_cast_forward_input(state, module, args, kwargs)

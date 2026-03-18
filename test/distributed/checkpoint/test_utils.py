@@ -2,7 +2,6 @@
 
 import io
 import sys
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -219,7 +218,8 @@ class TestDistWrapper(DTensorTestBase):
             if rank % half_world_size == 0
             else None
         )
-        assert gathered_objects == expected_objects
+        if gathered_objects != expected_objects:
+            raise AssertionError(f"Expected {expected_objects}, got {gathered_objects}")
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -241,7 +241,10 @@ class TestDistWrapper(DTensorTestBase):
         )
         scattered_objects = dist_wrapper.scatter_object(objects)
         expected_objects = rank
-        assert scattered_objects == expected_objects
+        if scattered_objects != expected_objects:
+            raise AssertionError(
+                f"Expected {expected_objects}, got {scattered_objects}"
+            )
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -255,11 +258,12 @@ class TestDistWrapper(DTensorTestBase):
 
         rank = dist.get_rank()
         # only local rank 1 supplies the payload
-        payload: Optional[int] = rank if rank == 1 else None
+        payload: int | None = rank if rank == 1 else None
 
         result = dist_wrapper.broadcast_object(payload)
         # every rank should receive the value from global rank 1
-        assert result == 1
+        if result != 1:
+            raise AssertionError(f"Expected 1, got {result}")
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -276,14 +280,15 @@ class TestDistWrapper(DTensorTestBase):
         rank = mesh_2d.get_rank()
 
         # only the local coordinator in each subgroup provides payload
-        payload: Optional[int] = rank if dist_wrapper.is_coordinator else None
+        payload: int | None = rank if dist_wrapper.is_coordinator else None
         got = dist_wrapper.broadcast_object(payload)
 
         # ensure we broadcast from the *global* coordinator rank,
         # not the local index.  For rows [0,1] this is global rank 1;
         # for rows [2,3] this is global rank 3.
         expected = dist_wrapper.global_coordinator_rank
-        assert got == expected
+        if got != expected:
+            raise AssertionError(f"Expected {expected}, got {got}")
 
     @with_comms
     @skip_if_lt_x_gpu(2)

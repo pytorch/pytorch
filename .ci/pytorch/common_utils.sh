@@ -320,7 +320,7 @@ function install_flash_attn_cute() {
   git checkout "${flash_attn_commit}"
 
   # Install only the 'cute' sub-directory
-  pip_install -e flash_attn/cute/
+  pip_install flash_attn/cute/
   popd
 
   # remove the local repo
@@ -367,7 +367,7 @@ function install_cutlass_api() {
   git checkout "${cutlass_commit}"
 
   # Install cutlass_api with torch extras
-  pip_install -e "python/cutlass_api[torch]"
+  pip_install "python/cutlass_api[torch]"
   popd
 
   rm -rf cutlass-build

@@ -88,8 +88,14 @@ class _ProfilerResult:
     def experimental_event_tree(self) -> list[_ProfilerEvent]: ...
     def trace_start_ns(self) -> int: ...
 
-class SavedTensor: ...
+class SavedTensor:
+    def unpack(self) -> torch.Tensor: ...
 
+def _make_saved_tensor(
+    tensor: torch.Tensor,
+    is_output: bool,
+    is_inplace_on_view: bool = False,
+) -> SavedTensor: ...
 def _enable_profiler(
     config: ProfilerConfig,
     activities: set[ProfilerActivity],
@@ -97,6 +103,7 @@ def _enable_profiler(
 def _prepare_profiler(
     config: ProfilerConfig,
     activities: set[ProfilerActivity],
+    activity_filter: dict[ProfilerActivity, set[str]] = ...,
 ) -> None: ...
 def _toggle_collection_dynamic(
     enable: bool,

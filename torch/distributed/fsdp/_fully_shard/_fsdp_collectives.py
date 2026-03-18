@@ -15,7 +15,6 @@ from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
-    compiled_autograd_enabled,
 )
 from ._fsdp_param import FSDPParam, ShardedState
 
@@ -294,9 +293,6 @@ def foreach_all_gather(
 def _get_param_all_gather_inputs(
     fsdp_params: list[FSDPParam],
 ) -> list[list[torch.Tensor]]:
-    if compiled_autograd_enabled():
-        return [fsdp_param.all_gather_inputs for fsdp_param in fsdp_params]
-
     # Intentionally try to run a fast-path that bypasses abstractions for the
     # common FSDP case of bf16/fp32 mixed precision in order to use foreach
     # copy for lower CPU overhead and more efficient copying in eager
@@ -371,16 +367,13 @@ def foreach_all_gather_copy_out(
     ):
         # NOTE: Under compile, make sure we always recreate all_gather_outputs
         # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
-        force_recreate = compiled_autograd_enabled()
         fsdp_param.init_all_gather_outputs(
             all_gather_input_numels,
             all_gather_input_dtypes,
             world_size,
             device,
-            force_recreate=force_recreate,
         )
-        if not force_recreate:
-            fsdp_param.alloc_all_gather_outputs()
+        fsdp_param.alloc_all_gather_outputs()
         param_all_gather_outputs = fsdp_param.all_gather_outputs
         if fsdp_param.fsdp_placement.dim != 0:
             # Copy to a temporary and then chunk-cat into the final all-gather
@@ -398,13 +391,7 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1) for t in split_with_sizes_out]
 
     # only avoid VC bump if we are not in inference mode
-    if torch._dynamo.is_compiling():
-        # For torch.compile, we turn off inference_mode for fake tensor
-        # propagation, and therefore graph break on is_inference. For `compile`,
-        # we don't care about VCs, so just skip the optimization.
-        non_inference_outs = []
-    else:
-        non_inference_outs = [o for o in out if not o.is_inference()]
+    non_inference_outs = [o for o in out if not o.is_inference()]
 
     if len(non_inference_outs) > 0:
         with torch.autograd._unsafe_preserve_version_counter(tuple(non_inference_outs)):
@@ -641,12 +628,11 @@ def foreach_reduce(
                     new_sharded_grad
                 )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
-            if not compiled_autograd_enabled():
-                for hook in (
-                    getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
-                    or {}
-                ).values():
-                    hook(fsdp_param.sharded_param)
+            for hook in (
+                getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
+                or {}
+            ).values():
+                hook(fsdp_param.sharded_param)
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
         post_reduce_event = post_reduce_stream.record_event()

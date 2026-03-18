@@ -116,6 +116,7 @@ flex_decoding_template = TritonTemplate(
     source=load_flex_template("flex_decode")
     + load_flex_template("utilities")
     + load_flex_template("common"),
+    always_freeze_layout=True,
 )
 
 
@@ -412,7 +413,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         8: create_indices_fake,
     }
 
-    buf_ACC = autotune_select_algorithm(
+    buf_ACC, _ = autotune_select_algorithm(
         "flex_decoding",
         choices,
         inputs_for_flex_decoding,

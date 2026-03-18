@@ -2,7 +2,7 @@
 import copy
 import warnings
 from collections import namedtuple
-from typing import Any, Union
+from typing import Any
 from typing_extensions import deprecated, TypeAliasType
 
 import torch
@@ -621,9 +621,9 @@ def _add_module_to_qconfig_obs_ctr(
     return QConfig(activation, weight)
 
 
-_ObserverOrFakeQuantizeConstructor = Union[
-    _PartialWrapper, type[ObserverBase], type[FakeQuantizeBase]
-]
+_ObserverOrFakeQuantizeConstructor = (
+    _PartialWrapper | type[ObserverBase] | type[FakeQuantizeBase]
+)
 
 
 def _obs_or_fq_ctr_equals(

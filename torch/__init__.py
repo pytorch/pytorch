@@ -61,7 +61,7 @@ from torch.torch_version import __version__ as __version__
 
 
 if TYPE_CHECKING:
-    from torch.types import Device, IntLikeType
+    from torch.types import Device, FloatLikeType, IntLikeType
 
 
 __all__ = [
@@ -132,6 +132,7 @@ __all__ = [
     "sym_min",
     "sym_not",
     "sym_sum",
+    "thread_safe_generator",
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
@@ -549,19 +550,55 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise TypeError("type stub not overridden")
 
-    def __add__(self, other) -> "SymInt":
+    @_overload
+    def __add__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __add__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __add__(self, other: complex) -> complex: ...
+    @_overload
+    def __add__(self, other: "Tensor") -> "Tensor": ...
+
+    def __add__(self, other):
         raise TypeError("type stub not overridden")
 
-    def __radd__(self, other) -> "SymInt":
+    @_overload
+    def __radd__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __radd__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __radd__(self, other: complex) -> complex: ...
+    @_overload
+    def __radd__(self, other: "Tensor") -> "Tensor": ...
+
+    def __radd__(self, other):
         raise TypeError("type stub not overridden")
 
-    def __rmul__(self, other) -> "SymInt":
+    @_overload
+    def __mul__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __mul__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __mul__(self, other: complex) -> complex: ...
+    @_overload
+    def __mul__(self, other: "Tensor") -> "Tensor": ...
+
+    def __mul__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __rmul__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __rmul__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __rmul__(self, other: complex) -> complex: ...
+    @_overload
+    def __rmul__(self, other: "Tensor") -> "Tensor": ...
+
+    def __rmul__(self, other):
         raise TypeError("type stub not overridden")
 
     def __mod__(self, other: "IntLikeType") -> "SymInt":
-        raise TypeError("type stub not overridden")
-
-    def __mul__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __pow_by_natural__(self, other) -> "SymInt":
@@ -591,13 +628,34 @@ class SymInt:
     def __sym_float__(self):
         raise TypeError("type stub not overridden")
 
-    def __neg__(self):
+    def __neg__(self) -> "SymInt":
         raise TypeError("type stub not overridden")
 
-    def __sub__(self, other: "IntLikeType") -> "SymInt":
+    def __abs__(self) -> "SymInt":
         raise TypeError("type stub not overridden")
 
-    def __rsub__(self, other: "IntLikeType") -> "SymInt":
+    @_overload
+    def __sub__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __sub__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __sub__(self, other: complex) -> complex: ...
+    @_overload
+    def __sub__(self, other: "Tensor") -> "Tensor": ...
+
+    def __sub__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __rsub__(self, other: "IntLikeType") -> "SymInt": ...
+    @_overload
+    def __rsub__(self, other: "FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __rsub__(self, other: complex) -> complex: ...
+    @_overload
+    def __rsub__(self, other: "Tensor") -> "Tensor": ...
+
+    def __rsub__(self, other):
         raise TypeError("type stub not overridden")
 
     def __and__(self, other) -> "SymInt":
@@ -709,6 +767,72 @@ class SymFloat:
         raise TypeError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __add__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __add__(self, other: complex) -> complex: ...
+    @_overload
+    def __add__(self, other: "Tensor") -> "Tensor": ...
+
+    def __add__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __radd__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __radd__(self, other: complex) -> complex: ...
+    @_overload
+    def __radd__(self, other: "Tensor") -> "Tensor": ...
+
+    def __radd__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __sub__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __sub__(self, other: complex) -> complex: ...
+    @_overload
+    def __sub__(self, other: "Tensor") -> "Tensor": ...
+
+    def __sub__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __rsub__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __rsub__(self, other: complex) -> complex: ...
+    @_overload
+    def __rsub__(self, other: "Tensor") -> "Tensor": ...
+
+    def __rsub__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __mul__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __mul__(self, other: complex) -> complex: ...
+    @_overload
+    def __mul__(self, other: "Tensor") -> "Tensor": ...
+
+    def __mul__(self, other):
+        raise TypeError("type stub not overridden")
+
+    @_overload
+    def __rmul__(self, other: "IntLikeType | FloatLikeType") -> "SymFloat": ...
+    @_overload
+    def __rmul__(self, other: complex) -> complex: ...
+    @_overload
+    def __rmul__(self, other: "Tensor") -> "Tensor": ...
+
+    def __rmul__(self, other):
+        raise TypeError("type stub not overridden")
+
+    def __neg__(self) -> "SymFloat":
+        raise TypeError("type stub not overridden")
+
+    def __abs__(self) -> "SymFloat":
         raise TypeError("type stub not overridden")
 
     def __float_pow__(self, other) -> "SymFloat":
@@ -953,11 +1077,17 @@ def sym_min(a, b):
         return builtins.min(a, b)  # type: ignore[call-overload]
 
 
-def sym_sum(args):
+def sym_sum(*args):
     """
     N-ary add which is faster to compute for long lists than iterated binary
     addition.  Only does something special for integers.
+
+    Accepts both ``sym_sum([a, b, c])`` and ``sym_sum(a, b, c)``.
     """
+    # Normalise: accept both sym_sum([a, b, c]) and sym_sum(a, b, c).
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        args = args[0]
+
     if overrides.has_torch_function(args):
         return overrides.handle_torch_function(sym_sum, args, args)
 
@@ -2144,7 +2274,14 @@ _tensor_classes: set[type["torch.Tensor"]] = set()
 from torch import amp as amp, random as random, serialization as serialization
 from torch._tensor_str import set_printoptions
 from torch.amp import autocast, GradScaler
-from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
+from torch.random import (
+    get_rng_state,
+    initial_seed,
+    manual_seed,
+    seed,
+    set_rng_state,
+    thread_safe_generator,
+)
 from torch.serialization import load, save
 
 
@@ -2455,10 +2592,11 @@ class _TorchCompileInductorWrapper:
                     )
             self.config[attr_name] = val
 
-    def __call__(self, model_, inputs_):
+    def __call__(self, model_, inputs_, *, config_patches=None):
         from torch._inductor.compile_fx import compile_fx
 
-        return compile_fx(model_, inputs_, config_patches=self.config)
+        all_patches = {**self.config, **(config_patches or {})}
+        return compile_fx(model_, inputs_, config_patches=all_patches)
 
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
@@ -2483,7 +2621,7 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
         self.apply_options({"cpp_wrapper": True})
         self.apply_options({"aot_inductor.package": True})
 
-    def __call__(self, model_, inputs_):
+    def __call__(self, model_, inputs_, *, config_patches=None):
         from contextlib import nullcontext
         from unittest import mock
 
@@ -2501,7 +2639,7 @@ class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
             ctx,
             torch._inductor.config.patch("enable_autograd_for_aot", True),
         ):
-            return super().__call__(model_, inputs_)
+            return super().__call__(model_, inputs_, config_patches=config_patches)
 
 
 class _TorchCompileWrapper:
@@ -2999,3 +3137,6 @@ def _as_tensor_fullprec(t):
 # an autoloaded backend are defined
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+# Register all registered custom / override ops in torch/_native
+import torch._native

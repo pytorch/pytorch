@@ -36,13 +36,22 @@ SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM100OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0))
 SM120OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (12, 0))
 
-IS_THOR = LazyVal(lambda: torch.cuda.is_available() and
+IS_THOR = LazyVal(lambda: torch.cuda.is_available() and torch.version.cuda is not None and
                   ((torch.cuda.get_device_capability() == (11, 0) and int(torch.version.cuda[:2]) >= 13) or
                    (torch.cuda.get_device_capability() == (10, 1) and int(torch.version.cuda[:2]) < 13)))
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and (torch.cuda.get_device_capability() in [(7, 2), (8, 7)] or IS_THOR))
 IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
+
+@contextlib.contextmanager
+def blas_library_context(backend):
+    prev_backend = torch.backends.cuda.preferred_blas_library()
+    torch.backends.cuda.preferred_blas_library(backend)
+    try:
+        yield
+    finally:
+        torch.backends.cuda.preferred_blas_library(prev_backend)
 
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():

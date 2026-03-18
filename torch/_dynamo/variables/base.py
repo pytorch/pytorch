@@ -19,7 +19,7 @@ import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from contextvars import ContextVar
 from enum import Enum
-from typing import Any, NoReturn, Optional, TYPE_CHECKING
+from typing import Any, NoReturn, TYPE_CHECKING
 
 from torch._guards import Guard
 from torch.fx.proxy import Node
@@ -43,8 +43,11 @@ log = logging.getLogger(__name__)
 
 # Tracks active method calls on VariableTracker instances to detect self-referential
 # calls (e.g., as_python_constant on a list that contains itself). Maps
-# (id(instance), method_name) tuples to track which calls are in progress.
-_vt_active_calls: ContextVar[set[tuple[int, str]] | None] = ContextVar(
+# (id(instance), id(original_method)) tuples to track which calls are in progress.
+# We use id(original_method) rather than the method name string so that super()
+# delegation within a class hierarchy (e.g. TorchScriptObjectVariable.as_python_constant
+# calling UserDefinedObjectVariable.as_python_constant) is not a false positive.
+_vt_active_calls: ContextVar[set[tuple[int, int]] | None] = ContextVar(
     "_vt_active_calls", default=None
 )
 
@@ -195,7 +198,7 @@ class AttributeMutationNew(AttributeMutation):
     the Python world.
     """
 
-    def __init__(self, cls_source: Optional[Source] = None) -> None:
+    def __init__(self, cls_source: Source | None = None) -> None:
         super().__init__(SourceType.New)
         self.cls_source = cls_source
 
@@ -296,7 +299,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cls,
         fn: Callable[["VariableTracker"], None],
         value: Any,
-        cache: Optional[dict[int, Any]] = None,
+        cache: dict[int, Any] | None = None,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances
@@ -449,7 +452,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def as_proxy(self) -> Any:
         raise NotImplementedError(str(self))
 
-    def maybe_fx_node(self) -> Optional[Node]:
+    def maybe_fx_node(self) -> Node | None:
         try:
             proxy = self.as_proxy()
             import torch.fx
@@ -595,7 +598,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 raise_observed_exception(
                     type(e),
                     tx,
-                    args=[list(map(variables.ConstantVariable.create, e.args))],
+                    args=list(map(variables.ConstantVariable.create, e.args)),
                 )
         hints = [
             f"Avoid calling `{self.python_type_name()}.{name}` in your code.",
@@ -702,6 +705,87 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             tree_map_kwargs,
         )
 
+    def call_tree_map_with_path(
+        self,
+        tx: Any,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: Sequence["VariableTracker"],
+        tree_map_kwargs: dict[str, "VariableTracker"],
+        keypath: tuple[Any, ...],
+    ) -> "VariableTracker":
+        """Performance optimization to implement tree_map_with_path faster than tracing it"""
+        is_leaf_var = tree_map_kwargs.get("is_leaf")
+        if is_leaf_var is not None and not is_leaf_var.is_constant_none():
+            pred_result = is_leaf_var.call_function(tx, [self], {})
+            try:
+                leaf_decision = pred_result.as_python_constant()
+            except NotImplementedError:
+                return self._tree_map_with_path_fallback(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                    keypath,
+                )
+            if leaf_decision:
+                keypath_var = variables.TupleVariable(
+                    [VariableTracker.build(tx, k) for k in keypath]
+                )
+                return map_fn.call_function(tx, [keypath_var, self, *rest], {})
+
+        return self.call_tree_map_with_path_branch(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+            keypath,
+        )
+
+    def call_tree_map_with_path_branch(
+        self,
+        tx: Any,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: Sequence["VariableTracker"],
+        tree_map_kwargs: dict[str, "VariableTracker"],
+        keypath: tuple[Any, ...],
+    ) -> "VariableTracker":
+        """Handle tree_map_with_path for leaf nodes (default behavior)"""
+        keypath_var = variables.TupleVariable(
+            [VariableTracker.build(tx, k) for k in keypath]
+        )
+        return map_fn.call_function(tx, [keypath_var, self, *rest], {})
+
+    def _tree_map_with_path_fallback(
+        self,
+        tx: Any,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: Sequence["VariableTracker"],
+        tree_map_kwargs: dict[str, "VariableTracker"],
+        keypath: tuple[Any, ...],
+    ) -> "VariableTracker":
+        tree_map_fn_copy = tree_map_fn.clone()
+        tree_map_fn_copy._maybe_call_tree_map_fastpath = lambda *args, **kwargs: None  # type: ignore[missing-attribute]
+        log.debug(
+            "tree_map_with_path fastpath fallback triggered for %s (rest=%s, kwargs=%s, keypath=%s)",
+            self,
+            rest,
+            tree_map_kwargs,
+            keypath,
+        )
+        # For fallback, we need to reconstruct the subtree rooted at this node
+        # and call tree_map_with_path on it. Since we're in the middle of the tree,
+        # we fall back to tracing the tree_map_with_path function.
+        return tree_map_fn_copy.call_function(
+            tx,
+            [map_fn, self, *rest],
+            tree_map_kwargs,
+        )
+
     def set_name_hint(self, name: str) -> None:
         pass
 
@@ -740,7 +824,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def build(
         tx: Any,
         value: Any,
-        source: Optional[Source] = None,
+        source: Source | None = None,
         realize: bool = False,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
@@ -815,8 +899,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def __init__(
         self,
         *,
-        source: Optional[Source] = None,
-        mutation_type: Optional[MutationType] = None,
+        source: Source | None = None,
+        mutation_type: MutationType | None = None,
     ) -> None:
         super().__init__()
         self.source = source
@@ -895,7 +979,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 active = set()
                 _vt_active_calls.set(active)
 
-            key = (id(self), method)
+            key = (id(self), id(original_method))
             if key in active:
                 callback(self)
 

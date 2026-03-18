@@ -35,10 +35,11 @@ You can register a custom class as being a reference-based opaque object class
 through `register_opaque_type(MyClass, typ="value")`.
 """
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Literal, NewType, Optional
+from typing import Any, Literal, NewType
 from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
@@ -46,6 +47,9 @@ import torch
 from torch._opaque_base import OpaqueBase, OpaqueBaseMeta  # noqa: F401
 
 from .fake_class_registry import register_fake_class
+
+
+log = logging.getLogger(__name__)
 
 
 class MemberType(Enum):
@@ -95,6 +99,19 @@ _OPAQUE_TYPES: WeakKeyDictionary[Any, _OpaqueTypeInfo] = WeakKeyDictionary()
 _OPAQUE_TYPES_BY_NAME: dict[str, _OpaqueTypeInfo] = {}
 
 
+def _resolve_opaque_type_info(cls: Any) -> _OpaqueTypeInfo | None:
+    if cls in _OPAQUE_TYPES:
+        return _OPAQUE_TYPES[cls]
+    if not isinstance(cls, type):
+        return None
+
+    # Allow subclasses too
+    for parent in cls.__mro__[1:]:
+        if parent in _OPAQUE_TYPES:
+            return _OPAQUE_TYPES[parent]
+    return None
+
+
 def get_opaque_type_name(cls: Any) -> str:
     """
     Gets the registered opaque type name for a given class.
@@ -108,12 +125,13 @@ def get_opaque_type_name(cls: Any) -> str:
     Raises:
         ValueError: If the class is not registered as an opaque type.
     """
-    if cls not in _OPAQUE_TYPES:
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
         raise ValueError(
             f"Class {cls} is not registered as an opaque type. "
             f"Call register_opaque_type({cls.__name__}) first."
         )
-    return _OPAQUE_TYPES[cls].class_name
+    return info.class_name
 
 
 def register_opaque_type(
@@ -233,31 +251,39 @@ def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
 
 
 def should_hoist(cls: Any) -> bool:
-    if cls not in _OPAQUE_TYPES:
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
         return False
-    return _OPAQUE_TYPES[cls].hoist
+    return info.hoist
 
 
 def has_members(cls: Any) -> bool:
-    if cls not in _OPAQUE_TYPES:
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
         return False
-    return len(_OPAQUE_TYPES[cls].members) > 0
+    return len(info.members) > 0
 
 
-def is_opaque_type(cls: Any) -> bool:
+def is_opaque_type(cls: type[Any] | str) -> bool:
     """
     Checks if the given type is an opaque type.
+    Also returns True for subclasses of registered opaque types.
     """
     if isinstance(cls, str):
         return torch._C._is_opaque_type_registered(cls)
 
-    if cls not in _OPAQUE_TYPES:
+    if not isinstance(cls, type):
+        log.warning("Passed invalid type `%s` to is_opaque_type, returning False", cls)
         return False
 
-    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls].class_name)
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
+        return False
+
+    return torch._C._is_opaque_type_registered(info.class_name)
 
 
-def is_opaque_value_type(cls: Any) -> bool:
+def is_opaque_value_type(cls: type[Any] | str) -> bool:
     """
     Checks if the given type is an opaque **value** type.
     See Note [Opaque Objects] for more information.
@@ -268,7 +294,10 @@ def is_opaque_value_type(cls: Any) -> bool:
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "value"
 
-    return _OPAQUE_TYPES[cls].opaque_typ == "value"
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
+        return False
+    return info.opaque_typ == "value"
 
 
 def is_opaque_reference_type(cls: Any) -> bool:
@@ -282,7 +311,10 @@ def is_opaque_reference_type(cls: Any) -> bool:
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "reference"
 
-    return _OPAQUE_TYPES[cls].opaque_typ == "reference"
+    info = _resolve_opaque_type_info(cls)
+    if info is None:
+        return False
+    return info.opaque_typ == "reference"
 
 
 def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
@@ -324,17 +356,17 @@ def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
     return repr_str, globals_dict
 
 
-def get_opaque_obj_info(cls: Any) -> Optional[_OpaqueTypeInfo]:
+def get_opaque_obj_info(cls: Any) -> _OpaqueTypeInfo | None:
     if not is_opaque_type(cls):
         return None
 
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls]
 
-    return _OPAQUE_TYPES[cls]
+    return _resolve_opaque_type_info(cls)
 
 
-def get_member_type(cls: Any, member_name: str) -> Optional[MemberType]:
+def get_member_type(cls: Any, member_name: str) -> MemberType | None:
     """
     Get the MemberType for a specific member of an opaque object class.
 

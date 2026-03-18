@@ -8,7 +8,7 @@ import math
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 
 import sympy
 
@@ -101,6 +101,7 @@ flex_attention_template = TritonTemplate(
     source=load_flex_template("flex_attention")
     + load_flex_template("utilities")
     + load_flex_template("common"),
+    always_freeze_layout=True,
 )
 
 
@@ -484,7 +485,7 @@ def flex_attention(
         8: create_indices_fake,
     }
 
-    out = autotune_select_algorithm(
+    out, _ = autotune_select_algorithm(
         "flex_attention",
         choices,
         # Need to filter out symbols since there is an invariant
@@ -530,6 +531,7 @@ flex_attention_backward_template = TritonTemplate(
     name="flex_attention_backward",
     grid=flex_attention_backward_grid,
     source=load_flex_template("flex_backwards") + load_flex_template("utilities"),
+    always_freeze_layout=True,
 )
 
 
@@ -563,7 +565,7 @@ class JointOutputResult:
 
     grad_input: ComputedBuffer
     captured_grads_compute: list[ComputedBuffer]
-    captured_grads: list[Optional[TensorBox]]
+    captured_grads: list[TensorBox | None]
     mutated_grads: list[TensorBox]
 
 
@@ -1010,7 +1012,7 @@ def flex_attention_backward(*args, **kwargs):
         15: create_indices_fake,
     }
 
-    broadcasted_grad_key = autotune_select_algorithm(
+    broadcasted_grad_key, _ = autotune_select_algorithm(
         "flex_attention_backward",
         choices,
         [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
@@ -1054,7 +1056,7 @@ def get_bwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults,
     mask_graph_buffer: SubgraphResults,
     joint_outputs: JointOutputResult,
-) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
+) -> list[ComputedBuffer | TensorBox | None]:
     subgraph_buffer = (
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )

@@ -23,10 +23,11 @@ import functools
 import inspect
 import itertools
 import logging
+import traceback
 import types
 import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import torch._C
@@ -70,7 +71,7 @@ if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
     from . import AutogradFunctionContextVariable
 
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Generator, Iterable
 from typing import ParamSpec, TypeVar
 
 
@@ -109,6 +110,21 @@ class OutputSpec:
             and self.const_values is not None
         ):
             assert len(self.masks_to_filter_const_values) == len(self.const_values)
+
+
+@dataclass(frozen=True)
+class SubgraphTracingInfo:
+    """Properties observed during subgraph tracing.
+
+    Expandable container for metadata collected while tracing a HOP subgraph.
+    Future additions may include aliasing info, mutation info, etc.
+    """
+
+    # User code stack at the point where the first externally-visible side
+    # effect was detected.  None means no side effect was observed.
+    side_effect_stack: traceback.StackSummary | None = None
+    # All sources accessed via VariableBuilder during the subgraph trace.
+    traced_sources: OrderedSet[Any] = field(default_factory=OrderedSet)
 
 
 # This function is a syntax sugar for creating a dummy new subtracer so that
@@ -232,22 +248,7 @@ def only_consist_of(
 # A more read-able syntax sugar for creating a UserFunctionVariable for f
 # and run call_function on it. Make it return a function to preserve the calling
 # convention of the original f.
-def _make_inlined(
-    tx: "InstructionTranslator", f: Callable[..., Any]
-) -> Callable[..., VariableTracker]:
-    assert callable(f), "Expect f to be a python callable."
-
-    def inline_call(
-        *args: VariableTracker, **kwargs: VariableTracker
-    ) -> VariableTracker:
-        from torch._dynamo.trace_rules import _force_inline
-
-        with _force_inline():
-            # We cannot use SourcelessBuilder here because it ignores _force_inline.
-            # since the rules are static.
-            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
-
-    return inline_call
+from torch._dynamo.utils import _make_inlined
 
 
 def add_call_function(
@@ -256,7 +257,7 @@ def add_call_function(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     flat_example_value: Any,
-    config: Optional[NestedCompileRegionOptions] = None,
+    config: NestedCompileRegionOptions | None = None,
 ) -> VariableTracker:
     from .builder import wrap_fx_proxy
 
@@ -1469,8 +1470,8 @@ def speculate_subgraph_with_auto_output_flattening(
     *,
     # source_target is the .value of HigherOrderOpVariable and is the
     # target of the proxy that we created for the higherOrderOperator.
-    source_target: Optional[HigherOrderOperator] = None,
-    enable_grad: Optional[bool] = None,
+    source_target: HigherOrderOperator | None = None,
+    enable_grad: bool | None = None,
     # automatic: relies on Dynamo to find the used tensors and lift them as
     # inputs.
     #
@@ -1544,6 +1545,7 @@ def speculate_subgraph_with_auto_output_flattening(
     | tuple[
         VariableTracker, ...
     ],  # graph_output_vts: Tensor/symint VTs that are actual FX graph outputs
+    SubgraphTracingInfo,  # tracing_info: Properties observed during subgraph tracing
 ]:
     """
     Speculate subgraph for Higher-Order Operators (HOPs) with automatic output flattening.
@@ -1632,14 +1634,15 @@ def speculate_subgraph_with_auto_output_flattening(
         )
 
     try:
-        # ensure guards on args get installed in parent subgraph
-        f, sub_args, sub_kwargs = LazyVariableTracker.realize_all(
-            (f, sub_args, sub_kwargs),
-        )
-
         with tx.output.subtracer(source_target, tracer, description) as subtracer:
             args = get_hop_args(
-                tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
+                tx,
+                f,
+                subtracer,
+                list(sub_args),
+                sub_kwargs,
+                set_subgraph_inputs,
+                description,
             )
 
             # Special case - if users uses
@@ -1690,7 +1693,6 @@ def speculate_subgraph_with_auto_output_flattening(
             # be actual FX graph outputs.
             # Collect only tensor and symint VTs that should be graph outputs.
             # We walk the output structure and extract proxyable VTs.
-            # pyrefly: ignore [implicit-any]
             graph_output_vt_list = []
 
             def visit(vt: VariableTracker) -> None:
@@ -1797,11 +1799,18 @@ def speculate_subgraph_with_auto_output_flattening(
             # - `lifted_freevars`: Free variables lifted as inputs to the subgraph
             # - `graph_output_vts`: Only the tensor/symint VTs that are actual
             #   FX graph outputs (basically the vts associated with graph outputs)
+            # - `tracing_info`: Properties observed during subgraph tracing
+            tracing_info = SubgraphTracingInfo(
+                side_effect_stack=subtracer.side_effect_stack,
+                traced_sources=subtracer.traced_sources,
+            )
+
             return (
                 output,
                 graph,
                 lifted_freevars,
                 graph_output_vts,
+                tracing_info,
             )
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
@@ -2084,7 +2093,7 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
     # Subclasses should set _HOP_NAME to enable automatic HOP context in error messages
-    _HOP_NAME: Optional[str] = None
+    _HOP_NAME: str | None = None
     # Set to False for HOPs that hard error on graph break (e.g., cond, map, scan); otherwise
     # HOPs will fall back to eager.
     _ALLOW_FALLBACK_TO_EAGER: bool = True
@@ -2201,6 +2210,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         from . import ListVariable
+
+        self.supports_input_mutation = not torch.is_grad_enabled()
+        self.supports_aliasing = not torch.is_grad_enabled()
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -3305,6 +3317,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         GraphModule,
         str,
         VariableTracker | tuple[VariableTracker, ...],
+        SubgraphTracingInfo,
     ]:
         # See NOTE [HigherOrderOperator tracing design] for more details
         (
@@ -3312,6 +3325,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_graph,
             body_lifted_freevars,
             body_graph_output_vts,
+            tracing_info,
         ) = speculate_subgraph_with_auto_output_flattening(
             tx,
             fn_vt,
@@ -3358,6 +3372,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_gmod,
             body_name,
             body_graph_output_vts,
+            tracing_info,
         )
 
     def _call_function(
@@ -3375,6 +3390,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             _,
             _,
             body_graph_output_vts,
+            _,
         ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "wrap")
 
         if len(p_kwargs) > 0:
@@ -3644,6 +3660,7 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
             body_gmod,
             _,
             body_graph_output_vts,
+            _,
         ) = self.create_wrapped_node(
             tx,
             args[0],  # function
@@ -3841,6 +3858,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             checkpointed_gmod,
             _,
             body_graph_output_vts,
+            _,
         ) = self.create_wrapped_node(
             tx,
             args[0],
@@ -3896,6 +3914,7 @@ class DynamoBypassingWrapperHigherOrderVariable(WrapHigherOrderVariable):
             gmod,
             _,
             body_graph_output_vts,
+            _,
         ) = self.create_wrapped_node(
             tx,
             args[1],
@@ -4473,7 +4492,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
 
         # Speculate subgraph on the fwd
-        fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts = (
+        fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts, _ = (
             speculate_subgraph_with_auto_output_flattening(
                 tx,
                 fwd_fn,
@@ -4528,7 +4547,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         """
         Traces the backward method of the autograd.Function object.
         """
-        from . import UserDefinedClassVariable, UserMethodVariable
+        from . import UserMethodVariable
 
         # Note that for the forward, we do not restore side effects, because we
         # want the later tracing to see the side-effects. But for backward, we
@@ -4573,7 +4592,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             tx.strict_translation_mode(is_strict_for),
         ):
             try:
-                bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
+                bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts, _ = (
                     speculate_subgraph_with_auto_output_flattening(
                         tx,
                         bwd_fn,
@@ -4610,7 +4629,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 elif isinstance(self.bwd_fn, types.MethodType):
                     bwd_fn = UserMethodVariable(
                         autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                        UserDefinedClassVariable(self.bwd_fn.__class__),
+                        VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
                     unimplemented(
@@ -4625,7 +4644,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
                     [],
                 ):
-                    bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
+                    bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts, _ = (
                         speculate_subgraph_with_auto_output_flattening(
                             tx,
                             bwd_fn,
@@ -5000,7 +5019,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         method_name: str,
         args: Sequence[VariableTracker],
     ) -> tuple[VariableTracker, Sequence[VariableTracker]]:
-        from . import UserDefinedClassVariable, UserMethodVariable
+        from . import UserMethodVariable
 
         source = None
         if self.parent_source:
@@ -5016,7 +5035,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fn_vt = VariableTracker.build(tx, fn, source=source)
             fn_args = [ctx, *args]
         elif isinstance(fn, types.MethodType):
-            cls_vt = UserDefinedClassVariable(fn.__class__)
+            cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
                 fn.__func__,
                 cls_vt,
@@ -5098,6 +5117,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             _,
             _,
             body_graph_output_vts,
+            _,
         ) = self.create_wrapped_node(
             tx, args[0], args[1:], {}, self.value._name, subgraph_name="subgraph"
         )
@@ -5201,7 +5221,21 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # This flattens the kwargs into lifted args
+        fn_var = args[0]
+        fn_args_vt = args[1:]
+
+        config = None
+        if hasattr(fn_var, "get_function"):
+            try:
+                fn = fn_var.get_function()
+                config = getattr(fn, "__marked_compile_region_config__", None)
+            except Exception:
+                log.warning(
+                    "Failed to extract nested_compile_region() config from InvokeSubgraphHigherOrderVariable. ",
+                    exc_info=True,
+                )
+                raise
+
         assert self._HOP_NAME is not None
         (
             p_args,
@@ -5211,7 +5245,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             body_gmod,
             body_name,
             body_graph_output_vts,
-        ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, self._HOP_NAME)
+            tracing_info,
+        ) = self.create_wrapped_node(tx, fn_var, fn_args_vt, kwargs, self._HOP_NAME)
 
         if len(p_kwargs) > 0:
             unimplemented(
@@ -5223,30 +5258,15 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 ],
             )
 
-        # Extract nested compile config and store in node meta
-        # This will be used in regional_inductor_invoke_subgraph
-        config = None
-        fn_var = args[0]
-        if hasattr(fn_var, "get_function"):
-            try:
-                fn = fn_var.get_function()
-
-                if hasattr(fn, "__marked_compile_region_config__"):
-                    config = fn.__marked_compile_region_config__
-                    if config is not None:
-                        body_gmod.meta["nested_region_config"] = config
-            except Exception:
-                log.warning(
-                    "Failed to extract nested_compile_region() config from InvokeSubgraphHigherOrderVariable. ",
-                    exc_info=True,
-                )
-                raise
+        if isinstance(config, NestedCompileRegionOptions):
+            body_gmod.meta["nested_region_config"] = config
 
         p_args = (
             p_args[0],
             body_name,
             *p_args[1:],
         )
+
         return _call_function_with_auto_output_flattening(  # type: ignore[return-value]
             tx,
             torch._higher_order_ops.invoke_subgraph,
@@ -5415,6 +5435,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_gmod,
             body_name,
             body_graph_output_vts,
+            _,
         ) = self.create_wrapped_node(
             tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
         )

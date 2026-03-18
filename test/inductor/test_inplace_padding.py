@@ -241,7 +241,8 @@ class InplacePaddingTest(TestCase):
 
         expect = (f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
         actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
-        assert same(expect, actual, tol=1e-2), f"ref:\n{expect}\nact:\n{actual}"
+        if not same(expect, actual, tol=1e-2):
+            raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
         # We may disable inplace_padding via env-var to test perf.
         self.assertEqual(num_inplace_padding(), int(inductor_config.inplace_padding))

@@ -17,6 +17,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
+    AuxRequest,
     create_block_mask,
     flex_attention,
 )
@@ -326,22 +327,32 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2, *, dynamic
         kernel_options={"BACKEND": "TRITON"},
     )
 
-    assert out_flash.shape == out_ref_fp32.shape == out_triton.shape
-    assert not torch.isnan(out_flash).any()
-    assert not torch.isnan(out_triton).any()
-    assert not torch.isnan(out_ref_fp32).any()
-    assert torch.isfinite(out_flash).all()
-    assert torch.isfinite(out_triton).all()
-    assert torch.isfinite(out_ref_fp32).all()
+    if not (out_flash.shape == out_ref_fp32.shape == out_triton.shape):
+        raise AssertionError(
+            f"Shape mismatch: flash={out_flash.shape}, ref={out_ref_fp32.shape}, triton={out_triton.shape}"
+        )
+    if torch.isnan(out_flash).any():
+        raise AssertionError("out_flash contains NaN")
+    if torch.isnan(out_triton).any():
+        raise AssertionError("out_triton contains NaN")
+    if torch.isnan(out_ref_fp32).any():
+        raise AssertionError("out_ref_fp32 contains NaN")
+    if not torch.isfinite(out_flash).all():
+        raise AssertionError("out_flash contains non-finite values")
+    if not torch.isfinite(out_triton).all():
+        raise AssertionError("out_triton contains non-finite values")
+    if not torch.isfinite(out_ref_fp32).all():
+        raise AssertionError("out_ref_fp32 contains non-finite values")
 
     fwd_atol = 2 * (out_ref_fp32 + 0.3 - 0.3 - out_ref_fp32).abs().max().item()
 
     triton_error = (out_triton - out_ref_fp32).abs().max().item()
     flash_error = (out_flash - out_ref_fp32).abs().max().item()
 
-    assert flash_error <= rtol * triton_error + fwd_atol, (
-        f"Flash error {flash_error:.2e} exceeds {rtol}x Triton error {triton_error:.2e} + {fwd_atol:.2e}"
-    )
+    if flash_error > rtol * triton_error + fwd_atol:
+        raise AssertionError(
+            f"Flash error {flash_error:.2e} exceeds {rtol}x Triton error {triton_error:.2e} + {fwd_atol:.2e}"
+        )
 
     needs_backward = any(
         isinstance(t, torch.Tensor) and t.requires_grad for t in (q, k, v)
@@ -361,17 +372,21 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2, *, dynamic
         for grad_flash, grad_triton, grad_ref, atol in zip(
             grads_flash, grads_triton, grads_ref, atol_pack
         ):
-            assert torch.isfinite(grad_flash).all()
-            assert torch.isfinite(grad_triton).all()
-            assert torch.isfinite(grad_ref).all()
+            if not torch.isfinite(grad_flash).all():
+                raise AssertionError("grad_flash contains non-finite values")
+            if not torch.isfinite(grad_triton).all():
+                raise AssertionError("grad_triton contains non-finite values")
+            if not torch.isfinite(grad_ref).all():
+                raise AssertionError("grad_ref contains non-finite values")
 
             triton_error = (grad_triton - grad_ref).abs().max().item()
             flash_error = (
                 (grad_flash - grad_ref.to(grad_flash.dtype)).abs().max().item()
             )
-            assert flash_error <= rtol * triton_error + atol, (
-                f"Flash error {flash_error:.2e} exceeds {rtol}x Triton error {triton_error:.2e} + {atol:.2e}"
-            )
+            if flash_error > rtol * triton_error + atol:
+                raise AssertionError(
+                    f"Flash error {flash_error:.2e} exceeds {rtol}x Triton error {triton_error:.2e} + {atol:.2e}"
+                )
 
     return out_flash, out_triton, out_ref_fp32
 
@@ -1207,6 +1222,44 @@ class TestFlexFlash(InductorTestCase):
             "FLASH backend backward does not support differentiating through logsumexp",
         ):
             loss.backward()
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_backend_raises_on_return_max_scores(self, device, dtype):
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Returning max scores is not supported with BACKEND='FLASH'",
+        ):
+            flex_attention(
+                q,
+                k,
+                v,
+                return_aux=AuxRequest(max_scores=True),
+                kernel_options={"BACKEND": "FLASH"},
+            )
+
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: IS_SM90,
+    )
+    @torch._inductor.config.patch(max_autotune=True)
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize(
+        "score_mod_fn",
+        [_times_two, _rel_bias],
+        name_fn=lambda fn: fn.__name__,
+    )
+    def test_max_autotune_score_mod(self, device, dtype, score_mod_fn):
+        q, k, v = create_test_tensors(
+            batch_size=2,
+            num_heads=4,
+            seq_len=257,
+            dim=64,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+        flash_vs_triton(q, k, v, score_mod=score_mod_fn)
 
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")

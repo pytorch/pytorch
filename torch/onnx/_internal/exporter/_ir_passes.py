@@ -116,7 +116,6 @@ def rename_axis(
                 continue
             dim_name = dim.value
             if dim_name in sorted_rename_mapping:
-                # pyrefly: ignore [bad-index]
                 new_shape.append(sorted_rename_mapping[dim_name])
                 changed = True
             elif dim_name is not None:

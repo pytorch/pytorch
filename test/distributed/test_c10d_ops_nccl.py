@@ -22,13 +22,12 @@ if not c10d.is_available() or not c10d.is_nccl_available():
 
 
 import torch.distributed as dist
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcContinuousTest,
     requires_nccl,
     requires_nccl_version,
-    sm_is_or_higher_than,
 )
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -245,10 +244,11 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not PLATFORM_SUPPORTS_FP8, "Float8 requires sm >= 90"
+    )
     def test_allreduce_float8(self):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
-        if not sm_is_or_higher_than(device, 9, 0):
-            self.skipTest("Float8 requires sm >= 90")
 
         numel = 1024
         tensor = torch.ones(numel, dtype=torch.float32, device=device).to(
@@ -950,10 +950,11 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
     @requires_nccl_version((2, 24), "Need NCCL 2.24+ for Float8")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        not PLATFORM_SUPPORTS_FP8, "Float8 requires sm >= 90"
+    )
     def test_reduce_scatter_float8(self):
         device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
-        if not sm_is_or_higher_than(device, 9, 0):
-            self.skipTest("Float8 requires sm >= 90")
 
         numel = 1024
         output_tensor = torch.zeros(numel, dtype=torch.float32, device=device).to(

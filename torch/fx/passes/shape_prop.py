@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import traceback
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import torch
 import torch.fx
@@ -26,7 +26,7 @@ class TensorMetadata(NamedTuple):
     dtype: torch.dtype
     requires_grad: bool
     stride: tuple[int, ...]
-    memory_format: Optional[torch.memory_format]
+    memory_format: torch.memory_format | None
 
     # Quantization metadata
     is_quantized: bool

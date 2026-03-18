@@ -25,7 +25,6 @@ Note:
 from __future__ import annotations
 
 import copy
-from typing import Optional
 
 import onnx_test_common
 import parameterized
@@ -218,7 +217,8 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
 OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_SUBTESTS)
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
-assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
+if not TESTED_OPS.issubset(ALL_OPS_IN_DB):
+    raise AssertionError(f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB")
 
 
 class SingleOpModel(torch.nn.Module):
@@ -235,14 +235,15 @@ class SingleOpModel(torch.nn.Module):
 
 def _should_skip_xfail_test_sample(
     op_name: str, sample
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """Returns a reason if a test sample should be skipped."""
     if op_name not in OP_WITH_SKIPPED_XFAIL_SUBTESTS:
         return None, None
     for decorator_meta in SKIP_XFAIL_SUBTESTS:
         # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS. That's fine because the list is small.
         if decorator_meta.op_name == op_name:
-            assert decorator_meta.matcher is not None, "Matcher must be defined"
+            if decorator_meta.matcher is None:
+                raise AssertionError("Matcher must be defined")
             if decorator_meta.matcher(sample):
                 return decorator_meta.test_behavior, decorator_meta.reason
     return None, None
@@ -281,7 +282,8 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""
         # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
-        assert device == "cpu"
+        if device != "cpu":
+            raise AssertionError(f"Expected device 'cpu', got {device!r}")
 
         samples = op.sample_inputs(
             device,

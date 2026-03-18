@@ -6,7 +6,7 @@ import logging
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -16,6 +16,7 @@ from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
 from torch._inductor import comms
+from torch._inductor.custom_graph_pass import CustomInferenceAwareGraphPass
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
@@ -137,6 +138,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
+        if isinstance(post_grad_custom_pre_pass, CustomInferenceAwareGraphPass):
+            post_grad_custom_pre_pass = functools.partial(
+                post_grad_custom_pre_pass, is_inference=is_inference
+            )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             post_grad_custom_pre_pass
         )
@@ -217,6 +222,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
+        if isinstance(post_grad_custom_post_pass, CustomInferenceAwareGraphPass):
+            post_grad_custom_post_pass = functools.partial(
+                post_grad_custom_post_pass, is_inference=is_inference
+            )
         GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
             post_grad_custom_post_pass
         )
@@ -251,7 +260,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
-                config.bucket_reduce_scatters_fx,  # type: ignore[arg-type]
+                config.bucket_reduce_scatters_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -283,7 +292,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_all_gathers_fx_bucket_size_determinator,
-                config.bucket_all_gathers_fx,  # type: ignore[arg-type]
+                config.bucket_all_gathers_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -723,12 +732,16 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
 
 
 @init_once_fakemode
-def lazy_init(input_device: Optional[torch.device] = None):
+def lazy_init(input_device: torch.device | None = None):
     if torch._C._has_mkldnn:
         from . import decompose_mem_bound_mm  # noqa: F401
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
+    else:
+        from .quantization import _register_woq_lowerings
+
+        _register_woq_lowerings()
 
     # Put this patterns in post-grad pass rather than joint-graph
     # pass since otherwise there will be perf/peak-memory regression:
@@ -1517,6 +1530,12 @@ def should_prefer_unfused_addmm(match):
     extra_check=should_prefer_unfused_addmm,
 )
 def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
+    if config.keep_addmm_fused_for_half_dtypes and inp.meta["val"].dtype in (
+        torch.bfloat16,
+        torch.float16,
+    ):
+        return
+
     def repl(inp, x1, x2, alpha, beta):
         mm_result = x1 @ x2
         if alpha != 1:
@@ -1858,7 +1877,8 @@ class ConstructorMoverPass:
                         lambda x: x
                         not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
                         + unsqueezed_nodes
-                        and x.target != torch.ops.aten.copy_.default,
+                        and x.target != torch.ops.aten.copy_.default
+                        and x.target != "output",
                     )
                     last_node = gpu_node
 
@@ -1934,6 +1954,7 @@ class ConstructorMoverPass:
                     del cpu_indeg[user]
                 elif (
                     self.allow_inputs
+                    and self.is_on_target_device(user)
                     and self.all_inputs_are_cpu_scalar_or_on_target_device(user)
                 ):
                     # this node takes only cpu scalar tensors or gpu tensors as inputs
