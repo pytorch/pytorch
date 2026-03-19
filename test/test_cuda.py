@@ -5897,7 +5897,9 @@ class TestMemPool(TestCase):
         super().setUp()
         # Ensure a clean state for memory pool tests. Some tests in this class or
         # previous classes might have changed allocator settings.
-        torch.cuda.memory._set_allocator_settings("expandable_segments:False,graph_capture_record_stream_reuse:False")
+        torch.cuda.memory._set_allocator_settings(
+            "expandable_segments:False,graph_capture_record_stream_reuse:False"
+        )
         gc.collect()
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
