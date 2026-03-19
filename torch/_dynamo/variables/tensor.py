@@ -886,15 +886,17 @@ class TensorVariable(VariableTracker):
                     from_exc=e,
                 )
 
-        # Only allow methods that are known tensor methods (defined on
-        # torch.Tensor or torch._C.TensorBase). Unknown methods should not
-        # be silently traced into the graph.
-        if name not in all_tensor_attrs:
+        # Guard against unknown methods reaching the generic proxy path.
+        # Use the actual tensor class (self.class_type) rather than the static
+        # all_tensor_attrs dict so that tensor subclass methods (e.g.
+        # DTensor.redistribute, NestedTensor.to_padded_tensor) are allowed.
+        if not hasattr(self.class_type, name):
             unimplemented(
                 gb_type="Unhandled tensor method",
                 context=f"call_method {self} {name} {args} {kwargs}",
-                explanation=f"Tensor method `{name}` is not a known torch.Tensor "
-                "method and does not have an explicit handler in TensorVariable.",
+                explanation=f"Tensor method `{name}` is not defined on "
+                f"{self.class_type.__name__} and does not have an explicit "
+                "handler in TensorVariable.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 

@@ -1687,12 +1687,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
-    def test_unknown_tensor_method_graph_break(self):
-        # Methods not in all_tensor_attrs should graph break rather than
-        # being silently proxied through the generic call_method fallthrough.
-        # The function name must match the attribute name so dynamo recognizes
-        # it as a bound tensor method (reaching TensorVariable.call_method)
-        # rather than inlining it as a user function.
+    def test_tensor_subclass_method_traced(self):
+        # Methods defined on the actual tensor class (including dynamically
+        # added ones) should be proxied through the generic call_method path,
+        # not graph-broken.  This validates that the guard uses the concrete
+        # class_type rather than the static all_tensor_attrs dict.
         def _dynamo_test_method(self):
             return self + 1
 
@@ -1706,8 +1705,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 return y + 1
 
             result = fn(torch.randn(4))
-            # Graph break on unknown method means multiple frames
-            self.assertGreater(cnt.frame_count, 1)
+            # Method exists on torch.Tensor, so it should be traced (not graph-broken)
+            self.assertEqual(cnt.frame_count, 1)
         finally:
             del torch.Tensor._dynamo_test_method
 
