@@ -1548,6 +1548,7 @@ class TestProfiler(TestCase):
             x = torch.randn(32, 32, device="cuda")
             torch.mm(x, x)
 
+        # Collect async CPU->GPU flow info from events()
         events_with_flow = [
             e for e in prof.events() if e.flow_id is not None and e.flow_id != 0
         ]
@@ -1560,6 +1561,7 @@ class TestProfiler(TestCase):
             self.assertIsInstance(e.flow_type, int)
             self.assertIsInstance(e.flow_start, bool)
 
+        # Verify parity with Chrome trace JSON for async CPU->GPU flow
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
             with open(fname) as f:
@@ -1573,6 +1575,7 @@ class TestProfiler(TestCase):
             json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
             json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
 
+            # kLinkAsyncCpuGpu = 2
             ac2g_events = [e for e in events_with_flow if e.flow_type == 2]
             events_flow_starts = {e.flow_id for e in ac2g_events if e.flow_start}
             events_flow_ends = {e.flow_id for e in ac2g_events if not e.flow_start}
@@ -1586,6 +1589,48 @@ class TestProfiler(TestCase):
                 json_flow_ends,
                 events_flow_ends,
                 "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
+            )
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_timestamp_consistency(self):
+        """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            x = torch.randn(32, 32, device="cuda")
+            torch.mm(x, x)
+
+        trace_start_ns = prof.profiler.kineto_results.trace_start_ns()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            # Chrome trace is relative to a different base time which is not exposed in Python.
+            # It's probably not important to do so as we still have the relative differences
+            # in duration.
+            base_time_ns = j.get("baseTimeNanoseconds", 0)
+
+            # Grab mm timestamp from events() and json
+            fe_mm = next((e for e in prof.events() if e.name == "aten::mm"), None)
+            json_mm = next(
+                (
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name") == "aten::mm" and e.get("ph") == "X"
+                ),
+                None,
+            )
+
+            # Reconstruct Chrome trace ts from events():
+            # absolute_ns = mm_op_start_us * 1000 + trace_start_ns
+            # chrome_ts = (absolute_ns - base_time_ns) / 1000 -> realign with json timeframe
+            absolute_ns = int(fe_mm.time_range.start * 1000) + trace_start_ns
+            recovered_ts = (absolute_ns - base_time_ns) / 1000
+            self.assertEqual(
+                recovered_ts,
+                json_mm["ts"],
+                msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
             )
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
