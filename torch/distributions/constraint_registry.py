@@ -231,7 +231,13 @@ def _transform_to_interval(constraint):
     loc = constraint.lower_bound
     scale = constraint.upper_bound - constraint.lower_bound
     return transforms.ComposeTransform(
-        [transforms.SigmoidTransform(), transforms.AffineTransform(loc, scale)]
+        [
+            transforms.SigmoidTransform(),
+            transforms.AffineTransform(
+                loc,  # pyrefly: ignore[bad-argument-type]
+                scale,  # pyrefly: ignore[bad-argument-type]
+            ),
+        ]
     )
 
 

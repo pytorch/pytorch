@@ -227,7 +227,10 @@ def _compare_onnx_pytorch_outputs_in_np(
             # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
             if not options.check_shape:
                 # Allow different but broadcastable output shapes.
-                ort_out, pt_out = np.broadcast_arrays(ort_out, pt_out)
+                ort_out, pt_out = np.broadcast_arrays(
+                    ort_out,  # pyrefly: ignore[bad-argument-type]
+                    pt_out,  # pyrefly: ignore[bad-argument-type]
+                )
             torch.testing.assert_close(
                 ort_out,
                 pt_out,
@@ -239,7 +242,9 @@ def _compare_onnx_pytorch_outputs_in_np(
         except AssertionError as e:
             if acceptable_error_percentage:
                 error_percentage = 1 - np.sum(
-                    np.isclose(ort_out, pt_out, rtol=options.rtol, atol=options.atol)
+                    np.isclose(  # pyrefly: ignore[no-matching-overload]
+                        ort_out, pt_out, rtol=options.rtol, atol=options.atol
+                    )
                 ) / np.prod(ort_out.shape)  # pyrefly: ignore [missing-attribute]
                 if error_percentage <= acceptable_error_percentage:
                     warnings.warn(

@@ -146,8 +146,8 @@ class Measurement:
         lower_bound = int(n_total // 4)
         upper_bound = int(torch.tensor(3 * n_total / 4).ceil())
         interquartile_points: tuple[float, ...] = self._sorted_times[lower_bound:upper_bound]
-        std = torch.tensor(interquartile_points).std(unbiased=False).item()
-        sqrt_n = torch.tensor(len(interquartile_points)).sqrt().item()
+        std = cast(float, torch.tensor(interquartile_points).std(unbiased=False).item())
+        sqrt_n = cast(float, torch.tensor(len(interquartile_points)).sqrt().item())
 
         # Rough estimates. These are by no means statistically rigorous.
         confidence_interval = max(1.645 * std / sqrt_n, _MIN_CONFIDENCE_INTERVAL)
@@ -164,10 +164,10 @@ class Measurement:
         if self.raw_times and not self._sorted_times:
             self._sorted_times = tuple(sorted(self.times))
             _sorted_times = torch.tensor(self._sorted_times, dtype=torch.float64)
-            self._median = _sorted_times.quantile(.5).item()
-            self._mean = _sorted_times.mean().item()
-            self._p25 = _sorted_times.quantile(.25).item()
-            self._p75 = _sorted_times.quantile(.75).item()
+            self._median = cast(float, _sorted_times.quantile(.5).item())
+            self._mean = cast(float, _sorted_times.mean().item())
+            self._p25 = cast(float, _sorted_times.quantile(.25).item())
+            self._p75 = cast(float, _sorted_times.quantile(.75).item())
 
             def add_warning(msg: str) -> None:
                 rel_iqr = self.iqr / self.median * 100

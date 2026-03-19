@@ -903,11 +903,13 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.float32]
         if typ is torch.device:
             return [torch.device("cpu")]
-        if typ == torch.types.Number:
+        # int | float | bool is the BC alias for torch.types.Number (before
+        # it included SymInt/SymFloat); infer_schema accepts both.
+        if typ == torch.types.Number or typ == (int | float | bool):
             return [2.718]
         if typ is torch.Tensor:
             return [torch.tensor(3)]
-        if typ == Optional[torch.types.Number]:
+        if typ == Optional[torch.types.Number] or typ == Optional[int | float | bool]:
             return [None, 2.718]
         origin = typing.get_origin(typ)
         if origin is Union:

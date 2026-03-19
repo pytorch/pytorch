@@ -1,3 +1,5 @@
+import typing
+
 import torch
 
 
@@ -116,7 +118,7 @@ def dp_knapsack(
     saved_items.reverse()  # To get items in the order they were added
 
     # The maximum runtime that can be achieved within the max_memory constraint
-    max_runtime = dp[n][quantized_max_memory].item()
+    max_runtime = typing.cast(float, dp[n][quantized_max_memory].item())
 
     return max_runtime, saved_items, recomputable_items
 

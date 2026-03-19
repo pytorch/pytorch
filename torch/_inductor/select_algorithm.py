@@ -4725,7 +4725,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     "All-reduce timeout when collecting benchmark results"
                 )
 
-            timing = time_tensor.item()
+            timing = cast(float, time_tensor.item())
 
             log.info(
                 "Collective benchmark for %s: %.6f ms",
