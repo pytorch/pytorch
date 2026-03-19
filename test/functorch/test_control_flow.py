@@ -9947,7 +9947,7 @@ class <lambda>(torch.nn.Module):
                 out = while_loop(cond_fn, body_fn, (x,))
                 return x + self.buf.sum() + out[0]
 
-        x = torch.tensor([2.0,1.0], requires_grad=False)
+        x = torch.tensor([2.0, 1.0], requires_grad=False)
         fw_gm = self.check(M, (x,), device, dynamic)
         if not TEST_WITH_CROSSREF and not dynamic and device == "cuda":
             self.assertExpectedInline(
@@ -9992,7 +9992,9 @@ class <lambda>(torch.nn.Module):
     @unittest.skipIf(not SM70OrLater, "triton")
     @parametrize("device", ["cuda", "cpu"])
     @parametrize("dynamic", [True, False])
-    def test_while_loop_auto_functionalize_multiple_buffer_mutation(self, device, dynamic):
+    def test_while_loop_auto_functionalize_multiple_buffer_mutation(
+        self, device, dynamic
+    ):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
