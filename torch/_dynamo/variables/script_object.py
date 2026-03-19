@@ -231,9 +231,15 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         ctor_arg_sources: tuple[Source | None, ...] | None = None,
         **options: Any,
     ) -> "TorchScriptObjectVariable":
-        return TorchScriptObjectVariable(
+        out = TorchScriptObjectVariable(
             proxy, value, ctor_args_kwargs, ctor_arg_sources=ctor_arg_sources, **options
         )
+        if isinstance(proxy, torch.fx.Proxy) and proxy.node.op != "placeholder":
+            from torch._dynamo.symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            tx.output.current_tracer.record_proxyable_vt(out)
+        return out
 
     def __init__(
         self,

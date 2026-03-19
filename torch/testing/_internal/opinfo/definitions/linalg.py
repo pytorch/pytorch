@@ -33,6 +33,9 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
+    IS_ARM64,
+    IS_CPU_CAPABILITY_SVE256,
+    IS_LINUX,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
@@ -1599,6 +1602,15 @@ op_db: list[OpInfo] = [
             ),
             # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # see https://github.com/pytorch/pytorch/issues/177249
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cpu",
+                dtypes=[torch.complex64],
+                active_if=IS_LINUX and IS_ARM64 and not IS_CPU_CAPABILITY_SVE256,
+            ),
         ),
     ),
     OpInfo(
@@ -2621,6 +2633,15 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_variant_consistency_eager",
                 device_type="mps",
+            ),
+            # see https://github.com/pytorch/pytorch/issues/177264
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+                device_type="cpu",
+                dtypes=[torch.float32],
+                active_if=IS_ARM64 and IS_LINUX,
             ),
         ),
     ),

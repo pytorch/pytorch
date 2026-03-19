@@ -4342,16 +4342,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(fn(x), opt_fn(x)))
 
     def test_add_sub_alpha_out(self):
-        inp = torch.randn(2, 3, 4)
-        other = 1
-        alpha = 2
+        test_cases = (
+            (torch.randn(2, 3, 4), 1, 2, torch.zeros(2, 3, 4)),
+            (2, 1.1, 0.4, torch.tensor(0.0)),
+        )
         for op in [torch.add, torch.sub]:
-            out = torch.zeros(2, 3, 4)
-            compile_out = torch.zeros(2, 3, 4)
-            op(inp, other, alpha=alpha, out=out)
-            compiled_fn = torch.compile(op, dynamic=True, backend="eager")
-            compiled_fn(inp, other, alpha=alpha, out=compile_out)
-            self.assertTrue(same(out, compile_out))
+            for inp, other, alpha, out in test_cases:
+                compiled_fn = torch.compile(op, dynamic=True, backend="eager")
+                eager_out = out.clone()
+                compiled_out = out.clone()
+                op(inp, other, alpha=alpha, out=eager_out)
+                compiled_fn(inp, other, alpha=alpha, out=compiled_out)
+                self.assertTrue(same(eager_out, compiled_out))
 
     def test_negative_shape_guard(self):
         def fn(x):
@@ -9011,6 +9013,22 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         result2 = fn(x)
         self.assertEqual(result2, torch.tensor([40.0]))
         self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfHpu
+    @requires_cuda
+    def test_deterministic_pad_replicate_compile(self, device):
+        from torch.testing._internal.common_utils import DeterministicGuard
+
+        pad = torch.nn.ReplicationPad1d(2).to(device)
+        compiled_pad = torch.compile(pad, backend="aot_eager", fullgraph=True)
+        x = torch.randn(3, 3, device=device, requires_grad=True)
+        with DeterministicGuard(True):
+            ref = pad(x)
+            res = compiled_pad(x)
+            self.assertEqual(ref, res)
+            grad = torch.autograd.grad(res.sum(), x)
+            ref_grad = torch.autograd.grad(ref.sum(), x)
+            self.assertEqual(grad, ref_grad)
 
 
 instantiate_parametrized_tests(ReproTests)

@@ -403,7 +403,12 @@ class TestViewOps(TestCase):
     @dtypesIfMPS(torch.cfloat, torch.chalf)
     def test_view_as_real(self, device, dtype):
         def fn(contiguous_input=True):
-            t = torch.randn(3, 4, dtype=dtype, device=device)
+            # `torch.bcomplex32` doesn't have randn yet
+            real_dt = torch.empty((0,), dtype=dtype, device=device).real.dtype
+            r = torch.randn(3, 4, dtype=real_dt, device=device)
+            c = torch.randn(3, 4, dtype=real_dt, device=device)
+            t = torch.complex(r, c)
+            self.assertEqual(t.dtype, dtype)
             input = self._do_transpose(t, contiguous_input)
             res = torch.view_as_real(input)
             self.assertEqual(res[:, :, 0], input.real)

@@ -3,7 +3,6 @@ import abc
 import cmath
 import collections.abc
 import contextlib
-import typing
 from collections.abc import Callable, Collection, Sequence
 from typing import Any, NoReturn
 from typing_extensions import deprecated
@@ -18,6 +17,37 @@ try:
 except ModuleNotFoundError:
     HAS_NUMPY = False
     np = None  # type: ignore[assignment]
+
+_HAS_DTENSOR = torch.distributed.is_available()
+
+
+def _unwrap_dtensor_for_comparison(actual, expected):
+    """Handle DTensor inputs for assertEqual/assert_close."""
+    if not _HAS_DTENSOR:
+        return actual, expected
+    from torch.distributed.tensor import DTensor
+
+    actual_dt = isinstance(actual, DTensor)
+    expected_dt = isinstance(expected, DTensor)
+    if actual_dt and expected_dt:
+        if actual.placements != expected.placements:
+            raise AssertionError(
+                f"DTensor placements do not match: "
+                f"{actual.placements} != {expected.placements}"
+            )
+        if actual.device_mesh != expected.device_mesh:
+            raise AssertionError(
+                f"DTensor device meshes do not match: "
+                f"{actual.device_mesh} != {expected.device_mesh}"
+            )
+        return actual.to_local(), expected.to_local()
+    elif actual_dt != expected_dt:
+        raise TypeError(
+            "Comparing a DTensor to a non-DTensor is ambiguous. "
+            "Call .full_tensor() to compare the full logical tensor "
+            "or .to_local() to compare the local shard."
+        )
+    return actual, expected
 
 
 class ErrorMeta(Exception):
@@ -223,8 +253,8 @@ def _make_mismatch_msg(
 
 
 def make_scalar_mismatch_msg(
-    actual: torch.types.Number | complex,
-    expected: torch.types.Number | complex,
+    actual: bool | int | float | complex,
+    expected: bool | int | float | complex,
     *,
     rtol: float,
     atol: float,
@@ -241,16 +271,16 @@ def make_scalar_mismatch_msg(
             as callable in which case it will be called by the default value to create the description at runtime.
             Defaults to "Scalars".
     """
-    abs_diff = abs(actual - expected)  # pyrefly: ignore[bad-argument-type]
+    abs_diff = abs(actual - expected)
     # pyrefly: ignore [bad-argument-type]
     rel_diff = float("inf") if expected == 0 else abs_diff / abs(expected)
     return _make_mismatch_msg(
         default_identifier="Scalars",
         identifier=identifier,
         extra=f"Expected {expected} but got {actual}.",
-        abs_diff=abs_diff,  # pyrefly: ignore[bad-argument-type]
+        abs_diff=abs_diff,
         atol=atol,
-        rel_diff=rel_diff,  # pyrefly: ignore[bad-argument-type]
+        rel_diff=rel_diff,
         rtol=rtol,
     )
 
@@ -329,10 +359,10 @@ def make_tensor_mismatch_msg(
         default_identifier="Tensor-likes",
         identifier=identifier,
         extra=extra,
-        abs_diff=typing.cast(float, max_abs_diff.item()),
+        abs_diff=max_abs_diff.item(),
         abs_diff_idx=unravel_flat_index(int(max_abs_diff_flat_idx)),
         atol=atol,
-        rel_diff=typing.cast(float, max_rel_diff.item()),
+        rel_diff=max_rel_diff.item(),
         rel_diff_idx=unravel_flat_index(int(max_rel_diff_flat_idx)),
         rtol=rtol,
     )
@@ -1573,6 +1603,8 @@ def assert_close(
     """
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
+
+    actual, expected = _unwrap_dtensor_for_comparison(actual, expected)
 
     error_metas = not_close_error_metas(
         actual,
