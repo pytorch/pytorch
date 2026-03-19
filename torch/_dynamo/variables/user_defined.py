@@ -1066,10 +1066,18 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
-        ) -> VariableTracker:
-        real_args = [a.as_python_constant() for a in args]
-        real_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-        return VariableTracker.build(tx, self.value(*real_args, **real_kwargs))
+    ) -> VariableTracker:
+        if self.source is None:
+            # NB: If source is added via side effects, create the exception
+            # object through side_effects as well. See FrozenDataClass creation
+            var = tx.output.side_effects.track_new_user_defined_object(
+                self,
+                self,
+                list(args),
+            )
+            var.call_method(tx, "__init__", list(args), dict(kwargs))
+            return var
+        return super().call_function(tx, args, kwargs)
 
 
 class UserDefinedEnumClassVariable(UserDefinedClassVariable):
