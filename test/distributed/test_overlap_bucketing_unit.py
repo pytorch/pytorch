@@ -1070,6 +1070,7 @@ class TestCrossPGOverlap(InductorTestCase):
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+@instantiate_parametrized_tests
 class TestFusibleNodeOverlap(InductorTestCase):
     """Test that fusible nodes are used for overlapping with collectives."""
 
@@ -1186,6 +1187,56 @@ class TestFusibleNodeOverlap(InductorTestCase):
         FileCheck().check("all_gather_into_tensor").check("add").check("mul").check(
             "sub"
         ).check("wait_tensor").run(graph_str)
+
+    @parametrize("enable_fusion_regions", [False, True])
+    def test_precomputed_estimations_via_custom_runtime(self, enable_fusion_regions):
+        """Pre-computed estimations from gather_node_runtime_estimations can be
+        fed into OverlapScheduler via custom_runtime_estimation wrapping a dict."""
+
+        def func(a):
+            group_name = "0"
+            group_size = 1
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            b = a + 1
+            b = b * 2
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+            return ag_out.sum() + b.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(1024, 1024, device=self.device)
+            traced = make_fx(func)(a)
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            gather_node_runtime_estimations,
+            OverlapScheduler,
+        )
+
+        estimations, fusion_region_of = gather_node_runtime_estimations(
+            traced,
+            collective_estimator="analytical",
+            enable_fusion_regions=enable_fusion_regions,
+        )
+        for node in fusion_region_of:
+            self.assertIn(node, estimations)
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=lambda node, _: estimations.get(node),
+            collective_estimator="analytical",
+        )
+        out = scheduler.run()
+        FileCheck().check("all_gather_into_tensor").check("wait_tensor").run(
+            str(out.graph)
+        )
+        self.assertEqual(len(scheduler.collective_info), 1)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])

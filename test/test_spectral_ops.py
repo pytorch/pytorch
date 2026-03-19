@@ -20,7 +20,6 @@ from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
 from torch._prims_common import corresponding_complex_dtype
 
-from typing import Optional
 from packaging import version
 
 
@@ -222,8 +221,11 @@ class TestFFT(TestCase):
                 }
 
                 y = backward(forward(x, **kwargs), **kwargs)
-                if x.dtype is torch.half and y.dtype is torch.complex32:
-                    # Since type promotion currently doesn't work with complex32
+                if (
+                    (x.dtype is torch.half and y.dtype is torch.complex32) or
+                    (x.dtype is torch.bfloat16 and y.dtype is torch.bcomplex32)
+                ):
+                    # Since type promotion currently doesn't work with [b]complex32
                     # manually promote `x` to complex32
                     x = x.to(torch.complex32)
                 # For real input, ifft(fft(x)) will convert to complex
@@ -599,7 +601,7 @@ class TestFFT(TestCase):
                 else:
                     numpy_fn = getattr(np.fft, fname)
 
-                def fn(t: torch.Tensor, s: Optional[list[int]], dim: list[int] = (-2, -1), norm: Optional[str] = None):
+                def fn(t: torch.Tensor, s: list[int] | None, dim: list[int] = (-2, -1), norm: str | None = None):
                     return torch_fn(t, s, dim, norm)
 
                 torch_fns = (torch_fn, torch.jit.script(fn))

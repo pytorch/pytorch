@@ -837,6 +837,25 @@ def forward(self, arg0_1, arg1_1):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    @with_comms
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_dtensor_requires_grad_intermediate_backward(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            y = x * 2
+            y.requires_grad_()
+            loss = (y * 3).sum()
+            loss.backward()
+            return y.grad
+
+        full_x = torch.randn(8, 8)
+        x = distribute_tensor(full_x, mesh, [Shard(0)])
+
+        ref = fn(x.full_tensor())
+        result = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(ref, result.full_tensor())
+
     def test_dtensor_attribute_access_on_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -2021,6 +2040,46 @@ class TestDTensorCompileE2E(DTensorTestBase):
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_net(replicated_inp)
         self.assertEqual(output.full_tensor(), ref_out)
+
+    @with_comms
+    def test_unbacked_illegal_views(self):
+        """Test that views with unbacked shapes match eager behavior"""
+        device_mesh = self.build_device_mesh()
+
+        def create_dt(shard_dim):
+            tensor = torch.randn(8, 8, 8)
+            dt = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
+            for i in range(3):
+                torch._dynamo.decorators.mark_unbacked(dt, i)
+            return dt
+
+        # aot_eager backend decomposes to as_strided, will fail as unsupported
+        @torch.compile(backend="eager", fullgraph=True)
+        def flatten_on_even_mesh(x):
+            torch._check(x.size(0) % self.world_size == 0)
+            return x.view(-1)
+
+        # view should be legal, since sharding is even and flatten is on first dim
+        dt = create_dt(0)
+        flatten_on_even_mesh(dt)
+
+        # flattening on non-first dimension should fail
+        dt = create_dt(1)
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot be performed without redistribution"
+        ):
+            flatten_on_even_mesh(dt)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def flatten(x):
+            return x.view(-1)
+
+        # uneven case: not informing compiler of divisibility will crash
+        dt = create_dt(0)
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to flatten unevenly sharded dimension 0"
+        ):
+            flatten(dt)
 
     @with_comms
     def test_split_with_symint_split_size(self):

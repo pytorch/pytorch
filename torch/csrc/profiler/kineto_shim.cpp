@@ -1,5 +1,6 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+
 #include <type_traits>
 
 #ifdef USE_KINETO
@@ -17,55 +18,87 @@ namespace profiler::impl::kineto {
 
 #ifdef USE_KINETO
 namespace {
-const std::set<libkineto::ActivityType> kCpuTypes{
-    libkineto::ActivityType::CPU_OP,
-    libkineto::ActivityType::CPU_INSTANT_EVENT,
-    libkineto::ActivityType::USER_ANNOTATION,
-    libkineto::ActivityType::EXTERNAL_CORRELATION,
-    libkineto::ActivityType::XPU_RUNTIME,
-    libkineto::ActivityType::XPU_DRIVER,
-    libkineto::ActivityType::CUDA_RUNTIME,
-    libkineto::ActivityType::CUDA_DRIVER,
-    libkineto::ActivityType::PYTHON_FUNCTION,
-    libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
-    libkineto::ActivityType::PRIVATEUSE1_DRIVER,
+
+using ActivityTypeMap =
+    std::unordered_map<libkineto::ActivityType, std::string>;
+
+// clang-format off
+const ActivityTypeMap kCpuTypes{
+    {libkineto::ActivityType::CPU_OP,                "CPU_OP"},
+    {libkineto::ActivityType::CPU_INSTANT_EVENT,     "CPU_INSTANT_EVENT"},
+    {libkineto::ActivityType::USER_ANNOTATION,       "USER_ANNOTATION"},
+    {libkineto::ActivityType::EXTERNAL_CORRELATION,  "EXTERNAL_CORRELATION"},
+    {libkineto::ActivityType::XPU_RUNTIME,           "XPU_RUNTIME"},
+    {libkineto::ActivityType::XPU_DRIVER,            "XPU_DRIVER"},
+    {libkineto::ActivityType::CUDA_RUNTIME,          "CUDA_RUNTIME"},
+    {libkineto::ActivityType::CUDA_DRIVER,           "CUDA_DRIVER"},
+    {libkineto::ActivityType::PYTHON_FUNCTION,       "PYTHON_FUNCTION"},
+    {libkineto::ActivityType::PRIVATEUSE1_RUNTIME,   "PRIVATEUSE1_RUNTIME"},
+    {libkineto::ActivityType::PRIVATEUSE1_DRIVER,    "PRIVATEUSE1_DRIVER"},
 };
 
-const std::set<libkineto::ActivityType> kCudaTypes = {
-    libkineto::ActivityType::GPU_MEMCPY,
-    libkineto::ActivityType::GPU_MEMSET,
-    libkineto::ActivityType::GPU_USER_ANNOTATION,
-    libkineto::ActivityType::CONCURRENT_KERNEL,
+const ActivityTypeMap kCudaTypes{
+    {libkineto::ActivityType::GPU_MEMCPY,            "GPU_MEMCPY"},
+    {libkineto::ActivityType::GPU_MEMSET,            "GPU_MEMSET"},
+    {libkineto::ActivityType::GPU_USER_ANNOTATION,   "GPU_USER_ANNOTATION"},
+    {libkineto::ActivityType::CONCURRENT_KERNEL,     "CONCURRENT_KERNEL"},
     // CUDA_RUNTIME and CUDA_DRIVER appear in both kCpuTypes and kCudaTypes.
-    libkineto::ActivityType::CUDA_RUNTIME,
-    libkineto::ActivityType::CUDA_DRIVER,
-    libkineto::ActivityType::OVERHEAD,
+    {libkineto::ActivityType::CUDA_RUNTIME,          "CUDA_RUNTIME"},
+    {libkineto::ActivityType::CUDA_DRIVER,           "CUDA_DRIVER"},
+    {libkineto::ActivityType::OVERHEAD,              "OVERHEAD"},
 };
-const std::set<libkineto::ActivityType> kXpuTypes = {
-    libkineto::ActivityType::GPU_MEMCPY,
-    libkineto::ActivityType::GPU_MEMSET,
-    libkineto::ActivityType::CONCURRENT_KERNEL,
+
+const ActivityTypeMap kXpuTypes{
+    {libkineto::ActivityType::GPU_MEMCPY,            "GPU_MEMCPY"},
+    {libkineto::ActivityType::GPU_MEMSET,            "GPU_MEMSET"},
+    {libkineto::ActivityType::CONCURRENT_KERNEL,     "CONCURRENT_KERNEL"},
     // XPU_RUNTIME and XPU_DRIVER appear in both kCpuTypes and kXpuTypes.
-    libkineto::ActivityType::XPU_RUNTIME,
-    libkineto::ActivityType::XPU_DRIVER,
+    {libkineto::ActivityType::XPU_RUNTIME,           "XPU_RUNTIME"},
+    {libkineto::ActivityType::XPU_DRIVER,            "XPU_DRIVER"},
 };
-const std::set<libkineto::ActivityType> kMtiaTypes = {
-    libkineto::ActivityType::MTIA_CCP_EVENTS,
-    libkineto::ActivityType::MTIA_RUNTIME,
-    libkineto::ActivityType::MTIA_INSIGHT,
+
+const ActivityTypeMap kMtiaTypes{
+    {libkineto::ActivityType::MTIA_CCP_EVENTS,       "MTIA_CCP_EVENTS"},
+    {libkineto::ActivityType::MTIA_RUNTIME,          "MTIA_RUNTIME"},
+    {libkineto::ActivityType::MTIA_INSIGHT,          "MTIA_INSIGHT"},
 };
-const std::set<libkineto::ActivityType> hpuTypes = {
-    libkineto::ActivityType::HPU_OP,
+
+const ActivityTypeMap kHpuTypes{
+    {libkineto::ActivityType::HPU_OP,                "HPU_OP"},
 };
-const std::set<libkineto::ActivityType> kPrivateUse1Types = {
-    libkineto::ActivityType::GPU_MEMCPY,
-    libkineto::ActivityType::GPU_MEMSET,
-    libkineto::ActivityType::GPU_USER_ANNOTATION,
-    libkineto::ActivityType::CONCURRENT_KERNEL,
+
+const ActivityTypeMap kPrivateUse1Types{
+    {libkineto::ActivityType::GPU_MEMCPY,            "GPU_MEMCPY"},
+    {libkineto::ActivityType::GPU_MEMSET,            "GPU_MEMSET"},
+    {libkineto::ActivityType::GPU_USER_ANNOTATION,   "GPU_USER_ANNOTATION"},
+    {libkineto::ActivityType::CONCURRENT_KERNEL,     "CONCURRENT_KERNEL"},
     // PRIVATEUSE1_RUNTIME appears in both kCpuTypes and kPrivateUse1Types.
-    libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
-    libkineto::ActivityType::PRIVATEUSE1_DRIVER,
+    {libkineto::ActivityType::PRIVATEUSE1_RUNTIME,   "PRIVATEUSE1_RUNTIME"},
+    {libkineto::ActivityType::PRIVATEUSE1_DRIVER,    "PRIVATEUSE1_DRIVER"},
 };
+// clang-format on
+
+// Given a named activity type map and a set of requested name strings,
+// return the matching subset of activity types.
+std::unordered_set<libkineto::ActivityType> filterActivities(
+    const ActivityTypeMap& defaults,
+    const std::unordered_set<std::string>& requested) {
+  std::unordered_set<libkineto::ActivityType> result;
+  for (const auto& name : requested) {
+    bool found = false;
+    for (const auto& [type, type_name] : defaults) {
+      if (type_name == name) {
+        result.insert(type);
+        found = true;
+        break;
+      }
+    }
+    TORCH_CHECK(
+        found, "Unknown or non-member activity type name: '", name, "'");
+  }
+  return result;
+}
+
 } // namespace
 #endif // USE_KINETO
 
@@ -189,7 +222,9 @@ class ExperimentalConfigWrapper {
 
     // Add CPU activities if we are measuring per kernel ranges
     if (config_.profiler_measure_per_kernel) {
-      k_activities.insert(kCpuTypes.begin(), kCpuTypes.end());
+      for (const auto& [type, name] : kCpuTypes) {
+        k_activities.insert(type);
+      }
     }
 
     const size_t num_metrics = config_.profiler_metrics.size();
@@ -260,7 +295,8 @@ void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config,
-    const std::string& trace_id) {
+    const std::string& trace_id,
+    const ActivityFilter& activity_filter) {
 #ifdef USE_KINETO
   libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
@@ -273,18 +309,34 @@ void prepareTrace(
   }
 
   std::set<libkineto::ActivityType> k_activities;
+
+  // Helper: insert activity types for a group, applying the filter if present.
+  auto insertActivities = [&](torch::autograd::profiler::ActivityType group,
+                              const ActivityTypeMap& defaults) {
+    auto filter_it = activity_filter.find(group);
+    if (filter_it != activity_filter.end()) {
+      auto filtered = filterActivities(defaults, filter_it->second);
+      k_activities.insert(filtered.begin(), filtered.end());
+    } else {
+      for (const auto& [type, name] : defaults) {
+        k_activities.insert(type);
+      }
+    }
+  };
+
   bool has_cpu_activity =
       activities.count(torch::autograd::profiler::ActivityType::CPU);
 
   if (has_cpu_activity) {
-    k_activities.insert(kCpuTypes.begin(), kCpuTypes.end());
+    insertActivities(torch::autograd::profiler::ActivityType::CPU, kCpuTypes);
   }
   if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
-    k_activities.insert(kXpuTypes.begin(), kXpuTypes.end());
+    insertActivities(torch::autograd::profiler::ActivityType::XPU, kXpuTypes);
   }
   if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
     if (config.custom_profiler_config.empty()) {
-      k_activities.insert(kMtiaTypes.begin(), kMtiaTypes.end());
+      insertActivities(
+          torch::autograd::profiler::ActivityType::MTIA, kMtiaTypes);
     } else {
       if (config.custom_profiler_config.find("disable_runtime_events") ==
           std::string::npos) {
@@ -307,10 +359,10 @@ void prepareTrace(
     }
   }
   if (activities.count(torch::autograd::profiler::ActivityType::HPU)) {
-    k_activities.insert(hpuTypes.begin(), hpuTypes.end());
+    insertActivities(torch::autograd::profiler::ActivityType::HPU, kHpuTypes);
   }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
-    k_activities.insert(kCudaTypes.begin(), kCudaTypes.end());
+    insertActivities(torch::autograd::profiler::ActivityType::CUDA, kCudaTypes);
     if (config.enable_cuda_sync_events || get_cuda_sync_enabled()) {
       LOG(INFO) << "Enabling CUDA Sync Events";
       k_activities.insert(libkineto::ActivityType::CUDA_SYNC);
@@ -320,7 +372,9 @@ void prepareTrace(
     k_activities.insert(libkineto::ActivityType::COLLECTIVE_COMM);
   }
   if (activities.count(torch::autograd::profiler::ActivityType::PrivateUse1)) {
-    k_activities.insert(kPrivateUse1Types.begin(), kPrivateUse1Types.end());
+    insertActivities(
+        torch::autograd::profiler::ActivityType::PrivateUse1,
+        kPrivateUse1Types);
   }
 
   ExperimentalConfigWrapper configWrap(config);

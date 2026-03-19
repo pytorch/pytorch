@@ -12,7 +12,6 @@ import tempfile
 import time
 import unittest
 from collections.abc import Callable
-from typing import Optional
 from unittest import mock
 from unittest.mock import patch
 
@@ -61,6 +60,7 @@ from torch._inductor.template_heuristics.triton import (
     CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
     get_shared_memory_checker_opts,
+    ROCmMMTemplateConfigHeuristic,
     XPUMMTemplateConfigHeuristic,
     XPUPersistentTMATemplateConfigHeuristic,
 )
@@ -94,7 +94,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import MI300_ARCH, runOnRocmArch, skipIfXpu
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     get_kernel_launch,
@@ -1017,8 +1017,12 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
+        # x has multi-consumers (cat + add), so cat skips pointwise_cat
+        # and uses ConcatKernel.  cos is no longer fused into cat, giving
+        # one extra kernel launch compared to the single-consumer case.
+        count = 3 if (using_triton_mm or config.triton.native_matmul) else 2
         FileCheck().check(get_func_call()).check_count(
-            get_kernel_launch(), 2, exactly=True
+            get_kernel_launch(), count, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -2230,9 +2234,6 @@ class TestMaxAutotune(TestCase):
                     self.assertTrue(decompose_count <= num_decompose_k_splits)
 
     @unittest.skipIf(
-        TEST_WITH_ROCM, "exhaustive currently only thoroughly tested on NVIDIA"
-    )
-    @unittest.skipIf(
         config.triton.native_matmul,
         "native matmul takes different tuning configs",
     )
@@ -2249,11 +2250,15 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.template_heuristics.registry.get_template_heuristic"
         ) as config_mock:
-            config_heuristics = (
-                XPUMMTemplateConfigHeuristic()
-                if GPU_TYPE == "xpu"
-                else CUDAMMTemplateConfigHeuristic()
-            )
+            # Create heuristic instance and modify it before setting as mock return value
+            # On ROCm, use ROCmMMTemplateConfigHeuristic; on XPU use XPUMMTemplateConfigHeuristic;
+            # otherwise use CUDAMMTemplateConfigHeuristic
+            if GPU_TYPE == "xpu":
+                config_heuristics = XPUMMTemplateConfigHeuristic()
+            elif torch.version.hip:
+                config_heuristics = ROCmMMTemplateConfigHeuristic()
+            else:
+                config_heuristics = CUDAMMTemplateConfigHeuristic()
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
@@ -2943,8 +2948,8 @@ class TestMaxAutotunePrecompile(TestCase):
             op: str,
             inputs: str,
             benchmark: Callable[[Any], dict[ChoiceCaller, float]],
-            hint_override: Optional[int] = None,
-        ) -> Optional[dict[ChoiceCaller, float]]:
+            hint_override: int | None = None,
+        ) -> dict[ChoiceCaller, float] | None:
             if benchmark is not None:
                 return benchmark(choices)
 
@@ -3000,7 +3005,6 @@ class TestMaxAutotunePrecompile(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(config.triton.native_matmul, "native matmul has counter 0")
     def test_precompilations(self):
         def fn(a, b, c):
@@ -3009,7 +3013,9 @@ class TestMaxAutotunePrecompile(TestCase):
             return (a @ b) @ c
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
+        # Scale down so float16 doesn't overflow: rand [0,1) -> (a@b)@c has elements in [0, 256^2).
+        # float16 max ~65504, so we keep values in a safe range (e.g. scale by 1/256).
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) / 256.0 for _ in range(3)]
 
         torch.testing.assert_close(fn_c(*inputs), fn(*inputs), atol=1e-2, rtol=1e-2)
 
@@ -3294,7 +3300,7 @@ class _TestTritonTemplateCaller(TritonTemplateCaller):
 
 
 class TestTuningProcess(TestCase):
-    def check_healthy(self, p: TuningProcess, device: Optional[int] = None):
+    def check_healthy(self, p: TuningProcess, device: int | None = None):
         result = random.random()
         bmreq = _TestBenchmarkRequest(result, device=device)
         p.put(bmreq.benchmark)
@@ -4542,6 +4548,56 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         "triton_poi_fused__to_copy"
                     ).run(code[0])
 
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
+    )
+    @parametrize("use_async_compile", (True, False))
+    def test_epilogue_prologue_fusion_cache_preserved(self, use_async_compile: bool):
+        def f(a, b):
+            # Prologue: pointwise operation on input 'a' before matmul
+            a_transformed = a + 1.0
+            # Matmul
+            mm_result = a_transformed @ b
+            # Epilogue: pointwise operation on output after matmul
+            return mm_result + 2.0
+
+        torch._dynamo.reset()
+
+        # Use float32 to avoid low precision heuristic rejection
+        a = torch.randn(512, 1024, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.randn(1024, 2048, device=GPU_TYPE, dtype=torch.float32)
+
+        triton_time = 0.1
+        aten_time = float("inf")
+        epilogue_runtime = 0.05
+
+        # Always allow prologue fusion heuristics
+        def always_allow_prologue(*args):
+            return True
+
+        with self._setup_mm_heuristic(use_async_compile):
+            with self.get_common_patches(
+                use_async_compile,
+                False,
+                aten_time=aten_time,
+                triton_time=triton_time,
+                mock_n_spills=0,
+                epilogue_runtime=epilogue_runtime,
+            ):
+                # Enable prologue fusion so both epilogue and prologue are considered
+                with config.patch(prologue_fusion=True):
+                    # Bypass prologue heuristics that might reject the fusion
+                    with mock.patch.object(
+                        Scheduler,
+                        "check_prologue_fusion_heuristics_fusable",
+                        always_allow_prologue,
+                    ):
+                        compiled_f = torch.compile(f)
+                        # If the bug exists, this will fail with:
+                        # "ValueError: min() arg is an empty sequence"
+                        # when get_min_choice() is called during prologue fusion
+                        run_and_get_code(compiled_f, a, b)
+
 
 def simple_fn():
     return 42
@@ -4647,6 +4703,27 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         future = pool_instance.submit(simple_fn)
         result = future.result()
         self.assertEqual(result, 42)
+        self.assertIsNotNone(pool_instance._pool)
+
+        time.sleep(5)
+
+        self.assertIsNone(pool_instance._pool)
+        self.assertIsNone(pool_instance._timer)
+        self.assertTrue(AutotuneProcessPool._shutdown_for_inactivity)
+
+    @patch(
+        "torch._inductor.autotune_process.AUTOTUNE_POOL_INACTIVITY_TIMEOUT",
+        2,
+    )
+    def test_autotune_process_pool_inactivity_shutdown_warmup_only(self):
+        """Test that the pool shuts down from inactivity even when only warmup is called."""
+        AutotuneProcessPool.shutdown_instance()
+        AutotuneProcessPool._shutdown_for_inactivity = False
+
+        pool_instance = AutotuneProcessPool.get_instance()
+        warmup_future = pool_instance.warm_up()
+        warmup_future.result()
+
         self.assertIsNotNone(pool_instance._pool)
 
         time.sleep(5)

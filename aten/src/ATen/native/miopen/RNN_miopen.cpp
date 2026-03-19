@@ -866,7 +866,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
             }
         }
     }
-    return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{dx, dhx, dcx, dw};
+    return std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>>{std::move(dx), std::move(dhx), std::move(dcx), std::move(dw)};
 }
 
 namespace {

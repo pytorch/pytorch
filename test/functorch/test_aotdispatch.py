@@ -14,7 +14,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import ContextDecorator, ExitStack, nullcontext
 from functools import partial, wraps
-from typing import Any, Optional, Union
+from typing import Any
 from unittest.mock import patch
 
 from common_utils import (
@@ -58,6 +58,11 @@ from torch._functorch.aot_autograd import (
     aot_export_joint_simple,
     aot_export_module,
     SerializableAOTDispatchCompiler,
+)
+from torch._functorch.partitioners import (
+    _extract_fwd_bwd_modules,
+    _extract_fwd_bwd_outputs,
+    _extract_graph_with_inputs_outputs,
 )
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.codecache import compiled_fx_graph_hash
@@ -424,8 +429,8 @@ class TestAOTAutograd(AOTTestCase):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -463,11 +468,11 @@ class TestAOTAutograd(AOTTestCase):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, list[Any]],
+        inp_: Callable | list[Any],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[dict] = None,
+        decompositions: dict | None = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
@@ -4676,6 +4681,58 @@ def forward(self, tangents_1):
         counters.clear()
         torch._dynamo.reset()
 
+    def test_compute_outer_size_and_stride_bug(self):
+        import dataclasses
+
+        from torch._functorch._aot_autograd.schemas import (
+            PlainTensorMeta,
+            SubclassCreationMeta,
+        )
+
+        # Simulate a 2D TwoTensor(4, 6), contiguous, with dynamic shapes.
+        # After make_runtime_safe(), outer_size=(None, None), outer_stride=(None, 1).
+        # The packed symints in all_args at curr_start_idx are: [4, 6, 6]
+        # (2 size symints for the two None entries, 1 stride symint for the first None).
+        meta = object.__new__(SubclassCreationMeta)
+        for f in dataclasses.fields(SubclassCreationMeta):
+            setattr(meta, f.name, f.default)
+        meta.flat_tensor_start_idx = 0
+        meta.arg_count = 2
+        meta.included_subclass_symints = True
+        meta.attrs = {
+            "a": PlainTensorMeta(unwrapped_idx=0),
+            "b": PlainTensorMeta(unwrapped_idx=1),
+        }
+        meta.outer_size = (None, None)
+        meta.outer_stride = (None, 1)
+        meta.meta = None
+        meta.original_subclass = None
+        meta.original_subclass_type = TwoTensor
+        meta.memory_format = None
+
+        # all_args: [tensor_a, tensor_b, 4, 6, 6]
+        # curr_start_idx = 2 (after the two inner tensors)
+        a = torch.randn(4, 6)
+        b = torch.randn(4, 6)
+        all_args = [a, b, 4, 6, 6]
+
+        outer_size, outer_stride = meta.compute_outer_size_and_stride(
+            all_args, curr_start_idx=2
+        )
+        self.assertEqual(outer_size, (4, 6))
+        self.assertEqual(outer_stride, (6, 1))
+
+    def test_subclass_dynamic_stride(self):
+        @torch.compile(backend="aot_eager", dynamic=True)
+        def f(x):
+            return x.sin()
+
+        a = torch.randn(4, 6)
+        b = torch.randn(4, 6)
+        inp = TwoTensor(a, b)
+        out = f(inp)
+        self.assertEqual(out.stride(), inp.stride())
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -5911,6 +5968,92 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
         self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
 
+    def test_extract_fwd_bwd_modules_omit_aot_autograd_runtime(self):
+        """Test splitting a backward graph into dI/dW subgraphs using
+        omit_aot_autograd_runtime and ignore_must_be_in_fw_bw."""
+        from torch._functorch.partitioners import is_sym_node
+
+        def f(x, w):
+            return ((x @ w).sum(),)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        w = torch.randn(4, 4, requires_grad=True)
+        joint = aot_export_joint_simple(f, [x, w], trace_joint=True)
+        fw_g, bw_g = default_partition(joint, [x, w], num_fwd_outputs=1)
+
+        # Run reference full backward
+        fw_outs = fw_g(x.detach(), w.detach())
+        activations = fw_outs[1:]
+        grad_out = torch.ones_like(fw_outs[0])
+        full_bw = bw_g(*activations, grad_out)
+
+        # Re-partition bw_g into dI (grad_x) and dW (grad_w),
+        # mimicking the split_dI_dW pattern.
+        # NOTE: placeholder names are load-bearing for the partitioner —
+        # _is_primal / _is_tangent classify nodes by checking substrings of
+        # node.target (e.g. "tangents" in target → is_tangent). We must create
+        # new placeholder nodes (not just rename) so the target is also updated.
+        bw_gm = copy.deepcopy(bw_g)
+        for p in list(bw_gm.graph.find_nodes(op="placeholder")):
+            if p.name.startswith("tangent"):
+                with bw_gm.graph.inserting_before(p):
+                    new_p = bw_gm.graph.placeholder(f"not_tngnt{p.name[8:]}")
+                    new_p.meta.update(p.meta)
+                    p.replace_all_uses_with(new_p)
+                    bw_gm.graph.erase_node(p)
+        bw_gm.recompile()
+
+        num_di = 1  # first output = grad_x
+        di_outs, dw_outs, di_descs, _ = _extract_fwd_bwd_outputs(
+            bw_gm, num_fwd_outputs=num_di
+        )
+        args = list(bw_gm.graph.find_nodes(op="placeholder"))
+        di_graph = _extract_graph_with_inputs_outputs(
+            bw_gm.graph,
+            args,
+            di_outs,
+            di_descs,
+            "forward",
+            ignore_must_be_in_fw_bw=True,
+        )
+        di_names = {n.name for n in di_graph.nodes if n.op != "output"}
+
+        saved_values = [
+            n
+            for n in bw_gm.graph.nodes
+            if n.name in di_names
+            and not is_sym_node(n)
+            and "tensor_meta" in n.meta
+            and any(n2.name not in di_names for n2 in n.users)
+        ]
+
+        di_mod, dw_mod = _extract_fwd_bwd_modules(
+            bw_gm,
+            saved_values,
+            saved_sym_nodes=[],
+            num_fwd_outputs=num_di,
+            ignore_must_be_in_fw_bw=True,
+            omit_aot_autograd_runtime=True,
+        )
+
+        # Verify graph structure
+        def ph_names(gm):
+            return [n.name for n in gm.graph.find_nodes(op="placeholder")]
+
+        self.assertFalse(any(n.startswith("tangent") for n in ph_names(di_mod)))
+        self.assertFalse(any(n.startswith("tangent") for n in ph_names(dw_mod)))
+
+        # Verify numerics: dI + dW matches full backward
+        bw_inputs = [*activations, grad_out]
+        di_outs = di_mod(*bw_inputs)
+        grad_x = di_outs[:num_di]
+        dw_inputs = di_outs[num_di:]
+        grad_w = dw_mod(*dw_inputs)
+        if not isinstance(grad_w, (list, tuple)):
+            grad_w = [grad_w]
+        self.assertEqual(grad_x[0], full_bw[0])
+        self.assertEqual(grad_w[0], full_bw[1])
+
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_raise_getitems(self):
         def f(x):
@@ -6732,6 +6875,65 @@ def forward(self, primals_1, tangents_1):
                 must_save_count,
                 tensor_getitem_count,
                 f"all {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
+            )
+        finally:
+            handle.destroy()
+
+    def test_static_input_indices_with_effect_tokens(self):
+        """Test that static_input_indices are correctly offset when effect tokens are prepended."""
+        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
+        from torch._functorch._aot_autograd.graph_capture_wrappers import (
+            handle_effect_tokens_fn,
+        )
+        from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
+        from torch._higher_order_ops.effects import _register_effectful_op
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_static_idx_op", mutates_args=())
+        def effectful_static_idx_op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @effectful_static_idx_op.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_static_idx_op, EffectType.ORDERED)
+
+        try:
+            meta = ViewAndMutationMeta(
+                input_info=[],
+                output_info=[],
+                num_intermediate_bases=0,
+                keep_input_mutations=False,
+                traced_tangents=[],
+                subclass_inp_meta=[],
+                subclass_fw_graph_out_meta=[],
+                subclass_tangent_meta=[],
+                is_train=False,
+                traced_tangents_descs=[],
+            )
+            meta.tokens = {EffectType.ORDERED: torch.tensor([])}
+            # Simulate: params at indices 1, 2 before token insertion
+            meta.static_input_indices = [1, 2]
+
+            args = [torch.randn(4, 3), torch.randn(2, 3), torch.randn(2)]
+            args_descs = [PlainAOTInput(i) for i in range(3)]
+
+            _, new_args, _ = handle_effect_tokens_fn(
+                lambda *a: (torch.randn(1), []),
+                args,
+                args_descs,
+                meta=meta,
+                trace_joint=False,
+            )
+
+            num_tokens = len(meta.tokens)
+            self.assertGreater(num_tokens, 0)
+            # After prepending tokens, args grow and indices must be offset
+            self.assertEqual(len(new_args), len(args) + num_tokens)
+            self.assertEqual(
+                meta.static_input_indices,
+                [1 + num_tokens, 2 + num_tokens],
             )
         finally:
             handle.destroy()
@@ -8548,7 +8750,6 @@ aot_autograd_failures = {
     skip("narrow"),
     xfail("istft"),
     xfail("linalg.eig"),
-    skip("as_strided_scatter"),
     skip("as_strided", "partial_views"),  # flaky
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip("max_pool2d_with_indices_backward"),
@@ -8579,6 +8780,14 @@ aot_autograd_failures = {
         # This delta is coming entirely from the clone() on tangents
         # in AOTDispatcher to make them contiguous
         decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-02)}),
+    ),
+    decorate(
+        "cholesky_inverse",
+        # Numerical differences due to tangent stride differences between
+        # eager (.sum().backward() uses contiguous tangent) and compiled
+        # (tangent strides match output strides). With ill-conditioned inputs,
+        # matmul accumulates rounding errors differently for different layouts.
+        decorator=toleranceOverride({torch.float32: tol(atol=3e02, rtol=2e-03)}),
     ),
     decorate(
         "nn.functional.interpolate",
@@ -8901,8 +9110,8 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -8990,6 +9199,45 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         def _inps():
             dummy = torch.zeros((2,), requires_grad=True)
             inplace_tensor = torch.zeros((2,), requires_grad=False)
+            return dummy, inplace_tensor
+
+        inps = _inps()
+        out = fn(*inps)
+        ref_inps_after_fw = [x.clone().detach() for x in inps]
+        out.sum().backward()
+        ref_inps_after_bw = [x.clone().detach() for x in inps]
+
+        inps = _inps()
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(*inps)
+        inps_after_fw = [x.clone().detach() for x in inps]
+        out.sum().backward()
+        inps_after_bw = [x.clone().detach() for x in inps]
+
+        self.assertEqual(ref_inps_after_fw, inps_after_fw)
+        self.assertEqual(ref_inps_after_bw, inps_after_bw)
+
+    def test_mutations_in_bw_requires_grad_input(self):
+        # Inplace mutation of a requires_grad=True forward input during the
+        # backward pass should not trigger the check_inplace error
+        class AF(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, dummy, inplace_tensor):
+                ctx.save_for_backward(inplace_tensor)
+                return dummy.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (inplace_tensor,) = ctx.saved_tensors
+                inplace_tensor.mul_(2.0)
+                return grad_output, None
+
+        def fn(dummy, inplace_tensor):
+            return AF.apply(dummy, inplace_tensor)
+
+        def _inps():
+            dummy = torch.zeros((2,), requires_grad=True)
+            # requires_grad=True is what triggered the bug
+            inplace_tensor = torch.ones((2,), requires_grad=True)
             return dummy, inplace_tensor
 
         inps = _inps()
@@ -9125,8 +9373,8 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def run_autograd(
         self,
         f: Callable,
-        fw_graph_cell: list[Optional[Callable]],
-        decompositions: Optional[dict],
+        fw_graph_cell: list[Callable | None],
+        decompositions: dict | None,
         keep_input_mutations: bool,
         dynamic: bool,
     ):
@@ -9148,11 +9396,11 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     def verify_aot_autograd(
         self,
         f,
-        inp_: Union[Callable, list[Any]],
+        inp_: Callable | list[Any],
         *,
         test_mutation: bool = False,
         keep_inp_mutations: bool = False,
-        decompositions: Optional[dict] = None,
+        decompositions: dict | None = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.

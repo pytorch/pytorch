@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose")
 
 
-def _get_example_value(node: fx.Node) -> Optional[str]:
+def _get_example_value(node: fx.Node) -> str | None:
     """
     Get the example value key for a node, since dynamo uses "example_value"
     while non-strict export uses "val.
@@ -167,9 +167,9 @@ def insert_deferred_runtime_asserts(
     # time to regress significantly.
     def _node_metadata_hook(
         node: torch.fx.Node,
-        stack_trace: Optional[str] = None,
-        nn_module_stack: Optional[dict[str, Any]] = None,
-        custom: Optional[dict[str, Any]] = None,
+        stack_trace: str | None = None,
+        nn_module_stack: dict[str, Any] | None = None,
+        custom: dict[str, Any] | None = None,
         skip_val: bool = False,
     ) -> None:
         if not skip_val:

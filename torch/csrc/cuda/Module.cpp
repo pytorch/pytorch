@@ -408,6 +408,23 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_allocationTraceback(PyObject* _unused, PyObject* obj) {
+  HANDLE_TH_ERRORS
+  void* ptr = PyLong_AsVoidPtr(obj);
+  if (!ptr && PyErr_Occurred()) {
+    return nullptr;
+  }
+  auto ctx = c10::cuda::CUDACachingAllocator::getContextForPointer(ptr);
+  if (!ctx) {
+    Py_RETURN_NONE;
+  }
+  auto* tb = getCapturedTracebackFromContext(ctx);
+  std::vector<CapturedTraceback*> tbs = {tb};
+  auto frames = py_symbolize(tbs);
+  return frames.at(0).release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     PyObject* _unused,
     PyObject* obj) {
@@ -776,6 +793,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str time_us_s = "time_us";
   py::str compile_context_s = "compile_context";
   py::str user_metadata_s = "user_metadata";
+  py::str pool_id_s = "pool_id";
 
   py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
@@ -895,6 +913,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       trace_entry[time_us_s] = te.time_.t_;
       trace_entry[compile_context_s] = te.compile_context_;
       trace_entry[user_metadata_s] = te.user_metadata_;
+      trace_entry[pool_id_s] = te.mempool_;
       trace.append(trace_entry);
     }
     traces.append(trace);
@@ -2086,6 +2105,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_O,
      nullptr},
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_O, nullptr},
+    {"_cuda_allocationTraceback",
+     THCPModule_allocationTraceback,
+     METH_O,
+     nullptr},
     {"_cuda_attach_out_of_memory_observer",
      THCPModule_attachOutOfMemoryObserver,
      METH_O,

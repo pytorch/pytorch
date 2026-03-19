@@ -534,9 +534,9 @@ Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsTyp
         target_lengths,
         BLANK,
         zero_infinity));
-    if (zero_infinity) {
-      res = at::where(res == Scalar(std::numeric_limits<double>::infinity()), at::zeros({}, res.options()), res);
-    }
+  }
+  if (zero_infinity) {
+    res = at::where(res.isinf(), at::zeros({}, res.options()), res);
   }
   if (reduction == at::Reduction::Mean) {
     auto target_lengths_t = get_clamped_target_length(target_lengths, res.options());

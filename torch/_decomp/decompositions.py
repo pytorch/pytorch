@@ -506,6 +506,12 @@ def _nll_loss_backward(
     if reduction == Reduction.MEAN.value:
         grad_output = grad_output / total_weight
 
+    # When self is 1D (no batch dim), the C++ kernel only uses target[0].
+    # Reduce target to a scalar so the subsequent unsqueeze produces a 1D
+    # tensor matching self's dimensionality.
+    if self.dim() == 1 and target.dim() > 0:
+        target = target[0]
+
     target = target.unsqueeze(channel_dim)
     safe_target = torch.where(target != ignore_index, target, 0)
     grad_input = torch.zeros_like(self)
@@ -4261,9 +4267,10 @@ def nll_loss_forward(
         )
 
     no_batch_dim = self.dim() == 1 and target.dim() == 0
-    if not (no_batch_dim or (self.shape[0] == target.shape[0])):
-        raise AssertionError(
-            f"size mismatch (got input: {self.shape}, target: {target.shape})"
+    if not no_batch_dim:
+        torch._check(
+            self.shape[0] == target.shape[0],
+            lambda: f"size mismatch (got input: {self.shape}, target: {target.shape})",
         )
 
     n_classes = self.shape[-1]

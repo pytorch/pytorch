@@ -116,14 +116,13 @@ def initialize_lazy_module(
             mod._infer_parameters(mod, fake_args, fake_kwargs)  # type: ignore[operator]
         except AttributeError as e:
             # Re-raise with the original error message from the AttributeError
+            error_message = VariableTracker.build(
+                tx, str(e) or "AttributeError during lazy module initialization"
+            )
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[
-                    str(e)
-                    if str(e)
-                    else "AttributeError during lazy module initialization"
-                ],
+                args=[error_message],
             )
 
 
@@ -406,10 +405,13 @@ class NNModuleVariable(VariableTracker):
                 if result is not None:
                     return result
                 # if we can't find a __getattr__, we can't parse this, raise attribute error
+                error_message = VariableTracker.build(
+                    tx, f"'{type(base).__name__}' object has no attribute '{name}'"
+                )
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
+                    args=[error_message],
                 )
 
         if name == "forward":
@@ -993,16 +995,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value: torch.nn.Module, **kwargs: Any) -> None:
-        if type(value) is torch.jit._script.RecursiveScriptModule:
-            unimplemented(
-                gb_type="UnspecializedNNModuleVariable wrapped around ScriptModules unsupported",
-                context=str(value),
-                explanation="ScriptModules aren't supported in UnspecializedNNModuleVariable"
-                " because their .forward function isn't a static member of their type.",
-                hints=[
-                    *graph_break_hints.DIFFICULT,
-                ],
-            )
         if "value_type" in kwargs:
             lazy_value_to_become = getattr(kwargs["value_type"], "cls_to_become", None)
             if type(value) is lazy_value_to_become:
@@ -1345,12 +1337,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if out is None:
             out = self.getattr_helper(tx, "_buffers", name_vt)
         if out is None:
+            error_message = VariableTracker.build(
+                tx,
+                f"'{type(self.value).__name__}' object has no attribute '{name}'",
+            )
             raise_observed_exception(
                 AttributeError,
                 tx,
-                args=[
-                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
-                ],
+                args=[error_message],
             )
         assert out is not None
         return out

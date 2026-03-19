@@ -4,7 +4,7 @@
 import itertools
 import math
 import unittest
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.nn.functional as F
@@ -527,6 +527,69 @@ class DistMatrixOpsTest(DTensorTestBase):
 
             self.assertEqual(comm_mode.get_total_counts(), 0)
 
+    def test_scaled_mm_blockwise_1d_scale_placement(self):
+        """Test that _scaled_mm_scale_placement handles 1D blockwise scales correctly.
+
+        1D blockwise scales arise in MX (microscaling) formats where a data
+        tensor [M, K] has a flattened scale of shape [M * K / block_size].
+        Shard(>=1) is invalid on a 1D tensor, so the strategy must map
+        non-contracting shards to Shard(0) and reject contracting-dim shards.
+        """
+        from torch.distributed.tensor._ops._matrix_ops import _scaled_mm_scale_placement
+
+        # --- Tensor-wise scale (single element) -> always Replicate ---
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([1]), contracting_dim=1
+        )
+        self.assertEqual(result, Replicate())
+        result = _scaled_mm_scale_placement(Shard(0), torch.Size([]), contracting_dim=1)
+        self.assertEqual(result, Replicate())
+
+        # --- 2D scale -> copy data placement directly (row-wise) ---
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([16, 1]), contracting_dim=1
+        )
+        self.assertEqual(result, Shard(0))
+
+        # --- 1D blockwise + non-contracting shard -> Shard(0) ---
+        # A (mk): dim 0 = m (non-contracting), dim 1 = k (contracting)
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([64]), contracting_dim=1
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result, Shard(0))
+
+        # B_t (kn): dim 1 = n (non-contracting), dim 0 = k (contracting)
+        result = _scaled_mm_scale_placement(
+            Shard(1), torch.Size([64]), contracting_dim=0
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result, Shard(0))
+
+        # --- 1D blockwise + contracting shard -> None (unsupported) ---
+        result = _scaled_mm_scale_placement(
+            Shard(1), torch.Size([64]), contracting_dim=1
+        )
+        self.assertIsNone(result)
+        result = _scaled_mm_scale_placement(
+            Shard(0), torch.Size([64]), contracting_dim=0
+        )
+        self.assertIsNone(result)
+
+        # --- 1D blockwise + Replicate -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Replicate(), torch.Size([64]), contracting_dim=1
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result, Replicate())
+
+        # --- 1D blockwise + Partial -> Replicate ---
+        result = _scaled_mm_scale_placement(
+            Partial(), torch.Size([64]), contracting_dim=0
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result, Replicate())
+
     @with_comms
     def test_matmul(self):
         device_mesh = self.build_device_mesh()
@@ -612,7 +675,7 @@ class DistMatrixOpsTest(DTensorTestBase):
             batch_2_placements: list[Placement],
             beta: int,
             alpha: int,
-            batch_1_grad: Optional[torch.Tensor],
+            batch_1_grad: torch.Tensor | None,
         ) -> None:
             tensor_dt = distribute_tensor(tensor, device_mesh, tensor_placements)
             batch_1_dt = distribute_tensor(batch_1, device_mesh, batch_1_placements)
@@ -1037,6 +1100,37 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(dist_inp.grad.full_tensor(), inp.grad)
         self.assertEqual(dist_w1.grad.full_tensor(), w1.grad)
         self.assertEqual(dist_w2.grad.full_tensor(), w2.grad)
+
+    @with_comms
+    def test_constant_pad_nd(self):
+        """constant_pad_nd: shard non-padded, replicate padded, Partial iff value==0."""
+        device_mesh = self.build_device_mesh()
+        t = torch.randn(8, 6, device=self.device_type)
+        pad = [1, 1]  # pad last dim only
+        expected = torch.nn.functional.pad(t, pad, value=0.0)
+
+        # Shard on non-padded dim (dim 0) — should work directly
+        dt = distribute_tensor(t, device_mesh, [Shard(0)])
+        result = torch.nn.functional.pad(dt, pad, value=0.0)
+        self.assertEqual(result.full_tensor(), expected)
+
+        # Shard on padded dim (dim 1) — forces redistribute to Replicate
+        dt = distribute_tensor(t, device_mesh, [Shard(1)])
+        result = torch.nn.functional.pad(dt, pad, value=0.0)
+        self.assertEqual(result.full_tensor(), expected)
+
+        # Partial input with value=0 — Partial passes through
+        dt = distribute_tensor(t, device_mesh, [Partial()])
+        result = torch.nn.functional.pad(dt, pad, value=0.0)
+        self.assertEqual(result.placements, (Partial(),))
+        self.assertEqual(result.full_tensor(), expected)
+
+        # Partial input with value!=0 — forces redistribute to Replicate
+        expected_nz = torch.nn.functional.pad(t, pad, value=1.0)
+        dt = distribute_tensor(t, device_mesh, [Partial()])
+        result = torch.nn.functional.pad(dt, pad, value=1.0)
+        self.assertNotEqual(result.placements, (Partial(),))
+        self.assertEqual(result.full_tensor(), expected_nz)
 
 
 instantiate_parametrized_tests(DistMatrixOpsTest)

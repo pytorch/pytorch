@@ -13,6 +13,7 @@ import sympy
 import torch
 from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config, config as inductor_config
@@ -1558,12 +1559,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
             (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4, kpack=default_kpack),
             (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4, kpack=default_kpack),
-            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 1, 4, kpack=default_kpack),
-            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 1, 4, kpack=default_kpack),
-            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 1, 4, kpack=default_kpack),
-            (torch.float16, 64): ROCmFlexConfig(128, 64, 1, 8, kpack=default_kpack),
-            (torch.float16, 128): ROCmFlexConfig(128, 64, 1, 8, kpack=default_kpack),
-            (torch.float16, 256): ROCmFlexConfig(32, 64, 1, 4, kpack=default_kpack),
+            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
+            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 2, 4, kpack=default_kpack),
+            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 2, 4, kpack=default_kpack),
+            (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 8, kpack=default_kpack),
+            (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 8, kpack=default_kpack),
+            (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4, kpack=default_kpack),
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1753,7 +1754,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(64, 64, 1, 4, kpack=default_kpack)
             else:
-                default_config = ROCmFlexConfig(128, 64, 1, 8, kpack=default_kpack)
+                default_config = ROCmFlexConfig(128, 64, 2, 8, kpack=default_kpack)
             default_config = self.default_flex_config.get(
                 (dtype, head_dim), default_config
             )
@@ -1761,7 +1762,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4, kpack=default_kpack)
             else:
-                default_config = ROCmFlexConfig(64, 32, 1, 4, kpack=default_kpack)
+                default_config = ROCmFlexConfig(64, 32, 2, 4, kpack=default_kpack)
+
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -2070,7 +2072,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Moved from mm_common.mm_options.
         """
         # Calculate EVEN_K symbolic. (It isn't worth guarding on this)
-        even_k_symbolic = (k % triton_config.kwargs["BLOCK_K"]) == 0
+        even_k_symbolic = sympy.Eq(Mod(k, triton_config.kwargs["BLOCK_K"]), 0)
         even_k_symbolic = V.graph.sizevars.statically_known_true(even_k_symbolic)
 
         # Build options dict

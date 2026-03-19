@@ -360,8 +360,24 @@ test_python_smoke_b200() {
       inductor/test_torchinductor \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
-    $PYTHON_TEST_EXTRA_OPTION \
-    --upload-artifacts-while-running
+      $PYTHON_TEST_EXTRA_OPTION \
+      --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_python_smoke_xpu() {
+  # Smoke tests for XPU client
+  time python test/run_test.py --include test_transformers $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_dtensor() {
+  # Dynamically discover all test files under test/distributed/tensor/
+  # so new tests are automatically picked up.
+  # shellcheck disable=SC2046
+  time python test/run_test.py \
+    --include $(find test/distributed/tensor -name 'test_*.py' -printf '%P\n' | sed 's|\.py$||; s|^|distributed/tensor/|' | sort | tr '\n' ' ') \
+    --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -388,6 +404,7 @@ test_h100_symm_mem() {
   export NVSHMEM_SYMMETRIC_SIZE=4G
   # Disable NVLink Switch features (not available on AWS H100 instances)
   export NVSHMEM_DISABLE_NVLS=1
+  export NCCL_NVLS_ENABLE=0
   _run_symm_mem_tests
 }
 
@@ -447,6 +464,8 @@ test_dynamo_wrapped_shard() {
 }
 
 test_einops() {
+  pip install einops==0.5.0
+  time python test/run_test.py --einops --verbose --upload-artifacts-while-running
   pip install einops==0.6.1
   time python test/run_test.py --einops --verbose --upload-artifacts-while-running
   pip install einops==0.7.0
@@ -585,7 +604,7 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro \
+    --include inductor/test_torchinductor inductor/test_max_autotune inductor/test_cpu_repro inductor/test_triton_kernels \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   python test/run_test.py --inductor \
@@ -593,7 +612,10 @@ test_inductor_cpp_wrapper_shard() {
     -k 'take' \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
-
+  TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=0 python test/run_test.py \
+    --include inductor/test_torchinductor inductor/test_triton_kernels\
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     python test/run_test.py \
       --include inductor/test_mkldnn_pattern_matcher \
@@ -1149,6 +1171,18 @@ test_libtorch_jit() {
   pushd test
   python cpp/jit/tests_setup.py shutdown
   popd
+}
+
+test_libtorch_profiler() {
+  echo "Testing profiler C++ tests"
+  export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
+  export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
+
+  # Run E2E test first (needs clean Kineto state)
+  python test/run_test.py --cpp --verbose -i cpp/test_privateuse1_profiler -k "EndToEndProfiling"
+
+  # Run all other tests
+  python test/run_test.py --cpp --verbose -i cpp/test_privateuse1_profiler -k "not EndToEndProfiling"
 }
 
 test_libtorch_api() {
@@ -1764,6 +1798,8 @@ test_linux_aarch64() {
         test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops profiler/test_memory_profiler \
         distributed/elastic/timer/api_test distributed/elastic/timer/local_timer_example distributed/elastic/timer/local_timer_test \
         test_linalg \
+        test_jit test_jit_autocast test_ops_jit \
+        test_nn nn/test_convolution functorch/test_ops functorch/test_aotdispatch \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1782,7 +1818,8 @@ test_linux_aarch64() {
        inductor/test_split_cat_fx_passes inductor/test_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
        inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
-       inductor/test_cpu_select_algorithm \
+       inductor/test_cpu_select_algorithm inductor/test_cpu_repro \
+       inductor/test_aot_inductor inductor/test_fused_attention \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
@@ -1848,6 +1885,7 @@ test_attention_microbenchmark() {
 }
 
 test_openreg() {
+  git submodule update --init --depth 1 third_party/googletest
   python test/run_test.py --openreg --verbose
   assert_git_not_dirty
 }
@@ -1882,6 +1920,9 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     (cd .ci/lumen_cli && python -m pip install -e .)
 
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
+elif [[ "$TEST_CONFIG" == *torchtitan* ]]; then
+    (cd .ci/lumen_cli && python -m pip install -e .)
+    python -m cli.run test external torchtitan --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
@@ -2011,6 +2052,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+  test_libtorch_profiler
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   install_torchvision
@@ -2023,15 +2065,14 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
-  install_torchvision
-  test_python
-  test_aten
-  test_xpu_bin
 elif [[ "${TEST_CONFIG}" == smoke ]]; then
   test_python_smoke
 elif [[ "${TEST_CONFIG}" == smoke_b200 ]]; then
   test_python_smoke_b200
+elif [[ "${TEST_CONFIG}" == smoke_xpu ]]; then
+  test_python_smoke_xpu
+elif [[ "${TEST_CONFIG}" == dtensor ]]; then
+  test_dtensor
 elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
   test_h100_distributed
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then

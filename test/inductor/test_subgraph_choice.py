@@ -74,9 +74,10 @@ class TestSubgraphChoice(TestCase):
 
             # Only return decomposeK case for codegen
             choices = [choices[1]]
-            return autotune_select_algorithm(
+            node, _ = autotune_select_algorithm(
                 "test_subgraph_choice", choices, [a, b], layout
             )
+            return node
 
         a_in = torch.randn(
             mat1_shape, dtype=torch.float16, device=torch.device(f"{GPU_TYPE}:0")
@@ -154,9 +155,10 @@ class TestSubgraphChoice(TestCase):
                 if example_stride != layout_stride:
                     raise AssertionError
 
-            return autotune_select_algorithm(
+            node, _ = autotune_select_algorithm(
                 "test_subgraph_choice", choices, [a, b], layout
             )
+            return node
 
         def func(mat1, mat2):
             return torch.ops.mylib.matmul_decompose_padding((mat1 + 1.0), mat2)

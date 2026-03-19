@@ -1413,14 +1413,14 @@ class TestBinaryUfuncs(TestCase):
         else:
             self._do_pow_for_exponents(m1, exponents, math.pow, None)
             will_raise_error = (
-                dtype is torch.half and torch.device(device).type == "cpu"
-            )
+                dtype == torch.half and torch.device(device).type == "cpu"
+            ) or dtype == torch.bfloat16
             if will_raise_error:
-                # On CPU,
-                # Half Tensor with complex exponents leads to computation dtype
-                # of ComplexHalf for which this ops is not supported yet
+                # On CPU, Half/BFloat16 Tensor with complex exponents leads to
+                # computation dtype of ComplexHalf/BComplex32 for which this ops is not
+                # supported yet
                 with self.assertRaisesRegex(
-                    RuntimeError, "not implemented for 'ComplexHalf'"
+                    RuntimeError, "not implemented for '(ComplexHalf|BComplex32)'"
                 ):
                     self._do_pow_for_exponents(m1, complex_exponents, pow, 10e-4)
             else:
@@ -3627,7 +3627,7 @@ class TestBinaryUfuncs(TestCase):
                 ref = ref_func(a.cpu().float().numpy(), b.cpu().float().numpy())
                 v = our_func(a, b)
                 self.assertEqual(ref, v.float(), atol=0.01, rtol=0.01)
-            elif dtype == torch.complex32:
+            elif dtype in (torch.complex32, torch.bcomplex32):
                 ref = ref_func(
                     a.cpu().to(torch.complex64).numpy(),
                     b.cpu().to(torch.complex64).numpy(),
