@@ -6772,13 +6772,21 @@ def div_floor_floating(a, b):
 
     Implements the CPython floordiv algorithm to avoid rounding errors from
     naive floor(a / b). See c10/util/generic_math.h:div_floor_floating.
+
+    Constants are typed to match the compute dtype of `a` (a CSEVariable in
+    Triton/CPP backends) to avoid int32/float type mismatches in generated code.
     """
-    zero = ops.constant(0, torch.int32)
-    one = ops.constant(1, torch.int32)
-    half = ops.constant(0.5, torch.float32)
+    # In Triton (codegen_upcast_to_fp32=True, the default), float16/bfloat16
+    # inputs are already upcast to float32 at load time, so a.dtype is float32
+    # or float64.  In CPP, a.dtype similarly reflects the compute type.
+    compute_dtype = getattr(a, "dtype", torch.float32)
+    zero = ops.constant(0.0, compute_dtype)
+    one = ops.constant(1.0, compute_dtype)
+    half = ops.constant(0.5, compute_dtype)
     mod = ops.fmod(a, b)
     # (a - mod) / b is more numerically accurate than a / b directly.
-    # Since fmod(a, b) has the same sign as a, sign(mod) != sign(b) iff sign(a) != sign(b).
+    # Since fmod(a, b) has the same sign as a, sign(mod) != sign(b) iff
+    # the inputs have opposite signs.
     adj_div = ops.truediv(ops.sub(a, mod), b)
     nonzero_mod = ops.ne(mod, zero)
     diff_signs = ops.ne(ops.signbit(mod), ops.signbit(b))
@@ -6793,11 +6801,10 @@ def div_floor_floating(a, b):
     )
     # When adj_div == 0, preserve the sign from true division.
     basic_div = ops.truediv(a, b)
-    zero_fp = ops.constant(0.0, torch.float32)
     floor_div = ops.where(
         ops.ne(adj_div, zero),
         floor_div,
-        ops.copysign(zero_fp, basic_div),
+        ops.copysign(zero, basic_div),
     )
     # When b == 0, return the IEEE 754 result from true division.
     return ops.where(ops.ne(b, zero), floor_div, basic_div)
