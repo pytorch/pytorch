@@ -92,9 +92,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     x.requires_grad = training
 
             if not self.use_static_shapes:
-                torch._dynamo.mark_dynamic(args2[0], 0)
-                torch._dynamo.mark_dynamic(args2[1], 0)
-                torch._dynamo.mark_dynamic(args2[2], 0)
+                for i in range(min(3, len(args2))):
+                    if isinstance(args2[i], torch.Tensor):
+                        torch._dynamo.mark_dynamic(args2[i], 0)
 
             dropout_arg = [training] if has_dropout else []
             torch.manual_seed(1234)
@@ -1579,6 +1579,32 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=True,
         )
 
+    def _test_sdpa_rewriter_28(self):
+        def dot_prod_attention(
+            qkv: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            q, k, v = qkv.permute(1, 0, 2, 4, 3).unbind(0)
+            scores = torch.matmul(q, k.transpose(-2, -1))
+            scores = scores.mul(0.2)
+            attn_weights = scores.softmax(dim=-1)
+            attn_weights = torch.nn.functional.dropout(
+                attn_weights, p=0.1, training=training
+            )
+            return attn_weights.matmul(v)
+
+        tensor_shape = (2, 3, 4, 16, 8)
+        args = [
+            torch.randn(tensor_shape, dtype=torch.half, device=self.device),
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_dropout=True,
+            check_train=True,
+        )
+
 
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
@@ -1663,6 +1689,9 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         )
         test_cache_sdpa_constraint_shared_kv_gpu = (
             TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
+        )
+        test_sdpa_rewriter_28_gpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_28
         )
         if HAS_XPU_AND_TRITON:
             test_sdpa_rewriter_25_gpu = functools.partialmethod(
@@ -1786,6 +1815,9 @@ if HAS_CPU:
         )
         test_cache_sdpa_constraint_shared_kv_cpu = (
             TestSDPAPatternRewriterTemplate._test_cache_sdpa_constraint_shared_kv
+        )
+        test_sdpa_rewriter_28_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_28
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
