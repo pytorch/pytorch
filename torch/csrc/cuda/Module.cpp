@@ -1615,7 +1615,8 @@ static PyObject* THCPModule_setCublasWorkspaceSize(
       "set cublas workspace size expects an int, but got ",
       THPUtils_typename(arg));
   int64_t size = THPUtils_unpackLong(arg);
-  TORCH_CHECK(size >= 0, "cublas workspace size must be non-negative, got ", size);
+  TORCH_CHECK(
+      size >= 0, "cublas workspace size must be non-negative, got ", size);
   at::cuda::setChosenWorkspaceSize(static_cast<size_t>(size));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1638,7 +1639,8 @@ static PyObject* THCPModule_setCublasLtWorkspaceSize(
       "set cublaslt workspace size expects an int, but got ",
       THPUtils_typename(arg));
   int64_t size = THPUtils_unpackLong(arg);
-  TORCH_CHECK(size >= 0, "cublaslt workspace size must be non-negative, got ", size);
+  TORCH_CHECK(
+      size >= 0, "cublaslt workspace size must be non-negative, got ", size);
   at::cuda::setCUDABlasLtWorkspaceSize(static_cast<size_t>(size));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
