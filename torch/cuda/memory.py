@@ -139,6 +139,11 @@ def caching_allocator_alloc(size, device: "Device" = None, stream=None):
             "`torch.cuda.Stream` or `int` representing a pointer "
             "to a existing stream"
         )
+    pip install ninja    if size < 0:
+        raise ValueError(
+            f"Invalid memory size: {size}. "
+            "caching_allocator_alloc requires a non-negative size."
+        )
     with torch.cuda.device(device):
         return torch._C._cuda_cudaCachingAllocator_raw_alloc(size, stream)
 
