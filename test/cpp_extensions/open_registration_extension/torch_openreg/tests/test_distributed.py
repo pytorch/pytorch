@@ -4,6 +4,14 @@ import os
 import sys
 import tempfile
 
+import torch
+import torch.distributed as dist
+
+
+if not (dist.is_available() and "occl" in dist.Backend.backend_list):
+    print("torch.distributed OCCL backend unavailable, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 
 os.environ["BACKEND"] = "occl"
 os.environ["WORLD_SIZE"] = "2"
@@ -20,8 +28,6 @@ if "TEMP_DIR" not in os.environ:
     )
 
 
-import torch
-import torch.distributed as dist
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import (
     cleanup_temp_dir,
@@ -34,11 +40,6 @@ from torch.testing._internal.distributed.distributed_test import (
     DistributedTest,
     TestDistBackend,
 )
-
-
-if not (dist.is_available() and "occl" in dist.Backend.backend_list):
-    print("torch.distributed OCCL backend unavailable, skipping tests", file=sys.stderr)
-    sys.exit(0)
 
 
 class TestProcessGroupOCCL(TestDistBackend, DistributedTest._DistTestBase):
