@@ -1644,6 +1644,7 @@ def register_replacement(
                 trace_fn,
                 scalar_workaround,
                 exclusive_arg_names,
+                get_decomp_fn=get_decomp_fn,
             )
         else:
             pattern = search_fn_pattern
@@ -1834,6 +1835,7 @@ def gen_pattern_and_search_gm(
     trace_fn: TraceFn,
     scalar_workaround: dict[str, float | int] | None = None,
     exclusive_arg_names: Sequence[str] = (),
+    get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] = select_decomp_table,
 ) -> tuple[PatternExpr, torch.fx.GraphModule]:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
 
@@ -1849,7 +1851,7 @@ def gen_pattern_and_search_gm(
             flat_inputs.append(example_inputs[input_idx])
             input_idx += 1
 
-    search_gm = trace_fn(search_fn, flat_inputs)
+    search_gm = trace_fn(search_fn, flat_inputs, get_decomp_fn=get_decomp_fn)
     return (
         fx_to_pattern(
             search_gm,
