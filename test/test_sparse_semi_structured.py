@@ -1311,6 +1311,36 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
                     torch.mm(A_sparse, B), expected, **atol_rtol_kw[dtype]
                 )
 
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_cusparselt_matmul_cache_bias(self, device, dtype):
+        m, k, n = 128, 64, 256
+        A = rand_sparse_semi_structured_mask(m, k, dtype=dtype, device=device)
+        A_compressed = torch._cslt_compress(A)
+        B = torch.rand(k, n, device=device, dtype=dtype)
+        for _ in range(4):
+            bias = torch.rand(m, device=device, dtype=dtype)
+            sparse_result = torch._cslt_sparse_mm(A_compressed, B, bias=bias)
+            dense_result = torch.mm(A.to(torch.float32), B.to(torch.float32))
+            dense_result = dense_result.to(dtype) + bias[:, None]
+            torch.testing.assert_close(sparse_result, dense_result, **atol_rtol_kw[dtype])
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
+    def test_cusparselt_matmul_cache_alpha(self, device, dtype):
+        "cuSPARSELt v0.8.x does not support bfloat/float16 alpha scaling, torch.int8 matrices are used for this test"
+        m, k, n = 128, 64, 256
+        A = rand_sparse_semi_structured_mask(m, k, dtype=torch.int8, device=device)
+        A_compressed = torch._cslt_compress(A)
+        B = torch.ones((n, k), device=device, dtype=torch.int8).t()
+        for _ in range(4):
+            alpha = torch.rand(m, device=device)
+            sparse_result = torch._cslt_sparse_mm(A_compressed, B, alpha=alpha, out_dtype=dtype)
+            dense_result = alpha[:, None].cpu() * torch.mm(
+                A.to(torch.int64).cpu(), B.to(torch.int64).cpu()
+            )
+            dense_result = dense_result.to(dtype)
+            torch.testing.assert_close(sparse_result.cpu(), dense_result, rtol=1e-3, atol=1e-3)
+
     def test_cusparselt_backend(self):
         if not torch.backends.cusparselt.is_available():
             raise AssertionError("cusparselt backend should be available")
