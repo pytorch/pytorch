@@ -1583,10 +1583,17 @@ def lu_unpack_meta(
     unpack_data: bool = True,
     unpack_pivots: bool = True,
 ) -> tuple[Tensor, Tensor, Tensor]:
+    lu_dim = LU.ndim
+    lu_shape = LU.shape
     torch._check(
-        LU.ndim >= 2,
-        lambda: f"torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: {LU.shape} instead",
+        lu_dim >= 2,
+        lambda: f"torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: {lu_shape} instead",
     )
+
+    m = lu_shape[-2]
+    n = lu_shape[-1]
+    k = sym_min(m, n)
+
     if unpack_pivots:
         torch._check(
             pivots.dtype == torch.int32,
@@ -1595,10 +1602,21 @@ def lu_unpack_meta(
                 "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor"
             ),
         )
-    sizes = list(LU.shape)
-    m = sizes[-2]
-    n = sizes[-1]
-    k = sym_min(m, n)
+
+        is_pivots_shape_correct = (
+            (pivots.ndim == lu_dim - 1)
+            and (pivots.shape[-1] == k)
+            and (pivots.shape[:-1] == lu_shape[:-2])
+        )
+        if not is_pivots_shape_correct:
+            expected_pivots_shape = lu_shape[:-2] + (k,)
+            torch._check(
+                False,
+                lambda: (
+                    f"torch.lu_unpack: Expected LU_pivots shape to be {expected_pivots_shape}, but got {pivots.shape}"
+                ),
+            )
+    sizes = list(lu_shape)
     sizes[-1] = m
     if unpack_pivots:
         P = LU.new_empty(sizes)

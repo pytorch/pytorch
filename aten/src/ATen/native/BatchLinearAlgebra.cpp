@@ -771,18 +771,32 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
 }
 
 TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_data, bool unpack_pivots) {
-  TORCH_CHECK(LU.dim() >= 2, "torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: ", LU.sizes(), " instead");
+  const auto lu_dim = LU.dim();
+  const auto lu_sizes = LU.sizes();
+  TORCH_CHECK(lu_dim >= 2, "torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: ", lu_sizes, " instead");
+
+  const auto m = lu_sizes[lu_dim - 2];
+  const auto n = lu_sizes[lu_dim - 1];
+  const auto k = std::min(m, n);
+
   if (unpack_pivots) {
     TORCH_CHECK(pivots.scalar_type() == at::kInt,
         "torch.lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype.\n"
         "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor");
+
+    const auto pivots_dim = pivots.dim();
+    const auto expected_batch_dims = lu_sizes.slice(0, lu_dim - 2);
+    const bool is_pivots_shape_correct = (pivots_dim == lu_dim - 1) && (pivots.size(-1) == k) &&
+      (pivots.sizes().slice(0, pivots_dim - 1).equals(expected_batch_dims));
+    if (!is_pivots_shape_correct) {
+      c10::DimVector expected_pivots_shape(expected_batch_dims);
+      expected_pivots_shape.emplace_back(k);
+      TORCH_CHECK(false,
+          "torch.lu_unpack: Expected LU_pivots shape to be ", expected_pivots_shape, ", but got ", pivots.sizes());
+    }
   }
 
-  auto sizes = LU.sizes().vec();
-  const auto m = sizes.cend()[-2];
-  const auto n = sizes.cend()[-1];
-  const auto k = std::min(m, n);
-
+  auto sizes = lu_sizes.vec();
   // P.shape[-2:] == (m, m) (or size zero if pivot == False)
   sizes.end()[-1] = m;
   if (unpack_pivots) {

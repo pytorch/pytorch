@@ -7279,6 +7279,19 @@ class TestLinalg(TestCase):
         p, l, u = torch.lu_unpack(lu_data, lu_pivots, unpack_data=False, unpack_pivots=False)
         self.assertTrue(p.numel() == 0 and l.numel() == 0 and u.numel() == 0)
 
+        # invalid pivots shape should be rejected with error, not segfault
+        wrong_dim_pivots = torch.empty((0,), dtype=torch.int32, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"Expected LU_pivots shape to be \[5, 5\], but got \[0\]"):
+            torch.lu_unpack(lu_data, wrong_dim_pivots)
+
+        wrong_size_pivots = torch.ones(5, 3, dtype=torch.int32, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"Expected LU_pivots shape to be \[5, 5\], but got \[5, 3\]"):
+            torch.lu_unpack(lu_data, wrong_size_pivots)
+
+        wrong_batch_pivots = torch.ones(6, 5, dtype=torch.int32, device=device)
+        with self.assertRaisesRegex(RuntimeError, r"Expected LU_pivots shape to be \[5, 5\], but got \[6, 5\]"):
+            torch.lu_unpack(lu_data, wrong_batch_pivots)
+
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
