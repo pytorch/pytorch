@@ -3707,11 +3707,15 @@ class CommonTemplate:
         # so inductor and eager should agree on the promoted type and result.
         t0_fp16 = torch.tensor([84.3125], dtype=torch.float16)
         t1_fp32 = torch.tensor([21.078125], dtype=torch.float32)
-        self.common(fn, (t0_fp16.to(self.device), t1_fp32.to(self.device)), check_lowp=False)
+        self.common(
+            fn, (t0_fp16.to(self.device), t1_fp32.to(self.device)), check_lowp=False
+        )
 
         t0_bf16 = torch.tensor([84.3125], dtype=torch.bfloat16)
         t1_fp16 = torch.tensor([21.078125], dtype=torch.float16)
-        self.common(fn, (t0_bf16.to(self.device), t1_fp16.to(self.device)), check_lowp=False)
+        self.common(
+            fn, (t0_bf16.to(self.device), t1_fp16.to(self.device)), check_lowp=False
+        )
 
     def test_div_precision(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/101039
