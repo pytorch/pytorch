@@ -225,6 +225,7 @@ jobs:
           # The build.sh script in this folder is not actually the correct one,
           # this is just needed for sha calculation
           docker-build-dir: .ci/docker
+          docker-build-script: ${{ contains(inputs.DOCKER_IMAGE, 'manylinux') && 'manywheel/build.sh' || 'build.sh' }}
           working-directory: pytorch
 
       - name: Pull Docker image
