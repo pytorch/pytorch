@@ -39,11 +39,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta, onlyAccelerator)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, dtypesIfMPS, skipMeta, onlyAccelerator)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
-    float_to_corresponding_complex_type_map, all_types_complex_float8_and
+    float_to_corresponding_complex_type_map, all_types_complex_float8_and, all_mps_types
 )
 
 from torch.utils.dlpack import to_dlpack
@@ -4254,6 +4254,7 @@ class TestAsArray(TestCase):
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types())
     def test_copy_tensor(self, device, dtype):
         self._test_copy_with_cvt(identity, device, dtype)
 
@@ -4264,6 +4265,7 @@ class TestAsArray(TestCase):
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types())
     def test_copy_from_dlpack(self, device, dtype):
         self._test_copy_with_cvt(to_dlpack, device, dtype)
 
