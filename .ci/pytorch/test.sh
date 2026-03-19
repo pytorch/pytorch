@@ -1798,6 +1798,8 @@ test_linux_aarch64() {
         test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops profiler/test_memory_profiler \
         distributed/elastic/timer/api_test distributed/elastic/timer/local_timer_example distributed/elastic/timer/local_timer_test \
         test_linalg \
+        test_jit test_jit_autocast test_ops_jit \
+        test_nn nn/test_convolution functorch/test_ops functorch/test_aotdispatch \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1817,6 +1819,7 @@ test_linux_aarch64() {
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
        inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
        inductor/test_cpu_select_algorithm inductor/test_cpu_repro \
+       inductor/test_aot_inductor inductor/test_fused_attention \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 

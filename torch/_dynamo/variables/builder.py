@@ -3151,7 +3151,7 @@ def wrap_fx_proxy_cls(
         )
         and proxy.node.op != "placeholder"
     ):
-        tx.output.current_tracer.record_tensor_or_symint_vt(out)
+        tx.output.current_tracer.record_proxyable_vt(out)
     return out
 
 
@@ -3499,6 +3499,14 @@ def handle_traced_output(
     elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, torch._library.fake_class_registry.FakeScriptObject):
+        # example_value is already a FakeScriptObject (e.g. returned by getitem
+        # on a container whose fake kernel returns a FakeScriptObject).  No need
+        # to convert it — just wrap the proxy directly.
+        return TorchScriptObjectVariable.create(
+            proxy,
+            example_value,
+        )
     elif is_opaque_type(type(example_value)):
         # This is for handling opaque objects in custom ops
         if is_opaque_value_type(type(example_value)):

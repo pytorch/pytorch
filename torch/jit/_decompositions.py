@@ -10,10 +10,7 @@ from collections.abc import Callable
 from typing import TypeVar
 from typing_extensions import ParamSpec
 
-
-# JIT can't handle SymInt/SymFloat in torch.types.Number, so use the
-# JIT-native scalar type directly.
-Number = int | float | bool
+from torch.types import Number
 
 
 decomposition_table: dict[str, torch.jit.ScriptFunction] = {}
