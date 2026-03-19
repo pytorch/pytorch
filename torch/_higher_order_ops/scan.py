@@ -300,14 +300,12 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         num_elems = xs[0].shape[dim]
         num_init_leaves = len(init)
 
-        # Process element 0 first: this both infers output shapes for
-        # pre-allocation AND computes the first real output.  The original
-        # approach used a separate first_slice_copy() call for shape
-        # inference and then re-processed element 0 in the main loop,
-        # causing operator to be called num_elems+1 times total.  That
-        # extra call is problematic for operators with side effects (e.g.
-        # RDMA-based MoE dispatch kernels).  Processing element 0 here
-        # reduces the total call count to exactly num_elems.
+        # Process element 0 to infer output shapes for pre-allocation
+        # AND produce the first real result in a single call.  The previous
+        # approach used first_slice_copy() for shape inference and then
+        # re-processed element 0 in the main loop, calling the operator
+        # num_elems+1 times.  That extra invocation is incorrect for
+        # operators with side effects.
         carry, out_0 = _extract_carry_and_out(
             call_operator(
                 operator,
