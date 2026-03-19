@@ -2,6 +2,7 @@
 import multiprocessing
 import os
 import threading
+import io
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 
@@ -219,6 +220,71 @@ def rebuild_cuda_tensor(
     return t
 
 
+def rebuild_xpu_tensor(
+    tensor_cls,
+    tensor_size,
+    tensor_stride,
+    tensor_offset,
+    storage_cls,
+    dtype,
+    storage_device,
+    storage_handle,
+    storage_size_bytes,
+    storage_offset_bytes,
+    requires_grad,
+):
+    if storage_handle is None or storage_size_bytes == 0:
+        storage = storage_cls(0, dtype=dtype, device=storage_device, _internal=True)
+    else:
+        cache_key = (storage_handle, storage_offset_bytes)
+        storage = storage_from_cache(storage_cls, cache_key)
+        if storage is None:
+            torch.xpu._lazy_init()
+            storage = storage_cls._new_shared_xpu(
+                storage_device,
+                storage_handle,
+                storage_size_bytes,
+                storage_offset_bytes,
+            )
+            shared_cache[cache_key] = StorageWeakRef(storage)
+
+    _storage = (
+        storage
+        if isinstance(storage, torch.UntypedStorage)
+        else storage._untyped_storage
+    )
+
+    t = torch._utils._rebuild_tensor(
+        torch.storage.TypedStorage(wrap_storage=_storage, dtype=dtype, _internal=True),
+        tensor_offset,
+        tensor_size,
+        tensor_stride,
+    )
+
+    if tensor_cls == torch.nn.parameter.Parameter:
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+
+    return t
+
+
+def rebuild_xpu_tensor_from_cpu(
+    tensor_cls,
+    cpu_tensor_bytes,
+    xpu_device,
+    requires_grad,
+):
+    cpu_buffer = io.BytesIO(cpu_tensor_bytes)
+    cpu_tensor = torch.load(cpu_buffer, map_location="cpu")
+    t = cpu_tensor.to(device=xpu_device)
+    if tensor_cls == torch.nn.parameter.Parameter:
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+    return t
+
+
 def reduce_tensor(tensor):
     if tensor.requires_grad and not tensor.is_leaf:
         raise RuntimeError(
@@ -385,6 +451,46 @@ def reduce_tensor(tensor):
                 tensor.storage_offset(),
                 tensor.dtype,
                 tensor.untyped_storage().size(),
+                tensor.requires_grad,
+            ),
+        )
+    elif storage._untyped_storage.device.type == "xpu":
+        if os.environ.get("TORCH_XPU_ENABLE_IPC", "0") != "1":
+            cpu_tensor = tensor.detach().to(device="cpu")
+            cpu_buffer = io.BytesIO()
+            torch.save(cpu_tensor, cpu_buffer)
+            return (
+                rebuild_xpu_tensor_from_cpu,
+                (
+                    type(tensor),
+                    cpu_buffer.getvalue(),
+                    tensor.device,
+                    tensor.requires_grad,
+                ),
+            )
+
+        (
+            device,
+            handle,
+            storage_size_bytes,
+            storage_offset_bytes,
+        ) = storage._share_xpu_()
+        tensor_offset = tensor.storage_offset()
+        if handle is not None:
+            shared_cache[(handle, storage_offset_bytes)] = StorageWeakRef(storage)
+        return (
+            rebuild_xpu_tensor,
+            (
+                type(tensor),
+                tensor.size(),
+                tensor.stride(),
+                tensor_offset,
+                type(storage),
+                tensor.dtype,
+                device,
+                handle,
+                storage_size_bytes,
+                storage_offset_bytes,
                 tensor.requires_grad,
             ),
         )
@@ -592,9 +698,17 @@ def reduce_typed_storage_child(storage):
 def reduce_storage(storage):
     from . import get_sharing_strategy
 
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    privateuse1_like_device_types = {privateuse1_backend_name, "xpu"}
+
     if storage.is_cuda:
         raise RuntimeError(
             "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
+        )
+    elif storage.device.type in privateuse1_like_device_types:
+        raise RuntimeError(
+            f"Cannot pickle {storage.device.type.upper()} storage; "
+            f"try pickling a {storage.device.type.upper()} tensor instead"
         )
     elif storage.device.type == "meta":
         raise RuntimeError(

@@ -185,11 +185,18 @@ class _StorageBase:
     def _share_cuda_(self, *args, **kwargs):
         raise NotImplementedError
 
+    def _share_xpu_(self, *args, **kwargs):
+        raise NotImplementedError
+
     def is_shared(self) -> _bool:
         raise NotImplementedError
 
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs) -> Self:
+        raise NotImplementedError
+
+    @classmethod
+    def _new_shared_xpu(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
     def _shared_incref(self, *args, **kwargs):
@@ -1451,6 +1458,9 @@ class TypedStorage:
     def _share_cuda_(self, *args, **kwargs):
         return self._untyped_storage._share_cuda_(*args, **kwargs)
 
+    def _share_xpu_(self, *args, **kwargs):
+        return self._untyped_storage._share_xpu_(*args, **kwargs)
+
     def is_shared(self):
         _warn_typed_storage_removal()
         return self._is_shared()
@@ -1462,6 +1472,10 @@ class TypedStorage:
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs):
         return torch.UntypedStorage._new_shared_cuda(*args, **kwargs)
+
+    @classmethod
+    def _new_shared_xpu(cls, *args, **kwargs):
+        return torch.UntypedStorage._new_shared_xpu(*args, **kwargs)
 
     def _share_filename_cpu_(self, *args, **kwargs):
         (

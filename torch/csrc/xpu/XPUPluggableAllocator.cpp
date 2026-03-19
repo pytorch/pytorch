@@ -53,6 +53,23 @@ void XPUPluggableAllocator::raw_delete(void* ptr) {
   free_fn_(ptr, size, device_idx, queue);
 }
 
+c10::xpu::XPUCachingAllocator::ShareableHandle
+XPUPluggableAllocator::shareIpcHandle(void* ptr) {
+  TORCH_CHECK(
+      false,
+      "XPUPluggableAllocator does not yet support shareIpcHandle. "
+      "If you need it, please file an issue describing your use case.");
+}
+
+std::shared_ptr<void> XPUPluggableAllocator::getIpcDevPtr(
+    std::string handle,
+    c10::DeviceIndex device) {
+  TORCH_CHECK(
+      false,
+      "XPUPluggableAllocator does not yet support getIpcDevPtr. "
+      "If you need it, please file an issue describing your use case.");
+}
+
 void XPUPluggableAllocator::init(c10::DeviceIndex device_count) {
   if (init_fn_) {
     init_fn_(device_count);

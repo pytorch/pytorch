@@ -4,13 +4,25 @@
 #include <c10/core/CachingDeviceAllocator.h>
 #include <c10/xpu/XPUStream.h>
 
+#include <memory>
+#include <string>
+
 namespace c10::xpu::XPUCachingAllocator {
+
+struct ShareableHandle {
+  std::string handle;
+  ptrdiff_t offset;
+};
 
 class XPUAllocator : public DeviceAllocator {
  public:
   virtual void init(c10::DeviceIndex device_count) = 0;
   virtual void* raw_alloc(size_t size) = 0;
   virtual void raw_delete(void* ptr) = 0;
+  virtual ShareableHandle shareIpcHandle(void* ptr) = 0;
+  virtual std::shared_ptr<void> getIpcDevPtr(
+      std::string handle,
+      c10::DeviceIndex device) = 0;
 };
 
 C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
@@ -61,6 +73,16 @@ inline void raw_delete(void* ptr) {
 
 inline void recordStream(const DataPtr& dataPtr, XPUStream stream) {
   get()->recordStream(dataPtr, stream);
+}
+
+inline ShareableHandle shareIpcHandle(void* ptr) {
+  return get()->shareIpcHandle(ptr);
+}
+
+inline std::shared_ptr<void> getIpcDevPtr(
+    std::string handle,
+    c10::DeviceIndex device) {
+  return get()->getIpcDevPtr(std::move(handle), device);
 }
 
 C10_XPU_API void enablePeerAccess(
