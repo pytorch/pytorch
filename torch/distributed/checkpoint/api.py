@@ -8,7 +8,11 @@ __all__ = ["CheckpointException"]
 
 
 def _wrap_exception(exc: BaseException) -> WRAPPED_EXCEPTION:
-    return (exc, tb.extract_tb(exc.__traceback__))
+    frames = tb.extract_tb(exc.__traceback__)
+    safe_summary = tb.StackSummary.from_list(
+        [(f.filename, f.lineno, f.name, f.line or '') for f in frames]
+    )
+    return (exc.with_traceback(None), safe_summary)
 
 
 def _is_wrapped_exception(obj: Any) -> bool:
