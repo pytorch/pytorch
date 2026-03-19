@@ -494,6 +494,10 @@ convertIValue(
     std::vector<std::string> stride_array;
     std::vector<std::string> type_array;
     std::vector<std::string> value_array;
+    shape_array.reserve(tuple_size);
+    stride_array.reserve(tuple_size);
+    type_array.reserve(tuple_size);
+    value_array.reserve(tuple_size);
     for (const auto j : c10::irange(tuple_size)) {
       auto tuple = convertIValue(
           ob,
@@ -524,6 +528,10 @@ convertIValue(
     std::vector<std::string> stride_array;
     std::vector<std::string> type_array;
     std::vector<std::string> value_array;
+    shape_array.reserve(list_size);
+    stride_array.reserve(list_size);
+    type_array.reserve(list_size);
+    value_array.reserve(list_size);
     for (const auto j : c10::irange(list_size)) {
       auto tuple = convertIValue(
           ob,
