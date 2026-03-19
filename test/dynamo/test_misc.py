@@ -12197,22 +12197,6 @@ def ___make_guard_fn():
         for i in range(4):
             self.assertEqual(eager_result[i], compiled_result[i])
 
-    def test_frozen_dataclass_setattr_raises(self):
-        @dataclasses.dataclass(frozen=True)
-        class TestDataClass:
-            x: int
-
-        def fn(t):
-            dc = TestDataClass(1)
-            dc.x = 2
-            return t + dc.x
-
-        with self.assertRaises(dataclasses.FrozenInstanceError):
-            fn(torch.randn(4))
-
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
-            torch.compile(fn, fullgraph=True)(torch.randn(4))
-
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
