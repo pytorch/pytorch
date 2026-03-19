@@ -1700,3 +1700,179 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
         keep_dim=keep_dim,
         reduction_linear=False,
     )
+
+
+_LINALG_NUM_PLACEMENTS = {
+    # 1 in 1 out
+    aten.cholesky.default: 2,
+    aten.cholesky_inverse.default: 2,
+    aten.linalg_matrix_exp.default: 2,
+    # 2 in 1 out
+    aten.cholesky_solve.default: 3,
+    aten.linalg_householder_product.default: 3,
+    aten.linalg_solve_triangular.default: 3,
+    # 3 in 1 out
+    aten.linalg_ldl_solve.default: 4,
+    aten.linalg_lu_solve.default: 4,
+    aten.ormqr.default: 4,
+    # 1 in 2 out
+    aten.geqrf.default: 3,
+    aten.linalg_cholesky_ex.default: 3,
+    aten.linalg_eig.default: 3,
+    aten.linalg_inv_ex.default: 3,
+    # 2 in 2 out
+    aten.triangular_solve.default: 4,
+    # 1 in 3 out
+    aten._linalg_det.default: 4,
+    aten.linalg_ldl_factor_ex.default: 4,
+    aten.linalg_lu.default: 4,
+    aten.linalg_lu_factor_ex.default: 4,
+    # 2 in 3 out
+    aten.lu_unpack.default: 5,
+    # 1 in 4 out
+    aten._linalg_slogdet.default: 5,
+    # 2 in 4 out
+    aten._linalg_solve_ex.default: 6,
+    # 1 in
+    aten._linalg_check_errors.default: 1,
+}
+
+
+def _linalg_batch_dim_strategies(
+    ndim: int, n_placements: int
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Build single-dim strategies for linalg ops that operate on the last 1-2 dims.
+
+    Returns sharding on each batch dim (all dims except the last 2), with all
+    outputs and inputs sharded on the same dim.
+    """
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(ndim - 2):
+        strategies.append([_ShardingPlaceholder(dim)] * n_placements)
+    return strategies
+
+
+def _get_ndim(tensor_meta: Any) -> int:
+    if not isinstance(tensor_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(tensor_meta)}")
+    return len(tensor_meta.shape)
+
+
+@register_single_dim_strategy(
+    [
+        aten.cholesky.default,
+        aten.cholesky_inverse.default,
+        aten.linalg_matrix_exp.default,
+        aten.cholesky_solve.default,
+        aten.linalg_householder_product.default,
+        aten.linalg_solve_triangular.default,
+        aten.linalg_ldl_solve.default,
+        aten.linalg_lu_solve.default,
+        aten.ormqr.default,
+        aten.geqrf.default,
+        aten.linalg_cholesky_ex.default,
+        aten.linalg_eig.default,
+        aten.linalg_inv_ex.default,
+        aten.triangular_solve.default,
+        aten._linalg_det.default,
+        aten.linalg_ldl_factor_ex.default,
+        aten.linalg_lu.default,
+        aten.linalg_lu_factor_ex.default,
+        aten.lu_unpack.default,
+        aten._linalg_slogdet.default,
+        aten._linalg_solve_ex.default,
+        aten._linalg_check_errors.default,
+    ],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def linalg_batch_dim_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    ndim = _get_ndim(args_schema[0])
+    if op not in _LINALG_NUM_PLACEMENTS:
+        raise AssertionError(f"Expected op in _LINALG_NUM_PLACEMENTS, got {op}")
+
+    n_placements = _LINALG_NUM_PLACEMENTS[op]
+    strategies = _linalg_batch_dim_strategies(ndim, n_placements=n_placements)
+
+    if op == aten.linalg_solve_triangular.default:
+        # solve_triangular(A, B) -> result: linear in B
+        strategies.append([Partial(), Replicate(), Partial()])
+        strategies.append([Partial("avg"), Replicate(), Partial("avg")])
+        # A replicated, B sharded on batch dims (B may have more batch dims than A)
+        ndim_b = _get_ndim(args_schema[1])
+        for dim in range(ndim_b - 2):
+            strategies.append(
+                [_ShardingPlaceholder(dim), Replicate(), _ShardingPlaceholder(dim)]
+            )
+    elif op == aten.cholesky_solve.default:
+        # cholesky_solve(B, A) -> result  (B is arg0)
+        strategies.append([Partial(), Partial(), Replicate()])
+    elif op == aten.linalg_lu_solve.default:
+        # linalg_lu_solve(LU, pivots, B) -> result
+        strategies.append([Partial(), Replicate(), Replicate(), Partial()])
+    elif op == aten.linalg_ldl_solve.default:
+        # linalg_ldl_solve(LD, pivots, B) -> result
+        strategies.append([Partial(), Replicate(), Replicate(), Partial()])
+    elif op == aten.ormqr.default:
+        # ormqr(a, tau, C) -> result  (linear in C)
+        strategies.append([Partial(), Replicate(), Replicate(), Partial()])
+    elif op == aten._linalg_solve_ex.default:
+        # _linalg_solve_ex(A, B) -> (result, LU, pivots, info)
+        strategies.append(
+            [Partial(), Replicate(), Replicate(), Replicate(), Replicate(), Partial()]
+        )
+
+    return strategies
+
+
+# linalg_pinv has optional tensor kwargs atol, rtol (scalar tensors when present).
+# Schema: (Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian) -> Tensor
+# When atol/rtol are None, num_inputs=1; when present, they add to num_inputs.
+@register_single_dim_strategy(
+    [aten.linalg_pinv.atol_rtol_tensor],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def linalg_pinv_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    ndim = _get_ndim(args_schema[0])
+    # Count optional tensor kwargs that are actually present
+    extra_tensors = sum(
+        isinstance(kwargs_schema.get(k), TensorMeta) for k in ("atol", "rtol")
+    )
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(ndim - 2):
+        s: list[Placement | _ShardingPlaceholder] = [
+            _ShardingPlaceholder(dim),
+            _ShardingPlaceholder(dim),
+        ]
+        # atol, rtol are scalar tensors — always Replicate
+        s.extend([Replicate()] * extra_tensors)
+        strategies.append(s)
+    return strategies
+
+
+# linalg_cross is pointwise on every dim except the cross-product dim (which
+# must be size 3).  Shard on any other dim.
+@register_single_dim_strategy(
+    [aten.linalg_cross.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def linalg_cross_strategy(
+    op: torch._ops.OpOverload,
+    args_schema: tuple[Any, ...],
+    kwargs_schema: dict[str, Any],
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    ndim = _get_ndim(args_schema[0])
+    cross_dim = kwargs_schema.get("dim", -1) % ndim
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for dim in range(ndim):
+        if dim == cross_dim:
+            continue
+        strategies.append([_ShardingPlaceholder(dim)] * 3)
+    return strategies

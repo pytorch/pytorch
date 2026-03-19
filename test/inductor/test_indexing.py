@@ -6,6 +6,7 @@ import unittest
 import sympy
 
 import torch
+from torch._dynamo.source import ConstantSource
 from torch._inductor.codegen.cpp import cexpr
 from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
@@ -539,6 +540,78 @@ class TestEvaluateMinMax(InductorTestCase):
         self.assertFalse(sizevars.guard_or_false(sympy.Le(10 * u0, u0)))
         # Lt(u0, 10*u0) => 9*u0 > 0 => u0 > 0, not provable (u0 could be 0)
         self.assertFalse(sizevars.guard_or_false(sympy.Lt(u0, 10 * u0)))
+
+
+class TestPrecomputedSizeHinting(InductorTestCase):
+    """Tests for optimization_hint and guarding_hint_or_throw with PRECOMPUTED_SIZE symbols."""
+
+    def test_optimization_hint_with_precomputed_size(self):
+        """Test that optimization_hint correctly resolves PRECOMPUTED_SIZE symbols.
+
+        When a complex expression is replaced with a precomputed size symbol (ps0, ps1, etc.),
+        optimization_hint must use inv_precomputed_replacements to resolve the symbol
+        back to its original expression before computing the hint.
+        """
+        sizevars = SizeVarAllocator()
+
+        # Create a backed symbol with a concrete hint value
+        s0 = sizevars.shape_env.create_symbol(168, source=ConstantSource("s0"))
+        sizevars.shape_env.var_to_val[s0] = sympy.Integer(168)
+        sizevars.backed_var_to_val[s0] = sympy.Integer(168)
+
+        # Create a complex expression that would be precomputed
+        complex_expr = s0 * 8  # Should evaluate to 168 * 8 = 1344
+
+        # Register the expression as a precomputed size (simulating what Inductor does)
+        ps_symbol = sizevars.lookup_precomputed_size(complex_expr)
+
+        # Verify the precomputed symbol was created
+        self.assertIn(complex_expr, sizevars.precomputed_replacements)
+        self.assertIn(ps_symbol, sizevars.inv_precomputed_replacements)
+
+        # Test optimization_hint resolves the ps symbol correctly
+        hint = sizevars.optimization_hint(ps_symbol)
+        expected = 168 * 8  # The concrete value of s0 * 8
+        self.assertEqual(hint, expected)
+
+    def test_guarding_hint_or_throw_with_precomputed_size(self):
+        """Test that guarding_hint_or_throw correctly resolves PRECOMPUTED_SIZE symbols."""
+        sizevars = SizeVarAllocator()
+
+        # Create a backed symbol with a concrete hint value
+        s0 = sizevars.shape_env.create_symbol(42, source=ConstantSource("s0"))
+        sizevars.shape_env.var_to_val[s0] = sympy.Integer(42)
+        sizevars.backed_var_to_val[s0] = sympy.Integer(42)
+
+        # Create a complex expression
+        complex_expr = s0 * 2
+
+        # Register as precomputed size
+        ps_symbol = sizevars.lookup_precomputed_size(complex_expr)
+
+        # Test guarding_hint_or_throw resolves correctly
+        hint = sizevars.guarding_hint_or_throw(ps_symbol)
+        expected = 42 * 2
+        self.assertEqual(hint, expected)
+
+    def test_optimization_hint_with_expression_containing_precomputed_size(self):
+        """Test optimization_hint with an expression that contains a PRECOMPUTED_SIZE symbol."""
+        sizevars = SizeVarAllocator()
+
+        # Create a backed symbol
+        s0 = sizevars.shape_env.create_symbol(10, source=ConstantSource("s0"))
+        sizevars.shape_env.var_to_val[s0] = sympy.Integer(10)
+        sizevars.backed_var_to_val[s0] = sympy.Integer(10)
+
+        # Register s0 * 5 as precomputed (ps0 = 50)
+        ps_symbol = sizevars.lookup_precomputed_size(s0 * 5)
+
+        # Create an expression using the precomputed symbol: ps0 + 3
+        expr = ps_symbol + 3
+
+        # optimization_hint should resolve ps0 -> s0*5 -> 50, then add 3 -> 53
+        hint = sizevars.optimization_hint(expr)
+        self.assertEqual(hint, 53)
 
 
 if __name__ == "__main__":

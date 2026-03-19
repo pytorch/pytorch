@@ -605,7 +605,12 @@ class DistMathOpsTest(DTensorTestBase):
                 with CommDebugMode() as comm_mode:
                     output_dist = model_dist(x)
 
-                self.assertEqual(output_local, output_dist)
+                output_dist_cmp = (
+                    output_dist.full_tensor()
+                    if isinstance(output_dist, DTensor)
+                    else output_dist
+                )
+                self.assertEqual(output_local, output_dist_cmp)
 
                 # all requires_grad patterns should have the same forward comm counts
                 expected_fwd_comm = {
@@ -645,7 +650,12 @@ class DistMathOpsTest(DTensorTestBase):
                     comm_mode.comm_module_counts["Global"]["backward"],
                     expected_bwd_comm,
                 )
-                self.assertEqual(output_local, output_dist)
+                output_dist_cmp = (
+                    output_dist.full_tensor()
+                    if isinstance(output_dist, DTensor)
+                    else output_dist
+                )
+                self.assertEqual(output_local, output_dist_cmp)
 
             except Exception as e:
                 subtest_fails[subtest_cfg] = e
@@ -1274,7 +1284,9 @@ class DistMathOpsTest(DTensorTestBase):
         dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
         out_with_redistribute = torch.norm(dt)
 
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
         local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
         dt = DTensor.from_local(
@@ -1285,7 +1297,9 @@ class DistMathOpsTest(DTensorTestBase):
         dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
         out_with_redistribute = torch.max(dt)
 
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
         local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
         dt = DTensor.from_local(
@@ -1296,7 +1310,9 @@ class DistMathOpsTest(DTensorTestBase):
         dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
         out_with_redistribute = torch.min(dt)
 
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
     @with_comms
     def test_matching_partial_reduction_ops(self):
@@ -1315,7 +1331,9 @@ class DistMathOpsTest(DTensorTestBase):
 
         self.assertTrue(out_without_redistribute.placements[0].is_partial())
         self.assertTrue(out_with_redistribute.placements[0].is_replicate())
-        self.assertEqual(out_without_redistribute, out_with_redistribute)
+        self.assertEqual(
+            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
+        )
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -1520,6 +1538,86 @@ class DistMathOpsTest(DTensorTestBase):
             else:
                 local_loss.backward()
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_linalg_ops(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # Batched positive-definite matrix for ops that require it (cholesky, inv)
+        A = torch.randn(8, 4, 4, device=self.device_type)
+        spd = A @ A.mT + 4 * torch.eye(4, device=self.device_type)
+        dt_spd = distribute_tensor(spd, device_mesh, [Shard(0)])
+
+        # cholesky
+        expected = torch.linalg.cholesky(spd)
+        result = torch.linalg.cholesky(dt_spd)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # inv
+        expected = torch.linalg.inv(spd)
+        result = torch.linalg.inv(dt_spd)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # lu_factor
+        B = torch.randn(8, 4, 4, device=self.device_type)
+        dt_B = distribute_tensor(B, device_mesh, [Shard(0)])
+        exp_LU, exp_piv = torch.linalg.lu_factor(B)
+        res_LU, res_piv = torch.linalg.lu_factor(dt_B)
+        self.assertEqual(res_LU.full_tensor(), exp_LU)
+        self.assertTrue(res_LU.placements[0].is_shard(0))
+
+        # eig
+        expected_vals, expected_vecs = torch.linalg.eig(B)
+        result_vals, result_vecs = torch.linalg.eig(dt_B)
+        self.assertEqual(result_vals.full_tensor(), expected_vals)
+        self.assertTrue(result_vals.placements[0].is_shard(0))
+
+        # solve
+        rhs = torch.randn(8, 4, 2, device=self.device_type)
+        dt_rhs = distribute_tensor(rhs, device_mesh, [Shard(0)])
+        expected = torch.linalg.solve(spd, rhs)
+        result = torch.linalg.solve(dt_spd, dt_rhs)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_linalg_cross(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        a = torch.randn(8, 4, 3, device=self.device_type)
+        b = torch.randn(8, 4, 3, device=self.device_type)
+
+        # Shard on batch dim (dim=0), cross on default dim=-1
+        dt_a = distribute_tensor(a, device_mesh, [Shard(0)])
+        dt_b = distribute_tensor(b, device_mesh, [Shard(0)])
+        expected = torch.linalg.cross(a, b)
+        result = torch.linalg.cross(dt_a, dt_b)
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_shard(0))
+
+        # Shard on dim=1, cross on dim=-1
+        dt_a1 = distribute_tensor(a, device_mesh, [Shard(1)])
+        dt_b1 = distribute_tensor(b, device_mesh, [Shard(1)])
+        result1 = torch.linalg.cross(dt_a1, dt_b1)
+        self.assertEqual(result1.full_tensor(), expected)
+        self.assertTrue(result1.placements[0].is_shard(1))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_linalg_solve_partial(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        A = torch.randn(4, 4, device=self.device_type, dtype=torch.float64)
+        A = A @ A.mT + 4 * torch.eye(4, device=self.device_type, dtype=torch.float64)
+        B = torch.randn(4, 2, device=self.device_type, dtype=torch.float64)
+
+        dt_A = distribute_tensor(A, device_mesh, [Replicate()])
+        dt_B = distribute_tensor(B, device_mesh, [Partial()])
+        expected = torch.linalg.solve(A, B)
+        result = torch.linalg.solve(dt_A, dt_B)
+        self.assertEqual(result.full_tensor(), expected)
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(

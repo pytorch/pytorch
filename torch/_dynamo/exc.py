@@ -112,6 +112,14 @@ class AutogradGradRestartAnalysis(RestartAnalysis):
     """
 
 
+class RequiresGradRestartAnalysis(RestartAnalysis):
+    """Raised when a source-less requires_grad_() intermediate leaks as output.
+
+    On restart, requires_grad_() will graph break instead of being traced,
+    preserving partial acceleration for code before the call.
+    """
+
+
 class UnspecializeRestartAnalysis(RestartAnalysis):
     pass
 

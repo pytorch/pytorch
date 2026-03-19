@@ -837,6 +837,25 @@ def forward(self, arg0_1, arg1_1):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    @with_comms
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_dtensor_requires_grad_intermediate_backward(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            y = x * 2
+            y.requires_grad_()
+            loss = (y * 3).sum()
+            loss.backward()
+            return y.grad
+
+        full_x = torch.randn(8, 8)
+        x = distribute_tensor(full_x, mesh, [Shard(0)])
+
+        ref = fn(x.full_tensor())
+        result = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(ref, result.full_tensor())
+
     def test_dtensor_attribute_access_on_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 

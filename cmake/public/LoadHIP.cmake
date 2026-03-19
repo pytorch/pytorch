@@ -75,7 +75,7 @@ message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 # needed because the find_package call to this module uses the Module mode search
 # https://cmake.org/cmake/help/latest/command/find_package.html#search-modes
 if(UNIX)
-  set(CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${CMAKE_MODULE_PATH})
+  set(CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip;${ROCM_PATH}/lib/${CMAKE_LIBRARY_ARCHITECTURE}/cmake/hip ${CMAKE_MODULE_PATH})
 else() # Win32
   set(CMAKE_MODULE_PATH ${ROCM_PATH}/cmake/ ${CMAKE_MODULE_PATH})
 endif()

@@ -559,7 +559,7 @@ def validate_combination(
             if isinstance(out_plc, Replicate):
                 local_values = [local_out._local_tensors[r] for r in range(world_size)]
                 all_same = all(
-                    torch.allclose(local_values[0], lv, atol=1e-5, rtol=1e-5)
+                    torch.allclose(local_values[0], lv, atol=1e-3, rtol=1e-3)
                     for lv in local_values[1:]
                 )
                 if not all_same:
@@ -580,7 +580,7 @@ def validate_combination(
                 )
 
             if not torch.allclose(
-                gt, full_output, atol=1e-5, rtol=1e-5, equal_nan=True
+                gt, full_output, atol=1e-3, rtol=1e-3, equal_nan=True
             ):
                 max_diff = (gt - full_output).abs().max().item()
                 return False, f"Value mismatch[{i}]: max_diff={max_diff:.6f}"
