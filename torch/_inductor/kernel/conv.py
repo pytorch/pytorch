@@ -650,6 +650,13 @@ def convolution(
             in_chan,
             dtype_size=dtype_size,
         ):
+            # Workaround for triton#1254: the flattened single-loop used
+            # for non-1x1 kernels (UNROLL=False) triggers a Triton compiler
+            # bug when num_warps >= 8, producing incorrect results. Cap at
+            # 4 warps for non-1x1 kernels until the upstream fix lands.
+            unroll = is_ones(kernel_shape)
+            num_warps = cfg.num_warps if unroll else min(cfg.num_warps, 4)
+
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
                     choices,
@@ -664,10 +671,10 @@ def convolution(
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
+                    UNROLL=unroll,
                     ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
+                    num_warps=num_warps,
                     **cfg.kwargs,
                 )
             elif ndim == 3:
@@ -687,10 +694,10 @@ def convolution(
                     GROUPS=groups,
                     # TODO(jansel): try unroll for bigger kernels once fixed:
                     #               https://github.com/triton-lang/triton/issues/1254
-                    UNROLL=is_ones(kernel_shape),
+                    UNROLL=unroll,
                     ALLOW_TF32=torch.backends.cudnn.fp32_precision == "tf32",
                     num_stages=cfg.num_stages,
-                    num_warps=cfg.num_warps,
+                    num_warps=num_warps,
                     **cfg.kwargs,
                 )
     if use_ck_conv_template(layout):
