@@ -81,7 +81,7 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
       case kFloat:
          gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
 #ifdef AT_USE_NV_CVT_INTRINSICS
-             const auto x =  __nv_cvt_float_to_fp8(value, __NV_NOSAT, __NV_E4M3);
+             const auto x =  __nv_cvt_float_to_fp8(value, __NV_SATFINITE, __NV_E4M3);
              return Float8_e4m3fn(x);
 #else
              return Float8_e4m3fn(value);
