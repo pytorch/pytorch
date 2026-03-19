@@ -6,13 +6,19 @@ from collections.abc import Callable
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.auto_functionalize import (
+    can_auto_functionalize,
+    do_auto_functionalize_v2,
+)
 from torch._higher_order_ops.utils import (
+    _check_alias_and_mutation,
     _maybe_run_with_interpreter,
     autograd_not_implemented,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
     fill_none_with_masks,
     filter_with_masks,
+    HopInstance,
     materialize_as_graph,
     reenter_make_fx,
     validate_subgraph_args_types,
@@ -592,12 +598,6 @@ def while_loop_fake_tensor_mode(
 def while_loop_func(
     ctx, cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False
 ):
-    from torch._higher_order_ops.auto_functionalize import (
-        can_auto_functionalize,
-        do_auto_functionalize_v2,
-    )
-    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
-
     op = while_loop_stack_output_op if stack_output else while_loop_op
     # For now, we only support auto-functionalization for while_loop when using python
     # functionalization mode
