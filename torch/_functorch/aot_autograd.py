@@ -24,6 +24,7 @@ from torch._dynamo.utils import (
     preserve_rng_state,
     set_feature_use,
 )
+from torch._functorch._aot_autograd.autograd_cache import create_fx_config
 from torch._guards import detect_fake_mode
 from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
