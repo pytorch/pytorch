@@ -415,7 +415,8 @@ class TestNVUniversalGemm(TestCase):
             compiled_fn = torch.compile(scaled_mm)
             result = compiled_fn(a_fp4, b_fp4_t, scale_a, scale_b)
 
-        torch.testing.assert_close(result, expected)
+        # a_fp4 and b_fp4_t could come with NaNs.
+        torch.testing.assert_close(result, expected, equal_nan=True)
 
     def test_grouped_gemm(self):
         """Test grouped GEMM with NVGEMM backend.

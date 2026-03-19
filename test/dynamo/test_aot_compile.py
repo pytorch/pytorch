@@ -1335,6 +1335,27 @@ from user code:
         actual = compiled_fn(*test_inputs)
         self.assertEqual(expected.x, actual.x)
 
+    def test_builtins_dict_survives_serialization(self):
+        """Test that __builtins_dict__ is preserved through serialize/deserialize."""
+
+        def fn(x):
+            return x + 1, type
+
+        x = torch.randn(4)
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(((x,), {}))
+
+        # Save and reload without f_globals
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            loaded_fn = torch.compiler.load_compiled_function(
+                f, f_globals=fn.__globals__
+            )
+
+        expected = fn(x)
+        actual = loaded_fn(x)
+        self.assertEqual(expected[0], actual[0])
+        self.assertEqual(expected[1], actual[1])
+
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_cross_aot_compile(self):
         """Test cross-compilation using fake cuda tensors and backward correctness"""

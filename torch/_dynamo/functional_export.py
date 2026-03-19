@@ -757,10 +757,16 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     {", ".join(without_annotation)}, = self._dynamo_bytecode_flatten(*_fn_args)"""
 
     def generate_output(
-        self, output_args: torch.fx.node.Argument, *, descs: object | None = None
+        self,
+        output_args: torch.fx.node.Argument,
+        *,
+        descs: object | None = None,
+        repr_fn: Any | None = None,
     ) -> str:
+        if repr_fn is None:
+            repr_fn = repr
         # pyrefly: ignore [not-iterable]
-        returned = f"self._dynamo_bytecode_unflatten(({', '.join([str(a) for a in output_args])},), _fn_args)"
+        returned = f"self._dynamo_bytecode_unflatten(({', '.join([repr_fn(a) for a in output_args])},), _fn_args)"
         if self.wrap_tuple:
             returned = f"({returned},)"
         return f"return {returned}"
