@@ -51,7 +51,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_jit import JitCommonTestCase
-from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
     GRAPH_EXECUTOR,
@@ -2941,13 +2941,6 @@ def f({", ".join(param_names)}):
 
     @slowTest
     @onlyCPU
-    @skipOps(
-        "TestNNCOpInfo",
-        "test_nnc_correctness",
-        {
-            skip("bfloat16", variant_name="functorch_no_channels_last"),
-        },
-    )
     @ops(
         [op for op in op_db if get_name(op) not in known_failures],
         dtypes=OpDTypes.supported,
