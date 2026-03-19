@@ -145,8 +145,8 @@ def _create_rearrange_callable(
         )
     )
 
-    exec(custom_rearrange_callable_code)
-    return locals()[custom_rearrange_callable_name]
+    exec(custom_rearrange_callable_code, globals(), exec_scope := {})
+    return exec_scope[custom_rearrange_callable_name]
 
 
 def rearrange(
