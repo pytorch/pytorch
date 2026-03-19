@@ -8198,6 +8198,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.common(fn, (inp, False))
             self.common(fn, (inp, True))
 
+    def test_sort_after_noop_pad_and_mutation(self):
+        # https://github.com/pytorch/pytorch/issues/177631
+        # When a no-op pad creates an alias that is later sorted, and the
+        # original tensor is mutated via index_put, the mutation must be
+        # scheduled after the sort. A bug in recompute_size_and_body was
+        # dropping the WeakDep that enforced this ordering.
+        def fn(a):
+            b = torch.nn.functional.pad(a, (0, 0))
+            a[0] = 1
+            sorted_tensor, _ = torch.sort(b)
+            return sorted_tensor
+
+        x1 = torch.zeros((2, 2), dtype=torch.float32, device=self.device)
+        x2 = x1.clone()
+
+        cfunc = torch.compile(fn, backend="inductor")
+        expected = fn(x1)
+        actual = cfunc(x2)
+        self.assertEqual(actual, expected)
+
     def test_topk(self):
         def fn(a):
             return torch.topk(a, 2, -1)
