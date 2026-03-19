@@ -2,6 +2,7 @@
 import contextlib
 import dataclasses
 import functools
+import gc
 import hashlib
 import inspect
 import itertools
@@ -4027,7 +4028,49 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
         # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
-        return benchmark_fn(choices)
+        result = benchmark_fn(choices)
+
+        # Evict benchmark template modules from PyCodeCache so their
+        # CachingAutotuner -> compile_results -> CompiledKernel chains become
+        # unreachable. Without this, PyCodeCache.modules (a class-level list)
+        # and PyCodeCache.modules_no_attr (a class-level dict) hold strong
+        # references that prevent GC from collecting CompiledKernel objects and
+        # triggering hipModuleUnload / cuModuleUnload via __del__.
+        evict_paths = set()
+        for choice in choices:
+            bmreq = getattr(choice, "bmreq", None)
+            if bmreq is not None:
+                path = getattr(bmreq, "module_path", None)
+                if path is not None:
+                    evict_paths.add(path)
+        if evict_paths:
+            evict_mod_names = set()
+            for path in evict_paths:
+                PyCodeCache.modules_no_attr.pop(path, None)
+            new_modules = []
+            for m in PyCodeCache.modules:
+                if getattr(m, "__file__", None) in evict_paths:
+                    name = getattr(m, "__name__", None)
+                    if name:
+                        evict_mod_names.add(name)
+                else:
+                    new_modules.append(m)
+            PyCodeCache.modules[:] = new_modules
+            # _reload_python_module also inserts each module into sys.modules
+            # (compile_tasks.py:37). This is the last strong reference keeping
+            # benchmark template modules (and their CachingAutotuner ->
+            # compile_results -> CompiledKernel chains) alive after the
+            # PyCodeCache eviction above.
+            for name in evict_mod_names:
+                sys.modules.pop(name, None)
+
+        # Also clear the precompile cache to release any futures holding
+        # references to compiled kernels from this round.
+        self.precompile_cache.clear()
+
+        gc.collect()
+
+        return result
 
     def autotune(
         self,
