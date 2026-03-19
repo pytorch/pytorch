@@ -1197,6 +1197,9 @@ TYPED_ATTR(Kineto, linkedCorrelationId, [&]() {
   const auto linked = e.linked_activity_.lock();
   return linked ? linked->correlationID() : 0;
 }())
+TYPED_ATTR(Kineto, flowId, e.flow.id)
+TYPED_ATTR(Kineto, flowType, e.flow.type)
+TYPED_ATTR(Kineto, flowStart, static_cast<bool>(e.flow.start))
 #undef TYPED_ATTR
 #undef TYPED_ATTR_WITH_DEFAULT
 

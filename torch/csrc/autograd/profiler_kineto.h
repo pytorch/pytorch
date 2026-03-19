@@ -58,6 +58,9 @@ struct TORCH_API KinetoEvent {
   bool isAsync() const;
   uint64_t correlationId() const;
   uint64_t linkedCorrelationId() const;
+  uint32_t flowId() const;
+  uint32_t flowType() const;
+  bool flowStart() const;
   int64_t externalId() const;
   int64_t deviceResourceId() const;
   std::string backend() const;
