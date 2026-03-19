@@ -183,7 +183,6 @@ struct TORCH_API Engine {
       InputBuffer& inputs,
       const std::shared_ptr<ReadyQueue>& cpu_ready_queue);
 
-  void initialize_device_threads_pool();
   virtual void thread_on_exception(
       const std::shared_ptr<GraphTask>& graph_task,
       const std::shared_ptr<Node>& fn,
@@ -221,17 +220,17 @@ struct TORCH_API Engine {
   std::shared_ptr<ReadyQueue> ready_queue_by_index(
       std::shared_ptr<ReadyQueue> cpu_ready_queue,
       int device_index);
-  // start device threads (CUDA, XLA, etc.) in Engine,
-  // note that it does NOT start CPU thread.
-  void start_device_threads();
   void increment_non_reentrant_thread_count();
   void decrement_non_reentrant_thread_count();
   virtual void thread_main(const std::shared_ptr<GraphTask>& task);
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
 
-  // Safe to read device_ready_queues_ without synchronization after
-  // initialization
+  c10::DeviceIndex compute_max_device_count();
+  void ensure_device_queues_allocated(c10::DeviceIndex required_size);
+  void ensure_device_thread_started(c10::DeviceIndex device_index);
+  void ensure_thread_pool_initialized();
+
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::shared_ptr<ReadyQueue>> device_ready_queues_;
 
@@ -275,6 +274,14 @@ struct TORCH_API Engine {
   // Destructor will wait for non-reentrant threads to finish
   std::condition_variable non_reentrant_device_thread_condvar_;
   std::mutex non_reentrant_device_thread_mutex_;
+
+  std::deque<std::atomic<bool>> device_thread_started_;
+  std::deque<std::atomic<bool>> device_thread_ready_;
+  std::mutex device_queues_init_mutex_;
+  std::atomic<c10::DeviceIndex> device_queues_size_{0};
+  c10::DeviceIndex max_device_count_{0};
+  bool global_device_count_computed_{false};
+
   // stop() must be called before the destruction path goes down to the base
   // class, in order to avoid a data-race-on-vptr. Use this boolean to guard
   // whether stop() has already been called, so we can call this in every
