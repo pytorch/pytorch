@@ -33,6 +33,29 @@ When component isn't clear from the issue body:
 
 **This is critical** when you have identified an issue as inductor, and the failing device is "cpu" ONLY, then this is a CPU inductor issue, and should be redirected to `oncall: cpu inductor`
 
+### Silently Dropped Operations = Dynamo
+
+If torch.compile silently drops or ignores an operation that works in eager, the bug is in Dynamo's tracing.
+
+| Signal | Label |
+|--------|-------|
+| In-place mutation skipped under compile (`detach_()`, `requires_grad_()`) | `module: dynamo` |
+| Side-effect not captured (global state, tensor metadata) | `module: dynamo` |
+
+Don't apply `module: autograd` just because the dropped operation involves autograd. If eager works fine, the autograd engine is fine.
+
+### Decomposition Bugs
+
+If eager and traced results diverge numerically for a specific op, suspect a bad decomposition.
+
+| Signal | Label |
+|--------|-------|
+| Eager vs traced diverge for a specific op | `module: decompositions` |
+| Higher-order gradients wrong under tracing | `module: decompositions` |
+| `make_fx` symbolic tracing diverges from eager | `module: fx` + `module: decompositions` + `oncall: pt2` |
+
+---
+
 ## 3. Don't Over-Tag pt2-dispatcher
 
 `module: pt2-dispatcher` is for bugs **IN** the dispatcher code, not just when it appears in a stack trace.

@@ -10,6 +10,7 @@ from unittest import skip, skipIf, skipUnless
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+from torch._C import FileCheck
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._inductor.utils import (
@@ -1414,6 +1415,97 @@ class LoweringTest(MultiProcContinuousTest):
             rtol=1e-5,
             atol=1e-5,
             msg="Compiled and eager (reuse) outputs do not match",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_output_buffer_reuse(self):
+        """
+        Verify that symm_mem ops are lowered via ExternKernelOut
+        (should_allocate()=True) so output buffers are visible to Inductor.
+        This is the foundation for subsequent PRs' P2P memory planning.
+        """
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w1 = torch.rand(N, N, device=self.device)
+        w2 = torch.rand(N, N, device=self.device)
+        w3 = torch.rand(N, N, device=self.device)
+
+        # Multi-layer TP pattern: mm -> allreduce, repeated 3 times.
+        def func(x, w1, w2, w3):
+            x = torch.mm(x, w1)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            x = torch.mm(x, w2)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            x = torch.mm(x, w3)
+            x = torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+            return x
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, x, w1, w2, w3)
+
+        # Verify one_shot_all_reduce is converted to one_shot_all_reduce_out
+        # with out= parameter (ExternKernelOut, not FallbackKernel).
+        # Each mm + allreduce pair should produce an out= call for the allreduce.
+        FileCheck().check_count("one_shot_all_reduce_out", 3, exactly=True).run(code)
+
+        # Verify the out= parameter is present on allreduce calls.
+        out_calls = code.count(", out=")
+        self.assertGreaterEqual(
+            out_calls,
+            6,
+            f"Expected at least 6 out= calls (3 mm + 3 allreduce), got {out_calls}.",
+        )
+
+        # Output buffers should be reused across layers (ping-pong).
+        reuse_count = code.count("# reuse")
+        self.assertGreaterEqual(
+            reuse_count,
+            2,
+            f"Expected at least 2 buffer reuses, got {reuse_count}.",
+        )
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_output_buffer_reuse_copy_variant(self):
+        """
+        Verify that one_shot_all_reduce_copy is also lowered via
+        ExternKernelOut through the manual out variant registry.
+        """
+        self._init_process()
+
+        N = 8
+        group_name = dist.group.WORLD.group_name
+        symm_buffer = symm_mem.empty(
+            N * N, device=self.device, dtype=torch.float32
+        ).view(N, N)
+        symm_mem.rendezvous(symm_buffer, group=group_name)
+
+        local_input = torch.rand(N, N, device=self.device)
+        w = torch.rand(N, N, device=self.device)
+
+        def func(symm_buffer, local_input, w):
+            x = torch.mm(local_input, w)
+            return torch.ops.symm_mem.one_shot_all_reduce_copy(
+                symm_buffer, x, "sum", "0"
+            )
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, symm_buffer, local_input, w)
+
+        # Verify one_shot_all_reduce_copy is converted to
+        # one_shot_all_reduce_copy_out with out= parameter.
+        FileCheck().check("one_shot_all_reduce_copy_out").run(code)
+
+        # Verify the out= parameter is present.
+        self.assertIn(
+            ", out=",
+            code,
+            "one_shot_all_reduce_copy_out should have out= parameter.",
         )
 
     @skip_if_rocm_multiprocess  # test requires support for registered buffers

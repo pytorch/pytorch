@@ -1004,6 +1004,20 @@ class GraphRuntimeEnv:
             )
 
 
+def _safe_builtins_dict(builtins_dict: dict[str, Any]) -> dict[str, Any]:
+    """Filter a builtins dict to only picklable entries for serialization."""
+    import pickle
+
+    result = {}
+    for k, v in builtins_dict.items():
+        try:
+            pickle.dumps(v)
+            result[k] = v
+        except Exception:
+            pass
+    return result
+
+
 @dataclass
 class GraphCaptureOutput:
     """
@@ -1052,6 +1066,17 @@ class GraphCaptureOutput:
 
         # Scan bytecode for all external references
         external_refs = self._get_external_refs(self.bytecode)
+
+        # Best-effort serialization of builtins referenced by the bytecode.
+        # Similar to how guards prune __builtins_dict__ to only used entries.
+        import builtins as _builtins
+
+        for ref in external_refs:
+            if ref not in used_globals:
+                if ref.startswith("__builtins_dict__") and ref in self.f_globals:
+                    used_globals[ref] = _safe_builtins_dict(self.f_globals[ref])
+                elif hasattr(_builtins, ref):
+                    used_globals[ref] = getattr(_builtins, ref)
 
         return GraphRuntimeEnv(
             bytecode=self.bytecode,

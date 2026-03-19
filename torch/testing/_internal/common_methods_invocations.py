@@ -39,6 +39,8 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
+    IS_ARM64,
+    IS_CPU_EXT_SVE_SUPPORTED,
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
@@ -1246,7 +1248,7 @@ def sample_inputs_mv(self, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(S, M), make_arg(M))
 
 def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, low=-1, high=+1, requires_grad=requires_grad)
+    make_arg = partial(make_tensor, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
     yield SampleInput(make_arg(M, S, M), make_arg(M, M, S))
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
@@ -9110,10 +9112,10 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                     mat2_fp4,
                     [scale1, global_scale1],
                     [ScalingType.BlockWise1x16, ScalingType.TensorWise],
-                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
                     [scale2, global_scale2],
                     [ScalingType.BlockWise1x16, ScalingType.TensorWise],
-                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
                     None,  # bias
                     torch.bfloat16,  # out_dtype
                 )
@@ -17692,7 +17694,13 @@ op_db: list[OpInfo] = [
     OpInfo(
         "to",
         op=lambda x, *args, **kwargs: x.to(*args, **kwargs),
-        dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool),
+        dtypes=all_types_and_complex_and(
+            torch.bfloat16,
+            torch.float16,
+            torch.bool,
+            torch.complex32,
+            torch.bcomplex32,
+        ),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
@@ -18955,6 +18963,15 @@ op_db: list[OpInfo] = [
                # RuntimeError: linalg.solve.triangular(); Only float is supported!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+               # see https://github.com/pytorch/pytorch/issues/177251
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestOperators',
+                   'test_jvp',
+                   device_type='cpu',
+                   dtypes=[torch.float32],
+                   active_if=IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED,
+               ),
            )),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
@@ -19239,14 +19256,6 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
-                            device_type='mps', dtypes=[torch.float32]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
-                            device_type='mps', dtypes=[torch.float32]),
-               # The operator 'aten::take' is not currently implemented for the MPS device
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
            )),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -25682,11 +25691,6 @@ python_ref_db = [
         skips=(
             # test error disabled since rhs non-tensor python scalar is supported
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.float32, torch.float16,)
-            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -25695,11 +25699,6 @@ python_ref_db = [
         skips=(
             # test error disabled since rhs non-tensor python scalar is supported
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.float32, torch.float16,)
-            ),
         ),
     ),
     PythonRefInfo(

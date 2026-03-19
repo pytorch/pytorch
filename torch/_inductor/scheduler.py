@@ -5593,8 +5593,10 @@ class Scheduler:
         def low_prec_fp(dtype: torch.dtype) -> bool:
             return dtype.itemsize <= 2 and dtype.is_floating_point
 
+        template_buf = template_node.get_template_node_or_throw()
         if (
-            low_prec_fp(template_node.get_template_node_or_throw().dtype)
+            not template_buf.is_multi_outputs_template()
+            and low_prec_fp(template_buf.dtype)
             and not prologue_node.can_codegen_in_low_precision()
         ):
             why(
