@@ -890,7 +890,9 @@ class TensorVariable(VariableTracker):
         # For traceable wrapper subclasses (DTensor, NestedTensor), class_type
         # is torch.Tensor, so check the example_value's actual type instead.
         example_value = self.proxy.node.meta.get("example_value")
-        check_type = type(example_value) if example_value is not None else self.class_type
+        check_type = (
+            type(example_value) if example_value is not None else self.class_type
+        )
         if not hasattr(check_type, name):
             unimplemented(
                 gb_type="Unhandled tensor method",
