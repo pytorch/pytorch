@@ -1,3 +1,4 @@
+#if USE_DISTRIBUTED
 #include <stdexcept>
 
 #include <ATen/core/Tensor.h>
@@ -364,3 +365,4 @@ c10::intrusive_ptr<ProcessGroupOCCL> createProcessGroupOCCL(
 }
 
 } // namespace c10d
+#endif // USE_DISTRIBUTED

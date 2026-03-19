@@ -1,5 +1,5 @@
 #pragma once
-
+#if USE_DISTRIBUTED
 #include <chrono>
 
 #include <c10/util/intrusive_ptr.h>
@@ -40,7 +40,7 @@ class OPENREG_EXPORT ProcessGroupOCCL : public Backend {
     c10::intrusive_ptr<c10::ivalue::Future> future_;
   };
 
-  struct TORCH_API Options : public Backend::Options {
+  struct OPENREG_EXPORT Options : public Backend::Options {
     explicit Options(
         std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
@@ -165,3 +165,4 @@ OPENREG_EXPORT c10::intrusive_ptr<ProcessGroupOCCL> createProcessGroupOCCL(
     const std::chrono::duration<float>& timeout);
 
 } // namespace c10d
+#endif // USE_DISTRIBUTED
