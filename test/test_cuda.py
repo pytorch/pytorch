@@ -653,7 +653,8 @@ print(t.is_pinned())
         def _check_default():
             default = torch.backends.cuda.preferred_blas_library()
             if torch.version.cuda:
-                self.assertTrue(default == torch._C._BlasBackend.Cublaslt)
+                # CUDA logic is easy, it's always cublas
+                self.assertTrue(default == torch._C._BlasBackend.Cublas)
             else:
                 # ROCm logic is less so, it's cublaslt for some Instinct, cublas for all else
                 gcn_arch = str(
@@ -5930,6 +5931,43 @@ class TestMemPool(TestCase):
         # each call to torch.cuda.graph_pool_handle() or torch.cuda.MemPool()
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_pool_id_in_snapshot(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history("all")
+
+            pool = torch.cuda.MemPool()
+            with torch.cuda.use_mem_pool(pool):
+                x = torch.rand(64, device="cuda")
+
+            ss = torch.cuda.memory._snapshot()
+
+            # segment_pool_id should match the MemPool id
+            found_segment = False
+            for seg in ss["segments"]:
+                if seg["segment_pool_id"] == pool.id:
+                    found_segment = True
+                    break
+            self.assertTrue(found_segment)
+
+            # trace entries for this allocation should carry pool_id
+            found_trace = False
+            for trace in ss["device_traces"]:
+                for te in trace:
+                    if "pool_id" not in te:
+                        continue
+                    if te["pool_id"] == pool.id and te["action"] == "alloc":
+                        found_trace = True
+                        break
+            self.assertTrue(found_trace)
+
+            del x
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     def get_dummy_allocator(self, check_vars):
         dummy_allocator_source_vars = """

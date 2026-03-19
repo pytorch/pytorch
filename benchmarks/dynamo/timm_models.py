@@ -69,7 +69,6 @@ BATCH_SIZE_DIVISORS = {
 REQUIRE_HIGHER_TOLERANCE = {
     "inception_v3",
     "mobilenetv3_large_100",
-    "convnextv2_nano.fcmae_ft_in22k_in1k",
 }
 
 REQUIRE_HIGHER_TOLERANCE_FP16_XPU = {

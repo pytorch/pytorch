@@ -94,7 +94,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import MI300_ARCH, runOnRocmArch, skipIfXpu
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     get_kernel_launch,
@@ -3005,7 +3005,6 @@ class TestMaxAutotunePrecompile(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(config.triton.native_matmul, "native matmul has counter 0")
     def test_precompilations(self):
         def fn(a, b, c):
@@ -3014,7 +3013,9 @@ class TestMaxAutotunePrecompile(TestCase):
             return (a @ b) @ c
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
+        # Scale down so float16 doesn't overflow: rand [0,1) -> (a@b)@c has elements in [0, 256^2).
+        # float16 max ~65504, so we keep values in a safe range (e.g. scale by 1/256).
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) / 256.0 for _ in range(3)]
 
         torch.testing.assert_close(fn_c(*inputs), fn(*inputs), atol=1e-2, rtol=1e-2)
 

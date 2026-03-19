@@ -10296,8 +10296,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: maximum_out
-    MPS: maximum_out_mps
+    CPU, CUDA, MTIA, MPS: maximum_out
   tags: pointwise
 
 # binary max, alias of maximum
@@ -10329,8 +10328,7 @@
   structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA, MTIA: minimum_out
-    MPS: minimum_out_mps
+    CPU, CUDA, MTIA, MPS: minimum_out
   tags: pointwise
 
 # binary min, alias for minimum

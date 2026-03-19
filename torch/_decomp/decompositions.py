@@ -4631,6 +4631,9 @@ def binary_cross_entropy_with_logits(
     if weight is not None:
         loss = loss * weight
 
+    # this is to align the resulted data type with the in-place
+    # operation in binary_cross_entropy_with_logits of aten/src/ATen/native/Loss.cpp
+    loss = loss.to(target.dtype)
     return apply_loss_reduction(loss, reduction)
 
 

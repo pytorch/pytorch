@@ -1877,7 +1877,8 @@ class ConstructorMoverPass:
                         lambda x: x
                         not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
                         + unsqueezed_nodes
-                        and x.target != torch.ops.aten.copy_.default,
+                        and x.target != torch.ops.aten.copy_.default
+                        and x.target != "output",
                     )
                     last_node = gpu_node
 

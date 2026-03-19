@@ -74,6 +74,11 @@ RUN bash ./install_cuda.sh 13.0
 RUN bash ./install_magma.sh 13.0
 RUN ln -sf /usr/local/cuda-13.0 /usr/local/cuda
 
+FROM cuda as cuda13.2
+RUN bash ./install_cuda.sh 13.2
+RUN bash ./install_magma.sh 13.2
+RUN ln -sf /usr/local/cuda-13.2 /usr/local/cuda
+
 # Install libibverbs for libtorch and copy to CUDA directory
 RUN apt-get update -y && \
     apt-get install -y libibverbs-dev librdmacm-dev && \

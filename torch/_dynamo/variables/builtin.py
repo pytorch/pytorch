@@ -1629,6 +1629,18 @@ class BuiltinVariable(VariableTracker):
             # - https://github.com/python/cpython/blob/3.12/Objects/floatobject.c#L878-L882
             assert istype(arg.sym_num, (torch.SymInt, torch.SymFloat))
             return SymNodeVariable.create(tx, arg.as_proxy() != 0)
+        if isinstance(arg, ConstDictVariable):
+            return ConstantVariable.build(tx, bool(arg.items))
+        if isinstance(arg, variables.UserDefinedObjectVariable):
+            # for user-defined objects, first try __bool__ if defined, else
+            # __len__. If neither is defined, then any instance is considered True
+            if arg.call_obj_hasattr(tx, "__bool__").value:
+                return arg.call_method(tx, "__bool__", [], {})
+            elif arg.call_obj_hasattr(tx, "__len__").value:
+                length = arg.call_method(tx, "__len__", [], {})
+                return ConstantVariable.create(length.value > 0)  # type: ignore[missing-attr]
+            else:
+                return ConstantVariable.create(True)
 
         # TODO handle more cases and merge this with this with `generic_jump`.
         return None
@@ -3329,6 +3341,9 @@ class BuiltinVariable(VariableTracker):
             a = a.dv_dict
         if isinstance(a, (ListVariable, ConstDictVariable)):
             return VariableTracker.build(tx, len(a.items) == 0)
+        if isinstance(a, UserDefinedObjectVariable):
+            bool_result = self.call_bool(tx, a)
+            return VariableTracker.build(tx, not bool_result.value)  # type: ignore[missing-attribute]
 
         return None
 

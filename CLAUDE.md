@@ -47,6 +47,10 @@ entirely.
 
 Disclose that the PR was authored with Claude.
 
+If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
+you MUST preserve them when rewriting or splitting commit messages. ghstack
+will update the source id automatically when needed.
+
 # Coding Style Guidelines
 
 Follow these rules for all code changes in this repository:

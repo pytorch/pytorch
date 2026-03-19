@@ -546,7 +546,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         expected = sum(i for i in range(self.world_size)) * 2
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
 
         res = aten.div.Scalar(dt, 2)
         self.assertEqual(
@@ -557,7 +557,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         expected = sum(i for i in range(self.world_size)) / 2
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
 
     @with_comms
     def test_mul_div_scalar_norm_partial(self):
@@ -589,7 +589,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         res = dt + 1
         expected = sum(i for i in range(self.world_size)) + 1
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial - scalar -> replicate
@@ -601,12 +601,12 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         res = dt - 1
         expected = sum(i for i in range(self.world_size)) - 1
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         res = 7 - dt
         expected = 7 - sum(i for i in range(self.world_size))
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial + regular partial -> partial
@@ -615,14 +615,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
         expected = sum(i for i in range(self.world_size)) * 2
-        self.assertEqual(res, expected)
+        self.assertEqual(res.full_tensor(), expected)
 
         # regular partial - regular partial -> partial
         res = dt - dt
         self.assertEqual(res.to_local(), rank - rank)
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        self.assertEqual(res, 0)
+        self.assertEqual(res.full_tensor(), 0)
 
     @with_comms
     def test_add_sub_scalar_norm_partial(self):
@@ -636,7 +636,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
         norm = norm + 1
 
-        self.assertEqual(norm, 11)
+        self.assertEqual(norm.full_tensor(), 11)
         self.assertTrue(norm._spec.placements[0].is_replicate())
 
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
@@ -645,7 +645,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
         norm = norm - 1
 
-        self.assertEqual(norm, 9)
+        self.assertEqual(norm.full_tensor(), 9)
         self.assertTrue(norm._spec.placements[0].is_replicate())
 
     @with_comms
