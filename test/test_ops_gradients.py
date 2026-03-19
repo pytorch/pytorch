@@ -8,7 +8,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
 )
-from torch.testing._internal.common_methods_invocations import op_db, skipOps, xfail
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
@@ -27,15 +27,7 @@ _gradcheck_ops = partial(
 
 @unMarkDynamoStrictTest
 class TestBwdGradients(TestGradients):
-    # autograd tests don't handle operators that change dtype
-    _autograd_dtype_skips = {
-        xfail("bfloat16", variant_name="functorch_no_channels_last"),
-        xfail("float", variant_name="functorch_no_channels_last"),
-        xfail("half", variant_name="functorch_no_channels_last"),
-    }
-
     # Tests that gradients are computed correctly
-    @skipOps("TestBwdGradients", "test_fn_grad", _autograd_dtype_skips)
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
     def test_fn_grad(self, device, dtype, op):
         # This is verified by test_dtypes in test_ops.py
@@ -51,7 +43,6 @@ class TestBwdGradients(TestGradients):
     #     self._skip_helper(op, device, dtype)
     #     self._grad_test_helper(device, dtype, op, op.get_method())
 
-    @skipOps("TestBwdGradients", "test_inplace_grad", _autograd_dtype_skips)
     @_gradcheck_ops(op_db + custom_op_db)
     def test_inplace_grad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
@@ -73,7 +64,6 @@ class TestBwdGradients(TestGradients):
             )
 
     # Test that gradients of gradients are computed correctly
-    @skipOps("TestBwdGradients", "test_fn_gradgrad", _autograd_dtype_skips)
     @_gradcheck_ops(op_db + hop_db + custom_op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
@@ -85,7 +75,6 @@ class TestBwdGradients(TestGradients):
             self._check_helper(device, dtype, op, op.get_op(), "bwgrad_bwgrad")
 
     # Test that gradients of gradients are properly raising
-    @skipOps("TestBwdGradients", "test_fn_fail_gradgrad", _autograd_dtype_skips)
     @_gradcheck_ops(op_db + custom_op_db)
     def test_fn_fail_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
@@ -103,7 +92,6 @@ class TestBwdGradients(TestGradients):
     #     self._skip_helper(op, device, dtype)
     #     self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
-    @skipOps("TestBwdGradients", "test_inplace_gradgrad", _autograd_dtype_skips)
     @_gradcheck_ops(op_db)
     def test_inplace_gradgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)

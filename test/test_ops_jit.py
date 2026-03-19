@@ -70,17 +70,6 @@ class TestJit(JitCommonTestCase):
             xfail("signal.windows.hann"),
             xfail("signal.windows.kaiser"),
             xfail("signal.windows.nuttall"),
-            # RuntimeError: attribute lookup is not defined on builtin
-            xfail("bfloat16", variant_name="functorch_no_channels_last"),
-            xfail("bool", variant_name="functorch_no_channels_last"),
-            xfail("byte", variant_name="functorch_no_channels_last"),
-            xfail("char", variant_name="functorch_no_channels_last"),
-            xfail("double", variant_name="functorch_no_channels_last"),
-            xfail("float", variant_name="functorch_no_channels_last"),
-            xfail("half", variant_name="functorch_no_channels_last"),
-            xfail("int", variant_name="functorch_no_channels_last"),
-            xfail("long", variant_name="functorch_no_channels_last"),
-            xfail("short", variant_name="functorch_no_channels_last"),
         },
     )
     @_variant_ops(op_db)

@@ -1,4 +1,5 @@
 import itertools
+import unittest
 from functools import partial
 
 import torch
@@ -8,6 +9,7 @@ from torch.testing._internal.common_dtype import (
     floating_types_and,
 )
 from torch.testing._internal.common_methods_invocations import (
+    DecorateInfo,
     OpInfo,
     SampleInput,
 )
@@ -604,6 +606,9 @@ additional_op_db.extend(
             supports_out=False,
             variant_test_name="functorch_no_channels_last",
             sample_inputs_func=sample_inputs_conversion,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
         OpInfo(
             "bool",
@@ -613,6 +618,9 @@ additional_op_db.extend(
             variant_test_name="functorch_no_channels_last",
             sample_inputs_func=sample_inputs_conversion,
             supports_autograd=False,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
         OpInfo(
             "byte",
@@ -623,6 +631,9 @@ additional_op_db.extend(
             sample_inputs_func=sample_inputs_conversion,
             # The autograd test runner cannot handle functions that change dtype
             supports_autograd=False,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
         OpInfo(
             "char",
@@ -633,6 +644,9 @@ additional_op_db.extend(
             sample_inputs_func=sample_inputs_conversion,
             # The autograd test runner cannot handle functions that change dtype
             supports_autograd=False,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
         OpInfo(
             "double",
@@ -643,6 +657,9 @@ additional_op_db.extend(
             sample_inputs_func=sample_inputs_conversion,
             supports_forward_ad=True,
             supports_fwgrad_bwgrad=True,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
         OpInfo(
             "float",
@@ -651,6 +668,9 @@ additional_op_db.extend(
             supports_out=False,
             variant_test_name="functorch_no_channels_last",
             sample_inputs_func=sample_inputs_conversion,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
         OpInfo(
             "half",
@@ -659,6 +679,9 @@ additional_op_db.extend(
             supports_out=False,
             variant_test_name="functorch_no_channels_last",
             sample_inputs_func=sample_inputs_conversion,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
         OpInfo(
             "int",
@@ -668,6 +691,9 @@ additional_op_db.extend(
             variant_test_name="functorch_no_channels_last",
             sample_inputs_func=sample_inputs_conversion,
             supports_autograd=False,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
         OpInfo(
             "long",
@@ -677,6 +703,9 @@ additional_op_db.extend(
             variant_test_name="functorch_no_channels_last",
             sample_inputs_func=sample_inputs_conversion,
             supports_autograd=False,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
         OpInfo(
             "short",
@@ -686,6 +715,9 @@ additional_op_db.extend(
             variant_test_name="functorch_no_channels_last",
             sample_inputs_func=sample_inputs_conversion,
             supports_autograd=False,
+            skips=(
+                DecorateInfo(unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"),
+            ),
         ),
     ]
 )

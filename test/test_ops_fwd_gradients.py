@@ -10,7 +10,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
 )
-from torch.testing._internal.common_methods_invocations import op_db, skipOps, xfail
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     run_tests,
@@ -35,15 +35,7 @@ _gradcheck_ops = partial(
 
 @unMarkDynamoStrictTest
 class TestFwdGradients(TestGradients):
-    # autograd tests don't handle operators that change dtype
-    _autograd_dtype_skips = {
-        xfail("bfloat16", variant_name="functorch_no_channels_last"),
-        xfail("float", variant_name="functorch_no_channels_last"),
-        xfail("half", variant_name="functorch_no_channels_last"),
-    }
-
     # Test that forward-over-reverse gradgrad is computed correctly
-    @skipOps("TestFwdGradients", "test_fn_fwgrad_bwgrad", _autograd_dtype_skips)
     @_gradcheck_ops(op_db)
     def test_fn_fwgrad_bwgrad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
@@ -87,7 +79,6 @@ class TestFwdGradients(TestGradients):
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 call_grad_test_helper()
 
-    @skipOps("TestFwdGradients", "test_forward_mode_AD", _autograd_dtype_skips)
     @_gradcheck_ops(op_db)
     @skipif(
         platform.machine() == "s390x",
@@ -98,7 +89,6 @@ class TestFwdGradients(TestGradients):
 
         self._forward_grad_helper(device, dtype, op, op.get_op(), is_inplace=False)
 
-    @skipOps("TestFwdGradients", "test_inplace_forward_mode_AD", _autograd_dtype_skips)
     @_gradcheck_ops(op_db)
     @skipIfTorchInductor("to be fixed")
     def test_inplace_forward_mode_AD(self, device, dtype, op):

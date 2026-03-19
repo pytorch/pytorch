@@ -36,7 +36,8 @@ def skipHopOps(test_case_name, base_test_name, to_skip):
     for entry in to_skip:
         op_name, variant_name, device_type, dtypes, expected_failure = entry
         matching = [
-            o for o in hop_tests
+            o
+            for o in hop_tests
             if o.name == op_name and o.variant_test_name == variant_name
         ]
         if not matching:
@@ -44,17 +45,25 @@ def skipHopOps(test_case_name, base_test_name, to_skip):
         for op in matching:
             decorators = list(op.decorators)
             if expected_failure:
-                decorators.append(DecorateInfo(
-                    unittest.expectedFailure,
-                    test_case_name, base_test_name,
-                    device_type=device_type, dtypes=dtypes,
-                ))
+                decorators.append(
+                    DecorateInfo(
+                        unittest.expectedFailure,
+                        test_case_name,
+                        base_test_name,
+                        device_type=device_type,
+                        dtypes=dtypes,
+                    )
+                )
             else:
-                decorators.append(DecorateInfo(
-                    unittest.skip("Skipped!"),
-                    test_case_name, base_test_name,
-                    device_type=device_type, dtypes=dtypes,
-                ))
+                decorators.append(
+                    DecorateInfo(
+                        unittest.skip("Skipped!"),
+                        test_case_name,
+                        base_test_name,
+                        device_type=device_type,
+                        dtypes=dtypes,
+                    )
+                )
             op.decorators = tuple(decorators)
 
     def wrapped(fn):
