@@ -6766,6 +6766,43 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
+@make_pointwise
+def div_floor_floating(a, b):
+    """Numerically correct floor division for floating-point types.
+
+    Implements the CPython floordiv algorithm to avoid rounding errors from
+    naive floor(a / b). See c10/util/generic_math.h:div_floor_floating.
+    """
+    zero = ops.constant(0, torch.int32)
+    one = ops.constant(1, torch.int32)
+    half = ops.constant(0.5, torch.float32)
+    mod = ops.fmod(a, b)
+    # (a - mod) / b is more numerically accurate than a / b directly.
+    # Since fmod(a, b) has the same sign as a, sign(mod) != sign(b) iff sign(a) != sign(b).
+    adj_div = ops.truediv(ops.sub(a, mod), b)
+    nonzero_mod = ops.ne(mod, zero)
+    diff_signs = ops.ne(ops.signbit(mod), ops.signbit(b))
+    adj_div = ops.where(
+        ops.and_(nonzero_mod, diff_signs), ops.sub(adj_div, one), adj_div
+    )
+    floor_div = ops.floor(adj_div)
+    floor_div = ops.where(
+        ops.gt(ops.sub(adj_div, floor_div), half),
+        ops.add(floor_div, one),
+        floor_div,
+    )
+    # When adj_div == 0, preserve the sign from true division.
+    basic_div = ops.truediv(a, b)
+    zero_fp = ops.constant(0.0, torch.float32)
+    floor_div = ops.where(
+        ops.ne(adj_div, zero),
+        floor_div,
+        ops.copysign(zero_fp, basic_div),
+    )
+    # When b == 0, return the IEEE 754 result from true division.
+    return ops.where(ops.ne(b, zero), floor_div, basic_div)
+
+
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -6775,7 +6812,7 @@ def div_mode(a, b, rounding_mode=None):
     # see the discussion at https://github.com/triton-lang/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
-        return floordiv(a, b) if both_integer else floor(div(a, b))
+        return floordiv(a, b) if both_integer else div_floor_floating(a, b)
     if rounding_mode == "trunc":
         assert not both_boolean, "truncdiv operands can not be boolean at the same time"
         return truncdiv(a, b) if both_integer else trunc(div(a, b))
