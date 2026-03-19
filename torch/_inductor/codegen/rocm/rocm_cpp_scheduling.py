@@ -82,7 +82,6 @@ class ROCmCPPScheduling(BaseScheduling):
         assert self.is_rocm_cpp_template(template_node), (
             "Template node passed to ROCmScheduler.codegen_template must be a SchedulerNode that wraps a ROCmTemplateBuffer"
         )
-        template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: ROCmTemplateBuffer = cast(ROCmTemplateBuffer, template_node.node)

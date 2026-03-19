@@ -136,7 +136,6 @@ class CUTLASSScheduling(BaseScheduling):
         assert self.is_cutlass_template(template_node), (
             "Template node passed to CUTLASSScheduling.codegen_template must be a SchedulerNode that wraps a CUTLASSTemplateBuffer"
         )
-        template_node = cast(SchedulerNode, template_node)
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: CUTLASSTemplateBuffer = cast(CUTLASSTemplateBuffer, template_node.node)
