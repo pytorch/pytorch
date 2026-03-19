@@ -3368,6 +3368,34 @@ static PyObject* THPVariable__use_count(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__weak_use_count(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  const auto& t = THPVariable_Unpack(self);
+  return THPUtils_packUInt64(t.weak_use_count());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable__storage_use_count(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  const auto& t = THPVariable_Unpack(self);
+  return THPUtils_packUInt64(t.storage().use_count());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable__storage_weak_use_count(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  const auto& t = THPVariable_Unpack(self);
+  return THPUtils_packUInt64(
+      t.storage().unsafeGetStorageImpl()->weakcount());
+  END_HANDLE_TH_ERRORS
+}
+
 // properties are registered here because we are currently only able to bind
 // them manually. TODO: make declarable in native_functions
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -3529,6 +3557,15 @@ static PyMethodDef extra_methods[] = {
      METH_O,
      nullptr},
     {"_use_count", THPVariable__use_count, METH_NOARGS, nullptr},
+    {"_weak_use_count", THPVariable__weak_use_count, METH_NOARGS, nullptr},
+    {"_storage_use_count",
+     THPVariable__storage_use_count,
+     METH_NOARGS,
+     nullptr},
+    {"_storage_weak_use_count",
+     THPVariable__storage_weak_use_count,
+     METH_NOARGS,
+     nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
