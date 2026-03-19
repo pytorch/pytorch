@@ -1843,6 +1843,46 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
             + "\n".join(wrong_strategy[:20]),
         )
 
+    def test_dijkstra_inplace_op(self):
+        """Verify Dijkstra respects inplace constraints: output == self placement."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(shape=torch.Size([8, 8]), stride=(8, 1), dtype=torch.float32)
+        add_strategy_fn = _common_pointwise_single_dim_strategy(
+            _BINARY_ADDITIVE_RULES  # pyrefly: ignore[bad-argument-type]
+        )
+        add_strategy_info = _SingleDimStrategyInfo(
+            add_strategy_fn, allow_uneven_sharding=True, allow_unbacked_sharding=True
+        )
+
+        # add_(Replicate, Partial(avg)): out-of-place rule gives P(avg) output,
+        # but inplace requires output == self == Replicate. Dijkstra must reject
+        # the zero-cost P(avg) match and find (R, R) -> R with redistribution.
+        self_spec = DTensorSpec(mesh, (Replicate(),), tensor_meta=meta)
+        other_spec = DTensorSpec(mesh, (Partial("avg"),), tensor_meta=meta)
+        op_schema = OpSchema(
+            op=torch.ops.aten.add_.Tensor,
+            args_schema=(
+                OpStrategy([OpSpec(self_spec)]),
+                OpStrategy([OpSpec(other_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, add_strategy_info, output_tensor_meta=meta
+        )
+        self.assertIsNotNone(strategy)
+        spec = strategy.strategies[0]
+        # Output must be Replicate (matching self)
+        self.assertEqual(spec.output_spec.placements, (Replicate(),))
+        # Self input must stay Replicate (not redistributed)
+        self.assertEqual(spec.input_specs[0].placements, (Replicate(),))
+        # Other input must be redistributed to Replicate
+        self.assertEqual(spec.input_specs[1].placements, (Replicate(),))
+        # Redistribution cost should be non-zero (P(avg) -> R requires allreduce)
+        total_cost = sum(chain.from_iterable(spec.redistribute_cost))
+        self.assertGreater(total_cost, 0)
+
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
 def dummy_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:

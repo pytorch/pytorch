@@ -45,6 +45,12 @@ def _is_sharding(p: Placement) -> TypeIs[Shard | _StridedShard]:
     return isinstance(p, (Shard, _StridedShard))
 
 
+def _is_inplace_op(op: OpOverload) -> bool:
+    """Detect inplace ops by checking if the base op name ends with '_'."""
+    base_name = op.name().split("::")[1].split(".")[0]
+    return base_name.endswith("_")
+
+
 class _ShardingPlaceholder:
     """
     A placeholder for a sharding placement that has a specified tensor dim, but the other
@@ -452,17 +458,12 @@ def _expand_single_dim_strategy_to_mesh(
                 strategy_info, op_schema, output_tensor_meta
             )
 
-            # Detect inplace ops by checking if the base op name ends with '_'
-            op_name = op.name()
-            base_name = op_name.split("::")[1].split(".")[0]
-            is_inplace = base_name.endswith("_")
-
             return expand_to_full_mesh_op_strategy(
                 mesh,
                 op_schema,
                 cast(list[PlacementList], prepared_strategy.expanded_strategies),
                 output_tensor_meta=output_tensor_meta,
-                inplace_op=is_inplace,
+                inplace_op=_is_inplace_op(op),
                 input_index=prepared_strategy.num_outputs,
                 allow_unbacked_sharding=prepared_strategy.allow_unbacked_sharding,
                 allow_uneven_sharding=prepared_strategy.allow_uneven_sharding,
@@ -786,12 +787,26 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         single_dim_strategy, op_schema, output_tensor_meta, num_inputs=num_inputs
     )
 
+    # Inplace ops: self cannot be redistributed and output must match
+    # self's placement (mirrors the check in _expand_single_dim_strategy_to_mesh).
+    is_inplace = _is_inplace_op(op_schema.op)
+
     initial_placements = tuple(spec.placements for spec in input_specs)
     first_result: OpStrategy | None = None
 
+    def _inplace_output_matches(result: OpStrategy) -> bool:
+        """For inplace ops, check that output placement == self's initial placement."""
+        if not is_inplace:
+            return True
+        spec = result.strategies[0]
+        output_specs = spec.output_specs
+        if isinstance(output_specs, DTensorSpec):
+            return output_specs.placements == initial_placements[0]
+        return True
+
     # Fast path: if initial placements already match a strategy, skip search
     fast_result = prepared_strategy.try_propagate(mesh, initial_placements, input_specs)
-    if fast_result is not None:
+    if fast_result is not None and _inplace_output_matches(fast_result):
         fast_result._pq_transitions = []  # type: ignore[attr-defined]
         if _collect_all_matches is not None:
             _collect_all_matches.add(initial_placements)
@@ -905,7 +920,7 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         match_result = prepared_strategy.try_propagate(
             mesh, candidate.placements, input_specs
         )
-        if match_result is not None:
+        if match_result is not None and _inplace_output_matches(match_result):
             # Use pre-computed per-input costs from the PQ search instead of
             # recomputing via generate_redistribute_costs -> _gen_transform_infos.
             match_spec = match_result.strategies[0]
@@ -938,6 +953,9 @@ def _dijkstra_expand_single_dim_strategy_to_mesh(
         # Generate neighbor states
         for mesh_dim in range(mesh.ndim):
             for input_idx in range(len(candidate.placements)):
+                # Inplace ops: self (input 0) can't be redistributed
+                if is_inplace and input_idx == 0:
+                    continue
                 current_p = candidate.placements[input_idx][mesh_dim]
                 for neighbor_p in _get_neighbor_placements(
                     prepared_strategy.allowed_sharding_per_input[input_idx],

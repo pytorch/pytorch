@@ -28,6 +28,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
+    _dijkstra_expand_single_dim_strategy_to_mesh,
     _expand_single_dim_strategy_to_mesh,
     _SingleDimStrategyInfo,
 )
@@ -41,6 +42,10 @@ from torch.utils._pytree import tree_map
 
 
 aten = torch.ops.aten
+
+# Disables the Dijkstra-based mincost search optimization for single-dim
+# strategy propagation, falling back to full O(S^N) strategy expansion.
+FORCE_FULLY_EXPAND_SINGLE_DIM: bool = False
 
 log = logging.getLogger(__name__)
 
@@ -678,14 +683,39 @@ class ShardingPropagator:
                 mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
                 if not isinstance(mesh, DeviceMesh):
                     raise AssertionError("Expected to find a valid mesh")
-                # expand to generate the full set of strategy combinations, each one
-                # with a redistribute cost, and then find the min strategy over those costs.
-                _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                    mesh, strategy_schema, single_dim_strategy_info, out_tensor_meta
-                )
-                op_strategy = _expanded_strategy_fn(
-                    op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
-                )
+                # Try PQ search first: fast path when inputs already match a
+                # strategy, otherwise Dijkstra over placement transitions.
+                # Computes redistribute costs directly via per-dim
+                # _compute_placement_transition_cost, avoiding the overhead of
+                # generate_redistribute_costs / _gen_transform_infos planning.
+                # Returns None for StridedShard/symbolic/TupleStrategy inputs.
+                # Note: we know the optimal sequence of operations needed to perform redistribution
+                # after the PQ search, and we could plumb this information through the OutputSharding
+                # so the subsequent redistribute() call can skip doing another graph-based transforminfo search,
+                # but this is not implemented now.
+                op_strategy = None
+                if not FORCE_FULLY_EXPAND_SINGLE_DIM:
+                    op_strategy = _dijkstra_expand_single_dim_strategy_to_mesh(
+                        mesh,
+                        strategy_schema,
+                        single_dim_strategy_info,
+                        out_tensor_meta,
+                    )
+                if op_strategy is None:
+                    # Fall back to full O(S^N) expansion
+                    # to generate the full set of strategy combinations, each one
+                    # with a redistribute cost, and then find the min strategy over those costs.
+                    _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                        mesh,
+                        strategy_schema,
+                        single_dim_strategy_info,
+                        out_tensor_meta,
+                    )
+                    op_strategy = _expanded_strategy_fn(
+                        op_schema.op,
+                        strategy_schema.args_meta,
+                        strategy_schema.kwargs_meta,
+                    )
             else:
                 if op_strategy_func is None:
                     raise AssertionError
