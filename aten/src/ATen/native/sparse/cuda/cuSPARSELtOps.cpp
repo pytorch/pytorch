@@ -103,7 +103,9 @@ struct CachedMatDescriptor {
       cusparseLtMatDescriptorDestroy(&dense_input);
       cusparseLtMatDescriptorDestroy(&res);
       cusparseLtMatDescriptorDestroy(&C);
+      #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 800
       cusparseLtMatmulAlgSelectionDestroy(&alg_sel);
+      #endif
       cusparseLtMatmulPlanDestroy(&plan);
       has_descriptors = false;
     }
@@ -127,7 +129,9 @@ struct CachedMatDescriptor {
         cusparseLtMatDescriptorDestroy(&dense_input);
         cusparseLtMatDescriptorDestroy(&res);
         cusparseLtMatDescriptorDestroy(&C);
+        #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 800
         cusparseLtMatmulAlgSelectionDestroy(&alg_sel);
+        #endif
         cusparseLtMatmulPlanDestroy(&plan);
       }
       sparse_input = other.sparse_input;
