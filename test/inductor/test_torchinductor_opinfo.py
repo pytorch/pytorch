@@ -32,6 +32,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db, skipOps
 from torch.testing._internal.common_utils import (
     IS_CI,
+    IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -297,7 +298,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     },  # align with cuda.
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
-    "addmv": {f64},
     "fft.fft": {f16},
     "fft.fft2": {f16},
     "fft.fftn": {f16},
@@ -991,8 +991,33 @@ inductor_one_sample["xpu"] = {
 
 # TODO: Fix these so strides match.
 inductor_skip_exact_stride = {
+    "complex",
+    "empty_permuted",
+    "fft.irfftn",
+    "fft.irfft2",
+    "linalg.diagonal",
+    "linalg.eigvals",  # Fails for ROCM
+    "linalg.lu",
+    "linalg.lu_factor",
+    "linalg.lu_factor_ex",
     "linalg.matrix_norm",
+    "linalg.norm",
+    "linalg.norm.subgradients_at_zero",
+    "linalg.pinv.singular",
+    "linalg.svdvals",
+    "linalg.solve",
+    "linalg.solve_ex",
+    "linalg.qr",
+    "lu",
+    "matmul",
+    "__rmatmul__",
+    "nn.functional.adaptive_avg_pool1d",
+    "nn.functional.group_norm",
+    "nn.functional.linear",
+    "nn.functional.max_pool2d",
+    "nn.functional.unfold",
     "ormqr",
+    "pca_lowrank",
     "rot90",
     "sum",
     "tensordot",
@@ -1263,8 +1288,11 @@ class TestInductorOpInfo(TestCase):
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
-        elif dtype in inductor_expected_failures_single_sample[device_type].get(
-            op_name, set()
+        elif (
+            device_type == "cpu"
+            and IS_LINUX
+            and dtype
+            in inductor_expected_failures_single_sample[device_type].get(op_name, set())
         ) or dtype in inductor_gradient_expected_failures_single_sample[
             device_type
         ].get(op_name, set()):
@@ -1291,7 +1319,7 @@ class TestInductorOpInfo(TestCase):
             # not exercised in test_ops_gradients atm.  The problem is not
             # complex32 per-se (which is supported by data movement only ops)
             # but that when we do backwards we expect other ops like add to work
-            and dtype != torch.complex32
+            and dtype not in (torch.complex32, torch.bcomplex32)
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
         extra = _inductor_extra_samples(op_name, device, dtype, requires_grad)

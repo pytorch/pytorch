@@ -6976,6 +6976,30 @@ PyObject* torch_c_dynamo_guards_init() {
     return nullptr;
   }
 
+  // Expose THPVariable_Wrap for cpp_wrapper inductor, for fbcode
+  {
+    using WrapFn = PyObject* (*)(const at::TensorBase&);
+    WrapFn fn = &THPVariable_Wrap;
+    if (PyModule_AddObject(
+            m,
+            "_torchinductor_thp_variable_wrap",
+            PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) < 0) {
+      return nullptr;
+    }
+  }
+
+  // Expose THPUtils_unpackInt for cpp_wrapper inductor, for fbcode
+  {
+    using UnpackFn = int32_t (*)(PyObject*);
+    UnpackFn fn = &THPUtils_unpackInt;
+    if (PyModule_AddObject(
+            m,
+            "_torchinductor_thputils_unpack_int",
+            PyLong_FromVoidPtr(reinterpret_cast<void*>(fn))) < 0) {
+      return nullptr;
+    }
+  }
+
   auto py_m = py::handle(m).cast<py::module>();
   py::class_<GuardDebugInfo, std::unique_ptr<GuardDebugInfo>>(
       py_m, "GuardDebugInfo")

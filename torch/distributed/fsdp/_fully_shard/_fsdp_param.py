@@ -31,6 +31,16 @@ from ._fsdp_common import (
 )
 
 
+_orig_param_uid_counter = itertools.count()
+
+
+def _get_orig_param_uid(param: nn.Parameter) -> int:
+    if not hasattr(param, "_fsdp_orig_uid"):
+        uid = next(_orig_param_uid_counter)
+        param._fsdp_orig_uid = uid  # pyrefly: ignore[missing-attribute]
+    return param._fsdp_orig_uid  # pyrefly: ignore[missing-attribute]
+
+
 """
 [Note: FSDP tensors]
 FSDP considers the following tensors:
@@ -172,6 +182,7 @@ class FSDPParam:
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: list[torch.Tensor]
+    _orig_param_uid: int
 
     def __init__(
         self,
@@ -249,6 +260,7 @@ class FSDPParam:
         # TODO: Simplify the following sharded parameter padding logic after
         # https://github.com/pytorch/pytorch/issues/113045
         self.is_dtensor = isinstance(param, DTensor)
+        self._orig_param_uid = _get_orig_param_uid(param)
         if self.is_dtensor:
             self._tp_spec = cast(DTensor, param)._spec
             dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)

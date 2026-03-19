@@ -13,6 +13,7 @@ import sympy
 import torch
 from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config, config as inductor_config
@@ -814,7 +815,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
 
             # Add TlxGemmConfig specific fields to key if present
-            if config.is_fbcode() and config.triton.tlx_mode in ("allow", "force"):
+            if config.is_fbcode() and config.triton.enable_tlx_templates:
                 from torch._inductor.fb.tlx_templates.registry import (
                     get_tlx_config_key_and_kwargs,
                 )
@@ -2040,7 +2041,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Moved from mm_common.mm_options.
         """
         # Calculate EVEN_K symbolic. (It isn't worth guarding on this)
-        even_k_symbolic = (k % triton_config.kwargs["BLOCK_K"]) == 0
+        even_k_symbolic = sympy.Eq(Mod(k, triton_config.kwargs["BLOCK_K"]), 0)
         even_k_symbolic = V.graph.sizevars.statically_known_true(even_k_symbolic)
 
         # Build options dict

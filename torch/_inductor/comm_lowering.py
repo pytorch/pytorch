@@ -483,6 +483,18 @@ def register_symm_mem_lowerings():
         log.info("symm_mem ops not available, skipping symm_mem lowerings")
         return
 
+    from torch._library._out_variant import register_out_variant
+
+    # Register manual out variant mappings for symm_mem ops.
+    register_out_variant(
+        symm_mem.one_shot_all_reduce.default,
+        symm_mem.one_shot_all_reduce_out.default,
+    )
+    register_out_variant(
+        symm_mem.one_shot_all_reduce_copy.default,
+        symm_mem.one_shot_all_reduce_copy_out.default,
+    )
+
     from .lowering import register_lowering
 
     def _maybe_realize_symm_mem(
