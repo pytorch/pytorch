@@ -1,16 +1,15 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import os
-import sys
 import tempfile
+import unittest
 
 import torch
 import torch.distributed as dist
 
 
 if not (dist.is_available() and "occl" in dist.Backend.backend_list):
-    print("torch.distributed OCCL backend unavailable, skipping tests", file=sys.stderr)
-    sys.exit(0)
+    raise unittest.SkipTest("torch.distributed OCCL backend unavailable")
 
 
 os.environ["BACKEND"] = "occl"
