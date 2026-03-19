@@ -10,7 +10,9 @@
 #include <pybind11/chrono.h>
 #include <pybind11/pybind11.h>
 
+#if USE_DISTRIBUTED
 #include <distributed/c10d/ProcessGroupOCCL.hpp>
+#endif
 #include <runtime/OpenRegFunctions.h>
 
 static PyObject* _initExtension(PyObject* self, PyObject* noargs) {
@@ -118,10 +120,11 @@ extern "C" OPENREG_EXPORT PyObject* initOpenRegModule(void) {
 
   namespace py = pybind11;
   py::module m = py::reinterpret_borrow<py::module>(mod);
-  // Expose the OCCL process group to Python. The intrusive_ptr template arg
-  // tells pybind11 how to manage lifetime of C++ shared state when returned
-  // to Python, and we list Backend as a base so Python recognizes the
-  // inheritance hierarchy.
+  // Expose the OCCL process group to Python only when distributed is enabled.
+  // The intrusive_ptr template arg tells pybind11 how to manage lifetime of
+  // C++ shared state when returned to Python, and we list Backend as a base
+  // so Python recognizes the inheritance hierarchy.
+#if USE_DISTRIBUTED
   py::class_<c10d::ProcessGroupOCCL, c10d::Backend, c10::intrusive_ptr<c10d::ProcessGroupOCCL>>( // NOLINT(bugprone-unused-raii)
       m,
       "ProcessGroupOCCL");
@@ -134,6 +137,7 @@ extern "C" OPENREG_EXPORT PyObject* initOpenRegModule(void) {
       py::arg("rank"),
       py::arg("size"),
       py::arg("timeout"));
+#endif
 
   return mod;
 }
