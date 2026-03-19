@@ -1710,6 +1710,19 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         finally:
             del torch.Tensor._dynamo_test_method
 
+    def test_unknown_tensor_method_graph_break(self):
+        # Truly unknown methods (not on any tensor type) should graph break.
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(x):
+            y = x._nonexistent_test_method_xyz()
+            return y + 1
+
+        result = fn(torch.randn(4))
+        # Graph break on unknown method means multiple frames
+        self.assertGreater(cnt.frame_count, 1)
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()

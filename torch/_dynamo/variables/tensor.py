@@ -887,15 +887,16 @@ class TensorVariable(VariableTracker):
                 )
 
         # Guard against unknown methods reaching the generic proxy path.
-        # Use the actual tensor class (self.class_type) rather than the static
-        # all_tensor_attrs dict so that tensor subclass methods (e.g.
-        # DTensor.redistribute, NestedTensor.to_padded_tensor) are allowed.
-        if not hasattr(self.class_type, name):
+        # For traceable wrapper subclasses (DTensor, NestedTensor), class_type
+        # is torch.Tensor, so check the example_value's actual type instead.
+        example_value = self.proxy.node.meta.get("example_value")
+        check_type = type(example_value) if example_value is not None else self.class_type
+        if not hasattr(check_type, name):
             unimplemented(
                 gb_type="Unhandled tensor method",
                 context=f"call_method {self} {name} {args} {kwargs}",
                 explanation=f"Tensor method `{name}` is not defined on "
-                f"{self.class_type.__name__} and does not have an explicit "
+                f"{check_type.__name__} and does not have an explicit "
                 "handler in TensorVariable.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
