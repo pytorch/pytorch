@@ -6771,8 +6771,7 @@ def div_floor_floating(a, b):
     """Numerically correct floor division for floating-point types.
 
     Implements the CPython floordiv algorithm to avoid rounding errors from
-    naive floor(a / b). See c10/util/generic_math.h:div_floor_floating.
-
+    naive floor(a / b). Took inspiration from c10/util/generic_math.h:div_floor_floating.
     Constants are typed to match the compute dtype of `a` (a CSEVariable in
     Triton/CPP backends) to avoid int32/float type mismatches in generated code.
     """

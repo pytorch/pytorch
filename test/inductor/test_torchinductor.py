@@ -3673,10 +3673,9 @@ class CommonTemplate:
             self.common(fn, (a, b_neg))
 
     def test_floor_divide_float_precision(self):
-        # Regression test: naive floor(a / b) can give wrong results for float16
-        # due to rounding errors in the division step. The correct algorithm
+        # Regression test: naive floor(a / b) can give wrong results for low-precision
+        # floats due to rounding errors in the division step. The correct algorithm
         # (CPython's floordiv) uses fmod-based computation to avoid this.
-        # See https://github.com/pytorch/pytorch/issues/<floor_divide_bug>
         def fn(a, b):
             return torch.floor_divide(a, b)
 
@@ -3687,7 +3686,7 @@ class CommonTemplate:
             t1 = torch.tensor([21.078125], dtype=torch.float64).to(dtype)
             self.common(fn, (t0.to(self.device), t1.to(self.device)), check_lowp=False)
 
-        # Additional cases with negative values to verify sign handling.
+        # Negative values: verify the sign-correction branch in the fmod algorithm.
         for dtype in (torch.float16, torch.float32):
             t0 = torch.tensor([-84.3125], dtype=torch.float64).to(dtype)
             t1 = torch.tensor([21.078125], dtype=torch.float64).to(dtype)
@@ -3697,23 +3696,21 @@ class CommonTemplate:
             t1 = torch.tensor([-21.078125], dtype=torch.float64).to(dtype)
             self.common(fn, (t0.to(self.device), t1.to(self.device)), check_lowp=False)
 
-        # Very small divisor: result should be a large integer (or inf for float16 overflow).
-        # Exercises the fmod and quotient-adjustment paths with extreme values.
+        # Very small divisor: exercises the fmod and quotient-adjustment paths
+        # with extreme magnitude differences. float16 excluded as result overflows to inf.
         for dtype in (torch.float32, torch.float64):
             t0 = torch.tensor([1.0, -1.0, 3.5], dtype=dtype)
             t1 = torch.tensor([1e-6, 1e-6, 1e-6], dtype=dtype)
             self.common(fn, (t0.to(self.device), t1.to(self.device)), check_lowp=False)
 
-        # Mixed-precision inputs: PyTorch promotes to the higher dtype before dividing.
-        # Verify floor divide with promotion matches eager.
+        # Mixed-precision inputs: TensorIterator promotes to the higher dtype,
+        # so inductor and eager should agree on the promoted type and result.
         t0_fp16 = torch.tensor([84.3125], dtype=torch.float16)
         t1_fp32 = torch.tensor([21.078125], dtype=torch.float32)
-        # floor_divide promotes both to float32
         self.common(fn, (t0_fp16.to(self.device), t1_fp32.to(self.device)), check_lowp=False)
 
         t0_bf16 = torch.tensor([84.3125], dtype=torch.bfloat16)
         t1_fp16 = torch.tensor([21.078125], dtype=torch.float16)
-        # floor_divide promotes both to float32
         self.common(fn, (t0_bf16.to(self.device), t1_fp16.to(self.device)), check_lowp=False)
 
     def test_div_precision(self):
