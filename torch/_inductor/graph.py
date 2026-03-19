@@ -24,7 +24,7 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import (
@@ -1522,6 +1522,10 @@ class GraphLowering(torch.fx.Interpreter):
             # nested subgraphs can have singleton outputs
             result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
+        result = [
+            ir.OpaqueValueTypeConstant(value=x) if is_opaque_value_type(type(x)) else x
+            for x in result
+        ]
         assert all(
             isinstance(
                 x,
@@ -1537,6 +1541,7 @@ class GraphLowering(torch.fx.Interpreter):
                     ir.ShapeAsConstantBuffer,
                     TorchBindObject,
                     ir.OpaqueMultiOutput,
+                    ir.OpaqueValueTypeConstant,
                 ),
             )
             for x in result
@@ -1922,26 +1927,9 @@ class GraphLowering(torch.fx.Interpreter):
                             result.get_size(), torch.channels_last
                         )
                     if not unbacked_symbols_in_strides and len(strides):
-                        # To avoid converting possible view ops to a copy kernel, we use the previous
-                        # require_exact_strides to handle views. But ultimately it's better to require
-                        # the right strides at the tensor definition.
-                        if n.meta["val"]._is_view() or isinstance(
-                            result.data,
-                            ir.BaseView,
-                        ):
-                            result = ir.ExternKernel.require_stride_order(
-                                result,
-                                ir.get_stride_order(strides),
-                                allow_padding=allow_padding,
-                            )
-                        else:
-                            # Fix for 0-d tensors: if result size is empty,
-                            # strides should also be empty
-                            if len(result.get_size()) == 0 and len(strides) > 0:
-                                strides = []
-                            result = ir.ExternKernel.require_exact_strides(
-                                result, strides, allow_padding=allow_padding
-                            )
+                        result = ir.ExternKernel.require_exact_strides(
+                            result, strides, allow_padding=allow_padding
+                        )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.

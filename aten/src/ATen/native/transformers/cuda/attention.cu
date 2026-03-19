@@ -86,6 +86,7 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #else
 // MemoryEfficient Attention Specific Imports for ROCM
+#include <ATen/native/transformers/hip/gemm_kernel_utils.h>
 #ifndef DISABLE_AOTRITON
 #include <ATen/native/transformers/hip/aotriton_adapter.h>
 #include <aotriton/flash.h>
@@ -95,7 +96,7 @@
 #endif
 #endif
 
-#if defined(USE_ROCM) && (defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION))
+#if defined(USE_ROCM) && defined(USE_FLASH_ATTENTION)
 namespace pytorch_flash
 {
 std::tuple<

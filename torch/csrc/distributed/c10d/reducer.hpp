@@ -60,7 +60,8 @@ class TORCH_API Reducer {
       int64_t first_bucket_bytes_cap,
       bool skip_all_reduce_unused_params,
       bool use_python_reducer,
-      std::vector<int64_t> bucket_bytes_cap_list);
+      std::vector<int64_t> bucket_bytes_cap_list,
+      bool batched_grad_copy = false);
 
   ~Reducer() noexcept(false);
 
@@ -236,6 +237,8 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool gradient_as_bucket_view_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  const bool batched_grad_copy_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<size_t> unused_parameters_;
   // Previous iteration's unused params, used for checking if unused parameters
   // change between iterations. Only filled during the first backwards call.
@@ -311,6 +314,12 @@ class TORCH_API Reducer {
           torch::distributed::autograd::DistAutogradContext::GradCallback>);
 #endif
   void runGradCallbackForVariable(at::Tensor& variable, const GradCallback& cb);
+
+  // Flushes deferred grad-to-bucket copies for a single bucket when
+  // batched_grad_copy_ is enabled. Called from mark_variable_ready (when
+  // bucket.pending == 0) and from delay_all_reduce (after all variables
+  // are marked ready).
+  void flush_deferred_copies(Bucket& bucket, size_t bucket_index);
 
   // This function is called inside `initialize_buckets()`. It initializes both
   // `bucket_views_in` and `bucket_views_out` with views for each variable's
@@ -402,6 +411,11 @@ class TORCH_API Reducer {
     // done on different CUDA streams. We record an event for every copy
     // so that we can synchronize with them prior to kicking off the reduction.
     // std::vector<at::cuda::CUDAEvent> events;
+
+    // Intra-bucket indices of variables whose grad-to-bucket copies are
+    // deferred for batching. Flushed as _foreach_copy_ + flat div_ when
+    // pending == 0. Only used when batched_grad_copy is enabled.
+    std::vector<size_t> deferred_copy_indices;
   };
 
   std::vector<Bucket> buckets_;

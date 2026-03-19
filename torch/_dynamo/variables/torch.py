@@ -313,6 +313,8 @@ def _collect_tensors_with_sources(
     Used by handle_autograd_grad to collect tensors from the outputs and inputs
     arguments for grad_fn reachability analysis.
     """
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
     from .lazy import LazyVariableTracker
     from .lists import BaseListVariable
     from .tensor import TensorVariable
@@ -320,7 +322,27 @@ def _collect_tensors_with_sources(
     results: list[tuple[torch.Tensor, str | None]] = []
     if isinstance(var, TensorVariable):
         fake_tensor = var.as_proxy().node.meta.get("example_value")
-        assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
+        assert isinstance(fake_tensor, torch.Tensor)
+        if isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor):
+            pass
+        elif is_traceable_wrapper_subclass(fake_tensor):
+            # For tensor subclasses (e.g. DTensor), verify the inner tensors
+            # are FakeTensors but keep the original subclass for grad_fn
+            # reachability analysis.
+            plain: list[object] = []
+            torch._subclasses.fake_tensor.get_plain_tensors(
+                fake_tensor,  # pyrefly: ignore[bad-argument-type]
+                out=plain,  # pyrefly: ignore[bad-argument-type]
+            )
+            assert all(
+                isinstance(t, torch._subclasses.fake_tensor.FakeTensor) for t in plain
+            ), (
+                f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"
+            )
+        else:
+            raise AssertionError(
+                f"Expected FakeTensor or subclass, got {type(fake_tensor)}"
+            )
         source_name = var.source.name if var.source else None
         results.append((fake_tensor, source_name))
     elif isinstance(var, LazyVariableTracker):
@@ -1358,8 +1380,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
-        @register(torch.fx.experimental.symbolic_shapes.size_hint)
-        def handle_size_hint(
+        @register(torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw)
+        def handle_guarding_hint_or_throw(
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
+        ) -> VariableTracker | None:
+            if isinstance(expr, SymNodeVariable):
+                return VariableTracker.build(
+                    tx,
+                    torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                        expr.sym_num
+                    ),
+                )
+            elif expr.is_python_constant():
+                return expr
+            else:
+                return None
+
+        @register(torch.fx.experimental.symbolic_shapes.optimization_hint)
+        def handle_optimization_hint(
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
@@ -1369,7 +1409,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if isinstance(expr, SymNodeVariable):
                 return VariableTracker.build(
                     tx,
-                    torch.fx.experimental.symbolic_shapes.size_hint(
+                    torch.fx.experimental.symbolic_shapes.optimization_hint(
                         expr.sym_num, fallback_int
                     ),
                 )
@@ -1735,6 +1775,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> StreamVariable:
+            from .streams import CudaStreamVariable
+
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented(
                     gb_type="unsupported arguments to torch.accelerator.current_stream",
@@ -1752,7 +1794,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 else:
                     device = None
 
-                return tx.symbolic_stream_state.cur_stream(device)
+                stream_var = tx.symbolic_stream_state.cur_stream(device)
+                if self.value is torch.cuda.current_stream and not isinstance(
+                    stream_var, CudaStreamVariable
+                ):
+                    stream_var = CudaStreamVariable(
+                        stream_var.proxy,
+                        stream_var.value,
+                        stream_var.user_object_index,
+                        source=stream_var.source,
+                    )
+                return stream_var
             except Exception as e:
                 unimplemented(
                     gb_type="bad device argument to torch.accelerator.current_stream",

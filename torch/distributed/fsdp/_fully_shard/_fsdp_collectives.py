@@ -1,11 +1,10 @@
 import math
 from collections.abc import Callable, Sequence
 from itertools import chain
-from typing import Any, cast, Literal, NamedTuple
+from typing import Any, cast, NamedTuple
 
 import torch
 import torch.distributed as dist
-import torch.distributed._symmetric_memory as symm_mem
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
@@ -78,36 +77,6 @@ class ProcessGroupAllocMixin:
         return torch.empty(*size, dtype=dtype, device=device)
 
 
-class SymmMemAllocMixin:
-    def __init__(
-        self,
-        group: dist.ProcessGroup,
-        backend: Literal["NCCL"] = "NCCL",
-        *args: Any,
-        **kwargs: Any,
-    ):
-        self._group = group
-        symm_mem.set_backend(backend)
-        # Force initialization of communicator; otherwise, the rendezvous may
-        # see empty communicator.
-        # TODO: Remove this, maybe by warning user to perform eager dist init.
-        # For now, it is okay since it isjust a one-time cost at init.
-        dist.barrier(group=group)
-
-    def allocate(
-        self,
-        size: Sequence[int | torch.SymInt],
-        *,
-        dtype: torch.dtype,
-        device: torch.device,
-    ) -> torch.Tensor:
-        # Leverage MemPool to reuse the symmetric buffer, avoiding allocation
-        # and rendezvous overhead
-        mempool = symm_mem.get_mem_pool(device)
-        with torch.cuda.use_mem_pool(mempool):
-            return torch.empty(size, dtype=dtype, device=device)
-
-
 class DefaultAllGather(DefaultAllocMixin, AllGather):
     def __call__(
         self,
@@ -135,35 +104,6 @@ class ProcessGroupAllocAllGather(ProcessGroupAllocMixin, AllGather):
         group: dist.ProcessGroup,
         async_op: bool = False,
     ) -> dist.Work | None:
-        return dist.all_gather_into_tensor(
-            output_tensor,
-            input_tensor,
-            group=group,
-            async_op=async_op,
-        )
-
-
-class SymmMemAllGather(SymmMemAllocMixin, AllGather):
-    def __init__(
-        self,
-        group: dist.ProcessGroup,
-        backend: Literal["NCCL"] = "NCCL",
-    ) -> None:
-        super().__init__(group, backend)
-
-    def __call__(
-        self,
-        output_tensor: torch.Tensor,
-        input_tensor: torch.Tensor,
-        group: dist.ProcessGroup,
-        async_op: bool = False,
-    ) -> dist.Work | None:
-        # We are doing inplace all-gather, so we need to rendezvous the output tensor only
-        symm_mem.rendezvous(output_tensor, group=group.group_name)
-        # Calling regular all-gather would already cause libraries like NCCL to
-        # use its optimized all-gather implementation for symmetric memory:
-        # - Copy Engine All-Gather (when zero-CTA policy is enabled)
-        # - Symmetric Kernel All-Gather (when zero-CTA policy is not enabled)
         return dist.all_gather_into_tensor(
             output_tensor,
             input_tensor,
@@ -202,35 +142,6 @@ class ProcessGroupAllocReduceScatter(ProcessGroupAllocMixin, ReduceScatter):
         op: _ReduceOp,
         async_op: bool = False,
     ) -> dist.Work:
-        return dist.reduce_scatter_tensor(
-            output=output_tensor,
-            input=input_tensor,
-            group=group,
-            op=op,
-            async_op=async_op,
-        )
-
-
-class SymmMemReduceScatter(SymmMemAllocMixin, ReduceScatter):
-    def __init__(
-        self,
-        group: dist.ProcessGroup,
-        backend: Literal["NCCL"] = "NCCL",
-    ) -> None:
-        super().__init__(group, backend)
-
-    def __call__(
-        self,
-        output_tensor: torch.Tensor,
-        input_tensor: torch.Tensor,
-        group: dist.ProcessGroup,
-        op: _ReduceOp,
-        async_op: bool = False,
-    ) -> dist.Work | None:
-        symm_mem.rendezvous(input_tensor, group=group.group_name)
-        symm_mem.rendezvous(output_tensor, group=group.group_name)
-        # Calling regular reduce-scatter would already cause libraries like NCCL to
-        # use its optimized reduce-scatter implementation for symmetric memory
         return dist.reduce_scatter_tensor(
             output=output_tensor,
             input=input_tensor,

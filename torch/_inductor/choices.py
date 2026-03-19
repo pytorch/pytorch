@@ -240,11 +240,6 @@ class InductorChoices:
         Returns:
             True if we need to fix the layout, False otherwise
         """
-        # TLX force mode uses Triton templates which require fixed layouts
-        # This check is independent of max_autotune
-        if config.is_fbcode() and config.triton.tlx_mode == "force":
-            return True
-
         # TODO: debug and fix
         # NOTE: on mps, we see issues with flexible layouts on baddmm. This check just makes sure
         # that for mps, everything stays as it was before this optimization

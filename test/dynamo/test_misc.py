@@ -14604,6 +14604,230 @@ fn
         result2 = compiled_fn(x2)
         self.assertEqual(result2, x2)
 
+    def test_requires_grad_changes_dynamo_graph(self):
+        # requires_grad_() on a graph input graph-breaks, so no fullgraph
+        def fn(x):
+            x.requires_grad_()
+            if x.requires_grad:
+                return x * 2
+            return x + 1
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn)
+        result = opt_fn(x)
+        self.assertEqual(result, x * 2)
+
+    def test_requires_grad_backward_outside_compile(self):
+        # requires_grad_() on a graph input graph-breaks, but eager fallback
+        # produces correct results.
+        def fn(x):
+            x.requires_grad_()
+            return (x * 2).sum()
+
+        x_ref = torch.randn(3, 3)
+        x_test = x_ref.clone()
+
+        fn(x_ref).backward()
+        torch.compile(fn)(x_test).backward()
+
+        self.assertEqual(x_ref.grad, x_test.grad)
+
+    def test_requires_grad_on_intermediate(self):
+        def fn(x):
+            y = x * 2
+            y.requires_grad_()
+            return y
+
+        x = torch.randn(3, 3)
+
+        # fullgraph=True should error with actionable message
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"requires_grad_\(\)(.|\n)*\.detach\(\)",
+        ):
+            torch.compile(fn, fullgraph=True)(x)
+
+        # Without fullgraph, falls back to eager and is correct
+        result = torch.compile(fn)(x)
+        self.assertTrue(result.requires_grad)
+        self.assertEqual(fn(x), result)
+
+    def test_requires_grad_on_intermediate_derived_returned(self):
+        def fn(x):
+            y = x * 2
+            y.requires_grad_()
+            return y * 3
+
+        x = torch.randn(3, 3)
+
+        # Derived tensor also loses requires_grad — should error with message
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"requires_grad_\(\)(.|\n)*\.detach\(\)",
+        ):
+            torch.compile(fn, fullgraph=True)(x)
+
+        # Without fullgraph, falls back to eager and is correct
+        result = torch.compile(fn)(x)
+        ref = fn(x)
+        self.assertTrue(result.requires_grad)
+        self.assertEqual(ref, result)
+
+    def test_requires_grad_on_intermediate_partial_graph(self):
+        # When requires_grad_() on a source-less intermediate leaks as output,
+        # Dynamo should restart and graph break at requires_grad_(), capturing
+        # ops before it in a compiled graph (partial acceleration).
+        def fn(x):
+            a = x.sin()
+            b = a.cos()
+            b.requires_grad_()
+            return b
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        x = torch.randn(3, 3)
+        result = torch.compile(fn, backend=backend)(x)
+        self.assertEqual(result, fn(x))
+        self.assertTrue(result.requires_grad)
+        # The graph should capture the ops before requires_grad_()
+        self.assertEqual(len(backend.graphs), 1)
+        # Dynamic shapes adds shape guards to the graph, skip the exact check
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    a = l_x_.sin();  l_x_ = None
+    b = a.cos();  a = None
+    return (b,)""",
+            )
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_requires_grad_on_intermediate_not_returned(self):
+        def fn(x):
+            y = x * 2
+            y.requires_grad_()
+            loss = (y * 3).sum()
+            loss.backward()
+            return y.grad
+
+        x = torch.randn(3, 3)
+
+        ref = fn(x.clone())
+        result = torch.compile(fn, fullgraph=True)(x.clone())
+        self.assertEqual(ref, result)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_requires_grad_intermediate_backward_grad_used_in_compute(self):
+        # Use the grad result in further computation within compile
+        def fn(x):
+            y = x * 2
+            y.requires_grad_()
+            loss = (y**2).sum()
+            loss.backward()
+            return y.grad * 2 + 1
+
+        x = torch.randn(3, 3)
+
+        ref = fn(x.clone())
+        result = torch.compile(fn, fullgraph=True)(x.clone())
+        self.assertEqual(ref, result)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_requires_grad_intermediate_chunked_loss_backward(self):
+        # Mirrors the TxtUnembedding pattern: forward compute, detach, make
+        # new leaf, chunked loss with per-chunk backward, then propagate
+        # accumulated grad back to the original input via h.backward().
+        def fn(x, targets):
+            # Forward computation before detach (e.g. transformer layers)
+            h = x * 2 + 1
+            x_detached = h.detach().requires_grad_()
+            chunksz = x_detached.shape[0] // 2
+            total_loss = torch.tensor(0.0)
+            for start in range(0, x_detached.shape[0], chunksz):
+                chunk = x_detached[start : start + chunksz]
+                chunk_targets = targets[start : start + chunksz]
+                logits = chunk @ torch.eye(chunk.shape[-1])
+                loss = torch.nn.functional.cross_entropy(logits, chunk_targets)
+                loss.backward()
+                total_loss = total_loss + loss.detach()
+            # Propagate chunked grad back through the forward computation
+            h.backward(x_detached.grad)
+            return x.grad, total_loss
+
+        x_ref = torch.randn(4, 8, requires_grad=True)
+        targets = torch.randint(0, 8, (4,))
+
+        x_test = x_ref.clone().detach().requires_grad_(True)
+        ref_grad, ref_loss = fn(x_ref, targets)
+        compiled_grad, compiled_loss = torch.compile(fn, fullgraph=True)(
+            x_test, targets
+        )
+        self.assertEqual(ref_grad, compiled_grad)
+        self.assertEqual(ref_loss, compiled_loss)
+        # Verify grad propagated to the input
+        self.assertEqual(x_ref.grad, x_test.grad)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_requires_grad_intermediate_backward_and_return_detached(self):
+        # Returning a detached version of the tainted tensor is safe — detach()
+        # strips requires_grad so AOTAutograd functionalization can't lose anything.
+        def fn(x):
+            y = x * 2
+            y.requires_grad_()
+            out = y * 3
+            loss = out.sum()
+            loss.backward()
+            return y.grad, out.detach()
+
+        x = torch.randn(3, 3)
+
+        ref_grad, ref_out = fn(x.clone())
+        compiled_grad, compiled_out = torch.compile(fn, fullgraph=True)(x.clone())
+        self.assertEqual(ref_grad, compiled_grad)
+        self.assertEqual(ref_out, compiled_out)
+        self.assertFalse(compiled_out.requires_grad)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_requires_grad_intermediate_metadata_checks(self):
+        # After requires_grad_() on an intermediate, requires_grad and is_leaf
+        # should report correctly and be usable in control flow.
+        def fn(x):
+            y = x * 2
+            y.requires_grad_()
+            if y.requires_grad and y.is_leaf:
+                loss = (y * 3).sum()
+                loss.backward()
+                return y.grad
+            return y
+
+        x = torch.randn(3, 3)
+        ref = fn(x.clone())
+        result = torch.compile(fn, fullgraph=True)(x.clone())
+        self.assertEqual(ref, result)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
+    def test_requires_grad_intermediate_side_effect_global(self):
+        # requires_grad_() on intermediate, then store grad in a global
+        saved = {}
+
+        def fn(x):
+            y = x * 2
+            y.requires_grad_()
+            loss = (y**2).sum()
+            loss.backward()
+            saved["grad"] = y.grad
+            return y.grad.clone()
+
+        x = torch.randn(3, 3)
+        ref = fn(x.clone())
+        saved_ref = saved["grad"].clone()
+        saved.clear()
+
+        result = torch.compile(fn, fullgraph=True)(x.clone())
+        self.assertEqual(ref, result)
+        self.assertEqual(saved_ref, saved["grad"])
+
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
     @parametrize_pytree_module

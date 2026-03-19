@@ -284,6 +284,10 @@ class SpeculationLog:
     # If True, graph break at autograd.grad instead of tracing it.
     # Set when we detect that autograd.grad consumed grad_fns that are returned.
     graph_break_on_autograd_grad: bool = False
+    # If True, graph break at requires_grad_() on source-less intermediates
+    # instead of tracing it. Set when we detect that such an intermediate
+    # leaks as a graph output with requires_grad=True.
+    graph_break_on_requires_grad_: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -768,7 +772,7 @@ def generic_jump(
                     x = None
 
             # __bool__ or __len__ is function
-            if isinstance(x, UserMethodVariable):
+            if isinstance(x, (GetAttrVariable, UserMethodVariable)):
                 result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
                 method_name = getattr(getattr(x, "fn", None), "__name__", None)
                 if result.is_python_constant():
