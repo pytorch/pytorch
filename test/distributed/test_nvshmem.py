@@ -13,7 +13,6 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
-    skip_if_rocm_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

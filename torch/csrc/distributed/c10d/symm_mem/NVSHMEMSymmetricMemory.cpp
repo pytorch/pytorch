@@ -148,7 +148,7 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
         arr_size,
         cudaMemcpyHostToDevice));
 
-#if !defined(USE_ROCM) //Multi-cast is not supported on ROCm yet
+#if !defined(USE_ROCM) // Multi-cast is not supported on ROCm yet
     // Initialize multicast address
     // On unsupported platforms, this API returns a nullptr.
     auto device = c10::Device(c10::DeviceType::CUDA, allocation->device_idx);
