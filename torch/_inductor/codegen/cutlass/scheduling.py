@@ -2,7 +2,7 @@
 import hashlib
 import logging
 from collections.abc import Sequence
-from typing import cast
+from typing import cast, TypeGuard
 
 from torch._inductor.codegen.cutlass.python_evt import (
     CutlassEVTCodegen,
@@ -53,7 +53,7 @@ class CUTLASSScheduling(BaseScheduling):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
     @staticmethod
-    def is_cutlass_template(node: BaseSchedulerNode) -> bool:
+    def is_cutlass_template(node: BaseSchedulerNode) -> TypeGuard[SchedulerNode]:
         return isinstance(node, SchedulerNode) and isinstance(
             node.node, CUTLASSTemplateBuffer
         )

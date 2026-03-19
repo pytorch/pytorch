@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 from collections.abc import Sequence
-from typing import cast
+from typing import cast, TypeGuard
 
 from ... import config
 from ...codecache import code_hash, get_path
@@ -28,7 +28,7 @@ class ROCmCPPScheduling(BaseScheduling):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
 
     @staticmethod
-    def is_rocm_cpp_template(node: BaseSchedulerNode) -> bool:
+    def is_rocm_cpp_template(node: BaseSchedulerNode) -> TypeGuard[SchedulerNode]:
         return isinstance(node, SchedulerNode) and isinstance(
             node.node, ROCmTemplateBuffer
         )
