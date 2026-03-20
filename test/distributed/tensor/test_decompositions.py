@@ -296,6 +296,87 @@ class TestDecompShardingWithComms(DTensorTestBase):
         self.assertTrue(torch.equal(result_dim1.min.full_tensor(), expected_dim1.min))
         self.assertTrue(torch.equal(result_dim1.max.full_tensor(), expected_dim1.max))
 
+    def _remove_strategy(self, op):
+        """Temporarily remove an op's explicit strategy to test DecompSharding fallback."""
+        prop = DTensor._op_dispatcher.sharding_propagator
+        saved = {}
+        for name, d in [
+            ("op_strategy", prop.op_strategy_funcs),
+            ("op_schema", prop.op_to_schema_info),
+            ("single_dim", prop.op_single_dim_strategy_funcs),
+            ("single_dim_schema", prop.op_to_schema_info_for_single_dim_strategy),
+        ]:
+            if op in d:
+                saved[name] = d.pop(op)
+        if hasattr(prop.propagate_op_sharding, "cache_clear"):
+            prop.propagate_op_sharding.cache_clear()
+        return saved
+
+    def _restore_strategy(self, op, saved):
+        prop = DTensor._op_dispatcher.sharding_propagator
+        mapping = {
+            "op_strategy": prop.op_strategy_funcs,
+            "op_schema": prop.op_to_schema_info,
+            "single_dim": prop.op_single_dim_strategy_funcs,
+            "single_dim_schema": prop.op_to_schema_info_for_single_dim_strategy,
+        }
+        for name, val in saved.items():
+            mapping[name][op] = val
+        if hasattr(prop.propagate_op_sharding, "cache_clear"):
+            prop.propagate_op_sharding.cache_clear()
+
+    def _test_decomp_fallback(self, op, run_fn):
+        """Remove explicit strategy, run op via DecompSharding, verify it returns DTensor."""
+        saved = self._remove_strategy(op)
+        try:
+            result = run_fn()
+            if isinstance(result, (tuple, list)):
+                self.assertTrue(any(isinstance(r, DTensor) for r in result))
+            else:
+                self.assertIsInstance(result, DTensor)
+        finally:
+            self._restore_strategy(op, saved)
+
+    @with_comms
+    def test_decomp_fallback_ops(self):
+        """Ops with decompositions that work via DecompSharding without explicit strategies."""
+        aten = torch.ops.aten
+        mesh = self.build_device_mesh()
+        dt = lambda t: DTensor.from_local(t, mesh, [Replicate()])
+
+        x = dt(torch.randn(4, 5, device=self.device_type))
+        idx = dt(torch.tensor([0, 2], device=self.device_type))
+        src = dt(torch.randn(2, 5, device=self.device_type))
+
+        self._test_decomp_fallback(
+            aten.index_add.default, lambda: aten.index_add(x, 0, idx, src)
+        )
+        self._test_decomp_fallback(
+            aten.index_copy.default, lambda: aten.index_copy(x, 0, idx, src)
+        )
+        val = dt(torch.tensor(3.14, device=self.device_type))
+        self._test_decomp_fallback(
+            aten.index_fill.int_Tensor,
+            lambda: aten.index_fill.int_Tensor(x, 0, idx, val),
+        )
+        self._test_decomp_fallback(
+            aten.isin.Tensor_Scalar,
+            lambda: aten.isin.Tensor_Scalar(
+                dt(torch.tensor([1, 2, 3], device=self.device_type)), 3
+            ),
+        )
+        self._test_decomp_fallback(
+            aten.renorm.default, lambda: aten.renorm(x, 2.0, 0, 1.0)
+        )
+        self._test_decomp_fallback(
+            aten.kron.default,
+            lambda: aten.kron(
+                dt(torch.randn(2, 3, device=self.device_type)),
+                dt(torch.randn(4, 5, device=self.device_type)),
+            ),
+        )
+
+
 
 if __name__ == "__main__":
     run_tests()

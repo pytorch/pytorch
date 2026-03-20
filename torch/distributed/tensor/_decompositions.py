@@ -18,7 +18,6 @@ from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, RuntimeSchemaInfo
-from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Placement,
@@ -199,10 +198,7 @@ class DecompShardingStrategy:
             return None
 
         candidate_placements = self._get_candidate_placements(op_schema)
-        mesh = try_find_mesh_from_args(
-            op_schema.op,
-            op_schema.args_schema + tuple(op_schema.kwargs_schema.values()),
-        )
+        mesh = op_schema.get_mesh_from_args(validate=False)
 
         fake_mesh = self._get_fake_mesh(mesh.device_type)
         single_dim_strategies = []
