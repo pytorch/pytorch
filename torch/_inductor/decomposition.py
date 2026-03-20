@@ -755,6 +755,7 @@ def _rand_like(
 ) -> torch.Tensor:
     dtype = self.dtype if dtype is None else dtype
     device = self.device if device is None else device
+
     if memory_format != torch.preserve_format:
         return rand_fn(
             self.shape,
