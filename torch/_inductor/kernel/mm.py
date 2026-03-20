@@ -664,27 +664,20 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
 
     if use_aten_gemm_kernels():
-        # For Aten on rocm, Separate Aten template and Triton template due to they have different kernel inputs
+        aten_templates: list[ExternKernelChoice | KernelTemplate] = [aten_addmm]
+        if (
+            inp_expanded.get_stride()[0] == 0
+            and inductor_config.triton.autotune_cublasLt
+        ):
+            aten_templates.append(aten_bias_addmm)
+
+        # On ROCm, ATen choices use original bias input; non-ROCm keeps unified inputs.
         if torch.version.hip:
-            templates_to_use_aten: list[ExternKernelChoice | KernelTemplate] = []
-            templates_to_use_aten.append(aten_addmm)
-            if (
-                inp_expanded.get_stride()[0] == 0
-                and inductor_config.triton.autotune_cublasLt
-            ):
-                templates_to_use_aten.append(aten_bias_addmm)
             choices.extend(
-                V.choices.get_template_configs(
-                    kernel_inputs_aten, templates_to_use_aten, name
-                )
+                V.choices.get_template_configs(kernel_inputs_aten, aten_templates, name)
             )
         else:
-            templates_to_use.append(aten_addmm)
-            if (
-                inp_expanded.get_stride()[0] == 0
-                and inductor_config.triton.autotune_cublasLt
-            ):
-                templates_to_use.append(aten_bias_addmm)
+            templates_to_use.extend(aten_templates)
 
     if is_nonzero and use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(mm_template)
