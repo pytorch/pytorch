@@ -1429,12 +1429,6 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
             return size
         elif fn(sympy.Lt(index, -size)):
             return 0
-        elif fn(sympy.Ge(index, 0)):
-            # If index >= 0, the resolved index is at most min(index, size).
-            return sympy.Min(index, size)
-        elif fn(sympy.Lt(index, 0)):
-            # If index < 0, wrap and clamp: the resolved index is at least 0.
-            return sympy.Max(index + size, 0)
         return None
 
     start_index, end_index = None, None
@@ -6772,6 +6766,11 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
+@make_pointwise
+def _div_rn(a, b):
+    return ops.div_rn(a, b)
+
+
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -6781,7 +6780,11 @@ def div_mode(a, b, rounding_mode=None):
     # see the discussion at https://github.com/triton-lang/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
-        return floordiv(a, b) if both_integer else floor(div(a, b))
+        # Use div_rn (IEEE round-to-nearest) instead of truediv here because
+        # Triton's default division uses an approximate reciprocal, which can
+        # produce a result slightly below the true quotient and cause floor()
+        # to round down by one.
+        return floordiv(a, b) if both_integer else floor(_div_rn(a, b))
     if rounding_mode == "trunc":
         assert not both_boolean, "truncdiv operands can not be boolean at the same time"
         return truncdiv(a, b) if both_integer else trunc(div(a, b))
@@ -8131,6 +8134,43 @@ def cvt_e8m0_rceil_lowering(inp):
     )
     result = make_pointwise(fn)(inp)
     return to_dtype(result, torch.uint8)
+
+
+@register_lowering(
+    torch._higher_order_ops.inline_asm_elementwise, type_promotion_kind=None
+)
+def lower_inline_asm_elementwise(
+    *inputs, asm_str, constraints, dtype, is_pure=True, pack=1
+):
+    inputs = broadcast_tensors(*inputs)
+
+    input_dtypes = tuple(inp.get_dtype() for inp in inputs)
+    loaders = [inp.make_loader() for inp in inputs]
+
+    def inner_fn(idx):
+        vals = tuple(loader(idx) for loader in loaders)
+        result = ops.inline_asm_elementwise(
+            *vals,
+            asm=asm_str,
+            constraints=constraints,
+            dtype=dtype,
+            is_pure=is_pure,
+            pack=pack,
+            input_dtypes=input_dtypes,
+        )
+        # Inductor computes in fp32 for bf16/fp16. Upcast so fused downstream
+        # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
+        # handles the final downcast on store.
+        if dtype in (torch.float16, torch.bfloat16):
+            result = ops.to_dtype(result, torch.float32)
+        return result
+
+    return ir.Pointwise.create(
+        device=inputs[0].get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(inputs[0].get_size()),
+    )
 
 
 # populate lowerings defined in kernel/*

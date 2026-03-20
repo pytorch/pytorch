@@ -219,6 +219,10 @@ def is_side_effect_safe(m: MutationType) -> bool:
     return m.scope == scope_id
 
 
+class NO_SUCH_SUBOBJ:
+    """Sentinel indicating no concrete Python object is available."""
+
+
 # This helps users of `as_python_constant` to catch unimplemented error with
 # more information; it inherits `NotImplementedError` for backward
 # compatibility reasons.
@@ -878,6 +882,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
+
+    def get_real_python_backed_value(self) -> object:
+        """Return the Python object this VT wraps, for `is` comparison.
+
+        Returns NO_SUCH_SUBOBJ if no concrete Python object is available.
+        """
+        return NO_SUCH_SUBOBJ
 
     def is_python_equal(self, other: object) -> bool:
         """

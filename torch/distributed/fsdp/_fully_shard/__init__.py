@@ -1,4 +1,9 @@
-from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import (
+    CPUOffloadPolicy,
+    DataParallelMeshDims,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
 from ._fully_shard import (
     FSDPModule,
     fully_shard,
@@ -10,6 +15,7 @@ from ._fully_shard import (
 
 __all__ = [
     "CPUOffloadPolicy",
+    "DataParallelMeshDims",
     "FSDPModule",
     "fully_shard",
     "MixedPrecisionPolicy",

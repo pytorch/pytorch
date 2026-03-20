@@ -54,31 +54,6 @@ inline size_t elementSize(ScalarType t) {
 #undef CASE_ELEMENTSIZE_CASE
 }
 
-inline ScalarType opaqueScalarType(ScalarType t) {
-  auto esize = elementSize(t);
-  ScalarType result;
-  switch (esize) {
-    case 1:
-      result = kByte;
-      break;
-    case 2:
-      result = kUInt16;
-      break;
-    case 4:
-      result = kUInt32;
-      break;
-    case 8:
-      result = kUInt64;
-      break;
-    case 16:
-      result = kComplexDouble;
-      break;
-    default:
-      TORCH_CHECK(false, "Unknown ScalarType");
-  }
-  return result;
-}
-
 inline bool isIntegralType(ScalarType t, bool includeBool) {
   bool isIntegral =
       (t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
@@ -114,7 +89,7 @@ inline bool isFloatingType(ScalarType t) {
 inline bool isComplexType(ScalarType t) {
   return (
       t == ScalarType::ComplexHalf || t == ScalarType::ComplexFloat ||
-      t == ScalarType::ComplexDouble || t == ScalarType::BComplex32);
+      t == ScalarType::ComplexDouble);
 }
 
 inline bool isBitsType(ScalarType t) {
@@ -187,7 +162,6 @@ inline bool isSignedType(ScalarType t) {
       CASE_ISSIGNED(ComplexHalf);
       CASE_ISSIGNED(ComplexFloat);
       CASE_ISSIGNED(ComplexDouble);
-      CASE_ISSIGNED(BComplex32);
       CASE_ISSIGNED(Bool);
     case ScalarType::Int1:
     case ScalarType::Int2:
@@ -230,8 +204,6 @@ inline ScalarType toRealValueType(ScalarType t) {
   switch (t) {
     case ScalarType::ComplexHalf:
       return ScalarType::Half;
-    case ScalarType::BComplex32:
-      return ScalarType::BFloat16;
     case ScalarType::ComplexFloat:
       return ScalarType::Float;
     case ScalarType::ComplexDouble:
@@ -244,7 +216,9 @@ inline ScalarType toRealValueType(ScalarType t) {
 inline ScalarType toComplexType(ScalarType t) {
   switch (t) {
     case ScalarType::BFloat16:
-      return ScalarType::BComplex32;
+      // BFloat16 has range equivalent to Float,
+      // so we map it to ComplexFloat.
+      return ScalarType::ComplexFloat;
     case ScalarType::Half:
       return ScalarType::ComplexHalf;
     case ScalarType::Float:
@@ -253,8 +227,6 @@ inline ScalarType toComplexType(ScalarType t) {
       return ScalarType::ComplexDouble;
     case ScalarType::ComplexHalf:
       return ScalarType::ComplexHalf;
-    case ScalarType::BComplex32:
-      return ScalarType::BComplex32;
     case ScalarType::ComplexFloat:
       return ScalarType::ComplexFloat;
     case ScalarType::ComplexDouble:
