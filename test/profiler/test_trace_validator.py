@@ -3,6 +3,7 @@
 import glob
 import json
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -17,19 +18,14 @@ from torch.profiler._trace_validator import (
     check_stream_sync_overlap,
     check_stream_wait_corr_id_in_past,
     check_stream_wait_corr_id_populated,
-    validate_trace,
 )
 from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
-
-
-# ---------------------------------------------------------------------------
-# Minimal ResNet50 (no torchvision dependency) — same bottleneck design
-# ---------------------------------------------------------------------------
 
 
 class _Bottleneck(nn.Module):
@@ -84,9 +80,81 @@ def _resnet50():
     )
 
 
-# ---------------------------------------------------------------------------
-# Unit tests — synthetic events, no GPU needed
-# ---------------------------------------------------------------------------
+def _profile_resnet_payload(trace_dir):
+    """Profile a ResNet50 training loop and return (trace_path, events)."""
+    device = torch.device("cuda:0")
+    model = _resnet50().to(device)
+    inputs = torch.randn(4, 3, 224, 224, device=device)
+    outputs = torch.rand_like(model(inputs))
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
+    loss_fn = nn.CrossEntropyLoss()
+    torch.cuda.synchronize()
+
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        experimental_config=_ExperimentalConfig(enable_cuda_sync_events=True),
+        schedule=schedule(wait=1, warmup=1, active=2, repeat=1),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+            trace_dir, worker_name="w"
+        ),
+    ) as prof:
+        for _ in range(5):
+            prof.step()
+            optimizer.zero_grad(set_to_none=True)
+            with record_function("## forward ##"):
+                pred = model(inputs)
+            with record_function("## backward ##"):
+                loss_fn(pred, outputs).backward()
+            with record_function("## optimizer ##"):
+                optimizer.step()
+
+    torch.cuda.synchronize()
+    return _load_trace(trace_dir)
+
+
+def _profile_complex_payload(trace_dir):
+    """Profile multi-stream + CUDA events + forward/backward and return (trace_path, events)."""
+    device = torch.device("cuda:0")
+
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        experimental_config=_ExperimentalConfig(enable_cuda_sync_events=True),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+            trace_dir, worker_name="w"
+        ),
+    ) as prof:
+        x = torch.randn(32, 32, device=device, requires_grad=True)
+        y = torch.mm(x, x)
+        loss = y.sum()
+        loss.backward()
+
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+        event = torch.cuda.Event()
+        with torch.cuda.stream(s1):
+            a = torch.randn(64, 64, device=device)
+            _b = torch.mm(a, a)
+            event.record(s1)
+        s2.wait_event(event)
+        with torch.cuda.stream(s2):
+            _c = torch.mm(a, a)
+        s2.synchronize()
+
+        prof.step()
+
+    torch.cuda.synchronize()
+    return _load_trace(trace_dir)
+
+
+def _load_trace(trace_dir):
+    traces = glob.glob(os.path.join(trace_dir, "*.pt.trace.json"))
+    if not traces:
+        raise RuntimeError(f"No trace file produced in {trace_dir}")
+    trace_path = traces[0]
+    with open(trace_path) as f:
+        data = json.load(f)
+    events = data.get("traceEvents", data)
+    return trace_path, events
 
 
 class TestTraceValidatorRules(TestCase):
@@ -124,166 +192,34 @@ class TestTraceValidatorRules(TestCase):
         self.assertEqual(len(v), 1)
 
 
-# ---------------------------------------------------------------------------
-# E2E: Two real CUDA payloads profiled once, each rule checked on both traces
-#
-# Payload 1 — ResNet50 training loop (forward + backward + optimizer)
-# Payload 2 — Multi-stream + CUDA events + stream sync + forward/backward
-# ---------------------------------------------------------------------------
-
-
-@unittest.skipIf(IS_WINDOWS, "CUDA profiler tests not supported on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
+@instantiate_parametrized_tests
 class TestTraceValidatorE2E(TestCase):
-    resnet_trace_path: str = ""
-    complex_trace_path: str = ""
-    resnet_events: list = []
-    complex_events: list = []
     _trace_dir: str = ""
+    _payloads: dict = {}
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        device = torch.device("cuda:0")
         cls._trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_")
-
-        # ── Payload 1: ResNet50 training loop ─────────────────────────
-        model = _resnet50().to(device)
-        inputs = torch.randn(4, 3, 224, 224, device=device)
-        outputs = torch.rand_like(model(inputs))
-        optimizer = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
-        loss_fn = nn.CrossEntropyLoss()
-        torch.cuda.synchronize()
-
-        resnet_dir = os.path.join(cls._trace_dir, "resnet")
-        os.makedirs(resnet_dir)
-
-        with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            experimental_config=_ExperimentalConfig(
-                enable_cuda_sync_events=True,
+        cls._payloads = {
+            "resnet": _profile_resnet_payload(
+                os.path.join(cls._trace_dir, "resnet")
             ),
-            schedule=schedule(wait=1, warmup=1, active=2, repeat=1),
-            on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                resnet_dir, worker_name="w"
+            "complex": _profile_complex_payload(
+                os.path.join(cls._trace_dir, "complex")
             ),
-        ) as prof:
-            for _ in range(5):
-                prof.step()
-                optimizer.zero_grad(set_to_none=True)
-                with record_function("## forward ##"):
-                    pred = model(inputs)
-                with record_function("## backward ##"):
-                    loss_fn(pred, outputs).backward()
-                with record_function("## optimizer ##"):
-                    optimizer.step()
-
-        torch.cuda.synchronize()
-
-        traces = glob.glob(os.path.join(resnet_dir, "*.pt.trace.json"))
-        if not traces:
-            raise RuntimeError(f"No trace file produced in {resnet_dir}")
-        cls.resnet_trace_path = traces[0]
-        with open(cls.resnet_trace_path) as f:
-            data = json.load(f)
-        cls.resnet_events = data.get("traceEvents", data)
-
-        # ── Payload 2: multi-stream + CUDA events + forward/backward ──
-        complex_dir = os.path.join(cls._trace_dir, "complex")
-        os.makedirs(complex_dir)
-
-        with profile(
-            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            experimental_config=_ExperimentalConfig(
-                enable_cuda_sync_events=True,
-            ),
-            on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                complex_dir, worker_name="w"
-            ),
-        ) as prof:
-            x = torch.randn(32, 32, device=device, requires_grad=True)
-            y = torch.mm(x, x)
-            loss = y.sum()
-            loss.backward()
-
-            s1 = torch.cuda.Stream()
-            s2 = torch.cuda.Stream()
-            event = torch.cuda.Event()
-            with torch.cuda.stream(s1):
-                a = torch.randn(64, 64, device=device)
-                _b = torch.mm(a, a)
-                event.record(s1)
-            s2.wait_event(event)
-            with torch.cuda.stream(s2):
-                _c = torch.mm(a, a)
-            s2.synchronize()
-
-            prof.step()
-
-        torch.cuda.synchronize()
-
-        traces = glob.glob(os.path.join(complex_dir, "*.pt.trace.json"))
-        if not traces:
-            raise RuntimeError(f"No trace file produced in {complex_dir}")
-        cls.complex_trace_path = traces[0]
-        with open(cls.complex_trace_path) as f:
-            data = json.load(f)
-        cls.complex_events = data.get("traceEvents", data)
+        }
 
     @classmethod
     def tearDownClass(cls):
         if cls._trace_dir and os.path.isdir(cls._trace_dir):
-            import shutil
-
             shutil.rmtree(cls._trace_dir, ignore_errors=True)
         super().tearDownClass()
 
-    # ── one test per rule, checked against both payloads ──────────────
-
-    def test_rule1_gpu_kernel_causality(self):
-        # Clock skew between CPU and GPU is normal; just verify the check
-        # runs and finds real kernel pairs without crashing.
-        check_gpu_kernel_causality(self.resnet_events)
-        check_gpu_kernel_causality(self.complex_events)
-
-    def test_rule2_stream_wait_corr_id_populated(self):
-        v1 = check_stream_wait_corr_id_populated(self.resnet_events)
-        v2 = check_stream_wait_corr_id_populated(self.complex_events)
-        self.assertEqual(len(v1), 0, self._fmt(v1))
-        self.assertEqual(len(v2), 0, self._fmt(v2))
-
-    def test_rule3_stream_sync_overlap(self):
-        v1 = check_stream_sync_overlap(self.resnet_events)
-        v2 = check_stream_sync_overlap(self.complex_events)
-        self.assertEqual(len(v1), 0, self._fmt(v1))
-        self.assertEqual(len(v2), 0, self._fmt(v2))
-
-    def test_rule4_stream_wait_corr_id_in_past(self):
-        v1 = check_stream_wait_corr_id_in_past(self.resnet_events)
-        v2 = check_stream_wait_corr_id_in_past(self.complex_events)
-        self.assertEqual(len(v1), 0, self._fmt(v1))
-        self.assertEqual(len(v2), 0, self._fmt(v2))
-
-    def test_rule5_nccl_metadata(self):
-        v1 = check_nccl_metadata(self.resnet_events)
-        v2 = check_nccl_metadata(self.complex_events)
-        self.assertEqual(len(v1), 0, self._fmt(v1))
-        self.assertEqual(len(v2), 0, self._fmt(v2))
-
-    def test_rule6_backward_seq_id_uniqueness(self):
-        v1 = check_backward_seq_id_uniqueness(self.resnet_events)
-        v2 = check_backward_seq_id_uniqueness(self.complex_events)
-        self.assertEqual(len(v1), 0, self._fmt(v1))
-        self.assertEqual(len(v2), 0, self._fmt(v2))
-
-    def test_validate_trace(self):
-        passed1, v1 = validate_trace(self.resnet_trace_path)
-        passed2, v2 = validate_trace(self.complex_trace_path)
-        self.assertTrue(passed1, self._fmt(v1))
-        self.assertTrue(passed2, self._fmt(v2))
-
-    # ── helper ────────────────────────────────────────────────────────
+    def _events(self, payload):
+        return self._payloads[payload][1]
 
     @staticmethod
     def _fmt(violations, limit=5):
@@ -292,6 +228,35 @@ class TestTraceValidatorE2E(TestCase):
             lines.append(f"  ... and {len(violations) - limit} more")
         return "\n".join(lines)
 
+    @parametrize("payload", ["resnet", "complex"])
+    def test_rule1_gpu_kernel_causality(self, payload):
+        v = check_gpu_kernel_causality(self._events(payload))
+        self.assertEqual(len(v), 0, self._fmt(v))
+
+    @parametrize("payload", ["resnet", "complex"])
+    def test_rule2_stream_wait_corr_id_populated(self, payload):
+        v = check_stream_wait_corr_id_populated(self._events(payload))
+        self.assertEqual(len(v), 0, self._fmt(v))
+
+    @parametrize("payload", ["resnet", "complex"])
+    def test_rule3_stream_sync_overlap(self, payload):
+        v = check_stream_sync_overlap(self._events(payload))
+        self.assertEqual(len(v), 0, self._fmt(v))
+
+    @parametrize("payload", ["resnet", "complex"])
+    def test_rule4_stream_wait_corr_id_in_past(self, payload):
+        v = check_stream_wait_corr_id_in_past(self._events(payload))
+        self.assertEqual(len(v), 0, self._fmt(v))
+
+    @parametrize("payload", ["resnet", "complex"])
+    def test_rule5_nccl_metadata(self, payload):
+        v = check_nccl_metadata(self._events(payload))
+        self.assertEqual(len(v), 0, self._fmt(v))
+
+    @parametrize("payload", ["resnet", "complex"])
+    def test_rule6_backward_seq_id_uniqueness(self, payload):
+        v = check_backward_seq_id_uniqueness(self._events(payload))
+        self.assertEqual(len(v), 0, self._fmt(v))
 
 if __name__ == "__main__":
     run_tests()
