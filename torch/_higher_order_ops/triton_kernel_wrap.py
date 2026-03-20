@@ -344,8 +344,8 @@ def generate_ttir(
     # the stride and size parameters.
     #
     # Additionally, tensors and scalars are both included as TTIR parameters,
-    # whereas `constexpr` are inlined, and None are excluded. This matters for
-    # "odd" ordering (eg. [tensor, scalar, tensor]).
+    # whereas `constexpr` are inlined, and None are excluded. We only preserve
+    # scalars as this matters for "odd" ordering (eg. [tensor, scalar, tensor]).
     def get_arg_names(name: str, arg: Any) -> list[str]:
         param_idx = kernel.arg_names.index(name)
 
