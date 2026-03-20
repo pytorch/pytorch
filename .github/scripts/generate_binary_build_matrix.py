@@ -24,7 +24,7 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
 CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0", "13.2"]
-CUDA_STABLE = "12.8"
+CUDA_STABLE = "13.0"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
