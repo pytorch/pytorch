@@ -1207,6 +1207,33 @@ class DistBucketizeTest(LocalDTensorTestBase):
             self.assertEqual(result.full_tensor(), expected)
 
 
+class DistToCopyTest(LocalDTensorTestBase):
+    @with_comms
+    def test_to_copy_partial_reduces_for_nonlinear_cast(self):
+        # (reduce_op, target_dtype, expect_partial)
+        cases = [
+            ("sum", torch.int32, False),  # truncation breaks additivity
+            ("sum", torch.bool, False),  # thresholding
+            ("sum", torch.float64, True),  # float→float is safe
+            ("max", torch.int32, True),  # monotonic
+            ("max", torch.bool, False),  # thresholding
+        ]
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = self.build_device_mesh()
+            input_tensor = torch.randn(4, 4, device=self.device_type)
+            for reduce_op, target_dtype, expect_partial in cases:
+                dt = DTensor.from_local(input_tensor, mesh, [Partial(reduce_op)])
+                result = dt.to(target_dtype)
+                p = result.placements[0]
+                if expect_partial:
+                    self.assertTrue(p.is_partial(), f"{reduce_op}→{target_dtype}: {p}")
+                    self.assertEqual(p.reduce_op, reduce_op)
+                else:
+                    self.assertTrue(
+                        p.is_replicate(), f"{reduce_op}→{target_dtype}: {p}"
+                    )
+
+
 class DistArgMaxArgMinTest(DTensorContinuousTestBase):
     world_size = 4
     _ops = [torch.argmax, torch.argmin]

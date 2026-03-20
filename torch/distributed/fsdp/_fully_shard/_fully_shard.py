@@ -5,14 +5,20 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
-from typing import Any, cast, NoReturn, overload, TYPE_CHECKING
+from typing import Any, cast, Literal, NoReturn, overload, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
-from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
+from ._fsdp_api import (
+    AllGather,
+    DataParallelMeshDims,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+    ReduceScatter,
+)
 from ._fsdp_common import FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -64,6 +70,7 @@ def fully_shard(
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: set[nn.Parameter] | None = ...,
+    dp_mesh_dims: DataParallelMeshDims | None = ...,
 ) -> FSDPModule: ...
 
 
@@ -78,6 +85,7 @@ def fully_shard(
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
     ignored_params: set[nn.Parameter] | None = ...,
+    dp_mesh_dims: DataParallelMeshDims | None = ...,
 ) -> list[FSDPModule]: ...
 
 
@@ -96,6 +104,7 @@ def fully_shard(
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: set[nn.Parameter] | None = None,
+    dp_mesh_dims: DataParallelMeshDims | None = None,
 ):
     """
     Apply fully sharded data parallelism (FSDP) to ``module``, where FSDP
@@ -194,6 +203,12 @@ def fully_shard(
         ignored_params: Optional(Set[nn.Parameter]): The set of parameters to be
             ignored by FSDP. They will not be sharded, nor moved to the device
             during init, nor have their gradients reduced in backward.
+        dp_mesh_dims (Optional[DataParallelMeshDims]): When provided,
+            ``mesh`` is treated as the full SPMD mesh, and parameters should be
+            DTensors on this mesh with ``Replicate()`` on all DP dimensions.
+            The ``shard`` field names which dim(s) FSDP shards on (multiple
+            dims are flattened). The ``replicate`` field names the HSDP
+            replication dim(s) (multiple dims are flattened).
 
     Returns:
         FSDPModule: The module with FSDP applied (in-place).
@@ -201,16 +216,29 @@ def fully_shard(
     torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
     _validate_module(module, "fully_shard")
     mesh = mesh or _init_default_mesh()
-    _validate_mesh(mesh)
-    mesh_info = _get_mesh_info(mesh)
+    _validate_mesh(mesh, dp_mesh_dims)
+    mesh_info = _get_mesh_info(mesh, dp_mesh_dims)
     device = _get_device_from_mesh(mesh)
     auto_reshard_after_forward = reshard_after_forward is None
     # If the user does not provide ``reshard_after_forward``, we set it to True.
     # During lazy_init, we identify which module is the root and override its value to False
-    post_forward_mesh_info = _get_post_forward_mesh_info(
-        reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
-        mesh_info,
-    )
+    if isinstance(mesh_info, FSDPMeshInfo):
+        if (
+            mesh_info.is_spmd_mesh
+            and not isinstance(reshard_after_forward, bool)
+            and isinstance(reshard_after_forward, int)
+        ):
+            raise NotImplementedError(
+                "reshard_after_forward as int is not yet supported with "
+                "SPMD mesh (dp_mesh_dims)"
+            )
+        post_forward_mesh_info = _get_post_forward_mesh_info(
+            reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
+            mesh_info,
+        )
+    else:
+        # DDPMeshInfo: no sharding, so no post-forward resharding needed
+        post_forward_mesh_info = None
     arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
         module, device, ignored_params
     )
@@ -628,6 +656,40 @@ class FSDPModule:
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_allocate_memory_from_process_group(enable)
+
+    def set_symm_mem_for_comm(self, backend: Literal["NCCL"] = "NCCL") -> None:
+        """
+        Sets the symmetric memory (``symm_mem``) backend for allocating the
+        staging buffers used in all-gather collectives. This allows NCCL to use
+        optimized all-gather implementations via symmetric memory. Such
+        optimization may depend on the topology of the system.  For single node,
+        Copy Engine All-Gather may be used. For multi-node, Symmetric Kernel
+        All-Gather may be used.
+
+        To enable Copy Engine All-Gather, you need to set the NCCL process group
+        with the zero-CTA policy.
+        ```python
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.config.cta_policy = dist.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
+        dist.init_process_group(backend="nccl", pg_options=opts, device_id=device)
+        ```
+        Alternatively, you can set the environment variable `NCCL_CTA_POLICY` to 2.
+        ```bash
+        export NCCL_CTA_POLICY=2
+        ```
+        For more details, see [Copy Engine
+        Collectives](https://docs.pytorch.org/docs/2.11/symmetric_memory.html#copy-engine-collectives).
+
+        This cannot be used together with :meth:`set_custom_all_gather` or
+        :meth:`set_custom_reduce_scatter`.
+
+        Args:
+            backend (str): The symmetric memory backend to use. Defaults to
+                ``"NCCL"``. Currently, only ``"NCCL"`` is supported.
+        """
+        state = self._get_fsdp_state()
+        for fsdp_param_group in state._fsdp_param_groups:
+            fsdp_param_group.set_symm_mem(backend)
 
     def _set_unshard_async_op(self, async_op: bool):
         """

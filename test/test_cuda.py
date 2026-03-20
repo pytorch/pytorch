@@ -5071,14 +5071,6 @@ print(value, end="")
 
     def test_allocator_fuzz(self):
         # fuzz
-        if (
-            torch.version.hip
-            and "expandable_segments:True"
-            in torch._C._accelerator_getAllocatorSettings()
-        ):
-            raise unittest.SkipTest(
-                "ROCm needs https://github.com/ROCm/rocm-systems/pull/3023"
-            )
         state = random.getstate()
         random.seed(123)
         N = 10000
@@ -6718,6 +6710,7 @@ class TestMemPool(TestCase):
             "graph_capture_record_stream_reuse:False"
         )
 
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Load_inline doesn't work in fbcode")
     def test_mempool_expandable(self):
         torch.cuda.empty_cache()
