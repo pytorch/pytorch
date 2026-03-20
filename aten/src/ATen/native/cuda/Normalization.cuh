@@ -117,7 +117,8 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
   scalar_t sum = static_cast<scalar_t>(0);
   for (int batch = threadIdx.y; batch < tensor.size(0); batch += blockDim.y) {
 #if defined(USE_ROCM)
-    constexpr int UNRL = 4; // load deserilize factor
+#if ROCM_VERSION <= 71300
+    constexpr int UNRL = 4; // load deserialize factor
     scalar_t tmp[UNRL];
     for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x*UNRL) {
 #pragma unroll
@@ -128,6 +129,13 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
         if (x+u*blockDim.x < tensor.size(2))
           sum += tmp[u];
     }
+#else // Starting with ROCm 7.14, the loop can be unrolled without manual modification,
+      // although it still requires the pragma and a signed integer step.
+    #pragma unroll
+    for (int x = threadIdx.x; x < tensor.size(2); x += (int)blockDim.x) {
+      sum += op(batch, plane, x);
+    }
+#endif
 #else
     for (int x = threadIdx.x; x < tensor.size(2); x += blockDim.x) {
       sum += op(batch, plane, x);
