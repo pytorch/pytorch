@@ -3635,6 +3635,7 @@ SKIP_DIRS = [
     "<__array_function__ internals>",
     _as_posix_path(_config_module.__file__),
     "triton/backends",
+    "triton/runtime",
 ]
 SKIP_DIRS.extend(map(_as_posix_path, filter(None, map(_module_dir, BUILTIN_SKIPLIST))))
 
