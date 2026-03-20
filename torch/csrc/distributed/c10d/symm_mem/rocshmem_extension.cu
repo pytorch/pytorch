@@ -275,7 +275,7 @@ void all_to_all_vdev(
    * Step 3: Launch allToAllV kernel to copy data between peers according to
    *         the exchanged splits/offsets.
    * Arguments:
-   *  - `input` is the send bufffer
+   *  - `input` is the send buffer
    *  - `out` is the receive buffer
    *  - `in_splits`: 1D[npes] num of elements this rank sends to each peer
    *  - `out_splits_offsets`:2D (2, npes). row0 = output splits, row1 = output offsets

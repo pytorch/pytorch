@@ -1466,7 +1466,7 @@ if(USE_ROCM)
 
   message(WARNING "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND}")
   if(USE_NVSHMEM)
-    if (rocshmem_FOUND)
+    if(rocshmem_FOUND)
       message(STATUS "rocSHMEM found, building with rocSHMEM support")
       message(STATUS "ROCSHMEM_INCLUDE_DIR: '${ROCSHMEM_INCLUDE_DIR}'")
       set(TORCH_ROCSHMEM_SRCS
