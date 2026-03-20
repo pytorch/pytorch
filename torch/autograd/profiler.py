@@ -633,10 +633,8 @@ class profile:
             )
 
         # Create and return FunctionEvent list, which contains all function events
-        # Here 2 function events are created:
-        # Python function events are collected but separated out to preserve
-        # backward compatibility of events(). Access via
-        # events(include_python_events=True).
+        # Python function events are separated to preserve backward compatibility
+        # of events(). Access via events(include_python_events=True).
         python_function_events = []
         all_function_events = []
         # frontend_function_events contains the events in aten or torch frontend level,
@@ -653,9 +651,7 @@ class profile:
                 or getattr(kineto_event, "is_hidden_event", lambda: False)()
             ):
                 continue
-            if kineto_event.is_python_function():
-                python_function_events.append(kineto_event)
-                continue
+            is_python_function = kineto_event.is_python_function()
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
             rel_end_ns = kineto_event.end_ns() - trace_start_ns
             abs_end_ns = kineto_event.end_ns()
@@ -723,7 +719,10 @@ class profile:
                     if cuda_time > 0:
                         fe.append_kernel(fe.name, fe.device_index, cuda_time)
                         fe.is_legacy = True
-            all_function_events.append(fe)
+            if is_python_function:
+                python_function_events.append(fe)
+            else:
+                all_function_events.append(fe)
             corr_id = kineto_event.linked_correlation_id()
             if corr_id > 0:
                 if corr_id not in device_corr_map:
