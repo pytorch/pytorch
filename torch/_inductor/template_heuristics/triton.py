@@ -23,6 +23,7 @@ from ..kernel.mm import (
     get_scaling_options,
     get_tile_size,
     mm_template,
+    persistent_mm_template,
     persistent_tma_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
     scaled_mm_device_tma_main_loop_scaling_template,
@@ -2529,6 +2530,33 @@ class CUDAPersistentTMATemplateConfigHeuristic(
         super().__init__()
         # Override mm_configs to use persistent_mm_configs
         self.mm_configs = self.persistent_mm_configs
+
+
+@register_template_heuristic(
+    persistent_mm_template.uid,
+    "cuda",
+    register=torch.version.hip is not None,
+)
+class PersistentMMTemplateConfigHeuristic(
+    MMTemplateConfigMixin,
+    ROCmConfigHeuristic,  # type: ignore[misc]
+):
+    """Persistent MM template heuristic (no TMA, standard pointer loads)"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.mm_configs = self.persistent_mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+        **kwargs,
+    ) -> Generator[dict[str, Any], None, None]:
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
+            yield {**template_kwargs, "NUM_SMS": get_num_sms()}
 
 
 @register_template_heuristic(

@@ -1810,8 +1810,9 @@ class triton:
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
 
-    # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
-    # with a version of triton new enough to support TMA
+    # Whether persistent matmul kernels should be enabled. On NVIDIA H100+ with TMA support,
+    # this enables TMA persistent kernels. On AMD GPUs without TMA, this enables
+    # non-TMA persistent kernels as a fallback.
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
