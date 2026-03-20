@@ -755,6 +755,37 @@ autoheuristic_log_path = os.environ.get(
     "TORCHINDUCTOR_AUTOHEURISTIC_LOG_PATH", "DEFAULT"
 )
 
+class learned_reduction_heuristic:
+    # Log reduction autotuning data (problem metadata, candidate configs,
+    # benchmark timings) for training learned heuristics.
+    # FB-internal: logs to Hive and uploads kernel reproducers to Manifold.
+    # OSS: no-op (logging module is FB-only).
+    log_autotune: bool = Config(
+        justknob="pytorch/learned_reduction_heuristic:log_autotune",
+        env_name_force="TORCHINDUCTOR_LOG_REDUCTION_AUTOTUNE",
+        default=False,
+    )
+
+    # When True, log to the production Hive table; otherwise use the
+    # experiments table.
+    log_to_prod: bool = Config(
+        justknob="pytorch/learned_reduction_heuristic:log_to_prod",
+        env_name_force="TORCHINDUCTOR_LOG_REDUCTION_AUTOTUNE_PROD",
+        default=False,
+    )
+
+    # Use the learned heuristic to score and prune candidate configs before
+    # autotuning.
+    enabled: bool = Config(
+        justknob="pytorch/learned_reduction_heuristic:enabled",
+        env_name_force="TORCHINDUCTOR_LEARNED_REDUCTION_HEURISTIC",
+        default=False,
+    )
+
+    # Number of top-scoring configs to keep when the learned heuristic is
+    # enabled.
+    top_k: int = 1
+
 # Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
 layout_opt_default = "1" if not torch.version.hip else "0"
 layout_optimization = (

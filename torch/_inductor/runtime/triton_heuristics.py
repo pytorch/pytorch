@@ -441,6 +441,23 @@ class CachingAutotuner(KernelInterface):
         # Mode for launch grid calculation
         self.grid_mode: Literal["python", "cpp"] = "python"
 
+        # Per-instance callback fired once after autotuning completes (or is
+        # skipped for single-config kernels).  Set by decorator functions when
+        # data collection is enabled.
+        self.on_autotune_complete: Callable[[CachingAutotuner, dict[object, float] | None], None] | None = None
+        self._autotune_callback_fired: bool = False
+        self.timings: dict | None = None
+
+    def _fire_autotune_callback(self, timings: dict | None) -> None:
+        """Fire the on_autotune_complete callback at most once."""
+        if self.on_autotune_complete is None or self._autotune_callback_fired:
+            return
+        self._autotune_callback_fired = True
+        try:
+            self.on_autotune_complete(self, timings)
+        except Exception:
+            log.warning("on_autotune_complete callback failed", exc_info=True)
+
     def is_statically_launchable(self):
         """
         Checks if every compiled kernel is statically launchable, which
@@ -1259,6 +1276,7 @@ class CachingAutotuner(KernelInterface):
                 )
 
         self.launchers = [builtins.min(timings, key=timings.get)]
+        self.timings = timings
         self.autotune_time_taken_ns = (
             self.precompile_time_taken_ns + benchmark_time_taken_ns
         )
@@ -1532,6 +1550,11 @@ class CachingAutotuner(KernelInterface):
                 self.precompile_time_taken_ns = time.time_ns() - start_time
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, **kwargs)
+                self._fire_autotune_callback(self.timings)
+            else:
+                self._fire_autotune_callback(None)
+        else:
+            self._fire_autotune_callback(None)
 
         if not getattr(
             self.launchers[0].config, "found_by_coordesc", False
@@ -2371,7 +2394,7 @@ def cached_autotune(
                 filename=filename,
                 with_bandwidth_info=True,
             )
-        return caching_autotuner_cls(
+        autotuner = caching_autotuner_cls(
             fn,
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,
@@ -2386,6 +2409,15 @@ def cached_autotune(
             filename=filename,
             autotune_cache_info=autotune_cache_info,
         )
+        # cooperative_reduction uses HeuristicType.REDUCTION so it is
+        # covered by the REDUCTION check below.
+        if heuristic_type in (
+            HeuristicType.REDUCTION,
+            HeuristicType.PERSISTENT_REDUCTION,
+            HeuristicType.SPLIT_SCAN,
+        ):
+            _attach_logging_callback(autotuner)
+        return autotuner
 
     return decorator
 
@@ -3564,6 +3596,21 @@ def filter_reduction_configs_for_determinism(
             log.debug("%s", c)
             log.debug("")
     return configs
+
+
+def _attach_logging_callback(autotuner: CachingAutotuner) -> None:
+    """Attach the reduction autotune logging callback when enabled."""
+    from torch._inductor import config as inductor_config
+
+    if not inductor_config.learned_reduction_heuristic.log_autotune:
+        return
+    if not torch.cuda.is_available():
+        return
+    from torch._inductor.runtime.reduction_heuristic_utils import (
+        enqueue_autotune_log,
+    )
+
+    autotuner.on_autotune_complete = enqueue_autotune_log
 
 
 def reduction(
