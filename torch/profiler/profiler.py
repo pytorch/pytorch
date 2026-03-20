@@ -26,7 +26,6 @@ from torch._C._profiler import (
 from torch._environment import is_fbcode
 from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
-from torch.autograd.profiler_util import EventList
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
 

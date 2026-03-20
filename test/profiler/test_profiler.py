@@ -3886,7 +3886,7 @@ class TestPrivateUse1ProfilerState(TestCase):
 class TestProfilerEventsParity(TestCase):
     """Tests validating parity between events() and export_chrome_trace() JSON."""
 
-    def test_include_python_events(self):
+    def test_python_function_events_in_events(self):
         with profile(
             activities=[ProfilerActivity.CPU],
             with_stack=True,
@@ -3894,21 +3894,14 @@ class TestProfilerEventsParity(TestCase):
             x = torch.randn(10, 10)
             torch.mm(x, x)
 
-        default_events = prof.events()
-        all_events = prof.events(include_python_events=True)
-
-        py_in_default = [
-            e for e in default_events if ".py(" in e.name and "): " in e.name
+        events = prof.events()
+        python_events = [
+            e for e in events if ".py(" in e.name and "): " in e.name
         ]
-        self.assertEqual(len(py_in_default), 0)
-
-        self.assertGreater(len(all_events), len(default_events))
-
-        extra_names = {e.name for e in all_events} - {e.name for e in default_events}
-        self.assertTrue(
-            any(".py(" in n for n in extra_names),
-            f"Expected Python function events, got: {extra_names}",
-        )
+        self.assertGreater(len(python_events), 0)
+        for e in python_events:
+            self.assertIsInstance(e.name, str)
+            self.assertGreater(e.time_range.end - e.time_range.start, 0)
 
 
 if __name__ == "__main__":
