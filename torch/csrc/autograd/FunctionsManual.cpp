@@ -7538,164 +7538,9 @@ static Tensor gs_bound_coord(
   auto in = x - min_v;
   auto in_abs = in.abs();
   auto even = at::fmod(at::floor(in_abs / span), 2.0) < 0.5;
-  auto r = at::where(
-      even,
-      at::fmod(in_abs, span),
-      at::full_like(in_abs, span) - at::fmod(in_abs, span));
+  auto rem = at::fmod(in_abs, span);
+  auto r = at::where(even, rem, span - rem);
   return (r + min_v).round().clamp(0, size - 1).to(at::kLong);
-}
-
-// Bounded gather for bicubic taps — applies proper padding to tap indices.
-static Tensor gs_gather2d_bc(
-    const Tensor& input,
-    const Tensor& h_idx,
-    const Tensor& w_idx,
-    int64_t padding_mode,
-    bool align_corners) {
-  auto N = input.size(0), C = input.size(1);
-  auto H = input.size(2), W = input.size(3);
-  auto out_H = h_idx.size(1), out_W = h_idx.size(2);
-  auto h_b = gs_bound_coord(h_idx, H, padding_mode, align_corners);
-  auto w_b = gs_bound_coord(w_idx, W, padding_mode, align_corners);
-  auto flat = (h_b * W + w_b).reshape({N, 1, -1}).expand({N, C, out_H * out_W});
-  auto result = input.reshape({N, C, H * W})
-                    .gather(2, flat)
-                    .reshape({N, C, out_H, out_W});
-  if (padding_mode == 0 /* zeros */) {
-    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    result = result * mask.unsqueeze(1).to(result.dtype());
-  }
-  return result;
-}
-
-// Bounded scatter for bicubic taps.
-static Tensor gs_scatter2d_bc(
-    const Tensor& values,
-    const Tensor& weights,
-    const Tensor& h_idx,
-    const Tensor& w_idx,
-    int64_t H,
-    int64_t W,
-    int64_t padding_mode,
-    bool align_corners) {
-  auto N = values.size(0), C = values.size(1);
-  auto out_H = values.size(2), out_W = values.size(3);
-  auto h_b = gs_bound_coord(h_idx, H, padding_mode, align_corners);
-  auto w_b = gs_bound_coord(w_idx, W, padding_mode, align_corners);
-  auto flat = (h_b * W + w_b).reshape({N, 1, -1}).expand({N, C, out_H * out_W});
-  auto weighted = weights.unsqueeze(1) * values;
-  if (padding_mode == 0 /* zeros */) {
-    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
-  }
-  return at::zeros({N, C, H * W}, values.options())
-      .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W}))
-      .reshape({N, C, H, W});
-}
-
-// Gather input values at integer 2D positions.
-// h_idx, w_idx: (N, out_H, out_W) kLong — may be out of bounds.
-// If zeros_oob, out-of-bounds positions return 0 (zeros padding).
-static Tensor gs_gather2d(
-    const Tensor& input,
-    const Tensor& h_idx,
-    const Tensor& w_idx,
-    bool zeros_oob) {
-  auto N = input.size(0), C = input.size(1);
-  auto H = input.size(2), W = input.size(3);
-  auto out_H = h_idx.size(1), out_W = h_idx.size(2);
-  auto h_c = h_idx.clamp(0, H - 1);
-  auto w_c = w_idx.clamp(0, W - 1);
-  auto flat = (h_c * W + w_c).reshape({N, 1, -1}).expand({N, C, out_H * out_W});
-  auto result = input.reshape({N, C, H * W})
-                    .gather(2, flat)
-                    .reshape({N, C, out_H, out_W});
-  if (zeros_oob) {
-    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    result = result * mask.unsqueeze(1).to(result.dtype());
-  }
-  return result;
-}
-
-// Scatter-add (weights * values) at 2D positions into (N, C, H, W).
-static Tensor gs_scatter2d(
-    const Tensor& values,
-    const Tensor& weights,
-    const Tensor& h_idx,
-    const Tensor& w_idx,
-    int64_t H,
-    int64_t W,
-    bool zeros_oob) {
-  auto N = values.size(0), C = values.size(1);
-  auto out_H = values.size(2), out_W = values.size(3);
-  auto h_c = h_idx.clamp(0, H - 1);
-  auto w_c = w_idx.clamp(0, W - 1);
-  auto flat = (h_c * W + w_c).reshape({N, 1, -1}).expand({N, C, out_H * out_W});
-  auto weighted = weights.unsqueeze(1) * values;
-  if (zeros_oob) {
-    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
-    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
-  }
-  return at::zeros({N, C, H * W}, values.options())
-      .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W}))
-      .reshape({N, C, H, W});
-}
-
-// Gather input values at integer 3D positions.
-static Tensor gs_gather3d(
-    const Tensor& input,
-    const Tensor& d_idx,
-    const Tensor& h_idx,
-    const Tensor& w_idx,
-    bool zeros_oob) {
-  auto N = input.size(0), C = input.size(1);
-  auto D = input.size(2), H = input.size(3), W = input.size(4);
-  auto out_D = d_idx.size(1), out_H = d_idx.size(2), out_W = d_idx.size(3);
-  auto d_c = d_idx.clamp(0, D - 1);
-  auto h_c = h_idx.clamp(0, H - 1);
-  auto w_c = w_idx.clamp(0, W - 1);
-  auto flat = ((d_c * H + h_c) * W + w_c)
-                  .reshape({N, 1, -1})
-                  .expand({N, C, out_D * out_H * out_W});
-  auto result = input.reshape({N, C, D * H * W})
-                    .gather(2, flat)
-                    .reshape({N, C, out_D, out_H, out_W});
-  if (zeros_oob) {
-    auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
-        (w_idx >= 0) & (w_idx < W);
-    result = result * mask.unsqueeze(1).to(result.dtype());
-  }
-  return result;
-}
-
-// Scatter-add (weights * values) at 3D positions into (N, C, D, H, W).
-static Tensor gs_scatter3d(
-    const Tensor& values,
-    const Tensor& weights,
-    const Tensor& d_idx,
-    const Tensor& h_idx,
-    const Tensor& w_idx,
-    int64_t D,
-    int64_t H,
-    int64_t W,
-    bool zeros_oob) {
-  auto N = values.size(0), C = values.size(1);
-  auto out_D = values.size(2), out_H = values.size(3), out_W = values.size(4);
-  auto d_c = d_idx.clamp(0, D - 1);
-  auto h_c = h_idx.clamp(0, H - 1);
-  auto w_c = w_idx.clamp(0, W - 1);
-  auto flat = ((d_c * H + h_c) * W + w_c)
-                  .reshape({N, 1, -1})
-                  .expand({N, C, out_D * out_H * out_W});
-  auto weighted = weights.unsqueeze(1) * values;
-  if (zeros_oob) {
-    auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
-        (w_idx >= 0) & (w_idx < W);
-    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
-  }
-  return at::zeros({N, C, D * H * W}, values.options())
-      .scatter_add(2, flat, weighted.reshape({N, C, out_D * out_H * out_W}))
-      .reshape({N, C, D, H, W});
 }
 
 // Compute unnormalized source coordinate and per-position chain-rule multiplier
@@ -7727,19 +7572,196 @@ static std::pair<Tensor, Tensor> gs_compute_coords(
     double span = (twice_high - twice_low) / 2.0;
     auto in = ix - min_v;
     auto in_abs = in.abs();
-    auto reflect_sign =
-        at::where(in >= 0, at::ones_like(in), at::full_like(in, -1.0));
+    auto reflect_sign = at::where(in >= 0, 1.0, -1.0);
     auto even = at::fmod(at::floor(in_abs / span), 2.0) < 0.5;
-    auto flip_sign =
-        at::where(even, at::ones_like(in), at::full_like(in, -1.0));
-    auto ix_refl =
-        at::where(even, in_abs % span + min_v, span - in_abs % span + min_v);
+    auto flip_sign = at::where(even, 1.0, -1.0);
+    auto rem = in_abs % span;
+    auto ix_refl = at::where(even, rem + min_v, span - rem + min_v);
     auto clip_grad = ((ix_refl > 0) & (ix_refl < static_cast<double>(size - 1)))
                          .to(ix.dtype());
     padding_grad = reflect_sign * flip_sign * clip_grad;
     ix = ix_refl.clamp(0, size - 1);
   }
   return {std::move(ix), padding_grad * unnorm_scale};
+}
+
+static Tensor gs_horner_eval(
+    const Tensor& x,
+    std::initializer_list<double> coeffs) {
+  auto it = coeffs.begin();
+  TORCH_INTERNAL_ASSERT(it != coeffs.end());
+  auto y = at::full_like(x, *it++);
+  for (; it != coeffs.end(); ++it) {
+    y = y * x + *it;
+  }
+  return y;
+}
+
+static Tensor gs_accum_sumprod_k(const Tensor& values, const Tensor& basis) {
+  return (values * basis.unsqueeze(1)).sum(-1);
+}
+
+static Tensor gs_outer_last(const Tensor& a, const Tensor& b) {
+  auto shape = a.sizes().vec();
+  shape.back() *= b.size(-1);
+  return (b.unsqueeze(-1) * a.unsqueeze(-2)).reshape(shape);
+}
+
+// Multi-tap gather for 2D: h_idx/w_idx [N, Ho, Wo, K] → [N, C, Ho, Wo, K]
+static Tensor gs_gather2d_multi(
+    const Tensor& input,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    bool zeros_oob) {
+  auto N = input.size(0), C = input.size(1);
+  auto H = input.size(2), W = input.size(3);
+  auto out_H = h_idx.size(1), out_W = h_idx.size(2), K = h_idx.size(3);
+  auto flat = (h_idx.clamp(0, H - 1) * W + w_idx.clamp(0, W - 1))
+                  .reshape({N, 1, out_H * out_W * K})
+                  .expand({N, C, out_H * out_W * K});
+  auto result = input.reshape({N, C, H * W})
+                    .gather(2, flat)
+                    .reshape({N, C, out_H, out_W, K});
+  if (zeros_oob) {
+    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
+    result = result * mask.unsqueeze(1).to(result.dtype());
+  }
+  return result;
+}
+
+// Multi-tap scatter for 2D: values [N,C,Ho,Wo], weights [N,Ho,Wo,K] → [N,C,H,W]
+static Tensor gs_scatter2d_multi(
+    const Tensor& values,
+    const Tensor& weights,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    int64_t H,
+    int64_t W,
+    bool zeros_oob) {
+  auto N = values.size(0), C = values.size(1);
+  auto out_H = values.size(2), out_W = values.size(3);
+  auto K = h_idx.size(3);
+  auto flat = (h_idx.clamp(0, H - 1) * W + w_idx.clamp(0, W - 1))
+                  .reshape({N, 1, out_H * out_W * K})
+                  .expand({N, C, out_H * out_W * K});
+  auto weighted = values.unsqueeze(-1) * weights.unsqueeze(1);
+  if (zeros_oob) {
+    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
+    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
+  }
+  return at::zeros({N, C, H * W}, values.options())
+      .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W * K}))
+      .reshape({N, C, H, W});
+}
+
+// Multi-tap bounded gather for bicubic 2D: h_idx/w_idx [N, Ho, Wo, K] → [N, C,
+// Ho, Wo, K]
+static Tensor gs_gather2d_bc_multi(
+    const Tensor& input,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    int64_t padding_mode,
+    bool align_corners) {
+  auto N = input.size(0), C = input.size(1);
+  auto H = input.size(2), W = input.size(3);
+  auto out_H = h_idx.size(1), out_W = h_idx.size(2), K = h_idx.size(3);
+  auto flat = (gs_bound_coord(h_idx, H, padding_mode, align_corners) * W +
+               gs_bound_coord(w_idx, W, padding_mode, align_corners))
+                  .reshape({N, 1, out_H * out_W * K})
+                  .expand({N, C, out_H * out_W * K});
+  auto result = input.reshape({N, C, H * W})
+                    .gather(2, flat)
+                    .reshape({N, C, out_H, out_W, K});
+  if (padding_mode == 0 /* zeros */) {
+    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
+    result = result * mask.unsqueeze(1).to(result.dtype());
+  }
+  return result;
+}
+
+// Multi-tap bounded scatter for bicubic 2D: values [N,C,Ho,Wo], weights
+// [N,Ho,Wo,K] → [N,C,H,W]
+static Tensor gs_scatter2d_bc_multi(
+    const Tensor& values,
+    const Tensor& weights,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    int64_t H,
+    int64_t W,
+    int64_t padding_mode,
+    bool align_corners) {
+  auto N = values.size(0), C = values.size(1);
+  auto out_H = values.size(2), out_W = values.size(3);
+  auto K = h_idx.size(3);
+  auto flat = (gs_bound_coord(h_idx, H, padding_mode, align_corners) * W +
+               gs_bound_coord(w_idx, W, padding_mode, align_corners))
+                  .reshape({N, 1, out_H * out_W * K})
+                  .expand({N, C, out_H * out_W * K});
+  auto weighted = values.unsqueeze(-1) * weights.unsqueeze(1);
+  if (padding_mode == 0 /* zeros */) {
+    auto mask = (h_idx >= 0) & (h_idx < H) & (w_idx >= 0) & (w_idx < W);
+    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
+  }
+  return at::zeros({N, C, H * W}, values.options())
+      .scatter_add(2, flat, weighted.reshape({N, C, out_H * out_W * K}))
+      .reshape({N, C, H, W});
+}
+
+// Multi-tap gather for 3D: d_idx/h_idx/w_idx [N, Do, Ho, Wo, K] → [N, C, Do,
+// Ho, Wo, K]
+static Tensor gs_gather3d_multi(
+    const Tensor& input,
+    const Tensor& d_idx,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    bool zeros_oob) {
+  auto N = input.size(0), C = input.size(1);
+  auto D = input.size(2), H = input.size(3), W = input.size(4);
+  auto out_D = d_idx.size(1), out_H = d_idx.size(2), out_W = d_idx.size(3),
+       K = d_idx.size(4);
+  auto flat = ((d_idx.clamp(0, D - 1) * H + h_idx.clamp(0, H - 1)) * W +
+               w_idx.clamp(0, W - 1))
+                  .reshape({N, 1, out_D * out_H * out_W * K})
+                  .expand({N, C, out_D * out_H * out_W * K});
+  auto result = input.reshape({N, C, D * H * W})
+                    .gather(2, flat)
+                    .reshape({N, C, out_D, out_H, out_W, K});
+  if (zeros_oob) {
+    auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
+        (w_idx >= 0) & (w_idx < W);
+    result = result * mask.unsqueeze(1).to(result.dtype());
+  }
+  return result;
+}
+
+// Multi-tap scatter for 3D: values [N,C,Do,Ho,Wo], weights [N,Do,Ho,Wo,K] →
+// [N,C,D,H,W]
+static Tensor gs_scatter3d_multi(
+    const Tensor& values,
+    const Tensor& weights,
+    const Tensor& d_idx,
+    const Tensor& h_idx,
+    const Tensor& w_idx,
+    int64_t D,
+    int64_t H,
+    int64_t W,
+    bool zeros_oob) {
+  auto N = values.size(0), C = values.size(1);
+  auto out_D = values.size(2), out_H = values.size(3), out_W = values.size(4);
+  auto K = d_idx.size(4);
+  auto flat = ((d_idx.clamp(0, D - 1) * H + h_idx.clamp(0, H - 1)) * W +
+               w_idx.clamp(0, W - 1))
+                  .reshape({N, 1, out_D * out_H * out_W * K})
+                  .expand({N, C, out_D * out_H * out_W * K});
+  auto weighted = values.unsqueeze(-1) * weights.unsqueeze(1);
+  if (zeros_oob) {
+    auto mask = (d_idx >= 0) & (d_idx < D) & (h_idx >= 0) & (h_idx < H) &
+        (w_idx >= 0) & (w_idx < W);
+    weighted = weighted * mask.unsqueeze(1).to(weighted.dtype());
+  }
+  return at::zeros({N, C, D * H * W}, values.options())
+      .scatter_add(2, flat, weighted.reshape({N, C, out_D * out_H * out_W * K}))
+      .reshape({N, C, D, H, W});
 }
 
 } // anonymous namespace
@@ -7797,46 +7819,43 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   if (interpolation_mode == 0 /* bilinear */) {
     auto x1 = x0 + 1;
     auto y1 = y0 + 1;
+    // Stack all 4 tap indices: [N, Ho, Wo, 4] order: nw, ne, sw, se
+    auto h_stk = at::stack({y0, y0, y1, y1}, -1);
+    auto w_stk = at::stack({x0, x1, x0, x1}, -1);
 
-    Tensor I_nw, I_ne, I_sw, I_se;
+    Tensor I; // [N, C, Ho, Wo, 4]
     if (output_mask[0] || output_mask[1] || output_mask[2]) {
-      I_nw = gs_gather2d(input, y0, x0, zeros_oob);
-      I_ne = gs_gather2d(input, y0, x1, zeros_oob);
-      I_sw = gs_gather2d(input, y1, x0, zeros_oob);
-      I_se = gs_gather2d(input, y1, x1, zeros_oob);
+      I = gs_gather2d_multi(input, h_stk, w_stk, zeros_oob);
     }
 
-    // ggGrid -> d_grad_output: gather input with derivative interpolation
-    // weights. d(w_nw)/d(ix) = -(1-fy), d(w_ne)/d(ix) = (1-fy),
-    // d(w_sw)/d(ix) = -fy, d(w_se)/d(ix) = fy
-    // d(w_nw)/d(iy) = -(1-fx), d(w_ne)/d(iy) = -fx,
-    // d(w_sw)/d(iy) = (1-fx), d(w_se)/d(iy) = fx
+    // Derivative weights [N, Ho, Wo, 4]: d(w_k)/d(ix) and d(w_k)/d(iy)
+    auto omx = 1.0 - fx, omy = 1.0 - fy;
+    auto dw_dx = at::stack({-omy, omy, -fy, fy}, -1);
+    auto dw_dy = at::stack({-omx, -fx, omx, fx}, -1);
+
     if (output_mask[0]) {
-      auto gx = ggG_x.unsqueeze(1);
-      auto gy = ggG_y.unsqueeze(1);
-      auto fx_ = fx.unsqueeze(1);
-      auto fy_ = fy.unsqueeze(1);
-      auto d_gO =
-          gx * ((fy_ - 1) * I_nw + (1 - fy_) * I_ne - fy_ * I_sw + fy_ * I_se) +
-          gy * ((fx_ - 1) * I_nw - fx_ * I_ne + (1 - fx_) * I_sw + fx_ * I_se);
-      d_grad_output = d_grad_output.defined() ? d_grad_output + d_gO : d_gO;
+      auto sum_dx = gs_accum_sumprod_k(I, dw_dx);
+      auto sum_dy = gs_accum_sumprod_k(I, dw_dy);
+      auto contrib = sum_dx * ggG_x.unsqueeze(1);
+      contrib.addcmul_(sum_dy, ggG_y.unsqueeze(1));
+      d_grad_output =
+          d_grad_output.defined() ? d_grad_output + contrib : contrib;
     }
 
-    // ggGrid -> d_input: scatter grad_output with derivative interpolation
-    // weights.
     if (output_mask[1]) {
-      auto w_nw = ggG_x * (fy - 1) + ggG_y * (fx - 1);
-      auto w_ne = ggG_x * (1 - fy) - ggG_y * fx;
-      auto w_sw = -ggG_x * fy + ggG_y * (1 - fx);
-      auto w_se = ggG_x * fy + ggG_y * fx;
-      d_input = gs_scatter2d(grad_output, w_nw, y0, x0, H, W, zeros_oob) +
-          gs_scatter2d(grad_output, w_ne, y0, x1, H, W, zeros_oob) +
-          gs_scatter2d(grad_output, w_sw, y1, x0, H, W, zeros_oob) +
-          gs_scatter2d(grad_output, w_se, y1, x1, H, W, zeros_oob);
+      // Combined per-tap weight [N, Ho, Wo, 4]
+      auto w_in = ggG_x.unsqueeze(-1) * dw_dx;
+      w_in.addcmul_(ggG_y.unsqueeze(-1), dw_dy);
+      d_input =
+          gs_scatter2d_multi(grad_output, w_in, h_stk, w_stk, H, W, zeros_oob);
     }
-    // ggGrid -> d_grid: cross second derivative d²output/(dix diy) = I_nw -
-    // I_ne - I_sw + I_se
+
     if (output_mask[2]) {
+      // cross second derivative: coeffs [nw,ne,sw,se] = [+1,-1,-1,+1]
+      auto I_nw = I.select(-1, 0);
+      auto I_ne = I.select(-1, 1);
+      auto I_sw = I.select(-1, 2);
+      auto I_se = I.select(-1, 3);
       auto cross = (grad_output * (I_nw - I_ne - I_sw + I_se)).sum(1);
       auto d_grid_x = gix_mult * ggG_y * cross;
       auto d_grid_y = giy_mult * ggG_x * cross;
@@ -7870,87 +7889,104 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     auto fx1 = fx + 1.0, fx2 = 1.0 - fx, fx3 = 2.0 - fx;
     auto fy1 = fy + 1.0, fy2 = 1.0 - fy, fy3 = 2.0 - fy;
 
-    std::array<Tensor, 4> cx = {
-        ((A * fx1 - 5 * A) * fx1 + 8 * A) * fx1 - 4 * A,
-        ((A + 2) * fx - (A + 3)) * fx.square() + 1,
-        ((A + 2) * fx2 - (A + 3)) * fx2.square() + 1,
-        ((A * fx3 - 5 * A) * fx3 + 8 * A) * fx3 - 4 * A,
-    };
-    std::array<Tensor, 4> dcx = {
-        (3 * A * fx1 - 10 * A) * fx1 + 8 * A,
-        (3 * (A + 2) * fx - 2 * (A + 3)) * fx,
-        -(3 * (A + 2) * fx2 - 2 * (A + 3)) * fx2,
-        (-3 * A * fx3 + 10 * A) * fx3 - 8 * A,
-    };
-    std::array<Tensor, 4> cy = {
-        ((A * fy1 - 5 * A) * fy1 + 8 * A) * fy1 - 4 * A,
-        ((A + 2) * fy - (A + 3)) * fy.square() + 1,
-        ((A + 2) * fy2 - (A + 3)) * fy2.square() + 1,
-        ((A * fy3 - 5 * A) * fy3 + 8 * A) * fy3 - 4 * A,
-    };
-    std::array<Tensor, 4> dcy = {
-        (3 * A * fy1 - 10 * A) * fy1 + 8 * A,
-        (3 * (A + 2) * fy - 2 * (A + 3)) * fy,
-        -(3 * (A + 2) * fy2 - 2 * (A + 3)) * fy2,
-        (-3 * A * fy3 + 10 * A) * fy3 - 8 * A,
-    };
+    auto cx_t = at::stack(
+        {gs_horner_eval(fx1, {A, -5 * A, 8 * A, -4 * A}),
+         gs_horner_eval(fx, {A + 2, -(A + 3), 0.0, 1.0}),
+         gs_horner_eval(fx2, {A + 2, -(A + 3), 0.0, 1.0}),
+         gs_horner_eval(fx3, {A, -5 * A, 8 * A, -4 * A})},
+        -1);
+    auto dcx_t = at::stack(
+        {gs_horner_eval(fx1, {3 * A, -10 * A, 8 * A}),
+         gs_horner_eval(fx, {3 * (A + 2), -2 * (A + 3), 0.0}),
+         -gs_horner_eval(fx2, {3 * (A + 2), -2 * (A + 3), 0.0}),
+         gs_horner_eval(fx3, {-3 * A, 10 * A, -8 * A})},
+        -1);
+    auto cy_t = at::stack(
+        {gs_horner_eval(fy1, {A, -5 * A, 8 * A, -4 * A}),
+         gs_horner_eval(fy, {A + 2, -(A + 3), 0.0, 1.0}),
+         gs_horner_eval(fy2, {A + 2, -(A + 3), 0.0, 1.0}),
+         gs_horner_eval(fy3, {A, -5 * A, 8 * A, -4 * A})},
+        -1);
+    auto dcy_t = at::stack(
+        {gs_horner_eval(fy1, {3 * A, -10 * A, 8 * A}),
+         gs_horner_eval(fy, {3 * (A + 2), -2 * (A + 3), 0.0}),
+         -gs_horner_eval(fy2, {3 * (A + 2), -2 * (A + 3), 0.0}),
+         gs_horner_eval(fy3, {-3 * A, 10 * A, -8 * A})},
+        -1);
 
-    // Second derivatives (only needed for d_grid).
-    std::array<Tensor, 4> d2cx, d2cy;
-    if (output_mask[2]) {
-      d2cx = {
-          6 * A * fx1 - 10 * A,
-          6 * (A + 2) * fx - 2 * (A + 3),
-          6 * (A + 2) * fx2 - 2 * (A + 3),
-          6 * A * fx3 - 10 * A,
-      };
-      d2cy = {
-          6 * A * fy1 - 10 * A,
-          6 * (A + 2) * fy - 2 * (A + 3),
-          6 * (A + 2) * fy2 - 2 * (A + 3),
-          6 * A * fy3 - 10 * A,
-      };
+    // Stack coefficients into [N, Ho, Wo, 4] tensors for vectorized outer
+    // products. Tap indices [N, Ho, Wo, 16]: flat index k=j*4+i → h=y0+(j-1),
+    // w=x0+(i-1)
+    auto offs = at::arange(-1, 3, x0_bc.options());
+    auto xt = x0_bc.unsqueeze(-1) + offs; // [N, Ho, Wo, 4]
+    auto yt = y0_bc.unsqueeze(-1) + offs;
+    // Outer product: h_idx[...,j,i]=yt[j], w_idx[...,j,i]=xt[i]
+    auto w_idx_bc = xt.unsqueeze(-2)
+                        .expand({-1, -1, -1, 4, 4})
+                        .reshape({-1, xt.size(1), xt.size(2), 16});
+    auto h_idx_bc = yt.unsqueeze(-1)
+                        .expand({-1, -1, -1, 4, 4})
+                        .reshape({-1, yt.size(1), yt.size(2), 16});
+
+    // Gather all 16 taps at once: [N, C, Ho, Wo, 16]
+    auto I_all = gs_gather2d_bc_multi(
+        input, h_idx_bc, w_idx_bc, padding_mode, align_corners);
+
+    // 1D weight outer products → [N, Ho, Wo, 16] where k=j*4+i
+    // B_dx[k] = dcx[i]*cy[j],  B_dy[k] = cx[i]*dcy[j]
+    auto B_dx = gs_outer_last(dcx_t, cy_t);
+    auto B_dy = gs_outer_last(cx_t, dcy_t);
+
+    if (output_mask[0]) {
+      auto sum_dx = gs_accum_sumprod_k(I_all, B_dx);
+      auto sum_dy = gs_accum_sumprod_k(I_all, B_dy);
+      auto contrib = sum_dx * ggG_x_bc.unsqueeze(1);
+      contrib.addcmul_(sum_dy, ggG_y_bc.unsqueeze(1));
+      d_grad_output =
+          d_grad_output.defined() ? d_grad_output + contrib : contrib;
     }
 
-    Tensor d2I_dx2, d2I_dy2, d2I_dxdy;
-    for (int j = 0; j < 4; ++j) {
-      auto y_idx = y0_bc + (j - 1);
-      for (int i = 0; i < 4; ++i) {
-        auto x_idx = x0_bc + (i - 1);
-        auto Iij =
-            gs_gather2d_bc(input, y_idx, x_idx, padding_mode, align_corners);
-        auto w = ggG_x_bc * dcx[i] * cy[j] + ggG_y_bc * cx[i] * dcy[j];
-        if (output_mask[0]) {
-          auto contrib = Iij * w.unsqueeze(1);
-          d_grad_output =
-              d_grad_output.defined() ? d_grad_output + contrib : contrib;
-        }
-        if (output_mask[1]) {
-          auto s = gs_scatter2d_bc(
-              grad_output, w, y_idx, x_idx, H, W, padding_mode, align_corners);
-          d_input = d_input.defined() ? d_input + s : s;
-        }
-        if (output_mask[2]) {
-          auto dx2 = (d2cx[i] * cy[j]).unsqueeze(1) * Iij;
-          auto dy2 = (cx[i] * d2cy[j]).unsqueeze(1) * Iij;
-          auto dxdy = (dcx[i] * dcy[j]).unsqueeze(1) * Iij;
-          d2I_dx2 = d2I_dx2.defined() ? d2I_dx2 + dx2 : dx2;
-          d2I_dy2 = d2I_dy2.defined() ? d2I_dy2 + dy2 : dy2;
-          d2I_dxdy = d2I_dxdy.defined() ? d2I_dxdy + dxdy : dxdy;
-        }
-      }
+    if (output_mask[1]) {
+      auto w_in = ggG_x_bc.unsqueeze(-1) * B_dx;
+      w_in.addcmul_(ggG_y_bc.unsqueeze(-1), B_dy);
+      d_input = gs_scatter2d_bc_multi(
+          grad_output,
+          w_in,
+          h_idx_bc,
+          w_idx_bc,
+          H,
+          W,
+          padding_mode,
+          align_corners);
     }
 
     // d_grid from ggGrid: non-zero for bicubic (second derivative of cubic
     // weights).
     if (output_mask[2]) {
-      auto dot_dx2 = (grad_output * d2I_dx2).sum(1);
-      auto dot_dy2 = (grad_output * d2I_dy2).sum(1);
-      auto dot_dxdy = (grad_output * d2I_dxdy).sum(1);
-      auto ggrid_d_grid_x =
-          x_scale * (ggG_x_bc * dot_dx2 + ggG_y_bc * dot_dxdy);
-      auto ggrid_d_grid_y =
-          y_scale * (ggG_x_bc * dot_dxdy + ggG_y_bc * dot_dy2);
+      auto d2cx_t = at::stack(
+          {6 * A * fx1 - 10 * A,
+           6 * (A + 2) * fx - 2 * (A + 3),
+           6 * (A + 2) * fx2 - 2 * (A + 3),
+           6 * A * fx3 - 10 * A},
+          -1);
+      auto d2cy_t = at::stack(
+          {6 * A * fy1 - 10 * A,
+           6 * (A + 2) * fy - 2 * (A + 3),
+           6 * (A + 2) * fy2 - 2 * (A + 3),
+           6 * A * fy3 - 10 * A},
+          -1);
+      auto B_dx2 = gs_outer_last(d2cx_t, cy_t);
+      auto B_dy2 = gs_outer_last(cx_t, d2cy_t);
+      auto B_dxdy = gs_outer_last(dcx_t, dcy_t);
+      auto dot_dx2 = (grad_output * gs_accum_sumprod_k(I_all, B_dx2)).sum(1);
+      auto dot_dy2 = (grad_output * gs_accum_sumprod_k(I_all, B_dy2)).sum(1);
+      auto dot_dxdy = (grad_output * gs_accum_sumprod_k(I_all, B_dxdy)).sum(1);
+      auto ggrid_d_grid_x = ggG_x_bc * dot_dx2;
+      ggrid_d_grid_x.addcmul_(ggG_y_bc, dot_dxdy);
+      ggrid_d_grid_x.mul_(x_scale);
+      auto ggrid_d_grid_y = ggG_x_bc * dot_dxdy;
+      ggrid_d_grid_y.addcmul_(ggG_y_bc, dot_dy2);
+      ggrid_d_grid_y.mul_(y_scale);
       auto ggrid_d_grid =
           at::stack({std::move(ggrid_d_grid_x), std::move(ggrid_d_grid_y)}, -1);
       d_grid =
@@ -8017,77 +8053,81 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
   auto ggG_y = ggGrid.select(-1, 1) * giy_mult;
   auto ggG_z = ggGrid.select(-1, 2) * giz_mult;
 
-  Tensor I_tnw, I_tne, I_tsw, I_tse, I_bnw, I_bne, I_bsw, I_bse;
+  // Stack all 8 tap indices [N, Do, Ho, Wo, 8]: tnw,tne,tsw,tse,bnw,bne,bsw,bse
+  auto d_stk = at::stack({z0, z0, z0, z0, z1, z1, z1, z1}, -1);
+  auto h_stk = at::stack({y0, y0, y1, y1, y0, y0, y1, y1}, -1);
+  auto w_stk = at::stack({x0, x1, x0, x1, x0, x1, x0, x1}, -1);
+
+  Tensor I; // [N, C, Do, Ho, Wo, 8]
   if (output_mask[0] || output_mask[1] || output_mask[2]) {
-    I_tnw = gs_gather3d(input, z0, y0, x0, zeros_oob);
-    I_tne = gs_gather3d(input, z0, y0, x1, zeros_oob);
-    I_tsw = gs_gather3d(input, z0, y1, x0, zeros_oob);
-    I_tse = gs_gather3d(input, z0, y1, x1, zeros_oob);
-    I_bnw = gs_gather3d(input, z1, y0, x0, zeros_oob);
-    I_bne = gs_gather3d(input, z1, y0, x1, zeros_oob);
-    I_bsw = gs_gather3d(input, z1, y1, x0, zeros_oob);
-    I_bse = gs_gather3d(input, z1, y1, x1, zeros_oob);
+    I = gs_gather3d_multi(input, d_stk, h_stk, w_stk, zeros_oob);
   }
 
+  // Trilinear derivative weights [N, Do, Ho, Wo, 8]
+  auto omx = 1.0 - fx, omy = 1.0 - fy, omz = 1.0 - fz;
+  auto dw_dx = at::stack(
+      {-omy * omz,
+       omy * omz,
+       -fy * omz,
+       fy * omz,
+       -omy * fz,
+       omy * fz,
+       -fy * fz,
+       fy * fz},
+      -1);
+  auto dw_dy = at::stack(
+      {-omx * omz,
+       -fx * omz,
+       omx * omz,
+       fx * omz,
+       -omx * fz,
+       -fx * fz,
+       omx * fz,
+       fx * fz},
+      -1);
+  auto dw_dz = at::stack(
+      {-omx * omy,
+       -fx * omy,
+       -omx * fy,
+       -fx * fy,
+       omx * omy,
+       fx * omy,
+       omx * fy,
+       fx * fy},
+      -1);
+
   if (output_mask[0]) {
-    auto gx = ggG_x.unsqueeze(1);
-    auto gy = ggG_y.unsqueeze(1);
-    auto gz = ggG_z.unsqueeze(1);
-    auto fx_ = fx.unsqueeze(1), fy_ = fy.unsqueeze(1), fz_ = fz.unsqueeze(1);
-    // Derivative weights for 8 corners w.r.t. ix, iy, iz:
-    auto d_gO = gx *
-            (-(1 - fy_) * (1 - fz_) * I_tnw + (1 - fy_) * (1 - fz_) * I_tne -
-             fy_ * (1 - fz_) * I_tsw + fy_ * (1 - fz_) * I_tse -
-             (1 - fy_) * fz_ * I_bnw + (1 - fy_) * fz_ * I_bne -
-             fy_ * fz_ * I_bsw + fy_ * fz_ * I_bse) +
-        gy *
-            (-(1 - fx_) * (1 - fz_) * I_tnw - fx_ * (1 - fz_) * I_tne +
-             (1 - fx_) * (1 - fz_) * I_tsw + fx_ * (1 - fz_) * I_tse -
-             (1 - fx_) * fz_ * I_bnw - fx_ * fz_ * I_bne +
-             (1 - fx_) * fz_ * I_bsw + fx_ * fz_ * I_bse) +
-        gz *
-            (-(1 - fx_) * (1 - fy_) * I_tnw - fx_ * (1 - fy_) * I_tne -
-             (1 - fx_) * fy_ * I_tsw - fx_ * fy_ * I_tse +
-             (1 - fx_) * (1 - fy_) * I_bnw + fx_ * (1 - fy_) * I_bne +
-             (1 - fx_) * fy_ * I_bsw + fx_ * fy_ * I_bse);
+    auto sum_dx = gs_accum_sumprod_k(I, dw_dx);
+    auto sum_dy = gs_accum_sumprod_k(I, dw_dy);
+    auto sum_dz = gs_accum_sumprod_k(I, dw_dz);
+    auto d_gO = sum_dx * ggG_x.unsqueeze(1);
+    d_gO.addcmul_(sum_dy, ggG_y.unsqueeze(1));
+    d_gO.addcmul_(sum_dz, ggG_z.unsqueeze(1));
     d_grad_output = d_grad_output.defined() ? d_grad_output + d_gO : d_gO;
   }
 
   if (output_mask[1]) {
-    // Per-corner scatter weights = sum_d ggG_d * d(w_corner)/d(coord_d)
-    auto w_tnw = ggG_x * (-(1 - fy) * (1 - fz)) +
-        ggG_y * (-(1 - fx) * (1 - fz)) + ggG_z * (-(1 - fx) * (1 - fy));
-    auto w_tne = ggG_x * ((1 - fy) * (1 - fz)) + ggG_y * (-fx * (1 - fz)) +
-        ggG_z * (-fx * (1 - fy));
-    auto w_tsw = ggG_x * (-fy * (1 - fz)) + ggG_y * ((1 - fx) * (1 - fz)) +
-        ggG_z * (-(1 - fx) * fy);
-    auto w_tse =
-        ggG_x * (fy * (1 - fz)) + ggG_y * (fx * (1 - fz)) + ggG_z * (-fx * fy);
-    auto w_bnw = ggG_x * (-(1 - fy) * fz) + ggG_y * (-(1 - fx) * fz) +
-        ggG_z * ((1 - fx) * (1 - fy));
-    auto w_bne =
-        ggG_x * ((1 - fy) * fz) + ggG_y * (-fx * fz) + ggG_z * (fx * (1 - fy));
-    auto w_bsw =
-        ggG_x * (-fy * fz) + ggG_y * ((1 - fx) * fz) + ggG_z * ((1 - fx) * fy);
-    auto w_bse = ggG_x * (fy * fz) + ggG_y * (fx * fz) + ggG_z * (fx * fy);
-    d_input = gs_scatter3d(grad_output, w_tnw, z0, y0, x0, D, H, W, zeros_oob) +
-        gs_scatter3d(grad_output, w_tne, z0, y0, x1, D, H, W, zeros_oob) +
-        gs_scatter3d(grad_output, w_tsw, z0, y1, x0, D, H, W, zeros_oob) +
-        gs_scatter3d(grad_output, w_tse, z0, y1, x1, D, H, W, zeros_oob) +
-        gs_scatter3d(grad_output, w_bnw, z1, y0, x0, D, H, W, zeros_oob) +
-        gs_scatter3d(grad_output, w_bne, z1, y0, x1, D, H, W, zeros_oob) +
-        gs_scatter3d(grad_output, w_bsw, z1, y1, x0, D, H, W, zeros_oob) +
-        gs_scatter3d(grad_output, w_bse, z1, y1, x1, D, H, W, zeros_oob);
+    auto w_in = ggG_x.unsqueeze(-1) * dw_dx;
+    w_in.addcmul_(ggG_y.unsqueeze(-1), dw_dy);
+    w_in.addcmul_(ggG_z.unsqueeze(-1), dw_dz);
+    d_input = gs_scatter3d_multi(
+        grad_output, w_in, d_stk, h_stk, w_stk, D, H, W, zeros_oob);
   }
 
   // ggGrid -> d_grid: cross second derivatives for 3D bilinear.
-  // d²output/(dix diy) = (1-fz)*(I_tnw-I_tne-I_tsw+I_tse) +
-  // fz*(I_bnw-I_bne-I_bsw+I_bse) d²output/(dix diz) =
-  // (1-fy)*(I_tnw-I_tne-I_bnw+I_bne) + fy*(I_tsw-I_tse-I_bsw+I_bse)
-  // d²output/(diy diz) = (1-fx)*(I_tnw-I_tsw-I_bnw+I_bsw) +
-  // fx*(I_tne-I_tse-I_bne+I_bse)
+  // d²output/(dix diy) = (1-fz)*(I_tnw-I_tne-I_tsw+I_tse) + fz*(I_bnw-...)
+  // d²output/(dix diz) = (1-fy)*(I_tnw-I_tne-I_bnw+I_bne) + fy*(I_tsw-...)
+  // d²output/(diy diz) = (1-fx)*(I_tnw-I_tsw-I_bnw+I_bsw) + fx*(I_tne-...)
   if (output_mask[2]) {
     auto fx_ = fx.unsqueeze(1), fy_ = fy.unsqueeze(1), fz_ = fz.unsqueeze(1);
+    auto I_tnw = I.select(-1, 0);
+    auto I_tne = I.select(-1, 1);
+    auto I_tsw = I.select(-1, 2);
+    auto I_tse = I.select(-1, 3);
+    auto I_bnw = I.select(-1, 4);
+    auto I_bne = I.select(-1, 5);
+    auto I_bsw = I.select(-1, 6);
+    auto I_bse = I.select(-1, 7);
     auto d2_xy = (1 - fz_) * (I_tnw - I_tne - I_tsw + I_tse) +
         fz_ * (I_bnw - I_bne - I_bsw + I_bse);
     auto d2_xz = (1 - fy_) * (I_tnw - I_tne - I_bnw + I_bne) +
@@ -8097,9 +8137,15 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto dot_xy = (grad_output * d2_xy).sum(1);
     auto dot_xz = (grad_output * d2_xz).sum(1);
     auto dot_yz = (grad_output * d2_yz).sum(1);
-    auto d_grid_x = gix_mult * (ggG_y * dot_xy + ggG_z * dot_xz);
-    auto d_grid_y = giy_mult * (ggG_x * dot_xy + ggG_z * dot_yz);
-    auto d_grid_z = giz_mult * (ggG_x * dot_xz + ggG_y * dot_yz);
+    auto d_grid_x = ggG_y * dot_xy;
+    d_grid_x.addcmul_(ggG_z, dot_xz);
+    d_grid_x.mul_(gix_mult);
+    auto d_grid_y = ggG_x * dot_xy;
+    d_grid_y.addcmul_(ggG_z, dot_yz);
+    d_grid_y.mul_(giy_mult);
+    auto d_grid_z = ggG_x * dot_xz;
+    d_grid_z.addcmul_(ggG_y, dot_yz);
+    d_grid_z.mul_(giz_mult);
     auto contrib = at::stack(
         {std::move(d_grid_x), std::move(d_grid_y), std::move(d_grid_z)}, -1);
     d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
