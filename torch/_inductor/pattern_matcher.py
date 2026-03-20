@@ -90,13 +90,30 @@ NodeOrConstant = Constant | torch.fx.Node
 backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
 
 
+_debug_nodes_cache: bool | OrderedSet[str] | None = None
+
+
+def _get_debug_nodes() -> bool | OrderedSet[str]:
+    global _debug_nodes_cache
+
+    def parse_debug_env() -> bool | OrderedSet[str]:
+        debug_env = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG")
+        if not debug_env:
+            return False
+        if debug_env == "all":
+            return True
+        return OrderedSet(debug_env.split(","))
+
+    if _debug_nodes_cache is None:
+        _debug_nodes_cache = parse_debug_env()
+    return _debug_nodes_cache
+
+
 def _should_debug_node(node_name: str) -> bool:
-    debug_env = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG")
-    if not debug_env:
-        return False
-    if debug_env == "all":
-        return True
-    return node_name in debug_env.split(",")
+    debug_nodes = _get_debug_nodes()
+    if isinstance(debug_nodes, bool):
+        return debug_nodes
+    return node_name in debug_nodes
 
 
 class SearchFn(Protocol):
@@ -1159,9 +1176,7 @@ class ReplacementPatternEntry(PatternEntry):
     """
 
     normalize_args: Callable[..., list[Any]]
-    pattern_name: typing.Optional[str] = (
-        None  # Unique identifier for per-pattern telemetry
-    )
+    pattern_name: str | None = None  # Unique identifier for per-pattern telemetry
 
     @staticmethod
     def replace_with_graph(
@@ -2111,7 +2126,7 @@ class PatternMatcherPass:
                             else:
                                 # Fallback: use pattern class name + operation target
                                 pattern_class = entry.pattern.__class__.__name__
-                                target = str(node.target) if node.target else "unknown"
+                                target = str(node.target)
                                 pattern_name = f"{pattern_class}_{target}"
 
                             pattern_key = f"{backend}_pattern_matcher_per_pattern"

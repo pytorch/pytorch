@@ -2266,7 +2266,6 @@ class TestPatternMatcherLogging(LoggingTestCase):
                 fn, options={"post_grad_custom_post_pass": custom_pass}
             )
             _ = compiled_fn(x, y)
-
         self.assertTrue(self.hasRecord(records, "Specific pattern match: add"))
         self.assertTrue(self.hasRecord(records, "Specific pattern match: sub"))
 
@@ -2362,11 +2361,12 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
                 # Verify accumulation
                 counters.clear()
+                torch._dynamo.reset()
                 compiled2 = torch.compile(fn2)
                 compiled2(x, y)
                 count2 = sum(counters.get(counter_key, {}).values())
 
-                self.assertGreaterEqual(accumulated_count, max(count1, count2))
+                self.assertEqual(accumulated_count, count1 + count2)
 
 
 if __name__ == "__main__":
