@@ -3185,6 +3185,64 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
             self.assertEqual(out2._size_store, size2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
 
+    def test_op_passthrough_counter_in_tuple(self):
+        # When a fake kernel returns its Counter input directly, the getitem
+        # proxy's example_value is already a FakeScriptObject.
+        counter_type = get_opaque_type_name(Counter)
+        torch.library.define(
+            "_TestOpaqueObject::passthrough_counter",
+            f"({counter_type} c, Tensor x) -> ({counter_type}, Tensor)",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::passthrough_counter",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def passthrough_impl(c: Counter, x: torch.Tensor):
+            return c, x * c.start
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::passthrough_counter", lib=self.lib
+        )
+        def passthrough_fake(c: Counter, x: torch.Tensor):
+            return c, torch.empty_like(x)
+
+        def fn(c, x):
+            out_c, out_x = torch.ops._TestOpaqueObject.passthrough_counter(c, x)
+            return torch.ops._TestOpaqueObject.counter_start(out_c) + out_x
+
+        c = Counter(3, 10)
+        x = torch.randn(4)
+        ref = fn(c, x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        res = opt_fn(c, x)
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_script_object_intermediate_exposed_from_checkpoint(self):
+        # A TorchScriptObjectVariable created inside an AC region and accessed
+        # outside via a list side effect must be exposed as a subgraph output.
+        import torch.utils.checkpoint
+
+        def gn(x, results):
+            counter = torch.ops._TestOpaqueObject.create_counter(x.shape[0], x.shape[0])
+            results.append(counter)
+            return x * 2
+
+        def fn(x):
+            results = []
+            out = torch.utils.checkpoint.checkpoint(gn, x, results, use_reentrant=False)
+            return torch.ops._TestOpaqueObject.counter_start(results[0]) + out
+
+        x = torch.randn(3, 4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager_decomp_partition")
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 

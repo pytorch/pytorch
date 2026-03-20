@@ -3435,6 +3435,20 @@
       ]
     }
   ],
+  "GB7324": [
+    {
+      "Gb_type": "returning intermediate with requires_grad_()",
+      "Context": "graph output depends on source-less requires_grad_()",
+      "Explanation": "msg",
+      "Hints": [
+        "If you only need the tensor values without gradients, ",
+        "call .detach() before returning.",
+        "Consume the gradient inside the compiled function ",
+        "(call backward() and use .grad), ",
+        "or move requires_grad_() outside torch.compile."
+      ]
+    }
+  ],
   "GB0280": [
     {
       "Gb_type": "1-arg super not implemented",
@@ -4381,6 +4395,19 @@
       "Explanation": "ScriptModules aren't supported in UnspecializedNNModuleVariable because their .forward function isn't a static member of their type.",
       "Hints": [
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB8985": [
+    {
+      "Gb_type": "requires_grad_() intermediate leaked as output",
+      "Context": "call_method {self} requires_grad_",
+      "Explanation": "An intermediate tensor with requires_grad_() called on it (or a tensor derived from it) is returned from the compiled region. Graph breaking here to preserve partial acceleration.",
+      "Hints": [
+        "Call .detach() before returning if you only need values.",
+        "Consume the gradient inside the compiled function ",
+        "(call backward() and use .grad), ",
+        "or move requires_grad_() outside torch.compile."
       ]
     }
   ],

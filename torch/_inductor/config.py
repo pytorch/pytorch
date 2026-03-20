@@ -300,7 +300,7 @@ joint_custom_post_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
-pre_grad_custom_pass: Callable[[torch.fx.graph.Graph], None] | None = None
+pre_grad_custom_pass: torch._inductor.custom_graph_pass.CustomGraphPassType = None
 
 # Registers a custom pass to be run right before fusion in Inductor scheduler.
 # WARNING: Inductor scheduler IR is at prototype stage and subject to change,
@@ -660,6 +660,15 @@ use_dce: bool = True
 
 # Use fx graph passes
 use_pre_grad_passes: bool = True
+
+# "early": pre-grad passes run before cache lookup (every compile).
+# "late": pre-grad passes run after cache lookup (only on cache miss);
+#   requires custom passes to implement uuid() for the cache key.
+# "default": resolves to "late" when possible (no custom pass, or custom pass
+#   with uuid), falls back to "early" otherwise.
+pre_grad_pass_timing: Literal["early", "late", "default"] = "default"
+
+
 use_joint_graph_passes: bool = True
 use_post_grad_passes: bool = True
 
@@ -1866,14 +1875,6 @@ class triton:
     # This ensures the last N runs are saved, where N is this value
     max_kernel_dump_occurrences = 3
 
-    # TLX template mode: "default", "allow", or "force"
-    tlx_mode: str = os.environ.get("TORCHINDUCTOR_TLX_MODE", "default")
-
-    # TLX heuristic config: when True, use heuristic-based config selection for TLX templates
-    tlx_heuristic_config: bool = (
-        os.environ.get("TORCHINDUCTOR_TLX_HEURISTIC_CONFIG", "1") == "1"
-    )
-
     proton_profiling: bool = (
         os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PROFILING", "0") == "1"
     )
@@ -2484,10 +2485,13 @@ _cache_config_ignore_prefix: list[str] = [
     "post_grad_custom_pre_pass",
     "joint_custom_pre_pass",
     "joint_custom_post_pass",
+    "pre_grad_custom_pass",
     "_fuse_ddp_communication_passes",
     "_pre_fusion_custom_pass",
     # tests assume that changes here don't invalidate cache
     "always_complex_memory_overlap_TESTING_ONLY",
+    # timing affects cache structure, not cache content
+    "pre_grad_pass_timing",
     # cache related options are not relevant to cache results
     "fx_graph_cache",
     "fx_graph_remote_cache",

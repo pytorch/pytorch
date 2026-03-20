@@ -33,6 +33,9 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
+    IS_ARM64,
+    IS_CPU_CAPABILITY_SVE256,
+    IS_LINUX,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
@@ -1599,6 +1602,15 @@ op_db: list[OpInfo] = [
             ),
             # Exception: The operator 'aten::linalg_lstsq.out' is not currently implemented for the MPS device
             DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # see https://github.com/pytorch/pytorch/issues/177249
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cpu",
+                dtypes=[torch.complex64],
+                active_if=IS_LINUX and IS_ARM64 and not IS_CPU_CAPABILITY_SVE256,
+            ),
         ),
     ),
     OpInfo(
@@ -2622,6 +2634,15 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_eager",
                 device_type="mps",
             ),
+            # see https://github.com/pytorch/pytorch/issues/177264
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestEagerFusionOpInfo",
+                "test_aot_autograd_symbolic_exhaustive",
+                device_type="cpu",
+                dtypes=[torch.float32],
+                active_if=IS_ARM64 and IS_LINUX,
+            ),
         ),
     ),
     OpInfo(
@@ -2643,27 +2664,6 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="mps",
-                dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
                 "TestFakeTensor",
                 "test_fake_crossref_backward_amp",
                 device_type="cuda",
@@ -2677,13 +2677,6 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
-            ),
-            # MPS: AssertionError: The values for attribute 'shape' do not match: torch.Size([0, 0]) != torch.Size([0, 1]).
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
             ),
         ),
     ),
@@ -2807,20 +2800,6 @@ python_ref_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_python_ref_errors"
             ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.bfloat16, torch.float16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.bfloat16, torch.float16),
-            ),
         ),
     ),
     PythonRefInfo(
@@ -2833,23 +2812,6 @@ python_ref_db: list[OpInfo] = [
         "_refs.linalg.vecdot",
         torch_opinfo_name="linalg.vecdot",
         op_db=op_db,
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-        ),
     ),
     ReductionPythonRefInfo(
         "_refs.linalg.vector_norm",
@@ -2857,21 +2819,6 @@ python_ref_db: list[OpInfo] = [
         supports_out=True,
         op_db=op_db,
         skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
             # Exception: norm ops are not supported for complex yet
             DecorateInfo(
                 unittest.expectedFailure,

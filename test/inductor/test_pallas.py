@@ -1722,7 +1722,14 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
     def _run_transformer_layer(
-        self, seq_len, hidden_dim, num_heads, head_dim, ffn_dim, atol=1e-5, rtol=1.3e-6
+        self,
+        seq_len,
+        hidden_dim,
+        num_heads,
+        head_dim,
+        ffn_dim,
+        atol=1e-5,
+        rtol=1.3e-6,
     ):
         """Run a Llama-style transformer layer forward pass and verify correctness.
 
@@ -1776,8 +1783,9 @@ class PallasTestsMixin:
 
         compiled = self._compile(transformer_layer)
 
-        # Initialize weights with small values for numerical stability
-        s = 0.02
+        # Scale weights by 1/sqrt(fan_in) to keep activations O(1) and
+        # avoid rsqrt amplification of reduction-order diffs.
+        s = hidden_dim**-0.5
         w_q = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
         w_k = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
         w_v = torch.randn(hidden_dim, hidden_dim, device=self.DEVICE) * s
@@ -1794,7 +1802,7 @@ class PallasTestsMixin:
             diagonal=1,
         )
 
-        x = torch.randn(seq_len, hidden_dim, device=self.DEVICE) * 0.02
+        x = torch.randn(seq_len, hidden_dim, device=self.DEVICE)
 
         result = compiled(
             x,
@@ -1844,8 +1852,8 @@ class PallasTestsMixin:
             num_heads=32,
             head_dim=128,
             ffn_dim=11008,
-            atol=1e-4,
-            rtol=1e-4,
+            atol=2e-2,
+            rtol=1e-2,
         )
 
     @skip_if_cuda
@@ -1857,8 +1865,8 @@ class PallasTestsMixin:
             num_heads=128,
             head_dim=128,
             ffn_dim=53248,
-            atol=2e-3,
-            rtol=1e-3,
+            atol=2e-2,
+            rtol=1e-2,
         )
 
     @skip_if_cuda

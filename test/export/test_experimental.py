@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
+import contextlib
 import copy
 import types
 import unittest
@@ -14,7 +15,12 @@ from torch._dynamo.functional_export import (
     dynamo_graph_capture_for_export,
 )
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._functorch.aot_autograd import aot_export_module
+from torch._export.utils import _compiling_state_context
+from torch._functorch.aot_autograd import (
+    aot_export_joint_with_descriptors,
+    aot_export_module,
+)
+from torch._guards import tracing as torch_tracing, TracingContext
 from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
@@ -1464,6 +1470,91 @@ def forward(self, arg0_1):
         self.assertEqual(spec_a, spec_a_same)
         # Same closure code + different captured value -> different spec
         self.assertNotEqual(spec_a, spec_b)
+
+    def test_aot_export_closure_buffer_mutation(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.zeros(()))
+
+            def forward(self, x):
+                self.buf.add_(x.sum())
+                return x.sin()
+
+        def make_closure(mod):
+            def fn(x):
+                mod._buffers["buf"].add_(x.sum())
+                return x.sin()
+
+            return fn
+
+        class Wrapper(torch.nn.Module):
+            def __init__(self, fn, mod):
+                super().__init__()
+                self._parameters = mod._parameters
+                self._buffers = mod._buffers
+                self._modules = mod._modules
+                self._fn = fn
+
+            def forward(self, x):
+                return self._fn(x)
+
+        def run_export(capture_fn):
+            mod = Mod()
+            wrapped = Wrapper(make_closure(mod), mod)
+            x = torch.randn(4)
+            gm = capture_fn(wrapped)(x)
+
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    torch_tracing(
+                        gm.meta.get(
+                            "tracing_context", TracingContext(gm.meta["fake_mode"])
+                        )
+                    )
+                )
+                stack.enter_context(_compiling_state_context())
+                stack.enter_context(gm.meta["fake_mode"])
+
+                jd = aot_export_joint_with_descriptors(
+                    stack,
+                    gm,
+                    args=(x,),
+                    kwargs={},
+                    keep_inference_input_mutations=True,
+                    disable_functionalization=True,
+                )
+            return jd.graph_module, wrapped, x
+
+        # Verify Dynamo-captured graph mutates the buffer via closure
+        mod = Mod()
+        wrapped = Wrapper(make_closure(mod), mod)
+        x = torch.randn(4)
+        gm = dynamo_graph_capture_for_export(wrapped)(x)
+        wrapped.buf.zero_()
+        gm(x)
+        self.assertEqual(wrapped.buf, x.sum())
+
+        # Verify joint graphs from both APIs match
+        joint_public, _, _ = run_export(dynamo_graph_capture_for_export)
+        joint_private, _, _ = run_export(_dynamo_graph_capture_for_export)
+        self.assertEqual(
+            str(joint_public.code).strip(), str(joint_private.code).strip()
+        )
+
+        # Verify numerical correctness of both joint graphs against eager
+        mod = Mod()
+        x = torch.randn(4)
+        eager_out = mod(x)
+        eager_buf = mod.buf.clone()
+
+        for label, joint_gm in [("public", joint_public), ("private", joint_private)]:
+            buf_input = torch.zeros(())
+            (exported_out,) = joint_gm(buf_input, x)
+            self.assertEqual(exported_out, eager_out, msg=f"{label}: output mismatch")
+            self.assertEqual(
+                buf_input, eager_buf, msg=f"{label}: buffer mutation mismatch"
+            )
 
 
 if __name__ == "__main__":

@@ -350,6 +350,7 @@ class FakeTensorTest(TestCase):
             if y.copy_(x).device.type != "cuda":
                 raise AssertionError("expected cuda device")
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_fake_device(self):
         t = torch.ones(3)
         t = t.view(1, 3)
@@ -599,6 +600,16 @@ class FakeTensorTest(TestCase):
 
         out_eager = fn(torch.empty((0,)))
         self.checkMetaProps(out_fake, out_eager)
+
+    def test_as_strided_negative_stride_error(self):
+        error = (
+            r"as_strided: Negative strides are not supported at the "
+            r"moment, got strides: \[-?[0-9]+(, -?[0-9]+)*\]"
+        )
+        with FakeTensorMode():
+            x = torch.empty(0)
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.as_strided(x, (17, 18), (-80, 1), 1)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):

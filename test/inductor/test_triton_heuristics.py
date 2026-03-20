@@ -694,6 +694,22 @@ class TestHIPInvalidConfigHandling(TestCase):
         torch.testing.assert_close(y, expected)
 
 
+class TestGridExprMaximum(TestCase):
+    def test_maximum_cpp_mode_casts_int_constants_to_long(self):
+        from torch._inductor.runtime.triton_heuristics import Grid1D
+
+        grid = Grid1D(inductor_meta={}, mode="cpp")
+        # Mixed str/int: int constants must be cast to (long) for std::max
+        result = grid.maximum(["ynumel_0", "ynumel_1", 4480])
+        self.assertIn("(long)4480", result)
+        self.assertIn("std::max", result)
+        # All strings: no cast needed
+        result = grid.maximum(["xnumel", "ynumel"])
+        self.assertNotIn("(long)", result)
+        # All ints: constant-folds
+        self.assertEqual(grid.maximum([10, 20, 5]), 20)
+
+
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
         run_tests()

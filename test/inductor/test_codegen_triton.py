@@ -7,12 +7,16 @@ import torch
 import torch._inductor.config as inductor_config
 from torch._inductor.codegen import triton_utils
 from torch._inductor.codegen.common import CSEVariable, SizeArg
-from torch._inductor.codegen.triton import TritonKernelOverrides
+from torch._inductor.codegen.triton import (
+    _materialize_trunc_to_float_expr,
+    TritonKernelOverrides,
+)
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
+from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -149,6 +153,33 @@ class TestCodegenTriton(InductorTestCase):
         self.assertEqual(
             TestTritonKernelOverrides.pow(3, exponent),
             "triton_helpers.pow_integer(custom_constant(3, torch.uint32), ks0)",
+        )
+
+    def test_materialize_trunc_to_float_expr_preserves_integer_subexpressions(self):
+        s0 = sympy.Symbol("s0")
+
+        trunc_expr = TruncToInt(s0)
+        self.assertEqual(
+            _materialize_trunc_to_float_expr(trunc_expr, torch.float64),
+            TruncToFloat(s0),
+        )
+
+        integer_expr = FloorDiv(trunc_expr, sympy.Integer(5))
+        self.assertEqual(
+            _materialize_trunc_to_float_expr(integer_expr, torch.float64),
+            integer_expr,
+        )
+
+        predicate_expr = sympy.Eq(trunc_expr, sympy.Integer(9007199254740993))
+        self.assertEqual(
+            _materialize_trunc_to_float_expr(predicate_expr, torch.float64),
+            predicate_expr,
+        )
+
+        float_expr = sympy.Float(0.5) + trunc_expr
+        self.assertEqual(
+            _materialize_trunc_to_float_expr(float_expr, torch.float64),
+            sympy.Float(0.5) + TruncToFloat(s0),
         )
 
 

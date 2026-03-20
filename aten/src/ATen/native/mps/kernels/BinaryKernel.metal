@@ -63,14 +63,14 @@ struct fmin_functor {
 struct maximum_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return max(a, b);
+    return c10::metal::max(a, b);
   }
 };
 
 struct minimum_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
-    return min(a, b);
+    return c10::metal::min(a, b);
   }
 };
 

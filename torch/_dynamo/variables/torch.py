@@ -313,6 +313,8 @@ def _collect_tensors_with_sources(
     Used by handle_autograd_grad to collect tensors from the outputs and inputs
     arguments for grad_fn reachability analysis.
     """
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
     from .lazy import LazyVariableTracker
     from .lists import BaseListVariable
     from .tensor import TensorVariable
@@ -320,7 +322,27 @@ def _collect_tensors_with_sources(
     results: list[tuple[torch.Tensor, str | None]] = []
     if isinstance(var, TensorVariable):
         fake_tensor = var.as_proxy().node.meta.get("example_value")
-        assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
+        assert isinstance(fake_tensor, torch.Tensor)
+        if isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor):
+            pass
+        elif is_traceable_wrapper_subclass(fake_tensor):
+            # For tensor subclasses (e.g. DTensor), verify the inner tensors
+            # are FakeTensors but keep the original subclass for grad_fn
+            # reachability analysis.
+            plain: list[object] = []
+            torch._subclasses.fake_tensor.get_plain_tensors(
+                fake_tensor,  # pyrefly: ignore[bad-argument-type]
+                out=plain,  # pyrefly: ignore[bad-argument-type]
+            )
+            assert all(
+                isinstance(t, torch._subclasses.fake_tensor.FakeTensor) for t in plain
+            ), (
+                f"Expected all plain tensors to be FakeTensors, got {[type(t) for t in plain]}"
+            )
+        else:
+            raise AssertionError(
+                f"Expected FakeTensor or subclass, got {type(fake_tensor)}"
+            )
         source_name = var.source.name if var.source else None
         results.append((fake_tensor, source_name))
     elif isinstance(var, LazyVariableTracker):
@@ -943,6 +965,60 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch._C._set_deterministic_algorithms(value)
             return CONSTANT_VARIABLE_NONE
 
+        @register(torch.autocast_increment_nesting)
+        def handle_autocast_increment_nesting(
+            self, tx: "InstructionTranslator"
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function", torch.autocast_increment_nesting, (), {}
+            )
+            prev = torch.autocast_increment_nesting()
+            tx.output.add_cleanup_hook(lambda: torch.autocast_decrement_nesting())
+            return VariableTracker.build(tx, prev)
+
+        @register(torch.autocast_decrement_nesting)
+        def handle_autocast_decrement_nesting(
+            self, tx: "InstructionTranslator"
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function", torch.autocast_decrement_nesting, (), {}
+            )
+            prev = torch.autocast_decrement_nesting()
+            tx.output.add_cleanup_hook(lambda: torch.autocast_increment_nesting())
+            return VariableTracker.build(tx, prev)
+
+        @register(torch.set_autocast_enabled)
+        def handle_set_autocast_enabled(
+            self,
+            tx: "InstructionTranslator",
+            device_type: VariableTracker,
+            enabled: VariableTracker,
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function",
+                torch.set_autocast_enabled,
+                (device_type.as_proxy(), enabled.as_proxy()),
+            )
+            dev_py_const = device_type.as_python_constant()
+            prev = torch.is_autocast_enabled(dev_py_const)
+            torch.set_autocast_enabled(dev_py_const, enabled.as_python_constant())
+            tx.output.add_cleanup_hook(
+                lambda: torch.set_autocast_enabled(dev_py_const, prev)
+            )
+            return CONSTANT_VARIABLE_NONE
+
+        @register(torch.set_autocast_cache_enabled)
+        def handle_set_autocast_cache_enabled(
+            self, tx: "InstructionTranslator", enabled: VariableTracker
+        ) -> VariableTracker:
+            tx.output.create_node(
+                "call_function", torch.set_autocast_cache_enabled, (enabled.as_proxy(),)
+            )
+            prev = torch.is_autocast_cache_enabled()
+            torch.set_autocast_cache_enabled(enabled.as_python_constant())
+            tx.output.add_cleanup_hook(lambda: torch.set_autocast_cache_enabled(prev))
+            return CONSTANT_VARIABLE_NONE
+
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
             self, tx: "InstructionTranslator"
@@ -1358,8 +1434,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
-        @register(torch.fx.experimental.symbolic_shapes.size_hint)
-        def handle_size_hint(
+        @register(torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw)
+        def handle_guarding_hint_or_throw(
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
+        ) -> VariableTracker | None:
+            if isinstance(expr, SymNodeVariable):
+                return VariableTracker.build(
+                    tx,
+                    torch.fx.experimental.symbolic_shapes.guarding_hint_or_throw(
+                        expr.sym_num
+                    ),
+                )
+            elif expr.is_python_constant():
+                return expr
+            else:
+                return None
+
+        @register(torch.fx.experimental.symbolic_shapes.optimization_hint)
+        def handle_optimization_hint(
             self,
             tx: "InstructionTranslator",
             expr: VariableTracker,
@@ -1369,7 +1463,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if isinstance(expr, SymNodeVariable):
                 return VariableTracker.build(
                     tx,
-                    torch.fx.experimental.symbolic_shapes.size_hint(
+                    torch.fx.experimental.symbolic_shapes.optimization_hint(
                         expr.sym_num, fallback_int
                     ),
                 )
@@ -1735,6 +1829,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             *args: VariableTracker,
             **kwargs: VariableTracker,
         ) -> StreamVariable:
+            from .streams import CudaStreamVariable
+
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented(
                     gb_type="unsupported arguments to torch.accelerator.current_stream",
@@ -1752,7 +1848,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 else:
                     device = None
 
-                return tx.symbolic_stream_state.cur_stream(device)
+                stream_var = tx.symbolic_stream_state.cur_stream(device)
+                if self.value is torch.cuda.current_stream and not isinstance(
+                    stream_var, CudaStreamVariable
+                ):
+                    stream_var = CudaStreamVariable(
+                        stream_var.proxy,
+                        stream_var.value,
+                        stream_var.user_object_index,
+                        source=stream_var.source,
+                    )
+                return stream_var
             except Exception as e:
                 unimplemented(
                     gb_type="bad device argument to torch.accelerator.current_stream",
@@ -1867,6 +1973,52 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     proxy_args,
                     {},
                 ),
+            )
+
+        def exchange_device_helper(
+            tx: "InstructionTranslator",
+            args: Sequence[VariableTracker],
+            kwargs: dict[str, VariableTracker],
+            fn: Callable[[int], int | None],
+        ) -> VariableTracker:
+            if len(args) != 1 or kwargs:
+                raise_type_error_exc(
+                    tx,
+                    f"{fn.__name__} takes exactly one argument ({len(args)} given)",
+                )
+            current_device_source = CallFunctionNoArgsSource(
+                AttrSource(AttrSource(ImportSource("torch"), "cuda"), "current_device")
+            )
+            install_guard(current_device_source.make_guard(GuardBuilder.EQUALS_MATCH))
+            arg = args[0].as_python_constant()
+            prev = fn(arg)
+            tx.output.create_node(
+                "call_function",
+                fn,
+                (arg,),
+                {},
+            )
+            tx.output.add_cleanup_hook(lambda: torch.cuda.set_device(prev))
+            return VariableTracker.build(tx, prev)
+
+        @register(torch.cuda._exchange_device)
+        def handle_exchange_device(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            return exchange_device_helper(tx, args, kwargs, torch.cuda._exchange_device)
+
+        @register(torch.cuda._maybe_exchange_device)
+        def handle_maybe_exchange_device(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            return exchange_device_helper(
+                tx, args, kwargs, torch.cuda._maybe_exchange_device
             )
 
         @register(torch.autograd.grad)

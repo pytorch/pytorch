@@ -793,6 +793,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str time_us_s = "time_us";
   py::str compile_context_s = "compile_context";
   py::str user_metadata_s = "user_metadata";
+  py::str pool_id_s = "pool_id";
 
   py::list empty_frames;
   std::vector<CapturedTraceback*> to_gather_frames;
@@ -912,6 +913,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       trace_entry[time_us_s] = te.time_.t_;
       trace_entry[compile_context_s] = te.compile_context_;
       trace_entry[user_metadata_s] = te.user_metadata_;
+      trace_entry[pool_id_s] = te.mempool_;
       trace.append(trace_entry);
     }
     traces.append(trace);

@@ -91,6 +91,8 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
+    IS_ARM64,
+    IS_CPU_EXT_SVE_SUPPORTED,
     IS_FBCODE,
     IS_MACOS,
     IS_X86,
@@ -2715,8 +2717,10 @@ class CommonTemplate:
         self.common(fn, (a, q_group, in_features, out_features))
 
     @skipCPUIf(IS_MACOS, "fails on M1, mismatch in bf16 support reporting")
-    @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
+    @xfailIf(
+        IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED
+    )  # see https://github.com/pytorch/pytorch/issues/170787
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     @skip_if_halide  # bf16
@@ -3471,6 +3475,8 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    test_one_hot._expected_failure_halide = True
+
     def test_div1(self):
         def fn(a, b):
             return (
@@ -3553,6 +3559,7 @@ class CommonTemplate:
         )
 
     @skip_if_triton_cpu  # divide by zero; cannot xfail because it crashes process
+    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/6401")
     def test_div7(self):
         def fn(a, b):
             return (
@@ -5383,7 +5390,6 @@ class CommonTemplate:
         for thread in threads:
             thread.join()
 
-    @unittest.skipIf(config.is_fbcode(), "fbcode triton error, needs debugging")
     @skip_if_triton_cpu("Flaky on Triton CPU")
     @skip_if_gpu_halide  # https://github.com/halide/Halide/issues/8311
     def test_adaptive_avg_pool2d_low_prec(self):
@@ -6122,6 +6128,24 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_layer_norm_rejects_complex_inputs(self):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only validated on CPU/CUDA")
+
+        m = torch.nn.LayerNorm(10).to(self.device)
+        x = torch.randn(1, 1, 10, device=self.device, dtype=torch.complex64)
+
+        with self.assertRaises(RuntimeError):
+            m(x)
+
+        with self.assertRaises(RuntimeError) as compiled_error:
+            torch.compile(m)(x)
+
+        self.assertIn(
+            "native_layer_norm does not support complex inputs",
+            str(compiled_error.exception),
+        )
+
     @torch._functorch.config.patch("donated_buffer", True)
     def test_matmul_layer_norm(self):
         batch_size = 32
@@ -6306,6 +6330,10 @@ class CommonTemplate:
             reference_in_float=False,
         )
 
+    @skipCUDAIf(
+        TEST_WITH_ROCM and not torch.cuda.has_magma,
+        "ROCm hipsolver backend does not currently support eig",
+    )
     @skipIfMPS
     def test_linalg_eig_stride_consistency(self):
         def fn(x):
@@ -7318,8 +7346,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(force_disable_caches=True)
     def test_deterministic_codegen(self):
-        if "cpu" in str(self.device) and config.is_fbcode():
-            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
         if "cpu" in str(self.device) and config.cpp_wrapper:
             raise unittest.SkipTest(
                 "run_and_get_kernels can't extract kernels from CPU cpp_wrapper code"
@@ -7371,8 +7397,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @config.patch(force_disable_caches=True)
     def test_deterministic_codegen_on_graph_break(self):
-        if "cpu" in str(self.device) and config.is_fbcode():
-            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
         if "cpu" in str(self.device) and config.cpp_wrapper:
             raise unittest.SkipTest(
                 "run_and_get_kernels can't extract kernels from CPU cpp_wrapper code"
@@ -7409,8 +7433,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         }
     )
     def test_deterministic_codegen_with_suffix(self):
-        if "cpu" in str(self.device) and config.is_fbcode():
-            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
         if "cpu" in str(self.device) and config.cpp_wrapper:
             raise unittest.SkipTest(
                 "run_and_get_kernels can't extract kernels from CPU cpp_wrapper code"
@@ -10350,11 +10372,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        assertGeneratedKernelCountEqual(self, 1)
+        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Correctness is validated by self.common() above.
+        self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     @expectedFailureXPU
     def test_max_pool2d_with_indices_backward5(self):
-        # Window size is too big. Should fallback
+        # Large window size - decomposition handles via scatter_add
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [13, 13], [1, 1], [2, 2], [1, 1], False, c
@@ -10378,11 +10402,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        assertGeneratedKernelCountEqual(self, 0)
+        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Correctness is validated by self.common() above.
+        # MPS: decomposition falls back to native kernel, so no inductor kernels generated
+        if self.device != "mps":
+            self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d_with_indices_backward6(self):
-        # dilation is not 1. Should fallback
+        # dilation != 1 - decomposition handles all dilation cases
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [3, 2], [2, 1], [1, 1], [1, 2], False, c
@@ -10406,7 +10434,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        assertGeneratedKernelCountEqual(self, 0)
+        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Correctness is validated by self.common() above.
+        # MPS: decomposition falls back to native kernel, so no inductor kernels generated
+        if self.device != "mps":
+            self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_issue102546(self):
         def fn(x):

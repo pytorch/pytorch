@@ -15,9 +15,8 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    isRocmArchAnyOf,
-    MI200_ARCH,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -294,6 +293,8 @@ class MixOrderReductionTest(TestBase):
     @parametrize("max_autotune", (False, True))
     @parametrize("initial_xblock", (1, 2))
     @parametrize("add_1dim", (False, True))
+    # The test OOM in CI sometimes. Ask for more memory to make it stable.
+    @largeTensorTest("16GB", device=GPU_TYPE, inductor=True)
     def test_rms_norm_bwd(
         self,
         wdtype,
@@ -534,9 +535,6 @@ class MixOrderReductionTest(TestBase):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
 
-        if dtype is torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
-            self.skipTest("Currently failing on rocm mi200")
-
         def f(xs, w, eps):
             ys = []
             for x in xs:
@@ -554,13 +552,22 @@ class MixOrderReductionTest(TestBase):
         eps = 1e-5
 
         ref = f(xs, w, eps)
+
+        # use float64 to compute ref_grads for precision
+        # and cast back to original dtype
+        xs_f64 = [x.to(torch.float64) for x in xs]
+        w_f64 = w.to(torch.float64)
+        dys_f64 = [dy.to(torch.float64) for dy in dys]
+        ref_f64 = f(xs_f64, w_f64, eps)
+        ref_grads_f64 = torch.autograd.grad(ref_f64, [*xs_f64, w_f64], dys_f64)
+        ref_grads = [g.to(dtype) for g in ref_grads_f64]
+
         act = torch.compile(
             f,
             options={
                 "split_reductions": split_reductions,
             },
         )(xs, w, eps)
-        ref_grads = torch.autograd.grad(ref, [*xs, w], dys)
         act_grads, (wrapper,) = utils.run_and_get_code(
             lambda: torch.autograd.grad(act, [*xs, w], dys)
         )
@@ -663,6 +670,7 @@ class MixOrderReductionTest(TestBase):
         # the other is the piontwise kernel
         self.assertTrue(2, metrics.generated_kernel_count)
 
+    @patch("torch._inductor.scheduler.MixOrderReduction.is_split_reduction")
     @patch("torch._inductor.scheduler.MixOrderReduction.get_numel_rnumel")
     @patch("torch._inductor.scheduler.MixOrderReduction.get_common_read")
     @patch("torch._inductor.scheduler.MixOrderReduction.has_mix_reduction_orders")
@@ -671,6 +679,7 @@ class MixOrderReductionTest(TestBase):
         mock_has_mix_reduction_orders: mock.Mock,
         mock_get_common_read: mock.Mock,
         mock_get_numel_rnumel: mock.Mock,
+        mock_is_split_reduction: mock.Mock,
     ):
         """
         This tests whether we can skip some non-critical checks
@@ -703,6 +712,7 @@ class MixOrderReductionTest(TestBase):
         from sympy import Integer
 
         mock_get_numel_rnumel.return_value = (Integer(1), Integer(1))
+        mock_is_split_reduction.return_value = False
 
         mock_node_1.read_writes = mock.Mock()
         mock_node_1.read_writes.reads = []
@@ -724,7 +734,11 @@ class MixOrderReductionTest(TestBase):
             self.assertFalse(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
         with (
             V.set_graph_handler(graph),
-            inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True}),
+            inductor_config.patch(
+                {
+                    "triton.mix_order_reduction_non_strict_mode": True,
+                }
+            ),
         ):
             self.assertTrue(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
 
@@ -752,6 +766,7 @@ class MixOrderReductionTest(TestBase):
         compile_metrics = torch._dynamo.utils._compilation_metrics
         self.assertEqual(len(compile_metrics), 1, "Don't recompile")
 
+    @skipIfXpu(msg="https://github.com/intel/intel-xpu-backend-for-triton/issues/6398")
     def test_additive_rnumel(self):
         """
         Fix https://github.com/pytorch/pytorch/issues/176375
@@ -930,6 +945,57 @@ class MixOrderReductionTest(TestBase):
         loss = out.sum()
         loss.backward()
         self.assertTrue(metrics.codegen_mix_order_reduction > 1)
+
+    @inductor_config.patch("triton.mix_order_reduction", True)
+    @inductor_config.patch("triton.mix_order_reduction_non_strict_mode", True)
+    def test_dimension_refactoring_mismatch(self):
+        """
+        This reproduces an issue where `simplify_and_reorder()` produces a different
+        dimension factorization than `_original_ranges` used during fusion decision.
+        For example, fusion might see (13, 8472) but codegen sees (26, 4236) after
+        the reduction split optimization adds a factor of 2 to the pointwise dimensions.
+
+        We skip fusing split reductions for node1 in this case.
+        """
+
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        # Reproduce the RMSNorm backward pattern that triggered the bug.
+        # The key is:
+        # - Shape (M, N) = (13, 8472) where N=8472 is large enough to trigger split
+        # - RMSNorm backward creates reductions along both dimensions
+        # - The feature dimension reduction (8472) gets split with factor 2
+        # - Mix order reduction tries to fuse these, but groups don't match after split
+        def f(x, w, eps):
+            orig_dtype = x.dtype
+            x = x.float()
+            # RMSNorm forward: y = x * rsqrt(mean(x^2) + eps) * w
+            rsqrt = torch.rsqrt((x * x).sum(dim=-1) / x.shape[-1] + eps)
+            y = (x * rsqrt[:, None] * w).to(dtype=orig_dtype)
+            return y
+
+        def fwd_bwd(compiled_f):
+            x.grad = None
+            w.grad = None
+            out = compiled_f(x, w, eps)
+            out.backward(dy)
+            return x.grad, w.grad
+
+        # Use the exact shape from the bug report: (13, 8472)
+        # 8472 = 2 * 4236, so split with factor 2 gives sub-reductions of 4236
+        M, N = 13, 8472
+        x = torch.randn(M, N, dtype=torch.float32, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=torch.float32, device=GPU_TYPE, requires_grad=True)
+        dy = torch.randn_like(x)
+        eps = 1e-5
+
+        opt_f = torch.compile(f)
+
+        ref = fwd_bwd(f)
+        act = fwd_bwd(opt_f)
+        torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
+        self.assertGreaterEqual(metrics.codegen_mix_order_reduction, 0)
 
 
 @inductor_config.patch(
