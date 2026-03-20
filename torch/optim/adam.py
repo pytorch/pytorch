@@ -105,10 +105,7 @@ class Adam(Optimizer):
             if differentiable:
                 raise RuntimeError("`fused` does not support `differentiable`")
             self._step_supports_amp_scaling = True
-            # TODO(crcrpar): [low prec params & their higher prec copy]
-            # Support AMP with FP16/BF16 model params which would need
-            # higher prec copy of params to do update math in higher prec to
-            # alleviate the loss of information.
+            self._low_prec_dtypes = (torch.float16, torch.bfloat16)
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
@@ -842,7 +839,7 @@ def _fused_adam(
         {lr.device: lr} if isinstance(lr, Tensor) and str(lr.device) != "cpu" else None
     )
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
+            [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
     for (device, _), (
         (
@@ -860,6 +857,17 @@ def _fused_adam(
         device_exp_avgs = cast(list[Tensor], device_exp_avgs_)
         device_exp_avg_sqs = cast(list[Tensor], device_exp_avg_sqs_)
         device_state_steps = cast(list[Tensor], device_state_steps_)
+        # If params are low precision (FP16/BF16), cast to FP32 for
+        # optimizer math to avoid loss of information, then copy back.
+        low_prec_dtypes = (torch.float16, torch.bfloat16)
+        is_low_prec = device_params[0].dtype in low_prec_dtypes if device_params else False
+        if is_low_prec:
+            device_params_fp32 = [p.float() for p in device_params]
+            device_grads = [g.float() for g in device_grads]
+            device_exp_avgs = [e.float() for e in device_exp_avgs]
+            device_exp_avg_sqs = [e.float() for e in device_exp_avg_sqs]
+        else:
+            device_params_fp32 = device_params
 
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
@@ -877,7 +885,7 @@ def _fused_adam(
         func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
         # pyrefly: ignore [no-matching-overload]
         func(
-            device_params,
+            device_params_fp32,
             device_grads,
             device_exp_avgs,
             device_exp_avg_sqs,
@@ -897,6 +905,10 @@ def _fused_adam(
             torch._foreach_sub_(
                 device_state_steps, [device_found_inf] * len(device_state_steps)
             )
+        # Copy FP32 results back to original low-precision params
+        if is_low_prec:
+            for orig, fp32 in zip(device_params, device_params_fp32):
+                orig.copy_(fp32)
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adam)

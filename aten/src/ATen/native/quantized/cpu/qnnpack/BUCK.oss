@@ -1,4 +1,0 @@
-load("//:buckbuild.bzl", "third_party")
-load(":buckbuild.bzl", "define_qnnpack")
-
-define_qnnpack(third_party)
