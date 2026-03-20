@@ -204,9 +204,7 @@ class TestTraceValidatorE2E(TestCase):
         super().setUpClass()
         cls._trace_dir = tempfile.mkdtemp(prefix="profiler_e2e_trace_")
         cls._payloads = {
-            "resnet": _profile_resnet_payload(
-                os.path.join(cls._trace_dir, "resnet")
-            ),
+            "resnet": _profile_resnet_payload(os.path.join(cls._trace_dir, "resnet")),
             "complex": _profile_complex_payload(
                 os.path.join(cls._trace_dir, "complex")
             ),
@@ -257,6 +255,7 @@ class TestTraceValidatorE2E(TestCase):
     def test_rule6_backward_seq_id_uniqueness(self, payload):
         v = check_backward_seq_id_uniqueness(self._events(payload))
         self.assertEqual(len(v), 0, self._fmt(v))
+
 
 if __name__ == "__main__":
     run_tests()
