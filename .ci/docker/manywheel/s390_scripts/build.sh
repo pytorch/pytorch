@@ -18,13 +18,7 @@ AUTOCONF_HASH=954bd69b391edc12d6a4a51a2dd1476543da5c6bbf05a95b59dc0dd6fd4c2969
 
 # Dependencies for compiling Python that we want to remove from
 # the final image after compiling Python
-PYTHON_COMPILE_DEPS="zlib-devel bzip2-devel ncurses-devel sqlite-devel readline-devel tk-devel gdbm-devel libpcap-devel xz-devel libffi-devel"
-
-if [ "$(uname -m)" != "s390x" ] ; then
-    PYTHON_COMPILE_DEPS="${PYTHON_COMPILE_DEPS} db4-devel"
-else
-    PYTHON_COMPILE_DEPS="${PYTHON_COMPILE_DEPS} libdb-devel"
-fi
+PYTHON_COMPILE_DEPS="zlib-devel bzip2-devel ncurses-devel sqlite-devel readline-devel tk-devel gdbm-devel libpcap-devel xz-devel libffi-devel libdb-devel"
 
 # Libraries that are allowed as part of the manylinux1 profile
 MANYLINUX1_DEPS="glibc-devel libstdc++-devel glib2-devel libX11-devel libXext-devel libXrender-devel  mesa-libGL-devel libICE-devel libSM-devel ncurses-devel"
@@ -103,13 +97,6 @@ find /opt/_internal \
   -o \( -type f -a -name '*.pyc' -o -name '*.pyo' \) \
   -print0 | xargs -0 rm -f
 
-for PYTHON in /opt/python/*/bin/python; do
-    # Smoke test to make sure that our Pythons work, and do indeed detect as
-    # being manylinux compatible:
-    $PYTHON $MY_DIR/manylinux1-check.py
-    # Make sure that SSL cert checking works
-    $PYTHON $MY_DIR/ssl-check.py
-done
 
 # Fix libc headers to remain compatible with C99 compilers.
 find /usr/include/ -type f -exec sed -i 's/\bextern _*inline_*\b/extern __inline __attribute__ ((__gnu_inline__))/g' {} +

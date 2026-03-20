@@ -854,7 +854,6 @@ Tensor scaled_dot_product_attention(
       TORCH_CHECK(
           false,
           "No viable backend for scaled_dot_product_attention was found.");
-      return Tensor();
   }
 }
 
@@ -1064,11 +1063,6 @@ _scaled_dot_product_fused_attention_overrideable_backward(
     const at::Tensor & philox_offset,
     std::optional<double> scale) {
   TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_fused_attention_overrideable_backward not implemented: This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
-          at::empty_like(query),
-          at::empty_like(key),
-          at::empty_like(value),
-          at::empty_like(attn_bias));
 }
 
 Tensor triton_multi_head_attention(

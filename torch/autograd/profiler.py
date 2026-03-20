@@ -698,6 +698,9 @@ class profile:
                 flops=kineto_event.flops(),
                 is_user_annotation=kineto_event.is_user_annotation(),
                 metadata_json=kineto_event.metadata_json(),
+                flow_id=kineto_event.flow_id(),
+                flow_type=kineto_event.flow_type(),
+                flow_start=kineto_event.flow_start(),
                 external_id=kineto_event.external_id(),
                 linked_correlation_id=kineto_event.linked_correlation_id(),
             )

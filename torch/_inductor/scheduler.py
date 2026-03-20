@@ -361,6 +361,9 @@ class MixOrderReduction:
         if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
+        if MixOrderReduction.is_split_reduction(contiguous_node):
+            return False
+
         # Other reduction types like max/min is not supported yet.
         # There are no real use case as well.
         out = all(

@@ -3179,7 +3179,6 @@ def _builtin_function_ids() -> dict[int, str]:
     rv.update(
         {
             id(cast): "typing.cast",
-            id(copy.deepcopy): "copy.deepcopy",
         }
     )
     return rv
@@ -3324,6 +3323,13 @@ BUILTIN_SKIPLIST = (
     random,
     linecache,
 )
+
+# Builtin modules that should be skipped at the top-level (PEP 523 frame
+# evaluation) but inlined when called from code dynamo is already tracing.
+# For example, copy.deepcopy should be inlined when the user calls it inside
+# a compiled function, but copy module frames should be skipped when they
+# appear as top-level frames (e.g. called internally by autograd).
+BUILTIN_INLINE_WHEN_CALLED: set[str] = set()
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
@@ -3637,6 +3643,8 @@ SKIP_DIRS = [
 ]
 SKIP_DIRS.extend(map(_as_posix_path, filter(None, map(_module_dir, BUILTIN_SKIPLIST))))
 
+BUILTIN_INLINE_WHEN_CALLED.update(filter(None, (_module_dir(copy),)))
+
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
 # Skip fbcode paths(including torch.package paths) containing
@@ -3722,6 +3730,12 @@ def check_file(filename: str | None, is_inlined_call: bool = False) -> SkipResul
             return SkipResult(False, f"file matches LEGACY_MOD_INLINELIST ({d})")
     if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(False, f"file matches MOD_INLINELIST ({filename})")
+    if is_inlined_call and any(
+        filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED
+    ):
+        return SkipResult(
+            False, f"file matches BUILTIN_INLINE_WHEN_CALLED ({filename})"
+        )
     if (
         is_fbcode()
         and FBCODE_SKIP_DIRS

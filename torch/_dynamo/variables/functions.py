@@ -587,6 +587,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # subclasses (such as methods) usually aren't a constant
         return super().as_python_constant()
 
+    def get_real_python_backed_value(self) -> Any:
+        if istype(self, UserFunctionVariable):
+            return self.fn
+        return super().get_real_python_backed_value()
+
     def self_args(self) -> list[VariableTracker]:
         return []
 
@@ -2107,6 +2112,9 @@ class SkipFunctionVariable(VariableTracker):
         self.reason = reason
 
     def as_python_constant(self) -> Any:
+        return self.value
+
+    def get_real_python_backed_value(self) -> Any:
         return self.value
 
     @classmethod
