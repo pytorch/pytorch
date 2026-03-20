@@ -48,7 +48,11 @@ struct ReduceScatterColumnsInfo {
 // blockIdx.x selects the owned slot; blockIdx.y tiles rows within that slot.
 // Each CTA holds a dedicated LSA barrier (index = blockIdx.x * gridDim.y + blockIdx.y)
 // so all ranks synchronize per-CTA rather than globally.
-template <typename T>
+//
+// UseMultimem=true: uses ncclMultimemReduceSum for hardware reduction via
+// NVLink multicast; requires devcomm created with lsaMultimem=true.
+// UseMultimem=false: uses ncclLsaReduceSum (software reduce via LSA reads).
+template <typename T, bool UseMultimem>
 __global__ void reduce_scatter_columns_kernel(
     ncclWindow_t window,
     ReduceScatterColumnsInfo info,
@@ -57,33 +61,39 @@ __global__ void reduce_scatter_columns_kernel(
     ncclDevComm devComm) {
   const int slot = blockIdx.x;
   const int local_block = blockIdx.y;
+  const ncclCoopCta coop{};
 
   // One LSA barrier per CTA; all ranks must call both syncs unconditionally.
   ncclLsaBarrierSession<ncclCoopCta> bar{
-      ncclCoopCta(),
+      coop,
       devComm,
       ncclTeamLsa(devComm),
       devComm.lsaBarrier,
       blockIdx.x * gridDim.y + blockIdx.y};
   // Acquire: wait until all peers have written their data into the window.
-  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+  bar.sync(coop, cuda::memory_order_acquire);
 
   const size_t base_byte_offset = info.byte_offsets[slot];
   T* dst_base = reinterpret_cast<T*>(info.dst_ptrs[slot]);
   const int cols = static_cast<int>(info.dst_cols[slot]);
 
-  // Each CTA handles a strided subset of rows; ncclLsaReduceSum reads from
-  // all peers, reduces, and writes cols elements starting at dst_row.
+  // Each CTA handles a strided subset of rows; the reduce reads from all peers
+  // and writes cols elements starting at dst_row.
   for (int row = local_block; row < rows; row += gridDim.y) {
     const size_t row_offset =
         base_byte_offset +
         static_cast<size_t>(row * outer_stride) * sizeof(T);
     T* dst_row = dst_base + row * cols;
-    ncclLsaReduceSum(ncclCoopCta(), window, row_offset, dst_row, cols, devComm);
+    if constexpr (UseMultimem) {
+      ncclMultimemReduceSum(
+          coop, window, row_offset, dst_row, cols, devComm.lsaMultimem);
+    } else {
+      ncclLsaReduceSum(coop, window, row_offset, dst_row, cols, devComm);
+    }
   }
 
   // Release: signal peers that we are done reading window memory.
-  bar.sync(ncclCoopCta(), cuda::memory_order_release);
+  bar.sync(coop, cuda::memory_order_release);
 }
 
 #endif // NCCL_DEVICE_HAS_REDUCE_COPY
@@ -133,13 +143,18 @@ void nccl_reduce_scatter_columns(
   auto& manager = c10d::symmetric_memory::NCCLDevCommManager::get(device);
   ncclComm_t comm = manager.get_comm(group_name);
 
+  const bool use_multimem = nccl_hdl->has_multicast_support();
+
   // The devcomm is cached per (group, key); create it on first use.
   // lsaBarrierCount must cover the maximum number of concurrent CTAs.
+  // lsaMultimem is set when the allocation has multicast support, so that
+  // devComm.lsaMultimem is valid for ncclMultimemReduceSum in the kernel.
   static constexpr char const kDevcommKey[] = "nccl_reduce_scatter_columns";
   auto devcomm_opt = manager.get_devcomm(group_name, kDevcommKey);
   if (!devcomm_opt) {
     ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     reqs.lsaBarrierCount = RS_MAX_CTA_COUNT;
+    reqs.lsaMultimem = use_multimem;
     ncclDevComm devcomm;
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devcomm),
@@ -277,13 +292,19 @@ void nccl_reduce_scatter_columns(
       input.scalar_type(),
       "nccl_reduce_scatter_columns",
       [&]() {
-        reduce_scatter_columns_kernel<scalar_t>
-            <<<dim3(n_owned, ctas_per_col_block), RS_THREADS_PER_CTA, 0, stream>>>(
-                window,
-                info,
-                rows,
-                outer_stride,
-                devcomm);
+        if (use_multimem) {
+          reduce_scatter_columns_kernel<scalar_t, true>
+              <<<dim3(n_owned, ctas_per_col_block),
+                 RS_THREADS_PER_CTA,
+                 0,
+                 stream>>>(window, info, rows, outer_stride, devcomm);
+        } else {
+          reduce_scatter_columns_kernel<scalar_t, false>
+              <<<dim3(n_owned, ctas_per_col_block),
+                 RS_THREADS_PER_CTA,
+                 0,
+                 stream>>>(window, info, rows, outer_stride, devcomm);
+        }
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 #else
