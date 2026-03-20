@@ -2851,7 +2851,7 @@ class CSEProxy(DefaultHandler):
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
         self.kernel.store_buffer_names.add(name)
-        if mode is None:
+        if mode is None or mode == "tma":
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
