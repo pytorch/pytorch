@@ -287,23 +287,22 @@ void undo_broadcast(at::Tensor& tensor) {
   return;
 }
 
-bool is_aligned_for_onednn(const at::Tensor& tensor) {
+bool is_64_bytes_aligned(const at::Tensor& tensor) {
   constexpr uintptr_t alignment_byte = 64;
   return reinterpret_cast<uintptr_t>(tensor.data_ptr()) % alignment_byte == 0;
 }
 
-at::Tensor contiguous_if_needed_for_onednn(
+at::Tensor make_contiguous_and_aligned(
     const at::Tensor& tensor,
     std::optional<at::MemoryFormat> memory_format) {
   at::Tensor out = memory_format.has_value()
       ? tensor.contiguous(*memory_format)
       : tensor.contiguous();
 
-  // oneDNN kernels can produce incorrect results for misaligned
-  // non-zero-offset tensors, so force a fresh allocation in this case.
-  if (out.storage_offset() > 0 && !is_aligned_for_onednn(out)) {
+  if (out.storage_offset() > 0 && !is_64_bytes_aligned(out)) {
     out = out.clone();
   }
+
   return out;
 }
 
@@ -320,8 +319,9 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   if (tensor.is_contiguous())
     return true;
 
-  if (tensor.storage_offset() > 0 && !is_aligned_for_onednn(tensor))
+  if (tensor.storage_offset() > 0 && !is_64_bytes_aligned(tensor)) {
     return false;
+  }
 
   // the overlapped cases are not supported
   dnnl::memory::dims strides = get_onednn_strides(tensor);

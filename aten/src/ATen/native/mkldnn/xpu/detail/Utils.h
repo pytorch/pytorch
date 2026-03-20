@@ -47,9 +47,9 @@ void undo_broadcast(at::Tensor& tensor);
 
 bool is_onednn_matmul_strides(const at::Tensor& tensor);
 
-bool is_aligned_for_onednn(const at::Tensor& tensor);
+bool is_64_bytes_aligned(const at::Tensor& tensor);
 
-at::Tensor contiguous_if_needed_for_onednn(
+at::Tensor make_contiguous_and_aligned(
   const at::Tensor& tensor,
   std::optional<at::MemoryFormat> memory_format = std::nullopt);
 
