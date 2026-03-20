@@ -6766,6 +6766,38 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
+@make_pointwise
+def div_floor_floating(a, b):
+    """
+    Floating-point floor division matching PyTorch eager semantics.
+    Implements c10::div_floor_floating from c10/util/generic_math.h.
+
+    Uses the formula: div = (a - fmod(a, b)) / b with div_rn for precision.
+    This avoids precision issues with naive floor(a / b) for low-precision floats.
+    """
+    zero = ops.constant(0, torch.float32)
+    one = ops.constant(1, torch.float32)
+    half = ops.constant(0.5, torch.float32)
+    b_is_zero = ops.eq(b, zero)
+
+    mod = ops.fmod(a, b)
+    div = ops.div_rn(ops.sub(a, mod), b)
+
+    mod_nonzero = ops.ne(mod, zero)
+    signs_differ = ops.ne(ops.lt(b, zero), ops.lt(mod, zero))
+    div = ops.where(ops.logical_and(mod_nonzero, signs_differ), ops.sub(div, one), div)
+
+    floordiv = ops.floor(div)
+    floordiv = ops.where(
+        ops.gt(ops.sub(div, floordiv), half), ops.add(floordiv, one), floordiv
+    )
+    floordiv = ops.where(
+        ops.ne(div, zero), floordiv, ops.copysign(zero, ops.div_rn(a, b))
+    )
+
+    return ops.where(b_is_zero, ops.div_rn(a, b), floordiv)
+
+
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -6775,7 +6807,7 @@ def div_mode(a, b, rounding_mode=None):
     # see the discussion at https://github.com/triton-lang/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
-        return floordiv(a, b) if both_integer else floor(div(a, b))
+        return floordiv(a, b) if both_integer else div_floor_floating(a, b)
     if rounding_mode == "trunc":
         assert not both_boolean, "truncdiv operands can not be boolean at the same time"
         return truncdiv(a, b) if both_integer else trunc(div(a, b))
