@@ -35,6 +35,7 @@ ciflow_push_tags:
 - ciflow/periodic-rocm-mi200
 - ciflow/periodic-rocm-mi300
 - ciflow/periodic-rocm-mi355
+- ciflow/ppc64le
 - ciflow/pull
 - ciflow/quantization-periodic
 - ciflow/riscv64

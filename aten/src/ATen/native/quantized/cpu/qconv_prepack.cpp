@@ -539,8 +539,12 @@ at::Tensor _qconv_prepack_onednn(
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
     kSpatialDim += 1;
   }
-#ifdef ONEDNN_FP8_QCONV_SUPPORTED
-  if (is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
+#if defined(__x86_64__) || defined(_M_X64)
+  #ifdef ONEDNN_FP8_QCONV_SUPPORTED
+    if (is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
+  #else
+    if (is_fp8) {
+  #endif
 #else
   if (is_fp8) {
 #endif
