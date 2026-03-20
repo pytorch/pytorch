@@ -1452,17 +1452,26 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.__repr__()
 
-    def test_repr_key_order(self):
-        param = Parameter(torch.randn(2, 3))
-        optimizer = SGD([param], lr=0.1)
-        repr_str = repr(optimizer)
-        keys = [
-            line.split(":")[0].strip()
-            for line in repr_str.splitlines()
-            if ":" in line and "Parameter Group" not in line
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_repr_key_order(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info
+        )
+        params = [
+            Parameter(torch.randn(2, 3, requires_grad=True, device=device, dtype=dtype))
+            for _ in range(2)
         ]
-        group_keys = [k for k in optimizer.param_groups[0] if k != "params"]
-        self.assertEqual(keys, group_keys)
+        for optim_input in all_optim_inputs:
+            optimizer = optim_cls(params, **optim_input.kwargs)
+            repr_str = repr(optimizer)
+            keys = [
+                line.split(":")[0].strip()
+                for line in repr_str.splitlines()
+                if ":" in line and "Parameter Group" not in line
+            ]
+            group_keys = [k for k in optimizer.param_groups[0] if k != "params"]
+            self.assertEqual(keys, group_keys)
 
     @parametrize("is_named_optim0", [True, False])
     @parametrize("is_named_optim1", [True, False])
