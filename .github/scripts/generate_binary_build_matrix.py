@@ -24,7 +24,7 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
 CUDA_ARCHES = ["12.6", "12.8", "12.9", "13.0", "13.2"]
-CUDA_STABLE = "12.8"
+CUDA_STABLE = "13.0"
 CUDA_ARCHES_FULL_VERSION = {
     "12.6": "12.6.3",
     "12.8": "12.8.1",
@@ -288,12 +288,6 @@ WHEEL_CONTAINER_IMAGES = {
 RELEASE = "release"
 DEBUG = "debug"
 
-LIBTORCH_CONTAINER_IMAGES: dict[str, str] = {
-    **{gpu_arch: f"libtorch-cxx11-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
-    **{gpu_arch: f"libtorch-cxx11-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
-    "cpu": "libtorch-cxx11-builder:cpu",
-}
-
 FULL_PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
 
 
@@ -321,10 +315,7 @@ def generate_libtorch_matrix(
 ) -> list[dict[str, str]]:
     if arches is None:
         arches = ["cpu"]
-        if os == "linux":
-            arches += CUDA_ARCHES
-            arches += ROCM_ARCHES
-        elif os == "windows":
+        if os == "windows":
             # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
             # in 2.10
             windows_cuda_arches = CUDA_ARCHES.copy()
@@ -344,9 +335,6 @@ def generate_libtorch_matrix(
         for libtorch_variant in libtorch_variants:
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
-            # ROCm builds without-deps failed even in ROCm runners; skip for now
-            if gpu_arch_type == "rocm" and ("without-deps" in libtorch_variant):
-                continue
             ret.append(
                 {
                     "gpu_arch_type": gpu_arch_type,
@@ -356,16 +344,8 @@ def generate_libtorch_matrix(
                     ),
                     "libtorch_config": release_type,
                     "libtorch_variant": libtorch_variant,
-                    "container_image": (
-                        LIBTORCH_CONTAINER_IMAGES[arch_version].split(":")[0]
-                        if os not in ("windows", "windows-arm64")
-                        else ""
-                    ),
-                    "container_image_tag_prefix": (
-                        LIBTORCH_CONTAINER_IMAGES[arch_version].split(":")[1]
-                        if os not in ("windows", "windows-arm64")
-                        else ""
-                    ),
+                    "container_image": "",
+                    "container_image_tag_prefix": "",
                     "package_type": "libtorch",
                     "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{release_type}".replace(
                         ".", "_"

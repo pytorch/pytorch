@@ -14,9 +14,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
-# Do not change workspace permissions for ROCm and s390x CI jobs
-# as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
+# Only change workspace permissions if passwordless sudo is available
+# (e.g. ROCm and s390x CI jobs lack it, and changing permissions
+# can leave the workspace in a bad state for cancelled jobs)
+if sudo -n true 2>/dev/null && [[ -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -360,6 +361,7 @@ test_python_smoke_b200() {
       inductor/test_torchinductor \
       inductor/test_nv_universal_gemm \
       inductor/test_fused_attention \
+      test_varlen_attention \
       $PYTHON_TEST_EXTRA_OPTION \
       --upload-artifacts-while-running
   assert_git_not_dirty

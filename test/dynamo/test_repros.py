@@ -8041,6 +8041,24 @@ SavedForBackwardsAOTOutput(idx=5)""",
         result = f(torch.randn(5))
         self.assertEqual(result, 5)
 
+    def test_one_hot_bounds_check_compiled(self):
+        # https://github.com/pytorch/pytorch/issues/144211
+        # torch.compile(one_hot) should raise on out-of-bounds indices,
+        # not silently produce wrong results.
+        one_hot = torch.compile(torch.nn.functional.one_hot, fullgraph=True)
+
+        a = torch.arange(0, 5) % 3  # [0, 1, 2, 0, 1]
+        with self.assertRaises(RuntimeError):
+            one_hot(a, 1)
+
+        torch._dynamo.reset()
+        with self.assertRaises(RuntimeError):
+            one_hot(torch.tensor([-1, 0, 1]), 3)
+
+        torch._dynamo.reset()
+        expected = torch.nn.functional.one_hot(a, 3)
+        self.assertEqual(one_hot(a, 3), expected)
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):

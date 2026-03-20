@@ -122,6 +122,20 @@ struct logaddexp2_functor {
   }
 };
 
+struct xlogy_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(c10::metal::xlogy(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::xlogy(float(a), float(b));
+  }
+  inline float operator()(const bool a, const bool b) {
+    return (a && !b) ? -INFINITY : 0;
+  }
+};
+
 struct xlog1py_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
@@ -449,6 +463,8 @@ REGISTER_FLOAT_BINARY_OP(logaddexp);
 REGISTER_INT2FLOAT_BINARY_OP(logaddexp);
 REGISTER_FLOAT_BINARY_OP(logaddexp2);
 REGISTER_INT2FLOAT_BINARY_OP(logaddexp2);
+REGISTER_FLOAT_BINARY_OP(xlogy);
+REGISTER_INT2FLOAT_BINARY_OP(xlogy);
 REGISTER_FLOAT_BINARY_OP(xlog1py);
 REGISTER_INT2FLOAT_BINARY_OP(xlog1py);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_t);

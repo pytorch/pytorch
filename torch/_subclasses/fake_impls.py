@@ -961,11 +961,6 @@ def _compute_slice_index(size: IntLikeType, index: IntLikeType) -> IntLikeType |
         return 0
     elif guard_or_false(index > size):
         return size
-    elif guard_or_false(index >= 0):
-        return torch.sym_min(index, size)
-    elif guard_or_false(index < 0):
-        return torch.sym_max(index + size, 0)
-
     return None
 
 
@@ -1010,12 +1005,6 @@ def slice_forward(
             new_size = (end_index - start_index + step - 1) // step
         elif guard_or_false(start_index >= end_index):
             new_size = 0
-        else:
-            # Both indices are resolved but we can't statically determine their
-            # ordering (e.g., when they involve Min/Max). Compute the size via
-            # max(end - start, 0) to avoid creating an unbacked symint.
-            diff = torch.sym_max(end_index - start_index, 0)
-            new_size = (diff + step - 1) // step
 
     # create unbacked if case unknown
     if new_size is None:

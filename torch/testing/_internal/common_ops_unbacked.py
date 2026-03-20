@@ -153,6 +153,7 @@ ops_dde_xfail = {
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
     xfail("nn.functional.gaussian_nll_loss"),
+    xfail("nn.functional.glu"),
     xfail("nn.functional.grid_sample"),
     xfail("nn.functional.group_norm"),
     xfail("nn.functional.huber_loss"),
