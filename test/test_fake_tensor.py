@@ -350,6 +350,7 @@ class FakeTensorTest(TestCase):
             if y.copy_(x).device.type != "cuda":
                 raise AssertionError("expected cuda device")
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_fake_device(self):
         t = torch.ones(3)
         t = t.view(1, 3)

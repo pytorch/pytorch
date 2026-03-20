@@ -1372,16 +1372,19 @@ class VariableBuilder:
         elif value is set_allocator:
             return TritonSetAllocatorVariable(value)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return AutocastModeVariable(
-                target_values=[
-                    value.device,
-                    value.fast_dtype,
-                    value._enabled,
-                    value._cache_enabled,
-                ],
-                source=self.source,
-            )
+            if isinstance(value, torch.amp.autocast_mode._UnmanagedAutocast):
+                return self.wrap_user_defined(value)
+            else:
+                self.install_guards(GuardBuilder.ID_MATCH)
+                return AutocastModeVariable(
+                    target_values=[
+                        value.device,
+                        value.fast_dtype,
+                        value._enabled,
+                        value._cache_enabled,
+                    ],
+                    source=self.source,
+                )
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             if inspect.isclass(value):
                 self.install_guards(GuardBuilder.CLASS_MATCH)
@@ -2673,6 +2676,7 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
 
         shape_env = self.tx.output.shape_env
+        frame_state_entry: FrameStateSizeEntry | None = None
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
             _constrain_range_for_size(wrapped_value)
@@ -2736,10 +2740,17 @@ class VariableBuilder:
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value)
 
+            excluded_scalar = (
+                frame_state_entry.excluded_scalar
+                if config.automatic_dynamic_exclusion_guard
+                and frame_state_entry is not None
+                else None
+            )
             wrapped_value = shape_env.create_unspecified_symint_and_symbol(
                 value,
                 source=self.source,
                 dynamic_dim=dynamic_dim,
+                excluded_value=excluded_scalar,
             )
 
             self.tx.output.tracked_fakes.append(
@@ -3483,6 +3494,7 @@ def handle_traced_output(
             torch._C._get_mem_efficient_sdp_enabled,
             torch._C._get_math_sdp_enabled,
             torch._C._get_overrideable_sdp_enabled,
+            torch._C._is_autocast_available,
             "is_integer",
         ]
         + list(supported_const_comparison_op_values.keys())
@@ -4015,6 +4027,7 @@ def _automatic_dynamic(
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         shape_ids=getattr(e, "_dynamo_shape_ids", None),
         unbacked_bounds=getattr(e, "_dynamo_unbacked_bounds", None),
+        excluded_sizes=frame_state_entry.excluded_sizes,
     )
 
 
