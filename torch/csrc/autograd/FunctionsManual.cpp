@@ -7833,11 +7833,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       auto sum_dy = gs_accum_sumprod_k(I, dw_dy);
       auto contrib = sum_dx * ggG_x.unsqueeze(1);
       contrib.addcmul_(sum_dy, ggG_y.unsqueeze(1));
-      if (d_grad_output.defined()) {
-        d_grad_output.add_(contrib);
-      } else {
-        d_grad_output = std::move(contrib);
-      }
+      d_grad_output =
+          d_grad_output.defined() ? d_grad_output + contrib : std::move(contrib);
     }
 
     if (output_mask[1]) {
@@ -7858,11 +7855,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       auto d_grid_x = gix_mult * ggG_y * cross;
       auto d_grid_y = giy_mult * ggG_x * cross;
       auto contrib = at::stack({std::move(d_grid_x), std::move(d_grid_y)}, -1);
-      if (d_grid.defined()) {
-        d_grid.add_(contrib);
-      } else {
-        d_grid = std::move(contrib);
-      }
+      d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
     }
   } else { // bicubic
     // Native bicubic backward uses raw unnormalized coordinates with a constant
@@ -7947,11 +7940,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       auto sum_dy = gs_accum_sumprod_k(I_all, B_dy);
       auto contrib = sum_dx * ggG_x_bc.unsqueeze(1);
       contrib.addcmul_(sum_dy, ggG_y_bc.unsqueeze(1));
-      if (d_grad_output.defined()) {
-        d_grad_output.add_(contrib);
-      } else {
-        d_grad_output = std::move(contrib);
-      }
+      d_grad_output =
+          d_grad_output.defined() ? d_grad_output + contrib : std::move(contrib);
     }
 
     if (output_mask[1]) {
@@ -8009,11 +7999,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       ggrid_d_grid_y.mul_(y_scale);
       auto ggrid_d_grid =
           at::stack({std::move(ggrid_d_grid_x), std::move(ggrid_d_grid_y)}, -1);
-      if (d_grid.defined()) {
-        d_grid.add_(ggrid_d_grid);
-      } else {
-        d_grid = std::move(ggrid_d_grid);
-      }
+      d_grid =
+          d_grid.defined() ? d_grid + ggrid_d_grid : std::move(ggrid_d_grid);
     }
   }
   return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
@@ -8131,11 +8118,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto d_gO = sum_dx * ggG_x.unsqueeze(1);
     d_gO.addcmul_(sum_dy, ggG_y.unsqueeze(1));
     d_gO.addcmul_(sum_dz, ggG_z.unsqueeze(1));
-    if (d_grad_output.defined()) {
-      d_grad_output.add_(d_gO);
-    } else {
-      d_grad_output = std::move(d_gO);
-    }
+    d_grad_output =
+        d_grad_output.defined() ? d_grad_output + d_gO : std::move(d_gO);
   }
 
   if (output_mask[1]) {
@@ -8200,11 +8184,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     d_grid_z.mul_(giz_mult);
     auto contrib = at::stack(
         {std::move(d_grid_x), std::move(d_grid_y), std::move(d_grid_z)}, -1);
-    if (d_grid.defined()) {
-      d_grid.add_(contrib);
-    } else {
-      d_grid = std::move(contrib);
-    }
+    d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
   }
   return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
 }
