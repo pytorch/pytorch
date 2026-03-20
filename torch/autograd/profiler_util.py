@@ -638,6 +638,11 @@ class FunctionEvent(FormattedTimesMixin):
         kwinputs=None,
         is_user_annotation=False,
         metadata_json=None,
+        flow_id=None,
+        flow_type=None,
+        flow_start=None,
+        external_id=0,
+        linked_correlation_id=0,
     ):
         self.id: int = id
         self.node_id: int = node_id
@@ -680,6 +685,11 @@ class FunctionEvent(FormattedTimesMixin):
         self.total_cpu_percent = -1
         self.total_device_percent = -1
         self.metadata_json = metadata_json
+        self.flow_id: int | None = flow_id
+        self.flow_type: int | None = flow_type
+        self.flow_start: bool | None = flow_start
+        self.external_id: int = external_id
+        self.linked_correlation_id: int = linked_correlation_id
 
     def append_kernel(self, name, device, duration):
         if self.device_type != DeviceType.CPU:

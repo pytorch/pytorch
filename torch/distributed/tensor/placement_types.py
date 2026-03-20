@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import functools
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import cast, TypeVar
 
@@ -21,6 +22,7 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor._ops._mask_buffer import MaskBuffer
+from torch.types import IntLikeType
 
 
 __all__ = ["Placement", "Shard", "Replicate", "Partial"]
@@ -211,7 +213,7 @@ class Shard(torch._C._distributed.Shard):
     @staticmethod
     @maybe_run_for_local_tensor
     def local_shard_size_and_offset(
-        curr_local_size: int,
+        curr_local_size: IntLikeType,
         num_chunks: int,
         rank: _RankTypeT,
     ) -> tuple[_RankTypeT, _RankTypeT]:
@@ -392,7 +394,7 @@ class Shard(torch._C._distributed.Shard):
     def _maybe_pad_tensor(
         self,
         local_tensor: torch.Tensor,
-        logical_dim_size: int,
+        logical_dim_size: IntLikeType,
         num_chunks: int,
     ) -> torch.Tensor:
         from torch.fx.experimental.symbolic_shapes import guard_or_true
@@ -414,7 +416,7 @@ class Shard(torch._C._distributed.Shard):
     def _maybe_unpad_tensor(
         self,
         local_tensor: torch.Tensor,
-        logical_dim_size: int,
+        logical_dim_size: IntLikeType,
         num_chunks: int,
     ) -> torch.Tensor:
         from torch.fx.experimental.symbolic_shapes import guard_or_true
@@ -434,7 +436,7 @@ class Shard(torch._C._distributed.Shard):
         local_tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        current_logical_shape: list[int],
+        current_logical_shape: Sequence[IntLikeType],
     ) -> torch.Tensor:
         """
         This function all_gather all shards and return a tensor that
@@ -462,7 +464,7 @@ class Shard(torch._C._distributed.Shard):
         local_tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        shard_index: int,
+        shard_index: IntLikeType,
     ) -> torch.Tensor:
         """
         transform from replicated tensor to a sharded tensor on
@@ -489,11 +491,11 @@ class Shard(torch._C._distributed.Shard):
 
     @staticmethod
     def _compute_padding_info(
-        current_logical_shape: list[int],
+        current_logical_shape: Sequence[IntLikeType],
         num_chunks: int,
         old_shard_dim: int,
         new_shard_dim: int,
-    ) -> tuple[bool, int, int, bool, int, int]:
+    ) -> tuple[bool, IntLikeType, int, bool, IntLikeType, int]:
         from torch.fx.experimental.symbolic_shapes import guard_or_true
 
         results = []
@@ -508,7 +510,7 @@ class Shard(torch._C._distributed.Shard):
     @staticmethod
     @maybe_run_for_local_tensor
     def _pad_for_new_shard_dim(
-        current_logical_shape: list[int],
+        current_logical_shape: Sequence[IntLikeType],
         local_tensor: torch.Tensor,
         num_chunks: int,
         old_shard_dim: int,
@@ -543,7 +545,7 @@ class Shard(torch._C._distributed.Shard):
     @staticmethod
     @maybe_run_for_local_tensor
     def _unpad_for_new_shard_dim(
-        current_logical_shape: list[int],
+        current_logical_shape: Sequence[IntLikeType],
         local_tensor: torch.Tensor,
         num_chunks: int,
         old_shard_dim: int,
@@ -582,7 +584,7 @@ class Shard(torch._C._distributed.Shard):
         local_tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        current_logical_shape: list[int],
+        current_logical_shape: Sequence[IntLikeType],
         new_shard_dim: int,
     ) -> torch.Tensor:
         """
@@ -857,7 +859,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         self,
         tensor: torch.Tensor,
         num_chunks: int,
-        index: int,
+        index: IntLikeType,
         *,
         with_padding: bool = True,
         contiguous: bool = True,
@@ -891,7 +893,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         local_tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        current_logical_shape: list[int],
+        current_logical_shape: Sequence[IntLikeType],
     ) -> torch.Tensor:
         """
         Replay the replicate-to-shard process to understand how to stitch shards back.
@@ -986,6 +988,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
         shape = [1] * self.dim + [logical_dim_size]
+        # pyrefly: ignore [no-matching-overload]
         indices_tensor = torch.arange(
             logical_dim_size, device=local_tensor.device
         ).view(shape)
@@ -1050,7 +1053,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         local_tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        shard_index: int,
+        shard_index: IntLikeType,
     ) -> torch.Tensor:
         """
         Transform from replicated tensor to a strided-sharded tensor on the current rank.
@@ -1097,7 +1100,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
     @maybe_run_for_local_tensor
     def local_shard_size_and_offset(
         self,
-        curr_local_size: int,
+        curr_local_size: IntLikeType,
         num_chunks: int,
         rank: RankType,
         return_first_offset: bool = True,
@@ -1127,6 +1130,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
         shape = [1] * self.dim + [curr_local_size]
+        # pyrefly: ignore [no-matching-overload]
         indices_tensor = torch.arange(
             curr_local_size,
         ).view(shape)
@@ -1384,7 +1388,9 @@ class _MaskPartial(Partial):
     @staticmethod
     @maybe_run_for_local_tensor
     def _mask_tensor(
-        tensor: torch.Tensor, local_offset_on_dim: int, local_shard_size: int
+        tensor: torch.Tensor,
+        local_offset_on_dim: IntLikeType,
+        local_shard_size: IntLikeType,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Build the input mask and save it for the current partial placement
         # this is so that the output of embedding op can reuse the same partial
@@ -1393,8 +1399,10 @@ class _MaskPartial(Partial):
             tensor >= local_offset_on_dim + local_shard_size
         )
         # mask the input tensor
+        # pyrefly: ignore [unsupported-operation]
         masked_tensor = tensor.clone() - local_offset_on_dim
         masked_tensor[mask] = 0
+        # pyrefly: ignore [bad-return]
         return mask, masked_tensor
 
     def _partition_value(

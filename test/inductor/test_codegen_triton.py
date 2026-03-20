@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import unittest
 
 import sympy
 
@@ -14,8 +15,14 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler, promote_types
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU,
+    HAS_GPU_AND_TRITON,
+)
 from torch.utils._sympy.functions import FloorDiv, TruncToFloat, TruncToInt
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -181,6 +188,19 @@ class TestCodegenTriton(InductorTestCase):
             _materialize_trunc_to_float_expr(float_expr, torch.float64),
             sympy.Float(0.5) + TruncToFloat(s0),
         )
+
+    @unittest.skipUnless(torch.version.hip is not None, "pointer_range_32 is HIP-only")
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    def test_pointer_range_in_generated_code(self):
+        """Verify tt.pointer_range=32 appears in generated Triton code on HIP."""
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(64, 64, device=GPU_TYPE, dtype=torch.bfloat16)
+        _, code = run_and_get_code(torch.compile(fn), x)
+        code_str = " ".join(code)
+        self.assertIn("tt.pointer_range", code_str)
 
 
 if __name__ == "__main__":

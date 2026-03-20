@@ -1107,6 +1107,40 @@ std::string KinetoEvent::metadataJson() const {
       [](const auto&) -> std::string { return std::string(""); }));
 }
 
+int64_t KinetoEvent::externalId() const {
+  // Mirrors libkineto::ChromeTraceLogger::handleActivity() "External id" logic.
+  // libkineto::ChromeTraceLogger checks op.linkedActivity() != nullptr; here we
+  // check linkedCorrelationId() > 0, which is equivalent because PyTorch
+  // correlation IDs are monotonically increasing from 1 (a valid linked
+  // activity always has a non-zero correlation ID).
+  uint64_t linked = linkedCorrelationId();
+  if (linked > 0) {
+    return static_cast<int64_t>(linked);
+  }
+
+  // Orphaned GPU activities (no linked CPU op) in these types should not get
+  // an External id, to avoid incorrect cross-linking in trace viewers.
+  auto type = static_cast<libkineto::ActivityType>(activityType());
+  if (type != libkineto::ActivityType::GPU_MEMCPY &&
+      type != libkineto::ActivityType::GPU_MEMSET &&
+      type != libkineto::ActivityType::CONCURRENT_KERNEL &&
+      type != libkineto::ActivityType::CUDA_RUNTIME &&
+      type != libkineto::ActivityType::CUDA_DRIVER &&
+      type != libkineto::ActivityType::PRIVATEUSE1_RUNTIME &&
+      type != libkineto::ActivityType::PRIVATEUSE1_DRIVER) {
+    return static_cast<int64_t>(result_->visit(c10::overloaded(
+        [](const ExtraFields<EventType::TorchOp>& e) -> uint64_t {
+          return e.correlation_id_;
+        },
+        [](const ExtraFields<EventType::Kineto>& e) -> uint64_t {
+          return e.correlation_id_;
+        },
+        [](const auto&) -> uint64_t { return 0; })));
+  }
+
+  return 0;
+}
+
 #define FORWARD_FROM_RESULT(method_name, result_expr)                        \
   decltype(std::declval<KinetoEvent>().method_name())                        \
   KinetoEvent::method_name() const {                                         \
@@ -1163,6 +1197,9 @@ TYPED_ATTR(Kineto, linkedCorrelationId, [&]() {
   const auto linked = e.linked_activity_.lock();
   return linked ? linked->correlationID() : 0;
 }())
+TYPED_ATTR(Kineto, flowId, e.flow.id)
+TYPED_ATTR(Kineto, flowType, e.flow.type)
+TYPED_ATTR(Kineto, flowStart, static_cast<bool>(e.flow.start))
 #undef TYPED_ATTR
 #undef TYPED_ATTR_WITH_DEFAULT
 

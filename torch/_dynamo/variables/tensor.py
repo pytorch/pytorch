@@ -783,6 +783,16 @@ class TensorVariable(VariableTracker):
                 hints=[],
             )
 
+        if name == "__deepcopy__":
+            unimplemented(
+                gb_type="Attempted to copy.deepcopy a tensor",
+                context=f"copy.deepcopy({self})",
+                explanation="Dynamo does not support copy.deepcopy() on tensors.",
+                hints=[
+                    "Avoid calling copy.deepcopy() on tensors inside compiled regions.",
+                ],
+            )
+
         # Only override builtin tensor methods
         # The user can manually add override handling
         # with a decorator for other methods (e.g. a dispatch subclass with other methods)
