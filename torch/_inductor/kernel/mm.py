@@ -664,9 +664,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
 
     if use_aten_gemm_kernels():
-        is_rocm = torch.version.hip is not None
         # For Aten on rocm, Separate Aten template and Triton template due to they have different kernel inputs
-        if is_rocm:
+        if torch.version.hip:
             templates_to_use_aten: list[ExternKernelChoice | KernelTemplate] = []
             templates_to_use_aten.append(aten_addmm)
             if (
