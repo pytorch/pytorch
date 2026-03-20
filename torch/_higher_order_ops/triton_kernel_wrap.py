@@ -911,7 +911,7 @@ def analyze_kernel_access(
     fn_name: str,
     num_args: int,
     tensor_names: tuple[str, ...],
-    tensor_arg_indices: frozenset[int] | None = None,
+    tensor_arg_indices: frozenset[int] | None,
 ) -> TensorAccesses:
     """
     Analyzes the graph to detect which arguments are written to and which are read.
@@ -995,6 +995,7 @@ def analyze_kernel_access(
                     op.fn_call_name,
                     len(op.args),
                     nested_names,
+                    None,
                 )
                 # Map back from StarDep names to args
                 written_set = {dep.name for dep in accesses.read_writes.writes}
