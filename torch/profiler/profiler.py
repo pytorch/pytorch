@@ -414,24 +414,14 @@ class _KinetoProfile:
             group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
 
-    def events(self, include_python_events=False):
+    def events(self):
         """
         Returns the list of unaggregated profiler events,
         to be used in the trace callback or after the profiling is finished
         """
         if self.profiler is None:
             raise AssertionError("Profiler must be initialized before accessing events")
-        events = self.profiler.function_events
-        if include_python_events:
-            python_events = getattr(self.profiler, "_python_function_events", [])
-            if python_events:
-                return EventList(
-                    list(events) + list(python_events),
-                    use_device=events._use_device,
-                    profile_memory=events._profile_memory,
-                    with_flops=events._with_flops,
-                )
-        return events
+        return self.profiler.function_events
 
     def add_metadata(self, key: str, value: str) -> None:
         """
