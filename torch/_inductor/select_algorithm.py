@@ -2050,8 +2050,11 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         """
         from torch._inductor.dependencies import MemoryDep
 
-        # Filter eligible epilogues
+        # Filter eligible epilogues.  Only one epilogue per output_param
+        # (store site) is allowed — the template has a single store per param
+        # and can only emit one <STORE_OUTPUT_{i}> placeholder for it.
         epilogues = []
+        seen_params: set[str] = set()
         for epilogue_node in epilogue_nodes:
             if isinstance(epilogue_node.node, ir.MultiOutput):
                 continue
@@ -2063,13 +2066,17 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             if len(dep_names) != 1:
                 continue
             output_buf = next(iter(dep_names))
+            output_param = output_param_mapping[output_buf]
+            if output_param in seen_params:
+                continue
+            seen_params.add(output_param)
             epilogue_writes = epilogue_node.read_writes.writes
             raw_st = next(iter(epilogue_writes)).name if epilogue_writes else None
             epilogues.append(
                 (
                     epilogue_node,
                     output_buf,
-                    output_param_mapping[output_buf],
+                    output_param,
                     raw_st if raw_st != output_buf else None,
                 )
             )
