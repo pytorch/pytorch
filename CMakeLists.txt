@@ -679,6 +679,7 @@ string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 # Set linker max-page-size to 64KiB on AArch64 Linux
 if(LINUX AND CPU_AARCH64)
   add_link_options_if_supported("-z,max-page-size=0x10000")
+  add_compile_options(-mno-fix-cortex-a53-835769 -mno-fix-cortex-a53-843419)
 endif()
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
