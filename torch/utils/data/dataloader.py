@@ -307,9 +307,9 @@ class DataLoader(Generic[_T_co]):
             will be used as the device if ``pin_memory=True``.
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
-        worker_method (str, optional): The worker method to be used. Either ``"multiprocessing"`` for process-based workers
-            or ``"thread"`` for thread-based workers. (default: ``"multiprocessing"``). Note that ``"thread"`` is not
-            supported for MacOS and Windows.
+        worker_method (str, optional): Worker implementation to use, ``"multiprocessing"`` for process-based workers
+            or ``"thread"`` for thread-based workers. (default: ``"multiprocessing"``).
+            Note that ``"thread"`` is only support on Linux.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -340,6 +340,11 @@ class DataLoader(Generic[_T_co]):
 
     .. warning:: Setting `in_order` to `False` can harm reproducibility and may lead to a skewed data
                  distribution being fed to the trainer in cases with imbalanced data.
+
+    .. warning:: Using ``"thread"`` with mutable or non-thread-safe datasets will cause data races
+         and undefined behavior. Additionally, thread workers only achieve true parallelism when
+        the data loading pipeline releases the GIL (e.g., during I/O, or PyTorch transforms).
+        For CPU-bound pure Python transforms, ``"multiprocessing"`` is recommended.
     """
 
     dataset: Dataset[_T_co]

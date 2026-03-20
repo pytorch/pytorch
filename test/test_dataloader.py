@@ -3926,7 +3926,7 @@ class TestThreadingDataLoader(TestCase):
             def __getitem__(self, idx):
                 worker_info = torch.utils.data.get_worker_info()
 
-                generator = worker_info.rng.torch_generator
+                generator = worker_info.rng.torch_generator if worker_info.rng else None
 
                 # Apply random transform using thread-specific generator
                 random_val = (
@@ -3961,6 +3961,25 @@ class TestThreadingDataLoader(TestCase):
         self.assertTrue(
             flattened1 == flattened2,
             "Results should be deterministic when using thread specific rng",
+        )
+
+        # Multiprocessing comparison
+        dataset3 = ThreadRNGTransformDataset(100)
+        torch.manual_seed(42)
+        mp_loader = DataLoader(
+            dataset3,
+            batch_size=10,
+            num_workers=3,
+            worker_method="multiprocessing",
+            shuffle=False,
+        )
+        results3 = list(mp_loader)
+
+        flattened3 = [item for batch in results3 for item in batch]
+
+        self.assertTrue(
+            flattened2 == flattened3,
+            "Multiprocessing and threading based results should be match when using thread specific rng ",
         )
 
     def test_threading_different_batch_sizes(self):
