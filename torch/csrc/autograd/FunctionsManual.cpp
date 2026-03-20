@@ -17,6 +17,7 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/Activation.h>
+#include <ATen/native/GridSamplerUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
@@ -43,6 +44,7 @@ using at::OptionalIntArrayRef;
 using at::Scalar;
 using at::Tensor;
 using at::TensorList;
+using at::native::detail::GridSamplerInterpolation;
 
 const char* kCudnnDoubleBackwardMsg =
     "Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API. To run double backwards, please disable the CuDNN backend temporarily while running the forward pass of your RNN. For example: \nwith torch.backends.cudnn.flags(enabled=False):\n    output = model(inputs)";
@@ -7585,18 +7587,6 @@ static std::pair<Tensor, Tensor> gs_compute_coords(
   return {std::move(ix), padding_grad * unnorm_scale};
 }
 
-static Tensor gs_horner_eval(
-    const Tensor& x,
-    std::initializer_list<double> coeffs) {
-  auto it = coeffs.begin();
-  TORCH_INTERNAL_ASSERT(it != coeffs.end());
-  auto y = at::full_like(x, *it++);
-  for (; it != coeffs.end(); ++it) {
-    y = y * x + *it;
-  }
-  return y;
-}
-
 static Tensor gs_accum_sumprod_k(const Tensor& values, const Tensor& basis) {
   return (values * basis.unsqueeze(1)).sum(-1);
 }
@@ -7777,6 +7767,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     bool align_corners,
     std::array<bool, 3> output_mask) {
   Tensor d_grad_output, d_input, d_grid;
+  const auto interpolation =
+      static_cast<GridSamplerInterpolation>(interpolation_mode);
 
   // ggI -> d_grad_output: gather ggI at grid positions = grid_sampler_2d(ggI,
   // grid)
@@ -7797,7 +7789,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   }
   // d_input from ggI is 0: grad_input has no dependence on input.
   // For nearest, grad_grid = 0, so all ggGrid contributions vanish.
-  if (!ggGrid.defined() || interpolation_mode == 1 /* nearest */) {
+  if (!ggGrid.defined() || interpolation == GridSamplerInterpolation::Nearest) {
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
   auto H = input.size(2), W = input.size(3);
@@ -7816,7 +7808,7 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
   auto ggG_x = ggGrid.select(-1, 0) * gix_mult; // (N, out_H, out_W)
   auto ggG_y = ggGrid.select(-1, 1) * giy_mult;
 
-  if (interpolation_mode == 0 /* bilinear */) {
+  if (interpolation == GridSamplerInterpolation::Bilinear) {
     auto x1 = x0 + 1;
     auto y1 = y0 + 1;
     // Stack all 4 tap indices: [N, Ho, Wo, 4] order: nw, ne, sw, se
@@ -7828,18 +7820,24 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       I = gs_gather2d_multi(input, h_stk, w_stk, zeros_oob);
     }
 
-    // Derivative weights [N, Ho, Wo, 4]: d(w_k)/d(ix) and d(w_k)/d(iy)
-    auto omx = 1.0 - fx, omy = 1.0 - fy;
-    auto dw_dx = at::stack({-omy, omy, -fy, fy}, -1);
-    auto dw_dy = at::stack({-omx, -fx, omx, fx}, -1);
+    Tensor dw_dx, dw_dy;
+    if (output_mask[0] || output_mask[1]) {
+      // Derivative weights [N, Ho, Wo, 4]: d(w_k)/d(ix) and d(w_k)/d(iy)
+      auto omx = 1.0 - fx, omy = 1.0 - fy;
+      dw_dx = at::stack({-omy, omy, -fy, fy}, -1);
+      dw_dy = at::stack({-omx, -fx, omx, fx}, -1);
+    }
 
     if (output_mask[0]) {
       auto sum_dx = gs_accum_sumprod_k(I, dw_dx);
       auto sum_dy = gs_accum_sumprod_k(I, dw_dy);
       auto contrib = sum_dx * ggG_x.unsqueeze(1);
       contrib.addcmul_(sum_dy, ggG_y.unsqueeze(1));
-      d_grad_output =
-          d_grad_output.defined() ? d_grad_output + contrib : contrib;
+      if (d_grad_output.defined()) {
+        d_grad_output.add_(contrib);
+      } else {
+        d_grad_output = std::move(contrib);
+      }
     }
 
     if (output_mask[1]) {
@@ -7860,7 +7858,11 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       auto d_grid_x = gix_mult * ggG_y * cross;
       auto d_grid_y = giy_mult * ggG_x * cross;
       auto contrib = at::stack({std::move(d_grid_x), std::move(d_grid_y)}, -1);
-      d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
+      if (d_grid.defined()) {
+        d_grid.add_(contrib);
+      } else {
+        d_grid = std::move(contrib);
+      }
     }
   } else { // bicubic
     // Native bicubic backward uses raw unnormalized coordinates with a constant
@@ -7890,28 +7892,28 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     auto fy1 = fy + 1.0, fy2 = 1.0 - fy, fy3 = 2.0 - fy;
 
     auto cx_t = at::stack(
-        {gs_horner_eval(fx1, {A, -5 * A, 8 * A, -4 * A}),
-         gs_horner_eval(fx, {A + 2, -(A + 3), 0.0, 1.0}),
-         gs_horner_eval(fx2, {A + 2, -(A + 3), 0.0, 1.0}),
-         gs_horner_eval(fx3, {A, -5 * A, 8 * A, -4 * A})},
+        {(((A * fx1) - (5 * A)) * fx1 + (8 * A)) * fx1 - (4 * A),
+         (((A + 2) * fx) - (A + 3)) * fx.square() + 1,
+         (((A + 2) * fx2) - (A + 3)) * fx2.square() + 1,
+         (((A * fx3) - (5 * A)) * fx3 + (8 * A)) * fx3 - (4 * A)},
         -1);
     auto dcx_t = at::stack(
-        {gs_horner_eval(fx1, {3 * A, -10 * A, 8 * A}),
-         gs_horner_eval(fx, {3 * (A + 2), -2 * (A + 3), 0.0}),
-         -gs_horner_eval(fx2, {3 * (A + 2), -2 * (A + 3), 0.0}),
-         gs_horner_eval(fx3, {-3 * A, 10 * A, -8 * A})},
+        {(((3 * A) * fx1) - (10 * A)) * fx1 + (8 * A),
+         (((3 * (A + 2)) * fx) - (2 * (A + 3))) * fx,
+         -((((3 * (A + 2)) * fx2) - (2 * (A + 3))) * fx2),
+         (((-3 * A) * fx3) + (10 * A)) * fx3 - (8 * A)},
         -1);
     auto cy_t = at::stack(
-        {gs_horner_eval(fy1, {A, -5 * A, 8 * A, -4 * A}),
-         gs_horner_eval(fy, {A + 2, -(A + 3), 0.0, 1.0}),
-         gs_horner_eval(fy2, {A + 2, -(A + 3), 0.0, 1.0}),
-         gs_horner_eval(fy3, {A, -5 * A, 8 * A, -4 * A})},
+        {(((A * fy1) - (5 * A)) * fy1 + (8 * A)) * fy1 - (4 * A),
+         (((A + 2) * fy) - (A + 3)) * fy.square() + 1,
+         (((A + 2) * fy2) - (A + 3)) * fy2.square() + 1,
+         (((A * fy3) - (5 * A)) * fy3 + (8 * A)) * fy3 - (4 * A)},
         -1);
     auto dcy_t = at::stack(
-        {gs_horner_eval(fy1, {3 * A, -10 * A, 8 * A}),
-         gs_horner_eval(fy, {3 * (A + 2), -2 * (A + 3), 0.0}),
-         -gs_horner_eval(fy2, {3 * (A + 2), -2 * (A + 3), 0.0}),
-         gs_horner_eval(fy3, {-3 * A, 10 * A, -8 * A})},
+        {(((3 * A) * fy1) - (10 * A)) * fy1 + (8 * A),
+         (((3 * (A + 2)) * fy) - (2 * (A + 3))) * fy,
+         -((((3 * (A + 2)) * fy2) - (2 * (A + 3))) * fy2),
+         (((-3 * A) * fy3) + (10 * A)) * fy3 - (8 * A)},
         -1);
 
     // Stack coefficients into [N, Ho, Wo, 4] tensors for vectorized outer
@@ -7932,18 +7934,24 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     auto I_all = gs_gather2d_bc_multi(
         input, h_idx_bc, w_idx_bc, padding_mode, align_corners);
 
-    // 1D weight outer products → [N, Ho, Wo, 16] where k=j*4+i
-    // B_dx[k] = dcx[i]*cy[j],  B_dy[k] = cx[i]*dcy[j]
-    auto B_dx = gs_outer_last(dcx_t, cy_t);
-    auto B_dy = gs_outer_last(cx_t, dcy_t);
+    Tensor B_dx, B_dy;
+    if (output_mask[0] || output_mask[1]) {
+      // 1D weight outer products → [N, Ho, Wo, 16] where k=j*4+i
+      // B_dx[k] = dcx[i]*cy[j],  B_dy[k] = cx[i]*dcy[j]
+      B_dx = gs_outer_last(dcx_t, cy_t);
+      B_dy = gs_outer_last(cx_t, dcy_t);
+    }
 
     if (output_mask[0]) {
       auto sum_dx = gs_accum_sumprod_k(I_all, B_dx);
       auto sum_dy = gs_accum_sumprod_k(I_all, B_dy);
       auto contrib = sum_dx * ggG_x_bc.unsqueeze(1);
       contrib.addcmul_(sum_dy, ggG_y_bc.unsqueeze(1));
-      d_grad_output =
-          d_grad_output.defined() ? d_grad_output + contrib : contrib;
+      if (d_grad_output.defined()) {
+        d_grad_output.add_(contrib);
+      } else {
+        d_grad_output = std::move(contrib);
+      }
     }
 
     if (output_mask[1]) {
@@ -7964,23 +7972,35 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
     // weights).
     if (output_mask[2]) {
       auto d2cx_t = at::stack(
-          {6 * A * fx1 - 10 * A,
-           6 * (A + 2) * fx - 2 * (A + 3),
-           6 * (A + 2) * fx2 - 2 * (A + 3),
-           6 * A * fx3 - 10 * A},
+          {((6 * A) * fx1) - (10 * A),
+           ((6 * (A + 2)) * fx) - (2 * (A + 3)),
+           ((6 * (A + 2)) * fx2) - (2 * (A + 3)),
+           ((6 * A) * fx3) - (10 * A)},
           -1);
       auto d2cy_t = at::stack(
-          {6 * A * fy1 - 10 * A,
-           6 * (A + 2) * fy - 2 * (A + 3),
-           6 * (A + 2) * fy2 - 2 * (A + 3),
-           6 * A * fy3 - 10 * A},
+          {((6 * A) * fy1) - (10 * A),
+           ((6 * (A + 2)) * fy) - (2 * (A + 3)),
+           ((6 * (A + 2)) * fy2) - (2 * (A + 3)),
+           ((6 * A) * fy3) - (10 * A)},
           -1);
-      auto B_dx2 = gs_outer_last(d2cx_t, cy_t);
-      auto B_dy2 = gs_outer_last(cx_t, d2cy_t);
-      auto B_dxdy = gs_outer_last(dcx_t, dcy_t);
-      auto dot_dx2 = (grad_output * gs_accum_sumprod_k(I_all, B_dx2)).sum(1);
-      auto dot_dy2 = (grad_output * gs_accum_sumprod_k(I_all, B_dy2)).sum(1);
-      auto dot_dxdy = (grad_output * gs_accum_sumprod_k(I_all, B_dxdy)).sum(1);
+      Tensor dot_dx2, dot_dy2, dot_dxdy;
+      for (const auto j : c10::irange(4)) {
+        auto cy_j = cy_t.select(-1, j);
+        auto dcy_j = dcy_t.select(-1, j);
+        auto d2cy_j = d2cy_t.select(-1, j);
+        for (const auto i : c10::irange(4)) {
+          auto tap_dot = (grad_output * I_all.select(-1, j * 4 + i)).sum(1);
+          auto dx2_term = tap_dot * d2cx_t.select(-1, i) * cy_j;
+          auto dy2_term = tap_dot * cx_t.select(-1, i) * d2cy_j;
+          auto dxdy_term = tap_dot * dcx_t.select(-1, i) * dcy_j;
+          dot_dx2 =
+              dot_dx2.defined() ? dot_dx2.add_(dx2_term) : std::move(dx2_term);
+          dot_dy2 =
+              dot_dy2.defined() ? dot_dy2.add_(dy2_term) : std::move(dy2_term);
+          dot_dxdy = dot_dxdy.defined() ? dot_dxdy.add_(dxdy_term)
+                                        : std::move(dxdy_term);
+        }
+      }
       auto ggrid_d_grid_x = ggG_x_bc * dot_dx2;
       ggrid_d_grid_x.addcmul_(ggG_y_bc, dot_dxdy);
       ggrid_d_grid_x.mul_(x_scale);
@@ -7989,8 +8009,11 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       ggrid_d_grid_y.mul_(y_scale);
       auto ggrid_d_grid =
           at::stack({std::move(ggrid_d_grid_x), std::move(ggrid_d_grid_y)}, -1);
-      d_grid =
-          d_grid.defined() ? d_grid + ggrid_d_grid : std::move(ggrid_d_grid);
+      if (d_grid.defined()) {
+        d_grid.add_(ggrid_d_grid);
+      } else {
+        d_grid = std::move(ggrid_d_grid);
+      }
     }
   }
   return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
@@ -8007,6 +8030,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     bool align_corners,
     std::array<bool, 3> output_mask) {
   Tensor d_grad_output, d_input, d_grid;
+  const auto interpolation =
+      static_cast<GridSamplerInterpolation>(interpolation_mode);
 
   if (output_mask[0] && ggI.defined()) {
     d_grad_output = at::grid_sampler_3d(
@@ -8022,11 +8047,11 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
         align_corners,
         {false, true}));
   }
-  if (!ggGrid.defined() || interpolation_mode == 1 /* nearest */) {
+  if (!ggGrid.defined() || interpolation == GridSamplerInterpolation::Nearest) {
     return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
   }
   TORCH_CHECK_NOT_IMPLEMENTED(
-      interpolation_mode == 0 /* bilinear */,
+      interpolation == GridSamplerInterpolation::Bilinear,
       "grid_sampler_3d double backward not implemented for interpolation_mode=",
       interpolation_mode);
 
@@ -8063,38 +8088,41 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     I = gs_gather3d_multi(input, d_stk, h_stk, w_stk, zeros_oob);
   }
 
-  // Trilinear derivative weights [N, Do, Ho, Wo, 8]
-  auto omx = 1.0 - fx, omy = 1.0 - fy, omz = 1.0 - fz;
-  auto dw_dx = at::stack(
-      {-omy * omz,
-       omy * omz,
-       -fy * omz,
-       fy * omz,
-       -omy * fz,
-       omy * fz,
-       -fy * fz,
-       fy * fz},
-      -1);
-  auto dw_dy = at::stack(
-      {-omx * omz,
-       -fx * omz,
-       omx * omz,
-       fx * omz,
-       -omx * fz,
-       -fx * fz,
-       omx * fz,
-       fx * fz},
-      -1);
-  auto dw_dz = at::stack(
-      {-omx * omy,
-       -fx * omy,
-       -omx * fy,
-       -fx * fy,
-       omx * omy,
-       fx * omy,
-       omx * fy,
-       fx * fy},
-      -1);
+  Tensor dw_dx, dw_dy, dw_dz;
+  if (output_mask[0] || output_mask[1]) {
+    // Trilinear derivative weights [N, Do, Ho, Wo, 8]
+    auto omx = 1.0 - fx, omy = 1.0 - fy, omz = 1.0 - fz;
+    dw_dx = at::stack(
+        {-omy * omz,
+         omy * omz,
+         -fy * omz,
+         fy * omz,
+         -omy * fz,
+         omy * fz,
+         -fy * fz,
+         fy * fz},
+        -1);
+    dw_dy = at::stack(
+        {-omx * omz,
+         -fx * omz,
+         omx * omz,
+         fx * omz,
+         -omx * fz,
+         -fx * fz,
+         omx * fz,
+         fx * fz},
+        -1);
+    dw_dz = at::stack(
+        {-omx * omy,
+         -fx * omy,
+         -omx * fy,
+         -fx * fy,
+         omx * omy,
+         fx * omy,
+         omx * fy,
+         fx * fy},
+        -1);
+  }
 
   if (output_mask[0]) {
     auto sum_dx = gs_accum_sumprod_k(I, dw_dx);
@@ -8103,7 +8131,11 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto d_gO = sum_dx * ggG_x.unsqueeze(1);
     d_gO.addcmul_(sum_dy, ggG_y.unsqueeze(1));
     d_gO.addcmul_(sum_dz, ggG_z.unsqueeze(1));
-    d_grad_output = d_grad_output.defined() ? d_grad_output + d_gO : d_gO;
+    if (d_grad_output.defined()) {
+      d_grad_output.add_(d_gO);
+    } else {
+      d_grad_output = std::move(d_gO);
+    }
   }
 
   if (output_mask[1]) {
@@ -8128,12 +8160,32 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     auto I_bne = I.select(-1, 5);
     auto I_bsw = I.select(-1, 6);
     auto I_bse = I.select(-1, 7);
-    auto d2_xy = (1 - fz_) * (I_tnw - I_tne - I_tsw + I_tse) +
-        fz_ * (I_bnw - I_bne - I_bsw + I_bse);
-    auto d2_xz = (1 - fy_) * (I_tnw - I_tne - I_bnw + I_bne) +
-        fy_ * (I_tsw - I_tse - I_bsw + I_bse);
-    auto d2_yz = (1 - fx_) * (I_tnw - I_tsw - I_bnw + I_bsw) +
-        fx_ * (I_tne - I_tse - I_bne + I_bse);
+    auto top_xy = I_tnw - I_tne;
+    top_xy.sub_(I_tsw);
+    top_xy.add_(I_tse);
+    auto bottom_xy = I_bnw - I_bne;
+    bottom_xy.sub_(I_bsw);
+    bottom_xy.add_(I_bse);
+    auto d2_xy = (1 - fz_) * top_xy;
+    d2_xy.add_(fz_ * bottom_xy);
+
+    auto top_xz = I_tnw - I_tne;
+    top_xz.sub_(I_bnw);
+    top_xz.add_(I_bne);
+    auto bottom_xz = I_tsw - I_tse;
+    bottom_xz.sub_(I_bsw);
+    bottom_xz.add_(I_bse);
+    auto d2_xz = (1 - fy_) * top_xz;
+    d2_xz.addcmul_(fy_, bottom_xz);
+
+    auto top_yz = I_tnw - I_tsw;
+    top_yz.sub_(I_bnw);
+    top_yz.add_(I_bsw);
+    auto bottom_yz = I_tne - I_tse;
+    bottom_yz.sub_(I_bne);
+    bottom_yz.add_(I_bse);
+    auto d2_yz = (1 - fx_) * top_yz;
+    d2_yz.addcmul_(fx_, bottom_yz);
     auto dot_xy = (grad_output * d2_xy).sum(1);
     auto dot_xz = (grad_output * d2_xz).sum(1);
     auto dot_yz = (grad_output * d2_yz).sum(1);
@@ -8148,7 +8200,11 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_3d_double_backward(
     d_grid_z.mul_(giz_mult);
     auto contrib = at::stack(
         {std::move(d_grid_x), std::move(d_grid_y), std::move(d_grid_z)}, -1);
-    d_grid = d_grid.defined() ? d_grid + contrib : std::move(contrib);
+    if (d_grid.defined()) {
+      d_grid.add_(contrib);
+    } else {
+      d_grid = std::move(contrib);
+    }
   }
   return {std::move(d_grad_output), std::move(d_input), std::move(d_grid)};
 }
