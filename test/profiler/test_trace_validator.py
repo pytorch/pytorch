@@ -182,7 +182,8 @@ class TestTraceValidatorE2E(TestCase):
         torch.cuda.synchronize()
 
         traces = glob.glob(os.path.join(resnet_dir, "*.pt.trace.json"))
-        assert traces, f"No trace file produced in {resnet_dir}"
+        if not traces:
+            raise RuntimeError(f"No trace file produced in {resnet_dir}")
         cls.resnet_trace_path = traces[0]
         with open(cls.resnet_trace_path) as f:
             data = json.load(f)
@@ -223,7 +224,8 @@ class TestTraceValidatorE2E(TestCase):
         torch.cuda.synchronize()
 
         traces = glob.glob(os.path.join(complex_dir, "*.pt.trace.json"))
-        assert traces, f"No trace file produced in {complex_dir}"
+        if not traces:
+            raise RuntimeError(f"No trace file produced in {complex_dir}")
         cls.complex_trace_path = traces[0]
         with open(cls.complex_trace_path) as f:
             data = json.load(f)
