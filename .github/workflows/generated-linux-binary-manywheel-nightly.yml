@@ -394,7 +394,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_10-rocm7_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -509,7 +509,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.2
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_10-rocm7_2
       build_environment: linux-binary-manywheel
     secrets:
@@ -1058,7 +1058,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_11-rocm7_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -1173,7 +1173,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.2
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_11-rocm7_2
       build_environment: linux-binary-manywheel
     secrets:
@@ -1722,7 +1722,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_12-rocm7_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -1837,7 +1837,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.2
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_12-rocm7_2
       build_environment: linux-binary-manywheel
     secrets:
@@ -2386,7 +2386,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_13-rocm7_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -2501,7 +2501,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.2
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_13-rocm7_2
       build_environment: linux-binary-manywheel
     secrets:
@@ -3050,7 +3050,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_13t-rocm7_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -3165,7 +3165,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.2
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_13t-rocm7_2
       build_environment: linux-binary-manywheel
     secrets:
@@ -3714,7 +3714,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_14-rocm7_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -3829,7 +3829,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.2
       DESIRED_PYTHON: "3.14"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_14-rocm7_2
       build_environment: linux-binary-manywheel
     secrets:
@@ -4378,7 +4378,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.1
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_14t-rocm7_1
       build_environment: linux-binary-manywheel
     secrets:
@@ -4493,7 +4493,7 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.2
       DESIRED_PYTHON: "3.14t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      timeout-minutes: 300
+      timeout-minutes: 420
       build_name: manywheel-py3_14t-rocm7_2
       build_environment: linux-binary-manywheel
     secrets:
