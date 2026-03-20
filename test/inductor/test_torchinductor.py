@@ -3676,6 +3676,26 @@ class CommonTemplate:
             b_neg = torch.full_like(a, -divisor)
             self.common(fn, (a, b_neg))
 
+    def test_floordiv_div_by_zero_int(self):
+        # Integer floor division by zero is undefined behavior on CUDA/Triton.
+        # Eager (c10::div_floor_integer) and compiled (Triton floordiv) must
+        # both return 0 for elements where the divisor is zero.
+        def fn(a, b):
+            return torch.floor_divide(a, b)
+
+        for dtype in [torch.int32, torch.int64]:
+            # All-zero divisor: every element should be 0
+            a = torch.tensor([0, 1, -1, 5, -5], device=self.device, dtype=dtype)
+            b = torch.zeros(5, device=self.device, dtype=dtype)
+            expected = torch.zeros(5, device=self.device, dtype=dtype)
+            self.common(fn, (a, b))
+
+            # Mixed: some zero, some non-zero divisors
+            a = torch.tensor([10, 0, -7, 3, 6], device=self.device, dtype=dtype)
+            b = torch.tensor([3, 0, 0, -2, 2], device=self.device, dtype=dtype)
+            expected = torch.tensor([3, 0, 0, -2, 3], device=self.device, dtype=dtype)
+            self.common(fn, (a, b))
+
     def test_floordiv_float_accuracy(self):
         # Triton uses an approximate reciprocal for fp32 division, so a naive
         # floor(a / b) can be off by one when the true quotient is very close
