@@ -142,7 +142,7 @@ struct is_vec_specialized_for<c10::BFloat16> : std::bool_constant<true> {};
 // bfloat16_t followed by a DUP intrinsic is incorrectly folded into a
 // single FP16 fmov. This function allows us to break the const-folding
 // chain to prevent this. It also happens to give us a good instruction
-// sequence when we aren't targetting native BF16 so it's used in all
+// sequence when we aren't targeting native BF16 so it's used in all
 // cases.
 template <typename T>
 static inline T disable_const_folding(T x) {
@@ -260,7 +260,8 @@ class Vectorized<c10::BFloat16> : public Vectorized16<
   Vectorized() = default;
 
   Vectorized(c10::BFloat16 val)
-      : Vectorized16(at_vdupq_n_bf16(c10::bit_cast<at_bfloat16_t>(disable_const_folding(val.x)))) {}
+      : Vectorized16(at_vdupq_n_bf16(
+            c10::bit_cast<at_bfloat16_t>(disable_const_folding(val.x)))) {}
   Vectorized(float val) : Vectorized(c10::BFloat16(val)) {}
   Vectorized(
       value_type val0,
