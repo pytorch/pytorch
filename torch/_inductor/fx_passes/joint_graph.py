@@ -362,12 +362,10 @@ class UniformValueConstantFolder(ConstantFolder):
         # handle before view ops because this changes value
         if node.target is aten.view.dtype:
             (input_tensor, output_dtype), kwargs = self.fetch_args_kwargs_from_env(node)
-            # view.dtype fails on 0-d tensors when element size changes
-            # (e.g., 0-d complex tensors can't be viewed as float)
-            if (
-                input_tensor.ndim == 0
-                and input_tensor.element_size() != output_dtype.itemsize
-            ):
+            # view.dtype with different element sizes changes element count
+            # (e.g., complex64 [1+0j] viewed as float32 becomes [1.0, 0.0]),
+            # making uniform values non-uniform. Also crashes on 0-d tensors.
+            if input_tensor.element_size() != output_dtype.itemsize:
                 return self.unknown_value
             return super(ConstantFolder, self).run_node(node)
 

@@ -1429,6 +1429,7 @@ class TestCustomOpAutoTune(TestCase):
 
         torch.testing.assert_close(result, test_x @ test_weight, rtol=1e-1, atol=1e-1)
 
+    @skipIfXpu
     def test_cudagraph_memory_cleanup(self):
         """Test that CUDA graph destruction automatically cleans up cuBLAS workspaces."""
         if self.device != "cuda":
@@ -1473,6 +1474,7 @@ class TestCustomOpAutoTune(TestCase):
             f"Memory leak detected: baseline={baseline_memory}, after_cleanup={memory_after_cleanup}",
         )
 
+    @skipIfXpu
     def test_cudagraph_memory_cleanup_benchmarker(self):
         """Test that CUDA graph benchmarking cleans up memory without leaking."""
         if self.device != "cuda":

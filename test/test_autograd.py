@@ -5075,6 +5075,19 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
             self.assertTrue(torch.autograd.is_view_replay_enabled())
         self.assertFalse(torch.autograd.is_view_replay_enabled())
 
+        prev = torch.autograd.is_view_replay_enabled()
+        ctx = torch.autograd._force_original_view_tracking(not prev)
+        # Construction eagerly sets state (function-form behavior).
+        self.assertEqual(torch.autograd.is_view_replay_enabled(), not prev)
+        with ctx:
+            self.assertEqual(torch.autograd.is_view_replay_enabled(), not prev)
+            out = f(x)
+            self.assertTrue(
+                ("ViewBackward" if not prev else "AsStridedBackward")
+                in str(out.grad_fn)
+            )
+        self.assertEqual(torch.autograd.is_view_replay_enabled(), prev)
+
         # Test as a function
         torch.autograd._force_original_view_tracking(False)
         out = f(x)
@@ -5085,6 +5098,20 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         out = f(x)
         self.assertTrue("ViewBackward" in str(out.grad_fn))
         self.assertTrue(torch.autograd.is_view_replay_enabled())
+
+        prev = torch.autograd.is_view_replay_enabled()
+
+        @torch.autograd._force_original_view_tracking(not prev)
+        def g(x):
+            return f(x)
+
+        # __call__ undoes the __init__ mutation, so ambient state is restored.
+        self.assertEqual(torch.autograd.is_view_replay_enabled(), prev)
+        out = g(x)
+        self.assertTrue(
+            ("ViewBackward" if not prev else "AsStridedBackward") in str(out.grad_fn)
+        )
+        self.assertEqual(torch.autograd.is_view_replay_enabled(), prev)
 
     def test_unsafe_set_version_counter(self):
         x = torch.ones(2, requires_grad=True).clone()

@@ -485,11 +485,11 @@ class TestProfiler(TestCase):
         self.assertEqual(len(observed_during_run), worker_threads)
         self.assertEqual(len(observed_during_run), len(set(observed_during_run)))
 
-    def payload(self, use_cuda=False):
-        x = torch.randn(10, 10)
+    def payload(self, use_cuda=False, tensor_size=10):
+        x = torch.randn(tensor_size, tensor_size)
         if use_cuda:
             x = x.cuda()
-        y = torch.randn(10, 10)
+        y = torch.randn(tensor_size, tensor_size)
         if use_cuda:
             y = y.cuda()
         z = torch.mm(x, y)
@@ -1542,6 +1542,133 @@ class TestProfiler(TestCase):
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_flow_events_parity(self):
+        """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            x = torch.randn(32, 32, device="cuda")
+            torch.mm(x, x)
+
+        # Collect async CPU->GPU flow info from events()
+        events_with_flow = [
+            e for e in prof.events() if e.flow_id is not None and e.flow_id != 0
+        ]
+        self.assertGreater(
+            len(events_with_flow), 0, "No flow events found via events()"
+        )
+
+        for e in events_with_flow:
+            self.assertIsInstance(e.flow_id, int)
+            self.assertIsInstance(e.flow_type, int)
+            self.assertIsInstance(e.flow_start, bool)
+
+        # Verify parity with Chrome trace JSON for async CPU->GPU flow
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_flow_events = [
+                e
+                for e in j["traceEvents"]
+                if e.get("ph") in ("s", "f") and e.get("cat") == "ac2g"
+            ]
+            json_flow_starts = {e["id"] for e in json_flow_events if e["ph"] == "s"}
+            json_flow_ends = {e["id"] for e in json_flow_events if e["ph"] == "f"}
+
+            # kLinkAsyncCpuGpu = 2
+            ac2g_events = [e for e in events_with_flow if e.flow_type == 2]
+            events_flow_starts = {e.flow_id for e in ac2g_events if e.flow_start}
+            events_flow_ends = {e.flow_id for e in ac2g_events if not e.flow_start}
+
+            self.assertEqual(
+                json_flow_starts,
+                events_flow_starts,
+                "Async CPU->GPU flow start IDs differ between events() and Chrome trace",
+            )
+            self.assertEqual(
+                json_flow_ends,
+                events_flow_ends,
+                "Async CPU->GPU flow end IDs differ between events() and Chrome trace",
+            )
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_timestamp_consistency(self):
+        """Verify that FunctionEvent timestamps can reconstruct Chrome trace ts values."""
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            x = torch.randn(32, 32, device="cuda")
+            torch.mm(x, x)
+
+        trace_start_ns = prof.profiler.kineto_results.trace_start_ns()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            # Chrome trace is relative to a different base time which is not exposed in Python.
+            # It's probably not important to do so as we still have the relative differences
+            # in duration.
+            base_time_ns = j.get("baseTimeNanoseconds", 0)
+
+            # Grab mm timestamp from events() and json
+            fe_mm = next((e for e in prof.events() if e.name == "aten::mm"), None)
+            json_mm = next(
+                (
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name") == "aten::mm" and e.get("ph") == "X"
+                ),
+                None,
+            )
+
+            # Reconstruct Chrome trace ts from events():
+            # absolute_ns = mm_op_start_us * 1000 + trace_start_ns
+            # chrome_ts = (absolute_ns - base_time_ns) / 1000 -> realign with json timeframe
+            absolute_ns = int(fe_mm.time_range.start * 1000) + trace_start_ns
+            recovered_ts = (absolute_ns - base_time_ns) / 1000
+            self.assertEqual(
+                recovered_ts,
+                json_mm["ts"],
+                msg="Recovered Chrome trace ts doesn't match JSON for aten::mm",
+            )
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_external_id_parity(self):
+        """Verify that FunctionEvent.external_id matches External id in Chrome trace JSON."""
+        from collections import Counter
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            with torch.profiler.record_function("test_region"):
+                x = torch.randn(32, 32, device="cuda")
+                y = torch.mm(x, x)
+                z = y + x
+                z.cpu()
+                torch.cuda.synchronize()
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+
+            json_name_ext = Counter(
+                (e["name"], e["args"]["External id"])
+                for e in j["traceEvents"]
+                if e.get("args", {}).get("External id") is not None
+            )
+            events_name_ext = Counter(
+                (ev.name, ev.external_id) for ev in prof.events() if ev.external_id != 0
+            )
+
+            self.assertEqual(
+                events_name_ext,
+                json_name_ext,
+                "(name, external_id) pairs differ between events() and Chrome trace JSON",
+            )
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_profiler_cuda_sync_events(self):
         device = torch.device("cuda:0")
         t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
@@ -2452,7 +2579,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                     disable_external_correlation=disable_external_correlation
                 ),
             ) as prof:
-                self.payload(use_cuda=True)
+                self.payload(use_cuda=True, tensor_size=256)
             validate_json(prof, disable_external_correlation)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
@@ -2815,6 +2942,27 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             x = torch.randn(10, 10).to("cuda")
             y = torch.mm(x, x)
         self.assertEqual(len(p.events()), 0)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not TEST_CUDA, "CUDA is required")
+    def test_kineto_kernel_metadata_in_trace(self):
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+            self.payload(use_cuda=True)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+            events = trace["traceEvents"]
+            kernel_events = [e for e in events if e.get("cat", "") == "kernel"]
+            self.assertGreater(
+                len(kernel_events), 0, "Error: No kernel events in trace"
+            )
+            for ke in kernel_events:
+                args = ke.get("args", {})
+                name = ke.get("name", "<unknown>")
+                for key in ["device", "stream", "correlation", "grid", "block"]:
+                    self.assertIn(key, args, f"kernel '{name}' missing '{key}'")
 
 
 class SimpleNet(nn.Module):

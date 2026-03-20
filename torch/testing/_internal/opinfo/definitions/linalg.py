@@ -2800,20 +2800,6 @@ python_ref_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_python_ref_errors"
             ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.bfloat16, torch.float16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.bfloat16, torch.float16),
-            ),
         ),
     ),
     PythonRefInfo(
@@ -2826,23 +2812,6 @@ python_ref_db: list[OpInfo] = [
         "_refs.linalg.vecdot",
         torch_opinfo_name="linalg.vecdot",
         op_db=op_db,
-        skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16, torch.bfloat16),
-            ),
-        ),
     ),
     ReductionPythonRefInfo(
         "_refs.linalg.vector_norm",
@@ -2850,21 +2819,6 @@ python_ref_db: list[OpInfo] = [
         supports_out=True,
         op_db=op_db,
         skips=(
-            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_python_ref_torch_fallback",
-                device_type="mps",
-                dtypes=(torch.float16,),
-            ),
             # Exception: norm ops are not supported for complex yet
             DecorateInfo(
                 unittest.expectedFailure,

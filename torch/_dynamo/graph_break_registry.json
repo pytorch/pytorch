@@ -4248,6 +4248,26 @@
       ]
     }
   ],
+  "GB4501": [
+    {
+      "Gb_type": "Reconstruction of FakeIdVariable",
+      "Context": "str(self.value)",
+      "Explanation": "A fake id produced by id() on a compile-time container cannot be reconstructed across a graph break.",
+      "Hints": [
+        "Avoid using id() on containers in code that may graph-break."
+      ]
+    }
+  ],
+  "GB4198": [
+    {
+      "Gb_type": "Attempted to copy.deepcopy a tensor",
+      "Context": "copy.deepcopy({self})",
+      "Explanation": "Dynamo does not support copy.deepcopy() on tensors.",
+      "Hints": [
+        "Avoid calling copy.deepcopy() on tensors inside compiled regions."
+      ]
+    }
+  ],
   "GB0344": [
     {
       "Gb_type": "wrap_with_autocast: expected constant arg",
