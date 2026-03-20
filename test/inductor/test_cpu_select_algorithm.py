@@ -801,7 +801,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 3)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
 
-
     @unittest.skipIf(
         not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
     )
@@ -1562,7 +1561,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 counters["inductor"]["cpp_epilogue_fusion_counter"],
                 0,
             )
-
 
     @unittest.skipIf(
         not torch.cpu._is_amx_tile_supported(), "AMX ISA support is required"
