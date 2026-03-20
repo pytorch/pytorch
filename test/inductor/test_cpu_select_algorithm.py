@@ -249,6 +249,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @requires_mkl
     @requires_onednn
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
@@ -756,6 +757,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @requires_mkl
     @requires_onednn
     @set_num_threads(1)
     @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
