@@ -911,6 +911,7 @@ def analyze_kernel_access(
     fn_name: str,
     num_args: int,
     tensor_names: tuple[str, ...],
+    tensor_arg_indices: frozenset[int] | None = None,
 ) -> TensorAccesses:
     """
     Analyzes the graph to detect which arguments are written to and which are read.
@@ -985,6 +986,9 @@ def analyze_kernel_access(
                     )
                 # Create placeholder names for nested function arguments
                 nested_names = tuple(f"_arg{i}" for i in range(len(op.args)))
+
+                # Do not pass tensor_arg_indices, most outer call of
+                # analyze_kernel_access will filter Param nodes.
                 accesses = analyze_kernel_access(
                     functions,
                     # pyrefly: ignore [bad-argument-type]
@@ -1026,6 +1030,8 @@ def analyze_kernel_access(
 
             if isinstance(arg, Param):
                 if arg.idx >= num_args:
+                    continue
+                if tensor_arg_indices is not None and arg.idx not in tensor_arg_indices:
                     continue
                 if arg.idx not in access_count:
                     access_count[arg.idx] = 1
@@ -1120,27 +1126,22 @@ def identify_accessed_tensors(
         # detection, so each top level invocation needs a clean cache
         analyze_kernel_access.reset()
         get_tma_stores.reset()
-        accesses = analyze_kernel_access(
+
+        # Build frozenset of indices corresponding to tensor args only.
+        # Used to filter out scalars which are transitively captured as mutated
+        # during traversal.
+        tensor_arg_indices = frozenset(
+            i
+            for i, name in enumerate(ordered_arg_names)
+            if isinstance(kwargs.get(name), (Tensor, TensorBox))
+        )
+
+        return analyze_kernel_access(
             functions,
             kernel_name,
             len(ordered_arg_names),
             tuple(ordered_arg_names),
-        )
-        tensor_writes = OrderedSet(
-            dep
-            for dep in accesses.read_writes.writes
-            if isinstance(kwargs.get(dep.name), (Tensor, TensorBox))
-        )
-        tensor_reads = OrderedSet(
-            dep
-            for dep in accesses.read_writes.reads
-            if isinstance(kwargs.get(dep.name), (Tensor, TensorBox))
-        )
-        return TensorAccesses(
-            ReadWrites(
-                reads=tensor_reads, writes=tensor_writes, index_exprs=OrderedSet()
-            ),
-            can_fuse_epilogue=accesses.can_fuse_epilogue,
+            tensor_arg_indices,
         )
     except Exception:
         log.warning(
