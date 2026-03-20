@@ -204,7 +204,8 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         - body_fn and cond_fn's output cannot alias any of the inputs. A clone is required.
 
-        - body_fn and cond_fn can in-place mutate module buffers during inference.
+        - During inference, body_fn and cond_fn can in-place mutate tensors that are not
+          carried_inputs, such as module buffers and captured tensors from the enclosing scope.
 
     """
 
