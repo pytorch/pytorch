@@ -5591,6 +5591,61 @@ def max_pool2d_with_indices_backward(
     return grad_input
 
 
+@register_decomposition(aten.addbmm.default)
+@out_wrapper(exact_dtype=True)
+@pw_cast_for_opmath
+def addbmm(self, batch1, batch2, *, beta=1, alpha=1):
+    if not self.is_floating_point() and not self.is_complex():
+        beta = int(beta)
+        alpha = int(alpha)
+    result = torch.bmm(batch1, batch2).sum(0)
+    if not isinstance(alpha, numbers.Number) or alpha != 1:
+        result = result * alpha
+    if beta == 0:
+        return result
+    if not isinstance(beta, numbers.Number) or beta != 1:
+        self = self * beta
+    return self + result
+
+
+@register_decomposition(aten._conj_physical.default)
+def _conj_physical(self):
+    return torch.conj_physical(self)
+
+
+@register_decomposition(aten.rrelu_with_noise.default)
+def rrelu_with_noise(self, noise, lower=0.125, upper=1.0 / 3, training=False, generator=None):
+    if training:
+        neg_slope = torch.empty_like(self).uniform_(lower, upper)
+        noise.copy_(neg_slope)
+    else:
+        neg_slope = (lower + upper) / 2
+    return torch.where(self >= 0, self, self * neg_slope)
+
+
+@register_decomposition(aten._pdist_forward.default)
+def _pdist_forward(self, p: float = 2):
+    n = self.shape[0]
+    dists = torch.cdist(self.unsqueeze(0), self.unsqueeze(0), p).squeeze(0)
+    rows, cols = torch.triu_indices(n, n, offset=1, device=self.device)
+    return dists[rows, cols]
+
+
+@register_decomposition(aten._cdist_forward.default)
+def _cdist_forward(x1, x2, p: float, compute_mode=None):
+    diff = x1.unsqueeze(-2) - x2.unsqueeze(-3)
+    if p == 0:
+        return (diff != 0).sum(-1).to(x1.dtype)
+    elif p == 1:
+        return diff.abs().sum(-1)
+    elif p == 2:
+        return (diff * diff).sum(-1).sqrt()
+    elif p == float("inf"):
+        return diff.abs().amax(-1)
+    else:
+        return diff.abs().pow(p).sum(-1).pow(1.0 / p)
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)

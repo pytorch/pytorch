@@ -376,6 +376,59 @@ class TestDecompShardingWithComms(DTensorTestBase):
             ),
         )
 
+    @with_comms
+    def test_new_decomp_addbmm(self):
+        aten = torch.ops.aten
+        mesh = self.build_device_mesh()
+        dt = lambda t: DTensor.from_local(t, mesh, [Replicate()])
+        a = torch.randn(4, 6, device=self.device_type)
+        b1 = torch.randn(2, 4, 3, device=self.device_type)
+        b2 = torch.randn(2, 3, 6, device=self.device_type)
+        ref = torch.addbmm(a, b1, b2)
+        out = aten.addbmm(dt(a), dt(b1), dt(b2))
+        self.assertIsInstance(out, DTensor)
+        self.assertEqual(ref, out.full_tensor())
+
+    @with_comms
+    def test_new_decomp_conj_physical(self):
+        aten = torch.ops.aten
+        mesh = self.build_device_mesh()
+        dt = lambda t: DTensor.from_local(t, mesh, [Replicate()])
+        x = torch.randn(3, 4, dtype=torch.cfloat, device=self.device_type)
+        out = aten._conj_physical(dt(x))
+        self.assertIsInstance(out, DTensor)
+
+    @with_comms
+    def test_new_decomp_rrelu(self):
+        aten = torch.ops.aten
+        mesh = self.build_device_mesh()
+        dt = lambda t: DTensor.from_local(t, mesh, [Replicate()])
+        x = dt(torch.randn(3, 4, device=self.device_type))
+        noise = dt(torch.empty(3, 4, device=self.device_type))
+        out = aten.rrelu_with_noise(x, noise, 0.125, 0.333, False)
+        self.assertIsInstance(out, DTensor)
+
+    @with_comms
+    def test_new_decomp_pdist(self):
+        aten = torch.ops.aten
+        mesh = self.build_device_mesh()
+        dt = lambda t: DTensor.from_local(t, mesh, [Replicate()])
+        x = dt(torch.randn(8, 5, device=self.device_type))
+        out = aten._pdist_forward(x, 2.0)
+        self.assertIsInstance(out, DTensor)
+        self.assertEqual(out.shape, torch.Size([28]))
+
+    @with_comms
+    def test_new_decomp_cdist(self):
+        aten = torch.ops.aten
+        mesh = self.build_device_mesh()
+        dt = lambda t: DTensor.from_local(t, mesh, [Replicate()])
+        x1 = torch.randn(2, 5, 3, device=self.device_type)
+        x2 = torch.randn(2, 4, 3, device=self.device_type)
+        ref = torch.cdist(x1, x2, 2.0)
+        out = torch.cdist(dt(x1), dt(x2), 2.0)
+        self.assertIsInstance(out, DTensor)
+        self.assertEqual(ref, out.full_tensor(), atol=1e-5, rtol=1e-5)
 
 
 if __name__ == "__main__":
