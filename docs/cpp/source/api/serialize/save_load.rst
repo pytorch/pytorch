@@ -5,25 +5,19 @@ The primary interface for serialization uses the ``torch::save`` and
 ``torch::load`` functions, which can save and load tensors, modules,
 and optimizers.
 
-Save Function
--------------
+Save Functions
+--------------
 
-.. cpp:function:: template<typename Value> void torch::save(const Value& value, const std::string& filename)
+.. doxygenfunction:: torch::save(const Value &value, SaveToArgs&&... args)
 
-   Saves a value to a file.
+.. doxygenfunction:: torch::save(const std::vector<torch::Tensor> &tensor_vec, SaveToArgs&&... args)
 
-   :param value: The value to save (Tensor, Module, etc.)
-   :param filename: The path to save to.
+Load Functions
+--------------
 
-Load Function
--------------
+.. doxygenfunction:: torch::load(Value &value, LoadFromArgs&&... args)
 
-.. cpp:function:: template<typename Value> void torch::load(Value& value, const std::string& filename)
-
-   Loads a value from a file.
-
-   :param value: The value to load into.
-   :param filename: The path to load from.
+.. doxygenfunction:: torch::load(std::vector<torch::Tensor> &tensor_vec, LoadFromArgs&&... args)
 
 Saving and Loading Tensors
 --------------------------

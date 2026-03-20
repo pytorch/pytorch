@@ -11,9 +11,7 @@ DeviceGuard Class
    :members:
    :undoc-members:
 
-.. cpp:function:: int16_t torch::stable::accelerator::getCurrentDeviceIndex()
-
-   Returns the current accelerator device index.
+.. doxygenfunction:: torch::stable::accelerator::getCurrentDeviceIndex
 
 **Example:**
 
@@ -179,25 +177,6 @@ in the PyTorch source tree.
 Parallelization Utilities
 -------------------------
 
-.. cpp:function:: void torch::stable::parallel_for(int64_t begin, int64_t end, int64_t grain_size, const std::function<void(int64_t, int64_t)>& f)
+.. doxygenfunction:: torch::stable::parallel_for
 
-   Parallel for loop over a range.
-
-   :param begin: Start of the range.
-   :param end: End of the range (exclusive).
-   :param grain_size: Minimum iterations per thread.
-   :param f: Function to execute, receives (start, end) of sub-range.
-
-   **Example:**
-
-   .. code-block:: cpp
-
-      torch::stable::parallel_for(0, tensor.numel(), 1000, [&](int64_t start, int64_t end) {
-          for (int64_t i = start; i < end; i++) {
-              data[i] = compute(i);
-          }
-      });
-
-.. cpp:function:: int64_t torch::stable::get_num_threads()
-
-   Get the number of threads used for parallelization.
+.. doxygenfunction:: torch::stable::get_num_threads

@@ -12,6 +12,7 @@ organized by module.
    c10/index
    autograd/index
    cuda/index
+   xpu/index
 
 .. toctree::
    :maxdepth: 2

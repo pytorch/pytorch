@@ -20,6 +20,25 @@ ArrayRef
    // Can also use initializer list
    auto tensor = at::zeros({3, 4, 5});  // implicitly converts
 
+OptionalArrayRef
+----------------
+
+.. doxygenclass:: c10::OptionalArrayRef
+   :members:
+   :undoc-members:
+
+**Example:**
+
+.. code-block:: cpp
+
+   void my_function(c10::OptionalArrayRef<int64_t> sizes = c10::nullopt) {
+       if (sizes.has_value()) {
+           for (auto s : sizes.value()) {
+               // process sizes
+           }
+       }
+   }
+
 Optional
 --------
 

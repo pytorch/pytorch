@@ -30,21 +30,13 @@ Device Management
 Stream Management
 -----------------
 
-.. cpp:function:: CUDAStream c10::cuda::getDefaultCUDAStream(int device_index = -1)
+.. doxygenfunction:: c10::cuda::getDefaultCUDAStream
 
-   Returns the default CUDA stream for the given device.
+.. doxygenfunction:: c10::cuda::getCurrentCUDAStream
 
-.. cpp:function:: CUDAStream c10::cuda::getCurrentCUDAStream(int device_index = -1)
+.. doxygenfunction:: c10::cuda::setCurrentCUDAStream
 
-   Returns the current CUDA stream for the given device.
-
-.. cpp:function:: void c10::cuda::setCurrentCUDAStream(CUDAStream stream)
-
-   Sets the current CUDA stream.
-
-.. cpp:function:: CUDAStream c10::cuda::getStreamFromPool(bool high_priority = false, int device_index = -1)
-
-   Gets a CUDA stream from the stream pool.
+.. doxygenfunction:: c10::cuda::getStreamFromPool(const bool isHighPriority, DeviceIndex device)
 
 **Example:**
 

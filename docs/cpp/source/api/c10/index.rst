@@ -55,5 +55,7 @@ C10 Categories
    :maxdepth: 1
 
    device
+   guards
+   streams
    types
    utilities

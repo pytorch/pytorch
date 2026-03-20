@@ -7,16 +7,7 @@ to graph leaves.
 Gradient Functions
 ------------------
 
-.. cpp:function:: variable_list torch::autograd::grad(const variable_list& outputs, const variable_list& inputs, const variable_list& grad_outputs = {}, std::optional<bool> retain_graph = std::nullopt, bool create_graph = false, bool allow_unused = false)
-
-   Computes the sum of gradients of given tensors w.r.t. graph leaves.
-
-   :param outputs: Tensors that will be differentiated.
-   :param inputs: Tensors with respect to which the gradient will be computed.
-   :param grad_outputs: Gradients w.r.t. each output (defaults to ones).
-   :param retain_graph: If false, the graph used to compute the grad will be freed.
-   :param create_graph: If true, graph of the derivative will be constructed.
-   :param allow_unused: If false, specifying unused inputs raises an error.
+.. doxygenfunction:: torch::autograd::grad
 
 .. cpp:function:: void torch::autograd::backward(const variable_list& tensors, const variable_list& grad_tensors = {}, std::optional<bool> retain_graph = std::nullopt, bool create_graph = false)
 

@@ -48,19 +48,9 @@ CUDAStreamGuard
 OptionalCUDAGuard
 -----------------
 
-.. cpp:class:: c10::cuda::OptionalCUDAGuard
-
-   A CUDA guard that can optionally be initialized. Unlike CUDAGuard,
-   this can be created without setting a device, then set_device() can
-   be called later.
-
-   .. cpp:function:: OptionalCUDAGuard()
-
-      Default constructor. Does not set any device.
-
-   .. cpp:function:: void set_device(Device device)
-
-      Sets the device. Can be called at most once.
+.. doxygenstruct:: c10::cuda::OptionalCUDAGuard
+   :members:
+   :undoc-members:
 
 **Example:**
 
@@ -71,3 +61,30 @@ OptionalCUDAGuard
        guard.set_device(0);
    }
    // Guard only switches device if set_device was called
+
+OptionalCUDAStreamGuard
+-----------------------
+
+.. doxygenstruct:: c10::cuda::OptionalCUDAStreamGuard
+   :members:
+   :undoc-members:
+
+CUDAMultiStreamGuard
+--------------------
+
+.. doxygenstruct:: c10::cuda::CUDAMultiStreamGuard
+   :members:
+   :undoc-members:
+
+**Example:**
+
+.. code-block:: cpp
+
+   at::cuda::CUDAStream stream0 = at::cuda::getStreamFromPool(false, 0);
+   at::cuda::CUDAStream stream1 = at::cuda::getStreamFromPool(false, 1);
+
+   {
+       at::cuda::CUDAMultiStreamGuard multi_guard({stream0, stream1});
+       // stream0 is current on device 0, stream1 on device 1
+   }
+   // Both streams restored

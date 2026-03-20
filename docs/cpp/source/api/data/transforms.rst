@@ -18,17 +18,17 @@ Stack
 
 Stacks a batch of tensors into a single tensor.
 
-.. cpp:class:: torch::data::transforms::Stack
+.. doxygenstruct:: torch::data::transforms::Stack
+   :members:
+   :undoc-members:
 
-   Transform that stacks a batch of tensors into a single tensor.
+**Example:**
 
-   **Example:**
+.. code-block:: cpp
 
-   .. code-block:: cpp
-
-      auto dataset = torch::data::datasets::MNIST("./data")
-          .map(torch::data::transforms::Normalize<>(0.5, 0.5))
-          .map(torch::data::transforms::Stack<>());
+   auto dataset = torch::data::datasets::MNIST("./data")
+       .map(torch::data::transforms::Normalize<>(0.5, 0.5))
+       .map(torch::data::transforms::Stack<>());
 
 Chaining Transforms
 -------------------

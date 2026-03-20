@@ -48,7 +48,9 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../build/aten/src/ATen/Functions.h \
                          ../../../build/aten/src/ATen/core/TensorBody.h \
                          ../../../c10/core/Device.h \
+                         ../../../c10/core/DeviceGuard.h \
                          ../../../c10/core/DeviceType.h \
+                         ../../../c10/core/Stream.h \
                          ../../../c10/util/Half.h \
                          ../../../c10/util/ArrayRef.h \
                          ../../../c10/util/OptionalArrayRef.h \
