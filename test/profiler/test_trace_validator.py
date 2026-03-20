@@ -94,17 +94,31 @@ class TestTraceValidatorRules(TestCase):
 
     def test_rule5_nccl_metadata_pass(self):
         events = [
-            {"ph": "X", "name": "record_param_comms", "ts": 100, "dur": 10,
-             "args": {"Collective name": "all_reduce", "dtype": "float32",
-                      "In msg nelems": 1024, "Out msg nelems": 1024,
-                      "Group size": 8}},
+            {
+                "ph": "X",
+                "name": "record_param_comms",
+                "ts": 100,
+                "dur": 10,
+                "args": {
+                    "Collective name": "all_reduce",
+                    "dtype": "float32",
+                    "In msg nelems": 1024,
+                    "Out msg nelems": 1024,
+                    "Group size": 8,
+                },
+            },
         ]
         self.assertEqual(check_nccl_metadata(events), [])
 
     def test_rule5_nccl_metadata_fail(self):
         events = [
-            {"ph": "X", "name": "record_param_comms", "ts": 100, "dur": 10,
-             "args": {"Collective name": "all_reduce"}},
+            {
+                "ph": "X",
+                "name": "record_param_comms",
+                "ts": 100,
+                "dur": 10,
+                "args": {"Collective name": "all_reduce"},
+            },
         ]
         v = check_nccl_metadata(events)
         self.assertEqual(len(v), 1)
@@ -122,7 +136,6 @@ class TestTraceValidatorRules(TestCase):
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 @skipIfTorchDynamo("profiler tests do not work with dynamo")
 class TestTraceValidatorE2E(TestCase):
-
     resnet_trace_path: str = ""
     complex_trace_path: str = ""
     resnet_events: list = []
