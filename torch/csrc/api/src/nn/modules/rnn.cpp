@@ -655,7 +655,7 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
   auto output = std::get<0>(result);
   auto hidden = std::make_tuple(std::get<1>(result), std::get<2>(result));
 
-  return std::make_tuple(output, hidden);
+  return std::make_tuple(std::move(output), std::move(hidden));
 }
 
 std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward(
