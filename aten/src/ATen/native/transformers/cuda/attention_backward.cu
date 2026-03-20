@@ -1046,11 +1046,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   }
   constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
   int64_t batch_size = query.size(0);
+  int64_t num_heads = query.size(1);
 
-  if (batch_size > MAX_BATCH_SIZE) {
+  if (batch_size > MAX_BATCH_SIZE || num_heads > MAX_BATCH_SIZE) {
     TORCH_CHECK(dropout_p == 0.0,
                 "Efficient attention backward cannot handle dropout when "
-                "the batch size exceeds (", MAX_BATCH_SIZE, ").");
+                "the batch size or number of heads exceeds (", MAX_BATCH_SIZE, ").");
   }
   auto grad_out_t = grad_out_.transpose(1, 2);
   auto query_t = query.transpose(1, 2);
@@ -1105,7 +1106,93 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), std::move(grad_bias));
   };
 
-  // process in chunks if batch size exceeds maximum
+  // Wrapper that chunks along the heads dimension when num_heads exceeds
+  // the CUDA grid dimension limit. Inputs are in transposed (B,M,H,K)
+  // format; outputs are transposed back to (B,H,M,K).
+  auto process_chunk_with_head_splitting = [&](
+      const Tensor& grad_out_chunk,
+      const Tensor& query_chunk,
+      const Tensor& key_chunk,
+      const Tensor& value_chunk,
+      const std::optional<Tensor>& attn_bias_chunk,
+      const Tensor& out_chunk,
+      const Tensor& logsumexp_chunk)
+      -> std::tuple<Tensor, Tensor, Tensor, Tensor> {
+    // Heads are dim 2 in transposed (B,M,H,K) tensors
+    int64_t h = query_chunk.size(2);
+    if (h <= MAX_BATCH_SIZE) {
+      return process_chunk(grad_out_chunk, query_chunk, key_chunk,
+                           value_chunk, attn_bias_chunk, out_chunk,
+                           logsumexp_chunk);
+    }
+
+    // Allocate full-size outputs in (B,H,M,K) format
+    int64_t B_chunk = query_chunk.size(0);
+    int64_t M_q = query_chunk.size(1);
+    int64_t M_k = key_chunk.size(1);
+    int64_t K_q = query_chunk.size(3);
+    int64_t K_v = value_chunk.size(3);
+
+    Tensor final_gq = grad_input_mask[0]
+        ? at::empty({B_chunk, h, M_q, K_q}, query_chunk.options())
+        : Tensor{};
+    Tensor final_gk = grad_input_mask[1]
+        ? at::empty({B_chunk, h, M_k, K_q}, key_chunk.options())
+        : Tensor{};
+    Tensor final_gv = grad_input_mask[2]
+        ? at::empty({B_chunk, h, M_k, K_v}, value_chunk.options())
+        : Tensor{};
+    Tensor final_gb;
+    if (grad_input_mask[3] && attn_bias_chunk.has_value() &&
+        attn_bias_chunk.value().defined()) {
+      final_gb = at::zeros({B_chunk, h,
+                            attn_bias_chunk.value().size(2),
+                            attn_bias_chunk.value().size(3)},
+                           attn_bias_chunk.value().options());
+    }
+
+    for (int64_t h_start = 0; h_start < h; h_start += MAX_BATCH_SIZE) {
+      int64_t h_end = std::min(h_start + MAX_BATCH_SIZE, h);
+
+      // Slice transposed tensors on dim 2 (heads)
+      Tensor go_h = grad_out_chunk.slice(2, h_start, h_end);
+      Tensor q_h = query_chunk.slice(2, h_start, h_end);
+      Tensor k_h = key_chunk.slice(2, h_start, h_end);
+      Tensor v_h = value_chunk.slice(2, h_start, h_end);
+      Tensor out_h = out_chunk.slice(2, h_start, h_end);
+
+      // Slice non-transposed tensors on dim 1 (heads)
+      std::optional<Tensor> bias_h;
+      if (attn_bias_chunk.has_value() && attn_bias_chunk.value().defined()) {
+        bias_h = attn_bias_chunk.value().slice(1, h_start, h_end);
+      }
+      Tensor lse_h = logsumexp_chunk.numel() > 0
+          ? logsumexp_chunk.slice(1, h_start, h_end)
+          : logsumexp_chunk;
+
+      auto [gq, gk, gv, gb] = process_chunk(
+          go_h, q_h, k_h, v_h, bias_h, out_h, lse_h);
+
+      // Outputs from process_chunk are in (B,H_chunk,M,K) format
+      if (grad_input_mask[0] && gq.defined()) {
+        final_gq.slice(1, h_start, h_end).copy_(gq);
+      }
+      if (grad_input_mask[1] && gk.defined()) {
+        final_gk.slice(1, h_start, h_end).copy_(gk);
+      }
+      if (grad_input_mask[2] && gv.defined()) {
+        final_gv.slice(1, h_start, h_end).copy_(gv);
+      }
+      if (grad_input_mask[3] && gb.defined()) {
+        final_gb.slice(1, h_start, h_end).copy_(gb);
+      }
+    }
+
+    return std::make_tuple(std::move(final_gq), std::move(final_gk),
+                           std::move(final_gv), std::move(final_gb));
+  };
+
+  // process in chunks if batch size or num_heads exceeds maximum
   if (batch_size > MAX_BATCH_SIZE) {
     Tensor final_grad_q, final_grad_k, final_grad_v, final_grad_bias;
 
@@ -1155,8 +1242,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
       Tensor logsumexp_chunk = logsumexp.numel() > 0 ? logsumexp.slice(0, start, end) : logsumexp;
 
       auto [chunk_grad_q, chunk_grad_k, chunk_grad_v, chunk_grad_bias] =
-          process_chunk(grad_out_chunk, query_chunk, key_chunk, value_chunk,
-                      attn_bias_chunk, out_chunk, logsumexp_chunk);
+          process_chunk_with_head_splitting(grad_out_chunk, query_chunk,
+                      key_chunk, value_chunk, attn_bias_chunk, out_chunk,
+                      logsumexp_chunk);
 
       if (grad_input_mask[0] && chunk_grad_q.defined()) {
         final_grad_q.slice(0, start, end).copy_(chunk_grad_q);
@@ -1178,13 +1266,13 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
         std::move(final_grad_v),
         std::move(final_grad_bias));
   }
-  // when batch size is within allowed size, no chunking needed
+  // when batch size is within allowed size, only head chunking may be needed
   else {
     std::optional<Tensor> attn_bias_opt;
     if (attn_bias.defined()) {
       attn_bias_opt = attn_bias;
     }
-    return process_chunk(grad_out_t, query_t, key_t, value_t, attn_bias_opt, out_t, logsumexp);
+    return process_chunk_with_head_splitting(grad_out_t, query_t, key_t, value_t, attn_bias_opt, out_t, logsumexp);
   }
 }
 
