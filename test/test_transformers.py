@@ -3173,10 +3173,10 @@ class TestSDPACudaOnly(NNTestCase):
                 enable_gqa=True,
             )
         self.assertEqual(attn_output_math, attn_output_cudnn, atol=5e-3, rtol=3e-3)
-        
+
         attention_mask_custom = torch.zeros(10, 10, dtype=torch.bool).to("cuda")
         attention_mask_custom[:7, :7] = torch.triu(torch.ones(7, 7, dtype=torch.bool), diagonal=0)
-        
+
         with sdpa_kernel(SDPBackend.MATH):
             attn_output_math = torch.nn.functional.scaled_dot_product_attention(
                 query=q.transpose(1, 2),
@@ -3199,7 +3199,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         attention_mask_custom = torch.zeros(10, 10, dtype=torch.bool).to("cuda")
         attention_mask_custom[:7, :10] = torch.ones(7, 10, dtype=torch.bool)
-        
+
         with sdpa_kernel(SDPBackend.MATH):
             attn_output_math = torch.nn.functional.scaled_dot_product_attention(
                 query=q.transpose(1, 2),
