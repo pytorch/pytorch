@@ -755,7 +755,6 @@ def _rand_like(
 ) -> torch.Tensor:
     dtype = self.dtype if dtype is None else dtype
     device = self.device if device is None else device
-
     if memory_format != torch.preserve_format:
         return rand_fn(
             self.shape,
@@ -964,7 +963,14 @@ def fast_random_decomps() -> dict[Any, Callable[..., Any]]:
 def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
-        return decompositions
+        # Keep rand*_like as ATen fallbacks so RNG matches eager layout
+        # (see github.com/pytorch/pytorch/issues/177652).
+        table = dict(decompositions)  # make shallow copy
+        for name in ("rand_like", "randn_like", "randint_like"):
+            pkt = getattr(aten, name)
+            for ol in pkt.overloads():
+                table.pop(getattr(pkt, ol), None)
+        return table
     if config.fallback_embedding_bag_byte_unpack:
         # remove q_embedding_bag_byte_unpack_decomp from decompositions
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
