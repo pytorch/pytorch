@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
-from typing import Any, overload, Union
+from typing import Any, overload
 
 import torch
 from torch import Tensor
@@ -120,7 +120,7 @@ def set_debug_level_from_env() -> None: ...
 class _PremulSumCallable:
     """Callable that creates a PREMUL_SUM ReduceOp with a given factor."""
 
-    def __call__(self, factor: Union[float, int, Tensor]) -> ReduceOp: ...
+    def __call__(self, factor: float | int | Tensor) -> ReduceOp: ...
     def __eq__(self, other: object) -> bool: ...
     def __hash__(self) -> int: ...
 
