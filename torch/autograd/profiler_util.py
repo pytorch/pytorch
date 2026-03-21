@@ -375,7 +375,6 @@ class EventList(list):
         group_by_input_shapes=False,
         group_by_stack_n=0,
         group_by_overload_name=False,
-        include_python_events=False,
     ):
         """Averages all function events over their keys.
 
@@ -390,10 +389,6 @@ class EventList(list):
 
             group_by_overload_name: Differentiate operators by their overload name e.g. aten::add.Tensor
             and aten::add.out will be aggregated separately
-
-            include_python_events: include Python function events in the aggregation.
-                Python function events wrap around aten ops and would cause
-                double-counting if included by default.
 
         Returns:
             An EventList containing FunctionEventAvg objects.
@@ -423,8 +418,6 @@ class EventList(list):
             return tuple(key)
 
         for evt in self:
-            if not include_python_events and getattr(evt, "is_python_function", False):
-                continue
             stats[
                 get_key(
                     evt, group_by_input_shapes, group_by_stack_n, group_by_overload_name
