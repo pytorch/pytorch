@@ -3761,6 +3761,10 @@ class TestProfilerEventsParity(TestCase):
     """Tests validating parity between events() and export_chrome_trace() JSON."""
 
     def test_python_function_events_in_events(self):
+        def _is_python_function_event(name):
+            return ".py(" in name and "): " in name
+
+        # Default: python function events are excluded from events()
         with profile(
             activities=[ProfilerActivity.CPU],
             with_stack=True,
@@ -3768,8 +3772,23 @@ class TestProfilerEventsParity(TestCase):
             x = torch.randn(10, 10)
             torch.mm(x, x)
 
+        default_events = prof.events()
+        default_py = [e for e in default_events if _is_python_function_event(e.name)]
+        self.assertEqual(len(default_py), 0)
+
+        # Opt-in: expose_python_function_events includes them
+        with profile(
+            activities=[ProfilerActivity.CPU],
+            with_stack=True,
+            experimental_config=_ExperimentalConfig(
+                expose_python_function_events=True
+            ),
+        ) as prof:
+            x = torch.randn(10, 10)
+            torch.mm(x, x)
+
         events = prof.events()
-        python_events = [e for e in events if ".py(" in e.name and "): " in e.name]
+        python_events = [e for e in events if _is_python_function_event(e.name)]
         self.assertGreater(len(python_events), 0)
         for e in python_events:
             self.assertIsInstance(e.name, str)
