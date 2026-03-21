@@ -66,7 +66,8 @@ struct TORCH_API ExperimentalConfig {
       bool record_python_gc_info = false,
       bool expose_kineto_event_metadata = false,
       std::string custom_profiler_config = "",
-      bool adjust_timestamps = false);
+      bool adjust_timestamps = false,
+      bool expose_python_function_events = false);
   explicit operator bool() const;
 
   std::vector<std::string> profiler_metrics;
@@ -132,6 +133,8 @@ struct TORCH_API ExperimentalConfig {
    * information instead of the original information.
    */
   bool adjust_timestamps;
+
+  bool expose_python_function_events;
 };
 
 struct TORCH_API ProfilerConfig {

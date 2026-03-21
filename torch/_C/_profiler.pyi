@@ -63,6 +63,7 @@ class _ExperimentalConfig:
         performance_events: list[str] = ...,
         enable_cuda_sync_events: bool = ...,
         profile_all_threads: bool = ...,
+        expose_python_function_events: bool = ...,
     ) -> None: ...
 
 class ProfilerConfig:

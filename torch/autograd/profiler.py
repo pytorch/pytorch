@@ -227,7 +227,6 @@ class profile:
         custom_trace_id_callback=None,
         post_processing_timeout_s: float | None = None,
         activity_filters: dict[ProfilerActivity, set[str]] | None = None,
-        include_python_events=False,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -266,7 +265,6 @@ class profile:
         self._stats = _ProfilerStats()
         self.custom_trace_id_callback = custom_trace_id_callback
         self.post_processing_timeout_s = post_processing_timeout_s
-        self.include_python_events = include_python_events
         self.activity_filters = activity_filters or {}
         self.trace_id = ""
         if not self.use_cpu:
@@ -634,6 +632,7 @@ class profile:
                 else 0
             )
 
+        # Create and return FunctionEvent list, which contains all function events
         # Here 2 function events are created:
         # all_function_events contains all events associated with each kineto event from result
         all_function_events = []
@@ -649,9 +648,6 @@ class profile:
             if (
                 _filter_name(kineto_event.name())
                 or getattr(kineto_event, "is_hidden_event", lambda: False)()
-                or (
-                    not self.include_python_events and kineto_event.is_python_function()
-                )
             ):
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
@@ -722,6 +718,11 @@ class profile:
                     if cuda_time > 0:
                         fe.append_kernel(fe.name, fe.device_index, cuda_time)
                         fe.is_legacy = True
+            if (
+                not self.experimental_config.expose_python_function_events
+                and kineto_event.is_python_function()
+            ):
+                continue
             all_function_events.append(fe)
             corr_id = kineto_event.linked_correlation_id()
             if corr_id > 0:
