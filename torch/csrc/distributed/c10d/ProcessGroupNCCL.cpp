@@ -11,6 +11,7 @@
 #include <utility>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
@@ -219,6 +220,30 @@ std::string getExceptionMsgFromExceptionPtr(
   } catch (...) {
     return "Unknown exception type";
   }
+}
+
+bool safeEventQuery(const std::shared_ptr<at::cuda::CUDAEvent>& event) {
+#ifdef USE_ROCM
+  // hipEventQuery from a non-capturing thread while another thread has GLOBAL
+  // capture active poisons the capture session
+  // (hipErrorStreamCaptureUnsupported -> hipErrorStreamCaptureInvalidated).
+  // Avoid the call entirely when any capture is in progress.
+  if (at::cuda::is_graph_capture_active()) {
+    return false;
+  }
+  try {
+    return event->query();
+  } catch (const c10::Error& e) {
+    const std::string msg = e.what_without_backtrace();
+    if (msg.find("hipErrorCapturedEvent") != std::string::npos ||
+        msg.find("hipErrorStreamCaptureUnsupported") != std::string::npos) {
+      return false;
+    }
+    throw;
+  }
+#else
+  return event->query();
+#endif
 }
 
 inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
@@ -644,7 +669,7 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
     return false;
   }
   // Checking the work's corresponding CUDA event's status
-  if (!ncclStartEvent_->query()) {
+  if (!safeEventQuery(ncclStartEvent_)) {
     return false;
   }
   return true;
@@ -657,7 +682,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   // hang if another thread is holding the CUDA global context lock. For
   // example, when doing a `cudaDeviceSynchronize` or even
   // `cudaStreamSynchronize`.
-  if (!ncclEndEvent_->query()) {
+  if (!safeEventQuery(ncclEndEvent_)) {
     return false;
   }
   return true;
@@ -2286,7 +2311,14 @@ void ProcessGroupNCCL::Watchdog::runLoop() {
 
       // Then check if work has timed out
       // Skip if work has encountered an error
-      bool timedout = !work.exception() && work.checkTimeout();
+      bool timedout = false;
+#ifdef USE_ROCM
+      if (!at::cuda::is_graph_capture_active()) {
+        timedout = !work.exception() && work.checkTimeout();
+      }
+#else
+      timedout = !work.exception() && work.checkTimeout();
+#endif
 
       // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
       // turned on; otherwise, run() is no-op)
