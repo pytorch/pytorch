@@ -375,6 +375,7 @@ class EventList(list):
         group_by_input_shapes=False,
         group_by_stack_n=0,
         group_by_overload_name=False,
+        include_python_events=False,
     ):
         """Averages all function events over their keys.
 
@@ -389,6 +390,10 @@ class EventList(list):
 
             group_by_overload_name: Differentiate operators by their overload name e.g. aten::add.Tensor
             and aten::add.out will be aggregated separately
+
+            include_python_events: include Python function events in the aggregation.
+                Python function events wrap around aten ops and would cause
+                double-counting if included by default.
 
         Returns:
             An EventList containing FunctionEventAvg objects.
@@ -418,6 +423,8 @@ class EventList(list):
             return tuple(key)
 
         for evt in self:
+            if not include_python_events and getattr(evt, "is_python_function", False):
+                continue
             stats[
                 get_key(
                     evt, group_by_input_shapes, group_by_stack_n, group_by_overload_name
@@ -637,6 +644,7 @@ class FunctionEvent(FormattedTimesMixin):
         concrete_inputs=None,
         kwinputs=None,
         is_user_annotation=False,
+        is_python_function=False,
         metadata_json=None,
         flow_id=None,
         flow_type=None,
@@ -681,6 +689,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.is_legacy: bool = is_legacy
         self.flops: int | None = flops
         self.is_user_annotation: bool | None = is_user_annotation
+        self.is_python_function: bool = is_python_function
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
         self.total_device_percent = -1
