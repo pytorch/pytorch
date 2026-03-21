@@ -2168,7 +2168,6 @@ class TestPatternMatcher(TestCase):
         def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
             nonlocal count
             count = my_patterns.apply(graph)
-            graph.eliminate_dead_code()
             return graph
 
         def fn(x):
