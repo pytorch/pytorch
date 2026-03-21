@@ -4,7 +4,7 @@ DOCKER_CMD ?= docker
 DESIRED_CUDA ?= 12.8
 DESIRED_CUDA_SHORT = $(subst .,,$(DESIRED_CUDA))
 PACKAGE_NAME = magma-cuda
-CUDA_ARCHITECTURES ?= 50;60;70;80;86;90
+CUDA_ARCHITECTURES ?= 75;80;86;90;100;120
 
 DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 	-v $(shell git rev-parse --show-toplevel)/.ci:/builder \
@@ -29,25 +29,25 @@ clean:
 
 .PHONY: magma-cuda132
 magma-cuda132: DESIRED_CUDA := 13.2
-magma-cuda132: CUDA_ARCHITECTURES := 80;86;90;100;120
+magma-cuda132: CUDA_ARCHITECTURES := 75;80;86;90;100;120
 magma-cuda132:
 	$(DOCKER_RUN)
 
 .PHONY: magma-cuda130
 magma-cuda130: DESIRED_CUDA := 13.0
-magma-cuda130: CUDA_ARCHITECTURES := 80;86;90;100;120
+magma-cuda130: CUDA_ARCHITECTURES := 75;80;86;90;100;120
 magma-cuda130:
 	$(DOCKER_RUN)
 
 .PHONY: magma-cuda129
 magma-cuda129: DESIRED_CUDA := 12.9
-magma-cuda129: CUDA_ARCHITECTURES := 50;60;70;80;86;90;100;120
+magma-cuda129: CUDA_ARCHITECTURES := 75;80;86;90;100;120
 magma-cuda129:
 	$(DOCKER_RUN)
 
 .PHONY: magma-cuda128
 magma-cuda128: DESIRED_CUDA := 12.8
-magma-cuda128: CUDA_ARCHITECTURES := 50;60;70;80;86;90;100;120
+magma-cuda128: CUDA_ARCHITECTURES := 75;80;86;90;100;120
 magma-cuda128:
 	$(DOCKER_RUN)
 
