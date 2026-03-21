@@ -2487,7 +2487,6 @@ class FakeTensorOperatorInvariants(TestCase):
         IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW,
         "https://github.com/pytorch/pytorch/issues/165387",
     )
-    @expectedFailurePropagateRealTensors
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_module_to(self):
         def _check_device(sd, device_type):
