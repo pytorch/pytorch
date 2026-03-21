@@ -2808,10 +2808,10 @@ class AOTAutogradCacheTests(InductorTestCase):
                                     g.erase_node(n)
                                     changed = True
                         if not changed:
-            raise RuntimeError(
-                "Custom pass did not change the graph. "
-                "All test cases expect the pass to modify the graph."
-            )
+                            raise RuntimeError(
+                                "Custom pass did not change the graph. "
+                                "All test cases expect the pass to modify the graph."
+                            )
 
                     def uuid(self):
                         return {pass_uuid}
