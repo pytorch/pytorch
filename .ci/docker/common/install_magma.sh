@@ -7,7 +7,7 @@ function do_install() {
     cuda_version=$1
     cuda_version_nodot=${1/./}
 
-    MAGMA_VERSION="2.6.1"
+    MAGMA_VERSION="2.10.0"
     magma_archive="magma-cuda${cuda_version_nodot}-${MAGMA_VERSION}-1.tar.bz2"
 
     cuda_dir="/usr/local/cuda-${cuda_version}"

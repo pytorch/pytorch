@@ -6,7 +6,12 @@ fi
 
 mkdir build
 cd build
-cmake .. -DUSE_FORTRAN=OFF -DGPU_TARGET="All" -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" -DCUDA_ARCH_LIST="$CUDA_ARCH_LIST"
-make -j$(getconf _NPROCESSORS_CONF)
-make install
+cmake .. \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DMAGMA_ENABLE_CUDA=ON \
+  -DUSE_FORTRAN=OFF \
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+  -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHITECTURES"
+cmake --build . --parallel "$(getconf _NPROCESSORS_CONF)"
+cmake --install .
 cd ..

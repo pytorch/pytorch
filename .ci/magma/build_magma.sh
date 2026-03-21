@@ -5,7 +5,7 @@ set -eou pipefail
 # Environment variables
 # The script expects DESIRED_CUDA and PACKAGE_NAME to be set
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MAGMA_VERSION=2.6.1
+MAGMA_VERSION=2.10.0
 
 # Folders for the build
 PACKAGE_FILES=${ROOT_DIR}/magma/package_files # source patches and metadata
@@ -18,18 +18,13 @@ mkdir -p ${PACKAGE_DIR} ${PACKAGE_OUTPUT}/linux-64 ${PACKAGE_BUILD} ${PACKAGE_RE
 
 # Fetch magma sources and verify checksum
 pushd ${PACKAGE_DIR}
-curl -LO http://icl.utk.edu/projectsfiles/magma/downloads/magma-${MAGMA_VERSION}.tar.gz
+curl -LO https://icl.utk.edu/projectsfiles/magma/downloads/magma-${MAGMA_VERSION}.tar.gz
 tar zxf magma-${MAGMA_VERSION}.tar.gz
 sha256sum --check < ${PACKAGE_FILES}/magma-${MAGMA_VERSION}.sha256
 popd
 
 # Apply patches and build
 pushd ${PACKAGE_DIR}/magma-${MAGMA_VERSION}
-patch < ${PACKAGE_FILES}/CMake.patch
-patch < ${PACKAGE_FILES}/cmakelists.patch
-patch -p0 < ${PACKAGE_FILES}/thread_queue.patch
-patch -p1 < ${PACKAGE_FILES}/cuda13.patch
-patch -p1 < ${PACKAGE_FILES}/getrf_shfl.patch
 patch -p1 < ${PACKAGE_FILES}/getrf_nbparam.patch
 # The build.sh script expects to be executed from the sources root folder
 INSTALL_DIR=${PACKAGE_BUILD} ${PACKAGE_FILES}/build.sh
@@ -38,12 +33,7 @@ popd
 # Package recipe, license and tarball
 # Folder and package name are backward compatible for the build workflow
 cp ${PACKAGE_FILES}/build.sh ${PACKAGE_RECIPE}/build.sh
-cp ${PACKAGE_FILES}/cuda13.patch ${PACKAGE_RECIPE}/cuda13.patch
-cp ${PACKAGE_FILES}/thread_queue.patch ${PACKAGE_RECIPE}/thread_queue.patch
-cp ${PACKAGE_FILES}/cmakelists.patch ${PACKAGE_RECIPE}/cmakelists.patch
-cp ${PACKAGE_FILES}/getrf_shfl.patch ${PACKAGE_RECIPE}/getrf_shfl.patch
 cp ${PACKAGE_FILES}/getrf_nbparam.patch ${PACKAGE_RECIPE}/getrf_nbparam.patch
-cp ${PACKAGE_FILES}/CMake.patch ${PACKAGE_RECIPE}/CMake.patch
 cp ${PACKAGE_FILES}/magma-${MAGMA_VERSION}.sha256 ${PACKAGE_RECIPE}/magma-${MAGMA_VERSION}.sha256
 cp ${PACKAGE_DIR}/magma-${MAGMA_VERSION}/COPYRIGHT ${PACKAGE_LICENSE}/COPYRIGHT
 pushd ${PACKAGE_BUILD}

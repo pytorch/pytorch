@@ -45,6 +45,6 @@ If you do not have upload permissions, please ping @seemethere or @soumith to ga
 
 New CUDA versions can be added by creating a new make target with the next desired version. For CUDA version NN.n, the target should be named `magma-cudaNNn`.
 
-Make sure to edit the appropriate environment variables (e.g., DESIRED_CUDA, CUDA_ARCH_LIST) in the `Makefile` accordingly. Remember also to check `build_magma.sh` to ensure the logic for copying over the files remains correct.
+Make sure to edit the appropriate environment variables (e.g., DESIRED_CUDA, CUDA_ARCHITECTURES) in the `Makefile` accordingly. Remember also to check `build_magma.sh` to ensure the logic for copying over the files remains correct.
 
 New patches can be added by editing `Makefile` and`build_magma.sh` the same way `getrf_nbparam.patch` is implemented.
