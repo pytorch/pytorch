@@ -634,6 +634,7 @@ class profile:
                 else 0
             )
 
+        # Here 2 function events are created:
         # all_function_events contains all events associated with each kineto event from result
         all_function_events = []
         # frontend_function_events contains the events in aten or torch frontend level,
@@ -648,7 +649,9 @@ class profile:
             if (
                 _filter_name(kineto_event.name())
                 or getattr(kineto_event, "is_hidden_event", lambda: False)()
-                or (not self.include_python_events and kineto_event.is_python_function())
+                or (
+                    not self.include_python_events and kineto_event.is_python_function()
+                )
             ):
                 continue
             rel_start_ns = kineto_event.start_ns() - trace_start_ns
