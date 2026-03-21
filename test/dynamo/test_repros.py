@@ -5905,10 +5905,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         opt_mod = torch.compile(mod, backend=compiler)
         opt_mod(torch.randn(2, 2))
 
-        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
-            mod = Mod()
-            opt_mod = torch.compile(mod, backend=compiler)
-            opt_mod(torch.randn(2, 2))
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=compiler)
+        opt_mod(torch.randn(2, 2))
 
         # an example similar to Pippy usecase
         mod = Mod()

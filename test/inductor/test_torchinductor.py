@@ -3023,7 +3023,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4, 4), torch.randn(4, 4)))
 
-    @xfail_if_mps
     @skip_if_halide  # different pow accuracies
     @xfail_if_triton_cpu
     def test_norm_constant_overflow(self):
