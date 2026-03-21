@@ -218,6 +218,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], bool | None]:
         torch.jit.is_scripting: False,
         torch.jit.is_tracing: False,
         torch._C._get_tracing_state: None,
+        torch._C._is_tracing: False,
         torch.fx._symbolic_trace.is_fx_tracing: False,
         torch.fx._symbolic_trace.is_fx_symbolic_tracing: False,
         torch.onnx.is_in_onnx_export: False,
