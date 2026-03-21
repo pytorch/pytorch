@@ -182,10 +182,10 @@ void abs_kernel(at::TensorIteratorBase& iter) {
     TORCH_CHECK(
         input_tensor.is_contiguous(), "Input tensor must be contiguous.")
 
-    auto output = at::empty_like(
-        input_tensor,
-        input_tensor.options(),
-        input_tensor.suggest_memory_format());
+    auto output = at::empty(
+        input_tensor.sizes(),
+        input_tensor.options().memory_format(
+            input_tensor.suggest_memory_format()));
 
     MemoryGuard guard(output);
 
