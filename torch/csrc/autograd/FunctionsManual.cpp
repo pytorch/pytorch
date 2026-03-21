@@ -7833,8 +7833,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       auto sum_dy = gs_accum_sumprod_k(I, dw_dy);
       auto contrib = sum_dx * ggG_x.unsqueeze(1);
       contrib.addcmul_(sum_dy, ggG_y.unsqueeze(1));
-      d_grad_output =
-          d_grad_output.defined() ? d_grad_output + contrib : std::move(contrib);
+      d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
+                                              : std::move(contrib);
     }
 
     if (output_mask[1]) {
@@ -7940,8 +7940,8 @@ std::tuple<Tensor, Tensor, Tensor> grid_sampler_2d_double_backward(
       auto sum_dy = gs_accum_sumprod_k(I_all, B_dy);
       auto contrib = sum_dx * ggG_x_bc.unsqueeze(1);
       contrib.addcmul_(sum_dy, ggG_y_bc.unsqueeze(1));
-      d_grad_output =
-          d_grad_output.defined() ? d_grad_output + contrib : std::move(contrib);
+      d_grad_output = d_grad_output.defined() ? d_grad_output + contrib
+                                              : std::move(contrib);
     }
 
     if (output_mask[1]) {
