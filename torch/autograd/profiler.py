@@ -718,11 +718,6 @@ class profile:
                     if cuda_time > 0:
                         fe.append_kernel(fe.name, fe.device_index, cuda_time)
                         fe.is_legacy = True
-            if (
-                not self.experimental_config.expose_python_function_events
-                and kineto_event.is_python_function()
-            ):
-                continue
             all_function_events.append(fe)
             corr_id = kineto_event.linked_correlation_id()
             if corr_id > 0:

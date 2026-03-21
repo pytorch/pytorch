@@ -498,6 +498,16 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
               [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
               [](auto&) {}));
 
+      if (!config_.experimental_config.expose_python_function_events) {
+        bool is_python = false;
+        e->visit_if_base<PyExtraFieldsBase>(
+            [&](const auto&) { is_python = true; });
+        if (is_python) {
+          e->kineto_activity_ = nullptr;
+          continue;
+        }
+      }
+
       kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
       AddTensorboardFields add_tb(e, kinetoEvents.back());
       AddGenericMetadata add_generic(e, &config_);
