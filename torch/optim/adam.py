@@ -105,10 +105,7 @@ class Adam(Optimizer):
             if differentiable:
                 raise RuntimeError("`fused` does not support `differentiable`")
             self._step_supports_amp_scaling = True
-            # TODO(crcrpar): [low prec params & their higher prec copy]
-            # Support AMP with FP16/BF16 model params which would need
-            # higher prec copy of params to do update math in higher prec to
-            # alleviate the loss of information.
+            self._low_prec_dtypes = (torch.float16, torch.bfloat16)
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
@@ -875,9 +872,21 @@ def _fused_adam(
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
         func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
+        low_prec_dtypes = (torch.float16, torch.bfloat16)
+        is_low_prec = device_params[0].dtype in low_prec_dtypes if device_params else False
+        if is_low_prec:
+            device_params_fp32 = [p.float() for p in device_params]
+            device_grads = [g.float() for g in device_grads]
+            device_exp_avgs = [e.float() for e in device_exp_avgs]
+            device_exp_avg_sqs = [
+                e.bfloat16() if e.dtype == torch.float16 else e
+                for e in device_exp_avg_sqs
+            ]
+        else:
+            device_params_fp32 = device_params
         # pyrefly: ignore [no-matching-overload]
         func(
-            device_params,
+            device_params_fp32,
             device_grads,
             device_exp_avgs,
             device_exp_avg_sqs,
@@ -893,10 +902,14 @@ def _fused_adam(
             grad_scale=device_grad_scale,
             found_inf=device_found_inf,
         )
+        if is_low_prec:
+            for orig, fp32 in zip(device_params, device_params_fp32):
+                orig.copy_(fp32)
         if device_found_inf is not None:
             torch._foreach_sub_(
                 device_state_steps, [device_found_inf] * len(device_state_steps)
             )
+	
 
 
 @_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adam)
