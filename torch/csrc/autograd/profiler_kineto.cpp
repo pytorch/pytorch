@@ -465,6 +465,15 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
     materializeOpEvents(records_and_trace.first, end_time);
 
+    if (!config_.experimental_config.expose_python_function_events) {
+      kinetoEvents.erase(
+          std::remove_if(
+              kinetoEvents.begin(),
+              kinetoEvents.end(),
+              [](const auto& i) { return i.isPythonFunction(); }),
+          kinetoEvents.end());
+    }
+
     return std::move(records_and_trace.second);
   }
 
@@ -497,16 +506,6 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
               [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
               [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
               [](auto&) {}));
-
-      if (!config_.experimental_config.expose_python_function_events) {
-        bool is_python = false;
-        e->visit_if_base<PyExtraFieldsBase>(
-            [&](const auto&) { is_python = true; });
-        if (is_python) {
-          e->kineto_activity_ = nullptr;
-          continue;
-        }
-      }
 
       kinetoEvents.emplace_back(e, config_.experimental_config.verbose);
       AddTensorboardFields add_tb(e, kinetoEvents.back());
