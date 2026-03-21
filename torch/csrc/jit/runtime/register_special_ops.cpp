@@ -381,6 +381,10 @@ RegisterOperators reg({
         [](Stack& stack) { push(stack, false); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::_is_tracing() -> bool"),
+        [](Stack& stack) { push(stack, false); },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA("aten::is_scripting() -> bool"),
         [](Stack& stack) { push(stack, true); },
         aliasAnalysisFromSchema()),
