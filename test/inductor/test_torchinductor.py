@@ -3687,15 +3687,21 @@ class CommonTemplate:
 
         for dtype in [torch.int32, torch.int64]:
             # All-zero divisor: every element should be 0
-            a = torch.tensor([0, 1, -1, 5, -5], device=self.device, dtype=dtype)
-            b = torch.zeros(5, device=self.device, dtype=dtype)
-            expected = torch.zeros(5, device=self.device, dtype=dtype)
-            self.common(fn, (a, b))
+            for dividend in [0, 1, -1, 5, -5]:
+                a = torch.full((8,), dividend, device=self.device, dtype=dtype)
+                b = torch.full((8,), 0, device=self.device, dtype=dtype)
+                self.common(fn, (a, b))
 
-            # Mixed: some zero, some non-zero divisors
-            a = torch.tensor([10, 0, -7, 3, 6], device=self.device, dtype=dtype)
-            b = torch.tensor([3, 0, 0, -2, 2], device=self.device, dtype=dtype)
-            expected = torch.tensor([3, 0, 0, -2, 3], device=self.device, dtype=dtype)
+            # Mixed zero and non-zero divisors in the same tensor
+            n = 4
+            a = torch.cat([
+                torch.full((n,), 10, device=self.device, dtype=dtype),
+                torch.full((n,), -7, device=self.device, dtype=dtype),
+            ])
+            b = torch.cat([
+                torch.full((n,), 0, device=self.device, dtype=dtype),
+                torch.full((n,), 3, device=self.device, dtype=dtype),
+            ])
             self.common(fn, (a, b))
 
     def test_floordiv_float_accuracy(self):
