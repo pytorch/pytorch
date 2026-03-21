@@ -6267,7 +6267,7 @@ class Scheduler:
         # When memory access is small, reducing gpu kernel overhead is profitable over
         # slightly larger memory access.
         node1_write_memory = self.dep_size_hint(next(iter(node1.read_writes.writes)))
-        node2_write_memory = self.dep_size_hint(next(iter(node1.read_writes.writes)))
+        node2_write_memory = self.dep_size_hint(next(iter(node2.read_writes.writes)))
         if (
             max(node1_write_memory, node2_write_memory)
             > config.small_memory_access_threshold
