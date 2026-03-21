@@ -1078,7 +1078,7 @@ class TestDeviceLazyInit(TestCase):
 
 
 instantiate_device_type_tests(
-    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
+    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_mps=True, allow_xpu=True
 )
 
 

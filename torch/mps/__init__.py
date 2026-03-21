@@ -12,6 +12,20 @@ from torch import Tensor
 
 _is_in_bad_fork = getattr(torch._C, "_mps_is_in_bad_fork", lambda: False)
 _default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
+_initialized = False
+
+
+def _lazy_init() -> None:
+    global _initialized
+    if _initialized:
+        return
+    if _is_in_bad_fork():
+        raise RuntimeError(
+            "Cannot re-initialize MPS in forked subprocess. To use MPS with "
+            "multiprocessing, you must use the 'spawn' start method. E.g., "
+            "torch.multiprocessing.set_start_method('spawn')"
+        )
+    _initialized = True
 
 
 # local helper function (not public or exported)
@@ -29,6 +43,7 @@ def device_count() -> int:
 
 def synchronize() -> None:
     r"""Waits for all kernels in all streams on a MPS device to complete."""
+    _lazy_init()
     return torch._C._mps_deviceSynchronize()
 
 
@@ -79,6 +94,7 @@ def empty_cache() -> None:
     r"""Releases all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU applications.
     """
+    _lazy_init()
     torch._C._mps_emptyCache()
 
 
@@ -104,6 +120,7 @@ def set_per_process_memory_fraction(fraction) -> None:
     if fraction < 0 or fraction > 2:
         raise ValueError(f"Invalid fraction value: {fraction}. Allowed range: 0~2")
 
+    _lazy_init()
     torch._C._mps_setMemoryFraction(fraction)
 
 
@@ -114,6 +131,7 @@ def current_allocated_memory() -> int:
        The returned size does not include cached allocations in
        memory pools of MPSAllocator.
     """
+    _lazy_init()
     return torch._C._mps_currentAllocatedMemory()
 
 
@@ -124,6 +142,7 @@ def driver_allocated_memory() -> int:
        The returned size includes cached allocations in MPSAllocator pools
        as well as allocations from MPS/MPSGraph frameworks.
     """
+    _lazy_init()
     return torch._C._mps_driverAllocatedMemory()
 
 
@@ -134,6 +153,7 @@ def recommended_max_memory() -> int:
        Recommended max working set size for Metal.
        returned from device.recommendedMaxWorkingSetSize.
     """
+    _lazy_init()
     return torch._C._mps_recommendedMaxMemory()
 
 
