@@ -17,6 +17,7 @@
 #include <ATen/ops/avg_pool2d_native.h>
 #include <ATen/ops/avg_pool3d_backward_native.h>
 #include <ATen/ops/avg_pool3d_native.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/max_pool2d_backward_native.h>
 #include <ATen/ops/max_pool2d_native.h>
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
@@ -925,7 +926,7 @@ Tensor mps_max_pool2d_backward(const Tensor& grad_output,
                                IntArrayRef padding,
                                IntArrayRef dilation,
                                bool ceil_mode) {
-  Tensor grad_input = at::empty(input.sizes(), input.options(), MemoryFormat::Contiguous);
+  Tensor grad_input = at::empty_like(input, MemoryFormat::Contiguous);
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     return [mpsGraph maxPooling2DGradientWithGradientTensor:cachedGraph.gradOutputTensor

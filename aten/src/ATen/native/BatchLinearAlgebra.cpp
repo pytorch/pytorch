@@ -2564,7 +2564,7 @@ static Tensor& householder_product_out_helper(const Tensor& input, const Tensor&
   // tau tensor must be contiguous
   Tensor tau_ = tau;
   if (!tau.is_contiguous()) {
-    tau_ = at::empty(tau.sizes(), tau.options(), MemoryFormat::Contiguous);
+    tau_ = at::empty_like(tau, MemoryFormat::Contiguous);
     tau_.copy_(tau);
   }
 
@@ -2688,7 +2688,7 @@ static void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tenso
   // 'tau' tensor must be contiguous
   Tensor tau_ = tau;
   if (!tau.is_contiguous()) {
-    tau_ = at::empty(tau.sizes(), tau.options(), MemoryFormat::Contiguous);
+    tau_ = at::empty_like(tau, MemoryFormat::Contiguous);
     tau_.copy_(tau);
   }
 

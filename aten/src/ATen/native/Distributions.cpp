@@ -389,7 +389,7 @@ Tensor& random_meta_(Tensor& self, int64_t to, std::optional<Generator> gen) {
 // ====================================================================================================================
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
-  Tensor ret = at::empty(self.sizes(), self.options());
+  Tensor ret = at::empty_like(self, MemoryFormat::Contiguous);
   auto iter = TensorIteratorConfig()
     .add_output(ret)
     .add_input(self)
@@ -404,7 +404,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
 }
 
 Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& total) {
-  Tensor ret = at::empty(x.sizes(), x.options());
+  Tensor ret = at::empty_like(x, MemoryFormat::Contiguous);
   auto iter = TensorIteratorConfig()
     .add_output(ret)
     .add_input(x)

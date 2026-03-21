@@ -50,7 +50,7 @@ static Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_arg
     "vmap: Cannot ask for different inplace randomness on an unbatched tensor. This will appear like same randomness. ",
     "If this is necessary for your usage, please file an issue with functorch.");
   if (randomness == RandomnessType::Same && self_bdim) {
-    auto intermediate = empty(self.sizes(), self.options());
+    auto intermediate = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     Func(intermediate, std::forward<ExtraArgs>(extra_args)...);
     self.copy_(intermediate); // batching should make this just work out...
     return self;
@@ -96,7 +96,7 @@ static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor
     "vmap: Cannot ask for different inplace randomness on an unbatched tensor. This will appear like same randomness. ",
     "If this is necessary for your usage, please file an issue with functorch.");
   if (randomness == RandomnessType::Same && self_bdim) {
-    auto intermediate = empty(self.sizes(), self.options());
+    auto intermediate = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     intermediate.bernoulli_(other_, std::move(gen));
     self.copy_(intermediate); // batching should make this just work out...
     return self;

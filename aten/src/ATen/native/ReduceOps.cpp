@@ -858,8 +858,9 @@ std::tuple<Tensor&, Tensor&> cummax_out(const Tensor& self, int64_t dim, Tensor&
 }
 
 std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
-  auto values = at::empty(self.sizes(), self.options());
-  auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
+  auto values = at::empty_like(self, MemoryFormat::Contiguous);
+  auto indices =
+      at::empty_like(self, self.options().dtype(at::kLong), MemoryFormat::Contiguous);
   at::cummax_out(values, indices, self, dim);
   return std::make_tuple(std::move(values), std::move(indices));
 }
@@ -897,8 +898,9 @@ std::tuple<Tensor&, Tensor&> cummin_out(const Tensor& self, int64_t dim, Tensor&
 }
 
 std::tuple<Tensor, Tensor> cummin(const Tensor& self, int64_t dim) {
-  auto values = at::empty(self.sizes(), self.options());
-  auto indices = at::empty(self.sizes(), self.options().dtype(at::kLong));
+  auto values = at::empty_like(self, MemoryFormat::Contiguous);
+  auto indices =
+      at::empty_like(self, self.options().dtype(at::kLong), MemoryFormat::Contiguous);
   at::cummin_out(values, indices, self, dim);
   return std::make_tuple(std::move(values), std::move(indices));
 }
@@ -1259,7 +1261,8 @@ TORCH_IMPL_FUNC(sum_out)
     // the intermediate sums is forced to do accumulation in the second reduced dim with lower precision.
     // See https://github.com/pytorch/pytorch/issues/83149
     if (should_use_acc_buffer(iter)) {
-      auto tmp_output = at::empty(result.sizes(), result.options().dtype(kFloat));
+      auto tmp_output = at::empty_like(
+          result, result.options().dtype(kFloat), MemoryFormat::Contiguous);
       at::sum_outf(self.to(ScalarType::Float), opt_dim, keepdim, /*dtype=*/std::nullopt, tmp_output);
       result.copy_(tmp_output);
     } else{

@@ -24,6 +24,7 @@
 #include <ATen/ops/_cudnn_rnn_flatten_weight_native.h>
 #include <ATen/ops/_cudnn_rnn_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #endif
@@ -1814,8 +1815,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto dy = grad_output.contiguous();
   auto y = output;
   auto w = weight_buf;
-  auto dx = at::empty(
-      input.sizes(), input.options()); // TODO: more compact way of saying this
+  auto dx = at::empty_like(input, MemoryFormat::Contiguous);
   auto dhy = grad_hy.contiguous().view(hidden_size);
   auto dcy =
       grad_cy.defined() ? grad_cy.contiguous().view(cell_size) : Tensor();
