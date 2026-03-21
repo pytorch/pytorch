@@ -327,8 +327,8 @@ Tensor _histc_cuda_template(
 
   if (min == max && self.numel() > 0) {
     auto [min_tensor, max_tensor] = self.aminmax();
-    minvalue = *min_tensor.cpu().const_data_ptr<input_t>();
-    maxvalue = *max_tensor.cpu().const_data_ptr<input_t>();
+    minvalue = min_tensor.item<input_t>();
+    maxvalue = max_tensor.item<input_t>();
   }
   if (minvalue == maxvalue) {
     minvalue = minvalue - 1;
