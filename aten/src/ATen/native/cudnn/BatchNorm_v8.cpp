@@ -306,11 +306,11 @@ void raw_cudnn_batchnorm_forward_out_v8(
           batchnorm_graph->batchnorm(
               X_fe, scale_fe, bias_fe, batchnorm_options);
 
-      Y_fe = Y_temp;
-      saved_mean_fe = mean_temp;
-      saved_inv_var_fe = inv_var_temp;
-      next_running_mean_fe = next_mean_temp;
-      next_running_var_fe = next_var_temp;
+      Y_fe = std::move(Y_temp);
+      saved_mean_fe = std::move(mean_temp);
+      saved_inv_var_fe = std::move(inv_var_temp);
+      next_running_mean_fe = std::move(next_mean_temp);
+      next_running_var_fe = std::move(next_var_temp);
 
       Y_fe->set_output(true);
       saved_mean_fe->set_output(true).set_data_type(get_fe_dtype(*save_mean));
