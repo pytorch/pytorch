@@ -465,6 +465,7 @@ dtensor_fails_no_strategy = {
     xfail("special.shifted_chebyshev_polynomial_v"),
     xfail("special.shifted_chebyshev_polynomial_w"),
     xfail("special.xlog1py"),
+    xfail("squeeze_copy"),
     xfail("stft"),
     xfail("take"),
     xfail("to_sparse"),
@@ -779,7 +780,7 @@ class TestLocalDTensorOps(TestDTensorOps):
         _op_db,
         "TestLocalDTensorOps",
         "test_dtensor_op_db",
-        dtensor_fails | dtensor_fails_no_strategy | {xfail("squeeze_copy")},
+        dtensor_fails | dtensor_fails_no_strategy,
     )
     def test_dtensor_op_db(self, dtype, op):
         self.run_opinfo_test(dtype, op)

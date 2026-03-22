@@ -174,6 +174,11 @@ class OpDispatcher:
             aten.bernoulli.default,
             aten.bernoulli_.float,
         }
+        self._squeeze_inplace_ops = {
+            aten.squeeze_.dim,
+            aten.squeeze_.default,
+            aten.squeeze_.dims,
+        }
         self._custom_op_handlers = {
             aten.is_same_size.default: is_same_size_handler,
             aten.is_pinned.default: is_pinned_handler,
@@ -395,13 +400,19 @@ class OpDispatcher:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
-                effective_op = op_call
                 if (
-                    output_sharding.redistribute_schema is not None
+                    output_sharding.needs_redistribute
+                    and output_sharding.redistribute_schema is not None
                     and output_sharding.redistribute_schema.op != op_call
                 ):
-                    effective_op = output_sharding.redistribute_schema.op
-                local_results = effective_op(*local_tensor_args, **op_info.local_kwargs)
+                    # Op was rewritten (e.g., squeeze.default → squeeze.dims)
+                    local_results = output_sharding.redistribute_schema.op(
+                        *local_tensor_args, **op_info.local_kwargs
+                    )
+                else:
+                    local_results = op_call(
+                        *local_tensor_args, **op_info.local_kwargs
+                    )
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -492,15 +503,9 @@ class OpDispatcher:
                 if not isinstance(args[0], dtensor.DTensor):
                     raise AssertionError
 
-                # NOTE: aten.squeeze_.dim is an inplace op but it also may change
-                # the inplace argument's tensor meta. Here we choose to special case
-                # this op because as far as I know this is the only inplace op that
-                # has such as behavior. We can extend this special case if necessary.
-                if op_call in (
-                    aten.squeeze_.dim,
-                    aten.squeeze_.default,
-                    aten.squeeze_.dims,
-                ):
+                # NOTE: squeeze_ inplace ops may change the tensor's metadata
+                # (shape/strides). We special-case them to update the spec.
+                if op_call in self._squeeze_inplace_ops:
                     # update the spec to handle tensor meta changes
                     args[0]._spec = output_spec
                     # use return_and_correct_aliasing to match the outer and the inner

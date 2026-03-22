@@ -692,6 +692,13 @@ class TestViewOps(DTensorTestBase):
         )
         self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
+        # squeeze_ should not trigger any communication
+        y = torch.randn((1, 4), device=self.device_type)
+        dist_y = DTensor.from_local(y, mesh_2d, [Partial(), Shard(1)])
+        with CommDebugMode() as comm_mode:
+            torch.ops.aten.squeeze_.dim(dist_y, 0)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
     @with_comms
     def test_squeeze_variants(self):
         """Test squeeze.default, squeeze.dim, and squeeze.dims with DTensor."""
@@ -701,7 +708,9 @@ class TestViewOps(DTensorTestBase):
         with self.subTest("dims_sharded"):
             x = torch.randn(self.world_size, 1, 1, 8, device=self.device_type)
             dt = distribute_tensor(x, mesh, [Shard(0)])
-            result = dt.squeeze((1, 2))
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze((1, 2))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([self.world_size, 8]))
             self.assertEqual(result.placements, (Shard(0),))
             self.assertEqual(result.to_local().shape, torch.Size([1, 8]))
@@ -710,7 +719,9 @@ class TestViewOps(DTensorTestBase):
         with self.subTest("dim_sharded"):
             x = torch.randn(self.world_size, 1, 8, device=self.device_type)
             dt = distribute_tensor(x, mesh, [Shard(0)])
-            result = dt.squeeze(1)
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze(1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([self.world_size, 8]))
             self.assertEqual(result.placements, (Shard(0),))
             self.assertEqual(result.to_local().shape, torch.Size([1, 8]))
@@ -719,7 +730,9 @@ class TestViewOps(DTensorTestBase):
         with self.subTest("default_replicated"):
             x = torch.randn(4, 1, 1, 8, device=self.device_type)
             dt = distribute_tensor(x, mesh, [Replicate()])
-            result = dt.squeeze()
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze()
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([4, 8]))
             self.assertEqual(result.placements, (Replicate(),))
 
@@ -727,7 +740,9 @@ class TestViewOps(DTensorTestBase):
         with self.subTest("dims_replicated"):
             x = torch.randn(2, 1, 3, 1, device=self.device_type)
             dt = distribute_tensor(x, mesh, [Replicate()])
-            result = dt.squeeze((1, 3))
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze((1, 3))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([2, 3]))
             self.assertEqual(result.placements, (Replicate(),))
 
@@ -735,7 +750,9 @@ class TestViewOps(DTensorTestBase):
         with self.subTest("non_singleton_noop"):
             x = torch.randn(self.world_size, 4, device=self.device_type)
             dt = distribute_tensor(x, mesh, [Shard(0)])
-            result = dt.squeeze(1)
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze(1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([self.world_size, 4]))
             self.assertEqual(result.placements, (Shard(0),))
 
@@ -743,7 +760,9 @@ class TestViewOps(DTensorTestBase):
         with self.subTest("partial_max_passthrough"):
             x = torch.randn(1, 4, device=self.device_type)
             dt = DTensor.from_local(x, mesh, [Partial("max")])
-            result = dt.squeeze(0)
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze(0)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([4]))
             self.assertEqual(result.placements, (Partial("max"),))
 
@@ -751,7 +770,9 @@ class TestViewOps(DTensorTestBase):
         with self.subTest("partial_sum_passthrough"):
             x = torch.randn(1, device=self.device_type)
             dt = DTensor.from_local(x, mesh, [Partial("sum")])
-            result = dt.squeeze()
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze()
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([]))
             self.assertEqual(result.placements, (Partial("sum"),))
 
@@ -763,7 +784,9 @@ class TestViewOps(DTensorTestBase):
                 .float()
             )
             dt = distribute_tensor(x, mesh, [Shard(0)])
-            result = dt.squeeze()
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze()
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([self.world_size, 8]))
             self.assertEqual(result._local_tensor.shape, torch.Size([1, 8]))
             self.assertEqual(result.placements, (Shard(0),))
@@ -777,7 +800,9 @@ class TestViewOps(DTensorTestBase):
                 .float()
             )
             dt = distribute_tensor(x, mesh, [Shard(0)])
-            result = dt.squeeze(0)
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze(0)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([self.world_size, 8]))
             self.assertEqual(result._local_tensor.shape, torch.Size([1, 8]))
             self.assertEqual(result.placements, (Shard(0),))
@@ -787,7 +812,9 @@ class TestViewOps(DTensorTestBase):
         with self.subTest("mixed_dims"):
             x = torch.randn(1, 4, 1, device=self.device_type)
             dt = distribute_tensor(x, mesh, [Replicate()])
-            result = dt.squeeze((0, 1, 2))
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze((0, 1, 2))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([4]))
             self.assertEqual(result.placements, (Replicate(),))
             self.assertEqual(result.full_tensor(), x.squeeze())
@@ -796,13 +823,15 @@ class TestViewOps(DTensorTestBase):
         with self.subTest("shard_index_shift"):
             x = torch.randn(1, self.world_size, 1, device=self.device_type)
             dt = distribute_tensor(x, mesh, [Shard(1)])
-            result = dt.squeeze((0, 1, 2))
+            with CommDebugMode() as comm_mode:
+                result = dt.squeeze((0, 1, 2))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             self.assertEqual(result.shape, torch.Size([self.world_size]))
             self.assertEqual(result._local_tensor.shape, torch.Size([1]))
             self.assertEqual(result.placements, (Shard(0),))
             self.assertEqual(result.full_tensor(), x.squeeze((0, 2)))
 
-        # S(0) on globally-singleton dim becomes R after squeeze
+        # S(0) on globally-singleton dim becomes R after squeeze (#174136)
         with self.subTest("singleton_shard_becomes_replicate"):
             x = torch.randn(1, 4, device=self.device_type)
             dt = distribute_tensor(x, mesh, [Shard(0)])
