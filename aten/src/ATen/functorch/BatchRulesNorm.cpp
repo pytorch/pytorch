@@ -284,7 +284,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
         training, eps);
     grad_input = makeBatched(std::move(std::get<0>(results)), std::get<1>(results), cur_level);
   }
-  return std::make_tuple(std::move(grad_input), grad_weight, grad_bias);
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
@@ -432,7 +432,7 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
     );
     grad_input = makeBatched(std::move(tensor), 0, cur_level);
   }
-  return std::make_tuple(std::move(grad_input), grad_weight, grad_bias);
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 static bool has_same_shape(
@@ -524,7 +524,7 @@ native_layer_norm_batch_rule(
     bias_ = maybePadToLogicalRank(bias_, /*has_bdim*/bias_bdim, result_logical_rank);
     result0 = result0 + bias_;
   }
-  return std::make_tuple(std::move(result0), 0, mean, stats_bdim, rstd, stats_bdim);
+  return std::make_tuple(std::move(result0), 0, std::move(mean), stats_bdim, std::move(rstd), stats_bdim);
 }
 
 static std::tuple<at::Tensor, std::optional<int64_t>> native_layer_norm_backward_no_weight_bias_batch_rule(
@@ -644,7 +644,7 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
         rstd_value, rstd_bdim);
     grad_input = makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
   }
-  return std::make_tuple(std::move(grad_input), grad_weight, grad_bias);
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 template <typename F, F Func>

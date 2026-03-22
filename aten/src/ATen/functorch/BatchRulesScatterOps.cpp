@@ -1107,7 +1107,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_batch_rule_helper(
     self_ = reshape_dim_into(0, dim, self_);
     self_.index_fill_(dim, index_, value);
     self_ = reshape_dim_outof(dim, batch_size, self_);
-    return std::make_tuple(std::move(self_), dim);
+    return std::make_tuple(self_, dim);
   }
 
   // If self_logical_rank == 0, the batch dim is certainly 0, and we must apply batched indices to each row.
