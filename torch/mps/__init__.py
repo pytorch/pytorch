@@ -219,12 +219,34 @@ def is_available() -> bool:
     return device_count() > 0
 
 
+class device:
+    r"""Context-manager that selects the MPS device.
+
+    MPS has only a single device, so this is largely a no-op provided for API
+    compatibility with :class:`torch.cuda.device`.
+
+    Args:
+        device (torch.device or int): device index to select (ignored, MPS has
+            only one device).
+    """
+
+    def __init__(self, device):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, typ, value, traceback):
+        return False
+
+
 from . import profiler
 from .event import Event
 
 
 __all__ = [
     "compile_shader",
+    "device",
     "load_metallib",
     "device_count",
     "get_rng_state",
