@@ -253,9 +253,8 @@ class TestMaxAutotune(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
-    @unittest.skipIf(
-        has_triton_tma_device(),
-        "Non-TMA persistent MM is only used for non-TMA devices",
+    @unittest.skipIf(not torch.version.hip, 
+        "Non-TMA persistent MM only tested on AMD"
     )
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
