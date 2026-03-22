@@ -239,8 +239,6 @@ static std::vector<int64_t> _aminmax_dims(
     std::iota(dims.begin(), dims.end(), 0);
   }
   return dims;
-}
-
 Tensor aminmax_backward(
     const Tensor& grad_min,
     const Tensor& grad_max,
@@ -253,16 +251,18 @@ Tensor aminmax_backward(
   IntArrayRef dims(dims_vec);
   Tensor grad = at::zeros_like(self);
   if (grad_min.defined()) {
-    grad += scale_grad_by_count(
-        restore_reduced_dims(grad_min, dims, keepdim),
-        restore_reduced_dims(min, dims, keepdim) == self,
-        dims);
+    grad = grad +
+        scale_grad_by_count(
+            restore_reduced_dims(grad_min, dims, keepdim),
+            restore_reduced_dims(min, dims, keepdim) == self,
+            dims);
   }
   if (grad_max.defined()) {
-    grad += scale_grad_by_count(
-        restore_reduced_dims(grad_max, dims, keepdim),
-        restore_reduced_dims(max, dims, keepdim) == self,
-        dims);
+    grad = grad +
+        scale_grad_by_count(
+            restore_reduced_dims(grad_max, dims, keepdim),
+            restore_reduced_dims(max, dims, keepdim) == self,
+            dims);
   }
   return grad;
 }
