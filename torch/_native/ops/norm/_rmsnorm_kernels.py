@@ -309,12 +309,6 @@ _FWD_SCHEMA = (
 )
 
 
-@torch.library.custom_op(
-    "cutedsl_norms::_rmsnorm_fwd",
-    mutates_args=("out", "rstd", "residual_out"),
-    device_types="cuda",
-    schema=_FWD_SCHEMA,
-)
 def _rmsnorm_fwd(
     x: Tensor,
     weight: Tensor | None,
@@ -812,12 +806,6 @@ _BWD_SCHEMA = (
 )
 
 
-@torch.library.custom_op(
-    "cutedsl_norms::_rmsnorm_bwd",
-    mutates_args={"dx", "dw_partial", "db_partial", "dresidual"},
-    device_types="cuda",
-    schema=_BWD_SCHEMA,
-)
 def _rmsnorm_bwd(
     x: Tensor,
     weight: Tensor | None,
