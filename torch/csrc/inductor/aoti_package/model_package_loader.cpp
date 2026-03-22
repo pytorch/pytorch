@@ -999,16 +999,16 @@ void AOTIModelPackageLoader::load_constants(
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
   std::unordered_map<std::string, std::string> fqn_to_constant_name;
-  for (const auto& it : constant_name_to_fqn) {
-    fqn_to_constant_name.emplace(it.second, it.first);
+  for (const auto& [name, fqn] : constant_name_to_fqn) {
+    fqn_to_constant_name.emplace(fqn, name);
   }
 
   std::unordered_map<std::string, at::Tensor> updated_constants_map;
-  for (const auto& it : constants_map) {
-    if (fqn_to_constant_name.find(it.first) != fqn_to_constant_name.end()) {
-      updated_constants_map.emplace(fqn_to_constant_name[it.first], it.second);
+  for (const auto& [fqn, tensor] : constants_map) {
+    if (fqn_to_constant_name.find(fqn) != fqn_to_constant_name.end()) {
+      updated_constants_map.emplace(fqn_to_constant_name[fqn], tensor);
     } else {
-      TORCH_CHECK(false, "Constant not found: ", it.first);
+      TORCH_CHECK(false, "Constant not found: ", fqn);
     }
   }
 

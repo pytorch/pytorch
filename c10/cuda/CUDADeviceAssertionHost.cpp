@@ -116,9 +116,7 @@ std::string c10_retrieve_device_side_assertion_info() {
 
   // The snapshot causes a brief block. That's okay because this function only
   // executes if something's gone wrong such that speed is no longer a priority.
-  const auto launch_data = launch_registry.snapshot();
-  const auto& assertion_data = launch_data.first;
-  const auto& launch_infos = launch_data.second;
+  const auto [assertion_data, launch_infos] = launch_registry.snapshot();
 
   std::stringstream oss;
 
