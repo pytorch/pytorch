@@ -49,24 +49,6 @@ def _collect_tensors(*tensors: torch.Tensor | None) -> tuple[torch.Tensor, ...]:
     return tuple(t for t in tensors if t is not None)
 
 
-def _support_error(
-    input: torch.Tensor,
-    tensors: tuple[torch.Tensor, ...],
-    name: str,
-) -> str | None:
-    if not all(t.is_cuda for t in tensors):
-        return "inputs must be CUDA tensors"
-    if len({t.device for t in tensors}) != 1:
-        return "inputs must share device"
-    if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        return "input dtype must be float16, bfloat16, or float32"
-    if not torch.cuda.is_available():
-        return "CUDA not available"
-    if _get_device_major(input.device) not in (9, 10):
-        return f"CuTeDSL {name} requires compute capability 9.0 or 10.0"
-    return None
-
-
 def _cutedsl_fused_rms_norm_impl(
     dispatch_keys: torch.DispatchKeySet,
     input: torch.Tensor,
@@ -76,9 +58,8 @@ def _cutedsl_fused_rms_norm_impl(
     *,
     fallback_kernel: _RMSNormFwdFallback,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    error = _support_error(input, _collect_tensors(input, weight), "RMSNorm")
-    if error is not None:
-        return fallback_kernel(dispatch_keys, input, normalized_shape, weight, eps)
+    if _get_device_major(input.device) not in (9, 10):
+        return fallback_kernel.call_boxed(dispatch_keys, input, normalized_shape, weight, eps)
 
     if eps is None:
         eps = torch.finfo(input.dtype).eps
@@ -98,11 +79,8 @@ def _cutedsl_fused_rms_norm_backward_impl(
     *,
     fallback_kernel: _RMSNormBwdFallback,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    error = _support_error(
-        input, _collect_tensors(grad_out, input, rstd, weight), "RMSNorm"
-    )
-    if error is not None:
-        return fallback_kernel(
+    if _get_device_major(input.device) not in (9, 10):
+        return fallback_kernel.call_boxed(
             dispatch_keys,
             grad_out,
             input,
