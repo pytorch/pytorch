@@ -412,7 +412,8 @@ std::string format_invalid_args(
     error_msg += _argDesc(args, kwargs);
     error_msg += ", but expected one of:\n";
     for (auto& option_str : options) {
-      const auto& [option, printable_option_str] = _parseOption(option_str, kwargs);
+      const auto& [option, printable_option_str] =
+          _parseOption(option_str, kwargs);
       error_msg += " * ";
       error_msg += printable_option_str;
       error_msg += '\n';

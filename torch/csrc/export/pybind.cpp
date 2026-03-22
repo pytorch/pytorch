@@ -48,7 +48,8 @@ void initExportBindings(PyObject* module) {
   exportModule.def(
       "deregister_example_upgraders", []() { deregisterExampleUpgraders(); });
 
-  for (const auto& [name, value] : torch::_export::archive_spec::kAllConstants) {
+  for (const auto& [name, value] :
+       torch::_export::archive_spec::kAllConstants) {
     pt2ArchiveModule.attr(name) = value;
   }
 }
