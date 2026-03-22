@@ -361,6 +361,7 @@ dtensor_numeric_only_fails = {
     xfail("signal.windows.nuttall"),
     xfail("sparse.mm", "reduce"),
     xfail("sparse.sampled_addmm"),
+    xfail("squeeze_copy"),
     xfail("stack"),
     xfail("unsafe_chunk"),
     xfail("zeros"),

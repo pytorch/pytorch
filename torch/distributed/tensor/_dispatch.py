@@ -410,9 +410,7 @@ class OpDispatcher:
                         *local_tensor_args, **op_info.local_kwargs
                     )
                 else:
-                    local_results = op_call(
-                        *local_tensor_args, **op_info.local_kwargs
-                    )
+                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
         else:
             # For a non-participating device (happens on rank that does not belong to
