@@ -915,7 +915,10 @@ class TestProfiler(TestCase):
 
         for event in events:
             self.assertIsInstance(event.module_hierarchy(), list)
-            self.assertIsInstance(event.activity_type(), int)
+            self.assertIsInstance(
+                event.activity_type(),
+                torch._C._autograd._ActivityType,
+            )
             self.assertIsInstance(event.get_perf_event_counters(), list)
             self.assertIsInstance(event.debug_handle(), int)
             self.assertIsInstance(event.extra_meta(), dict)
