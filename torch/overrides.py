@@ -30,7 +30,7 @@ import types
 import warnings
 from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, cast, TypeVar
+from typing import Any, cast, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -2016,7 +2016,7 @@ def is_tensor_method_or_property(func: Callable) -> bool:
     return func in _get_tensor_methods() or func.__name__ == "__get__"
 
 
-def is_tensor_like(inp):
+def is_tensor_like(inp: object) -> TypeGuard[torch.Tensor]:
     """
     Returns ``True`` if the passed-in input is a Tensor-like.
 
