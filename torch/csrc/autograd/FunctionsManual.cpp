@@ -239,6 +239,8 @@ static std::vector<int64_t> _aminmax_dims(
     std::iota(dims.begin(), dims.end(), 0);
   }
   return dims;
+}
+
 Tensor aminmax_backward(
     const Tensor& grad_min,
     const Tensor& grad_max,
