@@ -1274,9 +1274,6 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
         self.dim(),
         ")");
 
-    // explicitly capture all required variables to work around windows build
-    // TODO: fix this when windows can correctly capture variables in nested
-    // lambda
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
         ScalarType::Half,
         ScalarType::Bool,
@@ -1436,9 +1433,7 @@ static void index_reduce_func_impl(
         self.dim(),
         ")");
     auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
-    // explicitly capture all required variables to work around windows build
-    // TODO: fix this when windows can correctly capture variables in nested
-    // lambda
+
     AT_DISPATCH_ALL_TYPES_AND2(
         ScalarType::Half,
         ScalarType::BFloat16,
@@ -1683,10 +1678,6 @@ Tensor& index_select_out_cpu_(
 
     auto grain_size = at::internal::GRAIN_SIZE;
     auto outer_loop =
-        // explicitly capture all required variables to work around windows
-        // build
-        // TODO: fix this when windows can correctly capture variables in nested
-        // lambda
         [&index_contig,
          &iter,
          &self_dim_size,
@@ -1734,10 +1725,6 @@ Tensor& index_select_out_cpu_(
       // data type
       if (iter.is_contiguous() && self.scalar_type() == result.scalar_type()) {
         auto slice_size_bytes = slice_size * elementSize(self.scalar_type());
-        // explicitly capture all required variables to work around windows
-        // build
-        // TODO: fix this when windows can correctly capture variables in nested
-        // lambda
         at::parallel_for(
             0,
             numel,
@@ -1788,9 +1775,7 @@ Tensor& index_select_out_cpu_(
         ") must one or zero for given self.dim() (",
         self.dim(),
         ")");
-    // explicitly capture all required variables to work around windows build
-    // TODO: fix this when windows can correctly capture variables in nested
-    // lambda
+
     if (self.is_quantized()) {
       AT_DISPATCH_QINT_TYPES(
           self.scalar_type(),

@@ -93,9 +93,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     check_mixed_data_type(input, weight, bias);
   }
 
-  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
-  auto M = M_N.first;
-  auto N = M_N.second;
+  auto [M, N] = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
   auto beta = bias.expect_contiguous();
@@ -132,9 +130,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
-  auto M = M_N.first;
-  auto N = M_N.second;
+  auto [M, N] = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
   auto beta = bias.expect_contiguous();
@@ -212,8 +208,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
-  auto M = M_N.first;
+  auto [M, N] = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
 

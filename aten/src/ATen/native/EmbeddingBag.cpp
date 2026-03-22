@@ -1538,8 +1538,6 @@ static void _embedding_bag_dense_backward_cpu_sum_mean(
 
   int64_t numel = indices.numel();
 
-  // explicitly capture all required variables to work around windows build
-  // TODO: fix this when windows can correctly capture variables in nested lambda
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_dense_backward_cpu_sum_mean",
     [&indices, &offset2bag, &bag_size_, &num_weights, &numel, &per_sample_weights,
       &per_sample_weights_data, &per_sample_weights_stride, &mode, &scale_grad_by_freq,
@@ -1700,8 +1698,6 @@ static Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
   auto weight_stride0 = weight.strides()[0];
   auto weight_stride1 = weight.strides()[1];
 
-  // explicitly capture all required variables to work around windows build
-  // TODO: fix this when windows can correctly capture variables in nested lambda
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "_embedding_bag_per_sample_weights_backward_cpu_template",
     [&indices, &output, &offset2bag_, &num_samples, &embedding_features,
       &grad_data, &grad_stride0, &grad_stride1, &weight_data, &weight_stride0, &weight_stride1,
