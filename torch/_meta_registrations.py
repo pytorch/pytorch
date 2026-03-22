@@ -2618,7 +2618,23 @@ def meta_conv(
     if guard_or_false(input_tensor.size(input_channels_dim) == 0):
         shape_out[output_channels_dim] = 0
 
-    out = input_tensor.new_empty(shape_out)
+    # Propagate the memory format (channels_last / channels_last_3d) from the
+    # input and weight tensors to the output, matching the behaviour of the real
+    # convolution backends (cudnn, mkldnn, mps, etc.).  Without this, running
+    # convolution under FakeTensorMode on a channels_last_3d input produces a
+    # contiguous output whose dim_order does not match the input, causing
+    # incorrect data interpretation later in the graph.
+    # See: https://github.com/pytorch/pytorch/issues/177277
+    fmt1 = suggest_memory_format(input_tensor)
+    fmt2 = suggest_memory_format(weight)
+    if fmt1 == torch.channels_last or fmt2 == torch.channels_last:
+        memory_format = torch.channels_last
+    elif fmt1 == torch.channels_last_3d or fmt2 == torch.channels_last_3d:
+        memory_format = torch.channels_last_3d
+    else:
+        memory_format = torch.contiguous_format
+
+    out = input_tensor.new_empty(shape_out, memory_format=memory_format)
     return out
 
 
