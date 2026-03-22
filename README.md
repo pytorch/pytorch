@@ -1,5 +1,7 @@
 ![PyTorch Logo](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/pytorch-logo-dark.png)
 
+[![gitcgr](https://gitcgr.com/badge/pytorch/pytorch.svg)](https://gitcgr.com/pytorch/pytorch)
+
 --------------------------------------------------------------------------------
 
 PyTorch is a Python package that provides two high-level features:
