@@ -882,6 +882,77 @@ class TestProfiler(TestCase):
                                         f"Expected hierarchy '{hierarchy}' in {op_to_module_hierarchy[op_name]}"
                                     )
 
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_kineto_event_extra_bindings(self):
+        """Test module_hierarchy, activity_type, get_perf_event_counters,
+        debug_handle, and extra_meta bindings on KinetoEvent, verified
+        against Chrome JSON ground truth."""
+
+        class A(nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class B(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.A0 = A()
+
+            def forward(self, x):
+                return self.A0.forward(x) * 2
+
+        model = torch.jit.script(B())
+        x = torch.randn(4, 4)
+
+        with profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            with_modules=True,
+        ) as prof:
+            model(x)
+
+        # -- Verify bindings return correct types --
+        events = prof.profiler.kineto_results.events()
+        self.assertGreater(len(events), 0)
+
+        for event in events:
+            self.assertIsInstance(event.module_hierarchy(), list)
+            self.assertIsInstance(event.activity_type(), int)
+            self.assertIsInstance(event.get_perf_event_counters(), list)
+            self.assertIsInstance(event.debug_handle(), int)
+            self.assertIsInstance(event.extra_meta(), dict)
+
+        # -- Cross-check module_hierarchy against Chrome JSON --
+        # Build map from op name -> hierarchy from KinetoEvent binding
+        kineto_hierarchies = {}
+        for event in events:
+            h = event.module_hierarchy()
+            if h:
+                kineto_hierarchies.setdefault(event.name(), []).append(
+                    h[0] if len(h) == 1 else h
+                )
+
+        # Build same map from Chrome JSON export
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+
+        json_hierarchies = {}
+        for evt in trace.get("traceEvents", []):
+            if "args" in evt and "Module Hierarchy" in evt["args"]:
+                hierarchy = evt["args"]["Module Hierarchy"]
+                if hierarchy:
+                    json_hierarchies.setdefault(
+                        evt["name"], []
+                    ).append(hierarchy)
+
+        # Every hierarchy from the binding should appear in Chrome JSON
+        for op_name, hierarchies in kineto_hierarchies.items():
+            self.assertIn(
+                op_name, json_hierarchies,
+                f"Op '{op_name}' has module_hierarchy in binding but "
+                f"not in Chrome JSON",
+            )
+
     def test_high_level_trace(self):
         """Checks that python side high level events are recorded."""
 

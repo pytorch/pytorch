@@ -319,7 +319,31 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       // KinetoEvent metadata
       .def("metadata_json", [](const KinetoEvent& e) {
         return e.metadataJson();
-      });
+      })
+      // module hierarchy (e.g. "ResNet.layer1.0.conv1")
+      .def(
+          "module_hierarchy",
+          [](const KinetoEvent& e) { return e.moduleHierarchy().vec(); })
+      // activity type (matches libkineto::ActivityType enum)
+      .def(
+          "activity_type",
+          [](const KinetoEvent& e) { return e.activityType(); })
+      // hardware performance counters (CUPTI)
+      .def(
+          "get_perf_event_counters",
+          [](const KinetoEvent& e) {
+            torch::profiler::perf_counters_t counters;
+            e.getPerfEventCounters(counters);
+            return counters;
+          })
+      // debug handle for module correlation
+      .def(
+          "debug_handle",
+          [](const KinetoEvent& e) { return e.debugHandle(); })
+      // extra metadata as key-value pairs
+      .def(
+          "extra_meta",
+          [](const KinetoEvent& e) { return e.extraMeta(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
   m.def("_get_sequence_nr", &at::sequence_number::peek);
