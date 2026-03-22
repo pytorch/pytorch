@@ -192,17 +192,17 @@ struct C10_XPU_API DeviceProp{
     // the platform name.
     DEFINE_PLATFORM_PROP(name, platform_name)
 
-    // ext properties
+    // ext properties.
     AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP)
 
-    // device aspects
+    // device aspects.
     AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT)
 
-    // experimental device aspects
+    // experimental device aspects.
     AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_ASPECT)
 
 #if SYCL_COMPILER_VERSION >= 20250000
-    // experimental device properties
+    // experimental device properties.
     AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP)
 #endif
 };
