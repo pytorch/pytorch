@@ -176,7 +176,7 @@ def load_metallib(source):
 
     Example::
 
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_MPS)
+        >>> # xdoctest: +SKIP("requires external .metallib file")
         >>> lib = torch.mps.load_metallib("kernels.metallib")
         >>> x = torch.ones(16, device="mps")
         >>> lib.square(x)
