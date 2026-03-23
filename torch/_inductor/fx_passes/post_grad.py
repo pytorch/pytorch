@@ -245,6 +245,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
+    # SPMD verification — before collective reordering passes.
+    if (
+        config.aten_distributed_optimizations.spmd_check
+        and _needs_spmd_graph_preservation()
+    ):
+        from torch._inductor.fx_passes.spmd_check import spmd_check
+
+        spmd_check(gm)
+
     collectives_bucketing: bool = False
 
     if config.bucket_reduce_scatters_fx != "none":

@@ -12,7 +12,6 @@ import torch
 import torch.distributed as dist
 import torch.utils._pytree as pytree
 from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
@@ -30,6 +29,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
@@ -1443,6 +1443,108 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             torch.compile(foo, backend="eager")(
                 NestedCounters(Counter(1, 5)), torch.ones(2, 3)
             )
+
+    def test_compile_fixed_stride_order(self):
+        hs_name = get_opaque_type_name(HoistedString)
+
+        torch.library.define(
+            "_TestOpaqueObject::stride_op",
+            f"(Tensor x, {hs_name} s) -> Tensor",
+            tags=(torch.Tag.needs_fixed_stride_order,),
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::stride_op",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def stride_op_impl(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+            return x * 2.0
+
+        @torch.library.register_fake("_TestOpaqueObject::stride_op", lib=self.lib)
+        def stride_op_fake(x, s):
+            return torch.empty_like(x)
+
+        def fn(x, s):
+            return torch.ops._TestOpaqueObject.stride_op(x, s)
+
+        s = HoistedString("double")
+        x = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(x, s)
+
+        expected = x * 2.0
+        self.assertEqual(result, expected)
+
+    def test_compile_exact_strides(self):
+        hs_name = get_opaque_type_name(HoistedString)
+
+        torch.library.define(
+            "_TestOpaqueObject::exact_op",
+            f"(Tensor x, {hs_name} s) -> Tensor",
+            tags=(torch.Tag.needs_exact_strides,),
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::exact_op",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def exact_op_impl(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+            return x * 3.0
+
+        @torch.library.register_fake("_TestOpaqueObject::exact_op", lib=self.lib)
+        def exact_op_fake(x, s):
+            return torch.empty_like(x)
+
+        def fn(x, s):
+            return torch.ops._TestOpaqueObject.exact_op(x, s)
+
+        s = HoistedString("double")
+        x = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(x, s)
+
+        expected = x * 3.0
+        self.assertEqual(result, expected)
+
+    def test_compile_contiguous_strides(self):
+        hs_name = get_opaque_type_name(HoistedString)
+
+        torch.library.define(
+            "_TestOpaqueObject::contig_op",
+            f"(Tensor x, {hs_name} s) -> Tensor",
+            tags=(torch.Tag.needs_contiguous_strides,),
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::contig_op",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def contig_op_impl(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+            return x * 4.0
+
+        @torch.library.register_fake("_TestOpaqueObject::contig_op", lib=self.lib)
+        def contig_op_fake(x, s):
+            return torch.empty_like(x)
+
+        def fn(x, s):
+            return torch.ops._TestOpaqueObject.contig_op(x, s)
+
+        s = HoistedString("double")
+        x = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(x, s)
+
+        expected = x * 4.0
+        self.assertEqual(result, expected)
 
     def test_export_joint(self):
         torch.library.define(

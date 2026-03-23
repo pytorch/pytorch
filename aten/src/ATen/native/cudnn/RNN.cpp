@@ -2376,12 +2376,7 @@ struct DropoutState {
     if (event) {
 #if !defined(USE_ROCM)
       // See Note [DropoutState and CUDA graph capture]
-      cudaStreamCaptureStatus status;
-      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
-          cuda::getCurrentCUDAStream(), &status, &capture_id_last_lock));
-      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
-        capture_id_last_lock = 0;
-      }
+      capture_id_last_lock = at::cuda::currentStreamCaptureId().value_or(0);
       if (capture_id_last_lock == capture_id_last_unlock) {
         event->block(cuda::getCurrentCUDAStream());
       }
@@ -2396,12 +2391,7 @@ struct DropoutState {
       event->record();
 #if !defined(USE_ROCM)
       // See Note [DropoutState and CUDA graph capture]
-      cudaStreamCaptureStatus status;
-      AT_CUDA_CHECK(cudaStreamGetCaptureInfo(
-          cuda::getCurrentCUDAStream(), &status, &capture_id_last_unlock));
-      if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
-        capture_id_last_unlock = 0;
-      }
+      capture_id_last_unlock = at::cuda::currentStreamCaptureId().value_or(0);
       TORCH_INTERNAL_ASSERT(capture_id_last_unlock == capture_id_last_lock);
 #endif
     }

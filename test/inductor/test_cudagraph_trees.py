@@ -22,7 +22,7 @@ from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
-from torch._inductor.cudagraph_utils import PlaceholderInfo
+from torch._inductor.cudagraph_utils import FunctionID, PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
@@ -3303,8 +3303,20 @@ if HAS_CUDA_AND_TRITON:
             foo.static_tensor = torch.ones((2, 2), device="cuda")
             foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
 
-            for _ in range(3):
-                foo(inp)
+            if torch._dynamo.config.inline_inbuilt_nn_modules:
+                for _ in range(3):
+                    foo(inp)
+            else:
+                # Run with specific function id to avoid dynamo recompiling
+                self.get_manager().run(
+                    [
+                        foo.goo.linear.weight,
+                        foo.goo.linear.bias,
+                        foo.static_tensor,
+                        inp,
+                    ],
+                    FunctionID(0),
+                )
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 

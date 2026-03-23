@@ -23,6 +23,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+import warnings
 from collections.abc import (
     Callable,
     Collection,
@@ -2128,9 +2129,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     # for the compiled CUTLASS .so, similar to how the triton branch uses
     # static CUfunction + loadKernel for non-AOT mode.
     if V.graph.cpp_wrapper and not V.graph.aot_mode:
-        log.warning(
+        warnings.warn(
             "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
-            "Skipping CUTLASS backend."
+            "Skipping CUTLASS backend.",
         )
         return False
 

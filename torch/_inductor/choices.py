@@ -355,6 +355,10 @@ class InductorChoices:
         """Hook to override the autotuning best choice after benchmarking."""
         return best_choice
 
+    def customize_fused_kernel_name(self, fused_name: str, src_code: str) -> str:
+        """Hook to transform fused kernel names during codegen"""
+        return fused_name
+
     @staticmethod
     def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
         """Heuristic to decide if a cooperative reduction should be used."""

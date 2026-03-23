@@ -7248,7 +7248,11 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         mod = Module()
 
-        error_message = r"Higher Order Operator: torch\.ops\.higher_order\.map_impl"
+        error_message = ""
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            error_message = r"Higher Order Operator: torch\.ops\.higher_order\.map_impl"
+        else:
+            error_message = "Can't inplace modify module params/buffers"
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError, error_message
@@ -14835,6 +14839,26 @@ def forward(self, L_x_ : torch.Tensor):
         result = torch.compile(fn, fullgraph=True)(x.clone())
         self.assertEqual(ref, result)
         self.assertEqual(saved_ref, saved["grad"])
+
+    def test_import_user_defined_module(self):
+        # testcase for https://github.com/pytorch/pytorch/issues/177682
+        # Bad import result for types.ModuleType subclass in sys.modules
+        class _ConfigModule(types.ModuleType):
+            x = 1
+
+        _ConfigModule.__module__ = __name__
+        sys.modules["my_config"] = _ConfigModule("my_config")
+
+        def fn():
+            import my_config  # noqa: F401
+
+            return torch.tensor(1)
+
+        compilefn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        ret1 = fn()
+        ret2 = compilefn()
+        self.assertEqual(ret1, ret2)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

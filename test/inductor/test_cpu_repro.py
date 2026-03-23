@@ -5077,6 +5077,26 @@ class CPUReproTests(TestCase):
                     "at::vec::VectorizedN<int64_t,2>::loadu", 2, exactly=True
                 ).run(code)
 
+    @requires_vectorization
+    def test_indirect_assert_scalar_mask_tail_vec_no_crash(self):
+        # https://github.com/pytorch/pytorch/issues/178136
+        def fn(positions, cache):
+            x = cache[positions]
+            y = x[0].clone()
+            y[..., 1::3] = x[1, ..., 1::3]
+            y[..., 2::3] = x[2, ..., 2::3]
+            return y
+
+        positions = torch.tensor([[0, 0], [0, 0], [0, 0]], dtype=torch.int64)
+        cache = torch.arange(3, dtype=torch.float32).reshape(1, 3)
+
+        with config.patch({"cpp.enable_loop_tail_vec": True}):
+            expected = fn(positions, cache)
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            actual = compiled_fn(positions, cache)
+
+        torch.testing.assert_close(actual, expected)
+
     def test_uint64_pointwise_vec(self):
         def fn(x):
             return x * x

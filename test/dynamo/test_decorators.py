@@ -1323,7 +1323,8 @@ class DecoratorTests(PytreeRegisteringTestCase):
     def _test_mark_static_address(self, guarded):
         # This test verifies that dynamo properly marks inputs as static
         # when using the mark_static_address API.
-        # We expect the tensor to be present in the buffers attribute of the graph.
+        # For both inline_inbuilt_nn_modules True and False, we expect the
+        # tensor to be present in the buffers attribute of the graph.
 
         compiles_with_buffers = 0
         compiles = 0

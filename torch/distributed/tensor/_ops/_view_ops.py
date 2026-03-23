@@ -465,18 +465,22 @@ def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
     return tuple(dimmap)
 
 
-def dim_squeeze(shape: Shape, dim: int | None = None) -> DimMap:
-    # FIXME: this is wrong when dim=None and one of the dimensions
-    # equals size of the mesh. For example squeeze(DTensor(tensor(4), Shard[0])) could
-    # end up as squeeze(tensor(1)) if we have 4 devices; this would lead to
-    # removal of a dimension that is not actually a singleton.
+def dim_squeeze(shape: Shape, dim: DimsType | None = None) -> DimMap:
+    # Operates on local shape; sharding_prop rewrites squeeze ops to squeeze.dims
+    # with only globally-singleton dims before this is called.
     from torch.fx.experimental.symbolic_shapes import guard_or_true
 
+    ndim = len(shape)
+    if dim is None:
+        target_dims = set(range(ndim))
+    elif isinstance(dim, int):
+        target_dims = {normalize_dim(dim, ndim)}
+    else:
+        target_dims = set(normalize_dims(dim, ndim))
     return tuple(
         InputDim(i)
         for i, s in enumerate(shape)
-        if guard_or_true(s > 1)
-        or (dim is not None and i != normalize_dim(dim, len(shape)))
+        if guard_or_true(s > 1) or i not in target_dims
     )
 
 
@@ -801,6 +805,7 @@ def register_op_strategy_map(
 
 
 register_op_strategy_map(aten.squeeze.default, torch.squeeze)
+register_op_strategy_map(aten.squeeze_.default, torch.squeeze)
 register_op_strategy_map(
     aten.squeeze_.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )

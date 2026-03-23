@@ -1399,8 +1399,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_reformer_train(self):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
+        expected_op_count = (
+            """10""" if torch._dynamo.config.inline_inbuilt_nn_modules else """4"""
+        )
+
         self.assertExpectedInline(cnt.frame_count, """1""")
-        self.assertExpectedInline(cnt.op_count, """10""")
+        self.assertExpectedInline(cnt.op_count, expected_op_count)
 
     def test_longformer_chunk(self):
         input1 = torch.randn([1, 4096, 1])

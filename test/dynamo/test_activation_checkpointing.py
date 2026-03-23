@@ -1871,6 +1871,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
     @requires_distributed()
     @requires_cuda_and_triton
     def test_dynamo_does_not_trace_getattr_as_top_frame(self):
+        # inline_inbuilt_nn_modules is a proxy to emulate what FSDP tests do.
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             CheckpointWrapper,
         )

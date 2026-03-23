@@ -233,6 +233,10 @@ if TEST_WITH_ROCM:
 
 inductor_skips["xpu"] = {}
 
+# torch-xpu-ops: #2956
+inductor_skips["xpu"]["lu"] = {f32}
+inductor_skips["xpu"]["nn.functional.linear"] = {f16}
+
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
@@ -296,7 +300,6 @@ inductor_expected_failures_single_sample["xpu"] = {
         i32,
         i64,
     },  # align with cuda.
-    ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "fft.fft": {f16},
     "fft.fft2": {f16},
