@@ -157,7 +157,9 @@ class TestBypassDeviceRestrictions(TestCase):
         self.assertEqual(y, torch.full((4,), 2.0, device=device))
 
 
-instantiate_device_type_tests(TestBypassDeviceRestrictions, globals(), only_for="openreg")
+instantiate_device_type_tests(
+    TestBypassDeviceRestrictions, globals(), only_for="openreg"
+)
 
 
 if __name__ == "__main__":
