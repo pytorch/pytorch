@@ -20837,9 +20837,6 @@ op_db: list[OpInfo] = [
                   sample_inputs_func=sample_repeat_tile,
                   skips=(
                       DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-                      # Exception: repeat(): Not supported for complex yet!
-                      DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                      DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
                   )),
     OpInfo('squeeze',
            ref=_squeeze_ref,
@@ -20962,11 +20959,6 @@ op_db: list[OpInfo] = [
                   supports_out=False,
                   supports_forward_ad=True,
                   supports_fwgrad_bwgrad=True,
-                  skips=(
-                      # RuntimeError: repeat(): Not supported for complex yet!
-                      DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                      DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
-                  ),
                   sample_inputs_func=sample_repeat_tile),
     OpInfo('trapz',  # TODO: in the future, 'trapz' should be made a proper alias of 'trapezoid'
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -25988,17 +25980,6 @@ python_ref_db = [
         "_refs.repeat",
         torch_opinfo_name="repeat",
         validate_view_consistency=False,
-        skips=(
-            # Exception: repeat(): Not supported for complex yet!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.complex64,)
-            ),
-        ),
     ),
     PythonRefInfo(
         "_refs.reshape",
