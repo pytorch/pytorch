@@ -1067,11 +1067,12 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
         if self.source is None:
             # NB: If source is added via side effects, create the exception
             # object through side_effects as well. See FrozenDataClass creation
             var = tx.output.side_effects.track_new_user_defined_object(
-                self,
+                SourcelessBuilder.create(tx, object),
                 self,
                 list(args),
             )
