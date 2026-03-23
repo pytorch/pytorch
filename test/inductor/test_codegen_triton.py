@@ -201,6 +201,7 @@ class TestCodegenTriton(InductorTestCase):
         _, code = run_and_get_code(torch.compile(fn), x)
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
+
     def test_is_multiple_of_rules(self):
         """Test structural divisibility rules in _is_multiple_of."""
         from torch.utils._sympy.functions import FloorDiv, Mod
