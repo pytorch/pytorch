@@ -164,6 +164,29 @@ void scaled_gemm(
     bool use_fast_accum,
     const std::optional<Tensor>& alpha);
 
+void grouped_gemm(
+      char transa,
+      char transb,
+      const void* mArrayDev,
+      int64_t avgM,
+      const void* nArrayDev,
+      int64_t avgN,
+      const void* kArrayDev,
+      int64_t avgK,
+      const float* const* alphaArrayDev,
+      ScalarType input_dtype,
+      const void* const* A,
+      const void* ldaArrayDev,
+      const void* const* B,
+      const void* ldbArrayDev,
+      const float* const* betaArrayDev,
+      ScalarType result_dtype,
+      const void* const* C,
+      const void* ldcArrayDev,
+      void** D,
+      const void* lddArrayDev,
+      int batchCount);
+
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 
 #define CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)                                   \
