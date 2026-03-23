@@ -3940,6 +3940,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     best_choice = min(fallback_choices, key=lambda c: timings[c])
 
+        best_choice = V.choices.override_best_choice(best_choice, timings)
+
         # Test-only: force choosing decomposition (non-fallback) if available
         if config.test_configs.force_custom_op_decomposition:
 

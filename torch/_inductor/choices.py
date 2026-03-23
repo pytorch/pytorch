@@ -347,6 +347,14 @@ class InductorChoices:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
 
+    def override_best_choice(
+        self,
+        best_choice: ChoiceCaller,
+        timings: dict[ChoiceCaller, float],
+    ) -> ChoiceCaller:
+        """Hook to override the autotuning best choice after benchmarking."""
+        return best_choice
+
     @staticmethod
     def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
         """Heuristic to decide if a cooperative reduction should be used."""
