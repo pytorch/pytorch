@@ -37,6 +37,8 @@ def cutedsl_rmsnorm_fwd(
     out = torch.empty_like(x)
     rstd = torch.empty(M, device=x.device, dtype=torch.float32)
 
+    if weight is not None and weight.ndim != 1:
+        weight = weight.view(N)
     _rmsnorm_fwd(x, weight, out, None, rstd, None, None, eps)
 
     out = out.reshape(input_shape)
