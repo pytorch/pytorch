@@ -27,6 +27,8 @@ C10_CUDA_API DeviceIndex device_count_ensure_non_zero();
 
 C10_CUDA_API DeviceIndex current_device();
 
+C10_CUDA_API std::string current_device_name();
+
 C10_CUDA_API void set_device(DeviceIndex device, const bool force = false);
 
 C10_CUDA_API void device_synchronize();

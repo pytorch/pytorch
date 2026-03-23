@@ -239,6 +239,10 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     const XPUStream xpu_stream{stream};
     XPUCachingAllocator::recordStream(data_ptr, xpu_stream);
   }
+
+  std::string getDeviceName() const override {
+    return c10::xpu::current_device_name();
+  }
 };
 
 } // namespace c10::xpu::impl

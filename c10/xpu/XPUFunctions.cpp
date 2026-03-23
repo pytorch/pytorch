@@ -257,6 +257,11 @@ DeviceIndex current_device() {
   return curDeviceIndex;
 }
 
+std::string current_device_name() {
+  return gDevicePool.devices[current_device()]
+      ->get_info<sycl::info::device::name>();
+}
+
 void set_device(DeviceIndex device) {
   initDevicePoolCallOnce();
   check_device_index(device);

@@ -140,6 +140,12 @@ DeviceIndex current_device() {
   return cur_device;
 }
 
+std::string current_device_name() {
+  cudaDeviceProp props;
+  C10_CUDA_CHECK(cudaGetDeviceProperties(&props, current_device()));
+  return props.name;
+}
+
 void set_device(DeviceIndex device, const bool force) {
   C10_CUDA_CHECK(c10::cuda::SetDevice(device, force));
 }

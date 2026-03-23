@@ -108,6 +108,10 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
     impl_->synchronizeDevice(device_index);
   }
 
+  std::string getDeviceName() const override {
+    return impl_->getDeviceName();
+  }
+
  private:
   const DeviceGuardImplInterface* impl_ = nullptr;
 };

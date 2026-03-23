@@ -6056,3 +6056,49 @@ def get_gcc_major_version():
         return int(out.split(".")[0])
     except Exception:
         return None
+
+
+# Returns the GPU name for the given vendor and device ID,
+# or None if it cannot be determined.
+def get_gpu_name(vendor: str, device_id: int = 0) -> str | None:
+    if vendor == "intel":
+        tool = "xpu-smi"
+        cmd = [tool, "discovery", "-d", str(device_id), "-j"]
+    elif vendor == "nvidia":
+        tool = "nvidia-smi"
+        cmd = [tool, "--query-gpu=name", "--format=csv,noheader", "-i", str(device_id)]
+    else:
+        warnings.warn(f"Unsupported vendor {vendor!r} to get the GPU name; returning None. "
+                      f"Expected 'intel' or 'nvidia'.", stacklevel=2)
+        return None
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        gpu_name = None
+
+        if vendor == "intel":
+            data = json.loads(result.stdout)
+            gpu_name = data.get("device_name", None)
+        elif vendor == "nvidia":
+            gpu_name = result.stdout.strip()
+
+        # Treat empty string as None
+        gpu_name = None if gpu_name == "" else gpu_name
+
+        if gpu_name is None:
+            warnings.warn(f"{tool} returned an empty GPU name for device_id={device_id}.", stacklevel=2)
+        return gpu_name
+
+    except FileNotFoundError:
+        warnings.warn(f"{tool} not found in PATH so returning None. "
+                      f"Is it installed and available in your environment?", stacklevel=2)
+        return None
+    except subprocess.CalledProcessError as e:
+        warnings.warn(f"{tool} error for device_id={device_id} so returning None: {e.stderr}.", stacklevel=2)
+        return None

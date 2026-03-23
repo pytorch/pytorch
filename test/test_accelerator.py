@@ -6,6 +6,7 @@ import unittest
 
 import torch
 from torch.testing._internal.common_utils import (
+    get_gpu_name,
     NoTest,
     run_tests,
     TEST_ACCELERATOR,
@@ -259,6 +260,19 @@ class TestAccelerator(TestCase):
         free_bytes, total_bytes = torch.accelerator.get_memory_info()
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
+
+    @unittest.skipIf(
+        TEST_MPS, "MPS doesn't support torch.accelerator.device_name() API!"
+    )
+    def test_current_device_name(self):
+        vendor_by_accelerator = {"cuda": "nvidia", "xpu": "intel"}
+        for accelerator, vendor in vendor_by_accelerator.items():
+            if not torch.get_device_module(accelerator).is_available():
+                continue
+            device_name = get_gpu_name(vendor)
+            if device_name is None:
+                self.skipTest("Unable to get GPU name, skipping test")
+            self.assertEqual(torch.accelerator.current_device_name(), device_name)
 
 
 if __name__ == "__main__":

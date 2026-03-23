@@ -12,6 +12,8 @@ namespace py = pybind11;
 
 namespace torch::acc {
 
+constexpr const char* kPythonDeviceGuardDeviceName = "PythonDeviceGuard";
+
 // python hook interface
 struct PythonHooks final : public at::PrivateUse1HooksInterface {
   using at::PrivateUse1HooksInterface::PrivateUse1HooksInterface;
@@ -74,6 +76,10 @@ struct PythonDeviceGuard final : public c10::impl::DeviceGuardImplInterface {
   c10::Device getDevice() const override {
     return c10::Device(type(), 0);
   }
+  std::string getDeviceName() const noexcept override {
+    return kPythonDeviceGuardDeviceName;
+  }
+
   void setDevice(c10::Device device) const override {}
   void uncheckedSetDevice(c10::Device device) const noexcept override {}
   c10::Stream getStream(c10::Device /*unused*/) const noexcept override {

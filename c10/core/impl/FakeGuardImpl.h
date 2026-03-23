@@ -10,6 +10,8 @@ namespace c10::impl {
 // any good reason, just to simplify code.
 constexpr DeviceIndex kFakeGuardImplMaxDevices = 8;
 
+constexpr const char* kFakeGuardImplDeviceName = "FakeGuardDevice";
+
 /**
  * A fake implementation of DeviceGuardImplInterface suitable for testing.
  * The current device is modeled as a mutable field in the guard implementation
@@ -35,6 +37,9 @@ struct FakeGuardImpl final : public DeviceGuardImplInterface {
   }
   Device getDevice() const override {
     return Device(type(), current_device_);
+  }
+  std::string getDeviceName() const noexcept override {
+    return kFakeGuardImplDeviceName;
   }
   void setDevice(Device d) const override {
     AT_ASSERT(d.type() == type());

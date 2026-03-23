@@ -34,6 +34,12 @@ void initModule(PyObject* module) {
     return at::accelerator::getDeviceIndex();
   });
 
+  m.def("_accelerator_getDeviceName", []() {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    torch::utils::maybe_initialize_device(device_type);
+    return at::accelerator::getDeviceName();
+  });
+
   m.def("_accelerator_getDeviceCapability", [](c10::DeviceIndex device_index) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
     torch::utils::maybe_initialize_device(device_type);

@@ -94,6 +94,11 @@ struct C10_API DeviceGuardImplInterface {
   virtual Device getDevice() const = 0;
 
   /**
+   * Get the name of the current device.
+   */
+  virtual std::string getDeviceName() const = 0;
+
+  /**
    * Set the current device to Device.
    */
   virtual void setDevice(Device) const = 0;
@@ -271,6 +276,8 @@ struct C10_API DeviceGuardImplInterface {
   virtual ~DeviceGuardImplInterface() = default;
 };
 
+constexpr const char* kNoOpDeviceGuardImplDeviceName = "NoOpDevice";
+
 // A no-op device guard impl that doesn't do anything interesting.  Useful
 // for devices that don't actually have a concept of device index.  Prominent
 // examples are CPU and Meta.
@@ -285,6 +292,9 @@ struct NoOpDeviceGuardImpl : public DeviceGuardImplInterface {
   }
   Device getDevice() const override {
     return Device(D, -1);
+  }
+  std::string getDeviceName() const noexcept override {
+    return kNoOpDeviceGuardImplDeviceName;
   }
   void setDevice(Device /*unused*/) const override {
     // no-op

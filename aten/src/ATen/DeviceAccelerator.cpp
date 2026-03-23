@@ -136,6 +136,13 @@ c10::DeviceCapability getDeviceCapability(c10::DeviceIndex device_index) {
   c10::impl::VirtualGuardImpl impl(device_type);
   return impl.getDeviceCapability({device_type, device_index});
 }
+
+std::string getDeviceName() {
+  const auto device_type = getAccelerator(true).value();
+  c10::impl::VirtualGuardImpl impl(device_type);
+  return impl.getDeviceName();
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace at::accelerator

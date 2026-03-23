@@ -28,6 +28,7 @@ __all__ = [
     "current_accelerator",
     "current_device_idx",  # deprecated
     "current_device_index",
+    "current_device_name",
     "get_device_capability",
     "current_stream",
     "device_count",
@@ -154,6 +155,22 @@ current_device_idx.__doc__ = r"""
         :func:`torch.accelerator.current_device_idx` is deprecated in favor of :func:`torch.accelerator.current_device_index`
         and will be removed in a future PyTorch release.
     """
+
+
+def current_device_name() -> str:
+    r"""Return the name of the currently selected device for the current :ref:`accelerator<accelerators>`.
+
+    Returns:
+        str: the name of the currently selected device.
+
+    Example::
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> assert torch.accelerator.is_available() "No available accelerators detected."
+        >>> device_name = torch.accelerator.current_device_name()
+        >>> print(f"Current device name: {device_name}")
+    """
+    return torch._C._accelerator_getDeviceName()
 
 
 @cache

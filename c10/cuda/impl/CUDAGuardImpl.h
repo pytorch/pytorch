@@ -43,6 +43,9 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     return Device(DeviceType::CUDA, device);
   }
+  std::string getDeviceName() const override {
+    return c10::cuda::current_device_name();
+  }
   std::optional<Device> uncheckedGetDevice() const noexcept {
     DeviceIndex device{-1};
     const auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDevice(&device));

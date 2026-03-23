@@ -20,6 +20,7 @@
     set_device_idx
     current_device_index
     current_device_idx
+    current_device_name
     set_stream
     current_stream
     synchronize

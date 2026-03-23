@@ -16,6 +16,8 @@ C10_XPU_API DeviceIndex device_count_ensure_non_zero();
 
 C10_XPU_API DeviceIndex current_device();
 
+C10_XPU_API std::string current_device_name();
+
 C10_XPU_API void set_device(DeviceIndex device);
 
 C10_XPU_API DeviceIndex exchange_device(DeviceIndex device);

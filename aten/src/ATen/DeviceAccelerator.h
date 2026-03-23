@@ -54,6 +54,9 @@ TORCH_API void setDeviceIndex(c10::DeviceIndex device_index);
 // Get the current device index.
 TORCH_API c10::DeviceIndex getDeviceIndex();
 
+// Get the current device name
+TORCH_API std::string getDeviceName();
+
 // Set the current stream to a given stream. Note that this API doesn't change
 // the current device index.
 TORCH_API void setCurrentStream(c10::Stream stream);
@@ -104,6 +107,7 @@ TORCH_API inline std::pair<size_t, size_t> getMemoryInfo(
   const auto device_type = getAccelerator(true).value();
   return at::getDeviceAllocator(device_type)->getMemoryInfo(device_index);
 }
+
 } // namespace at::accelerator
 
 namespace at {

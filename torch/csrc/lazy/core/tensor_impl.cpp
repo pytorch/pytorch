@@ -16,6 +16,8 @@ namespace {
 // native function implementations, this guard is omitted.
 thread_local c10::Device g_device(c10::DeviceType::Lazy);
 
+constexpr const char* kLTCGuardImplDeviceName = "LazyDevice";
+
 struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
   at::DeviceType type() const override {
     return at::DeviceType::Lazy;
@@ -30,6 +32,10 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
 
   c10::Device getDevice() const override {
     return g_device;
+  }
+
+  std::string getDeviceName() const noexcept override {
+    return kLTCGuardImplDeviceName;
   }
 
   void setDevice(c10::Device device) const override {
