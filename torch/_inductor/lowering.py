@@ -31,7 +31,6 @@ from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
-    check,
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -2085,7 +2084,7 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
     dim1 = canonicalize_dim(idx=dim1, rank=num_dims)
     dim2 = canonicalize_dim(idx=dim2, rank=num_dims)
 
-    check(
+    torch._check(
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
     )
 

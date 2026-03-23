@@ -2818,7 +2818,6 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_param_inputs(self):
             # Verify that we can record multiple cudagraphs for a single
             # compiled function with param inputs
@@ -2829,7 +2828,6 @@ if HAS_CUDA_AND_TRITON:
             self.run_static_input_param_test(fn, 4)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_builtin_module(self):
             # Verify that we don't recompile when changing the param of a builtin module
             # and that we record another cudagraph
@@ -2837,7 +2835,6 @@ if HAS_CUDA_AND_TRITON:
             self._module_test(torch.nn.Linear(2, 3, device="cuda"))
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_builtin_module_buffers(self):
             # Verify that we don't recompile when changing the buffer of a builtin module
             # and that we record another cudagraph
@@ -2849,7 +2846,6 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_custom_module(self):
             # Test that we can correctly dispatch multiple graphs
             # if params of a custom module change
@@ -2866,7 +2862,6 @@ if HAS_CUDA_AND_TRITON:
             )
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_custom_module_buffer(self):
             # Test that we can correctly dispatch multiple graphs
             # if buffers of a custom module change
@@ -2890,7 +2885,6 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_child_node(self):
             # Test that we can correctly dispatch multiple graphs if a child node
             # in the tree has stable input pointers change
@@ -2909,7 +2903,6 @@ if HAS_CUDA_AND_TRITON:
             self.run_static_input_param_test(fn, 5)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_parent_node(self):
             def fn(x, p):
                 # Graph 1
@@ -3065,9 +3058,7 @@ if HAS_CUDA_AND_TRITON:
             ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
         def test_not_fallback_to_eager_if_have_not_recompiling_too_many_times(self):
             def fn(x, y):
@@ -3082,7 +3073,6 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_no_rerecord_with_mark_static_address(self):
             class Mod(torch.nn.Module):
                 def __init__(self):

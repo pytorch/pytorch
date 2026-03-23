@@ -4487,7 +4487,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call(self):
         def wrapper_fn(model, params, inputs, targets):
             prediction = torch.func.functional_call(model, params, (inputs,))
@@ -4537,7 +4536,6 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @config.patch(inline_inbuilt_nn_modules=True)
     def test_functional_call_sequential_params_and_buffers(self):
         # copied from test/test_stateless.py
         class MockModule(torch.nn.Module):

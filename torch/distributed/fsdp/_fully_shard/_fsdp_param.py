@@ -317,8 +317,10 @@ class FSDPParam:
             raise AssertionError(
                 f"Expected contiguous tensor with {self.fsdp_placement=}"
             )
-        self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
-        self.sharded_param.requires_grad_(param.requires_grad)
+        self.sharded_param = nn.Parameter(
+            self.to_sharded_dtensor(sharded_param),
+            requires_grad=param.requires_grad,
+        )
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
@@ -529,8 +531,10 @@ class FSDPParam:
         # then we do not need extra casting
         if reduce_dtype == param_dtype:
             reduce_dtype = None
-        # Clamp `param_dtype` to `None` if no casting is required
-        if param_dtype == self.orig_dtype:
+        # Clamp `param_dtype` to `None` if no casting is required or if the
+        # parameter is non-floating-point (mixed precision is only meaningful
+        # for floating-point parameters)
+        if param_dtype == self.orig_dtype or not self.orig_dtype.is_floating_point:
             param_dtype = None
         self.param_dtype = param_dtype
         self.reduce_dtype = reduce_dtype
@@ -659,7 +663,8 @@ class FSDPParam:
             storage_offset=0,
         )
         self._sharded_post_forward_param = nn.Parameter(
-            self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor)
+            self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor),
+            requires_grad=self.sharded_param.requires_grad,
         )
         self._setattr_on_modules(self._sharded_post_forward_param)
         self.free_unsharded_param()

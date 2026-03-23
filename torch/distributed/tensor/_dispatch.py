@@ -7,7 +7,6 @@ from typing import cast
 
 import torch
 import torch.distributed as dist
-import torch.distributed.config as dist_config
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
@@ -372,10 +371,6 @@ class OpDispatcher:
                             )
                     else:
                         # CUDA device without user generator, use HOP for traceability
-                        if dist_config.compile_on_one_rank:
-                            raise NotImplementedError(
-                                "run_dtensor_rng_op is not yet compatible with compile_on_one_rank"
-                            )
                         if not isinstance(
                             random._rng_tracker, random.OffsetBasedRNGTracker
                         ):

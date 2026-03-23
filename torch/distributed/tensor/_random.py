@@ -373,9 +373,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         from torch.distributed.tensor._ops.utils import prod
 
         mesh = spec.mesh
-        mesh_coordinate = mesh.get_coordinate()
-        if mesh_coordinate is None:
-            raise AssertionError
+        mesh_coordinate = [mesh._sym_get_coordinate(i) for i in range(mesh.ndim)]
 
         shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
             mesh_coordinate, spec
@@ -433,8 +431,6 @@ def _calc_shard_info(
     # The coordinate on each tensor dim is a tuple (idx, range)
     # If a DTensor is partitioned on its dim i into n shards, and the current rank
     # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
-    if mesh_coordinate is None:
-        raise AssertionError
     mesh_size = mesh.shape
     shard_idx_by_dim = []
     total_num_shards_by_dim: list[
