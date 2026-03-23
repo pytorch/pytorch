@@ -3761,9 +3761,6 @@ class TestProfilerEventsParity(TestCase):
     """Tests validating parity between events() and export_chrome_trace() JSON."""
 
     def test_python_function_events_in_events(self):
-        def _is_python_function_event(name):
-            return ".py(" in name and "): " in name
-
         # Default: python function events are excluded from events()
         with profile(
             activities=[ProfilerActivity.CPU],
@@ -3772,8 +3769,7 @@ class TestProfilerEventsParity(TestCase):
             x = torch.randn(10, 10)
             torch.mm(x, x)
 
-        default_events = prof.events()
-        default_py = [e for e in default_events if _is_python_function_event(e.name)]
+        default_py = [e for e in prof.events() if e.is_python_function]
         self.assertEqual(len(default_py), 0)
 
         # Opt-in: expose_python_function_events includes them
@@ -3788,11 +3784,25 @@ class TestProfilerEventsParity(TestCase):
             torch.mm(x, x)
 
         events = prof.events()
-        python_events = [e for e in events if _is_python_function_event(e.name)]
+        python_events = [e for e in events if e.is_python_function]
         self.assertGreater(len(python_events), 0)
         for e in python_events:
             self.assertIsInstance(e.name, str)
             self.assertGreater(e.time_range.end - e.time_range.start, 0)
+
+        # Parity: count should match python_function events in Chrome trace
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            fname = f.name
+        prof.export_chrome_trace(fname)
+        with open(fname) as f:
+            trace = json.load(f)
+        os.remove(fname)
+        json_py = [
+            e
+            for e in trace["traceEvents"]
+            if e.get("cat") == "python_function" and e.get("ph") == "X"
+        ]
+        self.assertEqual(len(python_events), len(json_py))
 
     def test_profiler_flow_events_parity(self):
         """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
