@@ -73,6 +73,54 @@ class Dep(abc.ABC):
 
 
 @dataclasses.dataclass(frozen=True)
+class UserTritonDep(Dep):
+    # pyrefly: ignore[bad-override]
+    name: str
+    # pyrefly: ignore[bad-override]
+    index: sympy.Expr | None
+    var_names: tuple[sympy.Symbol, ...] = ()
+    size: tuple[sympy.Expr, ...] = ()
+    mask: sympy.Expr | None = None
+
+    @property
+    def has_symbolic(self) -> bool:
+        return self.index is not None
+
+    @property
+    def ranges(self) -> dict[sympy.Symbol, sympy.Expr]:
+        return dict(zip(self.var_names, self.size))
+
+    def get_free_symbol_uses(self, unbacked_only=False) -> OrderedSet[sympy.Symbol]:
+        if self.index is None:
+            return OrderedSet()
+        return OrderedSet(self.index.free_symbols)
+
+    def rename(self, renames: dict[str, str]) -> "UserTritonDep":
+        if self.name in renames:
+            return dataclasses.replace(self, name=renames[self.name])
+        return self
+
+    def get_numel(self) -> sympy.Expr:
+        if not self.size:
+            return sympy.Integer(1)
+        return sympy.Mul(*self.size)
+
+    def numbytes_hint(self) -> int:
+        return 0
+
+    def numel_hint(self) -> int:
+        return 0
+
+    def has_unbacked_symbols(self) -> bool:
+        return False
+
+    def is_contiguous(self) -> bool:
+        if self.index is None:
+            return False
+        return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
+
+
+@dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
     # pyrefly: ignore [bad-override]
     name: str
