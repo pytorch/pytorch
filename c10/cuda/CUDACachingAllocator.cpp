@@ -1648,10 +1648,7 @@ class DeviceCachingAllocator {
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
 
-  Block* malloc(
-      size_t orig_size,
-      cudaStream_t stream,
-      void* hint = nullptr) {
+  Block* malloc(size_t orig_size, cudaStream_t stream, void* hint = nullptr) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -3626,15 +3623,48 @@ class DeviceCachingAllocator {
   }
 
   bool get_free_block_by_hint(void* hint, AllocParams& params) {
+    // Get a free block starting at hint address. If hint is at the middle of a block,
+    // split the block at hint and return the second part.
     BlockPool& pool = *params.pool;
     Block search_key(params.device(), params.stream(), 0);
     auto it = pool.blocks.lower_bound(&search_key);
     for (; it != pool.blocks.end() && (*it)->stream == params.stream(); ++it) {
-      if ((*it)->ptr == hint && (*it)->size >= params.size()) {
-        params.block = *it;
-        pool.blocks.erase(it);
-        return true;
+      Block* block = *it;
+      char* block_start = static_cast<char*>(block->ptr);
+      char* hint_ptr = static_cast<char*>(hint);
+      if (hint_ptr < block_start ||
+          hint_ptr + params.size() > block_start + block->size) {
+        continue;
       }
+      size_t prefix_size = hint_ptr - block_start;
+      if (prefix_size > 0 &&
+          !should_split(
+              block,
+              block->size - prefix_size,
+              params.is_expandable_segments_active)) {
+        continue;
+      }
+      pool.blocks.erase(it);
+      if (prefix_size > 0) {
+        Block* prefix = new Block(
+            params.device(),
+            params.stream(),
+            prefix_size,
+            block->pool,
+            block->ptr);
+        prefix->expandable_segment_ = block->expandable_segment_;
+        prefix->prev = block->prev;
+        if (prefix->prev) {
+          prefix->prev->next = prefix;
+        }
+        prefix->next = block;
+        block->prev = prefix;
+        block->ptr = hint_ptr;
+        block->size -= prefix_size;
+        pool.insert_into_blocks(prefix);
+      }
+      params.block = block;
+      return true;
     }
     return false;
   }

@@ -7,7 +7,7 @@
 
 namespace at::native {
 
-TORCH_CUDA_CPP_API void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes);
+TORCH_CUDA_CPP_API void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes, void* hint = nullptr);
 
 static inline void maybe_resize_storage_cuda(TensorImpl* self, size_t new_size_bytes) {
   // It does not make sense to try to resize a storage

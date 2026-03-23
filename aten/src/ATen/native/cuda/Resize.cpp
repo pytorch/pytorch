@@ -15,29 +15,18 @@
 
 namespace at::native {
 
-void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
+void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes, void* hint) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
 
   c10::Device device = storage->device();
 
   if (size_bytes == 0) {
-    void* old_ptr = storage->data_ptr().get();
-    size_t old_size = storage->nbytes();
     storage->set_data_ptr_noswap(at::DataPtr(nullptr, device));
     storage->set_nbytes(0);
-    if (old_ptr) {
-      storage->set_preferred_data_ptr(old_ptr, old_size);
-    }
     return;
   }
 
   c10::cuda::CUDAGuard guard(device.index());
-
-  void* hint = nullptr;
-  if (storage->preferred_data_ptr_size() == size_bytes) {
-    hint = storage->preferred_data_ptr();
-  }
-  storage->clear_preferred_data_ptr();
 
   at::DataPtr data = hint
       ? c10::cuda::CUDACachingAllocator::allocateWithHint(size_bytes, hint)

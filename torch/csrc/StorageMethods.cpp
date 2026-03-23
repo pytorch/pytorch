@@ -128,7 +128,7 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
+static PyObject* THPStorage_resize_(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
@@ -138,12 +138,28 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
       storage.sym_nbytes() != 0;
   TORCH_CHECK(
       !invalid, "Attempted to call resize_() on an invalid python storage.")
+  Py_ssize_t nargs = PyTuple_GET_SIZE(args);
+  TORCH_CHECK(
+      nargs >= 1 && nargs <= 2,
+      "resize_ expects 1 or 2 arguments, got ",
+      nargs);
+  PyObject* number_arg = PyTuple_GET_ITEM(args, 0);
   TORCH_CHECK(
       THPUtils_checkLong(number_arg),
       "resize_ expects an int, "
       "but got ",
       THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
+  void* hint = nullptr;
+  if (nargs == 2) {
+    PyObject* hint_arg = PyTuple_GET_ITEM(args, 1);
+    TORCH_CHECK(
+        THPUtils_checkLong(hint_arg),
+        "resize_ hint_addr expects an int, "
+        "but got ",
+        THPUtils_typename(hint_arg));
+    hint = reinterpret_cast<void*>(THPUtils_unpackLong(hint_arg));
+  }
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCUDA) {
 #ifdef USE_CUDA
@@ -154,7 +170,8 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
         size_bytes_i,
         ") cannot be represented as a size_t");
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
-    at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
+    at::native::resize_bytes_cuda(
+        storage.unsafeGetStorageImpl(), size_bytes, hint);
 #else
     TORCH_CHECK(false, "built without USE_CUDA");
 #endif
@@ -637,7 +654,7 @@ static PyMethodDef THPStorage_methods[] = {
     {"element_size", THPStorage_elementSize, METH_NOARGS, nullptr},
     {"fill_", THPStorage_fill_, METH_O, nullptr},
     {"new", THPStorage_new, METH_NOARGS, nullptr},
-    {"resize_", THPStorage_resize_, METH_O, nullptr},
+    {"resize_", THPStorage_resize_, METH_VARARGS, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
     {"resizable", THPStorage_resizable, METH_NOARGS, nullptr},
