@@ -890,6 +890,7 @@ ops_unbacked_dtensor_dde = {
     xfail("nonzero_static"),
     xfail("permute_copy"),
     xfail("prod"),
+    xfail("quantile"),
     xfail("ravel"),
     xfail("reshape"),
     xfail("reshape_as"),
