@@ -4844,6 +4844,43 @@ class TestResizeStorageHint(TestCase):
         del t
         del pool
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not use the caching allocator hint path",
+    )
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    def test_resize_storage_hint_expandable_segments_with_split_block(self):
+        torch.cuda.empty_cache()
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+        try:
+            pool = torch.cuda.MemPool()
+
+            # Allocate two tensors in private pool and t is the second tensor
+            with torch.cuda.use_mem_pool(pool):
+                blocker = torch.randn(1024, device="cuda")
+                t = torch.randn(1024, device="cuda")
+
+            original_ptr = t.untyped_storage().data_ptr()
+            original_size = t.untyped_storage().nbytes()
+
+            # delete blocker and t such that the two blocks have been merged
+            # in CUDACachingAllocator.
+            t.untyped_storage().resize_(0)
+            blocker.untyped_storage().resize_(0)
+
+            # Reallocate t at the original ptr in mempool.
+            with torch.cuda.use_mem_pool(pool):
+                t.untyped_storage().resize_(original_size, original_ptr)
+
+            self.assertEqual(t.untyped_storage().nbytes(), original_size)
+            self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
+        finally:
+            del blocker
+            del t
+            del pool
+            torch.cuda.empty_cache()
+            torch.cuda.memory._set_allocator_settings("")
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
