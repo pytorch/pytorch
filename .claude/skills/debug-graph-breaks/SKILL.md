@@ -74,7 +74,7 @@ For each graph break found, do the following:
 
 1. **Parse the graph break reason.** Extract the GB type string (e.g., "Failed to trace builtin operator", "Unsupported Tensor.item() call with capture_scalar_outputs=False") and the GB documentation URL from the output.
 
-2. **Fetch the graph break documentation page.** Use the URL from the log output (e.g., `https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0059.html`) to get detailed information, examples, and suggested fixes for that specific graph break type.
+2. **Fetch the graph break documentation page.** Use the URL from the log output (e.g., `https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0059.html`, alternatively internet may not be available and so the user should also be able to provide a local direcetory instead) to get detailed information, examples, and suggested fixes for that specific graph break type.
 
 3. **Classify the graph break** using the hint categories from the log output:
    - **USER_ERROR**: The user's code has a bug that also fails in eager mode. Tell them to verify by running without `torch.compile`.
@@ -202,6 +202,7 @@ After suggesting fixes:
 2. Check if the graph break is resolved.
 3. If new graph breaks appear, repeat Phase 2-3.
 4. Goal: either `fullgraph=True` runs without errors, or the user has eliminated the most impactful breaks.
+5. Optional: If the user is a PyTorch developer (can be determined if torch is built locally) and the graph break message is unclear, suggest a change to the error message or to create an issue.
 
 ### Benchmarking improvements
 
