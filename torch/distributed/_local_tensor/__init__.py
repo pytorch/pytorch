@@ -686,7 +686,7 @@ class _LocalOffsetBasedRNGTracker:
 
     @property
     def _device(self):
-        return torch.device(self._device_type, torch.cuda.current_device())
+        return torch.device(self._device_type, torch.accelerator.current_device_index())
 
     def _set_pre_op_offset(self, state, spec) -> None:
         """Compute and set per-rank offsets before the random operation."""
@@ -797,7 +797,7 @@ class _LocalOffsetBasedRNGTracker:
                 any_rank_state = lm._any_local_rng_state()
                 any_rank_cpu, any_rank_cuda = any_rank_state
 
-                if self._device.type == "cuda":
+                if self._device.type == torch.accelerator.current_accelerator().type:
                     if self._device.index not in any_rank_cuda:
                         raise AssertionError
                     any_rank_device_state = any_rank_cuda[self._device.index]
