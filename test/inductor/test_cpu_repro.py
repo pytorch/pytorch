@@ -1500,7 +1500,12 @@ class CPUReproTests(TestCase):
     def test_decomposed_dequant_relu_quant_int8(self):
         self._test_decomposed_dequant_relu_quant_helper(torch.int8)
 
-    def _test_dequant_quant_lowering_helper(self, dtype, input_dtype=torch.float32, dequant_out_dtype=None):
+    def _test_dequant_quant_lowering_helper(
+        self,
+        dtype,
+        input_dtype=torch.float32,
+        dequant_out_dtype=None,
+    ):
         def fn(
             x,
             scale,
