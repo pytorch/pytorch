@@ -2155,6 +2155,27 @@ class TestBinaryUfuncs(TestCase):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
+    def test_maximum_minimum_out_type_promotion(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/173110
+        # maximum/minimum with out= should promote inputs to common dtype
+        # before comparison, then cast the result to the output dtype.
+        b0 = torch.tensor([1], dtype=torch.uint8, device=device)
+        l0 = torch.tensor([-9], dtype=torch.int64, device=device)
+
+        for op in (torch.maximum, torch.minimum):
+            # Out-of-place result (always correct)
+            expected_full = op(b0, l0)
+
+            # Out= with output dtype matching common dtype
+            out_common = torch.empty(1, dtype=torch.int64, device=device)
+            op(b0, l0, out=out_common)
+            self.assertEqual(out_common, expected_full)
+
+            # Out= with output dtype different from common dtype
+            out_narrow = torch.empty(1, dtype=torch.uint8, device=device)
+            op(b0, l0, out=out_narrow)
+            self.assertEqual(out_narrow, expected_full.to(torch.uint8))
+
     @dtypes(*integral_types_and(torch.bool))
     def test_maximum_minimum_int_and_bool(self, device, dtype):
         ops = (
