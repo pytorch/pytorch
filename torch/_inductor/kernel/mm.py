@@ -765,7 +765,13 @@ def tuned_addmm(inp, mat1, mat2, out_dtype=None, *, alpha=1, beta=1, layout=None
         )
     )
 
-    if out_dtype is None:
+    if out_dtype is not None:
+        log.warning(
+            "Skipping CUTLASS, CK, and CPP GEMM backends because out_dtype is not None "
+            "(out_dtype=%s). These backends do not currently support explicit output dtype.",
+            out_dtype,
+        )
+    else:
         if (
             is_nonzero
             and use_cutlass_template(layout, m, n, k)
