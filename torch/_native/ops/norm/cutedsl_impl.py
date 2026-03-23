@@ -59,7 +59,9 @@ def _cutedsl_fused_rms_norm_impl(
     fallback_kernel: _RMSNormFwdFallback,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if _get_device_major(input.device) not in (9, 10):
-        return fallback_kernel.call_boxed(dispatch_keys, input, normalized_shape, weight, eps)
+        return fallback_kernel.call_boxed(  # pyrefly: ignore[missing-attribute]
+            dispatch_keys, input, normalized_shape, weight, eps
+        )
 
     if eps is None:
         eps = torch.finfo(input.dtype).eps
@@ -80,7 +82,7 @@ def _cutedsl_fused_rms_norm_backward_impl(
     fallback_kernel: _RMSNormBwdFallback,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
     if _get_device_major(input.device) not in (9, 10):
-        return fallback_kernel.call_boxed(
+        return fallback_kernel.call_boxed(  # pyrefly: ignore[missing-attribute]
             dispatch_keys,
             grad_out,
             input,

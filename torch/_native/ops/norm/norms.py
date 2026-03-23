@@ -49,7 +49,7 @@ def cutedsl_rmsnorm_bwd(
     rstd: torch.Tensor,
     weight: torch.Tensor | None,
     normalized_shape: list[int],
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor | None]:
     from ._rmsnorm_kernels import _get_sm_count, _rmsnorm_bwd
 
     N = math.prod(normalized_shape)
@@ -70,6 +70,6 @@ def cutedsl_rmsnorm_bwd(
     dw = (
         dw_partial.sum(dim=0).to(weight.dtype)  # pyrefly: ignore[missing-attribute]
         if weight is not None
-        else torch.Tensor()
+        else None
     )
     return dx, dw
