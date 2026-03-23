@@ -49,6 +49,16 @@ def _collect_tensors(*tensors: torch.Tensor | None) -> tuple[torch.Tensor, ...]:
     return tuple(t for t in tensors if t is not None)
 
 
+def _support_error(
+    input: torch.Tensor,
+    name: str,
+) -> str | None:
+    if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+        return "input dtype must be float16, bfloat16, or float32"
+    if _get_device_major(input.device) not in (9, 10):
+        return f"CuTeDSL {name} requires compute capability 9.0 or 10.0"
+    return None
+
 def _cutedsl_fused_rms_norm_impl(
     dispatch_keys: torch.DispatchKeySet,
     input: torch.Tensor,
@@ -58,10 +68,10 @@ def _cutedsl_fused_rms_norm_impl(
     *,
     fallback_kernel: _RMSNormFwdFallback,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    if _get_device_major(input.device) not in (9, 10):
-        return fallback_kernel.call_boxed(  # pyrefly: ignore[missing-attribute]
-            dispatch_keys, input, normalized_shape, weight, eps
-        )
+
+    error = _support_error(input, "RMSNorm")
+    if error is not None:
+        return fallback_kernel(dispatch_keys, input, normalized_shape, weight, eps)
 
     if eps is None:
         eps = torch.finfo(input.dtype).eps
@@ -81,7 +91,8 @@ def _cutedsl_fused_rms_norm_backward_impl(
     *,
     fallback_kernel: _RMSNormBwdFallback,
 ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    if _get_device_major(input.device) not in (9, 10):
+    error = _support_error(input, "RMSNorm backward")
+    if error is not None:
         return fallback_kernel.call_boxed(  # pyrefly: ignore[missing-attribute]
             dispatch_keys,
             grad_out,
