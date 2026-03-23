@@ -1073,7 +1073,7 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
             # NB: If source is added via side effects, create the exception
             # object through side_effects as well. See FrozenDataClass creation
             var = tx.output.side_effects.track_new_user_defined_object(
-                SourcelessBuilder.create(tx, object),
+                SourcelessBuilder.create(tx, BaseException),
                 self,
                 list(args),
             )
