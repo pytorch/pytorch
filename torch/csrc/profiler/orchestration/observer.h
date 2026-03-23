@@ -134,6 +134,7 @@ struct TORCH_API ExperimentalConfig {
    */
   bool adjust_timestamps;
 
+  /* When true, Python function call frame events are included in events(). */
   bool expose_python_function_events;
 };
 
