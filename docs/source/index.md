@@ -114,7 +114,7 @@ Linear algebra operations — decompositions, solves, norms.
 Special mathematical functions.
 :::
 
-:::{grid-item-card} {octicon}`signal;1.5em` torch.signal
+:::{grid-item-card} {octicon}`unmute;1.5em` torch.signal
 :link: signal.html
 
 Signal processing — window functions and filtering.
