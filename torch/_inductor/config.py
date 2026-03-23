@@ -1771,6 +1771,17 @@ class triton:
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = os.environ.get("TORCHINDUCTOR_DIVISIBLE_BY_16", "1") == "1"
 
+    # Control xmask unswitch optimization for pointwise kernels with dynamic
+    # shapes. Separates full blocks (unmasked, vectorizable) from the tail
+    # block (masked) via if/else.
+    #   0: disabled (masked everywhere)
+    #   1: unswitch load/store only (compute shared between branches) — default.
+    #      Best for memory-bound kernels; avoids code bloat from duplicated compute.
+    #   2: unswitch whole body (compute duplicated in both branches).
+    #      ~10% faster on compute-heavy kernels (e.g. sin/cos) due to avoiding
+    #      phi-node overhead, but duplicates all compute in both branches.
+    xmask_unswitch: int = int(os.environ.get("TORCHINDUCTOR_XMASK_UNSWITCH", "1"))
+
     # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
     min_split_scan_rblock = 256

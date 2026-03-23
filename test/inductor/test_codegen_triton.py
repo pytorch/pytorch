@@ -17,6 +17,10 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -201,6 +205,73 @@ class TestCodegenTriton(InductorTestCase):
         _, code = run_and_get_code(torch.compile(fn), x)
         code_str = " ".join(code)
         self.assertIn("tt.pointer_range", code_str)
+
+
+class TestXmaskUnswitch(InductorTestCase):
+    """Test the xmask_unswitch codegen optimization.
+
+    The unswitched pattern is only generated for dynamic shapes where xnumel
+    is symbolic. For static shapes, Triton already specializes on the
+    actual value via divisibility hints.
+    """
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize("mode", [1, 2])
+    def test_dynamic_shape_generates_unswitch(self, mode):
+        """Dynamic (symbolic) xnumel should emit unswitched pattern."""
+
+        def fn(x):
+            return x * 3.0 + 1.0
+
+        x = torch.randn(4097, device=GPU_TYPE, dtype=torch.float16)
+        with inductor_config.patch({"triton.xmask_unswitch": mode}):
+            result, code = run_and_get_code(torch.compile(fn, dynamic=True), x)
+        code_str = "\n".join(code)
+        self.assertIn("xoffset + XBLOCK <= xnumel", code_str)
+        self.assertIn(", None)", code_str)
+        self.assertIn(", xmask)", code_str)
+        if mode == 1:
+            # Mode 1 should have multiple if/else blocks (per load + per store)
+            self.assertGreater(
+                code_str.count("xoffset + XBLOCK <= xnumel"),
+                1,
+                "ldst-only mode should have separate if/else for loads and stores",
+            )
+        torch.testing.assert_close(result, fn(x), atol=1e-3, rtol=1e-3)
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize("mode", [1, 2])
+    def test_static_shape_no_unswitch(self, mode):
+        """Static shapes should NOT emit unswitch — Triton specializes
+        on the actual value via divisibility hints."""
+
+        def fn(x):
+            return x * 3.0 + 1.0
+
+        x = torch.randn(1000, device=GPU_TYPE, dtype=torch.float16)
+        with inductor_config.patch({"triton.xmask_unswitch": mode}):
+            _, code = run_and_get_code(torch.compile(fn), x)
+        code_str = "\n".join(code)
+        self.assertNotIn("xoffset + XBLOCK <= xnumel", code_str)
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize("mode", [1, 2])
+    def test_2d_transpose_no_unswitch(self, mode):
+        """2D tiled kernels (e.g. transpose) should NOT emit unswitch
+        because both x and y masks are dynamic."""
+
+        def fn(a, b):
+            return a + b.T
+
+        a = torch.randn(33, 17, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(17, 33, device=GPU_TYPE, dtype=torch.float16)
+        with inductor_config.patch({"triton.xmask_unswitch": mode}):
+            _, code = run_and_get_code(torch.compile(fn, dynamic=True), a, b)
+        code_str = "\n".join(code)
+        self.assertNotIn("xoffset + XBLOCK <= xnumel", code_str)
+
+
+instantiate_parametrized_tests(TestXmaskUnswitch)
 
 
 if __name__ == "__main__":
