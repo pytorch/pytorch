@@ -99,6 +99,7 @@ class NodeSource:
         node: Node | None,
         pass_name: str = "",
         action: Union["NodeSourceAction", list["NodeSourceAction"]] | None = None,
+        deep_copy: bool = True,
     ):
         self.pass_name = pass_name
 
@@ -114,9 +115,12 @@ class NodeSource:
             self.node_info = self.NodeInfo(
                 name=node.name, target=str(node.target), graph_id=id(node.graph)
             )
-            self.from_node = (
-                node.meta["from_node"].copy() if "from_node" in node.meta else []
-            )
+            self.from_node = []
+            if "from_node" in node.meta:
+                if deep_copy:
+                    self.from_node = copy.deepcopy(node.meta["from_node"])
+                else:
+                    self.from_node = node.meta["from_node"].copy()
         else:
             self.node_info = None
             self.from_node = []
@@ -446,8 +450,10 @@ def set_current_meta(node, pass_name=""):
             # Instead of appending, overwrite the "from_node" field because current_meta
             # will be assigned to the new node. The new NodeSource(node, ...) will
             # include the information from the previous current_meta["from_node"].
+            # Avoid deepcopy here because this runs in a very hot loop and the
+            # shallow copy is substantially faster.
             current_meta["from_node"] = [
-                NodeSource(node, pass_name, NodeSourceAction.CREATE)
+                NodeSource(node, pass_name, NodeSourceAction.CREATE, deep_copy=False)
             ]
             yield
         finally:
