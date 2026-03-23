@@ -42,7 +42,7 @@ Ask the user to paste the output.
 #### Option B: tlparse report
 If the user has a tlparse report (a structured HTML report from `TORCH_TRACE`), they can provide:
 - A local directory path to the tlparse output
-- A manifold/URL to the report
+- A URL to the report
 
 A tlparse report contains:
 - **`index.html`**: Main page with a **stack trie** showing all compilations as a tree, color-coded by status (green = success, lime = graph break, red = error). Each compilation is identified by a **compile id** like `[0/0]` (frame 0, first compile) or `[1/0]` (frame 1, first compile — often a resume after graph break).
