@@ -3,7 +3,6 @@ import abc
 import cmath
 import collections.abc
 import contextlib
-import typing
 from collections.abc import Callable, Collection, Sequence
 from typing import Any, NoReturn
 from typing_extensions import deprecated
@@ -223,8 +222,8 @@ def _make_mismatch_msg(
 
 
 def make_scalar_mismatch_msg(
-    actual: torch.types.Number | complex,
-    expected: torch.types.Number | complex,
+    actual: bool | int | float | complex,
+    expected: bool | int | float | complex,
     *,
     rtol: float,
     atol: float,
@@ -241,16 +240,16 @@ def make_scalar_mismatch_msg(
             as callable in which case it will be called by the default value to create the description at runtime.
             Defaults to "Scalars".
     """
-    abs_diff = abs(actual - expected)  # pyrefly: ignore[bad-argument-type]
+    abs_diff = abs(actual - expected)
     # pyrefly: ignore [bad-argument-type]
     rel_diff = float("inf") if expected == 0 else abs_diff / abs(expected)
     return _make_mismatch_msg(
         default_identifier="Scalars",
         identifier=identifier,
         extra=f"Expected {expected} but got {actual}.",
-        abs_diff=abs_diff,  # pyrefly: ignore[bad-argument-type]
+        abs_diff=abs_diff,
         atol=atol,
-        rel_diff=rel_diff,  # pyrefly: ignore[bad-argument-type]
+        rel_diff=rel_diff,
         rtol=rtol,
     )
 
@@ -329,10 +328,10 @@ def make_tensor_mismatch_msg(
         default_identifier="Tensor-likes",
         identifier=identifier,
         extra=extra,
-        abs_diff=typing.cast(float, max_abs_diff.item()),
+        abs_diff=max_abs_diff.item(),
         abs_diff_idx=unravel_flat_index(int(max_abs_diff_flat_idx)),
         atol=atol,
-        rel_diff=typing.cast(float, max_rel_diff.item()),
+        rel_diff=max_rel_diff.item(),
         rel_diff_idx=unravel_flat_index(int(max_rel_diff_flat_idx)),
         rtol=rtol,
     )

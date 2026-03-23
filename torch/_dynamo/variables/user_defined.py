@@ -96,7 +96,13 @@ from ..utils import (
     tuple_methods,
     unpatched_nn_module_getattr,
 )
-from .base import MutationType, raise_type_error_exc, ValueMutationNew, VariableTracker
+from .base import (
+    MutationType,
+    NO_SUCH_SUBOBJ,
+    raise_type_error_exc,
+    ValueMutationNew,
+    VariableTracker,
+)
 from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
 
 
@@ -1048,6 +1054,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.value is other.value
         )
 
+    def get_real_python_backed_value(self) -> object:
+        return self.value
+
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
@@ -1109,10 +1118,6 @@ class UserDefinedEnumClassVariable(UserDefinedClassVariable):
                 source = self.source and AttrSource(self.source, name)
                 return variables.UserMethodVariable(method, self, source=source)
         return super().var_getattr(tx, name)
-
-
-class NO_SUCH_SUBOBJ:
-    pass
 
 
 class RemovableHandleClass:
@@ -1234,6 +1239,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def python_type(self) -> type:
         return self.value_type  # type: ignore[return-value]
+
+    def get_real_python_backed_value(self) -> object:
+        return self.value
 
     def as_python_constant(self) -> object:
         if self.is_pytree_constant_class and self.source:

@@ -3578,10 +3578,10 @@ class SubgraphTracer(fx.Tracer):
                 "Inference mode is supposed to be disabled during compilation. Please open an issue."
             )
 
-        self.tracked_tensor_or_symint_vt: OrderedSet[VariableTracker] = OrderedSet()
+        self.tracked_proxyable_vt: OrderedSet[VariableTracker] = OrderedSet()
 
-    def record_tensor_or_symint_vt(self, vt: VariableTracker) -> None:
-        self.tracked_tensor_or_symint_vt.add(vt)
+    def record_proxyable_vt(self, vt: VariableTracker) -> None:
+        self.tracked_proxyable_vt.add(vt)
 
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(

@@ -51,7 +51,9 @@ DimsType: TypeAlias = int | list[int] | tuple[int, ...]
 DimsSequenceType: TypeAlias = list[int] | tuple[int, ...]
 # TODO: Type[torch.SymInt], Type[torch.SymFloat]
 NumberTypeType: TypeAlias = type[bool] | type[int] | type[float] | type[complex]
-NumberType: TypeAlias = bool | int | float | complex | torch.SymInt | torch.SymFloat
+# TODO: This needs a lot more type annotations
+# NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
+NumberType: TypeAlias = bool | int | float | complex
 RealNumberType: TypeAlias = bool | int | float
 
 Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat, torch.SymBool)

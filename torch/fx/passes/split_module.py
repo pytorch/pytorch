@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 from torch.fx._compatibility import compatibility
+from torch.fx._lazy_graph_module import _make_graph_module
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
@@ -638,7 +639,7 @@ def split_module(
                 )
                 already_constructed_attr_nodes.add(node)
 
-        base_mod_attrs[partition.submod_name] = torch.fx.graph_module.GraphModule(
+        base_mod_attrs[partition.submod_name] = _make_graph_module(
             partition.targets, partition.graph
         )  # noqa: B950
 
@@ -674,7 +675,7 @@ def split_module(
                 torch.fx.graph.map_arg(node.args[0], lambda n: base_mod_env[n.name])
             )  # noqa: B950
 
-    ret = torch.fx.graph_module.GraphModule(base_mod_attrs, base_mod_graph)
+    ret = _make_graph_module(base_mod_attrs, base_mod_graph)
     log.debug(
         "%s",
         lazy_format_graph_code("post split_module", ret, colored=True),

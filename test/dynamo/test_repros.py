@@ -5905,10 +5905,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         opt_mod = torch.compile(mod, backend=compiler)
         opt_mod(torch.randn(2, 2))
 
-        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
-            mod = Mod()
-            opt_mod = torch.compile(mod, backend=compiler)
-            opt_mod(torch.randn(2, 2))
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=compiler)
+        opt_mod(torch.randn(2, 2))
 
         # an example similar to Pippy usecase
         mod = Mod()
@@ -6273,96 +6272,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         # No assert necessary since this used to crash.
         fn(aot6_sub_58, aot6_mul_170)
-
-    @torch._dynamo.config.patch(guard_nn_modules=False)
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_inlining_cornercase(self):
-        """
-        nn.Modules can be mapped to either NNModuleVariable or UnspecializedNNModuleVariable. For NNModuleVariable, the
-        tensor attributes become part of the Dynamo graph. For unspecialized, they are lifted as inputs.
-
-        But there is a cornercase. Suppose you have NNModuleVariable with a submodule that is
-        UnspecializedNNModuleVariable. Today, Dynamo will still consider the submodule as specialized (courtesy of
-        guard.source().is_nn_module()). In retrospect, this is a mistake but there are dependencies of export and also
-        cudagraphs which make it harder to fix the corner case right away. The long term solution is
-        inline_inbuilt_nn_modules anyways, so we might have to live with this cornercase in the short term.
-
-        We are starting to annotate the source of each nn module more precisely - NNModuleVariable attribute is marked
-        as NNModuleSource, UnspecilaizedNNModuleVariable attribute is marked as UnspecializedNNModuleSource. But this
-        changes the behavior for the cornercase. And fails some tests which have unfortunately relied on this behavior.
-
-
-        To solve this, we tag the source only when inline_inbuilt_nn_module flag is turned on.
-
-        In this test, we purposely turn the flag off, testing that the tagging is disabled.
-        """
-
-        class SubMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(1, 1)
-                self.a = torch.randn(1, 1)
-                self.counter = 0
-                self.multipliers = [2.2, 3.3]
-
-            def forward(self, x):
-                self.counter += 1
-                return (
-                    self.linear(x) * self.a * self.multipliers[0] * self.multipliers[1]
-                )
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.submod = SubMod()
-
-            def forward(self, x):
-                return self.submod(x)
-
-        mod = Mod()
-        opt_mod = torch.compile(mod, backend="eager")
-
-        x = torch.randn(1, 1)
-        ref = mod(x)  # noqa: F841
-        res = opt_mod(x)  # noqa: F841
-
-        mod.submod.multipliers = [3.3, 4.4]
-        # Since guard_nn_modules is False, this will not recompile
-        with torch._dynamo.config.patch(error_on_recompile=True):
-            ref = mod(x)  # noqa: F841
-            res = opt_mod(x)  # noqa: F841
-
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
-    def test_nnmodule_variable_children_wrap_value(self):
-        """
-        tests wrap_values() in nn_module.py by calling children() on a submodule,
-        which triggers NNModuleVariable.call_method only when
-        inline_inbuilt_nn_modules=False.  This path was previously untested
-        causing #173924
-        """
-
-        class Parent(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.container = torch.nn.Sequential(
-                    torch.nn.Linear(10, 10),
-                    torch.nn.ReLU(),
-                    torch.nn.Linear(10, 5),
-                )
-
-            def forward(self, x):
-                for child in self.container.children():
-                    x = child(x)
-                return x
-
-        model = Parent()
-        x = torch.randn(2, 10)
-
-        eager_result = model(x)
-        compiled_model = torch.compile(model, backend="eager", fullgraph=True)
-        compiled_result = compiled_model(x)
-
-        self.assertEqual(eager_result, compiled_result)
 
     def test_optimized_module_training(self):
         mod = torch.nn.Linear(3, 3)
@@ -8040,6 +7949,24 @@ SavedForBackwardsAOTOutput(idx=5)""",
 
         result = f(torch.randn(5))
         self.assertEqual(result, 5)
+
+    def test_one_hot_bounds_check_compiled(self):
+        # https://github.com/pytorch/pytorch/issues/144211
+        # torch.compile(one_hot) should raise on out-of-bounds indices,
+        # not silently produce wrong results.
+        one_hot = torch.compile(torch.nn.functional.one_hot, fullgraph=True)
+
+        a = torch.arange(0, 5) % 3  # [0, 1, 2, 0, 1]
+        with self.assertRaises(RuntimeError):
+            one_hot(a, 1)
+
+        torch._dynamo.reset()
+        with self.assertRaises(RuntimeError):
+            one_hot(torch.tensor([-1, 0, 1]), 3)
+
+        torch._dynamo.reset()
+        expected = torch.nn.functional.one_hot(a, 3)
+        self.assertEqual(one_hot(a, 3), expected)
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):

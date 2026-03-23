@@ -418,7 +418,16 @@ def _optimization_hint_base(
                 sym_fallback = min(sym_fallback, int(vr.upper))
         size_dict[s] = sym_fallback
 
-    final_result = expr.subs(size_dict)
+    try:
+        final_result = expr.subs(size_dict)
+    except ZeroDivisionError:
+        # Expressions like ModularIndexing(x, u1, 4) crash during subs()
+        # when u1 is substituted with 0, because sympy eagerly evaluates
+        # (x // 0) % 4.  This can happen when an unbacked symbol with
+        # var_to_range lower=0 is used as a divisor (e.g. from
+        # _dynamic_reshape_indexer) and the fallback also maps to 0.
+        # Return fallback in that case.
+        return fallback if fallback is not None else 0
 
     final_result = _maybe_realize_expr(final_result, fallback)
     if final_result is None:

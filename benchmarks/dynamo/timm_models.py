@@ -234,10 +234,6 @@ class TimmRunner(BenchmarkRunner):
     def guard_on_nn_module_models(self):
         return {}
 
-    @property
-    def inline_inbuilt_nn_modules_models(self):
-        return {}
-
     @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(

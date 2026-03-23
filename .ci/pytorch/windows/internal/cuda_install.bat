@@ -27,6 +27,7 @@ if %CUDA_VER% EQU 126 goto cuda126
 if %CUDA_VER% EQU 128 goto cuda128
 if %CUDA_VER% EQU 129 goto cuda129
 if %CUDA_VER% EQU 130 goto cuda130
+if %CUDA_VER% EQU 132 goto cuda132
 
 echo CUDA %CUDA_VERSION_STR% is not supported
 exit /b 1
@@ -53,6 +54,12 @@ goto cuda_download
 
 :cuda130
 set CUDA_INSTALL_EXE=cuda_13.0.0_windows.exe
+set "ARGS="
+set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda13-archive
+goto cuda_download
+
+:cuda132
+set CUDA_INSTALL_EXE=cuda_13.2.0_windows.exe
 set "ARGS="
 set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda13-archive
 goto cuda_download
@@ -169,6 +176,10 @@ if %CUDA_VER% EQU 129 (
     set EXPECTED_CUDNN_VERSION=9.20.0
 )
 if %CUDA_VER% EQU 130 (
+    set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda13-archive
+    set EXPECTED_CUDNN_VERSION=9.20.0
+)
+if %CUDA_VER% EQU 132 (
     set CUDNN_FOLDER=cudnn-windows-x86_64-9.20.0.48_cuda13-archive
     set EXPECTED_CUDNN_VERSION=9.20.0
 )

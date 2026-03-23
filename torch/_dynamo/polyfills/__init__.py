@@ -11,7 +11,8 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ne
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
+from typing_extensions import TypeIs
 
 import torch
 
@@ -95,11 +96,11 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
-def impl_IS_MAPPING(a: object) -> bool:
+def impl_IS_MAPPING(a: object) -> TypeIs[Mapping[Any, Any]]:
     return isinstance(a, Mapping)
 
 
-def impl_MATCH_SEQUENCE(a: object) -> bool:
+def impl_MATCH_SEQUENCE(a: object) -> TypeGuard[Sequence[Any]]:
     return isinstance(a, Sequence) and not isinstance(a, (str, bytes, bytearray))
 
 

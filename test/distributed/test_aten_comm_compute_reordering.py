@@ -1216,6 +1216,116 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+        }
+    )
+    def test_uneven_sharding_spmd_graphs(self):
+        """Test that uneven DTensor sharding produces SPMD graphs across ranks.
+
+        When a tensor dimension is not divisible by world_size, DTensor pads
+        before all_gather and unpads after. The no-op pad/unpad on ranks with
+        full-size shards must not be eliminated by remove_noop_ops, so all
+        ranks produce identical FX graphs with matching op counts.
+        """
+
+        def func(a, *, ranks):
+            # Simulate DTensor's pad-before-all_gather for uneven shards.
+            # rank 0: a is (4, 8), pad_size=0 → no-op pad
+            # rank 1: a is (3, 8), pad_size=1 → real pad to (4, 8)
+            full_chunk = (7 + len(ranks) - 1) // len(ranks)
+            pad_size = full_chunk - a.size(0)
+            a_padded = torch.nn.functional.pad(a, [0, 0, 0, pad_size])
+            ag = _functional_collectives.all_gather_tensor(a_padded, 0, ranks)
+            # Unpad after all_gather: narrow to original logical size
+            result = ag.narrow(0, 0, 7)
+            return result + 1
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            import torch.distributed as dist
+            from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+            world_size = self.world_size
+            # 7 is not divisible by 2: rank 0 gets 4 rows, rank 1 gets 3
+            full_chunk = (7 + world_size - 1) // world_size
+            local_size = full_chunk if self.rank == 0 else 7 - full_chunk
+            a = torch.randn(local_size, 8, device=device_type)
+            ranks = list(range(world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+            out, aten_graph_str = run_and_get_aten_graph(compiled, a)
+
+            # Build structural fingerprint: sorted list of call_function targets.
+            # Node names differ across ranks, but targets and op counts must match.
+            targets_r = sorted(
+                str(n_line.split("target=")[1].split("]")[0])
+                for n_line in aten_graph_str.split("\n")
+                if "call_function" in n_line and "target=" in n_line
+            )
+
+            with unset_fake_temporarily():
+                all_targets: list[list[str] | None] = [None] * world_size
+                dist.all_gather_object(all_targets, targets_r)
+
+            self.assertEqual(
+                all_targets[0],
+                all_targets[1],
+                "FX graph op targets differ across ranks — not SPMD. "
+                "No-op pad/slice may have been eliminated by remove_noop_ops.",
+            )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+            "aten_distributed_optimizations.spmd_check": True,
+            "aten_distributed_optimizations.spmd_mismatch": "error",
+        }
+    )
+    def test_spmd_verify_crashes_on_mismatch(self):
+        """Test that spmd_mismatch="error" raises on non-SPMD graphs."""
+
+        def func(a, *, ranks):
+            # rank 0 gets (4, 8), rank 1 gets (3, 8) — different node counts
+            # if pad is eliminated on rank 0 but not rank 1
+            full_chunk = (7 + len(ranks) - 1) // len(ranks)
+            pad_size = full_chunk - a.size(0)
+            # Only rank 1 will have a real pad op here
+            if pad_size > 0:
+                a = torch.nn.functional.pad(a, [0, 0, 0, pad_size])
+            ag = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            return ag + 1
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            world_size = self.world_size
+            full_chunk = (7 + world_size - 1) // world_size
+            local_size = full_chunk if self.rank == 0 else 7 - full_chunk
+            a = torch.randn(local_size, 8, device=device_type)
+            ranks = list(range(world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+
+            # The graph will differ: rank 0 has no pad, rank 1 has pad.
+            # With spmd_check_crash_on_mismatch=True, this should raise.
+            with self.assertRaises(RuntimeError, msg="SPMD graph verification"):
+                compiled(a)
+
 
 def get_toy_model(device_type: str):
     """
