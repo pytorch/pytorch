@@ -1003,6 +1003,40 @@ def module_error_inputs_torch_nn_BatchNorm1d_2d_3d(module_info, device, dtype, r
     ]
 
 
+def module_error_inputs_torch_nn_Conv2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=requires_grad)
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(4, 5, kernel_size=3),
+                forward_input=FunctionInput(make_input((4, 5))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"Expected 3D \(unbatched\) or 4D \(batched\) input to conv2d",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(4, 5, kernel_size=3),
+                forward_input=FunctionInput(make_input((2, 6, 5, 5))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"channels, but got 6 channels instead",
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(4, 5, kernel_size=3, groups=3),
+                forward_input=FunctionInput(),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="in_channels must be divisible by groups",
+        ),
+    ]
+
+
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
     N = kwargs['N']
     lazy = kwargs.get('lazy', False)
@@ -3830,6 +3864,7 @@ module_db: list[ModuleInfo] = [
                )),
     ModuleInfo(torch.nn.Conv2d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False),
+               module_error_inputs_func=module_error_inputs_torch_nn_Conv2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
                skips=(
