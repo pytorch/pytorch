@@ -255,16 +255,16 @@ Tensor aminmax_backward(
   if (grad_min.defined()) {
     grad = grad +
         scale_grad_by_count(
-                restore_reduced_dims(grad_min, dims, keepdim),
-                restore_reduced_dims(min, dims, keepdim) == self,
-                dims);
+               restore_reduced_dims(grad_min, dims, keepdim),
+               restore_reduced_dims(min, dims, keepdim) == self,
+               dims);
   }
   if (grad_max.defined()) {
     grad = grad +
         scale_grad_by_count(
-                restore_reduced_dims(grad_max, dims, keepdim),
-                restore_reduced_dims(max, dims, keepdim) == self,
-                dims);
+               restore_reduced_dims(grad_max, dims, keepdim),
+               restore_reduced_dims(max, dims, keepdim) == self,
+               dims);
   }
   return grad;
 }
