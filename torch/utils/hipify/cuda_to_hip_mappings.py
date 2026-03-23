@@ -3397,37 +3397,23 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudnnTensorDescriptor_t ", "miopenTensorDescriptor_t "),
     ("CUDNN_ENFORCE", "MIOPEN_ENFORCE"),
     ("CUDNN_CHECK", "MIOPEN_CHECK"),
-    # NVSHMEM mappings
+    # NVSHMEM → rocSHMEM mappings (only symbols used in hipified files:
+    # NVSHMEMSymmetricMemory.cpp and nvshmem_team_manager.hpp).
     ("NVSHMEM_TEAM_INVALID", "ROCSHMEM_TEAM_INVALID"),
     ("NVSHMEM_TEAM_WORLD", "ROCSHMEM_TEAM_WORLD"),
-    ("NVSHMEM_CMP_EQ", "ROCSHMEM_CMP_EQ"),
-    ("NVSHMEM_SIGNAL_SET", "ROCSHMEM_SIGNAL_SET"),
     ("NVSHMEMX_INIT_WITH_UNIQUEID", "ROCSHMEM_INIT_WITH_UNIQUEID"),
 
-    ("nvshmem_quiet", "rocshmem_quiet"),
     ("nvshmem_malloc", "rocshmem_malloc"),
     ("nvshmem_free", "rocshmem_free"),
     ("nvshmem_ptr", "rocshmem_ptr"),
     ("nvshmem_team_t", "rocshmem_team_t"),
     ("nvshmem_team_split_strided", "rocshmem_team_split_strided"),
-    ("nvshmem_init", "rocshmem_init"),
-    ("nvshmem_team_n_pes", "rocshmem_team_n_pes"),
-    ("nvshmem_team_my_pe", "rocshmem_team_my_pe"),
-    ("nvshmem_team_translate_pe", "rocshmem_team_translate_pe"),
-    ("nvshmem_int64_p", "rocshmem_int64_p"),
-    ("nvshmemx_getmem_nbi_block", "rocshmem_getmem_nbi_wg"),
 
     ("nvshmemx_uniqueid_t", "rocshmem_uniqueid_t"),
     ("nvshmemx_get_uniqueid", "rocshmem_get_uniqueid"),
     ("nvshmemx_init_attr", "rocshmem_init_attr"),
     ("nvshmemx_init_attr_t", "rocshmem_init_attr_t"),
     ("nvshmemx_set_attr_uniqueid_args", "rocshmem_set_attr_uniqueid_args"),
-    ("nvshmemx_signal_wait_until_on_stream", "rocshmem_signal_wait_until_on_stream"),
-    ("nvshmemx_alltoallmem_on_stream", "rocshmem_alltoallmem_on_stream"),
-    ("nvshmemx_broadcastmem_on_stream", "rocshmem_broadcastmem_on_stream"),
-    ("nvshmemx_getmem_on_stream", "rocshmem_getmem_on_stream"),
-    ("nvshmemx_putmem_on_stream", "rocshmem_putmem_on_stream"),
-    ("nvshmemx_putmem_signal_on_stream", "rocshmem_putmem_signal_on_stream"),
 ])
 
 C10_MAPPINGS = collections.OrderedDict([
