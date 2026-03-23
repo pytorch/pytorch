@@ -161,6 +161,7 @@ def _sfdp_pattern_7(query, key, value, inv_scale, dropout_p):
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p, True)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
@@ -194,6 +195,7 @@ def _sfdp_pattern_8(query, key, value, inv_scale):
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
@@ -223,6 +225,7 @@ def _sfdp_pattern_9(query, key, value, inv_scale, dropout_p):
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p, True)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
@@ -252,6 +255,7 @@ def _sfdp_pattern_10(query, key, value, inv_scale):
     div = div.to(torch.float32)
     attn_weight = torch.softmax(div, dim=-1)
     attn_weight = attn_weight.to(torch.float16)
+    v = v.to(attn_weight.dtype)
     return attn_weight @ v
 
 
