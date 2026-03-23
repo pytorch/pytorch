@@ -449,10 +449,11 @@ void initPythonBindings(PyObject* module) {
                 p.record_python_gc_info,
                 p.expose_kineto_event_metadata,
                 p.custom_profiler_config,
+                p.adjust_timestamps,
                 p.expose_python_function_events);
           },
           [](const py::tuple& t) { // __setstate__
-            TORCH_CHECK(t.size() >= 12, "Expected at least 12 values in state");
+            TORCH_CHECK(t.size() >= 14, "Expected at least 14 values in state");
 
             py::list py_metrics = t[0].cast<py::list>();
             std::vector<std::string> metrics;
@@ -481,8 +482,8 @@ void initPythonBindings(PyObject* module) {
                 t[9].cast<bool>(),
                 t[10].cast<bool>(),
                 t[11].cast<std::string>(),
-                false,
-                t.size() > 12 ? t[12].cast<bool>() : false);
+                t[12].cast<bool>(),
+                t[13].cast<bool>());
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
