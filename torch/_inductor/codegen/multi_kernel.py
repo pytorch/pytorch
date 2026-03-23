@@ -6,6 +6,7 @@ import os
 import pathlib
 from typing import Any
 
+import torch
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
@@ -257,9 +258,19 @@ class MultiKernel:
                     continue
                 seen.add(arg)
                 if isinstance(precompile_arg, TensorArg):
-                    line = f"assert not {arg}.isnan().any().item()"
+                    # FP8 dtypes don't support isnan/isinf, upcast to float first
+                    if precompile_arg.dtype in (
+                        torch.float8_e4m3fn,
+                        torch.float8_e4m3fnuz,
+                        torch.float8_e5m2,
+                        torch.float8_e5m2fnuz,
+                    ):
+                        check_arg = f"{arg}.float()"
+                    else:
+                        check_arg = arg
+                    line = f"assert not {check_arg}.isnan().any().item()"
                     wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item()"
+                    line = f"assert not {check_arg}.isinf().any().item()"
                     wrapper.writeline(line)
 
     @property
