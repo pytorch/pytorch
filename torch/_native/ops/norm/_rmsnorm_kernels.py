@@ -7,7 +7,7 @@ RMSNorm CuTE DSL kernel classes from quack
 # ruff: noqa: S101
 
 import math
-from functools import partial
+from functools import cache, partial
 
 import cuda.bindings.driver as cuda
 
@@ -430,8 +430,10 @@ class RMSNormBackward:
         mRstd: cute.Tensor,
         mdX: cute.Tensor,
         mdW: cute.Tensor | None,
+        mdW_final: cute.Tensor | None,
         mdRes: cute.Tensor | None,
         mdB: cute.Tensor | None,
+        mSemaphore: cute.Tensor | None,
         sm_count: Int32,
         stream: cuda.CUstream,
     ):
@@ -457,6 +459,8 @@ class RMSNormBackward:
         )
         num_threads = tiled_copy.size
         mW = expand(mW, dim=0, size=tiler_mn[0]) if const_expr(mW is not None) else None
+        if const_expr(mdW_final is not None):
+            mdW_final = expand(mdW_final, dim=0, size=1)
         num_blocks = sm_count
         self.kernel(
             mX,
@@ -466,8 +470,10 @@ class RMSNormBackward:
             mRstd,
             mdX,
             mdW,
+            mdW_final,
             mdB,
             mdRes,
+            mSemaphore,
             tiler_mn,
             tiled_copy,
             threads_per_row,
@@ -488,8 +494,10 @@ class RMSNormBackward:
         mRstd: cute.Tensor,
         mdX: cute.Tensor,
         mdW: cute.Tensor | None,
+        mdW_final: cute.Tensor | None,
         mdB: cute.Tensor | None,
         mdRes: cute.Tensor | None,
+        mSemaphore: cute.Tensor | None,
         tiler_mn: cute.Shape,
         tiled_copy: cute.TiledCopy,
         threads_per_row: cutlass.Constexpr[int],
@@ -774,6 +782,49 @@ class RMSNormBackward:
             if const_expr(mdB is not None):
                 copy_(tXrdB, tXgdB)
 
+        # Last-CTA reduction: reduce dw_partial across CTAs into mdW_final.
+        # Only supported for cluster_n == 1; for cluster_n > 1 the caller
+        # must reduce dw_partial on the host.
+        if const_expr(mdW_final is not None and self.cluster_n == 1):
+            cute.arch.fence_acq_rel_gpu()
+            is_last_cta = Int32(0)
+            if tidx == 0:
+                old = cute.arch.atomic_add(
+                    mSemaphore.iterator, Int32(1), sem="acq_rel", scope="gpu"
+                )
+                if old == gdim - 1:
+                    is_last_cta = Int32(1)
+            # Broadcast is_last_cta from thread 0 to all threads via smem
+            sFlag = cute.make_tensor(
+                cute.recast_ptr(sX.iterator, dtype=Int32),
+                cute.make_layout((1,)),
+            )
+            if tidx == 0:
+                sFlag[0] = is_last_cta
+            cute.arch.barrier()
+            if sFlag[0]:
+                cute.arch.fence_acq_rel_gpu()
+                gdW_all = cute.local_tile(mdW, (1, tiler_mn[1]), (None, cluster_y))
+                gdW_final = cute.local_tile(
+                    mdW_final, (1, tiler_mn[1]), (0, cluster_y)
+                )
+                tXgdW_all = thr_copy_X.partition_S(gdW_all)
+                tXgdW_final = thr_copy_X.partition_D(gdW_final)
+                tXrdW_accum = cute.make_fragment_like(tXgdW_final, Float32)
+                tXrdW_accum.fill(0.0)
+                tXrdW_row = cute.make_fragment_like(tXgdW_all[None, None, None, 0])
+                for i in cutlass.range(0, gdim):
+                    copy_(tXgdW_all[None, None, None, i], tXrdW_row)
+                    tXrdW_accum.store(tXrdW_accum.load() + tXrdW_row.load())
+                tXrdW_final = cute.make_fragment_like(tXgdW_final)
+                tXrdW_final.store(
+                    tXrdW_accum.load().to(tXrdW_final.element_type)
+                )
+                copy_(tXrdW_final, tXgdW_final)
+                # Reset semaphore for the next kernel invocation
+                if tidx == 0:
+                    mSemaphore[0] = Int32(0)
+
         if const_expr(self.cluster_n > 1):
             stage ^= 1
             if stage == 0:
@@ -781,6 +832,7 @@ class RMSNormBackward:
             cute.arch.mbarrier_wait(mbar_empty_ptr + stage, producer_phase)
 
 
+@cache
 def _get_sm_count(N: int, device: torch.device) -> int:
     sm_count_multiple = (
         16
@@ -817,6 +869,8 @@ def _rmsnorm_bwd(
     dresidual_out: Tensor | None = None,
     dresidual: Tensor | None = None,
     sm_count: int | None = None,
+    dw: Tensor | None = None,
+    semaphore: Tensor | None = None,
 ) -> None:
     assert x.dim() == 2, "Input must be 2D"
     assert x.is_cuda, "Input tensor must be on CUDA device"
@@ -855,6 +909,7 @@ def _rmsnorm_bwd(
         _TORCH2CUTE_DTYPE[t.dtype] if t is not None else None
         for t in [x, dout, dx, weight, dresidual, dresidual_out]
     ]
+    dw_dtype = _TORCH2CUTE_DTYPE[dw.dtype] if dw is not None else None
     compile_key = (
         N,
         dtype,
@@ -864,6 +919,7 @@ def _rmsnorm_bwd(
         db_partial is not None,
         dres_dtype,
         dres_out_dtype,
+        dw_dtype,
     )
     if compile_key not in _rmsnorm_bwd.compile_cache:
         batch_sym, batch_partial_sym = cute.sym_int(), cute.sym_int()
@@ -885,6 +941,8 @@ def _rmsnorm_bwd(
             if db_partial is not None
             else None
         )
+        dw_cute = fake_tensor(dw_dtype, (N,), div) if dw is not None else None
+        semaphore_cute = fake_tensor(Int32, (1,)) if semaphore is not None else None
         _rmsnorm_bwd.compile_cache[compile_key] = cute.compile(
             RMSNormBackward(dtype, N),
             x_cute,
@@ -894,8 +952,10 @@ def _rmsnorm_bwd(
             rstd_cute,
             dx_cute,
             dw_partial_cute,
+            dw_cute,
             dres_cute,
             db_partial_cute,
+            semaphore_cute,
             sm_count,
             cute.runtime.make_fake_stream(use_tvm_ffi_env_stream=True),
             options="--enable-tvm-ffi",
@@ -908,8 +968,10 @@ def _rmsnorm_bwd(
         rstd,
         dx,
         dw_partial,
+        dw,
         dresidual,
         db_partial,
+        semaphore,
         sm_count,
     )
 
