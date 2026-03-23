@@ -1950,12 +1950,16 @@ def can_use_tma(
 def use_triton_tma_template(
     *matrices: IRNode, output_layout: Layout, add_guards: bool = False
 ) -> bool:
+    if not config.triton.enable_persistent_tma_matmul:
+        return False
+    if not all(len(m.get_size()) == 2 for m in matrices):
+        return False
+    # On AMD (HIP), TMA is not available but we still use non-TMA persistent
+    # kernels, so skip the TMA compatibility checks.
+    if torch.version.hip is not None:
+        return True
     layout = output_layout if config.triton.enable_template_tma_store else None
-    return (
-        all(len(m.get_size()) == 2 for m in matrices)
-        and can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
-        and config.triton.enable_persistent_tma_matmul
-    )
+    return can_use_tma(*matrices, output_layout=layout, add_guards=add_guards)
 
 
 def use_triton_blackwell_tma_template(
