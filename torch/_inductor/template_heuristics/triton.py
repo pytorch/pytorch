@@ -1764,7 +1764,6 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             else:
                 default_config = ROCmFlexConfig(64, 32, 2, 4, kpack=default_kpack)
 
-
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
