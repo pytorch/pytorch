@@ -96,7 +96,7 @@ For each graph break found, do the following:
 
 ### Phase 3: Fix — Eliminate graph breaks
 
-For each graph break, suggest a fix based on its type. Always read the user's code before suggesting changes.
+For each graph break, apply a fix based on its type. Always read the user's code before suggesting changes.
 
 #### Escape hatches (compile-safe alternatives)
 
