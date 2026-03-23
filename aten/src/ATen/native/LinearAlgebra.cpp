@@ -3809,7 +3809,6 @@ Tensor& _int_mm_acc_f32_out_cpu(
 
   // ---- Naive fallback (portable) ----
   if (!dispatched) {
-    std::cout << "Falling back to naive int8 x int8 -> float mm" << std::endl;
     auto a = reinterpret_cast<const int8_t*>(self.data_ptr());
     auto b = reinterpret_cast<const int8_t*>(mat2.data_ptr());
     auto c = reinterpret_cast<float*>(result.data_ptr());
@@ -3832,14 +3831,17 @@ Tensor& _int_mm_acc_f32_out_cpu(
         const int64_t row = idx / n;
         const int64_t col = idx % n;
 
-        float acc = 0.0f;
+        int32_t acc = 0;
 
         for (const auto kk : c10::irange(k)) {
-          acc += static_cast<float>(a[row * lda_0 + kk * lda_1]) *
-                static_cast<float>(b[kk * ldb_0 + col * ldb_1]);
+          acc += static_cast<int32_t>(
+                    a[row * lda_0 + kk * lda_1]) *
+                static_cast<int32_t>(
+                    b[kk * ldb_0 + col * ldb_1]);
         }
 
-        c[row * ldc_0 + col * ldc_1] = acc;
+        // single conversion at the end
+        c[row * ldc_0 + col * ldc_1] = static_cast<float>(acc);
       }
     });
   }
