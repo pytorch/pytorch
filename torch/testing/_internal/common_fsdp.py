@@ -1171,8 +1171,6 @@ def check_sharded_parity(
             raise AssertionError("Expected sharded_param.grad to be a DTensor")  # mypy
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
-
-@unittest.skipIf(TEST_XPU, "not-support-multithread")
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
     def world_size(self):

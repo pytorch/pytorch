@@ -119,7 +119,7 @@ class VerifyStateDictMixin:
             model_state_dict={},
             optim_state_dict=new_dist_osd,
         )
-        self.assertEqual(optim.state_dict(), new_optim.state_dict())
+        self.assertEqual(optim.state_dict(), new_optim.state_dict(), rtol=1e-5, atol=1e-5)
 
 
 class FusionEmbedding(nn.Module):

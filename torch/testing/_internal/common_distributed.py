@@ -181,6 +181,8 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
+    "not-support-multithread": TestSkip(90, "backend not support multithread."),
+    "power-of-two": TestSkip(91, "world size needs to be power of two on xpu."),
 }
 
 
@@ -195,10 +197,10 @@ class DistTestCases:
 
     # Sets showing that something is implemented
     backend_feature = {}
-    backend_feature["gpu"] = {"nccl", "gloo", "ucc"}
+    backend_feature["gpu"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["cuda"] = {"nccl", "gloo", "ucc"}
-    backend_feature["ddp"] = {"nccl", "gloo", "ucc"}
-    backend_feature["subgroup"] = {"nccl", "gloo", "ucc"}
+    backend_feature["ddp"] = {"nccl", "gloo", "ucc", "xccl"}
+    backend_feature["subgroup"] = {"nccl", "gloo", "ucc", "xccl"}
     backend_feature["plugin"] = set()
     if TEST_HPU:
         backend_feature["hpu"] = {"hccl"}
@@ -333,6 +335,21 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
         return wrapper
 
     return decorator
+
+
+def skip_if_not_powerof2_worldsize_xpu():
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if TEST_XPU:
+                x = torch.xpu.device_count()
+                print(f"skip_if_not_powerof2_worldsize_xpu x: {x}")
+                if (x & (x - 1)) == 0:
+                    return func(*args, **kwargs)
+                sys.exit(TEST_SKIPS["power-of-two"].exit_code)
+            return func(*args, **kwargs)
+
+        return wrapper
 
 
 def requires_world_size(n: int):
@@ -651,6 +668,10 @@ def sm_is_or_higher_than(device: torch.device, major: int, minor: int) -> bool:
     Returns False if device is a RoCM device.
     Returns True if device is a non-CUDA device.
     """
+    if device.type == "xpu":
+        # XPU devices have different compute capability codes
+        return True
+
     if device.type != "cuda":
         return True
 
