@@ -1960,7 +1960,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     dx = dx.transpose_(0, 1);
   }
 
-  return std::make_tuple(dx, dhx, dcx);
+  return std::make_tuple(std::move(dx), std::move(dhx), std::move(dcx));
 }
 
 // NB: This MUST BE CALLED AFTER _cudnn_rnn_backward_input.
