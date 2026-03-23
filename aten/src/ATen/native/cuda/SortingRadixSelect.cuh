@@ -694,9 +694,10 @@ __device__ scalar_t findPatternDataSmem(
   // Ensure all threads have finished reading from smem before overwriting it.
   // countRadixAggregateCounts Stage 3 reads from smem[buffer_offset + i];
   // when buffer_offset == 0, those locations overlap with smem[0]/smem[1]
-  // written below. Syncing here (rather than at the end of Stage 3) is
-  // cheaper because findPatternDataSmem is called at most once per radixSelect
-  // invocation, only when a unique element is found (count == 1).
+  // written below. Warp 0 (which writes smem[0]/smem[1]) may get ahead of
+  // lagging warps still in Stage 3. Syncing here (rather than at the end of
+  // Stage 3) is cheaper because findPatternDataSmem is called at most once per
+  // radixSelect invocation, only when a unique element is found (count == 1).
   __syncthreads();
 
   // initialize smem to 0.
