@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/util/env.h>
 #include <string>
+#include <string_view>
 
 namespace c10::cuda {
 
@@ -45,6 +46,15 @@ const char* get_cuda_check_suffix() noexcept {
 std::mutex* getFreeMutex() {
   static std::mutex cuda_free_mutex;
   return &cuda_free_mutex;
+}
+
+// NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
+bool isStickyGpuError(std::string_view msg) noexcept {
+  auto contains = [&](std::string_view sub) {
+    return msg.find(sub) != std::string_view::npos;
+  };
+  return (contains("CUDA error") || contains("HIP error:")) &&
+      !contains("invalid argument");
 }
 
 } // namespace c10::cuda
