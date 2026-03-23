@@ -3623,8 +3623,8 @@ class DeviceCachingAllocator {
   }
 
   bool get_free_block_by_hint(void* hint, AllocParams& params) {
-    // Get a free block starting at hint address. If hint is at the middle of a block,
-    // split the block at hint and return the second part.
+    // Get a free block starting at hint address. If hint is at the middle of a
+    // block, split the block at hint and return the second part.
     BlockPool& pool = *params.pool;
     Block search_key(params.device(), params.stream(), 0);
     auto it = pool.blocks.lower_bound(&search_key);

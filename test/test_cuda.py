@@ -4734,7 +4734,7 @@ class TestResizeStorageHint(TestCase):
         t.untyped_storage().resize_(0)
         self.assertEqual(t.untyped_storage().nbytes(), 0)
 
-        t.untyped_storage().resize_(original_size)
+        t.untyped_storage().resize_(original_size, original_ptr)
         self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
 
     @unittest.skipIf(
@@ -4751,7 +4751,7 @@ class TestResizeStorageHint(TestCase):
         # Allocate another tensor that may consume the freed block
         blocker = torch.randn(1024, device="cuda")
 
-        t.untyped_storage().resize_(original_size)
+        t.untyped_storage().resize_(original_size, original_ptr)
         # The hint may or may not succeed depending on whether blocker
         # consumed the exact block -- either way, no crash.
         self.assertEqual(t.untyped_storage().nbytes(), original_size)
@@ -4761,14 +4761,13 @@ class TestResizeStorageHint(TestCase):
         TEST_CUDAMALLOCASYNC,
         "CUDAMallocAsync does not use the caching allocator hint path",
     )
-    def test_resize_storage_hint_different_size(self):
+    def test_resize_storage_hint_no_hint(self):
         t = torch.randn(1024, device="cuda")
-        original_ptr = t.untyped_storage().data_ptr()
         original_size = t.untyped_storage().nbytes()
 
         t.untyped_storage().resize_(0)
 
-        # Resize to a different size -- hint should be discarded
+        # Resize without hint -- should work like normal allocation
         new_size = original_size * 2
         t.untyped_storage().resize_(new_size)
         self.assertEqual(t.untyped_storage().nbytes(), new_size)
@@ -4779,14 +4778,14 @@ class TestResizeStorageHint(TestCase):
     )
     def test_resize_storage_hint_inductor_path(self):
         t = torch.randn(1024, device="cuda")
-        original_ptr = t.untyped_storage().data_ptr()
         original_size = t.untyped_storage().nbytes()
 
         torch.ops.inductor.resize_storage_bytes_(t, 0)
         self.assertEqual(t.untyped_storage().nbytes(), 0)
 
         torch.ops.inductor.resize_storage_bytes_(t, original_size)
-        self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
+        self.assertEqual(t.untyped_storage().nbytes(), original_size)
+        # TODO: Decide if we want to support inductor case.
 
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC,
@@ -4804,7 +4803,7 @@ class TestResizeStorageHint(TestCase):
             t.untyped_storage().resize_(0)
             self.assertEqual(t.untyped_storage().nbytes(), 0)
 
-            t.untyped_storage().resize_(original_size)
+            t.untyped_storage().resize_(original_size, original_ptr)
             # With expandable segments the hint is best-effort; the block
             # may have been merged or unmapped.  Just verify no crash and
             # correct size.
@@ -4813,6 +4812,37 @@ class TestResizeStorageHint(TestCase):
             del t
             torch.cuda.empty_cache()
             torch.cuda.memory._set_allocator_settings("")
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "CUDAMallocAsync does not use the caching allocator hint path",
+    )
+    def test_resize_split_block(self):
+        pool = torch.cuda.MemPool()
+
+        # Allocate two tensors in private pool and t is the second tensor
+        with torch.cuda.use_mem_pool(pool):
+            blocker = torch.randn(1024, device="cuda")
+            t = torch.randn(1024, device="cuda")
+
+        original_ptr = t.untyped_storage().data_ptr()
+        original_size = t.untyped_storage().nbytes()
+
+        # delete blocker and t such that the two blocks have been merged
+        # in CUDACachingAllocator.
+        t.untyped_storage().resize_(0)
+        blocker.untyped_storage().resize_(0)
+
+        # Reallocate t at the original ptr in mempool.
+        with torch.cuda.use_mem_pool(pool):
+            t.untyped_storage().resize_(original_size, original_ptr)
+
+        self.assertEqual(t.untyped_storage().nbytes(), original_size)
+        self.assertEqual(t.untyped_storage().data_ptr(), original_ptr)
+
+        del blocker
+        del t
+        del pool
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
