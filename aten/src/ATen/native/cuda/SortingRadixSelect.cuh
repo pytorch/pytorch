@@ -521,9 +521,6 @@ __device__ __forceinline__ void countRadixAggregateCounts(
   for (uint32_t i = 0; i < RadixSize; ++i) {
     counts[i] = smem[buffer_offset + i];
   }
-  // No __syncthreads() here: the caller (findPatternDataSmem) issues one
-  // before writing to smem, which is sufficient and cheaper since
-  // findPatternDataSmem is called at most once (only when count == 1).
 }
 
 // This function counts the distribution of all input values in a
