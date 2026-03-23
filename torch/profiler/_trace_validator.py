@@ -1,10 +1,7 @@
 # mypy: allow-untyped-defs
 """
-Chrome trace validator — machine-checkable rules derived from production issues.
-
-Each rule corresponds to a bug filed in "Trace Problems Encountered by
-Performance Modeling Team".  The validator parses a Chrome trace JSON emitted
-by ``torch.profiler`` and reports every violation.
+Validates Chrome traces emitted by ``torch.profiler`` against rules derived
+from production issues.
 
 Usage::
 
@@ -40,7 +37,6 @@ class Violation:
 
 
 def _load_events(path: str) -> list[dict]:
-    """Load a Chrome trace JSON (plain or gzipped) and return the event list."""
     opener = gzip.open if path.endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as fh:
         data = json.load(fh)
@@ -48,7 +44,7 @@ def _load_events(path: str) -> list[dict]:
     return [e for e in events if isinstance(e, dict)]
 
 
-def check_gpu_kernel_causality(events: list[dict]) -> list[Violation]:
+def _check_gpu_kernel_causality(events: list[dict]) -> list[Violation]:
     """For each (cudaLaunchKernel, GPU kernel) pair matched by External id,
     the GPU kernel must start at or after its cudaLaunchKernel."""
     cpu_launches: dict[int, dict] = {}
@@ -73,7 +69,6 @@ def check_gpu_kernel_causality(events: list[dict]) -> list[Violation]:
                 gpu_kernels[ext_id] = {"ts": ts, "name": name, "corr": corr}
 
     violations = []
-    passed = 0
     for ext_id, gpu in gpu_kernels.items():
         launch = cpu_launches.get(ext_id)
         if launch is None:
@@ -82,7 +77,7 @@ def check_gpu_kernel_causality(events: list[dict]) -> list[Violation]:
             skew = launch["ts"] - gpu["ts"]
             violations.append(
                 Violation(
-                    rule_name="check_gpu_kernel_causality",
+                    rule_name="_check_gpu_kernel_causality",
                     message=(
                         f"GPU kernel '{gpu['name']}' (External id={ext_id}, "
                         f"correlation={gpu['corr']}) starts {skew:.1f}us before "
@@ -92,19 +87,15 @@ def check_gpu_kernel_causality(events: list[dict]) -> list[Violation]:
                     ),
                 )
             )
-        else:
-            passed += 1
-    # print(f"check_gpu_kernel_causality: {passed} passed, {len(violations)} violated")
     return violations
 
 
-def check_stream_wait_corr_id_populated(events: list[dict]) -> list[Violation]:
+def _check_stream_wait_corr_id_populated(events: list[dict]) -> list[Violation]:
     """Stream Wait Events and Event Synchronize must have
     wait_on_cuda_event_record_corr_id >= 0."""
     TARGET_KINDS = {"Stream Wait Event", "Event Sync"}
 
     violations = []
-    passed = 0
     for ev in events:
         if ev.get("ph") != "X":
             continue
@@ -117,7 +108,7 @@ def check_stream_wait_corr_id_populated(events: list[dict]) -> list[Violation]:
             ts = float(ev.get("ts", 0))
             violations.append(
                 Violation(
-                    rule_name="check_stream_wait_corr_id_populated",
+                    rule_name="_check_stream_wait_corr_id_populated",
                     message=(
                         f"'{sync_kind}' event at ts={ts:.1f}us on "
                         f"device={args.get('device')} stream={args.get('stream')} "
@@ -125,13 +116,10 @@ def check_stream_wait_corr_id_populated(events: list[dict]) -> list[Violation]:
                     ),
                 )
             )
-        else:
-            passed += 1
-    # print(f"check_stream_wait_corr_id_populated: {passed} passed, {len(violations)} violated")
     return violations
 
 
-def check_stream_sync_overlap(events: list[dict]) -> list[Violation]:
+def _check_stream_sync_overlap(events: list[dict]) -> list[Violation]:
     """For each Stream Synchronize on (device, stream), no kernel on that
     stream should still be running when the sync starts."""
     stream_syncs = []
@@ -168,17 +156,14 @@ def check_stream_sync_overlap(events: list[dict]) -> list[Violation]:
             )
 
     violations = []
-    passed = 0
     for sync in stream_syncs:
         key = (sync["device"], sync["stream"])
-        overlapped = False
         for k in kernels_by_stream.get(key, []):
             if k["ts"] < sync["ts"] < k["end"]:
-                overlapped = True
                 overlap = k["end"] - sync["ts"]
                 violations.append(
                     Violation(
-                        rule_name="check_stream_sync_overlap",
+                        rule_name="_check_stream_sync_overlap",
                         message=(
                             f"StreamSynchronize on device={sync['device']} "
                             f"stream={sync['stream']} at ts={sync['ts']:.1f}us "
@@ -187,9 +172,6 @@ def check_stream_sync_overlap(events: list[dict]) -> list[Violation]:
                         ),
                     )
                 )
-        if not overlapped:
-            passed += 1
-    # print(f"check_stream_sync_overlap: {passed} passed, {len(violations)} violated")
     return violations
 
 
@@ -201,7 +183,7 @@ _CUDA_EVENT_RECORD_NAMES = {
 }
 
 
-def check_stream_wait_corr_id_in_past(events: list[dict]) -> list[Violation]:
+def _check_stream_wait_corr_id_in_past(events: list[dict]) -> list[Violation]:
     """wait_on_cuda_event_record_corr_id must point to a cudaEventRecord
     with cudaEventRecord.ts <= stream_wait.ts."""
     event_record_ts: dict[int, float] = {}
@@ -221,7 +203,6 @@ def check_stream_wait_corr_id_in_past(events: list[dict]) -> list[Violation]:
                         event_record_ts[cid] = ts
 
     violations = []
-    passed = 0
     for ev in events:
         if ev.get("ph") != "X":
             continue
@@ -238,7 +219,7 @@ def check_stream_wait_corr_id_in_past(events: list[dict]) -> list[Violation]:
         if record_ts is None:
             violations.append(
                 Violation(
-                    rule_name="check_stream_wait_corr_id_in_past",
+                    rule_name="_check_stream_wait_corr_id_in_past",
                     message=(
                         f"Stream Wait Event at ts={sw_ts:.1f}us references "
                         f"corr_id={ref} but no matching cudaEventRecord in trace"
@@ -249,7 +230,7 @@ def check_stream_wait_corr_id_in_past(events: list[dict]) -> list[Violation]:
             lag = record_ts - sw_ts
             violations.append(
                 Violation(
-                    rule_name="check_stream_wait_corr_id_in_past",
+                    rule_name="_check_stream_wait_corr_id_in_past",
                     message=(
                         f"Stream Wait Event at ts={sw_ts:.1f}us references "
                         f"cudaEventRecord (corr_id={ref}) {lag:.1f}us in the future "
@@ -257,9 +238,6 @@ def check_stream_wait_corr_id_in_past(events: list[dict]) -> list[Violation]:
                     ),
                 )
             )
-        else:
-            passed += 1
-    # print(f"check_stream_wait_corr_id_in_past: {passed} passed, {len(violations)} violated")
     return violations
 
 
@@ -272,11 +250,10 @@ _NCCL_REQUIRED_FIELDS = {
 }
 
 
-def check_nccl_metadata(events: list[dict]) -> list[Violation]:
+def _check_nccl_metadata(events: list[dict]) -> list[Violation]:
     """record_param_comms events must carry: Collective name, dtype,
     In msg nelems, Out msg nelems, Group size."""
     violations = []
-    passed = 0
     for ev in events:
         if ev.get("ph") != "X" or ev.get("name") != "record_param_comms":
             continue
@@ -285,20 +262,17 @@ def check_nccl_metadata(events: list[dict]) -> list[Violation]:
         if missing:
             violations.append(
                 Violation(
-                    rule_name="check_nccl_metadata",
+                    rule_name="_check_nccl_metadata",
                     message=(
                         f"'record_param_comms' at ts={float(ev.get('ts', 0)):.1f}us "
                         f"missing metadata: {sorted(missing)}"
                     ),
                 )
             )
-        else:
-            passed += 1
-    print(f"check_nccl_metadata: {passed} passed, {len(violations)} violated")
     return violations
 
 
-def check_backward_seq_id_uniqueness(events: list[dict]) -> list[Violation]:
+def _check_backward_seq_id_uniqueness(events: list[dict]) -> list[Violation]:
     """Per Sequence number, at most one distinct backward op name."""
     seq_to_ops: dict[int, list[str]] = defaultdict(list)
     for ev in events:
@@ -317,33 +291,27 @@ def check_backward_seq_id_uniqueness(events: list[dict]) -> list[Violation]:
             seq_to_ops[seq].append(op)
 
     violations = []
-    passed = 0
     for seq, ops in seq_to_ops.items():
         if len(ops) > 1:
             violations.append(
                 Violation(
-                    rule_name="check_backward_seq_id_uniqueness",
+                    rule_name="_check_backward_seq_id_uniqueness",
                     message=(
                         f"Sequence number {seq} shared by {len(ops)} backward "
                         f"ops: {ops}"
                     ),
                 )
             )
-        else:
-            passed += 1
-    # print(f"check_backward_seq_id_uniqueness: {passed} passed, {len(violations)} violated")
     return violations
 
 
-# ── public API ────────────────────────────────────────────────────────────
-
-_ALL_RULES: list[Callable[[list[dict]], list[Violation]]] = [
-    check_gpu_kernel_causality,
-    check_stream_wait_corr_id_populated,
-    check_stream_sync_overlap,
-    check_stream_wait_corr_id_in_past,
-    check_nccl_metadata,
-    check_backward_seq_id_uniqueness,
+_RULES: list[Callable[[list[dict]], list[Violation]]] = [
+    _check_gpu_kernel_causality,
+    _check_stream_wait_corr_id_populated,
+    _check_stream_sync_overlap,
+    _check_stream_wait_corr_id_in_past,
+    _check_nccl_metadata,
+    _check_backward_seq_id_uniqueness,
 ]
 
 
@@ -360,6 +328,6 @@ def validate_trace(trace_path: str) -> tuple[bool, list[Violation]]:
     """
     events = _load_events(trace_path)
     all_violations: list[Violation] = []
-    for checker in _ALL_RULES:
-        all_violations.extend(checker(events))
+    for rule in _RULES:
+        all_violations.extend(rule(events))
     return len(all_violations) == 0, all_violations
