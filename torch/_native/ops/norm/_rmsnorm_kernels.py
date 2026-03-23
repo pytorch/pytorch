@@ -805,9 +805,7 @@ class RMSNormBackward:
             if sFlag[0]:
                 cute.arch.fence_acq_rel_gpu()
                 gdW_all = cute.local_tile(mdW, (1, tiler_mn[1]), (None, cluster_y))
-                gdW_final = cute.local_tile(
-                    mdW_final, (1, tiler_mn[1]), (0, cluster_y)
-                )
+                gdW_final = cute.local_tile(mdW_final, (1, tiler_mn[1]), (0, cluster_y))
                 tXgdW_all = thr_copy_X.partition_S(gdW_all)
                 tXgdW_final = thr_copy_X.partition_D(gdW_final)
                 tXrdW_accum = cute.make_fragment_like(tXgdW_final, Float32)
@@ -817,9 +815,7 @@ class RMSNormBackward:
                     copy_(tXgdW_all[None, None, None, i], tXrdW_row)
                     tXrdW_accum.store(tXrdW_accum.load() + tXrdW_row.load())
                 tXrdW_final = cute.make_fragment_like(tXgdW_final)
-                tXrdW_final.store(
-                    tXrdW_accum.load().to(tXrdW_final.element_type)
-                )
+                tXrdW_final.store(tXrdW_accum.load().to(tXrdW_final.element_type))
                 copy_(tXrdW_final, tXgdW_final)
                 # Reset semaphore for the next kernel invocation
                 if tidx == 0:

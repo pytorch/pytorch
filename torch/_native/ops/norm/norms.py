@@ -100,11 +100,23 @@ def cutedsl_rmsnorm_bwd(
             semaphore = _get_semaphore(x.device)
 
     _rmsnorm_bwd(
-        x, weight, dout, rstd_flat, dx, dw_partial,
-        None, None, None, sm_count, dw, semaphore,
+        x,
+        weight,
+        dout,
+        rstd_flat,
+        dx,
+        dw_partial,
+        None,
+        None,
+        None,
+        sm_count,
+        dw,
+        semaphore,
     )
 
     dx = dx.reshape(input.shape)
     if weight is not None and not use_in_kernel_dw_reduction:
-        dw = dw_partial.sum(dim=0, dtype=weight.dtype)  # pyrefly: ignore[missing-attribute]
+        dw = dw_partial.sum(  # pyrefly: ignore[missing-attribute]
+            dim=0, dtype=weight.dtype
+        )
     return dx, dw
