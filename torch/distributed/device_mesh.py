@@ -9,6 +9,7 @@ from itertools import zip_longest
 from typing import TYPE_CHECKING
 
 import torch
+from torch._opaque_base import OpaqueBase
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed._pycute import IntTuple, is_int, suffix_product
@@ -164,7 +165,7 @@ else:
 
         return None
 
-    class DeviceMesh:
+    class DeviceMesh(OpaqueBase):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
