@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
 import torch
@@ -65,11 +65,13 @@ from torch._inductor.cpp_builder import (
     _LINKER_SCRIPT,
     _set_gpu_runtime_env,
     _TORCH_PATH,
+    batch_convert_cubins_to_obj,
     convert_cubin_to_obj,
     CppBuilder,
     CppOptions,
     CppTorchDeviceOptions,
     get_compiler_version_info,
+    get_cpp_compiler,
     get_ld_and_objcopy,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
@@ -785,6 +787,38 @@ class BypassFxGraphCache(Exception):
     """
 
 
+def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
+    """Resolve the effective pre-grad pass timing from the config.
+
+    "default" is resolved based on whether the custom pass provides a UUID:
+    passes with a UUID (or no custom pass) run "late" (after cache lookup),
+    passes without a UUID run "early" (before cache lookup).
+
+    Raises RuntimeError if a custom pass without a UUID is explicitly set to
+    run "late", since the cache key cannot account for it.
+    """
+    timing: Literal["early", "late", "default"] = config.pre_grad_pass_timing
+    custom_pass = config.pre_grad_custom_pass
+    has_uuid = (
+        custom_pass
+        and isinstance(custom_pass, CustomGraphPass)
+        and custom_pass.uuid() is not None
+    )
+
+    if timing == "default":
+        supports_late = custom_pass is None or has_uuid
+        timing = "late" if supports_late else "early"
+
+    if timing == "late" and custom_pass and not has_uuid:
+        raise RuntimeError(
+            "pre_grad_custom_pass must implement uuid() to run late "
+            "(after cache lookup). Either implement uuid() or set "
+            "pre_grad_pass_timing to 'early'."
+        )
+
+    return timing
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -912,7 +946,11 @@ class FxGraphHashDetails:
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable(ignore_private_configs=False)
-        # Custom post grad passes should provide an ID to hash.
+        # Custom passes should provide an ID to hash when they run late (after cache lookup).
+        if resolve_pre_grad_pass_timing() != "early":
+            self.pre_grad_custom_pass = self._get_custom_pass_detail(
+                config.pre_grad_custom_pass
+            )
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
         )
@@ -1458,6 +1496,17 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         if graph is None:
             return None, cache_info
 
+        # Validate extern_libs (e.g. libdevice) match the current env.
+        if graph.extern_libs_key is not None:
+            try:
+                backend = torch.utils._triton.triton_backend()
+                current = torch.utils._triton._extern_libs_key(backend)
+            except Exception:
+                current = None
+            if current != graph.extern_libs_key:
+                cache_info["cache_status_detailed"] = "guard_miss"
+                return None, cache_info
+
         if pickled_content is not None:
             CacheArtifactManager.record_artifact(
                 InductorCacheArtifact.type(), key, pickled_content
@@ -1514,6 +1563,13 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         compiled_graph.guards_expr = shape_env.produce_guards_expression(
             placeholders=symints, guards=guards
         )
+        try:
+            backend = torch.utils._triton.triton_backend()
+            compiled_graph.extern_libs_key = torch.utils._triton._extern_libs_key(
+                backend
+            )
+        except Exception:
+            pass
         disk_compiled_graph = copy(compiled_graph)
         disk_compiled_graph.prepare_for_serialization()
 
@@ -1568,8 +1624,15 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
-        # Post grad custom passes must implement the CustomGraphPass or we don't
+        # Custom passes must implement the CustomGraphPass or we don't
         # know how to include them in the cache key calculation.
+        # When timing is EARLY, pre-grad passes already ran before the cache
+        # lookup so there's nothing to validate here.
+        if resolve_pre_grad_pass_timing() != "early":
+            assert not config.pre_grad_custom_pass or (
+                isinstance(config.pre_grad_custom_pass, CustomGraphPass)
+                and config.pre_grad_custom_pass.uuid()
+            ), "Unsupported pre grad custom pass"
         for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
@@ -2480,6 +2543,7 @@ end
             cubins_o = []
             asm_files = []
             if not _IS_WINDOWS:
+                cubins_to_embed: list[tuple[str, str]] = []
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
                 kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
                 for kernel_name, value in CudaKernelParamCache.cache.items():
@@ -2554,10 +2618,30 @@ end
                             log.info("Created multi-arch bundle: %s", cubin_file)
 
                     if config.aot_inductor.embed_kernel_binary:
-                        # Embed cubin files into model.so using objcopy
-                        cubins_o.append(
-                            convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
+                        cubins_to_embed.append((cubin_file, kernel_name))
+
+                if cubins_to_embed:
+                    # Batch all cubins into a single .o using .incbin assembly.
+                    # This replaces N * 3 subprocess calls (ld + 2x objcopy per
+                    # cubin) with a single compiler invocation.
+                    try:
+                        combined_obj = batch_convert_cubins_to_obj(
+                            cubins_to_embed,
+                            os.path.dirname(output_so),
+                            cpp_compiler=get_cpp_compiler(),
                         )
+                        cubins_o.append(combined_obj)
+                    except subprocess.CalledProcessError:
+                        log.warning(
+                            "Batched cubin embedding failed, "
+                            "falling back to per-cubin objcopy"
+                        )
+                        for cubin_file, kernel_name in cubins_to_embed:
+                            cubins_o.append(
+                                convert_cubin_to_obj(
+                                    cubin_file, kernel_name, ld, objcopy
+                                )
+                            )
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
@@ -3094,18 +3178,6 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         #include <cstdlib>
         #include <cerrno>
 
-        #ifndef _MSC_VER
-        #if __cplusplus < 202002L
-        // C++20 (earlier) code
-        // https://en.cppreference.com/w/cpp/language/attributes/likely
-        #define likely(x)       __builtin_expect(!!(x), 1)
-        #define unlikely(x)     __builtin_expect(!!(x), 0)
-        #endif
-        #else
-        #define likely(x) (x)
-        #define unlikely(x) (x)
-        #endif
-
         // This is defined in guards.cpp so we don't need to import PyTorch headers that are slooow.
         // We manually link it below to workaround issues with fbcode build.
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
@@ -3116,19 +3188,19 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         }}
         template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {{
             auto result = PyLong_AsSsize_t(PyTuple_GET_ITEM(args, n));
-            if(unlikely(result == -1 && PyErr_Occurred()))
+            if(result == -1 && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected int arg");
             return result;
         }}
         template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {{
             auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
-            if(unlikely(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()))
+            if(result == reinterpret_cast<void*>(-1) && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected int arg");
             return reinterpret_cast<uintptr_t>(result);
         }}
         template <> inline float parse_arg<float>(PyObject* args, size_t n) {{
             auto result = PyFloat_AsDouble(PyTuple_GET_ITEM(args, n));
-            if(unlikely(result == -1.0 && PyErr_Occurred()))
+            if(result == -1.0 && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected float arg");
             return static_cast<float>(result);
         }}
@@ -3137,9 +3209,9 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
         static PyObject* {entry_func}_py(PyObject* self, PyObject* args) {{
             try {{
-                if(unlikely(!PyTuple_CheckExact(args)))
+                if(!PyTuple_CheckExact(args)) [[unlikely]]
                     throw std::runtime_error("tuple args required");
-                if(unlikely(PyTuple_GET_SIZE(args) != {arg_len}))
+                if(PyTuple_GET_SIZE(args) != {arg_len}) [[unlikely]]
                     throw std::runtime_error("requires {arg_len} args");
                 {call_entry_func}
             }} catch(std::exception const& e) {{
@@ -3982,6 +4054,7 @@ class CUTLASSCodeCache:
     def cache_clear(cls) -> None:
         cls.cache.clear()
         cls.aot_kernels_o.clear()
+        cls.write.cache_clear()
 
     @staticmethod
     @lru_cache(maxsize=4)

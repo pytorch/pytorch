@@ -90,6 +90,7 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
+from .comprehension_graph_break import maybe_setup_comprehension_speculation
 from .exc import (
     augment_exc_message_with_hop_name,
     BackendCompilerFailed,
@@ -128,7 +129,6 @@ from .source import (
     SkipGuardSource,
     Source,
 )
-from .synthetic_function_graph_break import maybe_setup_comprehension_speculation
 from .trace_rules import is_builtin_constant, is_forbidden
 from .utils import (
     _get_error_on_graph_break,
@@ -284,6 +284,10 @@ class SpeculationLog:
     # If True, graph break at autograd.grad instead of tracing it.
     # Set when we detect that autograd.grad consumed grad_fns that are returned.
     graph_break_on_autograd_grad: bool = False
+    # If True, graph break at requires_grad_() on source-less intermediates
+    # instead of tracing it. Set when we detect that such an intermediate
+    # leaks as a graph output with requires_grad=True.
+    graph_break_on_requires_grad_: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -668,6 +672,7 @@ def generic_jump(
                     return self.jump(inst)
                 elif self.should_compile_partial_graph():
                     jump_graph_break(self, inst, value)
+                    return
                 else:
                     unimplemented(
                         gb_type="Data-dependent assertion failed (cannot compile partial graph)",
@@ -767,7 +772,7 @@ def generic_jump(
                     x = None
 
             # __bool__ or __len__ is function
-            if isinstance(x, UserMethodVariable):
+            if isinstance(x, (GetAttrVariable, UserMethodVariable)):
                 result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
                 method_name = getattr(getattr(x, "fn", None), "__name__", None)
                 if result.is_python_constant():
@@ -1604,9 +1609,8 @@ class InstructionTranslatorBase(
                         *create_copy(2),
                         cg.create_load_const(0),
                         cg.create_binary_subscr(),
-                        create_dup_top(),
                         *create_binary_slice(num_stack, None),
-                        *create_swap(2),
+                        *create_copy(3),
                         cg.create_load_const(0),
                         create_instruction("STORE_SUBSCR"),
                     ]
@@ -1758,11 +1762,11 @@ class InstructionTranslatorBase(
                     # twice is not an issue (second stop is a no op).
                     self.output.mark_bytecode_tracing_stop()
 
-    def push(self, val: VariableTracker | None) -> None:
-        assert val is None or isinstance(val, VariableTracker), (
+    def push(self, val: VariableTracker) -> None:
+        assert isinstance(val, VariableTracker), (
             f"push expects VariableTracker, got {typestr(val)}"
         )
-        self.stack.append(val)  # type: ignore[arg-type]
+        self.stack.append(val)
 
     def push_many(self, vals: list[VariableTracker]) -> None:
         for val in vals:
@@ -2111,20 +2115,6 @@ class InstructionTranslatorBase(
         assert inst.target is not None
         self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
-    def BEGIN_FINALLY(self, inst: Instruction) -> None:
-        self.push(None)
-
-    def WITH_CLEANUP_START(self, inst: Instruction) -> None:
-        exit, exc = self.popn(2)
-        assert exc is None
-        self.push(exc)
-
-        self.push(exit.call_function(self, [CONSTANT_VARIABLE_NONE] * 3, {}))
-
-    def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
-        self.popn(2)
-        self.push(None)
-
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
         self.push(it)
@@ -2215,11 +2205,15 @@ class InstructionTranslatorBase(
                 f"raised exception {val}", real_stack=python_stack
             )
 
-        unimplemented(
-            gb_type="Failed to raise exception",
-            context=str(exc),
-            explanation="Attempted to raise a non-Exception type/value.",
-            hints=[*graph_break_hints.USER_ERROR],
+        exc.raise_observed_exception(
+            TypeError,
+            self,
+            args=[
+                VariableTracker.build(
+                    self,
+                    f"exceptions must derive from BaseException, not {val.python_type_name()}",
+                )
+            ],
         )
 
     def RAISE_VARARGS(self, inst: Instruction) -> None:
@@ -2736,15 +2730,14 @@ class InstructionTranslatorBase(
             self.PUSH_NULL(inst)
             self.push(obj)
         else:
-            self.push(obj)
-            self.push(None)
+            raise AssertionError(
+                "LOAD_METHOD should have been rewritten to LOAD_ATTR. We should never reach here."
+            )
 
     def CALL_METHOD(self, inst: Instruction) -> None:
-        args = self.popn(inst.argval)
-        dummy = self.pop()
-        assert dummy is None
-        fn = self.pop()
-        self.call_function(fn, args, {})
+        raise AssertionError(
+            "CALL_METHOD should have been rewritten to CALL_FUNCTION. This function should never be called."
+        )
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
@@ -2989,21 +2982,12 @@ class InstructionTranslatorBase(
             )
 
         # add resume function to the global scope
-        if new_code.co_freevars:
-            # expose code object for debugging purposes
-            self.output.install_global_unsafe(resume_name, new_code)
-            package_name = None
-        else:
-            # This is safe: we pre-generate a unique name
-            self.output.install_global_unsafe(
-                resume_name,
-                types.FunctionType(new_code, self.f_globals, resume_name),
-            )
-            package_name = resume_name
-
+        self.output.install_resume_function_global(
+            resume_name, new_code, self.f_globals
+        )
         if self.package is not None:
             self.package.add_resume_function(
-                new_code, self.f_globals["__name__"], package_name
+                new_code, self.f_globals["__name__"], resume_name
             )
 
         counters["resumes"][new_code.co_name] += 1
@@ -3218,7 +3202,15 @@ class InstructionTranslatorBase(
                         cg.create_binary_subscr(),
                     ]
                 )
-                cg.make_function_with_closure(name, code)
+                # Call the factory function (stored under resume_name) to
+                # create the resume function with correct globals and closure.
+                cg.extend_output(
+                    [
+                        cg.create_load_global(name, add=True),
+                        *create_swap(2),
+                        *create_call_function(1, push_null=True),
+                    ]
+                )
             else:
                 cg.extend_output(cg.load_function_name(name, False, 0))
             cg.extend_output(create_swap(2))
@@ -3239,7 +3231,15 @@ class InstructionTranslatorBase(
                     cg.create_binary_subscr(),
                 ]
             )
-            cg.make_function_with_closure(resume_names[-1], resume_codes[-1])
+            # Call the factory function to create the resume function with
+            # correct globals and closure.
+            cg.extend_output(
+                [
+                    cg.create_load_global(resume_names[-1], add=True),
+                    *create_swap(2),
+                    *create_call_function(1, push_null=True),
+                ]
+            )
             cg.extend_output(
                 [
                     *create_rot_n(3),
@@ -5199,23 +5199,30 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         # Detect inline GraphModule calls in order to propagate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.
-        if args and isinstance(args[0], NNModuleVariable):
-            module = parent.output.get_submodule(args[0].module_key)
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
-        # When we have inline_nn_module turned on, modules resolve to UnspecializedNNModuleVariable
-        if args and isinstance(args[0], UnspecializedNNModuleVariable):
-            module = args[0].value
-            if isinstance(module, torch.fx.GraphModule):
-                # The inline call might not actually be a call to `forward`,
-                # but it is enough to add a context for `forward` in case it is called.
-                code_context.get_context(module.forward.__code__)[
-                    "orig_graphmodule"
-                ] = weakref.ref(module)
+        # For unrealized lazy VTs, use peek_type to skip non-Module args
+        # without realizing them (which would install unnecessary guards).
+        if args:
+            arg0 = args[0]
+            should_check = True
+            if isinstance(arg0, LazyVariableTracker) and not arg0.is_realized():
+                if issubclass(arg0.peek_type(), torch.nn.Module):
+                    arg0 = arg0.realize()
+                else:
+                    should_check = False
+
+            if should_check:
+                if isinstance(arg0, NNModuleVariable):
+                    module = parent.output.get_submodule(arg0.module_key)
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
+                elif isinstance(arg0, UnspecializedNNModuleVariable):
+                    module = arg0.value
+                    if isinstance(module, torch.fx.GraphModule):
+                        code_context.get_context(module.forward.__code__)[
+                            "orig_graphmodule"
+                        ] = weakref.ref(module)
 
         assert not isinstance(func, SkipFunctionVariable)
         tracer: InliningInstructionTranslator

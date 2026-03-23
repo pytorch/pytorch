@@ -6,6 +6,8 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
+from __future__ import annotations
+
 import json
 import multiprocessing as mp
 import os
@@ -16,8 +18,8 @@ import tempfile
 import time
 import unittest
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from unittest import mock
 from unittest.mock import Mock, patch
 
@@ -32,6 +34,7 @@ from torch.distributed.elastic.agent.server.api import (
 )
 from torch.distributed.elastic.agent.server.local_elastic_agent import (
     LocalElasticAgent,
+    TORCHELASTIC_ENABLE_FILE_TIMER,
     TORCHELASTIC_HEALTH_CHECK_PORT,
     TORCHELASTIC_TIMER_FILE,
 )
@@ -45,6 +48,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def init_rpc(name, backend):
@@ -1466,6 +1473,238 @@ class LocalElasticAgentTest(unittest.TestCase):
     )
     def test_rank_restart_after_failure(self):
         self.run_test_with_backend(backend="c10d", test_to_run=self.fail_rank_one_once)
+
+    def test_get_alive_time_without_watchdog(self):
+        """Test _get_alive_time returns current time when watchdog is not set."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        # Use a mocked rendezvous handler to avoid blocking on real connections
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Watchdog is None by default at initialization
+        self.assertIsNone(agent._worker_watchdog)
+
+        # _get_alive_time should return current time when watchdog is None
+        before = int(time.time())
+        alive_time = agent._get_alive_time()
+        after = int(time.time())
+
+        self.assertGreaterEqual(alive_time, before)
+        self.assertLessEqual(alive_time, after)
+
+    def test_get_alive_time_with_watchdog(self):
+        """Test _get_alive_time returns watchdog time when watchdog is active."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        # Use a mocked rendezvous handler to avoid blocking on real connections
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Mock the watchdog with a specific return value
+        mock_watchdog = Mock()
+        expected_time = 1234567890
+        mock_watchdog.get_last_progress_time.return_value = expected_time
+        agent._worker_watchdog = mock_watchdog
+
+        # _get_alive_time should delegate to watchdog when available
+        alive_time = agent._get_alive_time()
+
+        self.assertEqual(alive_time, expected_time)
+        mock_watchdog.get_last_progress_time.assert_called_once()
+
+    def test_setup_healthcheck_idempotent(self):
+        """Test _setup_healthcheck is idempotent and does not recreate server when JK is enabled."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        # Use a mocked rendezvous handler to avoid blocking on real connections
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Pre-set a mock health check server
+        mock_server = Mock()
+        agent._health_check_server = mock_server
+
+        # Set the env for healthcheck port
+        healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
+        original_value = os.environ.get(healthcheck_port_env_name)
+        os.environ[healthcheck_port_env_name] = "12345"
+
+        try:
+            # Patch justknobs_check to return True for the healthcheck knob
+            with patch(
+                "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
+                return_value=True,
+            ):
+                # Call _setup_healthcheck - should be a no-op since server already exists
+                agent._setup_healthcheck()
+
+            # Verify the mock server was not replaced or modified
+            self.assertIs(agent._health_check_server, mock_server)
+            # Verify start was not called on the mock (it was already "running")
+            mock_server.start.assert_not_called()
+        finally:
+            # Restore env
+            if original_value is None:
+                if healthcheck_port_env_name in os.environ:
+                    del os.environ[healthcheck_port_env_name]
+            else:
+                os.environ[healthcheck_port_env_name] = original_value
+
+    def test_setup_healthcheck_creates_server_when_none(self):
+        """Test _setup_healthcheck creates server when none exists."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+        self._backend = "c10d"
+        self._endpoint = f"localhost:{acquire_available_port()}"
+        spec = self.get_worker_spec(node_conf)
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        # Ensure no health check server exists
+        self.assertIsNone(agent._health_check_server)
+
+        # Set the env for healthcheck
+        healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
+        original_value = os.environ.get(healthcheck_port_env_name)
+        healthcheck_port = str(acquire_available_port())
+        os.environ[healthcheck_port_env_name] = healthcheck_port
+
+        try:
+            # Call _setup_healthcheck
+            agent._setup_healthcheck()
+
+            # Verify a health check server was created
+            self.assertIsNotNone(agent._health_check_server)
+        finally:
+            # Cleanup
+            if agent._health_check_server is not None:
+                agent._health_check_server.stop()
+                agent._health_check_server = None
+            if original_value is None:
+                if healthcheck_port_env_name in os.environ:
+                    del os.environ[healthcheck_port_env_name]
+            else:
+                os.environ[healthcheck_port_env_name] = original_value
+
+    def test_pre_invoke_run_calls_setup_healthcheck(self):
+        """Test _pre_invoke_run calls _setup_healthcheck when JK is enabled."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+        self._backend = "c10d"
+        self._endpoint = f"localhost:{acquire_available_port()}"
+        spec = self.get_worker_spec(node_conf)
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        with (
+            patch(
+                "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
+                return_value=True,
+            ),
+            patch.object(agent, "_setup_healthcheck") as mock_setup,
+        ):
+            agent._pre_invoke_run()
+        mock_setup.assert_called_once()
+
+    def test_pre_invoke_run_skips_healthcheck_without_jk(self):
+        """Test _pre_invoke_run does NOT call _setup_healthcheck when JK is disabled."""
+        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
+
+        # Use a mocked rendezvous handler to avoid blocking on real connections
+        rdzv_handler = Mock()
+        rdzv_handler.get_backend.return_value = "c10d"
+        spec = WorkerSpec(
+            role=node_conf.role,
+            local_world_size=node_conf.local_world_size,
+            entrypoint=node_conf.entrypoint,
+            args=node_conf.args,
+            rdzv_handler=rdzv_handler,
+            max_restarts=0,
+            monitor_interval=0.01,
+        )
+        agent = self.get_agent(spec, node_config=node_conf)
+
+        with (
+            patch(
+                "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
+                return_value=False,
+            ),
+            patch.object(agent, "_setup_healthcheck") as mock_setup,
+        ):
+            agent._pre_invoke_run()
+        mock_setup.assert_not_called()
+
+    def test_healthcheck_with_watchdog_enabled(self):
+        """Test healthcheck works with watchdog enabled during agent run."""
+        # Set the env for watchdog and healthcheck
+        watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
+        healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
+
+        original_watchdog = os.environ.get(watchdog_env_name)
+        original_healthcheck = os.environ.get(healthcheck_port_env_name)
+
+        os.environ[watchdog_env_name] = "1"
+        os.environ[healthcheck_port_env_name] = str(acquire_available_port())
+
+        try:
+            node_conf = Conf(
+                entrypoint=_check_local_watchdog_setup,
+                local_world_size=1,
+                args=(TORCHELASTIC_ENABLE_FILE_TIMER, True),
+            )
+
+            def run_test():
+                spec = self.get_worker_spec(node_conf, max_restarts=0)
+                agent = self.get_agent(spec, node_config=node_conf)
+
+                # Run the agent with justknobs_check returning True
+                with patch(
+                    "torch.distributed.elastic.agent.server.local_elastic_agent.justknobs_check",
+                    return_value=True,
+                ):
+                    res = agent.run()
+                self.assertFalse(res.is_failed())
+
+            self.run_test_with_backend(backend="c10d", test_to_run=run_test)
+        finally:
+            # Restore env
+            if original_watchdog is None:
+                if watchdog_env_name in os.environ:
+                    del os.environ[watchdog_env_name]
+            else:
+                os.environ[watchdog_env_name] = original_watchdog
+            if original_healthcheck is None:
+                if healthcheck_port_env_name in os.environ:
+                    del os.environ[healthcheck_port_env_name]
+            else:
+                os.environ[healthcheck_port_env_name] = original_healthcheck
 
 
 if __name__ == "__main__":

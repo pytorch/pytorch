@@ -586,17 +586,23 @@ class ShardingPropagator:
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):
                 return OpStrategy([OpSpec(spec)])
-            elif (
-                isinstance(spec, (list, tuple))
-                and len(spec) > 0
-                and isinstance(spec[0], DTensorSpec)
-            ):
-                # tensor list create tuple strategy
-                tuple_strategy = [spec_to_strategy(s) for s in spec]
-                tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
-                return TupleStrategy(
-                    tuple(tuple_strategy) if isinstance(spec, tuple) else tuple_strategy
-                )
+            elif isinstance(spec, (list, tuple)) and len(spec) > 0:
+                if all(isinstance(s, DTensorSpec) for s in spec):
+                    # tensor list create tuple strategy
+                    tuple_strategy = [spec_to_strategy(s) for s in spec]
+                    tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
+                    return TupleStrategy(
+                        tuple(tuple_strategy)
+                        if isinstance(spec, tuple)
+                        else tuple_strategy
+                    )
+                elif any(isinstance(s, DTensorSpec) for s in spec):
+                    # mixed list (e.g. [DTensorSpec, None, DTensorSpec]) for
+                    # ops like aten.index.Tensor; keep as list so pytree
+                    # flattening can extract OpStrategy items
+                    return [spec_to_strategy(s) for s in spec]
+                else:
+                    return spec
             else:
                 return spec
 
@@ -939,14 +945,15 @@ class ShardingPropagator:
         expected_input_schema = list(schema.args_schema)
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
-        expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
+        local_shape, _ = compute_local_shape_and_global_offset(
             out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )
+        expected_input_schema[shape_idx] = local_shape
 
         # adjust the stride arg for aten.new_empty_strided.default
         if stride_idx:
             expected_input_schema[stride_idx] = compute_local_stride(
-                out_tensor_meta.stride, spec.mesh, spec.placements
+                out_tensor_meta.stride, local_shape
             )
 
         return OpSchema(schema.op, tuple(expected_input_schema), schema.kwargs_schema)

@@ -6,12 +6,14 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
+from torch._opaque_base import OpaqueBase
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed._pycute import IntTuple, is_int, suffix_product
+from torch.types import IntLikeType
 from torch.utils._typing_utils import not_none
 
 
@@ -148,7 +150,7 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    class DeviceMesh(torch._opaque_base.OpaqueBase):
+    class DeviceMesh(OpaqueBase):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
@@ -202,6 +204,7 @@ else:
         _mesh_dim_names: tuple[str, ...] | None
         _layout: _MeshLayout
         _root_mesh: "DeviceMesh | None" = None
+        _thread_id: int | None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
         # Registry mapping group names to ProcessGroup objects (to avoid C++ lookup)
@@ -643,19 +646,21 @@ else:
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
 
+        def _hash_key(self) -> tuple[Any, ...]:
+            """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
+            return (
+                self._flatten_rank_map,
+                self._layout,
+                self._device_type,
+                self._mesh_dim_names,
+                self._thread_id,
+            )
+
         def __hash__(self):
             # lazily compute hash
             self._hash = getattr(self, "_hash", None)
             if not self._hash:
-                self._hash = hash(
-                    (
-                        self._flatten_rank_map,
-                        self._layout,
-                        self._device_type,
-                        self._mesh_dim_names,
-                        self._thread_id,
-                    )
-                )
+                self._hash = hash(self._hash_key())
             return self._hash
 
         def __eq__(self, other: object) -> bool:
@@ -670,6 +675,17 @@ else:
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
             )
+
+        def _stable_hash(self) -> str:
+            """
+            Return a stable hash for AOT autograd caching.
+            [See note: Tensor subclass stable hashing for AOT autograd cache]
+            """
+            import hashlib
+
+            return hashlib.blake2b(
+                repr(self._hash_key()).encode(), digest_size=16
+            ).hexdigest()
 
         def __getitem__(self, mesh_dim_names: str | tuple[str, ...]) -> "DeviceMesh":
             """
@@ -1220,7 +1236,7 @@ else:
             """
             return self._coordinate_on_dim
 
-        def _sym_get_coordinate(self, index: int) -> int:
+        def _sym_get_coordinate(self, index: int) -> IntLikeType:
             import torch.distributed.config as config
             from torch._guards import detect_fake_mode
 
@@ -1375,7 +1391,7 @@ else:
                 raise ValueError(
                     f"dim {dim} specified in `_unflatten` is out of range {self.ndim}"
                 )
-            elif isinstance(dim, str) and dim in not_none(self.mesh_dim_names):
+            elif isinstance(dim, str) and dim not in not_none(self.mesh_dim_names):
                 raise ValueError(
                     f"dim {dim} specified in `_unflatten` is not in {self.mesh_dim_names}"
                 )
@@ -1532,14 +1548,14 @@ else:
         if mesh_dim_names is not None:
             if len(set(mesh_dim_names)) != len(mesh_dim_names):
                 raise RuntimeError(
-                    "Each mesh_dim_name must be unique.",
-                    f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}",
+                    "Each mesh_dim_name must be unique. "
+                    f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}"
                 )
 
             if len(mesh_shape) != len(mesh_dim_names):
                 raise RuntimeError(
-                    "mesh_shape and mesh_dim_names should have same length!",
-                    f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
+                    "mesh_shape and mesh_dim_names should have same length! "
+                    f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}."
                 )
 
         if backend_override is not None:
@@ -1590,6 +1606,56 @@ def _register_distributed_opaque_types():
             "rank": MemberType.USE_REAL,
             "_get_backend_name": MemberType.USE_REAL,
             "group_name": MemberType.USE_REAL,
+            "group_desc": MemberType.USE_REAL,
             "__eq__": MemberType.USE_REAL,
+        },
+    )
+
+    register_opaque_type(
+        DeviceMesh,
+        typ="reference",
+        guard_fn=lambda obj: [
+            obj._flatten_rank_map,
+            obj._layout,
+            obj._device_type,
+            obj._mesh_dim_names,
+            obj._thread_id,
+        ],
+        members={
+            # USE_REAL: Evaluate these with the real object at compile time
+            # and bake the result as a constant
+            "_flatten_rank_map": MemberType.USE_REAL,
+            "_layout": MemberType.USE_REAL,
+            "_device_type": MemberType.USE_REAL,
+            "_mesh_dim_names": MemberType.USE_REAL,
+            "_thread_id": MemberType.USE_REAL,
+            "get_rank": MemberType.USE_REAL,
+            "size": MemberType.USE_REAL,
+            "get_coordinate": MemberType.USE_REAL,
+            "get_local_rank": MemberType.USE_REAL,
+            "__eq__": MemberType.USE_REAL,
+            "ndim": MemberType.USE_REAL,
+            "shape": MemberType.USE_REAL,
+            "mesh_dim_names": MemberType.USE_REAL,
+            "get_group": MemberType.INLINED,
+            "_pg_registry": MemberType.INLINED,
+            "_hash": MemberType.USE_REAL,
+            "_create_flatten_mesh": MemberType.USE_REAL,
+            "_coordinate_on_dim": MemberType.USE_REAL,
+            "_dim_group_names": MemberType.USE_REAL,
+            "_flatten_mapping": MemberType.USE_REAL,
+            "_rank_map": MemberType.USE_REAL,
+            "_root_mesh": MemberType.USE_REAL,
+            "device_type": MemberType.USE_REAL,
+            "mesh": MemberType.USE_REAL,
+            "_flatten": MemberType.INLINED,
+            "_unflatten": MemberType.USE_REAL,
+            "_is_current_rank_part_of_mesh": MemberType.USE_REAL,
+            "_sym_get_coordinate": MemberType.USE_REAL,
+            "_get_mesh_dim_by_name": MemberType.USE_REAL,
+            "_get_root_mesh": MemberType.INLINED,
+            "__getitem__": MemberType.INLINED,
+            "_get_slice_mesh_layout": MemberType.INLINED,
+            "_create_sub_mesh": MemberType.INLINED,
         },
     )

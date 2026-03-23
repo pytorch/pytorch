@@ -13,6 +13,7 @@ import sympy
 import torch
 from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import Mod
 from torch.utils._triton import has_triton_stable_tma_api
 
 from .. import config, config as inductor_config
@@ -779,6 +780,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             for num_warps in [2, 4, 8]
         ]
 
+    def _get_extra_config_key_and_kwargs(
+        self, conf: BaseConfig
+    ) -> tuple[tuple[int | None, ...], dict[str, Any]]:
+        """Hook for subclasses to extend config dedup key and kwargs."""
+        return (), {}
+
     def _finalize_mm_configs(
         self,
         configs: list[BaseConfig],
@@ -813,16 +820,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if isinstance(conf, BlackwellGPUGemmConfig):
                 key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
 
-            # Add TlxGemmConfig specific fields to key if present
-            if config.is_fbcode() and config.triton.enable_tlx_templates:
-                from torch._inductor.fb.tlx_templates.registry import (
-                    get_tlx_config_key_and_kwargs,
-                )
-
-                tlx_key_fields, tlx_kwargs = get_tlx_config_key_and_kwargs(conf)
-                key += tlx_key_fields
-            else:
-                tlx_kwargs = {}
+            extra_key, extra_kwargs = self._get_extra_config_key_and_kwargs(conf)
+            key += extra_key
 
             if key not in used and (
                 max_mm_configs is None or len(used) < max_mm_configs
@@ -843,8 +842,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
                     kwargs["FLATTEN"] = conf.flatten
 
-                # Add TlxGemmConfig specific fields if present
-                kwargs.update(tlx_kwargs)
+                kwargs.update(extra_kwargs)
 
                 yield self.triton_config(conf.num_stages, num_warps, **kwargs)
 
@@ -1554,12 +1552,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 128): ROCmFlexConfig(128, 32, 1, 4),
             (torch.float32, 256): ROCmFlexConfig(64, 16, 1, 4),
-            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 1, 4),
-            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 1, 4),
-            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 1, 4),
-            (torch.float16, 64): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 128): ROCmFlexConfig(128, 64, 1, 8),
-            (torch.float16, 256): ROCmFlexConfig(32, 64, 1, 4),
+            (torch.bfloat16, 64): ROCmFlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 128): ROCmFlexConfig(128, 64, 2, 4),
+            (torch.bfloat16, 256): ROCmFlexConfig(32, 64, 2, 4),
+            (torch.float16, 64): ROCmFlexConfig(128, 64, 2, 8),
+            (torch.float16, 128): ROCmFlexConfig(128, 64, 2, 8),
+            (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4),
         }
 
         self.flex_attn_fwd_autotune_configs: list[FlexConfig] = [
@@ -1735,7 +1733,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(64, 64, 1, 4)
             else:
-                default_config = ROCmFlexConfig(128, 64, 1, 8)
+                default_config = ROCmFlexConfig(128, 64, 2, 4)
             default_config = self.default_flex_config.get(
                 (dtype, head_dim), default_config
             )
@@ -1743,7 +1741,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(32, 16, 1, 4)
             else:
-                default_config = ROCmFlexConfig(64, 32, 1, 4)
+                default_config = ROCmFlexConfig(64, 32, 2, 4)
 
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
@@ -2040,7 +2038,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         Moved from mm_common.mm_options.
         """
         # Calculate EVEN_K symbolic. (It isn't worth guarding on this)
-        even_k_symbolic = (k % triton_config.kwargs["BLOCK_K"]) == 0
+        even_k_symbolic = sympy.Eq(Mod(k, triton_config.kwargs["BLOCK_K"]), 0)
         even_k_symbolic = V.graph.sizevars.statically_known_true(even_k_symbolic)
 
         # Build options dict

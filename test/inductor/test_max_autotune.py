@@ -60,6 +60,7 @@ from torch._inductor.template_heuristics.triton import (
     CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
     get_shared_memory_checker_opts,
+    ROCmMMTemplateConfigHeuristic,
     XPUMMTemplateConfigHeuristic,
     XPUPersistentTMATemplateConfigHeuristic,
 )
@@ -93,7 +94,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import MI300_ARCH, runOnRocmArch, skipIfXpu
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     get_kernel_launch,
@@ -1016,8 +1017,12 @@ class TestMaxAutotune(TestCase):
         f_c = torch.compile(mode="max-autotune-no-cudagraphs")(f)
         _, code = run_and_get_code(f_c, inps[0], inps[1])
         self.assertEqual(f_c(*inps), f(*inps), atol=0.03, rtol=0.25)
+        # x has multi-consumers (cat + add), so cat skips pointwise_cat
+        # and uses ConcatKernel.  cos is no longer fused into cat, giving
+        # one extra kernel launch compared to the single-consumer case.
+        count = 3 if (using_triton_mm or config.triton.native_matmul) else 2
         FileCheck().check(get_func_call()).check_count(
-            get_kernel_launch(), 2, exactly=True
+            get_kernel_launch(), count, exactly=True
         ).run(code[0])
 
         def f(x, y):
@@ -2229,9 +2234,6 @@ class TestMaxAutotune(TestCase):
                     self.assertTrue(decompose_count <= num_decompose_k_splits)
 
     @unittest.skipIf(
-        TEST_WITH_ROCM, "exhaustive currently only thoroughly tested on NVIDIA"
-    )
-    @unittest.skipIf(
         config.triton.native_matmul,
         "native matmul takes different tuning configs",
     )
@@ -2248,11 +2250,15 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.template_heuristics.registry.get_template_heuristic"
         ) as config_mock:
-            config_heuristics = (
-                XPUMMTemplateConfigHeuristic()
-                if GPU_TYPE == "xpu"
-                else CUDAMMTemplateConfigHeuristic()
-            )
+            # Create heuristic instance and modify it before setting as mock return value
+            # On ROCm, use ROCmMMTemplateConfigHeuristic; on XPU use XPUMMTemplateConfigHeuristic;
+            # otherwise use CUDAMMTemplateConfigHeuristic
+            if GPU_TYPE == "xpu":
+                config_heuristics = XPUMMTemplateConfigHeuristic()
+            elif torch.version.hip:
+                config_heuristics = ROCmMMTemplateConfigHeuristic()
+            else:
+                config_heuristics = CUDAMMTemplateConfigHeuristic()
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
@@ -2999,7 +3005,6 @@ class TestMaxAutotunePrecompile(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     @config.patch(autotune_local_cache=False, autotune_remote_cache=False)
-    @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(config.triton.native_matmul, "native matmul has counter 0")
     def test_precompilations(self):
         def fn(a, b, c):
@@ -3008,7 +3013,9 @@ class TestMaxAutotunePrecompile(TestCase):
             return (a @ b) @ c
 
         fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
-        inputs = [torch.rand([256, 256], device=GPU_TYPE) for _ in range(3)]
+        # Scale down so float16 doesn't overflow: rand [0,1) -> (a@b)@c has elements in [0, 256^2).
+        # float16 max ~65504, so we keep values in a safe range (e.g. scale by 1/256).
+        inputs = [torch.rand([256, 256], device=GPU_TYPE) / 256.0 for _ in range(3)]
 
         torch.testing.assert_close(fn_c(*inputs), fn(*inputs), atol=1e-2, rtol=1e-2)
 

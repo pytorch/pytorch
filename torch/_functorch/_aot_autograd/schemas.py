@@ -15,7 +15,7 @@ from typing_extensions import ParamSpec
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._library.opaque_object import OpaqueType
+from torch._opaque_base import OpaqueBase
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
@@ -186,14 +186,18 @@ class MemoryFormatMeta:
     memory_format: torch.memory_format | None = None
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> MemoryFormatMeta | None:
+    def from_tensor(
+        t: torch.Tensor, force_use_memory_format: bool = False
+    ) -> MemoryFormatMeta | None:
         # We only memorize expected memory format for
         # 1. Traceable wrapper subclasses
         # We can not create restrided subclass tensor, as torch.empty_strided works only with dense tensors.
         # 2. Dynamic shape tensors
         # Support for symbolic shapes is not implemented yet.
+        # 3. force_use_memory_format=True (e.g., local_map where shapes change)
         use_memory_format: bool = (
-            not torch._functorch.config.guess_tangent_strides_as_outputs
+            force_use_memory_format
+            or not torch._functorch.config.guess_tangent_strides_as_outputs
             or is_traceable_wrapper_subclass(t)
         )
         if not use_memory_format:
@@ -215,6 +219,11 @@ class MemoryFormatMeta:
 class PlainTensorMeta:
     unwrapped_idx: int
     memory_format: MemoryFormatMeta | None = None
+
+
+@dataclass
+class OpaqueMeta:
+    pass
 
 
 @dataclass
@@ -247,7 +256,7 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: dict[str, SubclassCreationMeta | PlainTensorMeta]
+    attrs: dict[str, SubclassCreationMeta | PlainTensorMeta | OpaqueMeta]
     outer_size: Iterable[IntLikeType | None]
     outer_stride: Iterable[IntLikeType | None]
     meta: Any
@@ -264,7 +273,7 @@ class SubclassCreationMeta:
 
     def compute_outer_size_and_stride(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType],
+        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
         *,
         curr_start_idx: int,
     ) -> tuple[
@@ -280,13 +289,12 @@ class SubclassCreationMeta:
             has_symbolic = any(placeholders)
 
             if has_symbolic:
-                start = curr_start_idx
                 end = start_idx + sum(placeholders)
-                it_args = iter(all_args[start:end])
+                it_args = iter(all_args[start_idx:end])
                 it_placeholders = iter(placeholders)
                 return pytree.tree_map_only(
                     lambda _: next(it_placeholders), lambda _: next(it_args), outer
-                ), start + len(placeholders)
+                ), end
             else:
                 return outer, start_idx
 
@@ -296,16 +304,25 @@ class SubclassCreationMeta:
 
     def creation_fn(
         self,
-        all_args: Sequence[torch.Tensor | IntLikeType],
+        all_args: Sequence[torch.Tensor | IntLikeType | OpaqueBase],
         *,
         is_runtime: bool,
     ) -> torch.Tensor:
-        inner_tensors = {}
+        inner_tensors: dict[str, torch.Tensor | OpaqueBase] = {}
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
+            if isinstance(creation_meta, OpaqueMeta):
+                opaque = all_args[curr_start_idx]
+                if not isinstance(opaque, OpaqueBase):
+                    raise AssertionError(f"OpaqueBase expected, got {type(opaque)}")
+                inner_tensors[attr] = opaque
+                curr_start_idx += 1
+                continue
             if isinstance(creation_meta, PlainTensorMeta):
                 subclass = all_args[curr_start_idx]
+                if not isinstance(subclass, Tensor):
+                    raise AssertionError("Tensor expected")
                 curr_start_idx += 1
             else:
                 subclass = creation_meta.creation_fn(
@@ -1194,7 +1211,7 @@ class AOTState:
     fake_mode: FakeTensorMode
 
 
-FxValue = Tensor | int | SymInt | BackwardState | OpaqueType
+FxValue = Tensor | int | SymInt | BackwardState | OpaqueBase
 
 
 class CompilerWrapper:

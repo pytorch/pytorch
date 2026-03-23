@@ -64,6 +64,10 @@ class FakeScriptObject:
             "(but note that this is more difficult)."
         )
 
+    def __getitem__(self, key):
+        # This is needed for DeviceMesh support
+        return self.real_obj[key]
+
     def __eq__(self, other):
         if isinstance(other, FakeScriptObject):
             return self.real_obj == other.real_obj
@@ -97,6 +101,13 @@ class FakeScriptObject:
                     else:
                         object.__setattr__(new_obj, name, value)
         return new_obj
+
+
+def maybe_unwrap_fake_script_object(obj: Any) -> Any:
+    """If obj is a FakeScriptObject, return the underlying real object."""
+    if isinstance(obj, FakeScriptObject):
+        return obj.real_obj
+    return obj
 
 
 class FakeScriptMethod:

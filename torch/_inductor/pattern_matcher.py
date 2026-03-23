@@ -331,6 +331,17 @@ class Match:
                     if "val" in arg.meta
                     else arg.meta["example_value"],
                 )
+                fake_mode = torch._dynamo.utils.detect_fake_mode(example_vals)
+                if fake_mode is not None:
+
+                    def _convert_to_fake_mode(it):
+                        if isinstance(it, FakeTensor) and fake_mode is not None:
+                            return fake_mode.from_tensor(it)
+                        return it
+
+                    example_vals = torch.fx.node.map_aggregate(
+                        example_vals, _convert_to_fake_mode
+                    )
                 replacement = trace_fn(replacement_fn, example_vals)
             if len(self.nodes) == 1:
                 for n in replacement.graph.nodes:
@@ -1357,6 +1368,16 @@ class ReplacementPatternEntry(PatternEntry):
                 replace(output_nodes[0], replacement)
 
         match.erase_nodes()
+
+        # Remove dead replacement nodes so they don't inflate user counts
+        # in later lowering heuristics (e.g. should_realize_on_reuse).
+        for node in reversed(added_replacement_nodes):
+            if (
+                not node.users
+                and not node.is_impure()
+                and not isinstance(node.target, torch._ops.HigherOrderOperator)
+            ):
+                graph.erase_node(node)
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         assert match.replacement_graph is not None

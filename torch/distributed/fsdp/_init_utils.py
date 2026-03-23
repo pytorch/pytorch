@@ -12,6 +12,7 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
+from torch._opaque_base import OpaqueBase
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.distributed_c10d import _get_default_group
@@ -1114,8 +1115,16 @@ def _sync_module_params_and_buffers(
                 # NOTE: Here we assume no nested subclasses, at most one level of subclass
                 # in both model's buffers and params
                 attrs, _ = detached_buffer.__tensor_flatten__()  # type: ignore[attr-defined]
-                inner_buffers = [getattr(detached_buffer, attr) for attr in attrs]
-                module_states.extend(inner_buffers)
+                for attr in attrs:
+                    match getattr(detached_buffer, attr):
+                        case torch.Tensor() as v:
+                            module_states.append(v)
+                        case OpaqueBase():
+                            pass
+                        case unexpected:
+                            raise AssertionError(
+                                f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                            )
             else:
                 module_states.append(detached_buffer)
 
@@ -1123,8 +1132,16 @@ def _sync_module_params_and_buffers(
         detached_param = param.detach()
         if is_traceable_wrapper_subclass(detached_param):
             attrs, _ = detached_param.__tensor_flatten__()  # type: ignore[attr-defined]
-            inner_params = [getattr(detached_param, attr) for attr in attrs]
-            module_states.extend(inner_params)
+            for attr in attrs:
+                match getattr(detached_param, attr):
+                    case torch.Tensor() as v:
+                        module_states.append(v)
+                    case OpaqueBase():
+                        pass
+                    case unexpected:
+                        raise AssertionError(
+                            f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                        )
         else:
             module_states.append(detached_param)
 

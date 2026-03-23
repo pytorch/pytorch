@@ -260,7 +260,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
-                config.bucket_reduce_scatters_fx,  # type: ignore[arg-type]
+                config.bucket_reduce_scatters_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -292,7 +292,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_all_gathers_fx_bucket_size_determinator,
-                config.bucket_all_gathers_fx,  # type: ignore[arg-type]
+                config.bucket_all_gathers_bucket_mode,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -1037,8 +1037,20 @@ def register_noop_decomp(targets, nop_arg=0):
     return register_fun
 
 
+def _needs_spmd_graph_preservation() -> bool:
+    """Check if SPMD graph preservation is needed for distributed overlap."""
+    return (
+        config.aten_distributed_optimizations.enable_overlap_scheduling
+        or config.reorder_for_compute_comm_overlap
+    )
+
+
 @register_noop_decomp(aten.slice)
 def slice_noop(self, dim=0, start=None, end=None, step=1):
+    if _needs_spmd_graph_preservation():
+        # Keep no-op slices so all ranks produce identical FX graphs (SPMD)
+        # with matching op counts and runtime estimations.
+        return False
     if start is None or end is None:
         return False
 
@@ -1082,6 +1094,10 @@ def repeat_noop(self, repeats):
 
 @register_noop_decomp(aten.constant_pad_nd)
 def constant_pad_nd(x, padding, fill_value=0):
+    if _needs_spmd_graph_preservation():
+        # Keep no-op pads so all ranks produce identical FX graphs (SPMD)
+        # with matching op counts and runtime estimations.
+        return False
     return all(p == 0 for p in padding)
 
 
@@ -1530,6 +1546,12 @@ def should_prefer_unfused_addmm(match):
     extra_check=should_prefer_unfused_addmm,
 )
 def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
+    if config.keep_addmm_fused_for_half_dtypes and inp.meta["val"].dtype in (
+        torch.bfloat16,
+        torch.float16,
+    ):
+        return
+
     def repl(inp, x1, x2, alpha, beta):
         mm_result = x1 @ x2
         if alpha != 1:
@@ -1871,7 +1893,8 @@ class ConstructorMoverPass:
                         lambda x: x
                         not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
                         + unsqueezed_nodes
-                        and x.target != torch.ops.aten.copy_.default,
+                        and x.target != torch.ops.aten.copy_.default
+                        and x.target != "output",
                     )
                     last_node = gpu_node
 
@@ -1947,6 +1970,7 @@ class ConstructorMoverPass:
                     del cpu_indeg[user]
                 elif (
                     self.allow_inputs
+                    and self.is_on_target_device(user)
                     and self.all_inputs_are_cpu_scalar_or_on_target_device(user)
                 ):
                     # this node takes only cpu scalar tensors or gpu tensors as inputs

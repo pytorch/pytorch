@@ -402,6 +402,71 @@ def register_comm_lowerings():
         ir._WaitKernel.create_wait(c10d.wait_tensor.default, inp)
         return inp
 
+    @register_comm_lowering(c10d.isend)  # type: ignore[misc]
+    def _isend(inp, dst, tag, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
+        return _create_out_of_place(c10d.isend.default, inp, dst, tag, group_name)
+
+    @register_comm_lowering(c10d.irecv)  # type: ignore[misc]
+    def _irecv(inp, src, tag, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
+        ir._CollectiveKernel.create_inplace(
+            c10d.irecv.default, inp, src, tag, group_name
+        )
+        return inp
+
+    @register_comm_lowering(c10d.batch_p2p_ops)  # type: ignore[misc]
+    def _batch_p2p_ops(op_list, peer_list, tag_list, tensors, group_name):
+        tensors = [ir.ExternKernel.require_contiguous(t) for t in tensors]
+        kernel = c10d.batch_p2p_ops.default
+        with V.graph.fake_mode:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                unbacked_bindings,
+            ) = ir._CollectiveKernel.process_kernel(
+                kernel,
+                op_list,
+                peer_list,
+                tag_list,
+                tensors,
+                group_name,
+            )
+        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
+        for op, tensor_arg in zip(op_list, tensor_args):
+            tensor_arg.realize()
+            if op == "irecv":
+                V.graph.mark_buffer_mutated(tensor_arg.get_name())
+
+        device = tensor_args[0].get_device()
+        packed = ir._CollectiveKernel(
+            ir.MultiOutputLayout(device=device),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+        )
+
+        results = []
+        for i, (op, t, ex_out) in enumerate(zip(op_list, tensors, example_output)):
+            if op == "irecv":
+                packed.mutation_outputs.append(
+                    ir.MutationOutput(ir.NoneLayout(device=device), t, packed)
+                )
+                packed.alias_names.append(t.get_name())
+                results.append(t)
+            else:
+                # isend: 0-element placeholder output connected to the collective
+                placeholder = ir.MultiOutput(
+                    ir._CollectiveKernel.tensor_to_layout(ex_out),
+                    packed,
+                    [(list, i)],
+                )
+                results.append(ir.TensorBox.create(placeholder))
+        return results
+
 
 def register_symm_mem_lowerings():
     """
@@ -417,6 +482,18 @@ def register_symm_mem_lowerings():
     except AttributeError:
         log.info("symm_mem ops not available, skipping symm_mem lowerings")
         return
+
+    from torch._library._out_variant import register_out_variant
+
+    # Register manual out variant mappings for symm_mem ops.
+    register_out_variant(
+        symm_mem.one_shot_all_reduce.default,
+        symm_mem.one_shot_all_reduce_out.default,
+    )
+    register_out_variant(
+        symm_mem.one_shot_all_reduce_copy.default,
+        symm_mem.one_shot_all_reduce_copy_out.default,
+    )
 
     from .lowering import register_lowering
 

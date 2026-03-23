@@ -17,6 +17,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
@@ -898,7 +899,8 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
     std::string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
+      auto biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, *bias_);
+      auto biasTensor_ = bias_->is_conj() ? [mpsGraph conjugateWithTensor:biasTensor name:nil] : biasTensor;
 
       // TODO: Use alpha and beta here with fill_.Scalar and mul
       auto [selfTensor, otherTensor, productTensor] = do_mm(mpsGraph, self, other);
@@ -911,11 +913,11 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
                                                             secondaryTensor:alphaTensor
                                                                        name:@"MM/alpha*(mat1@mat2)"];
       }
-      auto biasTimesBetaTensor = biasTensor;
+      auto biasTimesBetaTensor = biasTensor_;
       if (is_beta_non_zero && beta.toDouble() != 1.0) {
         auto betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
                                               dataType:getMPSScalarType((*bias_).scalar_type())];
-        biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:biasTensor
+        biasTimesBetaTensor = [mpsGraph multiplicationWithPrimaryTensor:biasTensor_
                                                         secondaryTensor:betaTensor
                                                                    name:@"MM/beta*input"];
       }
@@ -1078,6 +1080,11 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
 }
 
 static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
+  TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(),
+              "Expected arguments of same type but got ",
+              batch1.scalar_type(),
+              " and ",
+              batch2.scalar_type());
   using namespace mps;
 
   // Matmul not supported if any output dimension size is larger than 2**32
@@ -1122,7 +1129,8 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   // Call tiled implementation if the number of elements exceeds 2^32
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
   if (resultSize > pow(2, 32)) {
-    result = tiled_bmm_out_mps_impl(batch1, batch2, result);
+    // Tiled path uses MPSNDArray directly, so resolve conjugate views upfront
+    result = tiled_bmm_out_mps_impl(batch1.resolve_conj(), batch2.resolve_conj(), result);
     return result;
   }
 
@@ -1140,16 +1148,18 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
         std::to_string(doTranspose);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
-      MPSGraphTensor* batch2Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch2.scalar_type()));
-      MPSGraphTensor* batch2TensorTranspose = batch2Tensor;
+      auto batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
+      auto batch2Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch2.scalar_type()));
+
+      auto batch1TensorOp = batch1.is_conj() ? [mpsGraph conjugateWithTensor:batch1Tensor name:nil] : batch1Tensor;
+      auto batch2TensorOp = batch2.is_conj() ? [mpsGraph conjugateWithTensor:batch2Tensor name:nil] : batch2Tensor;
 
       if (doTranspose) {
-        batch2TensorTranspose = [mpsGraph transposeTensor:batch2Tensor dimension:-1 withDimension:-2 name:nil];
+        batch2TensorOp = [mpsGraph transposeTensor:batch2TensorOp dimension:-1 withDimension:-2 name:nil];
       }
 
-      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1Tensor
-                                                                      secondaryTensor:batch2TensorTranspose
+      MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1TensorOp
+                                                                      secondaryTensor:batch2TensorOp
                                                                                  name:@"MM/(batch1@batch2)"];
 
       newCachedGraph->batch1Tensor_ = batch1Tensor;
@@ -1741,6 +1751,28 @@ Tensor& linalg_solve_triangular_mps_out(const Tensor& A,
 Tensor linalg_solve_triangular_mps(const Tensor& A, const Tensor& B, bool upper, bool left, bool unitriangular) {
   Tensor out = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   mps::linalg_solve_triangular_mps_impl(A, B, upper, /*transpose=*/false, left, unitriangular, out);
+  return out;
+}
+
+Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool upper) {
+  auto out = at::empty({0}, self.options().memory_format(MemoryFormat::Contiguous));
+  const bool first_transpose = upper;
+  const bool second_transpose = !upper;
+
+  mps::linalg_solve_triangular_mps_impl(A,
+                                        self,
+                                        upper,
+                                        first_transpose,
+                                        /*left=*/true,
+                                        /*unitriangular=*/false,
+                                        out);
+  mps::linalg_solve_triangular_mps_impl(A,
+                                        out,
+                                        upper,
+                                        second_transpose,
+                                        /*left=*/true,
+                                        /*unitriangular=*/false,
+                                        out);
   return out;
 }
 
