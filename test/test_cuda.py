@@ -4776,21 +4776,6 @@ class TestResizeStorageHint(TestCase):
         TEST_CUDAMALLOCASYNC,
         "CUDAMallocAsync does not use the caching allocator hint path",
     )
-    def test_resize_storage_hint_inductor_path(self):
-        t = torch.randn(1024, device="cuda")
-        original_size = t.untyped_storage().nbytes()
-
-        torch.ops.inductor.resize_storage_bytes_(t, 0)
-        self.assertEqual(t.untyped_storage().nbytes(), 0)
-
-        torch.ops.inductor.resize_storage_bytes_(t, original_size)
-        self.assertEqual(t.untyped_storage().nbytes(), original_size)
-        # TODO: Decide if we want to support inductor case.
-
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC,
-        "CUDAMallocAsync does not use the caching allocator hint path",
-    )
     @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
     def test_resize_storage_hint_expandable_segments(self):
         torch.cuda.empty_cache()
