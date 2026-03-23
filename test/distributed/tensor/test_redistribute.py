@@ -1173,7 +1173,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             elif idx == 3:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]R->S(0)RR->S(0)S(1)R->RS(1)R->RS(1)S(0)""",
+                    """S(0)[0]S(0)[1]R->S(0)S(1)R->RS(1)R->RS(1)S(0)""",
                 )
             expected_dt = _distribute_tensor(
                 input_data.clone(), mesh, dst_placement, shard_order=dst_order
@@ -1221,17 +1221,15 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
 
             # Validate graph-based algorithm trace (idx=0, disable_graph=False)
             # Graph-based uses optimal path search (Dijkstra's algorithm)
-            # Expected path has 6 transformations with strategic intermediate states
-            # Path: S(0)[0,1,2] → S(0)[0,1]S(2) → S(0)S(2)[1,0] →
-            #       S(1)S(2)[1,0] → S(1)[0,1]S(2) → S(1)[0,1,2]
+            # Path: S(0)[0,1,2] → S(0)[0,1]R → S(0)RR →
+            #       S(1)RR → S(1)[0,1]R → S(1)[0,1,2]
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->S(1)RR->S(1)[0]S(1)[1]R->S(1)[0]S(1)[1]S(1)[2]""",
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]R->S(0)RR->S(1)RR->S(1)[0]S(1)[1]R->S(1)[0]S(1)[1]S(1)[2]""",
                 )
             # Validate greedy algorithm trace (idx=1, disable_graph=True)
             # Greedy uses simple heuristic approach (processes mesh dims sequentially)
-            # Expected path has 6 transformations but with different intermediate states
             # Path: S(0)[0,1,2] → S(0)[0,1]R → S(0)RR →
             #       S(1)RR → S(1)[0,1]R → S(1)[0,1,2]
             elif idx == 1:

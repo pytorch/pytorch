@@ -322,6 +322,18 @@ def reduce_scatter_cost(
     return latency + bw * 1e6
 
 
+def alltoall_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
+    # TODO: alltoall may be cheaper than allgather on NVSwitch hardware (direct
+    # exchange vs ring), but we use the same formula as a safe upper bound since
+    # the existing model is already approximate (hardcoded BW, ring assumption).
+    num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
+    mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
+    num_hops = num_devices_on_mesh_dim - 1
+    latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]
+    bw = (bytes_gb * num_hops / num_devices_on_mesh_dim) / mesh_dim_bandwidth
+    return latency + bw * 1e6
+
+
 def _compute_placement_transition_cost(
     current_placement: "dtensor_spec.Placement",
     target_placement: "dtensor_spec.Placement",
@@ -354,10 +366,7 @@ def _compute_placement_transition_cost(
         comm_bytes_gb *= num_devices_on_mesh_dim
         return allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim), comm_bytes_gb
     elif current_placement.is_shard() and target_placement.is_shard():
-        # should be alltoall comm, since we haven't implement it yet, add 1.0 as penalty
-        # to favor allgather instead
-        # TODO: add alltoall_cost
-        return allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim) + 1.0, comm_bytes_gb
+        return alltoall_cost(comm_bytes_gb, mesh_topo, mesh_dim), comm_bytes_gb
     elif current_placement.is_partial() and target_placement.is_replicate():
         return allreduce_cost(comm_bytes_gb, mesh_topo, mesh_dim), comm_bytes_gb
     elif current_placement.is_partial() and target_placement.is_shard():

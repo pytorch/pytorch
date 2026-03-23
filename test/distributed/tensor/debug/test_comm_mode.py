@@ -110,9 +110,10 @@ class TestCommMode(TestCase):
             f(x_dtensor, y_dtensor)
 
         comm_counts = comm_mode.get_comm_counts()
+        # S(0)->S(1) alltoall via _dtensor::shard_dim_alltoall
         self.assertEqual(comm_mode.get_total_counts(), 1)
         self.assertEqual(comm_counts[c10d_functional.all_reduce], 0)
-        self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 1)
+        self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 0)
         self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 0)
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])

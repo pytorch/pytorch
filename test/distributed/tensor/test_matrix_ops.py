@@ -449,7 +449,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         )
         weight = distribute_tensor(global_weight, device_mesh, (Replicate(),))
         out = torch.mm(inps_viewed, weight)
-        expected_placements = (Replicate(),)
+        # S(0) output is unshardable (dim 0 size < world_size), so the planner
+        # chooses S(1),S(0)->P(sum) via alltoall (cheaper than allgather to R).
+        expected_placements = (Partial(),)
         self.assertEqual(out.placements, expected_placements)
 
     @with_comms

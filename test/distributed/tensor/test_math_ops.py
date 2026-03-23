@@ -1084,7 +1084,9 @@ class DistMathOpsTest(DTensorTestBase):
                 with comm_mode:
                     dt_values, dt_indices = op(input_dtensor, dim=dim)
                 if dim == shard_dim:
-                    self.assertTrue(dt_values.placements[0].is_replicate())
+                    # alltoall reshards to S(1) before scanning along dim 0;
+                    # scan preserves shape so output stays S(1)
+                    self.assertTrue(dt_values.placements[0].is_shard(1))
                 else:
                     self.assertTrue(dt_values.placements[0].is_shard(shard_dim))
                 self.assertEqual(dt_values.full_tensor(), values)
@@ -1116,10 +1118,10 @@ class DistMathOpsTest(DTensorTestBase):
             dt_vals, dt_idxs = torch.nanmedian(dtensor, dim=dim)
             self.assertEqual(dt_vals.full_tensor(), vals)
             self.assertEqual(dt_idxs.full_tensor(), idxs)
-            if dim == shard_dim:
-                self.assertTrue(dt_vals.placements[0].is_replicate())
-            else:
-                self.assertTrue(dt_vals.placements[0].is_shard(shard_dim))
+            # When reducing along the shard dim, alltoall reshards to S(1)
+            # first; the reduction removes that dim so output is S(0).
+            # When reducing along other dims, shard is preserved as S(0).
+            self.assertTrue(dt_vals.placements[0].is_shard(0))
 
         # kthvalue: reduce along each dim
         for dim in range(tensor.ndim):
@@ -1127,10 +1129,7 @@ class DistMathOpsTest(DTensorTestBase):
             dt_vals, dt_idxs = torch.kthvalue(dtensor, 3, dim=dim)
             self.assertEqual(dt_vals.full_tensor(), vals)
             self.assertEqual(dt_idxs.full_tensor(), idxs)
-            if dim == shard_dim:
-                self.assertTrue(dt_vals.placements[0].is_replicate())
-            else:
-                self.assertTrue(dt_vals.placements[0].is_shard(shard_dim))
+            self.assertTrue(dt_vals.placements[0].is_shard(0))
 
         # mode: reduce along each dim
         for dim in range(tensor.ndim):
@@ -1138,10 +1137,7 @@ class DistMathOpsTest(DTensorTestBase):
             dt_vals, dt_idxs = torch.mode(dtensor, dim=dim)
             self.assertEqual(dt_vals.full_tensor(), vals)
             self.assertEqual(dt_idxs.full_tensor(), idxs)
-            if dim == shard_dim:
-                self.assertTrue(dt_vals.placements[0].is_replicate())
-            else:
-                self.assertTrue(dt_vals.placements[0].is_shard(shard_dim))
+            self.assertTrue(dt_vals.placements[0].is_shard(0))
 
     @with_comms
     def test_conj_complex_dtensor(self):

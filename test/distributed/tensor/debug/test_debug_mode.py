@@ -50,6 +50,10 @@ class TestDTensorDebugMode(TestCase):
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
+        import gc
+
+        gc.collect()
+        torch.cuda.empty_cache()
 
     def setUp(self):
         super().setUp()
@@ -74,18 +78,16 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
+  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$6: f32[8, 32]| P(sum)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
-      -> output: S(0)
-      redistribute_input [implicit] (1, S(0) -> R)
-        redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
-          _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
-          _c10d_functional::_wrap_tensor_autograd(t$3: f32[8, 32])  ->  t$4: f32[8, 32]
-          _c10d_functional::wait_tensor(t$3: f32[8, 32])  ->  t$3: f32[8, 32]
-      aten::mm(t$5: f32[1, 8], t$3: f32[8, 32])  ->  t$6: f32[1, 32]
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt$7: f32[8, 32]| S(0))  ->  dt$9: f32[]| P(sum)
-    aten::sum(dt$7: f32[8, 32]| S(0))
-      aten::sum(t$6: f32[1, 32])  ->  t$8: f32[]""",
+      -> output: P(sum)
+      redistribute_input [implicit] (0, S(0) -> S(1))
+        redistribute_input(t$2: f32[1, 8], trace: S(0)->S(1))
+          _dtensor::shard_dim_alltoall(t$2: f32[1, 8], 0, 1, 0)  ->  t$3: f32[8, 1]
+      aten::mm(t$3: f32[8, 1], t$4: f32[1, 32])  ->  t$5: f32[8, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$6: f32[8, 32]| P(sum))  ->  dt$8: f32[]| P(sum)
+    aten::sum(dt$6: f32[8, 32]| P(sum))
+      aten::sum(t$5: f32[8, 32])  ->  t$7: f32[]""",
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
@@ -111,7 +113,7 @@ class TestDTensorDebugMode(TestCase):
             compiled_out = torch.compile(mm, backend="aot_eager")(x_dtensor, y_dtensor)
 
         # check numerical equivalence
-        self.assertTrue(torch.equal(eager_out, compiled_out))
+        self.assertEqual(eager_out, compiled_out)
         sum_op = next(
             iter(
                 op
@@ -121,7 +123,7 @@ class TestDTensorDebugMode(TestCase):
         )
         self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
         self.assertTrue(
-            "aten::sum(t: f32[1, 32])  ->  t: f32[]  # {'hash': "
+            "aten::sum(t: f32[8, 32])  ->  t: f32[]  # {'hash': "
             in debug_mode.debug_string()
         )
 
@@ -366,15 +368,11 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::topk(dt: f32[8, 16]| S(1), 4, 1)
-    -> output: ('R', 'R')
-    redistribute_input [implicit] (0, S(1) -> R)
-      redistribute_input(t: f32[8, 2], trace: S(1)->R)
-        _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
-        _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
-        _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
-        aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
-        aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
-    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
+    -> output: ('S(0)', 'S(0)')
+    redistribute_input [implicit] (0, S(1) -> S(0))
+      redistribute_input(t: f32[8, 2], trace: S(1)->S(0))
+        _dtensor::shard_dim_alltoall(t: f32[8, 2], 1, 0, 0)  ->  t: f32[1, 16]
+    aten::topk(t: f32[1, 16], 4, 1)  ->  ('t: f32[1, 4]', 't: i64[1, 4]')""",  # noqa: B950
         )
 
     def test_debug_mode_einsum(self):
@@ -525,7 +523,8 @@ class TestDTensorDebugMode(TestCase):
                     torch.mm(x_dtensor, y_dtensor)
 
         self.assertTrue(
-            "redistribute_input [implicit] (1, S(0) -> R)" in debug_mode.debug_string()
+            "redistribute_input [implicit] (0, S(0) -> S(1))"
+            in debug_mode.debug_string()
         )
 
     def test_debug_mode_higher_order_cond(self):
