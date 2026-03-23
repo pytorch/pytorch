@@ -616,7 +616,7 @@ test_inductor_cpp_wrapper_shard() {
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   TORCHINDUCTOR_AUTOTUNE_AT_COMPILE_TIME=0 python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_triton_kernels\
+    --include inductor/test_torchinductor inductor/test_triton_kernels inductor/test_max_autotune \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
