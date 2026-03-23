@@ -8005,7 +8005,7 @@ def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
     )
 
 
-@register_meta(aten.topk.default)
+@register_meta([aten.topk.default, aten.topk.values])
 def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
@@ -8017,6 +8017,8 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     if len(topKSize) > 0:
         topKSize[dim] = k
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
+
+
 @register_meta([aten.topk.values])
 @out_wrapper("values", "indices")
 def meta_topk_values(self, k, dim=-1, largest=True, sorted=True):
