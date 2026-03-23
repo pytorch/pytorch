@@ -181,8 +181,7 @@ TEST_SKIPS = {
     ),
     "importerror": TestSkip(88, "Test skipped due to missing import"),
     "no_accelerator": TestSkip(89, "accelerator is not available."),
-    "not-support-multithread": TestSkip(90, "backend not support multithread."),
-    "power-of-two": TestSkip(91, "world size needs to be power of two on xpu."),
+    "power-of-two": TestSkip(90, "world size needs to be power of two on xpu."),
 }
 
 

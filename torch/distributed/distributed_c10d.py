@@ -174,7 +174,7 @@ _unpickler = pickle.Unpickler
 
 GroupName = NewType("GroupName", str)
 
-device_type = torch._C._get_accelerator().type
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
 def _export_c_types() -> None:
