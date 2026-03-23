@@ -385,6 +385,7 @@ void initPythonBindings(PyObject* module) {
               bool /* record_python_gc_info */,
               bool /* expose_kineto_event_metadata */,
               std::string /* custom_profiler_config*/,
+              bool /* adjust_timestamps */,
               bool /* expose_python_function_events */
               >(),
           "An experimental config for Kineto features. Please note that"
@@ -420,6 +421,7 @@ void initPythonBindings(PyObject* module) {
           py::arg("record_python_gc_info") = false,
           py::arg("expose_kineto_event_metadata") = false,
           py::arg("custom_profiler_config") = "",
+          py::arg("adjust_timestamps") = false,
           py::arg("expose_python_function_events") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
