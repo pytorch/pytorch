@@ -2488,7 +2488,9 @@ class TestMaxAutotune(TestCase):
             mat1 = torch.randn(32, 128, device=GPU_TYPE)
             mat2 = torch.randn(128, 64, device=GPU_TYPE)
 
-            from torch._inductor.template_heuristics.aten import ATenAddMMConfigHeuristics
+            from torch._inductor.template_heuristics.aten import (
+                ATenAddMMConfigHeuristics,
+            )
 
             def allow_bias_addmm_configs(self, kernel_inputs, op_name):
                 yield from ATenAddMMConfigHeuristics._get_template_configs_impl(
