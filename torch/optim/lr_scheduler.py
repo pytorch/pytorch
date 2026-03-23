@@ -625,6 +625,8 @@ class StepLR(LRScheduler):
         gamma: float = 0.1,
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
+        if step_size <= 0:
+            raise ValueError(f"Expected positive integer, but got {step_size}")
         self.step_size = step_size
         self.gamma = gamma
         super().__init__(optimizer, last_epoch)
@@ -810,7 +812,7 @@ class ConstantLR(LRScheduler):
         total_iters: int = 5,
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
-        if factor > 1.0 or factor < 0:
+        if factor > 1.0 or factor <= 0:
             raise ValueError(
                 "Constant multiplicative factor expected to be between 0 and 1."
             )
@@ -1391,6 +1393,8 @@ class CosineAnnealingLR(LRScheduler):
         eta_min: float = 0.0,
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
+        if T_max <= 0:
+            raise ValueError(f"Expected positive integer, but got {T_max}")
         self.T_max = T_max
         self.eta_min = eta_min
         super().__init__(optimizer, last_epoch)
@@ -1904,6 +1908,8 @@ class CyclicLR(LRScheduler):
 
         self.max_lrs = _format_param("max_lr", optimizer, max_lr)
 
+        if step_size_up <= 0:
+            raise ValueError(f"Expected positive integer, but got {step_size_up}")
         # pyrefly: ignore [bad-assignment]
         step_size_up = float(step_size_up)
         step_size_down = (
@@ -2399,6 +2405,12 @@ class OneCycleLR(LRScheduler):
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
         self.optimizer = optimizer
+
+        # Validate div_factor
+        if div_factor <= 0:
+            raise ValueError(f"Expected positive float, but got {div_factor}")
+        if final_div_factor <= 0:
+            raise ValueError(f"Expected positive float, but got {final_div_factor}")
 
         # Validate total_steps
         if total_steps is not None:
