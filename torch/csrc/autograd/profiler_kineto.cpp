@@ -492,6 +492,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
         eventTree.push_back(e);
       }
 
+      // Unfinished events automatically have end time set to trace end time
       if (!e->finished_) {
         e->visit(
             c10::overloaded(
@@ -1041,23 +1042,29 @@ uint64_t KinetoEvent::durationNs() const {
 }
 
 int64_t KinetoEvent::debugHandle() const {
-  return result_->visit(c10::overloaded(
-      [](const ExtraFields<EventType::TorchOp>& i) { return i.debug_handle_; },
-      [](const ExtraFields<EventType::Backend>& i) { return i.debug_handle_; },
-      [](const auto&) -> int64_t { return -1; }));
+  return result_->visit(
+      c10::overloaded(
+          [](const ExtraFields<EventType::TorchOp>& i) {
+            return i.debug_handle_;
+          },
+          [](const ExtraFields<EventType::Backend>& i) {
+            return i.debug_handle_;
+          },
+          [](const auto&) -> int64_t { return -1; }));
 }
 
 int KinetoEvent::deviceIndex() const {
-  return result_->visit(c10::overloaded(
-      [](const ExtraFields<EventType::Allocation>& i) {
-        return static_cast<int>(i.device_index_);
-      },
-      [](const ExtraFields<EventType::OutOfMemory>& i) {
-        return static_cast<int>(i.device_index_);
-      },
-      [&](const auto&) {
-        return static_cast<int>(result_->kineto_info_.device);
-      }));
+  return result_->visit(
+      c10::overloaded(
+          [](const ExtraFields<EventType::Allocation>& i) {
+            return static_cast<int>(i.device_index_);
+          },
+          [](const ExtraFields<EventType::OutOfMemory>& i) {
+            return static_cast<int>(i.device_index_);
+          },
+          [&](const auto&) {
+            return static_cast<int>(result_->kineto_info_.device);
+          }));
 }
 
 bool KinetoEvent::hasStack() const {
@@ -1092,29 +1099,31 @@ int64_t KinetoEvent::privateuse1ElapsedUs() const {
 }
 
 void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
-  return result_->visit(c10::overloaded(
-      [&in](const ExtraFields<EventType::TorchOp>& e) -> void {
-        const size_t n = e.perf_event_counters_->size();
-        // should be rare
-        if (in.size() < n) {
-          in.resize(n, 0);
-        }
-        for (size_t i = 0; i < n; ++i) {
-          in[i] = (*e.perf_event_counters_)[i];
-        }
-      },
-      [](const auto&) -> void { return; }));
+  return result_->visit(
+      c10::overloaded(
+          [&in](const ExtraFields<EventType::TorchOp>& e) -> void {
+            const size_t n = e.perf_event_counters_->size();
+            // should be rare
+            if (in.size() < n) {
+              in.resize(n, 0);
+            }
+            for (size_t i = 0; i < n; ++i) {
+              in[i] = (*e.perf_event_counters_)[i];
+            }
+          },
+          [](const auto&) -> void { return; }));
 }
 
 std::string KinetoEvent::metadataJson() const {
-  return result_->visit(c10::overloaded(
-      [](const ExtraFields<EventType::TorchOp>& op) -> std::string {
-        return op.metadata_json_;
-      },
-      [](const ExtraFields<EventType::Kineto>& op) -> std::string {
-        return op.metadata_json_;
-      },
-      [](const auto&) -> std::string { return std::string(""); }));
+  return result_->visit(
+      c10::overloaded(
+          [](const ExtraFields<EventType::TorchOp>& op) -> std::string {
+            return op.metadata_json_;
+          },
+          [](const ExtraFields<EventType::Kineto>& op) -> std::string {
+            return op.metadata_json_;
+          },
+          [](const auto&) -> std::string { return std::string(""); }));
 }
 
 int64_t KinetoEvent::externalId() const {
@@ -1138,14 +1147,15 @@ int64_t KinetoEvent::externalId() const {
       type != libkineto::ActivityType::CUDA_DRIVER &&
       type != libkineto::ActivityType::PRIVATEUSE1_RUNTIME &&
       type != libkineto::ActivityType::PRIVATEUSE1_DRIVER) {
-    return static_cast<int64_t>(result_->visit(c10::overloaded(
-        [](const ExtraFields<EventType::TorchOp>& e) -> uint64_t {
-          return e.correlation_id_;
-        },
-        [](const ExtraFields<EventType::Kineto>& e) -> uint64_t {
-          return e.correlation_id_;
-        },
-        [](const auto&) -> uint64_t { return 0; })));
+    return static_cast<int64_t>(result_->visit(
+        c10::overloaded(
+            [](const ExtraFields<EventType::TorchOp>& e) -> uint64_t {
+              return e.correlation_id_;
+            },
+            [](const ExtraFields<EventType::Kineto>& e) -> uint64_t {
+              return e.correlation_id_;
+            },
+            [](const auto&) -> uint64_t { return 0; })));
   }
 
   return 0;
@@ -1177,11 +1187,12 @@ FORWARD_FROM_RESULT(deviceResourceId, kineto_info_.resource)
   decltype(std::declval<KinetoEvent>().method_name())                  \
   KinetoEvent::method_name() const {                                   \
     using out_t = decltype(std::declval<KinetoEvent>().method_name()); \
-    return result_->visit(c10::overloaded(                             \
-        [](const ExtraFields<EventType::event_type>& e) -> out_t {     \
-          return expression;                                           \
-        },                                                             \
-        [](const auto&) -> out_t { return default_value; }));          \
+    return result_->visit(                                             \
+        c10::overloaded(                                               \
+            [](const ExtraFields<EventType::event_type>& e) -> out_t { \
+              return expression;                                       \
+            },                                                         \
+            [](const auto&) -> out_t { return default_value; }));      \
   }
 
 #define TYPED_ATTR(event_type, method_name, expression) \
