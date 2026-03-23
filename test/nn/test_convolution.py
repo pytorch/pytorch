@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     onlyNativeDeviceTypes,
+    onlyOn,
     precisionOverride,
     skipCPUIfNoMkldnn,
     skipCUDAIfMiopen,
@@ -1442,7 +1443,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
         return gradgradcheck(func, inputs, (grad_y,))
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @skipCUDAIfNoCudnn
     @dtypes(
         *floating_and_complex_types_and(
@@ -1463,11 +1464,25 @@ class TestConvolutionNNDeviceType(NNTestCase):
             y = torch.randn(out1.size(), device=device, dtype=dtype)
             out1.backward(y)
             out2.backward(y)
+            # On XPU the gradient reductions may not be bitwise-deterministic,
+            # so allow tolerance near machine epsilon for affected types.
+            if dtype in (torch.float32, torch.complex64):
+                grad_atol, grad_rtol = 1e-5, 1e-5
+            elif dtype in (torch.float64, torch.complex128):
+                grad_atol, grad_rtol = 1e-14, 1e-14
+            else:
+                grad_atol, grad_rtol = 0.0, 0
             self.assertEqual(
-                conv1.bias.grad.data, conv2.bias.grad.data, atol=0.0, rtol=0
+                conv1.bias.grad.data,
+                conv2.bias.grad.data,
+                atol=grad_atol,
+                rtol=grad_rtol,
             )
             self.assertEqual(
-                conv1.weight.grad.data, conv2.weight.grad.data, atol=0.0, rtol=0
+                conv1.weight.grad.data,
+                conv2.weight.grad.data,
+                atol=grad_atol,
+                rtol=grad_rtol,
             )
 
     @onlyCUDA
@@ -3408,7 +3423,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertEqual(maxdiff2, 0)
             self.assertEqual(maxdiff3, 0)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @largeTensorTest("12GB")
     @serialTest()
     def test_conv_large(self, device):
@@ -4318,7 +4333,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         atol = 5e-3 if dtype == torch.half else 5e-2
         self.assertEqual(gradref, x.grad, atol=atol, rtol=1e-3)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
     @serialTest()
