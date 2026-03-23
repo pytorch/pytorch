@@ -1,0 +1,155 @@
+/* ============================================================
+   PyTorch Docs Landing Page – Card Grid Styles
+   Targets sphinx_design .sd-card components used in index.md
+   ============================================================ */
+
+/* ------------------------------------------------------------------
+   Brand tokens (fallback values when theme vars aren't available)
+   ------------------------------------------------------------------ */
+:root {
+  --pt-brand: #ee4c2c;
+  --pt-brand-light: #ff6f4e;
+  --pt-brand-dark: #c9381a;
+  --pt-card-radius: 0.625rem;
+  --pt-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --pt-card-shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.12);
+  --pt-transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ------------------------------------------------------------------
+   Card base
+   ------------------------------------------------------------------ */
+.sd-card {
+  border: 1px solid var(--pst-color-border, #e0e0e0);
+  border-radius: var(--pt-card-radius);
+  box-shadow: var(--pt-card-shadow);
+  transition:
+    transform var(--pt-transition),
+    box-shadow var(--pt-transition),
+    border-color var(--pt-transition);
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------
+   Hover / focus lift
+   ------------------------------------------------------------------ */
+.sd-card:hover,
+.sd-card:focus-within {
+  transform: translateY(-3px);
+  box-shadow: var(--pt-card-shadow-hover);
+  border-color: var(--pt-brand);
+}
+
+/* Accent stripe along the top on hover */
+.sd-card:hover::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--pt-brand), var(--pt-brand-light));
+  border-radius: var(--pt-card-radius) var(--pt-card-radius) 0 0;
+}
+
+/* ------------------------------------------------------------------
+   Card body padding & typography
+   ------------------------------------------------------------------ */
+.sd-card .sd-card-body {
+  padding: 1.25rem;
+}
+
+.sd-card .sd-card-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+  color: var(--pst-color-text-base, #1a1a1a);
+}
+
+.sd-card .sd-card-text {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--pst-color-text-muted, #555);
+}
+
+/* ------------------------------------------------------------------
+   Clickable card link overlay
+   ------------------------------------------------------------------ */
+.sd-card .sd-stretched-link::after {
+  border-radius: var(--pt-card-radius);
+}
+
+/* ------------------------------------------------------------------
+   Grid gutter fine-tuning
+   ------------------------------------------------------------------ */
+.sd-row {
+  row-gap: 1rem;
+}
+
+/* ------------------------------------------------------------------
+   Section dividers between card groups
+   ------------------------------------------------------------------ */
+article.bd-article hr {
+  border: none;
+  border-top: 1px solid var(--pst-color-border, #e0e0e0);
+  margin: 2.5rem 0 2rem;
+}
+
+/* ------------------------------------------------------------------
+   Section headings (h2) that label each card group
+   ------------------------------------------------------------------ */
+article.bd-article h2 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: 1rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 2px solid var(--pt-brand);
+}
+
+/* ------------------------------------------------------------------
+   Octicon icons inside card titles
+   ------------------------------------------------------------------ */
+.sd-card-title .octicon {
+  color: var(--pt-brand);
+  margin-right: 0.35rem;
+  vertical-align: -0.15em;
+}
+
+/* ------------------------------------------------------------------
+   Dark mode overrides
+   ------------------------------------------------------------------ */
+html[data-theme="dark"] {
+  --pt-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  --pt-card-shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+html[data-theme="dark"] .sd-card {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: var(--pst-color-surface, #1e1e1e);
+}
+
+html[data-theme="dark"] .sd-card:hover,
+html[data-theme="dark"] .sd-card:focus-within {
+  border-color: var(--pt-brand-light);
+}
+
+html[data-theme="dark"] .sd-card .sd-card-text {
+  color: var(--pst-color-text-muted, #aaa);
+}
+
+html[data-theme="dark"] article.bd-article hr {
+  border-top-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ------------------------------------------------------------------
+   Responsive: stack to 1-col on very small screens
+   ------------------------------------------------------------------ */
+@media (max-width: 480px) {
+  .sd-card .sd-card-body {
+    padding: 1rem;
+  }
+
+  article.bd-article h2 {
+    font-size: 1.25rem;
+  }
+}
