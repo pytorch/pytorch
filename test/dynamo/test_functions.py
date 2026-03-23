@@ -5863,6 +5863,25 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
 
+    def test_full_nn_parameter_fill_value_raises_error(self):
+        def f(fill_value):
+            return torch.full(
+                (4, 2),
+                fill_value=fill_value,
+                dtype=torch.float32,
+                device=device_type,
+            )
+
+        fill_value = torch.nn.Parameter(torch.tensor(1.0))
+
+        with self.assertRaises(TypeError):
+            f(fill_value)
+
+        torch._dynamo.reset()
+        compiled_f = torch.compile(f, fullgraph=True)
+        with self.assertRaises(Unsupported):
+            compiled_f(fill_value)
+
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
