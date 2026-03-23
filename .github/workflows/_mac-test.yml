@@ -110,8 +110,6 @@ jobs:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          submodules: false
 
       - name: Get workflow job id
         id: get-job-id

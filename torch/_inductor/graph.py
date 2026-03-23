@@ -24,7 +24,7 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import (
@@ -451,6 +451,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_buffers: OrderedSet[str] = OrderedSet()
         self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
         self.mutated_buffers: OrderedSet[str] = OrderedSet()
+        self.sdpa_constraint_cache: dict[tuple, ir.IRNode] = {}
         self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
         self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
@@ -1521,6 +1522,10 @@ class GraphLowering(torch.fx.Interpreter):
             # nested subgraphs can have singleton outputs
             result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
+        result = [
+            ir.OpaqueValueTypeConstant(value=x) if is_opaque_value_type(type(x)) else x
+            for x in result
+        ]
         assert all(
             isinstance(
                 x,
@@ -1535,6 +1540,8 @@ class GraphLowering(torch.fx.Interpreter):
                     ir.EffectfulKernel,
                     ir.ShapeAsConstantBuffer,
                     TorchBindObject,
+                    ir.OpaqueMultiOutput,
+                    ir.OpaqueValueTypeConstant,
                 ),
             )
             for x in result
@@ -1701,6 +1708,29 @@ class GraphLowering(torch.fx.Interpreter):
             schema_arg = schema_kwargs[key]
             maybe_propagate(schema_arg, old_arg, new_arg)
 
+    @staticmethod
+    def _get_node_stream(n: torch.fx.Node) -> int | None:
+        """Get the user-annotated stream index from FX node metadata."""
+        return n.meta.get("custom", {}).get("stream")
+
+    def _realize_inputs_at_stream_boundaries(self, n: torch.fx.Node) -> None:
+        """Realize IR inputs that are on a different stream.
+
+        Without this, pointwise ops across stream boundaries would be inlined
+        into each other during lowering, making it impossible for the scheduler
+        to split them into separate kernels.
+
+        None means the default stream, so it is compared like any other value.
+        """
+        node_stream = self._get_node_stream(n)
+        for input_node in n.all_input_nodes:
+            input_stream = self._get_node_stream(input_node)
+            if input_stream == node_stream:
+                continue
+            ir_value = self.env.get(input_node)
+            if isinstance(ir_value, ir.TensorBox):
+                ir_value.realize()
+
     def run_node(self, n: torch.fx.Node) -> object:
         """Lower and execute a single FX node into Inductor IR."""
 
@@ -1745,6 +1775,7 @@ class GraphLowering(torch.fx.Interpreter):
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
+            self._realize_inputs_at_stream_boundaries(n)
         with (
             ir.IRNode.current_origins(origins),
             self.set_current_node(n),
@@ -1867,7 +1898,7 @@ class GraphLowering(torch.fx.Interpreter):
                 result.realize()
 
             if (is_output or is_input_for_as_strided) and isinstance(
-                n.meta["val"], torch.Tensor
+                n.meta.get("val"), torch.Tensor
             ):
                 if is_user_visible:
                     strides = self.user_visible_output_strides.get(n)
@@ -1896,26 +1927,9 @@ class GraphLowering(torch.fx.Interpreter):
                             result.get_size(), torch.channels_last
                         )
                     if not unbacked_symbols_in_strides and len(strides):
-                        # To avoid converting possible view ops to a copy kernel, we use the previous
-                        # require_exact_strides to handle views. But ultimately it's better to require
-                        # the right strides at the tensor definition.
-                        if n.meta["val"]._is_view() or isinstance(
-                            result.data,
-                            ir.BaseView,
-                        ):
-                            result = ir.ExternKernel.require_stride_order(
-                                result,
-                                ir.get_stride_order(strides),
-                                allow_padding=allow_padding,
-                            )
-                        else:
-                            # Fix for 0-d tensors: if result size is empty,
-                            # strides should also be empty
-                            if len(result.get_size()) == 0 and len(strides) > 0:
-                                strides = []
-                            result = ir.ExternKernel.require_exact_strides(
-                                result, strides, allow_padding=allow_padding
-                            )
+                        result = ir.ExternKernel.require_exact_strides(
+                            result, strides, allow_padding=allow_padding
+                        )
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
@@ -1981,6 +1995,19 @@ class GraphLowering(torch.fx.Interpreter):
                     if user.op == "output":
                         # pyrefly: ignore [missing-attribute]
                         if isinstance(result.data.data, (Pointwise, Reduction)):
+                            # Cheap-to-recompute nodes (0 buffer reads, e.g.
+                            # index arithmetic or constant fills) can be
+                            # deferred to realize_input at output processing.
+                            # This prevents cascade materialization where
+                            # shared constants inflate downstream read counts.
+                            if (
+                                config.delay_realize_cheap_outputs
+                                # pyrefly: ignore [missing-attribute]
+                                and result.data.num_reads() == 0
+                                # pyrefly: ignore [missing-attribute]
+                                and not result.data.has_large_inner_fn()
+                            ):
+                                continue
                             result.realize()
 
                 _data = result.data  # type: ignore[attr-defined]

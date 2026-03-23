@@ -14,7 +14,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -512,7 +512,7 @@ class GuardsCheckpointState:
     def __init__(self, dynamo_guards: OrderedSet[Guard]) -> None:
         self.dynamo_guards = dynamo_guards
 
-    def diff(self, other: GuardsCheckpointState) -> Optional[OrderedSet[Guard]]:
+    def diff(self, other: GuardsCheckpointState) -> OrderedSet[Guard] | None:
         """
         Produces a delta against another GuardsCheckpointState.
 
@@ -635,7 +635,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: Optional[OrderedSet[Guard]] = None) -> None:
+    def __init__(self, inner: OrderedSet[Guard] | None = None) -> None:
         if inner is None:
             self.inner: OrderedSet[Guard] = OrderedSet()
         else:
@@ -716,6 +716,16 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self) -> None:
         self.dynamo_guards: GuardsSet = GuardsSet()
         self.aotautograd_guards: list[GuardEnvExpr] = []
+        self.skip_install: bool = False
+
+    @contextlib.contextmanager
+    def skip_guard_install(self) -> Generator[None, None, None]:
+        old = self.skip_install
+        self.skip_install = True
+        try:
+            yield
+        finally:
+            self.skip_install = old
 
     def copy_graphstate(self) -> GuardsCheckpointState:
         return GuardsCheckpointState(OrderedSet(self.dynamo_guards.inner))

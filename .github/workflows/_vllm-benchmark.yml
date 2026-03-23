@@ -201,6 +201,7 @@ jobs:
       - name: Run vLLM benchmark
         working-directory: vllm-project/vllm
         env:
+          FLASHINFER_WORKSPACE_BASE: /mnt/hf_cache
           HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_HOME: /mnt/hf_cache
           # Nightly runs download from HF to periodically refresh the local cache

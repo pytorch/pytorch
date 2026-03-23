@@ -226,6 +226,7 @@ class profile:
         acc_events=False,
         custom_trace_id_callback=None,
         post_processing_timeout_s: float | None = None,
+        activity_filters: dict[ProfilerActivity, set[str]] | None = None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -264,6 +265,7 @@ class profile:
         self._stats = _ProfilerStats()
         self.custom_trace_id_callback = custom_trace_id_callback
         self.post_processing_timeout_s = post_processing_timeout_s
+        self.activity_filters = activity_filters or {}
         self.trace_id = ""
         if not self.use_cpu:
             if not use_kineto:
@@ -327,17 +329,18 @@ class profile:
                 )
             self.kineto_activities.add(ProfilerActivity.HPU)
         elif self.use_device is not None and self.use_device != "privateuseone":
-            if (
-                not use_kineto
-                or ProfilerActivity.PrivateUse1 not in _supported_activities()
-            ):
+            if use_kineto:
+                # Native tracing mode: use KINETO_PRIVATEUSE1 with registered IActivityProfiler
+                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
+                if ProfilerActivity.PrivateUse1 in _supported_activities():
+                    self.kineto_activities.add(ProfilerActivity.PrivateUse1)
+            else:
+                # Marker-only mode: use fallback state
                 if not self.use_cpu:
                     raise AssertionError(
-                        "Legacy custombackend profiling requires use_cpu=True"
+                        "Legacy privateuse1 profiling requires use_cpu=True"
                     )
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
-            else:
-                self.kineto_activities.add(ProfilerActivity.PrivateUse1)
 
         if len(self.kineto_activities) == 0:
             raise AssertionError("No activities specified for the profiler")
@@ -387,7 +390,11 @@ class profile:
     def _prepare_trace(self):
         self.entered = True
         t0 = perf_counter_ns()
-        _prepare_profiler(self.config(create_trace_id=True), self.kineto_activities)
+        _prepare_profiler(
+            self.config(create_trace_id=True),
+            self.kineto_activities,
+            activity_filter=self.activity_filters,
+        )
         t1 = perf_counter_ns()
         self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
 
@@ -691,6 +698,8 @@ class profile:
                 flops=kineto_event.flops(),
                 is_user_annotation=kineto_event.is_user_annotation(),
                 metadata_json=kineto_event.metadata_json(),
+                external_id=kineto_event.external_id(),
+                linked_correlation_id=kineto_event.linked_correlation_id(),
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:

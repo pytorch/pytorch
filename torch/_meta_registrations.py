@@ -255,14 +255,9 @@ def _exec_fft(out, self, out_sizes, dim, *, forward):
     for d in dim:
         is_transformed_dim[d] = True
 
-    # std::partition
-    left, right = [], []
-    for d in dim_permute:
-        if not is_transformed_dim[d]:
-            left.append(d)
-        else:
-            right.append(d)
-    dim_permute = left + right
+    # std::partition + std::copy(dim.begin(), dim.end(), batch_end)
+    left = [d for d in dim_permute if not is_transformed_dim[d]]
+    dim_permute = left + list(dim)
     batch_end = len(left)
 
     self_strides = self.stride()
@@ -300,8 +295,9 @@ def _exec_fft(out, self, out_sizes, dim, *, forward):
 def _sort_dims(self: Tensor, dim: list[int], exclude_last: bool = False):
     sorted_dims = list(dim)
     self_strides = self.stride()
-    sorted_dims[: len(sorted_dims) - int(exclude_last)].sort(
-        key=lambda i: self_strides[i]
+    end = len(sorted_dims) - int(exclude_last)
+    sorted_dims[:end] = sorted(
+        sorted_dims[:end], key=lambda i: self_strides[i], reverse=True
     )
     return sorted_dims
 
@@ -315,9 +311,36 @@ def meta_fft_c2c(self, dim, normalization, forward):
     if not dim:
         return self.clone()
 
-    sorted_dims = _sort_dims(self, dim)
-    out = self.new_empty(self.size())
-    return _exec_fft(out, self, self.size(), sorted_dims, forward=forward)
+    if device_hint(self) == "cpu" and not torch.backends.mkl.is_available():
+        return self.new_empty(self.size())
+
+    out_sizes = self.size()
+    output = self.new_empty(out_sizes)
+    if device_hint(self) != "cuda":
+        sorted_dims = _sort_dims(self, dim)
+        return _exec_fft(output, self, out_sizes, sorted_dims, forward=forward)
+
+    # Match _fft_c2c_cufft, which re-sorts the remaining dimensions after each
+    # staged transform because _exec_fft restrides the output in place.
+    sorted_dims = list(dim)
+    working_tensor = self
+    while True:
+        strides = working_tensor.stride()
+        sorted_dims.sort(key=lambda i: strides[i], reverse=True)
+        max_dims = min(cufft_max_ndim, len(sorted_dims))
+        last_dims = sorted_dims[len(sorted_dims) - max_dims :]
+
+        _exec_fft(output, working_tensor, out_sizes, last_dims, forward=forward)
+        sorted_dims = sorted_dims[: len(sorted_dims) - max_dims]
+
+        if not sorted_dims:
+            return output
+
+        if working_tensor is self:
+            working_tensor = output
+            output = self.new_empty(out_sizes)
+        else:
+            output, working_tensor = working_tensor, output
 
 
 cufft_max_ndim = 3
@@ -384,6 +407,14 @@ def meta_fft_r2c(self, dim, normalization, onesided):
                 output = working_tensor
 
         return output
+
+    elif torch.backends.mkl.is_available():
+        # _fft_r2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
+        sorted_dims = _sort_dims(self, dim, exclude_last=True)
+        output = self.new_empty(
+            out_sizes, dtype=utils.corresponding_complex_dtype(self.dtype)
+        )
+        return _exec_fft(output, self, out_sizes, sorted_dims, forward=True)
 
     else:
         return self.new_empty(
@@ -483,12 +514,13 @@ def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int)
         else:
             # First complete any C2C transforms
             if len(dim) > 1:
-                temp = meta_fft_c2c(self, dim[:-1], 0, lastdim)  # fft_norm_mode::none
+                temp = meta_fft_c2c(self, dim[:-1], 0, forward=False)
             else:
                 temp = self.clone(memory_format=torch.contiguous_format)
             return _exec_fft(output, temp, out_sizes, [dim[-1]], forward=False)
 
-    else:
+    elif torch.backends.mkl.is_available():
+        # _fft_c2r_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         input = self
         if len(dim) > 1:
             c2c_dims = dim[:-1]
@@ -499,6 +531,11 @@ def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int)
         out_sizes[dim[-1]] = lastdim
         out = self.new_empty(out_sizes, dtype=toRealValueType(self.dtype))
         return _exec_fft(out, input, out_sizes, dim, forward=False)
+
+    else:
+        out_sizes = list(self.size())
+        out_sizes[dim[-1]] = lastdim
+        return self.new_empty(out_sizes, dtype=toRealValueType(self.dtype))
 
 
 @register_meta(aten.copy_.default)
@@ -587,10 +624,11 @@ def meta_sparse_structured_linear(
             raise AssertionError(
                 f"out_dtype is only supported for i8i8->i32 linear operator, got input.dtype={input.dtype}, out_dtype={out_dtype}"
             )
-    output = input.new_empty(
+    output = input.new_empty_strided(
         output_sizes,
+        transposed_strides,
         dtype=input.dtype if out_dtype is None else out_dtype,
-    ).as_strided(output_sizes, transposed_strides)
+    )
 
     return output
 
@@ -3774,8 +3812,8 @@ def meta__int_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be a 2D tensor")
     torch._check(b.dim() == 2, lambda: "b must be a 2D tensor")
     torch._check(
-        a.dtype is torch.int8,
-        lambda: f"expected self to be int8, got {a.dtype}",
+        a.dtype in [torch.int8, torch.uint8],
+        lambda: f"expected self to be int8 or uint8, got {a.dtype}",
     )
     torch._check(
         b.dtype is torch.int8,
@@ -4997,7 +5035,8 @@ def max_pool2d_checks_and_compute_shape(
     return nInputPlane, outputHeight, outputWidth
 
 
-@register_meta(aten.max_pool2d_with_indices_backward.default)
+@register_meta(aten.max_pool2d_with_indices_backward)
+@out_wrapper("grad_input")
 def meta_max_pool2d_with_indices_backward(
     grad_output,
     self,
@@ -6117,33 +6156,26 @@ def meta__scaled_dot_product_attention_math_for_mps(
     k_, _ = ensure_4d(key)
     v_, _ = ensure_4d(value)
 
-    batch_size, num_head, q_size, head_size = q_.shape
-    _, k_size, max_seq_length, _ = k_.shape
+    batch_size, num_head, q_size, _ = q_.shape
+    _, _, max_seq_length, value_head_size = v_.shape
 
-    def sdpa_vector_fast_mps():
-        out = q_.new_empty(q_.shape)
-        if unsqueezed:
-            out = out.view_as(query)
-
+    def sdpa_general_mps():
+        out = q_.new_empty((batch_size, num_head, q_size, value_head_size))
         attn = q_.new_empty((batch_size, num_head, q_size, max_seq_length))
         if unsqueezed:
             if query.dim() == 3:
+                out = out.squeeze(0)
                 attn = attn.squeeze(0)
             else:
-                shape = list(query.shape[:-3]) + attn.shape[1:4]
-                attn = attn.view(shape)
+                out_shape = list(query.shape[:-3]) + list(out.shape[1:4])
+                attn_shape = list(query.shape[:-3]) + list(attn.shape[1:4])
+                out = out.view(out_shape)
+                attn = attn.view(attn_shape)
         return out, attn
 
-    def sdpa_vector_2pass_mps():
-        blocks = 32
-        out = q_.new_empty(q_.shape)
-        intermediate = q_.new_empty((batch_size, num_head, q_size, blocks, head_size))
-        return out, intermediate
-
-    if (max_seq_length >= 1024) or (k_size < q_size and max_seq_length >= 4096):
-        return sdpa_vector_2pass_mps()
-    else:
-        return sdpa_vector_fast_mps()
+    # sdpa_vector_2pass_mps and sdpa_vector_fast_mps are intentionally left out.
+    # See https://github.com/pytorch/pytorch/issues/177603 for additional context.
+    return sdpa_general_mps()
 
 
 @register_meta([aten._scaled_dot_product_efficient_attention])
@@ -6301,6 +6333,8 @@ def meta__flash_attention_forward(
     window_size_right: int | None = None,
     seqused_k: Tensor | None = None,
     alibi_slopes: Tensor | None = None,
+    block_table: Tensor | None = None,
+    num_splits: int | None = None,
 ):
     # NB: there are two underlying paths:
     # 1. normal dense path; expect 4D inputs of shape (batch_size, seqlen, num_heads, head_dim)
@@ -6358,6 +6392,48 @@ def meta__flash_attention_forward(
         offset,
         debug_mask,
     )
+
+
+@register_meta([aten._flash_attention_forward_no_dropout_inplace.default])
+def meta__flash_attention_forward_no_dropout_inplace(
+    out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    cum_seq_q: Tensor | None,
+    cum_seq_k: Tensor | None,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    scale: float | None = None,
+    window_size_left: int | None = None,
+    window_size_right: int | None = None,
+    seqused_k: Tensor | None = None,
+    alibi_slopes: Tensor | None = None,
+    block_table: Tensor | None = None,
+    num_splits: int | None = None,
+):
+    _, logsumexp, _, _, _ = meta__flash_attention_forward(
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
+        window_size_left,
+        window_size_right,
+        seqused_k,
+        alibi_slopes,
+        block_table,
+    )
+    return logsumexp
 
 
 @register_meta([aten._flash_attention_forward.quantized])

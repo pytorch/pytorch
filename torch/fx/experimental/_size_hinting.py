@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import sympy
 
@@ -33,9 +33,7 @@ def _sympy_subs(expr: sympy.Basic, replacements: dict[sympy.Expr, Any]) -> sympy
     have the same replaced expression integer and nonnegative properties.
     """
 
-    def to_symbol(
-        replaced: sympy.Expr, replacement: Union[sympy.Expr, str]
-    ) -> sympy.Symbol:
+    def to_symbol(replaced: sympy.Expr, replacement: sympy.Expr | str) -> sympy.Symbol:
         if not isinstance(replaced, sympy.Expr):
             raise AssertionError(
                 f"Expected sympy.Expr key, got {type(replaced)}: {replaced}"
@@ -56,8 +54,8 @@ def _sympy_subs(expr: sympy.Basic, replacements: dict[sympy.Expr, Any]) -> sympy
 
 
 def _maybe_realize_expr(
-    expr: sympy.Basic, nan_fallback: Optional[int]
-) -> Optional[Union[int, bool]]:
+    expr: sympy.Basic, nan_fallback: int | None
+) -> int | bool | None:
     """
     Handle special sympy values in hinting APIs.
 
@@ -97,9 +95,9 @@ def _maybe_realize_expr(
 
 def _guarding_hint_or_throw_base(
     shape_env: ShapeEnv,
-    expr: Union[sympy.Expr, sympy.Basic, int, bool],
+    expr: sympy.Expr | sympy.Basic | int | bool,
     precomputed_replacements: dict[sympy.Expr, sympy.Symbol],
-) -> Union[int, bool]:
+) -> int | bool:
     """
     Return a concrete integer hint for an expression that is safe to use for guarding.
 
@@ -316,9 +314,9 @@ def _sub_unbacked_exprs(shape_env: ShapeEnv, expr: sympy.Expr) -> sympy.Expr:
 
 def _optimization_hint_base(
     shape_env: ShapeEnv,
-    expr: Union[sympy.Expr, int],
+    expr: sympy.Expr | int,
     precomputed_replacements: dict[sympy.Expr, sympy.Symbol],
-    fallback: Optional[int] = None,
+    fallback: int | None = None,
 ) -> int:
     """
     Return a concrete integer hint for an expression using heuristics.
@@ -420,7 +418,16 @@ def _optimization_hint_base(
                 sym_fallback = min(sym_fallback, int(vr.upper))
         size_dict[s] = sym_fallback
 
-    final_result = expr.subs(size_dict)
+    try:
+        final_result = expr.subs(size_dict)
+    except ZeroDivisionError:
+        # Expressions like ModularIndexing(x, u1, 4) crash during subs()
+        # when u1 is substituted with 0, because sympy eagerly evaluates
+        # (x // 0) % 4.  This can happen when an unbacked symbol with
+        # var_to_range lower=0 is used as a divisor (e.g. from
+        # _dynamic_reshape_indexer) and the fallback also maps to 0.
+        # Return fallback in that case.
+        return fallback if fallback is not None else 0
 
     final_result = _maybe_realize_expr(final_result, fallback)
     if final_result is None:

@@ -205,8 +205,7 @@ bool is_desired_scaling(const at::Tensor& t, const at::Tensor& scale, ScalingTyp
     case ScalingType::BlockWise128x128:
       return is_blockwise_128x128_scaling(t, scale);
     default:
-      TORCH_CHECK(false);
-      return false;
+      TORCH_CHECK(false, "Unknown scaling type");
   }
 }
 

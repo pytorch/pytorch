@@ -1,12 +1,16 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import copy
 import dataclasses
 import functools
+import multiprocessing
+import operator
 import os
 import pickle
 import shutil
 import unittest
+from collections.abc import Sequence
 from unittest.mock import patch
 
 import torch
@@ -18,6 +22,7 @@ from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
     AOTAutogradCache,
+    AOTAutogradCachePickler,
     autograd_cache_key,
     BypassAOTAutogradCache,
     sanitize_gm_for_cache,
@@ -25,13 +30,14 @@ from torch._functorch._aot_autograd.autograd_cache import (
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._guards import TracingContext
 from torch._inductor import config as inductor_config
-from torch._inductor.custom_graph_pass import CustomRuntimeEstimator
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomRuntimeEstimator
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, InputType
 from torch._subclasses import FakeTensorMode
 from torch.compiler._cache import CacheArtifactManager
+from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -48,6 +54,40 @@ from torch.utils.checkpoint import (
     CheckpointPolicy,
     create_selective_checkpoint_contexts,
 )
+
+
+class CustomPreGradPassRemoveIdentMuls(CustomGraphPass):
+    """
+    Pre-grad pass that removes redundant identity multiplications (1 * x).
+    """
+
+    def __call__(self, g: torch.fx.Graph) -> None:
+        for n in g.nodes:
+            if n.op == "call_function" and n.target is operator.mul:
+                lhs, rhs = n.args
+                if lhs == 1:
+                    n.replace_all_uses_with(rhs)
+                    g.erase_node(n)
+
+    def uuid(self):
+        return "custom_pre_grad_pass_remove_ident_muls_v1"
+
+
+custom_pre_grad_pass_remove_ident_muls = CustomPreGradPassRemoveIdentMuls()
+
+
+@contextlib.contextmanager
+def _fake_process_group(rank=0, world_size=2):
+    """Context manager for setting up and tearing down a fake process group."""
+    import torch.distributed as c10d
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    fake_store = FakeStore()
+    c10d.init_process_group("fake", store=fake_store, rank=rank, world_size=world_size)
+    try:
+        yield
+    finally:
+        c10d.destroy_process_group()
 
 
 def aot_eager_regional_inductor():
@@ -2538,6 +2578,557 @@ class AOTAutogradCacheTests(InductorTestCase):
             x_view2.untyped_storage().data_ptr(), x2.untyped_storage().data_ptr()
         )
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_cache_hit_logs_aot_graphs(self):
+        """
+        Verify that TORCH_LOGS=aot_graphs prints graphs on cache hit, not just cache miss.
+        See https://github.com/pytorch/pytorch/issues/149060
+        """
+        from torch.testing._internal.logging_utils import logs_to_string
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # First call: cache miss — aot_graphs should be logged
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
+        )
+        with ctx():
+            compiled_fn(a, b)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertIn("Forward graph", log_stream.getvalue())
+
+        # Reset dynamo so guards force recompilation (but keep disk cache)
+        self._clear_dynamo_and_codecache()
+
+        # Second call: cache hit — aot_graphs should ALSO be logged.
+        # On cache hit the log comes from aot_autograd_result, not graph_capture.
+        log_stream2, ctx2 = logs_to_string(
+            "torch._functorch._aot_autograd.aot_autograd_result", "aot_graphs"
+        )
+        with ctx2():
+            compiled_fn(a, b)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertIn("Forward graph (from cache)", log_stream2.getvalue())
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    @inductor_config.patch("pre_grad_pass_timing", "late")
+    def test_pre_grad_passes_late_timing(self):
+        """
+        Verify that pre_grad_passes are called on cache miss but not on cache hit.
+        Also, verify that pre_grad_custom_pass is still considered correctly for the cache key.
+        Do this in 4 steps:
+        - Compile w/o  custom pre-grad pass, expect cache miss, expect to run pre-grad passes, expect NO graph change
+        - Compile w/o  custom pre-grad pass, expect cache hit
+        - Compile with custom pre-grad pass, expect cache miss, expect to run pre-grad passes, expect graph change
+        - Compile with custom pre-grad pass, expect cache hit
+        """
+
+        from torch._inductor.compile_fx import run_pre_grad_passes
+
+        # Target function with an identity multiplication that we can remove with a custom pre-grad pass
+        def fn(x, y):
+            return 1 * x + y
+
+        # Track the invocations of run_pre_grad_passes
+        @dataclasses.dataclass
+        class PreGradInvocation:
+            num_nodes_before: int
+            num_nodes_after: int
+
+        pre_grad_invocations: list[PreGradInvocation] = []
+
+        def wrap_run_pre_grad_passes(
+            model: GraphModule, example_inputs: Sequence[InputType]
+        ) -> GraphModule:
+            nonlocal pre_grad_invocations
+            num_nodes_before = len(model.graph.nodes)
+            run_pre_grad_passes(model, example_inputs)
+            num_nodes_after = len(model.graph.nodes)
+            pre_grad_invocations.append(
+                PreGradInvocation(
+                    num_nodes_before=num_nodes_before, num_nodes_after=num_nodes_after
+                )
+            )
+            return model
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.compile_fx.run_pre_grad_passes",
+                wrap_run_pre_grad_passes,
+            ),
+        ):
+            self._clear_all_caches()
+
+            # First compilation - cache miss, pre-grad passes should be called, no changes to graph expected
+            compiled_fn = torch.compile(fn)
+            result1 = compiled_fn(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(
+                len(pre_grad_invocations),
+                1,
+                "run_pre_grad_passes should be called on cache miss",
+            )
+            self.assertEqual(
+                pre_grad_invocations[-1].num_nodes_after
+                - pre_grad_invocations[-1].num_nodes_before,
+                0,
+            )
+
+            # Reset dynamo but keep the cache
+            torch._dynamo.reset()
+
+            # Second compilation - cache hit, pre-grad passes should NOT be called
+            compiled_fn2 = torch.compile(fn)
+            result2 = compiled_fn2(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(
+                len(pre_grad_invocations),
+                1,
+                "run_pre_grad_passes should NOT be called on cache hit",
+            )
+
+            # Reset dynamo but keep the cache
+            torch._dynamo.reset()
+
+            # Third compilation with custom pre-grad pass - cache miss, pre-grad passes should be called,
+            # expect one graph node removed
+            with inductor_config.patch(
+                "pre_grad_custom_pass", custom_pre_grad_pass_remove_ident_muls
+            ):
+                compiled_fn3 = torch.compile(fn)
+                result3 = compiled_fn3(x, y)
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+                self.assertEqual(
+                    len(pre_grad_invocations),
+                    2,
+                    "run_pre_grad_passes should be called on cache miss",
+                )
+                self.assertEqual(
+                    pre_grad_invocations[-1].num_nodes_after
+                    - pre_grad_invocations[-1].num_nodes_before,
+                    -1,
+                )
+
+                # Reset dynamo but keep the cache
+                torch._dynamo.reset()
+
+                # Fourth compilation with custom pre-grad pass - cache hit, pre-grad passes should NOT be called
+                compiled_fn4 = torch.compile(fn)
+                result4 = compiled_fn4(x, y)
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
+                self.assertEqual(
+                    len(pre_grad_invocations),
+                    2,
+                    "run_pre_grad_passes should NOT be called on cache hit",
+                )
+
+            # Results should match
+            self.assertEqual(result1, result2)
+            self.assertEqual(result2, result3)
+            self.assertEqual(result3, result4)
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    @inductor_config.patch("pre_grad_pass_timing", "early")
+    def test_pre_grad_passes_early_timing(self):
+        """
+        With pre_grad_pass_timing="early", pre-grad passes run before the
+        cache lookup.  This means they execute on every compile, even on
+        a cache hit.
+        """
+
+        from torch._inductor.compile_fx import run_pre_grad_passes
+
+        def fn(x, y):
+            return 1 * x + y
+
+        pre_grad_call_count = 0
+
+        def wrap_run_pre_grad_passes(
+            model: GraphModule, example_inputs: Sequence[InputType]
+        ) -> GraphModule:
+            nonlocal pre_grad_call_count
+            pre_grad_call_count += 1
+            run_pre_grad_passes(model, example_inputs)
+            return model
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        with unittest.mock.patch(
+            "torch._inductor.compile_fx.run_pre_grad_passes",
+            wrap_run_pre_grad_passes,
+        ):
+            self._clear_all_caches()
+
+            # First compilation — cache miss, pre-grad passes should run
+            compiled_fn = torch.compile(fn)
+            result1 = compiled_fn(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(pre_grad_call_count, 1)
+
+            torch._dynamo.reset()
+
+            # Second compilation — cache hit, pre-grad passes should STILL run
+            # because "early" timing means they execute before cache lookup
+            compiled_fn2 = torch.compile(fn)
+            result2 = compiled_fn2(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(pre_grad_call_count, 2)
+
+            self.assertEqual(result1, result2)
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_pre_grad_passes_default_timing_with_uuid(self):
+        """
+        With default timing and a custom pass that has a UUID, passes run late
+        (only on cache miss).
+        """
+        from torch._inductor.compile_fx import run_pre_grad_passes
+
+        def fn(x, y):
+            return 1 * x + y
+
+        pre_grad_call_count = 0
+
+        def wrap_run_pre_grad_passes(
+            model: GraphModule, example_inputs: Sequence[InputType]
+        ) -> GraphModule:
+            nonlocal pre_grad_call_count
+            pre_grad_call_count += 1
+            run_pre_grad_passes(model, example_inputs)
+            return model
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.compile_fx.run_pre_grad_passes",
+                wrap_run_pre_grad_passes,
+            ),
+            inductor_config.patch(
+                "pre_grad_custom_pass", custom_pre_grad_pass_remove_ident_muls
+            ),
+        ):
+            self._clear_all_caches()
+
+            compiled_fn = torch.compile(fn)
+            result1 = compiled_fn(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(pre_grad_call_count, 1)
+
+            torch._dynamo.reset()
+
+            # Cache hit — passes should NOT run (late timing)
+            compiled_fn2 = torch.compile(fn)
+            result2 = compiled_fn2(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(pre_grad_call_count, 1)
+
+            self.assertEqual(result1, result2)
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_pre_grad_passes_default_timing_without_uuid(self):
+        """
+        With default timing and a custom pass without a UUID, passes run early
+        (on every compile, even cache hits).
+        """
+        from torch._inductor.compile_fx import run_pre_grad_passes
+
+        class NoUuidPass(CustomGraphPass):
+            def __call__(self, g: torch.fx.Graph) -> None:
+                pass
+
+            def uuid(self):
+                return None
+
+        def fn(x, y):
+            return x + y
+
+        pre_grad_call_count = 0
+
+        def wrap_run_pre_grad_passes(
+            model: GraphModule, example_inputs: Sequence[InputType]
+        ) -> GraphModule:
+            nonlocal pre_grad_call_count
+            pre_grad_call_count += 1
+            run_pre_grad_passes(model, example_inputs)
+            return model
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        with (
+            unittest.mock.patch(
+                "torch._inductor.compile_fx.run_pre_grad_passes",
+                wrap_run_pre_grad_passes,
+            ),
+            inductor_config.patch("pre_grad_custom_pass", NoUuidPass()),
+        ):
+            self._clear_all_caches()
+
+            compiled_fn = torch.compile(fn)
+            result1 = compiled_fn(x, y)
+            self.assertEqual(pre_grad_call_count, 1)
+
+            torch._dynamo.reset()
+
+            # Cache hit — passes should STILL run (early timing)
+            compiled_fn2 = torch.compile(fn)
+            result2 = compiled_fn2(x, y)
+            self.assertEqual(pre_grad_call_count, 2)
+
+            self.assertEqual(result1, result2)
+
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    @inductor_config.patch("pre_grad_pass_timing", "late")
+    def test_pre_grad_pass_late_timing_without_uuid_raises(self):
+        """
+        Explicitly setting late timing with a pass that has no UUID should
+        raise a RuntimeError.
+        """
+
+        class NoUuidPass(CustomGraphPass):
+            def __call__(self, g: torch.fx.Graph) -> None:
+                pass
+
+            def uuid(self):
+                return None
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+
+        with inductor_config.patch("pre_grad_custom_pass", NoUuidPass()):
+            self._clear_all_caches()
+            compiled_fn = torch.compile(fn)
+            with self.assertRaisesRegex(
+                RuntimeError, "pre_grad_custom_pass must implement uuid"
+            ):
+                compiled_fn(x, y)
+
+    def test_cache_hit_across_processes(self):
+        """
+        Verify that a second subprocess gets a cache hit from the first subprocess's
+        compilation, using a shared cache directory.
+        """
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        with tempfile.TemporaryDirectory() as cache_dir:
+            script = textwrap.dedent(
+                """
+                import json
+                import torch
+                import torch._dynamo
+                from torch._dynamo.utils import counters
+                from torch._inductor import config as inductor_config
+
+                inductor_config.fx_graph_cache = True
+                inductor_config.fx_graph_remote_cache = False
+                torch._dynamo.reset()
+
+                def fn(x, y):
+                    return x + y
+
+                compiled_fn = torch.compile(fn)
+                x = torch.randn(10)
+                y = torch.randn(10)
+                compiled_fn(x, y)
+
+                print(json.dumps(dict(counters["aot_autograd"])))
+                """
+            )
+
+            env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": cache_dir}
+
+            import json
+
+            # First subprocess - expect cache miss
+            result1 = subprocess.run(
+                [sys.executable, "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result1.returncode, 0, result1.stderr)
+            counters1 = json.loads(result1.stdout.strip().splitlines()[-1])
+            self.assertEqual(counters1.get("autograd_cache_miss", 0), 1)
+            self.assertEqual(counters1.get("autograd_cache_hit", 0), 0)
+
+            # Second subprocess - expect cache hit
+            result2 = subprocess.run(
+                [sys.executable, "-c", script],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result2.returncode, 0, result2.stderr)
+            counters2 = json.loads(result2.stdout.strip().splitlines()[-1])
+            self.assertEqual(counters2.get("autograd_cache_miss", 0), 0)
+            self.assertEqual(counters2.get("autograd_cache_hit", 0), 1)
+
+    def test_cache_hit_across_processes_pre_grad_custom_pass(self):
+        """
+        Verify that different pre-grad custom passes produce different cache keys
+        across processes, and that the same pass produces a cache hit.
+        """
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        with tempfile.TemporaryDirectory() as cache_dir:
+            # Script template that accepts a custom pass UUID
+            script_template = textwrap.dedent(
+                """
+                import json
+                import operator
+                import torch
+                import torch._dynamo
+                from torch._dynamo.utils import counters
+                from torch._inductor import config as inductor_config
+                from torch._inductor.custom_graph_pass import CustomGraphPass
+
+                inductor_config.fx_graph_cache = True
+                inductor_config.fx_graph_remote_cache = False
+                inductor_config.pre_grad_pass_timing = "late"
+                torch._dynamo.reset()
+
+                class TestPreGradPass(CustomGraphPass):
+                    def __init__(self, pass_uuid):
+                        self._uuid = pass_uuid
+
+                    def __call__(self, g):
+                        for n in g.nodes:
+                            if n.op == "call_function" and n.target is operator.mul:
+                                lhs, rhs = n.args
+                                if lhs == 1:
+                                    n.replace_all_uses_with(rhs)
+                                    g.erase_node(n)
+
+                    def uuid(self):
+                        return self._uuid
+
+                inductor_config.pre_grad_custom_pass = TestPreGradPass("{pass_uuid}")
+
+                def fn(x, y):
+                    return 1 * x + y
+
+                compiled_fn = torch.compile(fn)
+                x = torch.randn(10)
+                y = torch.randn(10)
+                compiled_fn(x, y)
+
+                print(json.dumps(dict(counters["aot_autograd"])))
+                """
+            )
+
+            env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": cache_dir}
+
+            def run_script(pass_uuid):
+                script = script_template.format(pass_uuid=pass_uuid)
+                result = subprocess.run(
+                    [sys.executable, "-c", script],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                import json
+
+                return json.loads(result.stdout.splitlines()[-1])
+
+            # First run with pass_uuid_A - expect cache miss
+            c1 = run_script("pass_uuid_A")
+            self.assertEqual(c1.get("autograd_cache_miss", 0), 1)
+            self.assertEqual(c1.get("autograd_cache_hit", 0), 0)
+
+            # Second run with same pass_uuid_A - expect cache hit
+            c2 = run_script("pass_uuid_A")
+            self.assertEqual(c2.get("autograd_cache_miss", 0), 0)
+            self.assertEqual(c2.get("autograd_cache_hit", 0), 1)
+
+            # Third run with different pass_uuid_B - expect cache miss
+            c3 = run_script("pass_uuid_B")
+            self.assertEqual(c3.get("autograd_cache_miss", 0), 1)
+            self.assertEqual(c3.get("autograd_cache_hit", 0), 0)
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_dtensor_cache_hit(self):
+        """
+        Test that DTensor produces cache hits on second compile.
+
+        This follows the standard AOTAutograd cache test pattern: compile once
+        (cache miss), reset dynamo, compile again with equivalent input (cache hit).
+        """
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import DTensor, Replicate
+
+        with _fake_process_group():
+            mesh = init_device_mesh("cpu", (2,))
+
+            def fn(x):
+                return x.sin()
+
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            # First call - cache miss
+            dtensor1 = DTensor.from_local(torch.zeros(4, 4), mesh, [Replicate()])
+            compiled_fn(dtensor1)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            # Reset dynamo but keep the cache
+            self._clear_dynamo_and_codecache()
+
+            # Second call with equivalent DTensor - should hit cache
+            dtensor2 = DTensor.from_local(torch.zeros(4, 4), mesh, [Replicate()])
+            compiled_fn(dtensor2)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
@@ -2925,6 +3516,176 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             r"AOTAutogradCachePicklerTests.test_pickle_entry_strict_mode_raises.<locals>.<lambda>",
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
+
+    def test_nested_tensor_subclass_cache_key(self):
+        ctx = multiprocessing.get_context("spawn")
+        results = []
+        for _ in range(2):
+            queue = ctx.Queue()
+            p = ctx.Process(
+                target=_subprocess_gen_nested_subclass_cache_key,
+                args=(queue,),
+            )
+            p.start()
+            p.join()
+
+            if p.exitcode != 0:
+                self.skipTest(f"Subprocess exited with code {p.exitcode}")
+
+            results.append(queue.get())
+
+        # Cache keys from two different processes should be identical
+        self.assertEqual(
+            results[0],
+            results[1],
+            "Nested tensor subclass cache keys should be identical across processes",
+        )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_dtensor_different_process_cache_key(self):
+        """
+        Test that DTensor cache keys are consistent across different processes.
+
+        This is a critical test for warm start cache hits. The cache key must be
+        deterministic and not depend on process-specific values like memory addresses
+        or object ids that would differ between processes.
+        """
+        ctx = multiprocessing.get_context("spawn")
+        results = []
+        for _ in range(2):
+            queue = ctx.Queue()
+            p = ctx.Process(
+                target=_subprocess_gen_dtensor_cache_key,
+                args=(queue,),
+            )
+            p.start()
+            p.join()
+
+            if p.exitcode != 0:
+                self.skipTest(f"Subprocess exited with code {p.exitcode}")
+
+            results.append(queue.get())
+
+        # Cache keys from two different processes should be identical
+        self.assertEqual(
+            results[0],
+            results[1],
+            "DTensor cache keys should be identical across processes",
+        )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_dtensor_different_placements_different_cache_key(self):
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import DTensor, Replicate, Shard
+
+        with _fake_process_group():
+            mesh = init_device_mesh("cpu", (2,))
+
+            local_tensor = torch.zeros(4, 4)
+            dtensor_replicate = DTensor.from_local(local_tensor, mesh, [Replicate()])
+            dtensor_shard = DTensor.from_local(local_tensor, mesh, [Shard(0)])
+
+            def fn(x):
+                return x.sin()
+
+            # Get dynamo output for replicate
+            torch._dynamo.reset()
+            fx_graph = None
+
+            def compiler(gm, inputs, **kwargs):
+                nonlocal fx_graph
+                fx_graph = gm
+                return gm
+
+            g = torch.compile(fn, backend=compiler, fullgraph=True)
+            g(dtensor_replicate)
+
+            pickler = AOTAutogradCachePickler(fx_graph)
+            cache_key_replicate = pickler.get_hash(dtensor_replicate)
+            cache_key_shard = pickler.get_hash(dtensor_shard)
+
+            # Different placements should produce different cache keys
+            self.assertNotEqual(
+                cache_key_replicate,
+                cache_key_shard,
+                "DTensor with Replicate() should have different cache key than Shard(0)",
+            )
+
+
+def _subprocess_gen_dtensor_cache_key(queue):
+    """
+    Subprocess helper to generate a DTensor cache key.
+    Must be at module level for multiprocessing to work.
+    """
+    import torch
+    import torch._dynamo
+    import torch.distributed as c10d
+    from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCachePickler
+    from torch.distributed.device_mesh import init_device_mesh
+    from torch.distributed.tensor import DTensor, Replicate
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    fake_store = FakeStore()
+    c10d.init_process_group("fake", store=fake_store, rank=0, world_size=2)
+    try:
+        mesh = init_device_mesh("cpu", (2,))
+
+        # Create DTensor
+        local_tensor = torch.zeros(4, 4)
+        dtensor = DTensor.from_local(local_tensor, mesh, [Replicate()])
+
+        def fn(x):
+            return x.sin()
+
+        # Get dynamo output
+        torch._dynamo.reset()
+        fx_graph = None
+
+        def compiler(gm, inputs, **kwargs):
+            nonlocal fx_graph
+            fx_graph = gm
+            return gm
+
+        g = torch.compile(fn, backend=compiler, fullgraph=True)
+        g(dtensor)
+
+        pickler = AOTAutogradCachePickler(fx_graph)
+        cache_key = pickler.get_hash(dtensor)
+
+        queue.put(cache_key)
+    finally:
+        c10d.destroy_process_group()
+
+
+def _subprocess_gen_nested_subclass_cache_key(queue):
+    import torch
+    import torch._dynamo
+    from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCachePickler
+    from torch.testing._internal.two_tensor import TwoTensor
+
+    inner1 = TwoTensor(torch.zeros(4, 4), torch.zeros(4, 4))
+    inner2 = TwoTensor(torch.zeros(4, 4), torch.zeros(4, 4))
+    nested_two_tensor = TwoTensor(inner1, inner2)
+
+    def fn(x):
+        return x.sin()
+
+    # Get dynamo output
+    torch._dynamo.reset()
+    fx_graph = None
+
+    def compiler(gm, inputs, **kwargs):
+        nonlocal fx_graph
+        fx_graph = gm
+        return gm
+
+    g = torch.compile(fn, backend=compiler, fullgraph=True)
+    g(nested_two_tensor)
+
+    pickler = AOTAutogradCachePickler(fx_graph)
+    cache_key = pickler.get_hash(nested_two_tensor)
+
+    queue.put(cache_key)
 
 
 def _policy_save_mm(ctx, op, *args, **kwargs):

@@ -87,6 +87,7 @@ if torch.backends.mps.is_available():
             "isfinite",
             "isinf",
             "isreal",
+            "istft",
             "item",
             "kron",
             "linalg.cross",
@@ -121,6 +122,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv_transpose2d",
             "nn.functional.conv_transpose3d",
             "nn.functional.feature_alpha_dropoutwithout_train",
+            "nn.functional.l1_loss",
             "nn.functional.padcircular",
             "nn.functional.softminwith_dtype",
             "nn.functional.softsign",
@@ -315,7 +317,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "cholesky_solve": None,
             "frexp": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
@@ -623,7 +624,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
             ],
             # Unsupported dtypes
-            "histc": [torch.float16, torch.bfloat16],
             # GEMM on MPS is not supported for integral types
             "nn.functional.linear": [
                 torch.int16,
@@ -927,8 +927,6 @@ if torch.backends.mps.is_available():
             "nextafter": None,
             # derivative for aten::floor_divide is not implemented on CPU
             "floor_divide": [torch.float16, torch.float32],
-            # derivative for aten::narrow_copy is not implemented on CPU
-            "narrow_copy": [torch.float16, torch.float32],
             # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
             "histogramdd": [torch.float16, torch.float32],
             # derivative for aten::histogram is not implemented
@@ -1011,11 +1009,6 @@ if torch.backends.mps.is_available():
             "clamp_max",
             "clamp_min",
             "masked_scatter",
-            # unsupported float64 dtype
-            "multinomial",
-            "gather",
-            "scatter",
-            "scatter_add",
             # MPS does not support tensor dimensions > 16
             "amax",
             "amin",

@@ -264,7 +264,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(q_k_v_s.size() == 3);
-  return std::make_tuple(q_k_v_s[0], q_k_v_s[1], q_k_v_s[2]);
+  return std::make_tuple(std::move(q_k_v_s[0]), std::move(q_k_v_s[1]), std::move(q_k_v_s[2]));
 }
 
 std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
@@ -854,7 +854,6 @@ Tensor scaled_dot_product_attention(
       TORCH_CHECK(
           false,
           "No viable backend for scaled_dot_product_attention was found.");
-      return Tensor();
   }
 }
 
@@ -1064,11 +1063,6 @@ _scaled_dot_product_fused_attention_overrideable_backward(
     const at::Tensor & philox_offset,
     std::optional<double> scale) {
   TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_fused_attention_overrideable_backward not implemented: This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
-          at::empty_like(query),
-          at::empty_like(key),
-          at::empty_like(value),
-          at::empty_like(attn_bias));
 }
 
 Tensor triton_multi_head_attention(
