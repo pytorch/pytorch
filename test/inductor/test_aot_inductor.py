@@ -68,7 +68,9 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    IS_ARM64,
     IS_CI,
+    IS_CPU_CAPABILITY_SVE256,
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
@@ -84,6 +86,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_MPS,
     TEST_WITH_ROCM,
+    xfailIf,
 )
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.testing._internal.inductor_utils import (
@@ -904,6 +907,8 @@ class AOTInductorTestsTemplate:
         IS_FBCODE,
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
+    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/177243
     @tf32_on_and_off(0.005)
     def test_deconv_freezing(self):
         dtypes = [torch.float]
@@ -1327,12 +1332,11 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices or XPU",
     )
-    @skipIfXpu
     def test_fp8(self):
         # cuda only
-        if self.device != "cuda":
+        if self.device not in ("cuda", "xpu"):
             return
 
         class Model(torch.nn.Module):
@@ -1376,7 +1380,6 @@ class AOTInductorTestsTemplate:
         not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
         "scaled_grouped_mm is only supported on SM90 and MI300+ devices",
     )
-    @skipIfXpu
     def test_scaled_grouped_mm(self):
         # Test torch._scaled_grouped_mm AOTI lowering
         # cuda only
@@ -1440,9 +1443,8 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices or XPU",
     )
-    @skipIfXpu
     def test_fp8_view_of_param(self):
         # cuda only
         if self.device != GPU_TYPE:
@@ -1730,6 +1732,8 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @xfailIf(IS_ARM64)
+    # see https://github.com/pytorch/pytorch/issues/177254
     @skipIfNoFBGEMM
     def test_quanatized_int8_linear(self):
         class Model(torch.nn.Module):
@@ -2076,7 +2080,9 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
-    @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
+    @skipIfXpu(
+        msg="FlashAttentionForward headdim limitation on xpu - torch-xpu-ops: 2698"
+    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
     )
@@ -2527,8 +2533,8 @@ class AOTInductorTestsTemplate:
         determined device from [predicate] + operands, causing CPU predicates
         to force CUDA outputs onto CPU during autotuning.
         """
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device != "cuda" and self.device != "xpu":
+            raise unittest.SkipTest("requires CUDA or XPU")
 
         class Model(torch.nn.Module):
             def __init__(self, input_dim=4, hidden_dim=8):
@@ -5055,7 +5061,7 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices or XPU",
     )
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_fp8(self):
@@ -5798,9 +5804,8 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices or XPU",
     )
-    @skipIfXpu
     def test_aoti_debug_printer_fp8_dtype(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -6953,7 +6958,6 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(500, device=self.device),)
         self.check_model(model, example_inputs)
 
-    @skipIfXpu
     def test_conv3d(self):
         if self.device != GPU_TYPE or not is_big_gpu():
             raise unittest.SkipTest("requires modern GPU to run max-autotune")
@@ -7818,8 +7822,8 @@ class AOTInductorTestsTemplate:
         """
         Fix https://github.com/pytorch/pytorch/issues/167630
         """
-        if self.device != "cuda":
-            raise unittest.SkipTest("test is only for cuda")
+        if self.device not in ("cuda", "xpu"):
+            raise unittest.SkipTest("test is only for cuda or xpu")
 
         def make_mlp(in_dim=128, hidden=256, out_dim=64, depth=3):
             layers = []
@@ -7840,7 +7844,7 @@ class AOTInductorTestsTemplate:
 
         allocated_memory = []
         for _ in range(3):
-            torch.cuda.reset_peak_memory_stats()
+            torch.accelerator.reset_peak_memory_stats()
 
             model = make_mlp(in_dim, hidden, out_dim, depth).to(self.device)
             example_inputs = (torch.randn(batch, in_dim, device=self.device),)
@@ -7851,10 +7855,10 @@ class AOTInductorTestsTemplate:
             torch._inductor.aoti_compile_and_package(ep)
 
             del model, example_inputs, ep
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
+            torch.accelerator.synchronize()
+            torch.accelerator.empty_cache()
             gc.collect()
-            allocated_memory.append(torch.cuda.memory_allocated())
+            allocated_memory.append(torch.accelerator.memory_allocated())
 
         self.assertTrue(allocated_memory[1] == allocated_memory[2])
 
@@ -8216,6 +8220,37 @@ torch._inductor.aoti_load_package("{model_path}")
             if os.path.exists(temp_stderr_path):
                 os.unlink(temp_stderr_path)
 
+    def test_combo_kernel_grid_mixed_types(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("combo kernels require GPU")
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c, d):
+                return a + b, c + d
+
+        # Non-contiguous (transposed) tensors force 2D Triton iteration,
+        # creating both x and y range trees in the combo kernel.
+        # Dynamic shapes on (a, b) make ynumel_0 dynamic (string in codegen),
+        # while static shapes on (c, d) keep ynumel_1 as int.
+        # This triggers GridExpr.maximum() with mixed [str, int] in C++ mode,
+        # which previously generated std::max(long, int) causing a template
+        # deduction error in the AOTInductor C++ wrapper.
+        example_inputs = (
+            torch.randn(30, 20, device=self.device),
+            torch.randn(20, 30, device=self.device).t(),
+            torch.randn(40, 30, device=self.device),
+            torch.randn(30, 40, device=self.device).t(),
+        )
+        dim0 = Dim("dim0", min=1, max=100)
+        dynamic_shapes = {
+            "a": {0: dim0, 1: None},
+            "b": {0: dim0, 1: None},
+            "c": None,
+            "d": None,
+        }
+        with config.patch({"combo_kernels": True}):
+            self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -8348,8 +8383,6 @@ GPU_TEST_FAILURES = {
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
-    # No scaled_dot_product_efficient_attention implementation for XPU yet.
-    "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
 }
 
 MPS_TEST_FAILURES = {

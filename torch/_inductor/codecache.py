@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import override, Self
 
 import torch
@@ -65,11 +65,13 @@ from torch._inductor.cpp_builder import (
     _LINKER_SCRIPT,
     _set_gpu_runtime_env,
     _TORCH_PATH,
+    batch_convert_cubins_to_obj,
     convert_cubin_to_obj,
     CppBuilder,
     CppOptions,
     CppTorchDeviceOptions,
     get_compiler_version_info,
+    get_cpp_compiler,
     get_ld_and_objcopy,
     get_name_and_dir_from_output_file_path,
     normalize_path_separator,
@@ -785,6 +787,38 @@ class BypassFxGraphCache(Exception):
     """
 
 
+def resolve_pre_grad_pass_timing() -> Literal["early", "late"]:
+    """Resolve the effective pre-grad pass timing from the config.
+
+    "default" is resolved based on whether the custom pass provides a UUID:
+    passes with a UUID (or no custom pass) run "late" (after cache lookup),
+    passes without a UUID run "early" (before cache lookup).
+
+    Raises RuntimeError if a custom pass without a UUID is explicitly set to
+    run "late", since the cache key cannot account for it.
+    """
+    timing: Literal["early", "late", "default"] = config.pre_grad_pass_timing
+    custom_pass = config.pre_grad_custom_pass
+    has_uuid = (
+        custom_pass
+        and isinstance(custom_pass, CustomGraphPass)
+        and custom_pass.uuid() is not None
+    )
+
+    if timing == "default":
+        supports_late = custom_pass is None or has_uuid
+        timing = "late" if supports_late else "early"
+
+    if timing == "late" and custom_pass and not has_uuid:
+        raise RuntimeError(
+            "pre_grad_custom_pass must implement uuid() to run late "
+            "(after cache lookup). Either implement uuid() or set "
+            "pre_grad_pass_timing to 'early'."
+        )
+
+    return timing
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -912,7 +946,11 @@ class FxGraphHashDetails:
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable(ignore_private_configs=False)
-        # Custom post grad passes should provide an ID to hash.
+        # Custom passes should provide an ID to hash when they run late (after cache lookup).
+        if resolve_pre_grad_pass_timing() != "early":
+            self.pre_grad_custom_pass = self._get_custom_pass_detail(
+                config.pre_grad_custom_pass
+            )
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
         )
@@ -1586,8 +1624,15 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
-        # Post grad custom passes must implement the CustomGraphPass or we don't
+        # Custom passes must implement the CustomGraphPass or we don't
         # know how to include them in the cache key calculation.
+        # When timing is EARLY, pre-grad passes already ran before the cache
+        # lookup so there's nothing to validate here.
+        if resolve_pre_grad_pass_timing() != "early":
+            assert not config.pre_grad_custom_pass or (
+                isinstance(config.pre_grad_custom_pass, CustomGraphPass)
+                and config.pre_grad_custom_pass.uuid()
+            ), "Unsupported pre grad custom pass"
         for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
             if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
                 raise BypassFxGraphCache("Unsupported post grad custom pass")
@@ -2497,7 +2542,9 @@ end
 
             cubins_o = []
             asm_files = []
+            fatbin_cmds: list[tuple[str, str]] = []
             if not _IS_WINDOWS:
+                cubins_to_embed: list[tuple[str, str]] = []
                 ld, objcopy = get_ld_and_objcopy(use_relative_path)
                 kernels = getattr(V.graph.wrapper_code, "_kernel_name_to_body", {})
                 for kernel_name, value in CudaKernelParamCache.cache.items():
@@ -2515,30 +2562,7 @@ end
                         and device_type == "cuda"
                     ):
                         if torch.version.hip is None:
-                            current_arch = (
-                                cuda_compile_utils._nvcc_arch_as_compile_option()
-                            )
-                            cmd = (
-                                # pyrefly: ignore [unbound-name]
-                                f"{cuda_compile_utils._cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
-                                # Triton only allows generating PTX version as same as the current arch
-                                f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
-                                # Include SASS for the current specific arch
-                                f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
-                            )
-                            try:
-                                subprocess.run(
-                                    cmd.split(),
-                                    capture_output=True,
-                                    text=True,
-                                    check=True,
-                                )
-                            except subprocess.CalledProcessError as e:
-                                print(
-                                    f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
-                                    file=sys.stderr,
-                                )
-                                raise
+                            fatbin_cmds.append((asm_file, cubin_file))
 
                         else:
                             # ROCm multi-arch: compile LLVM IR to multi-arch bundle
@@ -2572,10 +2596,59 @@ end
                             log.info("Created multi-arch bundle: %s", cubin_file)
 
                     if config.aot_inductor.embed_kernel_binary:
-                        # Embed cubin files into model.so using objcopy
-                        cubins_o.append(
-                            convert_cubin_to_obj(cubin_file, kernel_name, ld, objcopy)
+                        cubins_to_embed.append((cubin_file, kernel_name))
+
+                # Compile PTX → fatbin in parallel (each nvcc call is independent).
+                # Must complete before cubin embedding below.
+                if fatbin_cmds:
+                    from concurrent.futures import ThreadPoolExecutor
+
+                    current_arch = cuda_compile_utils._nvcc_arch_as_compile_option()
+                    nvcc = cuda_compile_utils._cuda_compiler()
+
+                    def _compile_fatbin(asm_and_cubin: tuple[str, str]) -> None:
+                        asm_f, cubin_f = asm_and_cubin
+                        cmd = (
+                            f"{nvcc} -fatbin {asm_f} -o {cubin_f} "
+                            f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
+                            f"-gencode arch=compute_{current_arch},code=sm_{current_arch} "
                         )
+                        try:
+                            subprocess.run(
+                                cmd.split(), capture_output=True, text=True, check=True
+                            )
+                        except subprocess.CalledProcessError as e:
+                            print(
+                                f"{cmd} failed with:\nstdout:\n{e.stdout}\nstderr:\n{e.stderr}",
+                                file=sys.stderr,
+                            )
+                            raise
+
+                    with ThreadPoolExecutor() as pool:
+                        list(pool.map(_compile_fatbin, fatbin_cmds))
+
+                if cubins_to_embed:
+                    # Batch all cubins into a single .o using .incbin assembly.
+                    # This replaces N * 3 subprocess calls (ld + 2x objcopy per
+                    # cubin) with a single compiler invocation.
+                    try:
+                        combined_obj = batch_convert_cubins_to_obj(
+                            cubins_to_embed,
+                            os.path.dirname(output_so),
+                            cpp_compiler=get_cpp_compiler(),
+                        )
+                        cubins_o.append(combined_obj)
+                    except subprocess.CalledProcessError:
+                        log.warning(
+                            "Batched cubin embedding failed, "
+                            "falling back to per-cubin objcopy"
+                        )
+                        for cubin_file, kernel_name in cubins_to_embed:
+                            cubins_o.append(
+                                convert_cubin_to_obj(
+                                    cubin_file, kernel_name, ld, objcopy
+                                )
+                            )
 
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(

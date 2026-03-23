@@ -193,6 +193,7 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     WARNING: this API can be a footgun, please read the documentation carefully.
     """
     if isinstance(fn, (list, tuple)):
+        # pyrefly: ignore [deprecated]
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
     if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
@@ -1407,15 +1408,21 @@ def _allow_in_graph_einops() -> None:
         # helpers. Backport the try/except TypeError fallback from einops 0.7.0+
         # so allow_in_graph works during fake tensor validation.
         _patch_einops_symint_compat(einops.einops)  # type: ignore[attr-defined]
+        # pyrefly: ignore [deprecated]
         allow_in_graph(einops.rearrange)
+        # pyrefly: ignore [deprecated]
         allow_in_graph(einops.reduce)
         if hasattr(einops, "repeat"):
+            # pyrefly: ignore [deprecated]
             allow_in_graph(einops.repeat)  # available since einops 0.2.0
         if hasattr(einops, "einsum"):
+            # pyrefly: ignore [deprecated]
             allow_in_graph(einops.einsum)  # available since einops 0.5.0
         if hasattr(einops, "pack"):
+            # pyrefly: ignore [deprecated]
             allow_in_graph(einops.pack)  # available since einops 0.6.0
         if hasattr(einops, "unpack"):
+            # pyrefly: ignore [deprecated]
             allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 

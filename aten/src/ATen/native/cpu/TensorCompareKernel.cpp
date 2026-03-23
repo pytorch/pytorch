@@ -215,13 +215,14 @@ void aminmax_kernel(
 
 void where_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_V2(
-    opaqueScalarType(iter.dtype()), "where_cpu", [&] {
-      cpu_kernel_opaque(
+    iter.dtype(), "where_cpu", [&] {
+      cpu_kernel(
         iter,
         [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-  }, AT_EXPAND(AT_OPAQUE_TYPES));
+  },
+  kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
 void isposinf_kernel_impl(TensorIteratorBase& iter) {

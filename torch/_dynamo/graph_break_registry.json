@@ -718,7 +718,7 @@
   "GB8656": [
     {
       "Gb_type": "Opaque object with custom __getattr__ not supported",
-      "Context": "{value_type.__name__} with custom __getattr__",
+      "Context": "{real_obj_type.__name__} with custom __getattr__",
       "Explanation": "Dynamo does not support opaque objects types with custom __getattr__ methods",
       "Hints": []
     }
@@ -2434,6 +2434,15 @@
     }
   ],
   "GB8843": [
+    {
+      "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
+      "Context": "Opaque object type: {real_obj_type}. Method name: '{name}'",
+      "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
+      "Hints": [
+        "Register member '{name}' with MemberType.INLINED in ",
+        "register_opaque_type({real_obj_type}, members=...)."
+      ]
+    },
     {
       "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
       "Context": "Opaque object type: {value_type}. Method name: '{name}'",
@@ -4236,6 +4245,26 @@
       "Explanation": "Expect combine_fn to return a tuple (next_carry, y) but got {combine_result_vars}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB4501": [
+    {
+      "Gb_type": "Reconstruction of FakeIdVariable",
+      "Context": "str(self.value)",
+      "Explanation": "A fake id produced by id() on a compile-time container cannot be reconstructed across a graph break.",
+      "Hints": [
+        "Avoid using id() on containers in code that may graph-break."
+      ]
+    }
+  ],
+  "GB4198": [
+    {
+      "Gb_type": "Attempted to copy.deepcopy a tensor",
+      "Context": "copy.deepcopy({self})",
+      "Explanation": "Dynamo does not support copy.deepcopy() on tensors.",
+      "Hints": [
+        "Avoid calling copy.deepcopy() on tensors inside compiled regions."
       ]
     }
   ],

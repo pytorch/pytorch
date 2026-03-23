@@ -100,10 +100,19 @@ if HAS_GPU:
     USE_TF32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
 
     if hasattr(triton, "constexpr_function"):
-
+        # Helper functions for triton kernels must be in globals.
         @triton.constexpr_function
         def log2(n):
             return len(bin(n)) - 3
+
+        _get_int_dtype_test = triton.constexpr_function(tl.core.get_int_dtype)
+
+        @triton.jit
+        def _dtype_helper_test(x):
+            idtype = _get_int_dtype_test(
+                bitwidth=x.dtype.primitive_bitwidth, signed=True
+            )
+            return x.to(idtype, bitcast=True)
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -1587,6 +1596,50 @@ def forward(self, x_1, output_1):
         self.assertIn("@triton.constexpr_function", triton_code)
         self.assertEqual(compiled_out, eager_out)
 
+    @unittest.skipIf(
+        not HAS_GPU or not hasattr(triton, "constexpr_function"),
+        "newer triton version required",
+    )
+    def test_triton_kernel_with_constexpr_dtype_annotations(self):
+        """
+        Test that constexpr functions with dtype type annotations work correctly.
+        This tests the fix for proper handling of:
+        1. Type annotations using triton.language.core.dtype
+        2. Dtype instances (int8, uint8, etc.) that lack __name__ attribute
+        3. Function name aliasing
+        """
+
+        @triton.jit
+        def kernel_with_dtype_annotation(out_ptr, n: tl.constexpr):
+            offs = tl.arange(0, n)
+            x = tl.full([n], 1.0, dtype=tl.float32)
+            y = _dtype_helper_test(x)
+            tl.store(out_ptr + offs, y.to(tl.float32, bitcast=True))
+
+        def f(n):
+            out = torch.empty(n, device=GPU_TYPE)
+            kernel_with_dtype_annotation[(1,)](out, n)
+            return out
+
+        n = 8
+        eager_out = f(n)
+        compiled_out, (triton_code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), n
+        )
+
+        # Verify the generated code has proper imports
+        self.assertIn("from triton.language.core import dtype as dtype", triton_code)
+        self.assertIn("@triton.constexpr_function", triton_code)
+        self.assertIn("_get_int_dtype_test = get_int_dtype", triton_code)
+        # Verify dtype instances are emitted correctly
+        self.assertIn("int8 = tl.int8", triton_code)
+        self.assertIn("@triton.jit", triton_code)
+        self.assertIn("def _dtype_helper_test", triton_code)
+
+        # Verify correctness
+        self.assertEqual(compiled_out, eager_out)
+        self.assertTrue(torch.all(compiled_out == 1.0).item())
+
     @requires_gpu
     def test_triton_kernel_with_imported_symbol_with_custom_name(self):
         @triton.jit
@@ -2766,7 +2819,10 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(actual, expected)
 
     @requires_gpu
-    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
+    @skipIfXpu(
+        msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs, "
+        "https://github.com/pytorch/pytorch/pull/167786"
+    )
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     def test_kernel_inline_asm(self, quotes):

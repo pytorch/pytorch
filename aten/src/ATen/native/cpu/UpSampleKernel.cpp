@@ -1485,15 +1485,19 @@ void upsample_non_separable_Nd_kernel_impl(
 
   if (interp_size > 1) {
     // Nearest also supports uint8 tensor, so need to handle it separately
+    // Dispatch name should be "upsample_non_separable" but we keep the old
+    // name for internal BC.
     AT_DISPATCH_FLOATING_TYPES_AND2(
-        kBFloat16, kHalf, iter.dtype(), "upsample_non_separable", [&] {
+        kBFloat16, kHalf, iter.dtype(), "upsample_generic_Nd", [&] {
         // MSVC can not catch constexpr int interp_size here
         constexpr int mode = F::interp_size;
         upsample_non_separable<scalar_t, out_ndims, mode>(iter);
     });
   } else {
+    // Dispatch name should be "upsample_non_separable" but we keep the old
+    // name for internal BC.
     AT_DISPATCH_FLOATING_TYPES_AND3(kByte, kBFloat16, kHalf,
-        iter.dtype(), "upsample_non_separable", [&] {
+        iter.dtype(), "upsample_generic_Nd", [&] {
         constexpr int mode = F::interp_size;
         upsample_non_separable<scalar_t, out_ndims, mode>(iter);
     });
@@ -1561,8 +1565,10 @@ void upsample_separable_1d(
 
   auto iter = config.build();
 
+  // Dispatch name should be "upsample_separable_1d" but we keep the old
+  // name for internal BC.
   AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::Byte, iter.dtype(), "upsample_separable_1d", [&] {
+      at::ScalarType::Byte, iter.dtype(), "upsample_generic_Nd_aa", [&] {
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           if constexpr (is_horizontal) {
             // Strides are : X 0 | 8 8 8 0 8  (Channels first)

@@ -924,6 +924,73 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
 )
 
 
+class DTensorSubclassTest(DTensorTestBase):
+    def _make_dtensor(self, cls, mesh):
+        base = DTensor.from_local(
+            torch.randn(4, 4, device=self.device_type), mesh, [Replicate()]
+        )
+        return cls(base._local_tensor, base._spec, requires_grad=False)
+
+    @with_comms
+    def test_subclass_custom_dispatch(self):
+        """Subclass handles the entire dispatch, never calling DTensor dispatch."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        called = False
+
+        class MyDTensor(DTensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                nonlocal called
+                called = True
+                self.assertIs(cls, MyDTensor)
+                return NotImplemented
+
+        my_dt = self._make_dtensor(MyDTensor, mesh)
+        try:
+            my_dt + my_dt
+        except TypeError:
+            pass
+        self.assertTrue(called, "MyDTensor.__torch_dispatch__ was not called")
+
+    @with_comms
+    def test_subclass_no_override(self):
+        """Subclass without __torch_dispatch__ override uses C++ fast path."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        class MyDTensor(DTensor):
+            pass
+
+        my_dt = self._make_dtensor(MyDTensor, mesh)
+        result = my_dt + my_dt
+        self.assertIsInstance(result, DTensor)
+
+    @with_comms
+    def test_subclass_conditional_dispatch(self):
+        """Subclass handles some ops itself, delegates others to DTensor."""
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        custom_ops: list[torch._ops.OpOverload] = []
+
+        class MyDTensor(DTensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.add.Tensor:
+                    custom_ops.append(func)
+                return super().__torch_dispatch__(func, types, args, kwargs)
+
+        my_dt = self._make_dtensor(MyDTensor, mesh)
+
+        # add: subclass logs it, then delegates to DTensor
+        result = my_dt + my_dt
+        self.assertIsInstance(result, DTensor)
+        self.assertIn(torch.ops.aten.add.Tensor, custom_ops)
+
+        # neg: subclass doesn't do custom handling, just delegates
+        custom_ops.clear()
+        result = -my_dt
+        self.assertIsInstance(result, DTensor)
+        self.assertEqual(len(custom_ops), 0)
+
+
 class DTensorMeshTest(DTensorTestBase):
     @property
     def world_size(self):

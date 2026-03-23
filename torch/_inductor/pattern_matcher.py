@@ -1369,6 +1369,16 @@ class ReplacementPatternEntry(PatternEntry):
 
         match.erase_nodes()
 
+        # Remove dead replacement nodes so they don't inflate user counts
+        # in later lowering heuristics (e.g. should_realize_on_reuse).
+        for node in reversed(added_replacement_nodes):
+            if (
+                not node.users
+                and not node.is_impure()
+                and not isinstance(node.target, torch._ops.HigherOrderOperator)
+            ):
+                graph.erase_node(node)
+
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         assert match.replacement_graph is not None
         self.replace_with_graph(

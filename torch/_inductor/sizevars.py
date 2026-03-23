@@ -938,7 +938,7 @@ class SizeVarAllocator:
             if not _check_args(x2, div2, mod2, False):
                 return index
 
-            if mod2 % mod != 0:
+            if Mod(mod2, mod) != 0:
                 return index
 
             return ModularIndexing(x2, 1, mod)

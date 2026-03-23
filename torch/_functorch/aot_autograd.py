@@ -5,7 +5,7 @@ import itertools
 import time
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
@@ -25,15 +25,12 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import detect_fake_mode
+from torch._inductor.codecache import resolve_pre_grad_pass_timing
 from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
-
-static_inputs_log = torch._logging.getArtifactLogger(
-    __name__, "cudagraph_static_inputs"
-)
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
@@ -1133,6 +1130,15 @@ def aot_module_simplified(
 
         compiled_fn = None
 
+        pre_grad_pass_timing: Literal["early", "late"] = resolve_pre_grad_pass_timing()
+
+        if (
+            pre_grad_pass_timing == "early"
+            and pre_grad_passes
+            and isinstance(mod, torch.fx.GraphModule)
+        ):
+            mod = pre_grad_passes(mod, fake_flat_args)
+
         if (
             isinstance(fw_compiler, SerializableAOTDispatchCompiler)
             or torch._functorch.config.force_autograd_cache
@@ -1152,8 +1158,11 @@ def aot_module_simplified(
                 )
 
         if compiled_fn is None:
-            # Run pre-grad passes after cache lookup to cache pre-grad transforms.
-            if pre_grad_passes is not None and isinstance(mod, torch.fx.GraphModule):
+            if (
+                pre_grad_pass_timing == "late"
+                and pre_grad_passes
+                and isinstance(mod, torch.fx.GraphModule)
+            ):
                 mod = pre_grad_passes(mod, fake_flat_args)
 
             stack.enter_context(compiled_autograd._disable())

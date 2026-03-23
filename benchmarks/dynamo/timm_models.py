@@ -69,7 +69,6 @@ BATCH_SIZE_DIVISORS = {
 REQUIRE_HIGHER_TOLERANCE = {
     "inception_v3",
     "mobilenetv3_large_100",
-    "convnextv2_nano.fcmae_ft_in22k_in1k",
 }
 
 REQUIRE_HIGHER_TOLERANCE_FP16_XPU = {
@@ -233,10 +232,6 @@ class TimmRunner(BenchmarkRunner):
 
     @property
     def guard_on_nn_module_models(self):
-        return {}
-
-    @property
-    def inline_inbuilt_nn_modules_models(self):
         return {}
 
     @download_retry_decorator

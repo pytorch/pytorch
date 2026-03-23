@@ -1,6 +1,7 @@
 # Owner(s): ["module: custom-operators"]
 
 import contextlib
+import enum
 import gc
 import random
 import unittest
@@ -11,7 +12,6 @@ import torch
 import torch.distributed as dist
 import torch.utils._pytree as pytree
 from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     CompileCounter,
@@ -29,6 +29,7 @@ from torch._functorch.aot_autograd import (
 )
 from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
@@ -343,11 +344,7 @@ register_opaque_type(
 )
 register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
-register_opaque_type(
-    SizeStore,
-    typ="value",
-    members={"size": MemberType.USE_REAL, "increment_size": MemberType.USE_REAL},
-)
+register_opaque_type(SizeStore, typ="value")
 register_opaque_type(NestedValueSize, typ="value")
 register_opaque_type(OpaqueMultiplier, typ="reference")
 register_opaque_type(Color, typ="reference")
@@ -998,6 +995,25 @@ def forward(self, arg0_1, arg1_1):
         )
 
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
+    def test_make_fx_value_type(self, make_fx_tracing_mode):
+        def f(x, cfg):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        cfg = ValueConfig("square")
+        gm = make_fx(f, tracing_mode=make_fx_tracing_mode)(x, cfg)
+        self.assertEqual(gm(x, cfg), f(x, cfg))
+
+        self.assertExpectedInline(
+            gm.code.strip("\n"),
+            """\
+def forward(self, x_1, cfg_1):
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(x_1, cfg_1);  x_1 = cfg_1 = None
+    return process_with_config
+    """,  # noqa: B950
+        )
+
+    @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_bad_fake(self, make_fx_tracing_mode):
         torch.library.define(
             "_TestOpaqueObject::bad_fake",
@@ -1428,23 +1444,107 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 NestedCounters(Counter(1, 5)), torch.ones(2, 3)
             )
 
-        config = ValueConfig("double")
+    def test_compile_fixed_stride_order(self):
+        hs_name = get_opaque_type_name(HoistedString)
 
-        def foo(mode, x):
-            return config.mode
+        torch.library.define(
+            "_TestOpaqueObject::stride_op",
+            f"(Tensor x, {hs_name} s) -> Tensor",
+            tags=(torch.Tag.needs_fixed_stride_order,),
+            lib=self.lib,
+        )
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
-        ):
-            torch.compile(foo, backend="eager")(config, torch.ones(2, 3))
+        @torch.library.impl(
+            "_TestOpaqueObject::stride_op",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def stride_op_impl(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+            return x * 2.0
 
-        def bar(mode, x):
-            config.print_mode()
+        @torch.library.register_fake("_TestOpaqueObject::stride_op", lib=self.lib)
+        def stride_op_fake(x, s):
+            return torch.empty_like(x)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
-        ):
-            torch.compile(bar, backend="eager")(config, torch.ones(2, 3))
+        def fn(x, s):
+            return torch.ops._TestOpaqueObject.stride_op(x, s)
+
+        s = HoistedString("double")
+        x = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(x, s)
+
+        expected = x * 2.0
+        self.assertEqual(result, expected)
+
+    def test_compile_exact_strides(self):
+        hs_name = get_opaque_type_name(HoistedString)
+
+        torch.library.define(
+            "_TestOpaqueObject::exact_op",
+            f"(Tensor x, {hs_name} s) -> Tensor",
+            tags=(torch.Tag.needs_exact_strides,),
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::exact_op",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def exact_op_impl(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+            return x * 3.0
+
+        @torch.library.register_fake("_TestOpaqueObject::exact_op", lib=self.lib)
+        def exact_op_fake(x, s):
+            return torch.empty_like(x)
+
+        def fn(x, s):
+            return torch.ops._TestOpaqueObject.exact_op(x, s)
+
+        s = HoistedString("double")
+        x = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(x, s)
+
+        expected = x * 3.0
+        self.assertEqual(result, expected)
+
+    def test_compile_contiguous_strides(self):
+        hs_name = get_opaque_type_name(HoistedString)
+
+        torch.library.define(
+            "_TestOpaqueObject::contig_op",
+            f"(Tensor x, {hs_name} s) -> Tensor",
+            tags=(torch.Tag.needs_contiguous_strides,),
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::contig_op",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def contig_op_impl(x: torch.Tensor, s: HoistedString) -> torch.Tensor:
+            return x * 4.0
+
+        @torch.library.register_fake("_TestOpaqueObject::contig_op", lib=self.lib)
+        def contig_op_fake(x, s):
+            return torch.empty_like(x)
+
+        def fn(x, s):
+            return torch.ops._TestOpaqueObject.contig_op(x, s)
+
+        s = HoistedString("double")
+        x = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(x, s)
+
+        expected = x * 4.0
+        self.assertEqual(result, expected)
 
     def test_export_joint(self):
         torch.library.define(
@@ -1791,6 +1891,26 @@ def forward(self, arg0_1):
     cat = torch.ops.aten.cat.default([arg0_1, ones]);  arg0_1 = ones = None
     add = torch.ops.aten.add.Tensor(cat, 3);  cat = None
     return (add,)""",  # noqa: B950
+        )
+
+    def test_value_type_unregistered_method(self):
+        # Unregistered methods on value types should inline (no error)
+        def foo(x):
+            cfg = ValueConfig("square")
+            return x + len(cfg.mode)
+
+        x = torch.randn(3)
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        res = opt_f(x)
+        self.assertEqual(res, foo(x))
+
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, 6);  arg0_1 = None
+    return (add,)""",
         )
 
     def test_weakref_cleanup(self):
@@ -3167,6 +3287,148 @@ def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
             self.assertIs(out2._counter, counter2)
             self.assertEqual(out2._size_store, size2)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    def test_op_passthrough_counter_in_tuple(self):
+        # When a fake kernel returns its Counter input directly, the getitem
+        # proxy's example_value is already a FakeScriptObject.
+        counter_type = get_opaque_type_name(Counter)
+        torch.library.define(
+            "_TestOpaqueObject::passthrough_counter",
+            f"({counter_type} c, Tensor x) -> ({counter_type}, Tensor)",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::passthrough_counter",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def passthrough_impl(c: Counter, x: torch.Tensor):
+            return c, x * c.start
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::passthrough_counter", lib=self.lib
+        )
+        def passthrough_fake(c: Counter, x: torch.Tensor):
+            return c, torch.empty_like(x)
+
+        def fn(c, x):
+            out_c, out_x = torch.ops._TestOpaqueObject.passthrough_counter(c, x)
+            return torch.ops._TestOpaqueObject.counter_start(out_c) + out_x
+
+        c = Counter(3, 10)
+        x = torch.randn(4)
+        ref = fn(c, x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="eager")
+        res = opt_fn(c, x)
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(skip_fwd_side_effects_in_bwd_under_checkpoint=True)
+    def test_script_object_intermediate_exposed_from_checkpoint(self):
+        # A TorchScriptObjectVariable created inside an AC region and accessed
+        # outside via a list side effect must be exposed as a subgraph output.
+        import torch.utils.checkpoint
+
+        def gn(x, results):
+            counter = torch.ops._TestOpaqueObject.create_counter(x.shape[0], x.shape[0])
+            results.append(counter)
+            return x * 2
+
+        def fn(x):
+            results = []
+            out = torch.utils.checkpoint.checkpoint(gn, x, results, use_reentrant=False)
+            return torch.ops._TestOpaqueObject.counter_start(results[0]) + out
+
+        x = torch.randn(3, 4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager_decomp_partition")
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_enum_export(self):
+        class Direction(enum.Enum):
+            UP = 0
+            DOWN = 1
+
+        class Mod(torch.nn.Module):
+            def forward(self, x, d):
+                return x + d.value
+
+        ep = torch.export.export(Mod(), (torch.randn(4, 4), Direction.UP), strict=False)
+        self.assertEqual(
+            ep.module()(torch.ones(4, 4), Direction.UP),
+            torch.ones(4, 4) + Direction.UP.value,
+        )
+        self.assertExpectedInline(
+            normalize_gm(ep.graph_module.print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x: "f32[4, 4]", d):
+        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x, 0);  x = None
+        return (add,)
+""",
+        )
+
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(Mod(), backend=backend)
+        x = torch.randn(4, 4)
+        res = opt_fn(x, Direction.UP)
+        self.assertEqual(
+            res,
+            x + Direction.UP.value,
+        )
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 4]"):
+        l_x_ = L_x_
+
+        add: "f32[4, 4]" = l_x_ + 0;  l_x_ = None
+        return (add,)
+""",
+        )
+
+    def test_enum_custom_op(self):
+        def get_color():
+            class Color(enum.Enum):
+                RED = 0
+                GREEN = 1
+                BLUE = 2
+
+            return Color
+
+        Color = get_color()
+
+        @torch.library.custom_op("test_enum::add_color", mutates_args=())
+        def add_color(x: torch.Tensor, c: Color) -> torch.Tensor:
+            return x + c.value
+
+        @add_color.register_fake
+        def _(x, c):
+            return torch.empty_like(x)
+
+        def fn(x, c):
+            return add_color(x, c)
+
+        x = torch.randn(4, 4)
+        ref = fn(x, Color.GREEN)
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        res = opt_fn(x, Color.GREEN)
+        self.assertEqual(ref, res)
+        self.assertExpectedInline(
+            normalize_gm(backend.graphs[0].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 4]"):
+        l_x_ = L_x_
+
+        add_color_default: "f32[4, 4]" = torch.ops.test_enum.add_color.default(l_x_, Color.GREEN);  l_x_ = None
+        return (add_color_default,)
+""",
+        )
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

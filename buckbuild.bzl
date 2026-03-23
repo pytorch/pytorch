@@ -1519,7 +1519,12 @@ def define_buck_targets(
         srcs = [
             "torch/csrc/api/src/data/samplers/random.cpp",
             "torch/csrc/api/src/data/samplers/sequential.cpp",
+            "torch/csrc/api/src/optim/adagrad.cpp",
+            "torch/csrc/api/src/optim/adam.cpp",
+            "torch/csrc/api/src/optim/adamw.cpp",
+            "torch/csrc/api/src/optim/lbfgs.cpp",
             "torch/csrc/api/src/optim/optimizer.cpp",
+            "torch/csrc/api/src/optim/rmsprop.cpp",
             "torch/csrc/api/src/optim/serialize.cpp",
             "torch/csrc/api/src/optim/sgd.cpp",
             "torch/csrc/api/src/serialize/input-archive.cpp",
