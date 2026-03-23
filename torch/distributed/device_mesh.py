@@ -549,10 +549,10 @@ else:
                     getattr(default_group, "bound_device_id", None) is not None
                     or dist_config.use_torchcomms
                 )
-                and torch.cuda.is_available()
+                and torch.accelerator.is_available()
                 and (
                     backend is None
-                    or default_group._get_backend(torch.device("cuda")).name()
+                    or default_group._get_backend(torch.device(torch.accelerator.current_accelerator())).name()
                     == backend
                 )
             ):
