@@ -4,7 +4,7 @@
 set -eou pipefail
 
 function do_install() {
-    ROCSHMEM_VERSION=7a14c59a186016cf8cdebf5afc706f5ede18c922
+    ROCSHMEM_VERSION=ea5c137103f18a9aadd570d09d72e78ec52f0a3a
     rocm_dir="${ROCM_HOME:-}"
     if [[ -z "${rocm_dir}" && -f /etc/rocm_env.sh ]]; then
         source /etc/rocm_env.sh
@@ -12,6 +12,10 @@ function do_install() {
     fi
     rocm_dir="${rocm_dir:-/opt/rocm}"
     echo "install_rocSHMEM.sh: using ROCM install prefix ${rocm_dir}"
+    if [[ -f "${rocm_dir}/lib/librocshmem.a" ]]; then
+        echo "install_rocSHMEM.sh: librocshmem.a already present in ${rocm_dir}/lib, skipping build"
+        return
+    fi
     (
         set -x
         curr_dir=$(pwd)
