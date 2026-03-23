@@ -19,18 +19,14 @@ sys.path.append(pytorch_test_dir)
 from inductor.test_inductor_freezing import (  # @manual=fbcode//caffe2/test/inductor:inductor_freezing-library
     TestCase,
 )
-from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
-    check_model,
-    check_model_gpu,
-    copy_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
 
 
 aten = torch.ops.aten
@@ -38,7 +34,7 @@ aten = torch.ops.aten
 
 class BinaryFoldingTemplate(TestCase):
     @skipCUDAIf(TEST_CUDNN, "CUDNN has accuracy issues for this test")
-    def test_conv_binary_folding(self):
+    def test_conv_binary_folding(self, device):
         @torch.no_grad()
         def test_conv_fusion(
             use_bias,
@@ -77,7 +73,7 @@ class BinaryFoldingTemplate(TestCase):
 
             torch._dynamo.reset()
             counters.clear()
-            mod_eager = ConvOp(3, 32, self.device, kernel_size=3, stride=2).eval()
+            mod_eager = ConvOp(3, 32, device, kernel_size=3, stride=2).eval()
             out_optimized = torch.compile(mod_eager)
 
             inps = [4, 3, 4]
@@ -88,7 +84,7 @@ class BinaryFoldingTemplate(TestCase):
                 inps.append(inps[-1])
 
             torch.manual_seed(1234)
-            inp = torch.rand(inps).to(self.device)
+            inp = torch.rand(inps).to(device)
             out_eager = mod_eager(inp)
             out_optimized = out_optimized(inp)
             self.assertEqual(out_optimized, out_eager, rtol=rtol, atol=atol)
@@ -124,7 +120,7 @@ class BinaryFoldingTemplate(TestCase):
                     32,
                     1,
                     32,
-                ).to(self.device),
+                ).to(device),
                 expect_success=False,
             )
 
@@ -134,7 +130,7 @@ class BinaryFoldingTemplate(TestCase):
                 nn.Conv2d,
                 pytorch_op,
                 False,
-                add_tensor=torch.rand(1, 1).to(self.device),
+                add_tensor=torch.rand(1, 1).to(device),
                 expect_success=True,
             )
 
@@ -144,7 +140,7 @@ class BinaryFoldingTemplate(TestCase):
                 nn.Conv2d,
                 pytorch_op,
                 False,
-                add_tensor=torch.tensor([2]).to(torch.float64).to(self.device),
+                add_tensor=torch.tensor([2]).to(torch.float64).to(device),
                 expect_success=False,
                 # This test is for float32 conv fusion with different dtype, like float64,
                 # which will not be fused. The tolerance of float64 is too tight
@@ -155,7 +151,7 @@ class BinaryFoldingTemplate(TestCase):
             )
 
     @inductor_config.patch({"freezing": True})
-    def test_conv_bn_folding(self):
+    def test_conv_bn_folding(self, device):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, expect_success):
             class ConvOp(nn.Module):
@@ -188,7 +184,7 @@ class BinaryFoldingTemplate(TestCase):
                 return out
 
             torch._dynamo.reset()
-            mod_eager = ConvOp(3, 32, self.device, kernel_size=3, stride=2).eval()
+            mod_eager = ConvOp(3, 32, device, kernel_size=3, stride=2).eval()
             out_optimized = torch.compile(
                 mod_eager,
                 backend=functools.partial(compile_fx, inner_compile=my_inner_compile),
@@ -201,7 +197,7 @@ class BinaryFoldingTemplate(TestCase):
                 inps.append(inps[-1])
                 inps.append(inps[-1])
 
-            inp = torch.rand(inps).to(self.device)
+            inp = torch.rand(inps).to(device)
             out_eager = mod_eager(inp)
             out_optimized = out_optimized(inp)
             self.assertEqual(out_optimized, out_eager, atol=2e-04, rtol=1e-5)
@@ -224,7 +220,7 @@ class BinaryFoldingTemplate(TestCase):
             )
 
     @inductor_config.patch({"enable_linear_binary_folding": True})
-    def test_linear_binary_folding(self):
+    def test_linear_binary_folding(self, device):
         @torch.no_grad()
         def test_linear_fusion(
             use_bias, op, scalar, add_tensor, expect_success, input_3d=False
@@ -257,14 +253,14 @@ class BinaryFoldingTemplate(TestCase):
 
             torch._dynamo.reset()
             counters.clear()
-            mod_eager = LinearOp(3, 32, self.device).eval()
+            mod_eager = LinearOp(3, 32, device).eval()
             out_optimized = torch.compile(mod_eager)
 
             torch.manual_seed(1234)
             if input_3d:
-                inp = torch.rand([2, 4, 3]).to(self.device)
+                inp = torch.rand([2, 4, 3]).to(device)
             else:
-                inp = torch.rand([4, 3]).to(self.device)
+                inp = torch.rand([4, 3]).to(device)
             out_eager = mod_eager(inp)
             out_optimized = out_optimized(inp)
             self.assertEqual(out_optimized, out_eager, atol=5e-05, rtol=5e-06)
@@ -293,7 +289,7 @@ class BinaryFoldingTemplate(TestCase):
                 use_bias,
                 pytorch_op,
                 scalar,
-                add_tensor=torch.rand(tensor_size).to(self.device),
+                add_tensor=torch.rand(tensor_size).to(device),
                 expect_success=True,
             )
 
@@ -305,7 +301,7 @@ class BinaryFoldingTemplate(TestCase):
                 use_bias,
                 pytorch_op,
                 scalar,
-                add_tensor=torch.rand(tensor_size).to(self.device),
+                add_tensor=torch.rand(tensor_size).to(device),
                 expect_success=True,
                 input_3d=True,
             )
@@ -320,7 +316,7 @@ class BinaryFoldingTemplate(TestCase):
                 add_tensor=torch.rand(
                     4,
                     32,
-                ).to(self.device),
+                ).to(device),
                 expect_success=False,
             )
 
@@ -331,31 +327,12 @@ class BinaryFoldingTemplate(TestCase):
                 add_tensor=torch.rand(
                     4,
                     1,
-                ).to(self.device),
+                ).to(device),
                 expect_success=False,
             )
 
 
-if HAS_CPU and not torch.backends.mps.is_available():
-
-    class FreezingCpuTests(TestCase):
-        common = check_model
-        device = "cpu"
-        autocast = torch.cpu.amp.autocast
-
-    copy_tests(BinaryFoldingTemplate, FreezingCpuTests, "cpu")
-
-if HAS_GPU:
-
-    class FreezingGpuTests(TestCase):
-        common = check_model_gpu
-        device = GPU_TYPE
-        autocast = torch.amp.autocast(device_type=GPU_TYPE)
-
-    copy_tests(BinaryFoldingTemplate, FreezingGpuTests, GPU_TYPE)
-
-
-del BinaryFoldingTemplate
+instantiate_device_type_tests(BinaryFoldingTemplate, globals())
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
