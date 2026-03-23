@@ -64,9 +64,6 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
 
-# Temporarily set to 0 to verify PYTORCH_NUM_PYTEST_RERUNS env var works (will be reverted)
-export PYTORCH_NUM_PYTEST_RERUNS=0
-
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* || "$BUILD_ENVIRONMENT" == *xpu* ]]; then
