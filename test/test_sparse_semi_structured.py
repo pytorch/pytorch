@@ -52,7 +52,7 @@ _IS_HIPSPARSELT_AVAILABLE = False
 if torch.cuda.is_available():
     _IS_SM8X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 8)
     _IS_SM9X = torch.version.cuda is not None and (torch.cuda.get_device_capability(0)[0] == 9)
-    _IS_HIPSPARSELT_AVAILABLE = torch.version.hip is not None and tuple(int(v) for v in torch.version.hip.split('.')[:2]) > (6, 4)
+    _IS_HIPSPARSELT_AVAILABLE = torch.version.hip is not None and tuple(int(v) for v in torch.version.hip.split('.')[:2]) >= (7, 12)
     # CUTLASS kernels only work for Ampere
     if _IS_SM8X:
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
@@ -313,6 +313,8 @@ class TestSparseSemiStructured(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "spgemm_cutlass_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B)
             else:
+                if torch.version.hip:
+                    self.skipTest("Skipping int8 sparse mm (NN, cuSPARSELt) test on ROCm")
                 with self.assertRaisesRegex(RuntimeError,
                                             "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
                     sparse_result = torch.mm(A_sparse, B)
@@ -343,6 +345,8 @@ class TestSparseSemiStructured(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "spgemm_cutlass_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
+                if torch.version.hip:
+                    self.skipTest("Skipping int8 sparse mm (NT, cusparselt, shape=(1,128)) test on ROCm")
                 with self.assertRaisesRegex(RuntimeError,
                                             "CUDA error: operation not supported when calling `cusparseLtMatmulDescriptorInit"):
                     sparse_result = torch.mm(A_sparse, B.t())
