@@ -3268,15 +3268,6 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not torch._dynamo.config.inline_inbuilt_nn_modules:
-            unimplemented(
-                gb_type="torch.func.functional_call capture is disabled",
-                context="",
-                explanation="torch.func.functional_call capture is disabled",
-                hints=[
-                    "Set `torch._dynamo.config.inline_inbuilt_nn_modules=True` to enable.",
-                ],
-            )
         return super().call_function(tx, args, kwargs)
 
 

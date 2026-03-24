@@ -564,6 +564,8 @@ enable_faithful_generator_behavior = True
 inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     default=True,
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
+    deprecated=True,
+    deprecation_message="does not do anything, inline_inbuilt_nn_modules is always True",
 )
 
 # Resume tracing in nested frames if a nested graph break occurs

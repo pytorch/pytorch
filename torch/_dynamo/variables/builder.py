@@ -2105,62 +2105,54 @@ class VariableBuilder:
                 value = value.get_base()
                 self.source = AttrProxySource(self.source)
 
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                freezing = is_parameter_freezing()
+            freezing = is_parameter_freezing()
 
-                # Guard against the case where user may overwrite named parameters
-                # / named buffers
-                # NOTE: This is not likely to happen but worth guarding to avoid
-                # exception
-                if (
-                    callable(value.named_parameters)
+            # Guard against the case where user may overwrite named parameters
+            # / named buffers
+            # NOTE: This is not likely to happen but worth guarding to avoid
+            # exception
+            if (
+                callable(value.named_parameters)
+                # type: ignore[attr-defined]
+                and value.named_parameters.__func__ is og_module_named_parameters_fn_ptr
+            ):
+                try:  # catch TypeErrors in named_parameters() from unserializable nn modules
                     # type: ignore[attr-defined]
-                    and value.named_parameters.__func__
-                    is og_module_named_parameters_fn_ptr
-                ):
-                    try:  # catch TypeErrors in named_parameters() from unserializable nn modules
-                        # type: ignore[attr-defined]
-                        for _, p in value.named_parameters():
-                            self.mark_static_input(p, guard=freezing)
-                    except TypeError as e:
-                        raise_observed_exception(type(e), self.tx, args=list(e.args))
+                    for _, p in value.named_parameters():
+                        self.mark_static_input(p, guard=freezing)
+                except TypeError as e:
+                    raise_observed_exception(type(e), self.tx, args=list(e.args))
 
-                if (
-                    callable(value.named_buffers)
+            if (
+                callable(value.named_buffers)
+                # type: ignore[attr-defined]
+                and value.named_buffers.__func__ is og_module_named_buffers_fn_ptr
+            ):
+                try:  # catch TypeErrors in named_parameters() from unserializable nn modules
                     # type: ignore[attr-defined]
-                    and value.named_buffers.__func__ is og_module_named_buffers_fn_ptr
-                ):
-                    try:  # catch TypeErrors in named_parameters() from unserializable nn modules
-                        # type: ignore[attr-defined]
-                        for _, b in value.named_buffers():
-                            self.mark_static_input(b, guard=freezing)
-                    except TypeError as e:
-                        raise_observed_exception(type(e), self.tx, args=list(e.args))
+                    for _, b in value.named_buffers():
+                        self.mark_static_input(b, guard=freezing)
+                except TypeError as e:
+                    raise_observed_exception(type(e), self.tx, args=list(e.args))
 
-                if freezing:
-                    # we need to add the module to tracing context
-                    # in order to allow its params to get invalidated
-                    # this will get cleaned up once compile ends
-                    self.tx.output.nn_modules[self.name] = value
+            if freezing:
+                # we need to add the module to tracing context
+                # in order to allow its params to get invalidated
+                # this will get cleaned up once compile ends
+                self.tx.output.nn_modules[self.name] = value
 
             if (
                 value.__module__.startswith(("torch.nn.modules", "torch.ao."))
                 and not value.__module__.startswith("torch.nn.modules.container")
             ) or getattr(value.__class__, "_dynamo_marked_static", False):
                 new_source = self.source
-                if config.inline_inbuilt_nn_modules and (
-                    not self.tx.output.export or config.install_free_tensors
-                ):
-                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                if not self.tx.output.export or config.install_free_tensors:
                     new_source = UnspecializedBuiltinNNModuleSource(self.source)
                 result = UnspecializedBuiltinNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
             else:
                 new_source = self.source
-                if config.inline_inbuilt_nn_modules and (
-                    not self.tx.output.export or config.install_free_tensors
-                ):
-                    # Export corner case - look at test_repros.py test_inlining_cornercase
+                if not self.tx.output.export or config.install_free_tensors:
                     new_source = UnspecializedNNModuleSource(self.source)
                 result = UnspecializedNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
@@ -2305,15 +2297,10 @@ class VariableBuilder:
 
         is_static_input = get_static_address_type(value) is not None
 
-        if (
-            config.inline_inbuilt_nn_modules
-            and not is_static_input
-            and (
-                isinstance(value, torch.nn.Parameter)
-                # mark tensor attributes of nn modules static. This is done to keep inline_inbuilt_nn_modules behavior
-                # compatible with previous behavior.
-                or (source and source.guard_source.is_unspecialized_nn_module())
-            )
+        if not is_static_input and (
+            isinstance(value, torch.nn.Parameter)
+            # mark tensor attributes of nn modules static
+            or (source and source.guard_source.is_unspecialized_nn_module())
         ):
             self.mark_static_input(value, guard=is_parameter_freezing())
             is_static_input = True
@@ -2329,9 +2316,7 @@ class VariableBuilder:
         )
 
         make_graph_attribute = is_static_input and (
-            not config.inline_inbuilt_nn_modules
-            or is_parameter_freezing()
-            or torch._dynamo.config.prepare_freezing
+            is_parameter_freezing() or torch._dynamo.config.prepare_freezing
         )
 
         if should_install_free_tensor or (
