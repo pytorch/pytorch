@@ -1057,13 +1057,22 @@ class CachingAutotuner(KernelInterface):
 
         copies = {}
         try:
-            budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+            if torch.accelerator.current_accelerator() is None:
+                # No initialized accelerator; skip memory-optimized path
+                return {}
+            budget = (
+                torch.accelerator.max_memory_allocated()
+                - torch.accelerator.memory_allocated()
+            )
         except RuntimeError:
             # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
             return {}
 
         def maybe_copy(name, arg):
-            if name in self.mutated_arg_names and arg.is_cuda:
+            if name in self.mutated_arg_names and arg.device.type in (
+                "cuda",
+                "xpu",
+            ):
                 nonlocal budget
                 assert isinstance(arg, torch.Tensor)
                 required_storage_length = compute_required_storage_length(
@@ -3349,23 +3358,25 @@ def _reduction_configs(
     ]
 
     if torch.version.hip:
-        # Skip large-XBLOCK HIP configs when a combo kernel has a persistent
-        # sub-kernel with a large hardcoded R0_BLOCK.  The persistent tile size
-        # (XBLOCK * max_persistent_rblock) would otherwise cause pathological
-        # ROCm compilation times (e.g. 1024 * 1024 = 1M elements → 20+ min).
-        # Use the same 4096-element threshold as _persistent_reduction_configs.
-        max_persistent_rblock = inductor_meta.get("max_persistent_rblock", 0)
         hip_configs = [
             make_config(1024, 8, num_warps=4, num_stages=1, waves_per_eu=2),
             make_config(512, 8, num_warps=4, num_stages=1, waves_per_eu=1),
         ]
+        result_configs.extend(hip_configs)
+
+        # Filter ALL configs (not just HIP-specific ones) when a combo kernel
+        # has a persistent sub-kernel with a large hardcoded R0_BLOCK.  The
+        # persistent tile size (XBLOCK * max_persistent_rblock) causes
+        # pathological ROCm compilation times (e.g. 64 * 1024 = 64K elements
+        # → 60+ min triton.compile).  Use the same 4096-element threshold as
+        # _persistent_reduction_configs.
+        max_persistent_rblock = inductor_meta.get("max_persistent_rblock", 0)
         if max_persistent_rblock > 0:
-            hip_configs = [
+            result_configs = [
                 c
-                for c in hip_configs
+                for c in result_configs
                 if c.kwargs.get("XBLOCK", 0) * max_persistent_rblock <= 4096
             ]
-        result_configs.extend(hip_configs)
 
     return result_configs
 
@@ -3389,6 +3400,7 @@ def match_target_block_product(
         # just assume even score with no minimum block size
         min_block_size = 1
         tiling_scores = dict.fromkeys(tiling_scores.keys(), target_block_product)
+        total_score = target_block_product * len(tiling_scores)
 
     # First, give each coalescing dimension at least min_block_size
     block_sizes = {}
@@ -4143,7 +4155,10 @@ class GridExpr:
             return items[0]
         if self.mode == "python":
             return f"max({', '.join(map(str, items))})"
-        return functools.reduce(lambda x, y: f"std::max({x}, {y})", items)
+        # Cast int constants to (long) to avoid type deduction errors with std::max
+        # when mixing long variables with int literals
+        cpp_items = [f"(long){x}" if isinstance(x, int) else str(x) for x in items]
+        return functools.reduce(lambda x, y: f"std::max({x}, {y})", cpp_items)
 
     def summation(self, seq: list[int | str]) -> int | str:
         """Codegen for sum function with constant folding, constants are represented as int"""

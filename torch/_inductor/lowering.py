@@ -26,6 +26,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (
     canonicalize_dim,
@@ -856,13 +857,27 @@ def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
     return outputs
 
 
-def to_dtype(x: TensorBox, dtype: torch.dtype, copy: bool = False):
+def to_dtype(
+    x: TensorBox, dtype: torch.dtype, copy: bool = False, use_compute_types: bool = True
+):
     src_dtype = x.get_dtype()
     if src_dtype == dtype:
         return clone(x) if copy else x
 
     def _to_dtype(x):
-        return ops.to_dtype(x, dtype, src_dtype=src_dtype)
+        result = ops.to_dtype(
+            x,
+            dtype,
+            src_dtype=src_dtype,
+            use_compute_types=use_compute_types,
+        )
+        low_pr_fp = (torch.bfloat16, torch.float16)
+        if not use_compute_types and dtype in low_pr_fp:
+            # Upcast back to compute type so fused consumers see a compute-type
+            # value. Without this, a raw low-precision value gets a redundant
+            # downcast from the consumer's input emulation.
+            result = ops.to_dtype(result, dtype)
+        return result
 
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
@@ -925,7 +940,13 @@ def _convert_element_type(x: TensorBox, dtype: torch.dtype):
             return fallback_handler(
                 prims.convert_element_type.default, add_to_fallback_set=False
             )(x, dtype)
-    return to_dtype(x, dtype, copy=True)
+    src_dtype = x.get_dtype()
+    low_pr_fp = (torch.bfloat16, torch.float16)
+    use_compute_types = not (
+        config.emulate_precision_casts
+        and (src_dtype in low_pr_fp or dtype in low_pr_fp)
+    )
+    return to_dtype(x, dtype, copy=True, use_compute_types=use_compute_types)
 
 
 def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
@@ -1909,6 +1930,7 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
+    """Lower aten.cat, choosing between pointwise_cat and ConcatKernel."""
     cpu_device = inputs[0].get_device().type == "cpu"
     if cpu_device and all(
         input.get_dtype() in [torch.int8, torch.uint8] for input in inputs
@@ -2023,10 +2045,34 @@ def cat(inputs, dim=0):
 
         # horizontal fuse in case all inputs will require a copy kernel anyway.
         # only horizontally fuse pointwise kernels
+
+        # Skip pointwise_cat when any cat input has a fusible (pointwise)
+        # multi-consumer — ConcatKernel + NonOwningLayout avoids redundant
+        # reads.  Non-fusible users (e.g. matmul) don't benefit, so they
+        # should not prevent pointwise_cat.
+        def any_input_has_multi_consumers() -> bool:
+            cat_node = V.current_node
+            if cat_node is None:
+                return False
+            fx_args = cat_node.args[0]  # aten.cat format: cat(input_list, dim)
+            if not isinstance(fx_args, (list, tuple)):
+                return False
+
+            def has_fusible_multi_consumer(arg):
+                if not hasattr(arg, "users") or len(arg.users) <= 1:
+                    return False
+                return any(is_pointwise_use(u) for u in arg.users if u is not cat_node)
+
+            return any(has_fusible_multi_consumer(arg) for arg in fx_args)
+
+        has_multi_consumers = any_input_has_multi_consumers()
+
         horizontal_fuse_cat = all(
             should_lower_cat_input(inp) for inp in inputs
         ) and not any(can_fuse_reduction(t) for t in inputs)
-        if fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction):
+        if not has_multi_consumers and (
+            fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction)
+        ):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -2279,7 +2325,7 @@ def fallback_handler(kernel, add_to_fallback_set=True):
 
     def handler(*args, **kwargs):
         def wrap_tensors(x):
-            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+            return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
 
         return pytree.tree_map(
             wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
@@ -2547,6 +2593,7 @@ make_fallback(aten.randint)
 # TODO: mlazos reevaluate if we want to codegen something different
 make_fallback(torch.ops.streams.record_event.default)
 make_fallback(torch.ops.streams.wait_event.default)
+make_fallback(torch.ops.streams.synchronize_event.default)
 
 
 @register_lowering(aten.rand)
@@ -2835,16 +2882,22 @@ def bucketize(
     return result
 
 
+def _is_tensor_irnode(x):
+    return isinstance(x, ir.IRNode) and not isinstance(x, ir.NonTensorObj)
+
+
 def require_dense(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_stride1, (args, kwargs)
+        _is_tensor_irnode, ir.ExternKernel.require_stride1, (args, kwargs)
     )
     return args, kwargs
 
 
 def require_contiguous(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_contiguous, (args, kwargs)
+        _is_tensor_irnode,
+        ir.ExternKernel.require_contiguous,
+        (args, kwargs),
     )
     return args, kwargs
 
@@ -2853,14 +2906,18 @@ def require_contiguous_strides(_, *args, **kwargs):
     # TODO: combine this with require_contiguous after
     # https://github.com/pytorch/pytorch/pull/148235 lands.
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_contiguous_strides, (args, kwargs)
+        _is_tensor_irnode,
+        ir.ExternKernel.require_contiguous_strides,
+        (args, kwargs),
     )
     return args, kwargs
 
 
 def require_channels_last(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
-        ir.IRNode, ir.ExternKernel.require_channels_last, (args, kwargs)
+        _is_tensor_irnode,
+        ir.ExternKernel.require_channels_last,
+        (args, kwargs),
     )
     return args, kwargs
 
@@ -2868,7 +2925,7 @@ def require_channels_last(_, *args, **kwargs):
 def constrain_to_fake_tensor(arg, fake_arg):
     if fake_arg is None:
         return arg
-    if isinstance(fake_arg, FakeScriptObject):
+    if isinstance(fake_arg, FakeScriptObject) or is_opaque_value(fake_arg):
         return arg
     if isinstance(arg, ir.IRNode):
         return ir.ExternKernel.require_exact_strides(arg, fake_arg.stride())
@@ -2892,7 +2949,7 @@ def constrain_to_fake_tensors(args, kwargs, fake_args, fake_kwargs):
 
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
-        if isinstance(arg, ir.IRNode):
+        if _is_tensor_irnode(arg):
             stride_order = ir.get_stride_order(
                 fx_arg.meta["val"].stride(), V.graph.sizevars.shape_env
             )
@@ -2908,11 +2965,17 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     return args, kwargs
 
 
+# native_dropout uses empty_like(input) internally, so bernoulli_ consumes
+# RNG values in the input's stride order. Constrain input strides to match
+# the FX graph (i.e. eager) so the dropout mask is identical.
+add_layout_constraint(aten.native_dropout.default, constrain_to_fx_strides)
+
+
 def sdpa_constraint(fx_node, *args, **kwargs):
-    # sdpa requires dense last dimension]
+    """Apply stride constraints to SDPA inputs, ensuring dense last dimension."""
 
     def apply_constraint(idx, arg, fx_arg):
-        if not isinstance(arg, ir.IRNode):
+        if not _is_tensor_irnode(arg):
             return arg
 
         meta_val = fx_arg.meta["val"]
@@ -2938,6 +3001,31 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             # Check https://github.com/pytorch/pytorch/issues/138772
             stride_order = (3, 1, 2, 0)
 
+        # Cache keyed by (id(arg), arg_name, stride_order) to avoid
+        # duplicate copy_input when the same tensor feeds multiple SDPA
+        # positions (e.g., key=value).  Including arg_name handles
+        # mutation: mark_buffer_mutated() renames the buffer in place,
+        # so a mutated tensor has the same id but a different name,
+        # causing a cache miss.
+        cache_key = None
+        if config.cache_sdpa_constraint:
+            arg_name = arg.maybe_get_name()
+            cache_key = (
+                id(arg),
+                arg_name,
+                tuple(stride_order) if stride_order else None,
+            )
+            if cache_key in V.graph.sdpa_constraint_cache:
+                return V.graph.sdpa_constraint_cache[cache_key]
+
+        result = _apply_constraint_inner(
+            idx, arg, meta_val, meta_stride_expr, stride_order
+        )
+        if cache_key is not None:
+            V.graph.sdpa_constraint_cache[cache_key] = result
+        return result
+
+    def _apply_constraint_inner(idx, arg, meta_val, meta_stride_expr, stride_order):
         if not meta_val.is_cuda:
             return ir.ExternKernel.require_stride_order(arg, stride_order)
 
@@ -2997,12 +3085,14 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 # we can make them expanded by setting the stride equal to 0
                 if i in expanded_dims:
                     if V.graph.sizevars.statically_known_equals(
-                        out_strides[i + 1] % ALIGNMENT, 0
+                        Mod(out_strides[i + 1], ALIGNMENT), 0
                     ):
                         out_strides[i] = 0
                         continue
 
-                if not V.graph.sizevars.statically_known_equals(stride % ALIGNMENT, 0):
+                if not V.graph.sizevars.statically_known_equals(
+                    Mod(stride, ALIGNMENT), 0
+                ):
                     stride = ceildiv(stride, ALIGNMENT) * ALIGNMENT
 
                 out_strides[i] = stride
@@ -6687,6 +6777,11 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
+@make_pointwise
+def _div_rn(a, b):
+    return ops.div_rn(a, b)
+
+
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -6696,7 +6791,11 @@ def div_mode(a, b, rounding_mode=None):
     # see the discussion at https://github.com/triton-lang/triton/issues/605
     if rounding_mode == "floor":
         assert not both_boolean, "floordiv operands can not be boolean at the same time"
-        return floordiv(a, b) if both_integer else floor(div(a, b))
+        # Use div_rn (IEEE round-to-nearest) instead of truediv here because
+        # Triton's default division uses an approximate reciprocal, which can
+        # produce a result slightly below the true quotient and cause floor()
+        # to round down by one.
+        return floordiv(a, b) if both_integer else floor(_div_rn(a, b))
     if rounding_mode == "trunc":
         assert not both_boolean, "truncdiv operands can not be boolean at the same time"
         return truncdiv(a, b) if both_integer else trunc(div(a, b))
@@ -7568,6 +7667,9 @@ def resize(x, size, *, memory_format=None):
     dtype = x.get_dtype()
     device = x.get_device_or_error()
 
+    if isinstance(x.data, ir.BaseView):
+        x.data = x.data.unwrap_view()
+
     if (
         torch.are_deterministic_algorithms_enabled()
         and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
@@ -7585,20 +7687,15 @@ def resize(x, size, *, memory_format=None):
     if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
         return full(size, uninitialized_val, dtype=dtype, device=device)
 
-    # aten::resize (non-inplace) = clone + resize_. Clone preserves strides
-    # for non-overlapping tensors (storage order is maintained), but for
-    # overlapping tensors (e.g. stride 0 from as_strided/expand), clone
-    # materializes logical elements into contiguous storage.
-    strides = x.maybe_get_stride()
-    has_overlapping = strides is not None and any(
-        V.graph.sizevars.statically_known_equals(s, 0) for s in strides
+    x_flat = as_strided(
+        x,
+        [
+            old_numel,
+        ],
+        [
+            1,
+        ],
     )
-    if has_overlapping:
-        x = clone(x)
-    elif isinstance(x.data, ir.BaseView):
-        x.data = x.data.unwrap_view()
-
-    x_flat = as_strided(x, [old_numel], [1])
     flat_loader = x_flat.make_loader()
     out_stride = ir.FlexibleLayout.stride_ordered_for_memory_format(size, memory_format)
     out_indexer = ir.FixedLayout(device, dtype, size, out_stride).make_indexer()
@@ -7888,7 +7985,7 @@ def with_effects(token, op, *args, **kwargs):
     else:
 
         def wrap_tensors(x):
-            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+            return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
 
         result = pytree.tree_map(
             wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
@@ -8048,6 +8145,43 @@ def cvt_e8m0_rceil_lowering(inp):
     )
     result = make_pointwise(fn)(inp)
     return to_dtype(result, torch.uint8)
+
+
+@register_lowering(
+    torch._higher_order_ops.inline_asm_elementwise, type_promotion_kind=None
+)
+def lower_inline_asm_elementwise(
+    *inputs, asm_str, constraints, dtype, is_pure=True, pack=1
+):
+    inputs = broadcast_tensors(*inputs)
+
+    input_dtypes = tuple(inp.get_dtype() for inp in inputs)
+    loaders = [inp.make_loader() for inp in inputs]
+
+    def inner_fn(idx):
+        vals = tuple(loader(idx) for loader in loaders)
+        result = ops.inline_asm_elementwise(
+            *vals,
+            asm=asm_str,
+            constraints=constraints,
+            dtype=dtype,
+            is_pure=is_pure,
+            pack=pack,
+            input_dtypes=input_dtypes,
+        )
+        # Inductor computes in fp32 for bf16/fp16. Upcast so fused downstream
+        # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
+        # handles the final downcast on store.
+        if dtype in (torch.float16, torch.bfloat16):
+            result = ops.to_dtype(result, torch.float32)
+        return result
+
+    return ir.Pointwise.create(
+        device=inputs[0].get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=list(inputs[0].get_size()),
+    )
 
 
 # populate lowerings defined in kernel/*

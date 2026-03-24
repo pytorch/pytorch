@@ -944,7 +944,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   }
   mean = mean.view(stat_shape);
   rstd = rstd.view(stat_shape);
-  return std::make_tuple(out, mean, rstd);
+  return std::make_tuple(std::move(out), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_out,

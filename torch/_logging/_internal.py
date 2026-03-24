@@ -1200,6 +1200,7 @@ class LazyTraceHandler(logging.StreamHandler):
         logging.Handler.__init__(self)
         self.stream = None
         self._builtin_open = open
+        self._pending_log_version = False
 
     # cloned from FileHandler in cpython
     def close(self) -> None:
@@ -1271,12 +1272,36 @@ class LazyTraceHandler(logging.StreamHandler):
                 # TORCH_LOGS="inductor" is enabled
                 inductor_log = logging.getLogger("torch._inductor")
                 inductor_log.info("tlparse raw data: %s", self.stream.name)
+                self._pending_log_version = True
             else:
                 # We go poof, remove and no-op
                 trace_log.removeHandler(self)
                 return
         if self.stream:
             super().emit(record)
+            if self._pending_log_version:
+                self._pending_log_version = False
+                _log_torch_version()
+
+
+def _log_torch_version() -> None:
+    import torch
+    from torch._environment import is_fbcode
+    from torch._utils_internal import get_torch_source_version
+
+    version_info: dict[str, object] = {
+        "pytorch_version": torch.__version__,
+        "commit": get_torch_source_version(),
+        "oss": not is_fbcode(),
+    }
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {"name": "torch_version", "encoding": "json"},
+        payload_fn=lambda: version_info,
+        suppress_context=True,
+        expect_trace_id=False,
+    )
 
 
 @functools.cache

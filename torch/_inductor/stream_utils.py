@@ -7,8 +7,6 @@ import functools
 from torch._inductor.stream_constants import (
     DEFAULT_STREAM,
     DEFAULT_STREAM_IDX,
-    ENTRANCE_EVENT,
-    EVENT_NAME_TEMPLATE,
     STREAM_NAME_TEMPLATE,
 )
 
@@ -16,8 +14,6 @@ from torch._inductor.stream_constants import (
 __all__ = [
     "DEFAULT_STREAM",
     "DEFAULT_STREAM_IDX",
-    "ENTRANCE_EVENT",
-    "EVENT_NAME_TEMPLATE",
     "STREAM_NAME_TEMPLATE",
     "get_stream_name",
 ]

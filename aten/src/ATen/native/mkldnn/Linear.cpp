@@ -203,7 +203,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   if (output_mask[1] || output_mask[2]) {
     std::tie(grad_weight, grad_bias) = at::mkldnn_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
-  return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
+  return std::tuple<Tensor, Tensor, Tensor>{std::move(grad_input), std::move(grad_weight), std::move(grad_bias)};
 }
 
 Tensor mkldnn_linear_pointwise(

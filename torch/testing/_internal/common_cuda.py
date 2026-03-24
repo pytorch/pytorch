@@ -5,7 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
 import inspect
 import contextlib
 import os
@@ -76,13 +76,9 @@ def evaluate_platform_supports_flash_attention():
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
+    if TEST_XPU:
+        return True
     return False
-
-def evaluate_platform_supports_ck_sdpa():
-    if TEST_WITH_ROCM:
-        return torch.backends.cuda.is_ck_sdpa_available()
-    else:
-        return False
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
@@ -91,6 +87,8 @@ def evaluate_platform_supports_efficient_attention():
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
+        return True
+    if TEST_XPU:
         return True
     return False
 
@@ -123,6 +121,8 @@ def evaluate_platform_supports_bf16():
         return SM80OrLater
     elif torch.version.hip:
         return True
+    elif TEST_XPU:
+        return True
     return False
 
 
@@ -146,8 +146,6 @@ PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_support
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
-PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
-
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
@@ -161,6 +159,8 @@ def evaluate_platform_supports_fp8():
                     return True
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
+    if torch.xpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_fp8_grouped_gemm():

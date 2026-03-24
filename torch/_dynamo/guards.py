@@ -1168,9 +1168,7 @@ class GuardBuilder(GuardBuilderBase):
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
         self.scope: dict[str, dict[str, object]] = {"L": local_scope, "G": global_scope}
-        self.src_get_value_cache: weakref.WeakKeyDictionary[Source, object] = (
-            weakref.WeakKeyDictionary()
-        )
+        self.src_get_value_cache: dict[Source, object] = {}
         self.runtime_global_scope = runtime_global_scope or global_scope
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
@@ -2438,7 +2436,20 @@ class GuardBuilder(GuardBuilderBase):
     )
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
         value = self.get(guard)
-        original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
+
+        # Deepcopying SymInts result in an error from copying FakeTensors.
+        # Instead we just always assume the metadata is the same.
+        class _AnyCompare:
+            def __eq__(self, other: object) -> bool:
+                return True
+
+            def __ne__(self, other: object) -> bool:
+                return False
+
+        metadata = value.__tensor_flatten__()[1]
+        original_metadata = deepcopy(
+            pytree.tree_map_only(torch.SymInt, lambda _: _AnyCompare(), metadata)
+        )
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
             cls = type(value)
@@ -3432,10 +3443,13 @@ class GuardBuilder(GuardBuilderBase):
                         guard.user_stack,
                     )
 
-                # Guard on shape_ids when tensor has unbacked indices.
-                # shape_id is only set via mark_unbacked, which sets _dynamo_unbacked_indices.
-                # Empty dict is treated the same as not having the attribute.
-                if shape_ids := getattr(value, "_dynamo_shape_ids", None):
+                # Guard on shape_ids for tensors marked with mark_unbacked().
+                # - If the runtime tensor has _dynamo_unbacked_indices → check shape_ids match
+                # - If the runtime tensor doesn't have _dynamo_unbacked_indices → pass
+                # We must install guards even when shape_ids is None to detect runtime
+                # tensors that have the attribute when compile-time didn't.
+                if hasattr(value, "_dynamo_unbacked_indices"):
+                    shape_ids = getattr(value, "_dynamo_shape_ids", None)
                     code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
                     code.append(code_part)
                     self.get_guard_manager(guard).add_lambda_guard(
@@ -3447,7 +3461,27 @@ class GuardBuilder(GuardBuilderBase):
                         get_verbose_code_parts(code_part, guard),
                         guard.user_stack,
                     )
-                    # TODO we dont have guards on _dynamo_unbacked_indices like those of _dynamo_dynamic_indices this seems wrong!!
+
+                # Guard on unbacked_bounds for tensors marked with mark_unbacked().
+                # - If the runtime tensor has _dynamo_unbacked_indices → check bounds match
+                # - If the runtime tensor doesn't have _dynamo_unbacked_indices → pass
+                # We must install guards even when unbacked_bounds is None to detect runtime
+                # tensors that have the attribute when compile-time didn't.
+                if hasattr(value, "_dynamo_unbacked_indices"):
+                    unbacked_bounds = getattr(value, "_dynamo_unbacked_bounds", None)
+                    code_part = f"((getattr({tensor_name}, '_dynamo_unbacked_bounds', None) == {unbacked_bounds!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                    code.append(code_part)
+                    self.get_guard_manager(guard).add_lambda_guard(
+                        lambda x, expected=unbacked_bounds: (
+                            getattr(x, "_dynamo_unbacked_bounds", None) == expected
+                            if hasattr(x, "_dynamo_unbacked_indices")
+                            else True
+                        ),
+                        get_verbose_code_parts(code_part, guard),
+                        guard.user_stack,
+                    )
+
+                # TODO we dont have guards on _dynamo_unbacked_indices like those of _dynamo_dynamic_indices this seems wrong!!
 
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
@@ -4184,38 +4218,43 @@ class CheckFunctionManager:
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
 
-        if guard_filter_fn:
-            # If we're filtering guards, we need to build it an extra time first
-            # because filtering depends on the builder/guard_manager results
+        # Disable __torch_function__ dispatch during guard construction so
+        # modes with mutable state aren't triggered.  We exit the context
+        # before the guard sanity check so GlobalStateGuard.check() sees
+        # the true runtime state.
+        with torch._C.DisableTorchFunction():
+            if guard_filter_fn:
+                # If we're filtering guards, we need to build it an extra time first
+                # because filtering depends on the builder/guard_manager results
+                builder, guard_manager = self.build_guards(
+                    sorted_guards,
+                    existing_diff_guard_sources,
+                    f_code,
+                    output_graph,
+                    False,
+                )
+
+                filter_results = guard_filter_fn(
+                    [make_guard_filter_entry(guard, builder) for guard in sorted_guards]
+                )
+                assert len(filter_results) == len(sorted_guards)
+                assert all(type(x) is bool for x in filter_results)
+                sorted_guards = [
+                    guard for i, guard in enumerate(sorted_guards) if filter_results[i]
+                ]
+
+            # Redo the guards because filtering relies on the results from the last guard builder.
             builder, guard_manager = self.build_guards(
                 sorted_guards,
                 existing_diff_guard_sources,
                 f_code,
                 output_graph,
-                False,
+                save_guards,
+                guard_filter_fn=guard_filter_fn,
             )
 
-            filter_results = guard_filter_fn(
-                [make_guard_filter_entry(guard, builder) for guard in sorted_guards]
-            )
-            assert len(filter_results) == len(sorted_guards)
-            assert all(type(x) is bool for x in filter_results)
-            sorted_guards = [
-                guard for i, guard in enumerate(sorted_guards) if filter_results[i]
-            ]
-
-        # Redo the guards because filtering relies on the results from the last guard builder.
-        builder, guard_manager = self.build_guards(
-            sorted_guards,
-            existing_diff_guard_sources,
-            f_code,
-            output_graph,
-            save_guards,
-            guard_filter_fn=guard_filter_fn,
-        )
-
-        self.guard_manager = guard_manager
-        self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
+            self.guard_manager = guard_manager
+            self.compile_check_fn(builder, sorted_guards, guard_fail_fn)
 
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and guard_manager and is used to
@@ -5199,10 +5238,14 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
     """
     from torch._guards import TracingContext
 
+    guards_context = TracingContext.get().guards_context
+    if guards_context.skip_install:
+        return
+
     collect_debug_stack = guards_log.isEnabledFor(
         logging.DEBUG
     ) or verbose_guards_log.isEnabledFor(logging.DEBUG)
-    add = TracingContext.get().guards_context.dynamo_guards.add
+    add = guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
         if is_from_skip_guard_source(guard.originating_source):
