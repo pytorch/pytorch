@@ -966,6 +966,31 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 8)
         self.assertEqual(cnts.op_count, 10)
 
+    def test_disable_nested_graph_breaks_context_manager(self):
+        """disable_nested_graph_breaks as a context manager."""
+        global f1, f2, f3
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 2
+
+        def f2(x):
+            return f1(x + 4) + 8
+
+        def f3(x):
+            with torch._dynamo.disable_nested_graph_breaks():
+                x = f2(x + 16) + 32
+            return x + 64
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f3)
+        x = torch.zeros(3)
+        res = f3(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 6)
+
     def test_nested_store_attr_graph_break(self):
         class Foo:
             def __setattr__(self, name, value):
