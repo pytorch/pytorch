@@ -8002,19 +8002,19 @@ class TestMemPool(TestCase):
         with torch.cuda.use_mem_pool(pool1):
             t1 = torch.randn(NELEMS, device="cuda", dtype=torch.float32)
         reserved1 = torch.cuda.private_pool_memory_reserved()
-        self.assertGreaterEqual(reserved1, TENSOR_SIZE)
+        self.assertEqual(reserved1, TENSOR_SIZE)
 
         with torch.cuda.use_mem_pool(pool2):
             t2 = torch.randn(NELEMS, device="cuda", dtype=torch.float32)
         reserved_both = torch.cuda.private_pool_memory_reserved()
-        self.assertGreaterEqual(reserved_both, 2 * TENSOR_SIZE)
+        self.assertEqual(reserved_both, 2 * TENSOR_SIZE)
 
         # Deleting one pool reduces the total but doesn't zero it.
         del t1
         del pool1
         torch.cuda.empty_cache()
         reserved_after_pool1_delete = torch.cuda.private_pool_memory_reserved()
-        self.assertGreaterEqual(reserved_after_pool1_delete, TENSOR_SIZE)
+        self.assertEqual(reserved_after_pool1_delete, TENSOR_SIZE)
         self.assertLess(reserved_after_pool1_delete, reserved_both)
 
         # Deleting the second pool zeros it.
