@@ -4267,6 +4267,8 @@ class SourcelessBuilder:
         elif isinstance(value, (type, abc.ABCMeta)):
             if isinstance(value, type) and issubclass(value, enum.Enum):
                 return UserDefinedEnumClassVariable(value)
+            elif issubclass(type(value), type) and issubclass(value, BaseException):
+                return UserDefinedExceptionClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)

@@ -12182,6 +12182,35 @@ def ___make_guard_fn():
         expected = fn(*inps)
         self.assertEqual(actual, expected)
 
+    def test_frozen_dataclass_in_compile(self):
+        from torch.utils._pytree import MappingKey, SequenceKey
+
+        def fn(x):
+            path = (MappingKey("a"), SequenceKey(0))
+            msg = f"path={path}"
+            return x * 2, msg
+
+        x = torch.randn(4, 4)
+        eager_result = fn(x)
+        compiled_result = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(eager_result[0], compiled_result[0])
+        self.assertEqual(eager_result[1], compiled_result[1])
+
+    def test_frozen_dataclass_treespec_method_and_fields(self):
+        from torch.utils._pytree import tree_flatten
+
+        def fn(x):
+            d = {"a": x, "b": [x * 2, x * 3]}
+            flat, spec = tree_flatten(d)
+            is_leaf = spec.is_leaf()
+            return sum(flat), spec.num_leaves, spec.num_nodes, is_leaf
+
+        x = torch.randn(4)
+        eager_result = fn(x)
+        compiled_result = torch.compile(fn, fullgraph=True)(x)
+        for i in range(4):
+            self.assertEqual(eager_result[i], compiled_result[i])
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
