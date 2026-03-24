@@ -154,6 +154,8 @@ class _ToTorchTensor(torch.autograd.Function):
                 grad_output,
                 grad_spec.device_mesh,
                 grad_spec.placements,
+                shape=grad_spec.shape,
+                stride=grad_spec.stride,
             ),
             None,
         )
