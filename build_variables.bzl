@@ -791,6 +791,13 @@ libtorch_nvshmem_sources = [
     "torch/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cpp",
 ]
 
+libtorch_nixl_sources = [
+    "torch/csrc/distributed/c10d/cuda/utils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/NIXLSymmetricMemory.cpp",
+    "torch/csrc/distributed/c10d/symm_mem/NIXLSymmetricMemoryOps.cu",
+]
+
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [

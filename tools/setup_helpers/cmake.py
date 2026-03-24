@@ -359,6 +359,19 @@ class CMake:
         if os.path.exists(nvshmem_py_dir):
             build_options["NVSHMEM_PY_DIR"] = nvshmem_py_dir
 
+        # NIXL
+        # The pip wheel ships shared libs but not C++ headers. Users must
+        # set NIXL_HOME to a prefix with both include/ and lib/, or point
+        # NIXL_INCLUDE_DIR at the headers separately.
+        for candidate in [
+            py_lib_path + "/.nixl.mesonpy.libs",
+            py_lib_path + "/.nixl-cu12.mesonpy.libs",
+            py_lib_path + "/.nixl-cu13.mesonpy.libs",
+        ]:
+            if os.path.exists(candidate):
+                build_options["NIXL_PY_DIR"] = candidate
+                break
+
         # Options starting with CMAKE_
         cmake__options = {
             "CMAKE_INSTALL_PREFIX": install_dir,

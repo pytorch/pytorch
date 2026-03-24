@@ -1063,6 +1063,51 @@ elseif(USE_CUDA)
     message(STATUS "NVSHMEM not found, not building with NVSHMEM support.")
   endif()
 
+  # Compile with NIXL
+  if(USE_NIXL)
+    message(STATUS "NIXL_HOME set to: '$ENV{NIXL_HOME}'")
+    message(STATUS "NIXL pip dir: '${NIXL_PY_DIR}'")
+    # Search order: NIXL_HOME env var, then NIXL_PY_DIR (pip), then system paths
+    find_library(NIXL_LIB
+      NAMES nixl
+      HINTS $ENV{NIXL_HOME} ${NIXL_PY_DIR}
+      PATH_SUFFIXES lib lib64 lib/x86_64-linux-gnu lib/aarch64-linux-gnu
+      DOC "The location of NIXL library.")
+    find_path(NIXL_INCLUDE_DIR
+      NAMES nixl.h
+      HINTS $ENV{NIXL_HOME}/include ${NIXL_PY_DIR}/include
+      DOC "The location of NIXL headers.")
+    message(STATUS "NIXL_LIB: '${NIXL_LIB}'")
+    message(STATUS "NIXL_INCLUDE_DIR: '${NIXL_INCLUDE_DIR}'")
+  endif()
+
+  if(NIXL_LIB AND NIXL_INCLUDE_DIR)
+    message(STATUS "NIXL found, building with NIXL support")
+    include_directories(${NIXL_INCLUDE_DIR})
+
+    add_library(torch_nixl SHARED
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/cuda/utils.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NIXLSymmetricMemory.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NIXLSymmetricMemoryOps.cu"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
+    )
+    get_filename_component(NIXL_LIB_DIR "${NIXL_LIB}" DIRECTORY)
+    target_link_libraries(torch_nixl PRIVATE torch_cpu torch::cudart ${NIXL_LIB})
+    target_link_directories(torch_nixl PRIVATE ${NIXL_LIB_DIR})
+    target_include_directories(torch_nixl PRIVATE ${NIXL_INCLUDE_DIR})
+    set_target_properties(torch_nixl PROPERTIES
+        BUILD_RPATH "${NIXL_LIB_DIR}"
+        INSTALL_RPATH "${NIXL_LIB_DIR}")
+    target_compile_definitions(torch_cuda PUBLIC USE_NIXL)
+    target_compile_definitions(torch_nixl PUBLIC USE_NIXL)
+    target_link_libraries(torch_cuda PRIVATE torch_nixl)
+    install(TARGETS torch_nixl EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  else()
+    if(USE_NIXL)
+      message(STATUS "NIXL not found, not building with NIXL support.")
+    endif()
+  endif()
+
   if(USE_UCC)
     target_link_libraries(torch_cuda PRIVATE __caffe2_ucc)
     target_compile_definitions(torch_cuda PRIVATE USE_UCC)

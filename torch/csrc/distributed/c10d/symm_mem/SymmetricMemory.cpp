@@ -551,6 +551,10 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
   m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
   m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
+  m.def("nixl_put(Tensor(a!) tensor, int peer) -> ()");
+  m.def("nixl_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def("nixl_wait_for_signal(Tensor sigpad, int signal) -> ()");
+  m.def("nixl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
   m.def(
       "nccl_reduce_scatter_offset(Tensor input, Tensor(a!)[] out, str group_name, int dim, int[]? offsets=None, int[]? dst_ranks=None, str red_op='sum') -> ()");
   m.def(
