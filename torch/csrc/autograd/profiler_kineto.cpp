@@ -1078,7 +1078,6 @@ int64_t KinetoEvent::privateuse1ElapsedUs() const {
   }
   return (int64_t)torch::profiler::impl::privateuse1Stubs()->elapsed(
       &privateuse1_event_start, &privateuse1_event_end);
-  return -1;
 }
 
 void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {

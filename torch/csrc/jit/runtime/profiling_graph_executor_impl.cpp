@@ -111,8 +111,9 @@ static FusionStrategy getInitialStrategy() {
 // TODO remove ifdef
 #ifdef FBCODE_CAFFE2
   return {{FusionBehavior::STATIC, 20}};
-#endif
+#else
   return mixed;
+#endif
 }
 
 // defer initial value so that we can load in gflags

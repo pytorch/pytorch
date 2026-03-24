@@ -708,21 +708,10 @@ namespace c10::detail {
   TORCH_CHECK(cond, "invalid argument ", argN, ": ", __VA_ARGS__)
 
 #ifndef FATAL_IF
-#ifdef C10_USE_GLOG
-#define FATAL_IF(condition)                                           \
-  condition ? (void)0                                                 \
-            : ::c10::LoggerVoidify() &                                \
-          ::c10::MessageLogger(                                       \
-              ::c10::SourceLocation::current(), ::google::GLOG_FATAL) \
-              .stream()
-#else
-#define FATAL_IF(condition)                                        \
-  condition ? (void)0                                              \
-            : ::c10::LoggerVoidify() &                             \
-          ::c10::MessageLogger(                                    \
-              ::c10::SourceLocation::current(), ::c10::GLOG_FATAL) \
-              .stream()
-#endif
+#define FATAL_IF(condition)            \
+  condition ? (void)0                  \
+            : ::c10::LoggerVoidify() & \
+          ::c10::FatalMessageLogger(::c10::SourceLocation::current()).stream()
 #endif
 
 #ifndef NON_FATAL_IF

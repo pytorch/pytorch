@@ -10,6 +10,8 @@ namespace c10 {
 // MessageLogger that throws exceptions instead of aborting (glog version)
 // or logs and may abort (non-glog version).
 class C10_API MessageLogger {
+  friend class FatalMessageLogger;
+
  public:
   MessageLogger(
       SourceLocation source_location,
@@ -23,7 +25,7 @@ class C10_API MessageLogger {
  private:
   // When there is a fatal log, and fatal == true, we abort
   // otherwise, we throw.
-  void DealWithFatal();
+  [[noreturn]] void DealWithFatal();
 
 #if defined(ANDROID) && !defined(C10_USE_GLOG)
   const char* tag_{"native"};
@@ -32,6 +34,21 @@ class C10_API MessageLogger {
   int severity_;
   bool exit_on_fatal_;
   SourceLocation source_location_;
+};
+
+// Separate logger class for FATAL severity with a [[noreturn]] destructor,
+// so the compiler knows code after LOG(FATAL) is unreachable.
+class C10_API FatalMessageLogger {
+ public:
+  FatalMessageLogger(SourceLocation source_location, bool exit_on_fatal = true);
+  [[noreturn]] ~FatalMessageLogger() noexcept(false);
+
+  std::stringstream& stream() {
+    return logger_.stream();
+  }
+
+ private:
+  MessageLogger logger_;
 };
 
 // This class is used to explicitly ignore values in the conditional

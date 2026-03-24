@@ -320,6 +320,18 @@ void MessageLogger::DealWithFatal() {
   }
 }
 
+FatalMessageLogger::FatalMessageLogger(
+    SourceLocation source_location,
+    bool exit_on_fatal)
+    : logger_(source_location, ::google::GLOG_FATAL, exit_on_fatal) {}
+
+FatalMessageLogger::~FatalMessageLogger() noexcept(false) {
+  // Prevent ~MessageLogger from also calling DealWithFatal when it runs
+  // during stack unwinding (if we throw) or not at all (if we abort).
+  logger_.severity_ = 0;
+  logger_.DealWithFatal();
+}
+
 } // namespace c10
 
 C10_DEFINE_int(
@@ -537,6 +549,31 @@ void MessageLogger::DealWithFatal() {
   } else {
     throw c10::Error(source_location_, stream_.str());
   }
+}
+
+FatalMessageLogger::FatalMessageLogger(
+    SourceLocation source_location,
+    bool exit_on_fatal)
+    : logger_(source_location, GLOG_FATAL, exit_on_fatal) {}
+
+FatalMessageLogger::~FatalMessageLogger() noexcept(false) {
+  // Output the message ourselves because abort() won't run ~MessageLogger,
+  // and if we throw, we need to prevent ~MessageLogger from re-doing output
+  // and calling DealWithFatal again.
+  if (logger_.severity_ >= FLAGS_caffe2_log_level) {
+    logger_.stream_ << '\n';
+#ifdef ANDROID
+    __android_log_print(
+        ANDROID_LOG_FATAL, logger_.tag_, "%s", logger_.stream_.str().c_str());
+    __android_log_print(ANDROID_LOG_FATAL, logger_.tag_, "terminating.\n");
+#else
+    std::cerr << logger_.stream_.str() << std::flush;
+#endif
+  }
+  // Set severity below log threshold so ~MessageLogger skips output and
+  // does not re-enter DealWithFatal during stack unwinding.
+  logger_.severity_ = FLAGS_caffe2_log_level - 1;
+  logger_.DealWithFatal();
 }
 
 } // namespace c10

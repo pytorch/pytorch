@@ -38,7 +38,6 @@ static inline ExprPtr newBinaryOpOfType(
       return alloc<Rshift>(lhs, rhs);
     default:
       LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
-      return nullptr;
   }
 }
 

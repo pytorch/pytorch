@@ -71,18 +71,25 @@ static_assert(
     "CAFFE2_LOG_THRESHOLD should at most be GLOG_FATAL.");
 // If n is under the compile time caffe log threshold, The _CAFFE_LOG(n)
 // should not generate anything in optimized code.
-#define LOG(n)                                                            \
-  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD)                            \
-  ::c10::MessageLogger(::c10::SourceLocation::current(), ::c10::GLOG_##n) \
-      .stream()
+#define COMPACT_C10_LOG_INFO \
+  ::c10::MessageLogger(::c10::SourceLocation::current(), ::c10::GLOG_INFO)
+#define COMPACT_C10_LOG_WARNING \
+  ::c10::MessageLogger(::c10::SourceLocation::current(), ::c10::GLOG_WARNING)
+#define COMPACT_C10_LOG_ERROR \
+  ::c10::MessageLogger(::c10::SourceLocation::current(), ::c10::GLOG_ERROR)
+#define COMPACT_C10_LOG_FATAL \
+  ::c10::FatalMessageLogger(::c10::SourceLocation::current())
+
+#define LOG(n)                                 \
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
+  COMPACT_C10_LOG_##n.stream()
 #define VLOG(n)                   \
   if (-n >= CAFFE2_LOG_THRESHOLD) \
   ::c10::MessageLogger(::c10::SourceLocation::current(), -n).stream()
 
-#define LOG_IF(n, condition)                                              \
-  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD && (condition))             \
-  ::c10::MessageLogger(::c10::SourceLocation::current(), ::c10::GLOG_##n) \
-      .stream()
+#define LOG_IF(n, condition)                                  \
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD && (condition)) \
+  COMPACT_C10_LOG_##n.stream()
 #define VLOG_IF(n, condition)                    \
   if (-n >= CAFFE2_LOG_THRESHOLD && (condition)) \
   ::c10::MessageLogger(::c10::SourceLocation::current(), -n).stream()
@@ -91,18 +98,29 @@ static_assert(
 
 // Log with source location information override (to be used in generic
 // warning/error handlers implemented as functions, not macros)
-#define LOG_AT_FILE_LINE(n, file, line)                                     \
-  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD)                              \
-  ::c10::MessageLogger(                                                     \
-      ::c10::SourceLocation::current(file, nullptr, line), ::c10::GLOG_##n) \
-      .stream()
+#define COMPACT_C10_LOG_AT_INFO(file, line) \
+  ::c10::MessageLogger(                     \
+      ::c10::SourceLocation::current(file, nullptr, line), ::c10::GLOG_INFO)
+#define COMPACT_C10_LOG_AT_WARNING(file, line)             \
+  ::c10::MessageLogger(                                    \
+      ::c10::SourceLocation::current(file, nullptr, line), \
+      ::c10::GLOG_WARNING)
+#define COMPACT_C10_LOG_AT_ERROR(file, line) \
+  ::c10::MessageLogger(                      \
+      ::c10::SourceLocation::current(file, nullptr, line), ::c10::GLOG_ERROR)
+#define COMPACT_C10_LOG_AT_FATAL(file, line) \
+  ::c10::FatalMessageLogger(::c10::SourceLocation::current(file, nullptr, line))
+
+#define LOG_AT_FILE_LINE(n, file, line)        \
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
+  COMPACT_C10_LOG_AT_##n(file, line).stream()
 // Log only if condition is met.  Otherwise evaluates to void.
-#define FATAL_IF(condition)                                        \
-  condition ? (void)0                                              \
-            : ::c10::LoggerVoidify() &                             \
-          ::c10::MessageLogger(                                    \
-              ::c10::SourceLocation::current(), ::c10::GLOG_FATAL) \
-              .stream()
+#ifndef FATAL_IF
+#define FATAL_IF(condition)            \
+  condition ? (void)0                  \
+            : ::c10::LoggerVoidify() & \
+          ::c10::FatalMessageLogger(::c10::SourceLocation::current()).stream()
+#endif
 
 // Check for a given boolean condition.
 #define CHECK(condition) FATAL_IF(condition) << "Check failed: " #condition " "

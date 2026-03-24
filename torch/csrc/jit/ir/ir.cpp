@@ -1218,7 +1218,6 @@ bool Node::hasSideEffects() const {
       return true;
   }
   TORCH_INTERNAL_ASSERT(false, "Unhandled AliasAnalysisKind case");
-  return false; // silence compiler warning
 }
 
 // Assign this node a topological position, to facilitate fast isBefore() and
