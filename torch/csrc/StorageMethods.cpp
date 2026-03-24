@@ -150,19 +150,19 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* args) {
       "but got ",
       THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
-  void* hint = nullptr;
-  if (nargs == 2) {
-    PyObject* hint_arg = PyTuple_GET_ITEM(args, 1);
-    TORCH_CHECK(
-        THPUtils_checkLong(hint_arg),
-        "resize_ hint_addr expects an int, "
-        "but got ",
-        THPUtils_typename(hint_arg));
-    hint = reinterpret_cast<void*>(THPUtils_unpackLong(hint_arg));
-  }
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCUDA) {
 #ifdef USE_CUDA
+    void* hint = nullptr;
+    if (nargs == 2) {
+      PyObject* hint_arg = PyTuple_GET_ITEM(args, 1);
+      TORCH_CHECK(
+          THPUtils_checkLong(hint_arg),
+          "resize_ hint_addr expects an int, "
+          "but got ",
+          THPUtils_typename(hint_arg));
+      hint = reinterpret_cast<void*>(THPUtils_unpackLong(hint_arg));
+    }
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<size_t>(size_bytes_i),
