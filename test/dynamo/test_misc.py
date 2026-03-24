@@ -1695,9 +1695,10 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def _dynamo_test_method(self):
             return self + 1
 
-        torch.Tensor._dynamo_test_method = _dynamo_test_method
-        try:
-            cnt = torch._dynamo.testing.CompileCounter()
+        with unittest.mock.patch.object(
+            torch.Tensor, "_dynamo_test_method", _dynamo_test_method, create=True
+        ):
+            cnt = CompileCounterWithBackend("eager")
 
             @torch.compile(backend=cnt)
             def fn(x):
@@ -1705,10 +1706,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 return y + 1
 
             result = fn(torch.randn(4))
-            # Method exists on torch.Tensor, so it should be traced (not graph-broken)
             self.assertEqual(cnt.frame_count, 1)
-        finally:
-            del torch.Tensor._dynamo_test_method
+            # Verify _dynamo_test_method appears as a call_method in the FX graph
+            call_method_targets = [
+                n.target
+                for n in cnt.graphs[0].graph.nodes
+                if n.op == "call_method"
+            ]
+            self.assertIn("_dynamo_test_method", call_method_targets)
 
     def test_unknown_tensor_method_graph_break(self):
         # Truly unknown methods raise AttributeError during tracing at
