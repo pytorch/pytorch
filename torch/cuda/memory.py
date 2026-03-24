@@ -586,9 +586,7 @@ def private_pool_memory_reserved(device: "Device" = None) -> int:
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return memory_stats(device=device).get(
-        "private_pool_reserved_bytes.all.current", 0
-    )
+    return memory_stats(device=device).get("private_pool_reserved_bytes.all.current", 0)
 
 
 def max_memory_reserved(device: "Device" = None) -> int:
