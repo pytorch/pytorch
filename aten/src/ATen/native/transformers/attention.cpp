@@ -676,11 +676,11 @@ Tensor _safe_softmax(
 // greater than 0.0 is specified.
 //
 // Args:
-//     query (Tensor): Query tensor; shape (N, ..., L, E)
-//     key (Tensor): Key tensor; shape (N, ..., S, E)
-//     value (Tensor): Value tensor; shape (N, ..., S, E)
+//     query (Tensor): Query tensor; shape (N, ..., Hq, L, E)
+//     key (Tensor): Key tensor; shape (N, ..., H, S, E)
+//     value (Tensor): Value tensor; shape (N, ..., H, S, Ev)
 //     attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
-//         which is (N,..., L, S). Two types of masks are supported.
+//         which is (N,..., Hq, L, S). Two types of masks are supported.
 //         A boolean mask where a value of True indicates that the element *should* take part in attention.
 //         A float mask of the same type as query, key, value that is added to the attention score.
 //     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
@@ -692,14 +692,17 @@ Tensor _safe_softmax(
 //         sparse masks) via tensor subclassing, allowing for a leaner API.
 //
 // Returns a tensor:
-//     output (Tensor): Attention output; shape (N, ..., L, E)
+//     output (Tensor): Attention output; shape (N, ..., Hq, L, Ev)
 //
 // Shape legend:
 //     N: Batch size
 //     ...: Any number of other batch dimensions (optional)
 //     S: Source sequence length
 //     L: Target sequence length
-//     E: Embedding dimension
+//     E: Embedding dimension of the query and key
+//     Ev: Embedding dimension of the value
+//     Hq: Number of heads of query
+//     H: Number of heads of key and value
 Tensor scaled_dot_product_attention(
     const Tensor& query_,
     const Tensor& key,
