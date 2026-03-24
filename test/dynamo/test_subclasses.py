@@ -2285,7 +2285,6 @@ class GraphModule(torch.nn.Module):
                 out_test = compiled_f(view)
                 self.assertEqual(out_ref, out_test)
 
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @parametrize("dynamic", [True, False])
     def test_mark_static_with_subclass_desugaring(self, dynamic):
         from collections.abc import Callable
@@ -2328,7 +2327,6 @@ class GraphModule(torch.nn.Module):
 
         fn(torch.ones(4), x, torch.ones(4))
 
-    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_subclass_parameters_are_static_under_training(self):
         from collections.abc import Callable
         from typing import Any

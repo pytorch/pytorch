@@ -7020,16 +7020,14 @@
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: norm_dtype_out
-    MPS: norm_dtype_out_mps
+    CPU, CUDA, MPS: norm_dtype_out
   tags: reduction
 
 - func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: norm_out
-    MPS: norm_out_mps
+    CPU, CUDA, MPS: norm_out
   tags: reduction
 
 # These four redispatch in their implementation, so OK to be CompositeImplicitAutograd
@@ -10014,8 +10012,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: lerp_Tensor
-    MPS: lerp_Tensor_mps
+    CPU, CUDA, MPS: lerp_Tensor
   tags: pointwise
 
 - func: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
@@ -14525,8 +14522,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_vector_norm_out
-    MPS: linalg_vector_norm_out_mps
+    CPU, CUDA, MPS: linalg_vector_norm_out
   tags: reduction
 
 # Computes sum(|x|^ord) - the "power sum" without the final root.

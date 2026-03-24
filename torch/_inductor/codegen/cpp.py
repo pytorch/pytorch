@@ -3503,7 +3503,7 @@ class CppVecKernel(CppKernel):
         cond = f"{self._get_mask_type(var.dtype)}({cond})"
         if mask:
             if not mask.is_vec:
-                mask = f"{self._get_mask_type(var.dtype)}({mask})"
+                mask = f"{self._get_mask_type(var.dtype)}::from({mask})"
             # We need not check when the mask is False
             cond = f"({cond}) | ~({mask})"
         if self.tail_size:

@@ -104,6 +104,7 @@ HAVE_TEST_SELECTION_TOOLS = True
 TEST_CONFIG = os.getenv("TEST_CONFIG", "")
 BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
+NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
 IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
@@ -1266,9 +1267,9 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", f"--flake-runs={count}"]
     else:
-        # When under the normal mode, retry a failed test 2 more times. -x means stop at the first
-        # failure
-        rerun_options = ["-x", "--reruns=2"]
+        # When under the normal mode, retry a failed test NUM_PYTEST_RERUNS more times.
+        # -x means stop at the first failure. Set PYTORCH_NUM_PYTEST_RERUNS=0 to disable.
+        rerun_options = ["-x", f"--reruns={NUM_PYTEST_RERUNS}"]
 
     pytest_args = [
         "-vv",
