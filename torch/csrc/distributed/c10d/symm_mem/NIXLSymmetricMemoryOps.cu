@@ -92,10 +92,19 @@ static void do_nixl_xfer(nixl_xfer_op_t op,
   nixl_xfer_dlist_t rl(VRAM_SEG); rl.addDesc(nixlBasicDesc(ra, rs, rd));
   nixlXferReqH* req = nullptr;
   auto s = agent.createXferReq(op, ll, rl, rn, req);
-  TORCH_CHECK(s == NIXL_SUCCESS, "NIXL createXferReq failed");
+  TORCH_CHECK(s == NIXL_SUCCESS, "NIXL createXferReq failed, status=",
+      static_cast<int>(s), " remote_agent=", rn,
+      " local=(0x", std::hex, la, ",", std::dec, ls, ",dev", ld, ")",
+      " remote=(0x", std::hex, ra, ",", std::dec, rs, ",dev", rd, ")");
   s = agent.postXferReq(req);
-  TORCH_CHECK(s == NIXL_SUCCESS || s == NIXL_IN_PROG, "NIXL postXferReq failed");
-  while (agent.getXferStatus(req) == NIXL_IN_PROG) std::this_thread::yield();
+  TORCH_CHECK(s == NIXL_SUCCESS || s == NIXL_IN_PROG,
+      "NIXL postXferReq failed, status=", static_cast<int>(s));
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (agent.getXferStatus(req) == NIXL_IN_PROG) {
+    TORCH_CHECK(std::chrono::steady_clock::now() < deadline,
+        "NIXL transfer timed out after 30s");
+    std::this_thread::yield();
+  }
   agent.releaseXferReq(req);
 }
 

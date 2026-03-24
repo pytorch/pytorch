@@ -257,7 +257,18 @@ class NIXLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     allocs_.try_emplace(p, std::make_unique<NIXLAllocation>(p, sz, sz, bs, dev));
     return p;
   }
-  void free(void* p) override { std::lock_guard<std::mutex> lk(mu_); allocs_.erase(p); }
+  void free(void* p) override {
+    std::lock_guard<std::mutex> lk(mu_);
+    allocs_.erase(p);
+    // Evict stale rendezvous cache entries for this pointer so that if
+    // cudaMalloc reuses the same address, we don't return a stale handle.
+    for (auto it = sms_.begin(); it != sms_.end();) {
+      if (std::get<0>(it->first) == p)
+        it = sms_.erase(it);
+      else
+        ++it;
+    }
+  }
   size_t get_alloc_size(void* p) override {
     std::lock_guard<std::mutex> lk(mu_);
     auto i = allocs_.find(p); TORCH_CHECK(i != allocs_.end()); return i->second->buffer_size;

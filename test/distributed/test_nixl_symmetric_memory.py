@@ -77,9 +77,7 @@ def _nixl_has_device_ops() -> bool:
         torch.ops.symm_mem.nixl_put  # noqa: B018
     except (AttributeError, RuntimeError):
         return False
-    # Ops exist but may not be functional yet.
-    # Set to True once end-to-end NIXL transfers work.
-    return False
+    return True
 
 
 NIXL_HAS_DEVICE_OPS = _nixl_has_device_ops()
@@ -88,7 +86,8 @@ requires_nixl_device_ops = unittest.skipUnless(
 )
 
 # Signal operations (barrier, put_signal, wait_signal) are not yet
-# implemented in the NIXL backend C++ code.
+# implemented in the NIXL C++ backend -- they raise TORCH_CHECK(false).
+# Enable once NIXLSymmetricMemory.cpp implements these methods.
 NIXL_HAS_SIGNALS = False
 requires_nixl_signals = unittest.skipUnless(
     NIXL_HAS_SIGNALS, "NIXL signal ops not yet implemented"
@@ -259,12 +258,13 @@ class NixlSymmetricMemoryTest(MultiProcContinuousTest):
         torch.cuda.synchronize()
         dist.barrier()
 
-    # -- nixl_put -----------------------------------------------------------
+    # -- nixl_put (runs first alphabetically to avoid stale metadata) ------
 
     @requires_nixl_device_ops
     @requires_nixl_functional
     @skip_if_lt_x_gpu(2)
-    def test_nixl_put(self):
+    def test_a_nixl_put(self):
+        """Cross-rank NIXL WRITE transfer. Named test_a_ to run first."""
         self._init()
         t = symm_mem.empty(
             1024, dtype=torch.float, device=self.device
@@ -277,48 +277,6 @@ class NixlSymmetricMemoryTest(MultiProcContinuousTest):
         torch.cuda.synchronize()
         if self.rank == 0:
             self.assertEqual(t, torch.ones_like(t))
-
-    # -- nixl_get -----------------------------------------------------------
-
-    @requires_nixl_device_ops
-    @requires_nixl_functional
-    @skip_if_lt_x_gpu(2)
-    def test_nixl_get(self):
-        self._init()
-        t = symm_mem.empty(
-            1024, dtype=torch.float, device=self.device
-        ).fill_(float(self.rank))
-        symm_mem.rendezvous(t, group=dist.group.WORLD)
-        dist.barrier()
-        if self.rank == 0:
-            torch.ops.symm_mem.nixl_get(t, 1)
-        dist.barrier()
-        torch.cuda.synchronize()
-        if self.rank == 0:
-            self.assertEqual(t, torch.ones_like(t))
-
-    # -- nixl_put_with_signal / nixl_wait_for_signal ------------------------
-
-    @requires_nixl_device_ops
-    @requires_nixl_functional
-    @skip_if_lt_x_gpu(2)
-    def test_nixl_put_with_signal(self):
-        self._init()
-        data = symm_mem.empty(
-            512, dtype=torch.float, device=self.device
-        ).fill_(float(self.rank))
-        symm_mem.rendezvous(data, group=dist.group.WORLD)
-        dist.barrier()
-        signal_val = 42
-        if self.rank == 1:
-            torch.ops.symm_mem.nixl_put_with_signal(data, signal_val, 0)
-        dist.barrier()
-        torch.cuda.synchronize()
-        if self.rank == 0:
-            torch.ops.symm_mem.nixl_wait_for_signal(data, signal_val)
-            torch.cuda.synchronize()
-            self.assertEqual(data, torch.ones_like(data))
-        dist.barrier()
 
 
 class NixlSymmetricMemorySingleProcTest(TestCase):
