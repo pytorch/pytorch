@@ -352,7 +352,7 @@ class TestLRScheduler(TestCase):
 
     @parametrize("step_size", [0, -1])
     def test_step_lr_step_size_non_positive(self, step_size):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "step_size must be a positive integer"):
             StepLR(self.opt, step_size=step_size)
 
     def test_get_last_lr_step_lr(self):
@@ -542,7 +542,7 @@ class TestLRScheduler(TestCase):
 
     @parametrize("T_max", [0, -1])
     def test_cos_anneal_lr_T_max_non_positive(self, T_max):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "T_max must be a positive integer"):
             CosineAnnealingLR(self.opt, T_max=T_max)
 
     def test_closed_form_step_lr(self):
@@ -1719,7 +1719,9 @@ class TestLRScheduler(TestCase):
     def test_cycle_lr_step_size_up_non_positive(self, step_size_up):
         base_lr = 1
         max_lr = 5
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(
+            ValueError, "step_size_up must be a positive integer"
+        ):
             CyclicLR(
                 self.opt, base_lr=base_lr, max_lr=max_lr, step_size_up=step_size_up
             )
@@ -1864,13 +1866,17 @@ class TestLRScheduler(TestCase):
 
     @parametrize("div_factor", [0, -1])
     def test_onecycle_lr_div_factor_non_positive(self, div_factor):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "div_factor must be a positive float"):
             OneCycleLR(self.opt, max_lr=1e-3, total_steps=10, div_factor=div_factor)
 
     @parametrize("final_div_factor", [0, -1])
     def test_onecycle_lr_final_div_factor_non_positive(self, final_div_factor):
-        with self.assertRaises(ValueError):
-            OneCycleLR(self.opt, max_lr=1e-3, total_steps=10, final_div_factor=final_div_factor)
+        with self.assertRaisesRegex(
+            ValueError, "final_div_factor must be a positive float"
+        ):
+            OneCycleLR(
+                self.opt, max_lr=1e-3, total_steps=10, final_div_factor=final_div_factor
+            )
 
     def test_cycle_lr_with_adam(self):
         old_opt = self.opt
