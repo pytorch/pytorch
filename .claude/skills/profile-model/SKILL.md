@@ -74,93 +74,286 @@ After traces are generated, proceed to [Analyze Traces](#workflow-b-analyze-exis
 
 ## Workflow B: Analyze Existing Traces
 
-### Step 1: Load the Trace
+### Step 1: Get Trace Path
 
 Ask the user for the trace file path. Traces are typically:
 - Single file: `/path/to/trace.json` or `/path/to/trace.json.gz`
 - Directory (multi-rank): `/path/to/traces/` containing `rank0.json`, `rank1.json`, etc.
 
-### Step 2: Quick Analysis (No Dependencies)
+### Step 2: Load Trace as DataFrame
 
-**Always start here.** This works with just Python standard libraries:
+Load the trace into a pandas DataFrame for flexible querying. **Ask the user first:**
+
+> "Would you like me to cache this trace as Parquet for faster future loads?
+> This saves to `/tmp/trace_cache/` and makes subsequent loads faster.
+> (Recommended for large traces or if you plan to ask follow-up questions)"
 
 ```python
+import pandas as pd
 import json
 import gzip
-from collections import defaultdict
+import os
 
-def load_trace(path: str) -> dict:
-    """Load a trace file (handles .json and .json.gz)"""
+def load_trace_as_dataframe(path: str) -> pd.DataFrame:
+    """
+    Load a trace file into a pandas DataFrame.
+
+    Columns:
+    - name, cat, ph, ts, dur, pid, tid (standard trace fields)
+    - args_* columns (flattened from args dict)
+    """
     if path.endswith('.gz'):
         with gzip.open(path, 'rt') as f:
-            return json.load(f)
+            trace = json.load(f)
     else:
         with open(path, 'r') as f:
-            return json.load(f)
+            trace = json.load(f)
 
-def analyze_trace(trace: dict) -> dict:
-    """Basic trace analysis without external dependencies"""
     events = trace.get("traceEvents", [])
 
-    # Categorize events
-    kernel_times = defaultdict(lambda: {"total_dur": 0, "count": 0})
-    cpu_op_times = defaultdict(lambda: {"total_dur": 0, "count": 0})
-    memory_events = []
-    comm_events = []
+    records = []
+    for e in events:
+        record = {
+            "name": e.get("name"),
+            "cat": e.get("cat"),
+            "ph": e.get("ph"),
+            "ts": e.get("ts"),
+            "dur": e.get("dur"),
+            "pid": e.get("pid"),
+            "tid": e.get("tid"),
+            "id": e.get("id"),
+        }
 
-    for event in events:
-        if "dur" not in event or event.get("ph") != "X":
-            continue
+        # Flatten args dict into separate columns
+        args = e.get("args", {})
+        for key, value in args.items():
+            if isinstance(value, (list, dict)):
+                value = str(value)
+            record[f"args_{key}"] = value
 
-        name = event.get("name", "unknown")
-        cat = event.get("cat", "")
-        dur = event["dur"]  # microseconds
+        records.append(record)
 
-        if cat == "kernel":
-            kernel_times[name]["total_dur"] += dur
-            kernel_times[name]["count"] += 1
-        elif cat == "cpu_op":
-            cpu_op_times[name]["total_dur"] += dur
-            cpu_op_times[name]["count"] += 1
-        elif "memcpy" in cat.lower() or "memset" in cat.lower():
-            memory_events.append(event)
-        elif "nccl" in name.lower() or "collective" in cat.lower():
-            comm_events.append(event)
+    df = pd.DataFrame(records)
+    df["ts"] = pd.to_numeric(df["ts"], errors="coerce")
+    df["dur"] = pd.to_numeric(df["dur"], errors="coerce")
 
-    return {
-        "kernel_times": dict(kernel_times),
-        "cpu_op_times": dict(cpu_op_times),
-        "memory_events": memory_events,
-        "comm_events": comm_events,
-        "total_events": len(events),
-    }
+    return df
 
-# Load and analyze
-trace = load_trace("/path/to/trace.json.gz")
-results = analyze_trace(trace)
 
-# Top 10 GPU kernels by time
-kernels = sorted(
-    results["kernel_times"].items(),
-    key=lambda x: -x[1]["total_dur"]
-)[:10]
+def load_trace_with_cache(path: str, use_cache: bool = True) -> pd.DataFrame:
+    """
+    Load trace with optional Parquet caching for faster subsequent loads.
 
-total_kernel_time = sum(k[1]["total_dur"] for k in results["kernel_times"].items())
+    Parquet loading is faster than JSON parsing.
+
+    Note: Trace args columns often have mixed types (int, str, None, etc.).
+    This function handles mixed types gracefully when saving to Parquet.
+    """
+    cache_dir = "/tmp/trace_cache"
+    basename = os.path.basename(path).replace(".json.gz", "").replace(".json", "")
+    cache_path = f"{cache_dir}/{basename}.parquet"
+
+    # Check for existing cache
+    if use_cache and os.path.exists(cache_path):
+        cache_mtime = os.path.getmtime(cache_path)
+        source_mtime = os.path.getmtime(path)
+        if cache_mtime > source_mtime:
+            print(f"✓ Loading from cache: {cache_path}")
+            return pd.read_parquet(cache_path)
+
+    # Load from JSON
+    print(f"Parsing trace: {path}")
+    file_size_mb = os.path.getsize(path) / (1024 * 1024)
+    if file_size_mb > 100:
+        print(f"  Large file ({file_size_mb:.0f}MB) - this may take a moment...")
+
+    df = load_trace_as_dataframe(path)
+    print(f"  Loaded {len(df):,} events")
+
+    # Save to cache if requested
+    if use_cache:
+        os.makedirs(cache_dir, exist_ok=True)
+
+        # Handle mixed types in args_* columns before saving to Parquet
+        # Parquet requires homogeneous types per column
+        df_to_save = df.copy()
+        for col in df_to_save.columns:
+            if col.startswith("args_"):
+                # Check if column has mixed types
+                non_null = df_to_save[col].dropna()
+                if len(non_null) > 0:
+                    types = non_null.apply(type).unique()
+                    if len(types) > 1:
+                        # Mixed types detected - convert entire column to string
+                        df_to_save[col] = df_to_save[col].astype(str)
+                        # Replace 'nan' strings back to None for cleaner data
+                        df_to_save[col] = df_to_save[col].replace({'nan': None, 'None': None})
+
+        try:
+            df_to_save.to_parquet(cache_path)
+            print(f"✓ Cached to: {cache_path}")
+            print(f"  (Future loads will be faster)")
+        except Exception as e:
+            # If Parquet save still fails, fall back to converting all args to strings
+            print(f"  Warning: Parquet save failed ({e}), retrying with string conversion...")
+            for col in df_to_save.columns:
+                if col.startswith("args_"):
+                    df_to_save[col] = df_to_save[col].astype(str).replace({'nan': None, 'None': None})
+            try:
+                df_to_save.to_parquet(cache_path)
+                print(f"✓ Cached to: {cache_path}")
+            except Exception as e2:
+                print(f"  ⚠️ Could not cache to Parquet: {e2}")
+                print(f"  Continuing without cache...")
+
+    return df
+
+
+# Load the trace (set use_cache based on user preference)
+df = load_trace_with_cache("/path/to/trace.json.gz", use_cache=True)
+```
+
+### Step 3: Quick Summary
+
+After loading, show a quick summary:
+
+```python
+def print_trace_summary(df: pd.DataFrame) -> None:
+    """Print a quick summary of the trace."""
+    print("=" * 60)
+    print("TRACE SUMMARY")
+    print("=" * 60)
+    print(f"Total events: {len(df):,}")
+    print(f"\nEvents by category:")
+    print(df["cat"].value_counts().to_string())
+
+    # GPU utilization
+    kernels = df[df["cat"] == "kernel"]
+    if len(kernels) > 0:
+        total_kernel_time = kernels["dur"].sum()
+
+        trace_start = df["ts"].min()
+        trace_end = (df["ts"] + df["dur"].fillna(0)).max()
+        trace_duration = trace_end - trace_start
+
+        gpu_util = 100 * total_kernel_time / trace_duration if trace_duration > 0 else 0
+
+        print(f"\nGPU Metrics:")
+        print(f"  Kernel count: {len(kernels):,}")
+        print(f"  Total kernel time: {total_kernel_time/1e6:.2f}s")
+        print(f"  Trace duration: {trace_duration/1e6:.2f}s")
+        print(f"  GPU utilization: {gpu_util:.1f}%")
+
+        if gpu_util < 50:
+            print(f"  ⚠️  Low GPU utilization - GPU idle >50% of time")
+
+print_trace_summary(df)
+```
+
+### Step 4: Analyze with DataFrame Queries
+
+The DataFrame is now loaded. Use pandas queries to answer user questions:
+
+```python
+# Top 10 GPU kernels by total time
+kernels = df[df["cat"] == "kernel"]
+top_kernels = (
+    kernels.groupby("name")["dur"]
+    .agg(total_us="sum", count="count", avg_us="mean")
+    .sort_values("total_us", ascending=False)
+    .head(10)
+)
+total_kernel_time = kernels["dur"].sum()
+top_kernels["pct"] = 100 * top_kernels["total_us"] / total_kernel_time
 
 print("=" * 60)
 print("TOP 10 GPU KERNELS BY TIME")
 print("=" * 60)
-for name, stats in kernels:
-    pct = 100 * stats["total_dur"] / total_kernel_time if total_kernel_time > 0 else 0
-    avg = stats["total_dur"] / stats["count"] if stats["count"] > 0 else 0
-    print(f"{pct:5.1f}% | {stats['count']:5d} calls | avg {avg:8.1f}μs | {name[:60]}")
-
-print(f"\nTotal GPU kernel time: {total_kernel_time/1e6:.2f}s")
-print(f"Total memory operations: {len(results['memory_events'])}")
-print(f"Total communication operations: {len(results['comm_events'])}")
+print(top_kernels[["pct", "count", "avg_us"]].round(1).to_string())
 ```
 
-### Step 3: Interpret Quick Analysis Results
+#### Common DataFrame Queries
+
+| User Question | Pandas Query |
+|---------------|--------------|
+| "Top kernels by time" | `df[df["cat"]=="kernel"].groupby("name")["dur"].sum().sort_values(ascending=False).head(10)` |
+| "Show NCCL ops" | `df[df["name"].str.contains("nccl", case=False, na=False)]` |
+| "Memory operations" | `df[df["cat"].str.contains("mem", case=False, na=False)]` |
+| "Slow events (>1ms)" | `df[df["dur"] > 1000].sort_values("dur", ascending=False)` |
+| "Events on stream 7" | `df[df["args_stream"] == 7]` |
+| "CPU ops only" | `df[df["cat"] == "cpu_op"]` |
+| "Time window 1-2s" | `df[(df["ts"] > 1e6) & (df["ts"] < 2e6)]` |
+| "Unique kernel names" | `df[df["cat"]=="kernel"]["name"].unique()` |
+| "Group by thread" | `df.groupby("tid")["dur"].sum().sort_values(ascending=False)` |
+
+### Step 5: GPU Utilization & Idle Gap Analysis
+
+```python
+def analyze_gpu_utilization(df: pd.DataFrame) -> dict:
+    """Calculate GPU utilization metrics."""
+    kernels = df[(df["cat"] == "kernel") & df["dur"].notna() & df["ts"].notna()]
+
+    if len(kernels) == 0:
+        return {"error": "No GPU kernels found"}
+
+    trace_start = df["ts"].min()
+    trace_end = (df["ts"] + df["dur"].fillna(0)).max()
+    trace_duration = trace_end - trace_start
+    total_kernel_time = kernels["dur"].sum()
+
+    return {
+        "gpu_utilization_pct": round(100 * total_kernel_time / trace_duration, 1),
+        "trace_duration_s": round(trace_duration / 1e6, 3),
+        "total_kernel_time_s": round(total_kernel_time / 1e6, 3),
+        "kernel_count": len(kernels),
+    }
+
+
+def find_idle_gaps(df: pd.DataFrame, min_gap_us: float = 1000) -> pd.DataFrame:
+    """Find idle gaps between GPU kernels (default: gaps > 1ms)."""
+    kernels = (
+        df[(df["cat"] == "kernel") & df["dur"].notna() & df["ts"].notna()]
+        .sort_values("ts")
+        .copy()
+    )
+
+    if len(kernels) < 2:
+        return pd.DataFrame()
+
+    # Calculate gaps between consecutive kernels
+    kernels["end_ts"] = kernels["ts"] + kernels["dur"]
+    kernels["next_start"] = kernels["ts"].shift(-1)
+    kernels["gap"] = kernels["next_start"] - kernels["end_ts"]
+
+    # Filter to significant gaps
+    gaps = kernels[kernels["gap"] >= min_gap_us][["name", "gap", "end_ts"]].copy()
+    gaps.columns = ["after_kernel", "gap_us", "timestamp"]
+    gaps["gap_ms"] = (gaps["gap_us"] / 1000).round(2)
+
+    return gaps.sort_values("gap_us", ascending=False).head(20)
+
+
+# Run analysis
+util = analyze_gpu_utilization(df)
+print(f"\nGPU Utilization: {util['gpu_utilization_pct']}%")
+
+if util['gpu_utilization_pct'] < 30:
+    print("🔴 SEVERE: GPU utilization below 30% - likely CPU-bound")
+elif util['gpu_utilization_pct'] < 50:
+    print("🟡 WARNING: GPU utilization below 50%")
+else:
+    print("🟢 GPU utilization looks healthy")
+
+gaps = find_idle_gaps(df, min_gap_us=1000)
+if len(gaps) > 0:
+    print(f"\nTop idle gaps (>1ms):")
+    print(gaps[["gap_ms", "after_kernel"]].head(10).to_string())
+
+    if gaps["gap_ms"].max() > 10:
+        print(f"\n🔴 Found large gaps >10ms - investigate CPU bottlenecks")
+```
+
+### Step 6: Interpret Results
 
 | Finding | Likely Issue | Recommendation |
 |---------|--------------|----------------|
@@ -177,11 +370,8 @@ If the user wants deeper analysis, use HTA (Holistic Trace Analysis):
 # Check if HTA is available
 try:
     from hta.trace_analysis import TraceAnalysis
-    HTA_AVAILABLE = True
 except ImportError:
-    HTA_AVAILABLE = False
     print("HTA not installed. Install with: pip install HolisticTraceAnalysis")
-    print("Or use Buck target: //HolisticTraceAnalysis/hta:trace_analysis")
 ```
 
 #### HTA Analysis Functions
