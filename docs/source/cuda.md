@@ -145,6 +145,7 @@
      max_memory_allocated
      reset_max_memory_allocated
      memory_reserved
+     private_pool_memory_reserved
      max_memory_reserved
      set_per_process_memory_fraction
      memory_cached
