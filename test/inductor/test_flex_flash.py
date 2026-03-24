@@ -17,6 +17,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
+    AuxRequest,
     create_block_mask,
     flex_attention,
 )
@@ -177,6 +178,21 @@ def create_score_mod_buffer(num_heads=4, dtype=torch.float16, device="cuda"):
         return score + score_bias[h]
 
     return score_with_buffer
+
+
+def create_mask_mod_scalar_tensor(device="cuda"):
+    """mask_mod that captures a 0-dim (scalar) tensor.
+
+    Regression test: loading a 0-dim tensor in CuTeDSL codegen produces a
+    constant index 0, which was incorrectly passed as a bare Python int to
+    ssa_to_indexable (expects TensorSSA).  See #177813.
+    """
+    offset = torch.tensor(5, dtype=torch.int32, device=device)
+
+    def mask_with_scalar_tensor(_b, _h, q_idx, kv_idx):
+        return (q_idx + offset) >= kv_idx
+
+    return mask_with_scalar_tensor
 
 
 def create_mask_mod_buffer(num_heads=4, dtype=torch.float16, device="cuda"):
@@ -597,6 +613,10 @@ DETERMINISTIC_SCORE_MOD_CASES = [case for case in SCORE_MOD_CASES if case.requir
 
 
 MASK_MOD_CASES = [
+    MaskModCase(
+        "mask_mod_scalar_tensor",
+        lambda _dtype, device: create_mask_mod_scalar_tensor(device=device),
+    ),
     MaskModCase("block_mask_causal", lambda _dtype, _device: _causal_mask),
     MaskModCase(
         "block_mask_causal_score_times_two",
@@ -1221,6 +1241,21 @@ class TestFlexFlash(InductorTestCase):
             "FLASH backend backward does not support differentiating through logsumexp",
         ):
             loss.backward()
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_backend_raises_on_return_max_scores(self, device, dtype):
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"Returning max scores is not supported with BACKEND='FLASH'",
+        ):
+            flex_attention(
+                q,
+                k,
+                v,
+                return_aux=AuxRequest(max_scores=True),
+                kernel_options={"BACKEND": "FLASH"},
+            )
 
     @decorateIf(
         unittest.expectedFailure,

@@ -121,7 +121,7 @@ native_dropout_cpu(const Tensor& input, double p, std::optional<bool> train) {
     mask = at::ones_like(input, input.options().dtype(c10::CppTypeToScalarType<bool>::value));
     output = input.clone();
   }
-  return std::make_tuple(output, mask);
+  return std::make_tuple(std::move(output), std::move(mask));
 }
 
 Tensor native_dropout_backward(const Tensor& grad, const Tensor& mask, double scale) {

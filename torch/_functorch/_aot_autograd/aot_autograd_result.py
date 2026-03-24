@@ -35,6 +35,7 @@ from torch._inductor.output_code import (
     OutputCode,
 )
 from torch._inductor.utils import should_use_remote_fx_graph_cache
+from torch._logging import getArtifactLogger
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     from .schemas import AOTConfig, ViewAndMutationMeta
 
 log = logging.getLogger(__name__)
+aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
 TOut = TypeVar("TOut", bound=OutputCode)
@@ -408,12 +410,12 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
 
         # Log the output of AOTAutogradCache
         if aot_config.enable_log:
-            # TODO: maybe also log to aot_graphs_log
-            # Unfortunately aot_graphs_log uses
-            # slightly different formatting though
             if self.aot_joint_graph_str is not None:
                 torch._logging.trace_structured(
                     "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
+                )
+                aot_graphs_log.info(
+                    "Joint graph (from cache)\n\n%s", self.aot_joint_graph_str
                 )
 
             if self.aot_forward_graph_str is not None:
@@ -438,18 +440,23 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                     )
 
                 # It's called an inference graph if not running with autograd
-                name = (
-                    "aot_forward_graph"
-                    if self.aot_backward_graph_str is not None
-                    else "aot_inference_graph"
-                )
+                has_backward = self.aot_backward_graph_str is not None
                 torch._logging.trace_structured(
-                    name, payload_fn=lambda: self.aot_forward_graph_str
+                    "aot_forward_graph" if has_backward else "aot_inference_graph",
+                    payload_fn=lambda: self.aot_forward_graph_str,
+                )
+                aot_graphs_log.info(
+                    "Forward graph (from cache)\n\n%s",
+                    self.aot_forward_graph_str,
                 )
 
             if self.aot_backward_graph_str is not None:
                 torch._logging.trace_structured(
                     "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
+                )
+                aot_graphs_log.info(
+                    "Backward graph (from cache)\n\n%s",
+                    self.aot_backward_graph_str,
                 )
         with dynamo_timed("AOTAutogradCache.inductor_load"):
             compiled_fw_func = self.compiled_fw.load(args)

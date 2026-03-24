@@ -100,6 +100,14 @@ persistent_tma_mm_template = TritonTemplate(
     source=load_kernel_template("triton_persistent_tma_mm"),
 )
 
+# Non-TMA Triton template for persistent MM
+# used on AMD
+persistent_mm_template = TritonTemplate(
+    name="mm_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_mm"),
+)
+
 
 scaled_mm_device_tma_epilogue_scaling_template = TritonTemplate(
     name="scaled_mm_device_tma_epilogue_scaling",
@@ -359,7 +367,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                 return ops.to_dtype(x, mat1.dtype, use_compute_types=False)
 
             args = [make_pointwise(_to_dtype)(x) for x in args]
-
         mul_pointwise = make_pointwise(ops.dot)(*args)
         dot_reduction = make_reduction("dot")(mul_pointwise, 1)
 
@@ -422,15 +429,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
             elif use_triton_tma_template(mat1, mat2, output_layout=layout):
-                templates_to_use.append(persistent_tma_mm_template)
-
-            if (
-                inductor_config.is_fbcode()
-                and inductor_config.triton.enable_tlx_templates
-            ):
-                from torch._inductor.fb.tlx_templates.mm_templates import append_tlx
-
-                templates_to_use = append_tlx(templates_to_use)
+                if torch.version.hip is None:
+                    templates_to_use.append(persistent_tma_mm_template)
+                else:
+                    templates_to_use.append(persistent_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
@@ -540,13 +542,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         return box
 
-    return autotune_select_algorithm(
+    node, _ = autotune_select_algorithm(
         name,
         choices,
         kernel_inputs.nodes(),
         layout,
         best_config_future=best_config_future,
     )
+    return node
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
@@ -595,7 +598,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             choices, layout, kernel_inputs.nodes(), fuseable=True, non_fuseable=True
         )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
@@ -654,7 +658,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 name,
             )
         )
-        return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+        node, _ = autotune_select_algorithm(
+            name, choices, kernel_inputs.nodes(), layout
+        )
+        return node
 
     # Collect all templates for unified call
     templates_to_use: list[ExternKernelChoice | KernelTemplate] = []
@@ -719,7 +726,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             has_bias=True,
         )
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @register_lowering(aten._sparse_semi_structured_mm, type_promotion_kind=None)
@@ -766,9 +774,10 @@ def tuned_sparse_semi_structured_mm(
             choices, layout, [mat1, mat2, mat1_meta], fuseable=True, non_fuseable=True
         )
 
-    return autotune_select_algorithm(
+    node, _ = autotune_select_algorithm(
         "sparse_semi_structured_mm", choices, (mat1, mat1_meta, mat2), layout
     )
+    return node
 
 
 scaling_pairs = [
@@ -1018,7 +1027,8 @@ def tuned_scaled_mm(
 
     # Early return for MX variants
     if scale_a.dtype != torch.float32:
-        return autotune_select_algorithm(name, choices, input_nodes, layout)
+        node, _ = autotune_select_algorithm(name, choices, input_nodes, layout)
+        return node
 
     if (
         is_nonzero
@@ -1035,7 +1045,8 @@ def tuned_scaled_mm(
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    node, _ = autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+    return node
 
 
 @functools.cache
