@@ -8,11 +8,7 @@ import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
-from .opaque_object import (
-    _resolve_opaque_type_info,
-    is_opaque_reference_type,
-    is_opaque_type,
-)
+from .opaque_object import _OPAQUE_TYPES, is_opaque_reference_type, is_opaque_type
 
 
 # This is used as a negative test for
@@ -131,7 +127,7 @@ def infer_schema(
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if is_opaque_type(annotation_type):
-                schema_type = _resolve_opaque_type_info(annotation_type).class_name  # type: ignore[union-attr]
+                schema_type = _OPAQUE_TYPES[annotation_type].class_name
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
@@ -304,7 +300,7 @@ def parse_return(annotation, error_fn):
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES:
             if is_opaque_reference_type(annotation):
-                return _resolve_opaque_type_info(annotation).class_name  # type: ignore[union-attr]
+                return _OPAQUE_TYPES[annotation].class_name
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
@@ -323,7 +319,7 @@ def parse_return(annotation, error_fn):
     def _return_type_str(arg):
         if ty := SUPPORTED_RETURN_TYPES.get(arg):
             return ty
-        return _resolve_opaque_type_info(arg).class_name  # type: ignore[union-attr]
+        return _OPAQUE_TYPES[arg].class_name
 
     output_ty = ", ".join(_return_type_str(arg) for arg in args)
 

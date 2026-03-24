@@ -2140,10 +2140,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                self.assertEqual(cnts.frame_count, 1)
-            else:
-                self.assertEqual(cnts.frame_count, num_submodules)
+            self.assertEqual(cnts.frame_count, 1)
 
     def test_inline_inbuilt_nn_modules(self):
         size = (10, 10)
@@ -2225,10 +2222,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             ]:
                 x = torch.randn(size)
                 mod(x)
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertEqual(cnts.frame_count, 2)
-        else:
-            self.assertEqual(cnts.frame_count, 2 * num_submodules)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_recursion(self):
         mod = MockModule()
@@ -2800,16 +2794,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         mod = Mod()
         foo(mod, torch.rand([4]))
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertEqual(compiles_without_buffers, 1)
-        else:
-            self.assertEqual(compiles_without_buffers, 0)
+        self.assertEqual(compiles_without_buffers, 1)
 
         foo(mod, torch.rand([4], dtype=torch.half))
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertEqual(compiles_without_buffers, 2)
-        else:
-            self.assertEqual(compiles_without_buffers, 1)
+        self.assertEqual(compiles_without_buffers, 2)
 
         class Mod2(Mod):
             def __setattr__(self, name, value):

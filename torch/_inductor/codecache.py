@@ -500,14 +500,19 @@ class FxGraphCachePickler(pickle.Pickler):
         self,
         gm: torch.fx.GraphModule,
         has_user_defined_triton_kernels: bool = False,
+        device_id_agnostic: bool = False,
     ) -> None:
         """
         Create an FX graph pickler. If include_non_inlined=True, then pickling will
         include the _values_ for all Tensors. (Note that any tensors are constants
         attached as attributes to the GraphModule). Otherwise, pickling will include
         only the metadata for these tensors.
+
+        If device_id_agnostic=True, device indices in TensorMetadata are normalized
+        to 0, so that the same graph on different GPUs produces identical bytes.
         """
         self._stream = io.BytesIO()
+        self._device_id_agnostic = device_id_agnostic
         super().__init__(self._stream)
 
         self.dispatch_table = copyreg.dispatch_table.copy()
@@ -540,6 +545,10 @@ class FxGraphCachePickler(pickle.Pickler):
         Custom reducer to pickle FakeTensors.
         """
         metadata = extract_tensor_metadata_for_cache_key(t)
+        if self._device_id_agnostic:
+            metadata = dataclasses.replace(
+                metadata, device=torch.device(metadata.device.type, 0)
+            )
         return (_ident, (metadata,))
 
     def _reduce_tensor(
@@ -558,6 +567,10 @@ class FxGraphCachePickler(pickle.Pickler):
             raise BypassFxGraphCache("mkldnn tensors unpickleable")
 
         metadata = extract_tensor_metadata_for_cache_key(t)
+        if self._device_id_agnostic:
+            metadata = dataclasses.replace(
+                metadata, device=torch.device(metadata.device.type, 0)
+            )
 
         # If this is a non-inlined frozen parameter, we consider the metadata only.
         if is_frozen_param(t) and not GraphLowering.can_inline_constant(t):

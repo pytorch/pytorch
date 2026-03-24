@@ -4885,6 +4885,51 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(counter.op_count, 2)
 
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_prune_configs_by_called_twice(self, backend):
+        def early_config_prune(configs, named_args, **kwargs):
+            return [configs[0]]
+
+        @triton.autotune(
+            configs=[
+                triton.Config(kwargs={"BLOCK_SIZE": 128}),
+                triton.Config(kwargs={"BLOCK_SIZE": 256}),
+            ],
+            key=["N"],
+            prune_configs_by={"early_config_prune": early_config_prune},
+        )
+        @triton.jit
+        def add_kernel(
+            x_ptr,
+            y_ptr,
+            out_ptr,
+            N,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < N
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        def call_kernel(x, y):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, out, N=n_elements)
+            return out
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x, y):
+            out = call_kernel(x, y)
+            return call_kernel(out, y)
+
+        x = torch.randn(1024, device=GPU_TYPE)
+        y = torch.randn(1024, device=GPU_TYPE)
+
+        self.assertEqual(f(x, y), x + y + y)
+
     # see: https://github.com/triton-lang/triton/blob/67ea999935f4511a535a25bdecb27e79e3c3af41/python/test/unit/language/test_decorator.py#L31
     @requires_gpu
     @common_utils.parametrize("non_strict", [True, False])

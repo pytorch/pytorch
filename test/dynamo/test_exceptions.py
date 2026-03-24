@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import contextlib
+import dataclasses
 import sys
 
 import torch
@@ -1025,6 +1026,24 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         # The error should point to 'raise Exception("Invalid")' in g()
         self.assertIn("in g", str(ctx.exception))
         self.assertIn('raise Exception("Invalid")', str(ctx.exception))
+
+    def test_frozen_dataclass_setattr_raises(self):
+        @dataclasses.dataclass(frozen=True)
+        class TestDataClass:
+            x: int
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            dc = TestDataClass(1)
+            try:
+                dc.x = 2
+            except dataclasses.FrozenInstanceError:
+                return t + 1
+            except Exception:
+                return t + 2
+            return t + dc.x
+
+        self.assertEqual(fn(torch.zeros(1)), 1)
 
 
 instantiate_parametrized_tests(ExceptionTests)

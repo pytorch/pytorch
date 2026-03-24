@@ -2842,6 +2842,11 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                         out,
                     )
 
+                if (
+                    torch._C._is_key_in_tls("context")
+                    and (config_ctx := torch._C._get_obj_in_tls("context")) is not None
+                ):
+                    impl_fn = functools.partial(config_ctx.run, impl_fn)
                 needs_grad = torch.is_grad_enabled() and any(
                     t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
                 )

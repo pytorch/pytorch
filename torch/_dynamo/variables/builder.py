@@ -1523,17 +1523,14 @@ class VariableBuilder:
                 # ID_MATCH even if its a global variable.
                 self.install_guards(GuardBuilder.CLASS_MATCH)
 
-            if isinstance(value, type) and issubclass(value, enum.Enum):
-                # Order this before OpaqueObjectClassVariable since it's better
-                # to use the native UserDefinedEnumClassVariable
-                return UserDefinedEnumClassVariable(
+            if is_opaque_type(value):
+                return OpaqueObjectClassVariable(
                     value,
                     source=self.source,
                 )
 
-            if is_opaque_type(value):
-                assert not (isinstance(value, type) and issubclass(value, enum.Enum))
-                return OpaqueObjectClassVariable(
+            if isinstance(value, type) and issubclass(value, enum.Enum):
+                return UserDefinedEnumClassVariable(
                     value,
                     source=self.source,
                 )
@@ -4232,7 +4229,7 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        elif is_opaque_value_type(type(value)) and not isinstance(value, enum.Enum):
+        elif is_opaque_value_type(type(value)):
             return TorchScriptObjectVariable.create(value, value)
         elif is_opaque_reference_type(type(value)):
             # This is for handling opaque objects in custom ops
@@ -4240,7 +4237,7 @@ class SourcelessBuilder:
                 tx.output.fake_mode, value
             )
             return TorchScriptObjectVariable.create(
-                value,  # pyrefly: ignore[bad-argument-type]
+                value,
                 fake_script_obj,
             )
         # type: ignore[attr-defined]
@@ -4270,6 +4267,8 @@ class SourcelessBuilder:
         elif isinstance(value, (type, abc.ABCMeta)):
             if isinstance(value, type) and issubclass(value, enum.Enum):
                 return UserDefinedEnumClassVariable(value)
+            elif issubclass(type(value), type) and issubclass(value, BaseException):
+                return UserDefinedExceptionClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)

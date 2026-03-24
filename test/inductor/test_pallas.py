@@ -660,7 +660,6 @@ class PallasTestsMixin:
         x = torch.randn(1, 1, 16, device=self.DEVICE).expand(4, 8, 16)
         self.assertEqual(compiled(x, x), x + x)
 
-    @skip_if_tpu
     def test_stride_multiple_inputs(self):
         """Test multiple strided inputs and broadcasting."""
         compiled = self._compile(lambda a, b, c: a * b + c)
@@ -685,6 +684,80 @@ class PallasTestsMixin:
         s = torch.tensor(2.0, device=self.DEVICE)  # scalar
         compiled_bcast = self._compile(lambda x, y, s: x + y * s)
         self.assertEqual(compiled_bcast(x, y, s), x + y * s)
+
+    @skip_if_cuda
+    def test_scalar_scalar_ops(self):
+        """Test scalar-scalar operations."""
+
+        def test_add(a, b):
+            return a + b
+
+        def test_mul(a, b):
+            return a * b
+
+        def test_sub(a, b):
+            return a - b
+
+        def test_div(a, b):
+            return a / b
+
+        for fn in [test_add, test_mul, test_sub, test_div]:
+            with self.subTest(op=fn.__name__):
+                compiled = self._compile(fn)
+
+                # Test with 0-D tensors (scalars)
+                a = torch.tensor(3.5, dtype=torch.float32, device=self.DEVICE)
+                b = torch.tensor(2.0, dtype=torch.float32, device=self.DEVICE)
+
+                result = compiled(a, b)
+                expected = fn(a, b)
+                self.assertEqual(result, expected)
+
+                # Ensure result is also scalar
+                self.assertEqual(result.dim(), 0)
+                self.assertEqual(result.dtype, torch.float32)
+
+    def test_scalar_tensor_ops(self):
+        """Test scalar-tensor operations."""
+
+        def test_scalar_add_tensor(s, t):
+            return s + t
+
+        def test_tensor_add_scalar(t, s):
+            return t + s
+
+        def test_scalar_mul_tensor(s, t):
+            return s * t
+
+        def test_tensor_mul_scalar(t, s):
+            return t * s
+
+        shapes = [(16,), (8, 8), (4, 4, 4)]
+
+        for shape in shapes:
+            for fn in [
+                test_scalar_add_tensor,
+                test_tensor_add_scalar,
+                test_scalar_mul_tensor,
+                test_tensor_mul_scalar,
+            ]:
+                with self.subTest(op=fn.__name__, shape=shape):
+                    compiled = self._compile(fn)
+
+                    # Create 0-D scalar tensor
+                    scalar = torch.tensor(2.5, dtype=torch.float32, device=self.DEVICE)
+                    tensor = torch.randn(shape, dtype=torch.float32, device=self.DEVICE)
+
+                    if "scalar" in fn.__name__.split("_")[0]:
+                        result = compiled(scalar, tensor)
+                        expected = fn(scalar, tensor)
+                    else:
+                        result = compiled(tensor, scalar)
+                        expected = fn(tensor, scalar)
+
+                    self.assertEqual(result, expected)
+                    self.assertEqual(result.shape, shape)
+                    self.assertEqual(result.dtype, torch.float32)
 
     def test_non_power_of_2_sizes(self):
         """Test that non-power-of-2 tensor sizes work correctly.

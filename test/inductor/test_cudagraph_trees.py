@@ -22,7 +22,7 @@ from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
-from torch._inductor.cudagraph_utils import FunctionID, PlaceholderInfo
+from torch._inductor.cudagraph_utils import PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
@@ -2647,6 +2647,25 @@ if HAS_CUDA_AND_TRITON:
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
 
+        def test_clear_storage_data_ptr_access_error(self):
+            x = torch.rand([4], device="cuda")
+            storage = x.untyped_storage()
+            storage_ptr = storage.data_ptr()
+            storage_impl_ptr = storage._cdata
+
+            storage.resize_(0)
+
+            torch._C._set_storage_data_ptr_access_error_msg(
+                storage_impl_ptr, "storage is dead"
+            )
+            with self.assertRaisesRegex(Exception, "storage is dead"):
+                storage.data_ptr()
+
+            torch._C._clear_storage_data_ptr_access_error_msg(storage_impl_ptr)
+            storage.resize_(4 * x.element_size())
+            # Should not raise
+            storage.data_ptr()
+
         def test_side_stream_memory_allocation(self):
             device = f"cuda:{self.device_idx}"
 
@@ -3303,20 +3322,8 @@ if HAS_CUDA_AND_TRITON:
             foo.static_tensor = torch.ones((2, 2), device="cuda")
             foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
 
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                for _ in range(3):
-                    foo(inp)
-            else:
-                # Run with specific function id to avoid dynamo recompiling
-                self.get_manager().run(
-                    [
-                        foo.goo.linear.weight,
-                        foo.goo.linear.bias,
-                        foo.static_tensor,
-                        inp,
-                    ],
-                    FunctionID(0),
-                )
+            for _ in range(3):
+                foo(inp)
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
