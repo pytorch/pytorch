@@ -1326,7 +1326,7 @@ _cached_hip_to_amdsmi: dict[int, int] | None = None
 
 
 def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
-    r"""Return amdsmi index from HIP device index. On RDNA systems they are not always the same.
+    r"""Return amdsmi index from HIP device index. They are not always the same.
 
     Assume amdsmi_init() already completes successfully."""
     global _cached_hip_to_amdsmi
@@ -1343,7 +1343,7 @@ def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
         if not _cached_hip_to_amdsmi and len(amdsmi_handles) > 1:
             warnings.warn(
                 "Cannot translate HIP ID to AMD SMI ID due to"
-                " lack of translation information prior to ROCM 6.4."
+                " lack of translation information prior to ROCm 6.4."
                 " Functions that rely on amdsmi"
                 " (e.g. temperature()) may operate on wrong devices."
             )
@@ -1363,7 +1363,8 @@ def _get_amdsmi_device_index(device: Device) -> int:
     r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
-    if type(visible_devices[0]) is str:
+    visible_device_is_str = type(visible_devices[0]) is str
+    if visible_device_is_str:
         uuids = _raw_device_uuid_amdsmi()
         if uuids is None:
             raise RuntimeError("Can't get device UUIDs")
@@ -1376,7 +1377,10 @@ def _get_amdsmi_device_index(device: Device) -> int:
         raise RuntimeError(
             f"device {idx} is not visible (HIP_VISIBLE_DEVICES={visible_devices})"
         )
-    return _get_amdsmi_device_index_from_hip_index(idx_map[idx])
+    if visible_device_is_str:
+        return idx_map[idx]
+    else:
+        return _get_amdsmi_device_index_from_hip_index(idx_map[idx])
 
 
 def _get_amdsmi_device_memory_used(device: Device = None) -> int:
