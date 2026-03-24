@@ -5,6 +5,8 @@ import re
 import sys
 import unittest
 
+import numpy as np
+
 import torch
 import torch._dynamo
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -1230,7 +1232,6 @@ class PallasTestsMixin:
                 self.assertEqual(result, expected)
 
     @skip_if_cuda
-    @skip_if_tpu
     def test_welford(self):
         """Test Welford variance/mean computation (two-pass fallback)."""
 
@@ -1244,9 +1245,11 @@ class PallasTestsMixin:
                 compiled = self._compile(fn)
                 x = torch.randn(shape, device=self.DEVICE)
                 var_result, mean_result = compiled(x)
-                var_expected, mean_expected = fn(x)
-                self.assertEqual(mean_result, mean_expected)
-                self.assertEqual(var_result, var_expected)
+                # Eager mode torch_tpu doesn't support lowering var_mean, so comparing with numpy
+                var_expected = np.var(x.cpu().numpy(), axis=-1, keepdims=True, ddof=1)
+                mean_expected = np.mean(x.cpu().numpy(), axis=-1, keepdims=True)
+                self.assertEqual(mean_result.cpu().numpy(), mean_expected)
+                self.assertEqual(var_result.cpu().numpy(), var_expected)
 
     @skip_if_cuda
     def test_layer_norm(self):
