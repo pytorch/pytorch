@@ -22,7 +22,16 @@ macro(custom_protobuf_find)
   # We will make sure that protobuf and caffe2 uses the same msvc runtime.
   option(protobuf_MSVC_STATIC_RUNTIME "" ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
 
-  if(${CAFFE2_LINK_LOCAL_PROTOBUF})
+  # On aarch64, protobuf+abseil static libs linked into libtorch_cpu.so can
+  # exceed the ±128MB branch range (R_AARCH64_CALL26 relocation overflow),
+  # especially with the prioritized text linker script that reorders sections.
+  # Build protobuf as shared on aarch64 so inter-library calls use PLT/GOT.
+  set(__caffe2_protobuf_shared OFF)
+  if(${CAFFE2_LINK_LOCAL_PROTOBUF} AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    set(__caffe2_protobuf_shared ON)
+  endif()
+
+  if(${CAFFE2_LINK_LOCAL_PROTOBUF} AND NOT __caffe2_protobuf_shared)
     set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
     set(__caffe2_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
@@ -46,12 +55,16 @@ macro(custom_protobuf_find)
         "<CMAKE_RC_COMPILER> /l0x409 <DEFINES> /fo<OBJECT> <SOURCE>")  # codespell:ignore fo
   endif()
 
+  if(__caffe2_protobuf_shared)
+    set(protobuf_BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+  endif()
+
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf)
   set(CMAKE_RC_COMPILE_OBJECT "${__caffe2_CMAKE_RC_COMPILE_OBJECT}")
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
-  if(${CAFFE2_LINK_LOCAL_PROTOBUF})
+  if(${CAFFE2_LINK_LOCAL_PROTOBUF} AND NOT __caffe2_protobuf_shared)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
     set(BUILD_SHARED_LIBS ON)
     set(CMAKE_CXX_FLAGS ${__caffe2_CMAKE_CXX_FLAGS})
