@@ -3156,6 +3156,9 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             fx_g.meta = {"foo": "bar"}
             fx_g.compile_subgraph_reason = "Blah"
             config = self.default_config()
+            # autograd_cache_key now applies sanitize_gm_for_cache
+            # internally, so the result is the same whether we wrap the
+            # call or not.
             with sanitize_gm_for_cache(fx_g):
                 c1 = autograd_cache_key(fx_g, example_inputs, config, {})
             c3 = autograd_cache_key(fx_g, example_inputs, config, {})
@@ -3167,7 +3170,8 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             c4 = autograd_cache_key(fx_g, example_inputs, config, {})
 
             self.assertEqual(c1, c2)
-            self.assertNotEqual(c3, c4)
+            self.assertEqual(c1, c3)
+            self.assertEqual(c1, c4)
 
     def test_dill_serialization_with_inner_functions(self):
         """

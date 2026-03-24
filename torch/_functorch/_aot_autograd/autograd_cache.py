@@ -717,7 +717,7 @@ def create_fx_config(
 
 
 def autograd_cache_key(
-    gm: torch.fx.GraphModule,
+    mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
     example_inputs: Sequence[Any],
     config: AOTConfig,
     fx_config: _CompileFxKwargs,
@@ -727,44 +727,48 @@ def autograd_cache_key(
     Generate a unique hash of the FX graph for caching.
     """
 
-    try:
-        check_cacheable(gm)
-        if has_triton_package():
-            # Due to https://github.com/triton-lang/triton/issues/3729,
-            # if triton is < 3.2.0, AOTAutogradCache may cause us to
-            # attempt to load a cache entry without initializing
-            # the CUDA context on the autograd thread.
+    gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
+    with sanitize_gm_for_cache(gm):
+        try:
+            check_cacheable(gm)
+            if has_triton_package():
+                # Due to https://github.com/triton-lang/triton/issues/3729,
+                # if triton is < 3.2.0, AOTAutogradCache may cause us to
+                # attempt to load a cache entry without initializing
+                # the CUDA context on the autograd thread.
 
-            # Without caching, we naturally do this initialization when
-            # tracing through the graph with the autograd engine.
-            import triton
+                # Without caching, we naturally do this initialization when
+                # tracing through the graph with the autograd engine.
+                import triton
 
-            if triton.__version__ < "3.2.0":
-                raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
-        details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
-        pickler = AOTAutogradCachePickler(gm)
-        # The prefix distinguishes among the other kinds of objects we cache
-        key = "a" + pickler.get_hash(details)
-        debug_lines = pickler.debug_lines(details)
-        log.debug(
-            "Autograd graph cache hash details for key %s:\n%s",
-            key,
-            LazyString(lambda: "\n".join(debug_lines)),
-        )
-        return key, debug_lines
-    except Exception:
-        # If enable_aot_compile is set, we're in AOT precompile mode where we always
-        # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
-        # a proper key because we are guaranteed in an AOT precompile world users are in
-        # complete control of distributing and loading artifacts.
-        if torch._functorch.config.bypass_autograd_cache_key:
-            log.info(
-                "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
-                exc_info=True,
+                if triton.__version__ < "3.2.0":
+                    raise BypassAOTAutogradCache(
+                        "AOTAutogradCache requires triton 3.2.0"
+                    )
+            details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
+            pickler = AOTAutogradCachePickler(gm)
+            # The prefix distinguishes among the other kinds of objects we cache
+            key = "a" + pickler.get_hash(details)
+            debug_lines = pickler.debug_lines(details)
+            log.debug(
+                "Autograd graph cache hash details for key %s:\n%s",
+                key,
+                LazyString(lambda: "\n".join(debug_lines)),
             )
-            return str(random.random()), []
-        else:
-            raise
+            return key, debug_lines
+        except Exception:
+            # If enable_aot_compile is set, we're in AOT precompile mode where we always
+            # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
+            # a proper key because we are guaranteed in an AOT precompile world users are in
+            # complete control of distributing and loading artifacts.
+            if torch._functorch.config.bypass_autograd_cache_key:
+                log.info(
+                    "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
+                    exc_info=True,
+                )
+                return str(random.random()), []
+            else:
+                raise
 
 
 @contextlib.contextmanager
@@ -869,148 +873,138 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
-        gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
-        with sanitize_gm_for_cache(gm):
-            compiled_fn = None
-            cache_info: dict[str, Any] = {}
-            cache_key = None
-            debug_lines: list[str] = []
-            cache_event_time = time.time_ns()
-            cache_state = None
-            try:
-                cache_key, debug_lines = autograd_cache_key(
-                    gm, args, aot_config, fx_config
+        compiled_fn = None
+        cache_info: dict[str, Any] = {}
+        cache_key = None
+        debug_lines: list[str] = []
+        cache_event_time = time.time_ns()
+        cache_state = None
+        try:
+            cache_key, debug_lines = autograd_cache_key(
+                mod, args, aot_config, fx_config
+            )
+            result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = (
+                AOTAutogradCache._lookup(
+                    cache_key, local, remote, args, cache_info, aot_config
                 )
-                result: tuple[GenericAOTAutogradResult[Any, Any], bytes] | None = (
-                    AOTAutogradCache._lookup(
-                        cache_key, local, remote, args, cache_info, aot_config
-                    )
+            )
+            if result is not None:
+                (entry, pickled_content) = result
+                compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
+                # Make the compiled_fn serializable, where the serialize function just
+                # makes a copy of the original entry before post compile via the pickled content
+                compiled_fn = SerializableCompiledFunction(
+                    compiled_fn, lambda: pickle.loads(pickled_content)
                 )
-                if result is not None:
-                    (entry, pickled_content) = result
-                    compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
-                    # Make the compiled_fn serializable, where the serialize function just
-                    # makes a copy of the original entry before post compile via the pickled content
-                    compiled_fn = SerializableCompiledFunction(
-                        compiled_fn, lambda: pickle.loads(pickled_content)
-                    )
-                    log.info("AOTAutograd cache hit for key %s", cache_key)
+                log.info("AOTAutograd cache hit for key %s", cache_key)
 
-                    counters["aot_autograd"]["autograd_cache_hit"] += 1
-                    cache_state = "hit"
-                    cache_event_time = time.time_ns()
-                    forward_time_saved = entry.forward_time_taken_ns // 1e6
-                    backward_time_saved = entry.backward_time_taken_ns // 1e6
-                    cache_info.update(
-                        {
-                            "forward_time_saved_ms": forward_time_saved,
-                            "backward_time_saved_ms": backward_time_saved,
-                            "time_saved_ms": forward_time_saved + backward_time_saved,
-                        }
-                    )
-                    time_saved_ns = (
-                        entry.forward_time_taken_ns + entry.backward_time_taken_ns
-                    )
-                    # TODO: should we use the same field for remote cache time saved for both
-                    # FXGraphCache and AOTAutogradCache?
-                    # get_metrics_context().increment(...)
-                    if (
-                        ephemeral_increase
-                        := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
-                    ) != 0:
-                        cache_info["ephemeral_timeout_increase"] = ephemeral_increase
+                counters["aot_autograd"]["autograd_cache_hit"] += 1
+                cache_state = "hit"
+                cache_event_time = time.time_ns()
+                forward_time_saved = entry.forward_time_taken_ns // 1e6
+                backward_time_saved = entry.backward_time_taken_ns // 1e6
+                cache_info.update(
+                    {
+                        "forward_time_saved_ms": forward_time_saved,
+                        "backward_time_saved_ms": backward_time_saved,
+                        "time_saved_ms": forward_time_saved + backward_time_saved,
+                    }
+                )
+                time_saved_ns = (
+                    entry.forward_time_taken_ns + entry.backward_time_taken_ns
+                )
+                # TODO: should we use the same field for remote cache time saved for both
+                # FXGraphCache and AOTAutogradCache?
+                # get_metrics_context().increment(...)
+                if (
+                    ephemeral_increase
+                    := add_ephemeral_timeout_increase_for_distributed(time_saved_ns)
+                ) != 0:
+                    cache_info["ephemeral_timeout_increase"] = ephemeral_increase
 
-                if compiled_fn is None:
-                    log.info("AOTAutograd cache miss for key %s", cache_key)
-                    counters["aot_autograd"]["autograd_cache_miss"] += 1
-                    cache_state = "miss"
-                    cache_event_time = time.time_ns()
-            # Count missing the FXGraphCache as a miss not a bypass
-            except FXGraphCacheMiss as e:
+            if compiled_fn is None:
+                log.info("AOTAutograd cache miss for key %s", cache_key)
                 counters["aot_autograd"]["autograd_cache_miss"] += 1
                 cache_state = "miss"
-                if (
-                    config.strict_autograd_cache
-                    or torch._dynamo.config.strict_precompile
-                ):
-                    raise e
-            # Most often this is BypassAOTAutogradCache, but
-            # if there's ever different reason we can't cache,
-            # we still never want to hard throw an exception, since
-            # we can always fallback to a cache bypass.
-            # As an example, if the user calls autograd via
-            # standalone inductor, we will sometimes get a GraphModule
-            # that doesn't actually have a `.graph` on it. Instead
-            # of checking every single case, we safely catch the exception
-            # in those cases.
-            except Exception as e:
-                cache_key = None
-                counters["aot_autograd"]["autograd_cache_bypass"] += 1
-                log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
-                cache_state = "bypass"
                 cache_event_time = time.time_ns()
-                cache_info["cache_bypass_reason"] = str(e)
-                cache_info["cache_bypass_exception_type"] = type(e).__name__
-                cache_info["cache_bypass_traceback"] = traceback.format_exc().split(
-                    "\n"
-                )
-                # TODO: this gets logged implicitly by cache_bypass_reason,
-                # and here we explicitly log it into tlparse.
-                # We may want to log this as an extra column in Scuba, though.
-                cache_info["cache_bypass_hard_exception"] = not isinstance(
-                    e, BypassAOTAutogradCache
-                )
-                if remote:
-                    log_cache_bypass("bypass_aot_autograd", str(e))
-                if (
-                    config.strict_autograd_cache
-                    or torch._dynamo.config.strict_precompile
-                ):
-                    raise e
-            if compiled_fn is None:
-                # Set the cache key so we can save a cache result later
-                symints = AOTAutogradCache._filter_backed_symints(args)
-                if cache_key is not None:
-                    aot_config.cache_info = AOTAutogradCacheInfo(
-                        cache_key,
-                        time.time_ns(),
-                        forward_symints=symints,
-                    )
-
-            cache_info.update(
-                {
-                    "key": cache_key,
-                    "cache_state": cache_state,
-                    "components": debug_lines,
-                }
+        # Count missing the FXGraphCache as a miss not a bypass
+        except FXGraphCacheMiss as e:
+            counters["aot_autograd"]["autograd_cache_miss"] += 1
+            cache_state = "miss"
+            if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
+                raise e
+        # Most often this is BypassAOTAutogradCache, but
+        # if there's ever different reason we can't cache,
+        # we still never want to hard throw an exception, since
+        # we can always fallback to a cache bypass.
+        # As an example, if the user calls autograd via
+        # standalone inductor, we will sometimes get a GraphModule
+        # that doesn't actually have a `.graph` on it. Instead
+        # of checking every single case, we safely catch the exception
+        # in those cases.
+        except Exception as e:
+            cache_key = None
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
+            cache_state = "bypass"
+            cache_event_time = time.time_ns()
+            cache_info["cache_bypass_reason"] = str(e)
+            cache_info["cache_bypass_exception_type"] = type(e).__name__
+            cache_info["cache_bypass_traceback"] = traceback.format_exc().split("\n")
+            # TODO: this gets logged implicitly by cache_bypass_reason,
+            # and here we explicitly log it into tlparse.
+            # We may want to log this as an extra column in Scuba, though.
+            cache_info["cache_bypass_hard_exception"] = not isinstance(
+                e, BypassAOTAutogradCache
             )
-            if chromium_event_log_active():
-                CompileEventLogger.instant(
-                    f"autograd_cache_{cache_state}",
-                    metadata=cache_info,
-                    time_ns=cache_event_time,
-                )
-                CompileEventLogger.try_add_pt2_compile(
-                    "backend_compile",
-                    cache_state=cache_state,
-                    cache_event_time=cache_event_time,
-                    key=cache_info.get("key"),
-                    components=cache_info.get("components"),
-                    cache_bypass_reason=cache_info.get("cache_bypass_reason"),
-                    remote_cache_enabled=remote,
-                    local_cache_enabled=local,
+            if remote:
+                log_cache_bypass("bypass_aot_autograd", str(e))
+            if config.strict_autograd_cache or torch._dynamo.config.strict_precompile:
+                raise e
+        if compiled_fn is None:
+            # Set the cache key so we can save a cache result later
+            symints = AOTAutogradCache._filter_backed_symints(args)
+            if cache_key is not None:
+                aot_config.cache_info = AOTAutogradCacheInfo(
+                    cache_key,
+                    time.time_ns(),
+                    forward_symints=symints,
                 )
 
-            torch._logging.trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": f"aotautograd_cache_{cache_state}",
-                    "encoding": "json",
-                },
-                payload_fn=lambda: json.dumps(cache_info),
+        cache_info.update(
+            {
+                "key": cache_key,
+                "cache_state": cache_state,
+                "components": debug_lines,
+            }
+        )
+        if chromium_event_log_active():
+            CompileEventLogger.instant(
+                f"autograd_cache_{cache_state}",
+                metadata=cache_info,
+                time_ns=cache_event_time,
+            )
+            CompileEventLogger.try_add_pt2_compile(
+                "backend_compile",
+                cache_state=cache_state,
+                cache_event_time=cache_event_time,
+                key=cache_info.get("key"),
+                components=cache_info.get("components"),
+                cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+                remote_cache_enabled=remote,
+                local_cache_enabled=local,
             )
 
-            return compiled_fn
+        torch._logging.trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": f"aotautograd_cache_{cache_state}",
+                "encoding": "json",
+            },
+            payload_fn=lambda: json.dumps(cache_info),
+        )
+
+        return compiled_fn
 
     @classmethod
     def generate_guards_expression(
