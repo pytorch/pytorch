@@ -316,6 +316,23 @@ TORCH_META_FUNC2(mean, dim)
   resize_reduction(*this, self, opt_dim, keepdim, out_dtype);
 }
 
+TORCH_META_FUNC(logsumexp)
+(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  ScalarType out_dtype;
+  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    out_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+  } else {
+    out_dtype = self.scalar_type();
+  }
+  const auto& result = maybe_get_output();
+  if (result.defined()) {
+    TORCH_CHECK(at::isFloatingType(result.scalar_type()) || at::isComplexType(result.scalar_type()),
+                "logsumexp(): Expected floating point type for result tensor, but got: ",
+                result.scalar_type());
+  }
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
+}
+
 static ScalarType get_result_or_self_value_dtype(
     const Tensor& self,
     const Tensor& result,
@@ -1505,36 +1522,28 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
   return result;
 }
 
-Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
-  // Complex type implies floating point type
+TORCH_IMPL_FUNC(logsumexp_out)
+(const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
+  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+    logsumexp_out_impl(const_cast<Tensor&>(result), self.to(default_dtype), dim, keepdim);
+  } else {
+    logsumexp_out_impl(const_cast<Tensor&>(result), self, dim, keepdim);
+  }
+}
+
+// CompositeExplicitAutograd fallback for backends without dedicated kernels
+Tensor& logsumexp_out_default(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(at::isFloatingType(result.scalar_type()) || at::isComplexType(result.scalar_type()),
               "logsumexp(): Expected floating point type for result tensor, but got: ",
               result.scalar_type());
-  {
-    NoNamesGuard guard;
-    if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-      // for integral inputs, promote input to default floating type.
-      auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-      logsumexp_out_impl(result, self.to(default_dtype), dims, keepdim);
-    } else {
-      logsumexp_out_impl(result, self, dims, keepdim);
-    }
-  }
-  namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
-  return result;
-}
-
-Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  TensorOptions result_options;
   if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    // even for integral inputs, result is floating dtype
     auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-    result_options = self.options().dtype(default_dtype);
+    logsumexp_out_impl(result, self.to(default_dtype), dim, keepdim);
   } else {
-    result_options = self.options();
+    logsumexp_out_impl(result, self, dim, keepdim);
   }
-  auto result = at::empty({0}, result_options);
-  return at::logsumexp_outf(self, dims, keepdim, result);
+  return result;
 }
 
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
