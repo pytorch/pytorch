@@ -512,7 +512,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 class TestNoCPU(DTensorTestBase):
     @property
     def backend(self):
-        return "nccl"
+        return dist.get_default_backend_for_device(device_type)
 
     @with_comms
     def test_no_cpu(self):

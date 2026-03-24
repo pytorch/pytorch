@@ -112,7 +112,7 @@ class TestCheckpointReader(TestCase):
     def test_read_with_map_location(self):
         """Test that read correctly uses the map_location parameter."""
         # Call read with map_location='cpu'
-        map_location = "cuda" if torch.cuda.is_available() else "cpu"
+        map_location = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
         read_state_dict, _ = self.reader.read(
             self.checkpoint_path, map_location=map_location
         )
