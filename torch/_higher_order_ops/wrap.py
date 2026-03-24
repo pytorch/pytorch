@@ -21,7 +21,7 @@ from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.types import _dtype
 from torch.utils._debug_mode import DebugMode
-from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
+from torch.utils.checkpoint import _always_prefer_recompute, _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 _P = ParamSpec("_P")
@@ -434,10 +434,8 @@ class TagActivationCheckpoint(HigherOrderOperator):
 tag_activation_checkpoint = TagActivationCheckpoint()
 
 
-def _always_prefer_recompute(ctx, op, *args, **kwargs):
-    from torch.utils.checkpoint import CheckpointPolicy
 
-    return CheckpointPolicy.PREFER_RECOMPUTE
+
 
 
 def tag_activation_checkpoint_impl(gmod, *args, **kwargs):

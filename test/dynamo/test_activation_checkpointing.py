@@ -2690,7 +2690,7 @@ class ActivationCheckpointingMakeFxTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(node.meta.get("recompute"), CheckpointPolicy.MUST_SAVE)
 
     def test_interleaved_sac_and_vanilla_ac_ids(self):
-        """Interleaving SAC and vanilla AC regions produces monotonically increasing ac_graph_ids for SAC."""
+        """Interleaving SAC and vanilla AC regions produces monotonically increasing ac_graph_ids."""
 
         def policy_fn(ctx, func, *args, **kwargs):
             if func == torch.ops.aten.addmm.default:
@@ -2730,9 +2730,10 @@ class ActivationCheckpointingMakeFxTests(torch._dynamo.test_case.TestCase):
             if ac_id is not None and (not ids_in_order or ids_in_order[-1] != ac_id):
                 ids_in_order.append(ac_id)
 
-        # 2 SAC regions, each with a distinct id, monotonically increasing.
-        self.assertEqual(len(ids_in_order), 2)
-        self.assertLess(ids_in_order[0], ids_in_order[1])
+        # All 4 regions (SAC, vanilla, SAC, vanilla) get distinct, monotonically increasing ids.
+        self.assertEqual(len(ids_in_order), 4)
+        for i in range(len(ids_in_order) - 1):
+            self.assertLess(ids_in_order[i], ids_in_order[i + 1])
 
     def test_cleanup_recompute_tags_saves_boundary_tensors(self):
         """cleanup_recompute_tags overrides boundary nodes to MUST_SAVE."""
