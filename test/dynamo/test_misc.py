@@ -1709,9 +1709,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             self.assertEqual(cnt.frame_count, 1)
             # Verify _dynamo_test_method appears as a call_method in the FX graph
             call_method_targets = [
-                n.target
-                for n in cnt.graphs[0].graph.nodes
-                if n.op == "call_method"
+                n.target for n in cnt.graphs[0].graph.nodes if n.op == "call_method"
             ]
             self.assertIn("_dynamo_test_method", call_method_targets)
 
