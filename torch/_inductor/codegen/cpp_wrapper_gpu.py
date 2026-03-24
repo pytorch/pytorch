@@ -105,6 +105,10 @@ static PyObject* triton_lazy_compile_module = nullptr;
 static PyObject* start_kernel_compile = nullptr;
 static PyObject* run_triton_kernel_with_autotune = nullptr;
 
+// Per-module dict for pending kernel compile results (avoids global state
+// collisions when multiple compiled modules produce kernels with the same name).
+static PyObject* _module_pending_kernels = nullptr;
+
 static inline void loadLazyCompileFuncs() {
     if (triton_lazy_compile_module == nullptr) {
         triton_lazy_compile_module = PyImport_ImportModule("torch._inductor.runtime.triton_lazy_compile");
@@ -191,6 +195,7 @@ static inline PyObject* convertArgToPython(const T& arg) {
 
 template<typename... Args>
 static inline LazyKernelCompileResult runTritonKernelWithAutotune(
+        PyObject* pending_kernels,
         const std::string& kernel_name,
         cudaStream_t stream,
         const Args&... kernel_args) {
@@ -207,7 +212,8 @@ static inline LazyKernelCompileResult runTritonKernelWithAutotune(
     };
     (add_arg(convertArgToPython(kernel_args)), ...);
 
-    RAIIPyObject call_args = PyTuple_Pack(3,
+    RAIIPyObject call_args = PyTuple_Pack(4,
+        pending_kernels,
         PyUnicode_FromString(kernel_name.c_str()),
         PyLong_FromVoidPtr(stream),
         py_args_list.get()
@@ -220,14 +226,18 @@ static inline LazyKernelCompileResult runTritonKernelWithAutotune(
     return extractCompileResult(result);
 }
 
-static inline void startKernelCompile(const std::string& kernel_name, const std::string& kernel_source) {
+static inline void startKernelCompile(
+    PyObject* pending_kernels,
+    const std::string& kernel_name,
+    const std::string& kernel_source)
+{
     py::gil_scoped_acquire_simple acquire;
 
     RAIIPyObject py_name = PyUnicode_FromString(kernel_name.c_str());
     RAIIPyObject py_source = PyUnicode_FromString(kernel_source.c_str());
-    AOTI_TORCH_CHECK(py_name && py_source, "Failed to create Python strings");
+    AOTI_TORCH_CHECK(py_name && py_source, "Failed to create Python args");
 
-    RAIIPyObject call_args = PyTuple_Pack(2, py_name.get(), py_source.get());
+    RAIIPyObject call_args = PyTuple_Pack(3, pending_kernels, py_name.get(), py_source.get());
     AOTI_TORCH_CHECK(call_args, "Failed to create call args");
 
     RAIIPyObject result = PyObject_CallObject(start_kernel_compile, call_args);
@@ -652,9 +662,8 @@ class DeferredTritonCallWrapper:
         )
         prefix.writeline(kernel_var_decl)
         # Use delimited raw string to handle )" in kernel source
-        kernel_body = (
-            f'R"TRITON(\n{self.kernel_name_to_body.get(kernel_name, "")}\n)TRITON"'
-        )
+        kernel_source_str = self.kernel_name_to_body.get(kernel_name, "")
+        kernel_body = f'R"TRITON(\n{kernel_source_str}\n)TRITON"'
         prefix.writeline(f"static const char* {kernel_name}_source = {kernel_body};")
         prefix.writeline(f"static LazyKernelCompileResult {kernel_name}_result;")
 
@@ -682,7 +691,7 @@ class DeferredTritonCallWrapper:
                 f"""\
                 if ({kernel_name} == nullptr) {{
                     {kernel_name}_result = runTritonKernelWithAutotune(
-                        "{kernel_name}", stream_, {autotune_args});
+                        _module_pending_kernels, "{kernel_name}", stream_, {autotune_args});
 
                     {kernel_name} = loadKernel(
                         {kernel_name}_result.cubin_path,
@@ -1077,7 +1086,7 @@ class CppWrapperGpu(CppWrapperCpu):
         # Generate parallel kernel compilation initialization function
         if self._lazy_kernel_names:
             start_compile_calls = "\n    ".join(
-                f'startKernelCompile("{name}", {name}_source);'
+                f'startKernelCompile(_module_pending_kernels, "{name}", {name}_source);'
                 for name in self._lazy_kernel_names
             )
             self.prefix.splice(
@@ -1085,6 +1094,8 @@ class CppWrapperGpu(CppWrapperCpu):
 // Start parallel compilation of all Triton kernels
 static inline void start_all_triton_kernel_compiles() {{
     loadLazyCompileFuncs();
+    _module_pending_kernels = PyDict_New();
+    AOTI_TORCH_CHECK(_module_pending_kernels, "Failed to create pending kernels dict");
     {start_compile_calls}
 }}
 
