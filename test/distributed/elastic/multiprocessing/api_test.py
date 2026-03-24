@@ -740,9 +740,9 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             result = pc.wait()
 
             self.assertFalse(result.is_failed())
-            self.assert_in_file(["hello stdout from 0"], pc.stdouts[0])
-            self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
-            self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
+            self.assert_in_file(["[rank0]:hello stdout from 0"], pc.stdouts[0])
+            self.assert_in_file(["[rank0]:hello stderr from 0"], pc.stderrs[0])
+            self.assert_in_file(["[rank1]:world stderr from 1"], pc.stderrs[1])
             self.assertFalse(pc.stdouts[1])
             for tail_log in pc._tail_logs:
                 self.assertTrue(tail_log.stopped())
@@ -842,9 +842,9 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     result = pc.wait()
 
                     self.assertFalse(result.is_failed())
-                    self.assert_in_file(["hello stdout from 0"], pc.stdouts[0])
-                    self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
-                    self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
+                    self.assert_in_file(["[rank0]:hello stdout from 0"], pc.stdouts[0])
+                    self.assert_in_file(["[rank0]:hello stderr from 0"], pc.stderrs[0])
+                    self.assert_in_file(["[rank1]:world stderr from 1"], pc.stderrs[1])
                     self.assertFalse(pc.stdouts[1])
                     for tail_log in pc._tail_logs:
                         self.assertTrue(tail_log.stopped())
