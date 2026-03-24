@@ -18,6 +18,9 @@ from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
+from torch._functorch._aot_autograd.schemas import (
+    CompilerMetadata,
+)
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1095,6 +1098,31 @@ class TracingContext:
         self.previously_inlined_functions.clear()
         self.previously_cleaned_instructions.clear()
         self.inlined_code_cache.clear()
+
+    @property
+    def compiler_metadata(self) -> CompilerMetadata | None:
+        """
+        Public API for backend compilers to access mutation metadata.
+
+        This property exposes a minimal, stable interface for out-of-tree backends
+        to access information about input mutations and output aliasing from the
+        forward graph. The returned CompilerMetadata object is immutable and
+        contains only the fields that backends actually need.
+
+        Returns None if metadata has not been set (e.g., when not in AOT Autograd).
+
+        This is preferred to direct access to fw_metadata, which is an internal
+        implementation detail subject to change.
+        """
+        if self.fw_metadata is None:
+            return None
+        return CompilerMetadata(
+            static_input_indices=self.fw_metadata.static_input_indices,
+            num_mutated_inp_runtime_indices=self.fw_metadata.num_mutated_inp_runtime_indices,
+            input_info=self.fw_metadata.input_info,
+            output_info=self.fw_metadata.output_info,
+            bw_donated_idxs=self.fw_metadata.bw_donated_idxs,
+        )
 
     @staticmethod
     @contextmanager
