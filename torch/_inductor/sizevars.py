@@ -22,7 +22,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymNode,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import IntInfinity, ValueRanges
 
@@ -416,7 +416,7 @@ class SizeVarAllocator:
         if len(free_symbols(numerator)) > 20:
             return False
 
-        expr = sympy.Eq(numerator % denominator, 0)
+        expr = sympy.Eq(Mod(numerator, denominator), 0)
         return self.statically_known_true(expr)  # type: ignore[arg-type]
 
     def statically_known_power_of_2(self, expr: Expr) -> bool:
@@ -674,7 +674,7 @@ class SizeVarAllocator:
                 "Use expr.expr to extract the sympy expression from a SymNode."
             )
         return _guarding_hint_or_throw_base(
-            self.shape_env, expr, self.precomputed_replacements
+            self.shape_env, expr, self.inv_precomputed_replacements
         )
 
     def optimization_hint(self, expr: Expr | int, fallback: int | None = None) -> int:
@@ -695,7 +695,7 @@ class SizeVarAllocator:
         - NaN (sympy.nan): returns the fallback value.
         """
         return _optimization_hint_base(
-            self.shape_env, expr, self.precomputed_replacements, fallback
+            self.shape_env, expr, self.inv_precomputed_replacements, fallback
         )
 
     def optimization_hints(
@@ -938,7 +938,7 @@ class SizeVarAllocator:
             if not _check_args(x2, div2, mod2, False):
                 return index
 
-            if mod2 % mod != 0:
+            if Mod(mod2, mod) != 0:
                 return index
 
             return ModularIndexing(x2, 1, mod)

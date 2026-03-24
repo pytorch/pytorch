@@ -1,11 +1,31 @@
 name: Setup Linux
 
-description: Set up Docker workspace on EC2
+description: Set up Linux workspace on EC2 or OSDC ARC runners
+
+inputs:
+  use-arc:
+    description: Whether the runner is an OSDC ARC runner (returned by runner_determinator)
+    required: false
+    default: ''
+  python-version:
+    description: Python version to install (e.g. "3.12"). Empty string keeps the default.
+    required: false
+    default: ''
+  compiler:
+    description: Compiler name and version (e.g. "gcc11", "clang15"). Empty string keeps the base image default.
+    required: false
+    default: ''
+  cuda-version:
+    description: CUDA version to activate (e.g. "13.0"). Empty string keeps the default.
+    required: false
+    default: ''
 
 runs:
   using: composite
   steps:
+    # ── EC2-only steps ──────────────────────────────────────────────────
     - name: Display EC2 information
+      if: ${{ inputs.use-arc != 'true' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -28,18 +48,15 @@ runs:
         echo "instance-type: $(get_ec2_metadata instance-type)"
         echo "system info $(uname -a)"
 
-    - name: Print GPU info (if present)
-      shell: bash
-      run: if [ -f /usr/bin/nvidia-smi ]; then nvidia-smi; fi
-
     - name: Check if in a container runner
+      if: ${{ inputs.use-arc != 'true' }}
       shell: bash
       id: check_container_runner
       run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
     - name: Start docker if docker daemon is not running
       shell: bash
-      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      if: ${{ inputs.use-arc != 'true' && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       run: |
         if ! docker version >/dev/null 2>/dev/null; then
           if systemctl is-active --quiet docker; then
@@ -49,15 +66,15 @@ runs:
           fi
         fi
 
-    - name: Install uv
+    - name: Install uv (EC2)
       uses: pytorch/test-infra/.github/actions/setup-uv@main
-      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      if: ${{ inputs.use-arc != 'true' && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       with:
         python-version: "3.12"
 
     - name: Install pip
       shell: bash
-      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      if: ${{ inputs.use-arc != 'true' && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       run: |
         set -euo pipefail
         if command -v pip3 &> /dev/null; then
@@ -67,14 +84,8 @@ runs:
           uv tool install pip
         fi
 
-    - name: Preserve github env variables for use in docker
-      shell: bash
-      run: |
-        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-
     - name: Kill any existing containers, clean up images
-      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      if: ${{ inputs.use-arc != 'true' && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       shell: bash
       run: |
         # ignore expansion of "docker ps -q" since it could be empty
@@ -86,7 +97,7 @@ runs:
     - name: Check that the docker daemon is running
       shell: bash
       continue-on-error: true
-      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
+      if: ${{ inputs.use-arc != 'true' && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
       run: |
         set +x
 
@@ -107,3 +118,121 @@ runs:
         done
         echo "Reached maximum attempts to connect to Docker. Exiting."
         exit 1
+
+    # ── ARC-only steps ──────────────────────────────────────────────────
+    - name: Install uv (ARC)
+      if: ${{ inputs.use-arc == 'true' }}
+      uses: pytorch/test-infra/.github/actions/setup-uv@main
+      with:
+        python-version: ${{ inputs.python-version || '3.12' }}
+        activate-environment: true
+
+    - name: Install CI requirements
+      if: ${{ inputs.use-arc == 'true' }}
+      shell: bash
+      run: |
+        uv pip install -r .ci/docker/requirements-ci.txt
+        echo "CMAKE_PREFIX_PATH=${VIRTUAL_ENV}" >> "${GITHUB_ENV}"
+
+    - name: Install C++ compiler
+      if: ${{ inputs.use-arc == 'true' && inputs.compiler != '' }}
+      shell: bash
+      run: |
+        set -eux
+
+        COMPILER="${{ inputs.compiler }}"
+        CLANG_VERSION=$(echo "${COMPILER}" | perl -n -e'/^clang(\d+)$/ && print $1')
+        GCC_VERSION=$(echo "${COMPILER}" | perl -n -e'/^gcc(\d+)$/ && print $1')
+
+        if [ -z "${CLANG_VERSION}" ] && [ -z "${GCC_VERSION}" ]; then
+          echo "ERROR: unrecognized compiler '${COMPILER}', expected gcc<N> or clang<N>"
+          exit 1
+        elif [ -n "${CLANG_VERSION}" ]; then
+          # Clang 20 and libomp-devel 20 are already installed in the base image.
+          # For older versions (15, 18), download pre-built tarballs from S3.
+          if [ "${CLANG_VERSION}" = "20" ]; then
+            echo "Using base image default clang 20"
+          elif [ "${CLANG_VERSION}" = "15" ] || [ "${CLANG_VERSION}" = "18" ]; then
+            ARCH=$(uname -m)
+            PLATFORM="linux-${ARCH}"
+            S3_URL="https://gha-artifacts.s3.amazonaws.com/clang/${PLATFORM}/clang-${CLANG_VERSION}/clang-${CLANG_VERSION}-${PLATFORM}.tar.gz"
+            INSTALL_DIR="/opt/clang-${CLANG_VERSION}"
+
+            echo "Downloading clang ${CLANG_VERSION} from ${S3_URL}"
+            curl -fsSL "${S3_URL}" -o /tmp/clang.tar.gz
+            mkdir -p "${INSTALL_DIR}"
+            tar xzf /tmp/clang.tar.gz -C "${INSTALL_DIR}" --strip-components=1
+            rm -f /tmp/clang.tar.gz
+
+            echo "PATH=${INSTALL_DIR}/bin:${PATH}" >> "${GITHUB_ENV}"
+            echo "CC=${INSTALL_DIR}/bin/clang" >> "${GITHUB_ENV}"
+            echo "CXX=${INSTALL_DIR}/bin/clang++" >> "${GITHUB_ENV}"
+            echo "CMAKE_PREFIX_PATH=${INSTALL_DIR}:${CMAKE_PREFIX_PATH:-}" >> "${GITHUB_ENV}"
+          else
+            echo "ERROR: unsupported clang version '${CLANG_VERSION}', available: 15, 18, 20"
+            exit 1
+          fi
+        else
+          # On AlmaLinux 9, GCC 11 is the system default at /usr/bin/gcc.
+          # Only install gcc-toolset for newer versions that aren't already available.
+          if [ "${GCC_VERSION}" = "11" ]; then
+            # Remove gcc/g++ from /usr/local/bin so they don't shadow /usr/bin/gcc (system default)
+            rm -f /usr/local/bin/gcc /usr/local/bin/g++ /usr/local/bin/cc /usr/local/bin/c++
+            # Strip any /opt/rh/gcc-toolset-* paths from PATH
+            CLEAN_PATH=$(echo "${PATH}" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-' | tr '\n' ':' | sed 's/:$//')
+            echo "PATH=${CLEAN_PATH}" >> "${GITHUB_ENV}"
+            echo "Using system default GCC 11"
+          else
+            dnf install -y \
+              gcc-toolset-${GCC_VERSION}-gcc \
+              gcc-toolset-${GCC_VERSION}-gcc-c++ \
+              gcc-toolset-${GCC_VERSION}-gcc-gfortran
+
+            TOOLSET_ROOT="/opt/rh/gcc-toolset-${GCC_VERSION}/root/usr"
+            echo "PATH=${TOOLSET_ROOT}/bin:${PATH}" >> "${GITHUB_ENV}"
+            echo "LD_LIBRARY_PATH=${TOOLSET_ROOT}/lib64:${TOOLSET_ROOT}/lib:${LD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
+          fi
+        fi
+
+    - name: Switch CUDA version
+      if: ${{ inputs.use-arc == 'true' && inputs.cuda-version != '' }}
+      shell: bash
+      run: |
+        set -eux
+
+        CUDA_VERSION="${{ inputs.cuda-version }}"
+
+        # All CUDA versions are pre-installed in the base image under
+        # /usr/local/cuda-{major.minor}. The default (/usr/local/cuda
+        # symlink) points to CUDA 13. Switch to the requested version.
+        CUDA_DIR="/usr/local/cuda-${CUDA_VERSION}"
+        if [ ! -d "${CUDA_DIR}" ]; then
+          echo "ERROR: CUDA ${CUDA_VERSION} not found at ${CUDA_DIR}"
+          ls -d /usr/local/cuda-* /usr/local/cuda 2>/dev/null || true
+          exit 1
+        fi
+
+        rm -f /usr/local/cuda
+        ln -s "${CUDA_DIR}" /usr/local/cuda
+
+        echo "PATH=/usr/local/cuda/bin:${PATH}" >> "${GITHUB_ENV}"
+        echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" >> "${GITHUB_ENV}"
+        echo "CUDA_HOME=/usr/local/cuda" >> "${GITHUB_ENV}"
+        echo "CUDA_PATH=/usr/local/cuda" >> "${GITHUB_ENV}"
+        echo "DESIRED_CUDA=${CUDA_VERSION}" >> "${GITHUB_ENV}"
+        echo "NCCL_INCLUDE_DIR=/usr/local/cuda/include" >> "${GITHUB_ENV}"
+        echo "NCCL_LIB_DIR=/usr/local/cuda/lib64" >> "${GITHUB_ENV}"
+
+        echo "Switched to CUDA ${CUDA_VERSION}"
+        nvcc --version
+
+    # ── Shared steps ────────────────────────────────────────────────────
+    - name: Print GPU info (if present)
+      shell: bash
+      run: if [ -f /usr/bin/nvidia-smi ]; then nvidia-smi; fi
+
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"

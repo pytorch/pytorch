@@ -5,7 +5,7 @@ import itertools
 import time
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
@@ -26,14 +26,12 @@ from torch._dynamo.utils import (
 )
 from torch._functorch._aot_autograd.autograd_cache import create_fx_config
 from torch._guards import detect_fake_mode
+from torch._inductor.codecache import resolve_pre_grad_pass_timing
+from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 
-
-static_inputs_log = torch._logging.getArtifactLogger(
-    __name__, "cudagraph_static_inputs"
-)
 from . import config
 from ._aot_autograd.autograd_cache import (  # noqa: F401
     AOTAutogradCache,
@@ -123,6 +121,7 @@ from ._aot_autograd.schemas import (  # noqa: F401
     InputAliasInfo,
     JointWithDescriptors,
     MutationType,
+    OpaqueMeta,
     OutputAliasInfo,
     OutputType,
     SerializableAOTDispatchCompiler,
@@ -1084,6 +1083,11 @@ def aot_module_simplified(
     boxed_forward_device_index: BoxedDeviceIndex | None = None,
     ignore_shape_env: bool = False,
     disable_functionalization: bool = False,
+    # Optional callback to run passes on the module at the start of AOT autograd.
+    pre_grad_passes: Callable[
+        [torch.fx.GraphModule, Sequence[InputType]], torch.fx.GraphModule
+    ]
+    | None = None,
 ) -> Callable[..., Any]:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1124,6 +1128,15 @@ def aot_module_simplified(
 
         compiled_fn = None
 
+        pre_grad_pass_timing: Literal["early", "late"] = resolve_pre_grad_pass_timing()
+
+        if (
+            pre_grad_pass_timing == "early"
+            and pre_grad_passes
+            and isinstance(mod, torch.fx.GraphModule)
+        ):
+            mod = pre_grad_passes(mod, fake_flat_args)
+
         if (
             isinstance(fw_compiler, SerializableAOTDispatchCompiler)
             or torch._functorch.config.force_autograd_cache
@@ -1143,6 +1156,13 @@ def aot_module_simplified(
                 )
 
         if compiled_fn is None:
+            if (
+                pre_grad_pass_timing == "late"
+                and pre_grad_passes
+                and isinstance(mod, torch.fx.GraphModule)
+            ):
+                mod = pre_grad_passes(mod, fake_flat_args)
+
             stack.enter_context(compiled_autograd._disable())
             aot_state = create_aot_state(
                 stack,

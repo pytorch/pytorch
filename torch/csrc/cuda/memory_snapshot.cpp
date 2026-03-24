@@ -315,6 +315,7 @@ std::string _memory_snapshot_pickled() {
   IValue time_us_s = "time_us";
   IValue compile_contexts_s = "compile_context";
   IValue user_metadata_s = "user_metadata";
+  IValue pool_id_s = "pool_id";
 
   auto empty_frames = new_list();
 
@@ -439,6 +440,7 @@ std::string _memory_snapshot_pickled() {
         frame_dict.push_back(trace_entry);
       }
       trace_entry.insert(time_us_s, te.time_.t_);
+      trace_entry.insert(pool_id_s, std::tuple<int64_t, int64_t>(te.mempool_));
       trace.push_back(trace_entry);
     }
     traces.push_back(trace);

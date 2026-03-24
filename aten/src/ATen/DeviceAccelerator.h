@@ -78,10 +78,18 @@ TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
 TORCH_API c10::DeviceCapability getDeviceCapability(
     c10::DeviceIndex device_index);
 
+// Releases all unused device memory currently held by the accelerator's
+// device-side caching allocator. The freed memory becomes available for reuse
+// by other applications or processes.
 TORCH_API inline void emptyCache() {
   const auto device_type = getAccelerator(true).value();
   at::getDeviceAllocator(device_type)->emptyCache();
 }
+
+// Releases all unused host (pinned) memory currently held by the accelerator's
+// host-side caching allocator. The freed memory becomes available for reuse by
+// other applications or processes.
+TORCH_API void emptyHostCache();
 
 TORCH_API inline at::CachingDeviceAllocator::DeviceStats getDeviceStats(
     c10::DeviceIndex device_index) {

@@ -134,6 +134,46 @@ class DictTests(torch._dynamo.test_case.TestCase):
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_torch_size_dynamic_key(self):
+        class DynamicShapeModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_configs = {
+                    torch.Size([32, 64]): torch.nn.Linear(32, 64),
+                    torch.Size([64, 128]): torch.nn.Linear(64, 128),
+                    torch.Size([128, 256]): torch.nn.Linear(128, 256),
+                }
+                self.activation_functions = {
+                    torch.Size([32]): torch.nn.ReLU(),
+                    torch.Size([64]): torch.nn.Tanh(),
+                    torch.Size([128]): torch.nn.Sigmoid(),
+                }
+
+            def forward(self, x):
+                current_shape = torch.tensor(x.shape[1:])
+                shape_key = torch.Size([current_shape[0], 64])
+                if shape_key in self.layer_configs:
+                    x = self.layer_configs[shape_key](x)
+
+                activation_shape = torch.Size([x.shape[1]])
+                if activation_shape in self.activation_functions:
+                    x = self.activation_functions[activation_shape](x)
+                return x
+
+        model = DynamicShapeModel().eval()
+
+        for features in (32, 64, 128, 16):
+            x = torch.randn(4, features)
+            with torch.no_grad():
+                eager_out = model(x)
+
+            torch._dynamo.reset()
+            compiled_model = torch.compile(model, backend="eager")
+            with torch.no_grad():
+                compiled_out = compiled_model(x)
+
+            self.assertTrue(same(eager_out, compiled_out))
+
     def test_dict_subclass_methods_fallback_readonly(self):
         sd = SimpleDict()
         sd[2] = 5
@@ -1488,6 +1528,44 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_custom_bool(self):
+        class CustomBoolDict:
+            def __init__(self, bool_result: bool):
+                super().__init__()
+                self._bool_result = bool_result
+
+            def __bool__(self):
+                return self._bool_result
+
+        def fn(t: torch.Tensor, d, apply_not: bool):
+            if apply_not:
+                return t.sin(), bool(not d)
+            else:
+                return t.sin(), bool(d)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        t = CustomBoolDict(True)
+        self.assertTrue(
+            opt_fn(x, t, False)[1],
+            "CustomBoolDict(True) should evaluate to True in boolean context",
+        )
+        self.assertFalse(
+            opt_fn(x, t, True)[1],
+            "not CustomBoolDict(True) should evaluate to False in boolean context",
+        )
+
+        f = CustomBoolDict(False)
+        self.assertFalse(
+            opt_fn(x, f, False)[1],
+            "CustomBoolDict(False) should evaluate to False in boolean context",
+        )
+        self.assertTrue(
+            opt_fn(x, f, True)[1],
+            "not CustomBoolDict(False) should evaluate to True in boolean context",
+        )
+
 
 instantiate_parametrized_tests(DictTests)
 
@@ -1632,6 +1710,7 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
     thetype = dict
 
     # Methods:
+    # + bool
     # + clear
     # + copy
     # + fromkeys
@@ -2079,6 +2158,19 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         self.assertTrue(same(f(A(), x), opt_f(A(), x)))
+
+    @make_dynamo_test
+    def test_bool(self):
+        p = self.thetype()
+        q = self.thetype({"a": 1, "b": 2})
+        if p:
+            self.fail("empty mapping must compare to False")
+        if not q:
+            self.fail("non-empty mapping must compare to True")
+        if bool(p):
+            self.fail("empty mapping must compare to False")
+        if not bool(q):
+            self.fail("non-empty mapping must compare to True")
 
 
 class DictSubclassMethodsTests(DictMethodsTests):

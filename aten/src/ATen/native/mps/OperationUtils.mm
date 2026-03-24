@@ -25,34 +25,6 @@
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 
-@implementation MPSGraph (PyTorchFixups)
-- (MPSGraphTensor*)minimumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
-                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
-                                                                       name:(NSString*)name {
-  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
-  // arguments results in
-  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
-  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
-  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
-    return [self minimumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
-  }
-  return [self minimumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
-}
-
-- (MPSGraphTensor*)maximumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
-                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
-                                                                       name:(NSString*)name {
-  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
-  // arguments results in
-  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
-  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
-  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
-    return [self maximumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
-  }
-  return [self maximumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
-}
-@end
-
 namespace at::native::mps {
 /**
  * Computes distance from lowest to highest element offset in given tensor.
@@ -484,8 +456,8 @@ MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray) 
   MPSShape* originalSortedStridesShape = sortedStridesShape;
   bool hasNonZeroStrides = nStrides == 0 ? false : nonZeroStrides[sortedStridesIndices[nStrides - 1]] != 1;
   if (hasNonZeroStrides) {
-    originalSortedMPSShape = [sortedMPSShape copy];
-    originalSortedStridesShape = [sortedStridesShape copy];
+    originalSortedMPSShape = [[sortedMPSShape copy] autorelease];
+    originalSortedStridesShape = [[sortedStridesShape copy] autorelease];
     [sortedStridesShape addObject:[NSNumber numberWithInteger:1]];
     [sortedMPSShape addObject:[NSNumber numberWithInteger:1]];
   }
