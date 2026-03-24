@@ -345,6 +345,32 @@ if HAS_GPU_AND_TRITON:
 
             torch._dynamo.reset()
 
+        @fresh_cache()
+        @config.patch(autotune_gemm_at_fusion_time=True)
+        def test_autotune_fused_epilogue(self):
+            from unittest.mock import patch as mock_patch
+
+            def foo(m, inp):
+                return torch.nn.functional.relu(m(inp))
+
+            m = torch.nn.Linear(256, 256, bias=True).half().to(GPU_TYPE)
+            inp = torch.rand([256, 256]).half().to(GPU_TYPE)
+
+            foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+            with (
+                torch.no_grad(),
+                mock_patch.object(
+                    Scheduler,
+                    "_autotune_fused_epilogue",
+                    wraps=Scheduler._autotune_fused_epilogue,
+                ) as mock_autotune,
+            ):
+                expected = foo(m, inp)
+                actual = foo_c(m, inp)
+
+            mock_autotune.assert_called()
+            self.assertEqual(expected, actual, atol=1e-4, rtol=1.1)
+
 
 if HAS_CPU and not torch.backends.mps.is_available():
 
