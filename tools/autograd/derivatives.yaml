@@ -265,15 +265,15 @@
   mat2: mm_mat2_backward(grad, mat1, mat2.sym_sizes(), mat2.sym_strides(), mat2.layout(), alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  self: maybe_multiply(grad, beta.conj())
-  mat: maybe_multiply(grad.ger(vec.conj()), alpha.conj())
-  vec: maybe_multiply(mat.t().conj().mv(grad), alpha.conj())
+  self: handle_r_to_c(self.scalar_type(), maybe_multiply(grad, beta.conj()))
+  mat: handle_r_to_c(mat.scalar_type(), maybe_multiply(grad.ger(vec.conj()), alpha.conj()))
+  vec: handle_r_to_c(vec.scalar_type(), maybe_multiply(mat.t().conj().mv(grad), alpha.conj()))
   result: maybe_multiply(self_t, beta) + maybe_multiply(mat_t.mv(vec_p), alpha) + maybe_multiply(mat_p.mv(vec_t), alpha)
 
 - name: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  self: maybe_multiply(grad, beta.conj())
-  vec1: maybe_multiply(grad.mv(vec2.conj()), alpha.conj())
-  vec2: maybe_multiply(grad.t().mv(vec1.conj()), alpha.conj())
+  self: handle_r_to_c(self.scalar_type(), maybe_multiply(grad, beta.conj()))
+  vec1: handle_r_to_c(vec1.scalar_type(), maybe_multiply(grad.mv(vec2.conj()), alpha.conj()))
+  vec2: handle_r_to_c(vec2.scalar_type(), maybe_multiply(grad.t().mv(vec1.conj()), alpha.conj()))
   result: maybe_multiply(self_t, beta) + maybe_multiply(vec1_t.outer(vec2_p), alpha) + maybe_multiply(vec1_p.outer(vec2_t), alpha)
 
 - name: affine_grid_generator(Tensor theta, SymInt[] size, bool align_corners) -> Tensor
