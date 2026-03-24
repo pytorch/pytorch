@@ -426,12 +426,12 @@ class TagActivationCheckpoint(HigherOrderOperator):
         unique_graph_id = next(uid)
         for node in gmod.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
-                node.meta["ac_graph_id"] = unique_graph_id
                 if is_sac:
-                    # For selective checkpointing, we will populate this tag later in _CachingTorchDispatchMode.
-                    node.meta["recompute"] = None
+                    # ac_graph_id and recompute are populated by _CachingTorchDispatchMode.
+                    pass
                 else:
                     # Under vanilla activation checkpointing, all nodes should be recomputed.
+                    node.meta["ac_graph_id"] = unique_graph_id
                     node.meta["recompute"] = CheckpointPolicy.PREFER_RECOMPUTE
         return gmod
 
