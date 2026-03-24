@@ -47,7 +47,7 @@ from ..codecache import output_code_log
 from ..ir import IRNode, ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
-from ..stream_constants import DEFAULT_STREAM, ENTRANCE_EVENT, STREAM_NAME_TEMPLATE
+from ..stream_constants import DEFAULT_STREAM, STREAM_NAME_TEMPLATE
 from ..stream_utils import get_stream_name
 from ..utils import (
     cache_on_self,
@@ -82,7 +82,6 @@ if TYPE_CHECKING:
 
     import triton
 
-    from ..event import CudaEventSym
     from ..graph import GraphLowering
     from ..ir import ExternKernel
     from ..scheduler import BaseSchedulerNode
@@ -329,6 +328,7 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     import triton
     from triton import JITFunction  # type: ignore[name-defined, attr-defined]
     from triton.language import constexpr  # type: ignore[name-defined]
+    from triton.language.core import dtype as triton_dtype
 
     # global constexpr vars handled above
     symbols_included = OrderedSet([kernel.__name__])
@@ -352,7 +352,6 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
-
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
@@ -360,9 +359,25 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                     symbol,
                     triton.runtime.jit.ConstexprFunction,
                 ):
+                    # Import dtype class if used in type annotations
+                    if "dtype" in symbol.src and "dtype" not in symbols_included:
+                        dtype_symbol = symbol.fn.__globals__.get("dtype")
+                        if (
+                            dtype_symbol
+                            and hasattr(dtype_symbol, "__module__")
+                            and dtype_symbol.__module__.startswith("triton")
+                        ):
+                            compile_wrapper.writeline(
+                                f"from {dtype_symbol.__module__} import dtype as dtype"
+                            )
+                            symbols_included.add("dtype")
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.constexpr_function")
                     compile_wrapper.splice(symbol.src, strip=True)
+                    if symbol_name != symbol.fn.__name__:
+                        compile_wrapper.writeline(
+                            f"{symbol_name} = {symbol.fn.__name__}"
+                        )
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif isinstance(symbol, (int, str, bool, constexpr)):
@@ -396,9 +411,14 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                     # a global symbol imported from triton is referenced
                     # without module qualification (i.e., `store` instead
                     # of `tl.store`): need to codegen an import
-                    compile_wrapper.writeline(
-                        f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
-                    )
+
+                    # Triton dtype instances have .name instead of .__name__
+                    if isinstance(symbol, triton_dtype):
+                        compile_wrapper.writeline(f"{symbol_name} = tl.{symbol.name}")
+                    elif hasattr(symbol, "__name__"):
+                        compile_wrapper.writeline(
+                            f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
+                        )
                     symbols_included.add(symbol_name)
 
     traverse(kernel)
@@ -746,28 +766,34 @@ class MemoryPlanningLine(WrapperLine):
 
 @dataclasses.dataclass
 class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine):
-    """Enter a CUDA device context and allocate required side streams.
+    """Enter a CUDA device context and retrieve user stream objects.
 
     Attributes:
-        num_streams: Number of streams to allocate (determined by user annotations on nodes).
+        num_streams: Number of streams (determined by user annotations on nodes).
+        stream_idx_to_user_obj_idx: Maps stream_idx → user_object_index for
+            retrieving user stream objects via get_external_object_by_index.
     """
 
     num_streams: int = 1
+    stream_idx_to_user_obj_idx: dict[int, int] = dataclasses.field(default_factory=dict)
 
     def codegen(self, code: IndentedBuffer) -> None:
-        """Generate context switching and stream allocation code."""
+        """Generate context switching and stream retrieval code."""
         if V.graph.cpp_wrapper:
             super().codegen(code)
         else:
             super().codegen(code)
             code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
-            code.writeline(f"{ENTRANCE_EVENT} = {DEFAULT_STREAM}.record_event()")
 
             if self.num_streams > 1:
+                code.writeline(
+                    "from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index"
+                )
                 for i in range(1, self.num_streams):
+                    user_obj_idx = self.stream_idx_to_user_obj_idx[i]
                     code.writeline(
                         f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                        f"= torch.cuda.Stream(device={self.device_idx})",
+                        f"= get_external_object_by_index({user_obj_idx})",
                     )
 
 
@@ -789,25 +815,15 @@ class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
 
 @dataclasses.dataclass
 class EnterCudaStreamContextLine(WrapperLine):
-    """Enter a context executed by respective CUDA Stream and insert necessary syncs.
+    """Enter a context executed by respective CUDA Stream.
 
     Attributes:
-        wrapper: The code-gen wrapper of the current compilation phase.
         stream_idx: The index number corresponds to the entering CUDA Stream context.
-        upstream_events: Names of CUDA Events that the current stream should be waiting for before
-            the stream switching.
-        buffers_from_other_streams: Name of buffers produced by other CUDA Streams. Those buffers
-            should be recorded to the current stream to avoid accidental memory free.
     """
 
     stream_idx: int
 
-    def __post_init__(self) -> None:
-        """Track buffers have been recorded on this stream to reduce duplicate recording."""
-        self.buffers_recorded_on_this_stream: OrderedSet[str] = OrderedSet()
-
     def codegen(self, code: IndentedBuffer) -> None:
-        """Generate stream switching and buffer recording code."""
         code.writeline(f"with torch.cuda.stream({get_stream_name(self.stream_idx)}):")
         code.do_indent()
 
@@ -1667,13 +1683,19 @@ class PythonWrapperCodegen(CodeGen):
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
-    def codegen_device_guard_enter(self, device_idx: int, num_streams: int = 1) -> None:
+    def codegen_device_guard_enter(
+        self,
+        device_idx: int,
+        num_streams: int = 1,
+        stream_idx_to_user_obj_idx: dict[int, int] | None = None,
+    ) -> None:
         if num_streams > 1:
             self.writeline(
                 EnterDeviceContextManagerWithStreamInfoLine(
                     device_idx,
                     self.last_seen_device_guard_index,
                     num_streams,
+                    stream_idx_to_user_obj_idx or {},
                 ),
             )
         else:
@@ -1711,23 +1733,11 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_cuda_stream_enter(
         self,
         stream_idx: int,
-        upstream_events: OrderedSet[CudaEventSym],
-        buffers_from_other_streams: OrderedSet[str],
     ) -> EnterCudaStreamContextLine:
         """Generate data structure for entering a CUDA Stream context.
 
         Args:
             stream_idx: The index number of the entering CUDA Stream context.
-            upstream_events: Names of CUDA Events that the current stream should be waiting for
-                before the stream switching. This is usually the events that are generated by the
-                previous stream context.
-            buffers_from_other_streams: Name of buffers produced by other CUDA Streams. Those
-                buffers should be recorded to the current stream to avoid accidental memory free.
-
-        Note:
-            - Refer to :class:`EnterCudaStreamContextLine` for argument specifications;
-            - Once entered a context, the stream associated with this context will also be recorded
-              such that kernels in subsequent code-gen can get the correct stream index.
 
         Raises:
             ValueError: If this function is called while the previous stream context isn't exited.
@@ -1740,46 +1750,11 @@ class PythonWrapperCodegen(CodeGen):
             )
         ctx_entrance = EnterCudaStreamContextLine(stream_idx=stream_idx)
         self.writeline(ctx_entrance)
-        self.codegen_buffers_record_stream(
-            buffers=buffers_from_other_streams,
-            stream_idx=stream_idx,
-        )
-        ctx_entrance.buffers_recorded_on_this_stream |= buffers_from_other_streams
-        self.codegen_events_wait_stream(
-            events=upstream_events,
-            stream_idx=stream_idx,
-        )
         return ctx_entrance
 
     def codegen_cuda_stream_exit(self) -> None:
         """Generate data structure for exiting a CUDA Stream context."""
         self.writeline(ExitCudaStreamContextLine())
-
-    def codegen_events_wait_stream(
-        self, events: OrderedSet[CudaEventSym], stream_idx: int
-    ) -> None:
-        """Generate data structure for syncing hanging CUDA Events with certain stream.
-
-        Args:
-            events: Symbols of the events that need to be synchronized with the given stream.
-            stream_idx: Index of the CUDA stream to synchronize the events with.
-        """
-        for event in events:
-            self.writeline(event.wait(stream_idx))
-
-    def codegen_buffers_record_stream(
-        self,
-        buffers: OrderedSet[str],
-        stream_idx: int,
-    ) -> None:
-        """Generate code for recording stream on buffers to prevent premature memory free.
-
-        Args:
-            buffers: Names of buffers that need to be recorded on the given stream.
-            stream_idx: Index of the CUDA stream to record the buffers to.
-        """
-        for buff in buffers:
-            self.writeline(f"{buff}.record_stream({get_stream_name(stream_idx)})")
 
     def generate_return(self, output_refs: list[str]) -> None:
         if output_refs:
@@ -2931,6 +2906,11 @@ class PythonWrapperCodegen(CodeGen):
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
+        if config.cpp_wrapper:
+            # With cpp_wrapper + autotune_at_compile_time=False, the source is
+            # further embedded in a C++ raw string inside a Python r"""...""" wrapper.
+            # So we need to add backslash here.
+            kernel_src = kernel_src.replace('"""', '\\"\\"\\"')
         kernel_src = kernel_src.replace("'''", "\\'\\'\\'")
         compile_wrapper.splice(kernel_src)
 
@@ -3478,12 +3458,6 @@ class PythonWrapperCodegen(CodeGen):
             allocation_shape
         )
         codegen_stride_tuple = self.codegen_python_shape_tuple(stride)
-
-        is_deterministic = (
-            torch.are_deterministic_algorithms_enabled()
-            and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
-        )
-
         if torch._inductor.config.test_configs.track_memory_lifecycle:
             out = (
                 f"{name} = tracked_empty_strided("
@@ -3493,14 +3467,14 @@ class PythonWrapperCodegen(CodeGen):
                 f"device='{device.type}', "
                 f"name='{name}')"
             )
-        elif device.type == "cpu" and is_pinned and not is_deterministic:
+        elif device.type == "cpu" and is_pinned:
             out = (
                 f"{name} = empty_strided_cpu_pinned("
                 f"{codegen_allocation_shape_tuple}, "
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
-        elif device.type in ("cpu", "cuda", "xpu", "mtia") and not is_deterministic:
+        elif device.type in ("cpu", "cuda", "xpu", "mtia"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
             out = (
                 f"{name} = empty_strided_{device.type}("
@@ -3508,14 +3482,13 @@ class PythonWrapperCodegen(CodeGen):
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
             )
-        # all other devices (or deterministic mode):
-        # NOTE: For deterministic mode, fallback to the slower path which correctly fills the buffer with NaN or MAX_INT
+        # all other devices:
         else:
             out = (
                 f"{name} = empty_strided("
                 f"{codegen_allocation_shape_tuple}, "
                 f"{codegen_stride_tuple}, "
-                f"device='{device.type}', dtype={dtype}, pin_memory={is_pinned})"
+                f"device='{device.type}', dtype={dtype})"
             )
         if codegen_shape_tuple != codegen_allocation_shape_tuple:
             # need an extra as_strided call

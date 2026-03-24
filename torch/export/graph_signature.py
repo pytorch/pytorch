@@ -2,7 +2,7 @@
 import dataclasses
 from collections.abc import Collection, Mapping
 from enum import auto, Enum
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_type_name, is_opaque_type
@@ -67,15 +67,15 @@ class ConstantArgument:
     value: int | float | bool | str | None
 
 
-ArgumentSpec = Union[
-    TensorArgument,
-    SymIntArgument,
-    SymFloatArgument,
-    SymBoolArgument,
-    ConstantArgument,
-    CustomObjArgument,
-    TokenArgument,
-]
+ArgumentSpec = (
+    TensorArgument
+    | SymIntArgument
+    | SymFloatArgument
+    | SymBoolArgument
+    | ConstantArgument
+    | CustomObjArgument
+    | TokenArgument
+)
 
 
 class InputKind(Enum):

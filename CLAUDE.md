@@ -1,3 +1,11 @@
+# Scratch Space
+
+Use `agent_space/` (git-ignored, at repo root) for temporary scripts, scratch files, and throwaway experiments. Do not commit files from this directory.
+
+# PR Review
+
+When asked to review a PR, always use the /pr-review skill.
+
 # Environment
 
 If any tool you're trying to use (pip, python, spin, etc) is missing, always stop and ask the user if an environment is needed. Do NOT try to find alternatives or install these tools.
@@ -42,6 +50,10 @@ changes. Instead, if the PR is large, explain the order to review changes
 entirely.
 
 Disclose that the PR was authored with Claude.
+
+If a commit message contains `ghstack-source-id` or `Pull-Request` trailers,
+you MUST preserve them when rewriting or splitting commit messages. ghstack
+will update the source id automatically when needed.
 
 # Coding Style Guidelines
 

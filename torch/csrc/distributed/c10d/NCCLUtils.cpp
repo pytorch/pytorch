@@ -595,6 +595,54 @@ std::string NCCLComm::repr() const {
   return c10::str((void*)ncclComm_);
 }
 
+void NCCLComm::suspend() {
+#ifdef NCCL_HAS_COMM_OFFLOAD
+  LockType lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK(ncclCommSuspend(comm, NCCL_SUSPEND_MEM), std::nullopt);
+#else
+  TORCH_CHECK(false, "suspend() requires NCCL 2.29.7 or later");
+#endif
+}
+
+void NCCLComm::resume() {
+#ifdef NCCL_HAS_COMM_OFFLOAD
+  LockType lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  C10D_NCCL_CHECK(ncclCommResume(comm), std::nullopt);
+#else
+  TORCH_CHECK(false, "resume() requires NCCL 2.29.7 or later");
+#endif
+}
+
+std::unordered_map<std::string, uint64_t> NCCLComm::getMemoryStats() {
+#ifdef NCCL_HAS_COMM_OFFLOAD
+  LockType lock(mutex_);
+  at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
+  auto comm = getNcclComm();
+  uint64_t suspend, suspended, persist, total;
+  C10D_NCCL_CHECK(
+      ncclCommMemStats(comm, ncclStatGpuMemSuspend, &suspend), std::nullopt);
+  C10D_NCCL_CHECK(
+      ncclCommMemStats(comm, ncclStatGpuMemSuspended, &suspended),
+      std::nullopt);
+  C10D_NCCL_CHECK(
+      ncclCommMemStats(comm, ncclStatGpuMemPersist, &persist), std::nullopt);
+  C10D_NCCL_CHECK(
+      ncclCommMemStats(comm, ncclStatGpuMemTotal, &total), std::nullopt);
+  return {
+      {"suspend", suspend},
+      {"suspended", suspended},
+      {"persist", persist},
+      {"total", total},
+  };
+#else
+  TORCH_CHECK(false, "getMemoryStats() requires NCCL 2.29.7 or later");
+#endif
+}
+
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
   std::unordered_map<std::string, std::string> dump;

@@ -23,6 +23,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
+from torch._opaque_base import OpaqueBase
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.proxy_tensor import (
     _proxy_tensor_disable_update_tensor_tracker,
@@ -671,7 +672,15 @@ def sc_visit(
             return
 
         for a in e.__tensor_flatten__()[0]:
-            visit(getattr(e, a))
+            match getattr(e, a):
+                case torch.Tensor() as inner:
+                    visit(inner)
+                case OpaqueBase():
+                    pass
+                case unexpected:
+                    raise AssertionError(
+                        f"expected Tensor or OpaqueBase, got {type(unexpected)}"
+                    )
 
     visit(t)
     return accum
@@ -960,7 +969,11 @@ def create_functionalized_fn(
                                 raise AssertionError(
                                     f"expected both before and after to be Tensors, got {type(before)} and {type(after)}"
                                 )
-                            before.copy_(after)
+                            # no_grad prevents the FakeTensor's requires_grad from
+                            # triggering check_inplace during tracing.  The
+                            # requires_grad case is checked at runtime instead
+                            with torch.no_grad():
+                                before.copy_(after)
                         meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
                             idx
                         )
@@ -1388,7 +1401,7 @@ def aot_dispatch_subclass(
             append_symints=True,
         )
         # We pass append_symints=False here because the partitioner will
-        # capture and add any extra argument
+        # capture and add any extra argument.
         tangents_unwrapped_pair = unwrap_tensor_subclasses(
             args[1],  # type: ignore[arg-type]
             args_descs[1],  # type: ignore[arg-type]

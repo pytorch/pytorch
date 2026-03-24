@@ -91,9 +91,6 @@ jobs:
       - name: Setup XPU
         uses: ./.github/actions/setup-xpu
 
-      - name: Login to ECR
-        uses: ./.github/actions/ecr-login
-
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
