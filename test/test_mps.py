@@ -9730,6 +9730,33 @@ class TestLinalgMPS(TestCaseMPS):
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertLess(mean_err, 0.05)
 
+    def test_loradown_regression_original_case(self):
+        a = torch.rand(2, 1025, device='mps', dtype=torch.half)
+        b = torch.rand(2, 1041, device='mps', dtype=torch.half)[:, :1025].t()
+        result = a @ b
+        self.assertEqual(result.shape, (2, 2))
+
+        self.assertFalse(torch.isnan(result).any())
+        self.assertFalse(torch.isinf(result).any())
+
+    @parametrize("padding", [0, 3, 4, 7, 8, 15, 16])
+    @parametrize("vector_dim", [2, 15, 16, 24])
+    def test_loradown_correctness_vs_cpu(self, padding, vector_dim):
+        torch.manual_seed(13)
+
+        base_size = 64
+        physical_size = base_size + padding
+
+        a_mps = torch.rand(vector_dim, base_size, device='mps', dtype=torch.half)
+        b_mps = torch.rand(vector_dim, physical_size, device='mps', dtype=torch.half)[:, :base_size].t()
+
+        a_cpu = a_mps.cpu()
+        b_cpu = b_mps.cpu()
+
+        result_cpu = (a_cpu @ b_cpu)
+        result_mps = (a_mps @ b_mps).cpu()
+
+        torch.testing.assert_close(result_mps, result_cpu, rtol=1e-3, atol=1e-3)
 
 class TestSDPA(TestCaseMPS):
     def _compare_tensors(self, y, ref, tol=0.01):
