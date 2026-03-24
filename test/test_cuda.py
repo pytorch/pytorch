@@ -82,6 +82,7 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfRocmVersionLessThan,
     slowTest,
     subtest,
     TemporaryFileName,
@@ -150,17 +151,25 @@ def get_wait_for_cpu_kernel():
     if _wait_for_cpu_kernel is None:
         from torch.cuda import _compile_kernel
 
-        _wait_for_cpu_kernel = _compile_kernel(
-            r"""
+        if torch.version.hip:
+            kernel_source = r"""
+            __global__ void wait_for_cpu(int *pinned_cpu_flag) {
+                int flag = 0;
+                do {
+                    flag = __hip_atomic_load(pinned_cpu_flag, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+                } while (flag == 0);
+            }
+            """
+        else:
+            kernel_source = r"""
             __global__ void wait_for_cpu(int *pinned_cpu_flag) {
                 int flag = 0;
                 do {
                     asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
                 } while (flag == 0);
             }
-            """,
-            "wait_for_cpu",
-        )
+            """
+        _wait_for_cpu_kernel = _compile_kernel(kernel_source, "wait_for_cpu")
     return _wait_for_cpu_kernel
 
 
@@ -2421,8 +2430,8 @@ torch.cuda.synchronize()
             g.debug_dump(os.path.join(tempdir, "out_multi_stream.dot"))
 
     @unittest.skipIf(
-        not TEST_CUDA_GRAPH or TEST_WITH_ROCM,
-        "CUDA >= 11.0 required for external events in cuda graphs. rocm does not support external events",
+        not TEST_CUDA_GRAPH,
+        "CUDA >= 11.0 ROCM >= 7.3 required for external events in cuda graphs.",
     )
     def test_graph_timing(self):
         torch.cuda.empty_cache()
@@ -6635,7 +6644,6 @@ class TestMemPool(TestCase):
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCM does not support nvrtc")
     @unittest.skipIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
     )
@@ -6645,7 +6653,7 @@ class TestMemPool(TestCase):
         # Exercises the insert_events path in endAllocateToPool.
         spin_wait_kernel = get_wait_for_cpu_kernel()
 
-        torch.cuda.memory._set_allocator_settings(
+        torch._C._accelerator_setAllocatorSettings(
             "graph_capture_record_stream_reuse:True"
         )
         torch.cuda.empty_cache()
@@ -6714,7 +6722,7 @@ class TestMemPool(TestCase):
 
         self.assertEqual(data_ptr, reused_ptr)
 
-        torch.cuda.memory._set_allocator_settings(
+        torch._C._accelerator_setAllocatorSettings(
             "graph_capture_record_stream_reuse:False"
         )
 
@@ -8405,9 +8413,7 @@ class TestCompileKernel(TestCase):
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCudaDeviceParametrized(TestCase):
-    @unittest.skipIf(
-        TEST_WITH_ROCM, "ROCM does not support nvrtc or external cuda graph events"
-    )
+    @skipIfRocmVersionLessThan((7, 3))
     @skipCUDAIf(
         not SM70OrLater, "Compute capability >= SM70 required for relaxed ptx flag"
     )
@@ -8487,6 +8493,8 @@ class TestCudaDeviceParametrized(TestCase):
             torch.all(x_cpu == 1.0),
             "Copy should be done once end_event is synchronized",
         )
+        # sync to ensure that work_stream is done before checking query
+        torch.cuda.synchronize()
         self.assertTrue(
             work_stream.query(),
             "end_event.synchronize() completing should imply that work_stream is done",
