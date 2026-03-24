@@ -1322,7 +1322,7 @@ def _get_amdsmi_handler(device: Device = None):
     return handle
 
 
-_cached_hip_to_amdsmi: Optional[dict[int, int]] = None
+_cached_hip_to_amdsmi: dict[int, int] | None = None
 
 
 def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
