@@ -1093,6 +1093,7 @@ def mark_unbacked(
             NOTE: changing hint_override values will cause FxGraphCache misses, since hint overrides
             affect inductor codegen decisions and are included in the cache key via
             ShapeEnv.var_to_hint_override.
+            Changing hint_override also result in recompilations.
         strict (bool, default=False): If True, an error will be raised if the unbacked dimension is specialized.
             By default (strict=False), specialization is allowed and will proceed without error.
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.

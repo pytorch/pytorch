@@ -3443,27 +3443,48 @@ class GuardBuilder(GuardBuilderBase):
             add_dim_indices_guard("_dynamo_unbacked_indices")
             add_dim_indices_guard("_dynamo_static_indices")
 
-            # Guard on unbacked-dependent attributes (shape_ids, bounds).
-            # These are only checked if the runtime tensor has _dynamo_unbacked_indices.
+            # Guard on attribute values with dependency on another attribute.
+            # Guard is only checked if runtime tensor has dependent_on attribute.
             # We must install guards even when attr_value is None to detect runtime
             # tensors that have the attribute when compile-time didn't.
-            def add_unbacked_dependent_guard(attr_name: str) -> None:
-                if hasattr(value, "_dynamo_unbacked_indices"):
+            def add_attribute_dependent_guard(
+                attr_name: str, dependent_on: str
+            ) -> None:
+                if hasattr(value, dependent_on):
                     attr_value = getattr(value, attr_name, None)
-                    code_part = f"((getattr({tensor_name}, '{attr_name}', None) == {attr_value!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                    code_part = (
+                        f"((getattr({tensor_name}, '{attr_name}', None) == {attr_value!r}) "
+                        f"if hasattr({tensor_name}, '{dependent_on}') else True)"
+                    )
                     code.append(code_part)
                     self.get_guard_manager(guard).add_lambda_guard(
-                        lambda x, attr=attr_name, expected=attr_value: (
+                        lambda x,
+                        attr=attr_name,
+                        expected=attr_value,
+                        dep=dependent_on: (
                             getattr(x, attr, None) == expected
-                            if hasattr(x, "_dynamo_unbacked_indices")
+                            if hasattr(x, dep)
                             else True
                         ),
                         get_verbose_code_parts(code_part, guard),
                         guard.user_stack,
                     )
 
-            add_unbacked_dependent_guard("_dynamo_shape_ids")
-            add_unbacked_dependent_guard("_dynamo_unbacked_bounds")
+            # hint_overrides is independent - used by both mark_dynamic and mark_unbacked
+            add_attribute_dependent_guard(
+                "_dynamo_hint_overrides", dependent_on="_dynamo_unbacked_indices"
+            )
+            add_attribute_dependent_guard(
+                "_dynamo_hint_overrides", dependent_on="_dynamo_dynamic_indices"
+            )
+
+            # shape_ids and bounds are only relevant when unbacked indices exist
+            add_attribute_dependent_guard(
+                "_dynamo_shape_ids", dependent_on="_dynamo_unbacked_indices"
+            )
+            add_attribute_dependent_guard(
+                "_dynamo_unbacked_bounds", dependent_on="_dynamo_unbacked_indices"
+            )
 
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
