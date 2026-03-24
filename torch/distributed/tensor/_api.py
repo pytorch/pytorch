@@ -419,14 +419,26 @@ class DTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        # We just need to have an implementation here; the __torch_dispatch__ machinery
-        # calls into a specific C++ fast path that doesn't call here.
-        # See #167051 for details
-        # python_arg_parser.cpp: dispatch_on_subclass()
-        # -> python_variable.cpp: dispatchDTensorOp()
-        raise NotImplementedError(
-            "DTensor.__torch_dispatch__ should not actually get called"
-        )
+        # Base DTensor is normally dispatched via a C++ fast path (see #167051)
+        # and never reaches here. This implementation exists so that DTensor
+        # subclasses can delegate back via super().__torch_dispatch__().
+        # It unwraps subclass instances to base DTensor and re-calls the op,
+        # which re-enters dispatch and hits the C++ fast path.
+        def unwrap(t):
+            if isinstance(t, DTensor) and type(t) is not DTensor:
+                # pyrefly: ignore [bad-argument-type]
+                return DTensor(
+                    # pyrefly: ignore [bad-argument-count]
+                    t._local_tensor,
+                    t._spec,
+                    # pyrefly: ignore [unexpected-keyword]
+                    requires_grad=t.requires_grad,
+                )
+            return t
+
+        args = torch.utils._pytree.tree_map(unwrap, args)
+        kwargs = torch.utils._pytree.tree_map(unwrap, kwargs or {})
+        return func(*args, **kwargs)
 
     @staticmethod
     def from_local(

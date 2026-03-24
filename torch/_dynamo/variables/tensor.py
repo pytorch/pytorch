@@ -1884,6 +1884,20 @@ class TensorVariable(VariableTracker):
                     )
         return self
 
+    def method_detach_(self, tx: "InstructionTranslator") -> "TensorVariable":
+        from .builder import wrap_fx_proxy
+
+        proxy = tx.output.create_proxy(
+            "call_method",
+            "detach_",
+            (self.as_proxy(),),
+            {},
+        )
+        # Run the fake op so the proxy metadata reflects the detached tensor state.
+        wrap_fx_proxy(tx, proxy)
+        self.synchronize_attributes(tx)
+        return self
+
     def method_share_memory_(self) -> NoReturn:
         unimplemented(
             gb_type="Unsupported Tensor.share_memory_() call",

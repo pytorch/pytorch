@@ -1283,6 +1283,49 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 "No-op pad/slice may have been eliminated by remove_noop_ops.",
             )
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(
+        {
+            **get_bucket_patches(),
+            "aten_distributed_optimizations.enable_overlap_scheduling": True,
+            "aten_distributed_optimizations.spmd_check": True,
+            "aten_distributed_optimizations.spmd_mismatch": "error",
+        }
+    )
+    def test_spmd_verify_crashes_on_mismatch(self):
+        """Test that spmd_mismatch="error" raises on non-SPMD graphs."""
+
+        def func(a, *, ranks):
+            # rank 0 gets (4, 8), rank 1 gets (3, 8) — different node counts
+            # if pad is eliminated on rank 0 but not rank 1
+            full_chunk = (7 + len(ranks) - 1) // len(ranks)
+            pad_size = full_chunk - a.size(0)
+            # Only rank 1 will have a real pad op here
+            if pad_size > 0:
+                a = torch.nn.functional.pad(a, [0, 0, 0, pad_size])
+            ag = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            return ag + 1
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            world_size = self.world_size
+            full_chunk = (7 + world_size - 1) // world_size
+            local_size = full_chunk if self.rank == 0 else 7 - full_chunk
+            a = torch.randn(local_size, 8, device=device_type)
+            ranks = list(range(world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+
+            # The graph will differ: rank 0 has no pad, rank 1 has pad.
+            # With spmd_check_crash_on_mismatch=True, this should raise.
+            with self.assertRaises(RuntimeError, msg="SPMD graph verification"):
+                compiled(a)
+
 
 def get_toy_model(device_type: str):
     """
