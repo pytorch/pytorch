@@ -1533,17 +1533,23 @@ TORCH_IMPL_FUNC(logsumexp_out)
   }
 }
 
-// CompositeExplicitAutograd fallback for backends without dedicated kernels
+// CompositeExplicitAutograd fallback for backends without dedicated kernels.
+// Unlike the structured path (CPU/CUDA), this bypasses the meta function,
+// so we must handle output dtype checking and name propagation explicitly.
 Tensor& logsumexp_out_default(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
   TORCH_CHECK(at::isFloatingType(result.scalar_type()) || at::isComplexType(result.scalar_type()),
               "logsumexp(): Expected floating point type for result tensor, but got: ",
               result.scalar_type());
-  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-    logsumexp_out_impl(result, self.to(default_dtype), dim, keepdim);
-  } else {
-    logsumexp_out_impl(result, self, dim, keepdim);
+  {
+    NoNamesGuard guard;
+    if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+      auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+      logsumexp_out_impl(result, self.to(default_dtype), dim, keepdim);
+    } else {
+      logsumexp_out_impl(result, self, dim, keepdim);
+    }
   }
+  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
   return result;
 }
 
