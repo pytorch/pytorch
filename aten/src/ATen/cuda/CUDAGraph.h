@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <limits>
+#include <optional>
 #include <stack>
 
 #if defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
@@ -88,7 +89,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       const Tensor& scalar_cuda_pred_tensor);
 
  private:
-  std::function<bool(cudaStream_t)> create_allocate_filter();
+  template <typename StreamType>
+  std::function<bool(StreamType)> create_allocate_filter() const;
   std::function<bool(cudaStream_t)> create_child_allocate_filter();
 
  protected:
@@ -151,6 +153,11 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
       conditional_rng_snapshots_;
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12040
 };
+
+template <>
+std::function<bool(cudaStream_t)> CUDAGraph::create_allocate_filter<cudaStream_t>() const;
+template <>
+std::function<bool(c10::Stream)> CUDAGraph::create_allocate_filter<c10::Stream>() const;
 
 } // namespace cuda
 } // namespace at

@@ -1790,7 +1790,13 @@ class SIMDScheduling(BaseScheduling):
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
 
-            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            # Check if the original reduction used keepdim=True by comparing dimensions.
+            # Without keepdim, reduction produces [rnumel]; with keepdim, [1, rnumel].
+            buffer = V.graph.get_buffer(buffer_name)
+            keepdim = buffer is not None and len(buffer.get_layout().size) > 1
+
+            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0, keepdim={keepdim})"
+
             # The workspace tensor is in torch.float, need a cast if the buffer is
             # not.
             if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:

@@ -2030,7 +2030,7 @@ class InstructionTranslatorBase(
             self.exec_recorder.add_local_mod(recorded_name, value)
 
         # pyrefly: ignore [unbound-name]
-        if istype(value, (types.ModuleType, DummyModule)):
+        if isinstance(value, (types.ModuleType, DummyModule)):
             # pyrefly: ignore [unbound-name, bad-argument-type]
             self.push(PythonModuleVariable(value, source=source))
         else:

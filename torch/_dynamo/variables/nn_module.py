@@ -1095,7 +1095,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             and istype(mod._call_impl, types.MethodType)  # type: ignore[attr-defined]
             and mod.__call__.__func__ is unpatched_nn_module_call  # type: ignore[operator]
             and mod._call_impl.__func__ is unpatched_nn_module_call_impl  # type: ignore[attr-defined]
-            and "forward" not in mod.__dict__
+            # Consult pending STORE_ATTR side effects too. During tracing the
+            # patched forward may not be visible in mod.__dict__ yet.
+            and not self.has_key_in_generic_dict(tx, "forward")
         ):
             forward_method = inspect.getattr_static(mod, "forward")
             if isinstance(forward_method, types.FunctionType):
@@ -1170,7 +1172,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             fn_vt = VariableTracker.build(tx, fn, source=source, realize=True)
             return fn_vt.call_function(tx, [self] + list(args), kwargs)
 
-        if name not in getattr(self.value, "__dict__", {}):
+        if not self.has_key_in_generic_dict(tx, name):
             try:
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:

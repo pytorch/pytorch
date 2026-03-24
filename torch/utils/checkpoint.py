@@ -1316,9 +1316,10 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         return True
 
     # Used together with _CachedTorchDispatchMode to implement SAC.
-    def __init__(self, policy_fn, storage) -> None:
+    def __init__(self, policy_fn, storage, ac_graph_id=None) -> None:
         self.policy_fn = policy_fn
         self.storage = storage
+        self.ac_graph_id = ac_graph_id
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if func in SAC_IGNORED_OPS:
@@ -1335,6 +1336,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         if is_compiling:
             # Overwrite each node's "recompute" tag to add in the user annotation.
             fx_traceback.current_meta["recompute"] = policy
+            fx_traceback.current_meta["ac_graph_id"] = self.ac_graph_id
 
         out = func(*args, **kwargs)
 

@@ -533,7 +533,7 @@ inline void validate_sdpa_input(
 // the math and memory efficient attn_mask implementation
 //  Args:
 //    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
-std::optional<Tensor> convert_boolean_attn_mask_(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype, double neg_inf) {
+std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
   // Pass through
   if (!attn_mask.has_value()) {
     return std::nullopt;
@@ -541,21 +541,11 @@ std::optional<Tensor> convert_boolean_attn_mask_(const std::optional<Tensor>& at
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
+    constexpr double neg_inf = -std::numeric_limits<double>::infinity();
     return at::where(*attn_mask, 0.0, at::scalar_tensor(neg_inf, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
-}
-
-std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
-  return convert_boolean_attn_mask_(attn_mask, dtype, -std::numeric_limits<double>::infinity());
-}
-
-// alternate version to workaround -inf issue with cuDNN
-// TODO(eqy): delete this when cuDNN -inf issue is resolved
-std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
-  // TODO Use the max type of the input and output
-  return convert_boolean_attn_mask_(attn_mask, dtype, -65504.0);
 }
 
 // Memory Efficient Attention requires a padded attn mask bias
@@ -744,8 +734,7 @@ Tensor scaled_dot_product_attention(
   }
   const auto query_device_type = query_.device().type();
   const auto backend = static_cast<SDPBackend>(choice_int);
-  const auto convert_attn_func = backend != SDPBackend::cudnn_attention ? convert_boolean_attn_mask : convert_boolean_attn_mask_cudnn;
-  auto attn_mask = convert_attn_func(attn_mask_, query_.dtype());
+  auto attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case SDPBackend::cudnn_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);

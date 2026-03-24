@@ -100,6 +100,14 @@ persistent_tma_mm_template = TritonTemplate(
     source=load_kernel_template("triton_persistent_tma_mm"),
 )
 
+# Non-TMA Triton template for persistent MM
+# used on AMD
+persistent_mm_template = TritonTemplate(
+    name="mm_persistent",
+    grid=persistent_mm_grid,
+    source=load_kernel_template("triton_persistent_mm"),
+)
+
 
 scaled_mm_device_tma_epilogue_scaling_template = TritonTemplate(
     name="scaled_mm_device_tma_epilogue_scaling",
@@ -359,7 +367,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
                 return ops.to_dtype(x, mat1.dtype, use_compute_types=False)
 
             args = [make_pointwise(_to_dtype)(x) for x in args]
-
         mul_pointwise = make_pointwise(ops.dot)(*args)
         dot_reduction = make_reduction("dot")(mul_pointwise, 1)
 
@@ -422,7 +429,10 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
             elif use_triton_tma_template(mat1, mat2, output_layout=layout):
-                templates_to_use.append(persistent_tma_mm_template)
+                if torch.version.hip is None:
+                    templates_to_use.append(persistent_tma_mm_template)
+                else:
+                    templates_to_use.append(persistent_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 

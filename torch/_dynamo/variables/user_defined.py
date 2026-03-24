@@ -553,7 +553,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         "Set TORCHDYNAMO_ENABLE_P2P_COMPILATION=1 to enable.",
                     ],
                 )
-
             var = tx.output.side_effects.track_new_user_defined_object(
                 SourcelessBuilder.create(tx, object),
                 self,
@@ -893,7 +892,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
                     default_kwargs[field.name] = var_tracker
             kwargs.update(default_kwargs)
-
             var = tx.output.side_effects.track_new_user_defined_object(
                 SourcelessBuilder.create(tx, object),
                 self,
@@ -1062,6 +1060,26 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
     def fn(self) -> type[object]:
         return self.value
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        if self.source is None:
+            # NB: If source is added via side effects, create the exception
+            # object through side_effects as well. See FrozenDataClass creation
+            var = tx.output.side_effects.track_new_user_defined_object(
+                SourcelessBuilder.create(tx, BaseException),
+                self,
+                list(args),
+            )
+            var.call_method(tx, "__init__", list(args), dict(kwargs))
+            return var
+        return super().call_function(tx, args, kwargs)
 
 
 class UserDefinedEnumClassVariable(UserDefinedClassVariable):

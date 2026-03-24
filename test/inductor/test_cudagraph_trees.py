@@ -22,7 +22,7 @@ from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
-from torch._inductor.cudagraph_utils import FunctionID, PlaceholderInfo
+from torch._inductor.cudagraph_utils import PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
@@ -2233,25 +2233,6 @@ if HAS_CUDA_AND_TRITON:
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
-        def test_unstable_ptr(self):
-            import torch
-
-            @torch.compile(mode="reduce-overhead")
-            def foo(m, inp):
-                return m(inp)
-
-            def f():
-                l = []
-                m = torch.nn.Linear(20, 20).cuda()
-                for _ in range(4):
-                    inp = torch.rand([20, 20], device="cuda")
-                    foo(m, inp)
-                    m.weight.data = torch.rand([20, 20], device="cuda")
-
-            self.assertRaises(RuntimeError, f)
-
         @requires_multigpu()
         def test_manager_per_device(self):
             def test():
@@ -2666,6 +2647,25 @@ if HAS_CUDA_AND_TRITON:
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
 
+        def test_clear_storage_data_ptr_access_error(self):
+            x = torch.rand([4], device="cuda")
+            storage = x.untyped_storage()
+            storage_ptr = storage.data_ptr()
+            storage_impl_ptr = storage._cdata
+
+            storage.resize_(0)
+
+            torch._C._set_storage_data_ptr_access_error_msg(
+                storage_impl_ptr, "storage is dead"
+            )
+            with self.assertRaisesRegex(Exception, "storage is dead"):
+                storage.data_ptr()
+
+            torch._C._clear_storage_data_ptr_access_error_msg(storage_impl_ptr)
+            storage.resize_(4 * x.element_size())
+            # Should not raise
+            storage.data_ptr()
+
         def test_side_stream_memory_allocation(self):
             device = f"cuda:{self.device_idx}"
 
@@ -2708,49 +2708,6 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(side_stream_buffer, ref_out)
 
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
-
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", False)
-        def test_static_inputs_address_mutation_log(self):
-            class Goo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.linear = torch.nn.Linear(2, 2, device="cuda")
-
-                def forward(self, x) -> torch.Tensor:
-                    return self.linear(x)
-
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.static_tensor = torch.zeros((2, 2), device="cuda")
-                    self.goo = Goo()
-
-                def forward(self, x) -> torch.Tensor:
-                    self.static_tensor.add_(torch.ones((2, 2), device="cuda"))
-                    return self.static_tensor + x + self.goo(x)
-
-            foo = Foo()
-            foo = torch.compile(foo, mode="reduce-overhead")
-            inp = torch.rand((2, 2), device="cuda")
-
-            for _ in range(3):
-                foo(inp)
-
-            # mutates static input tensors' addresses
-            foo.static_tensor = torch.ones((2, 2), device="cuda")
-            foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
-
-            with self.assertRaisesRegex(
-                Exception,
-                r"(?s)static input data pointer changed.\n"
-                r"input name: primals_.*. data pointer changed from .* to .*. input stack trace:.*"
-                r"input name: primals_.*. data pointer changed from .* to .*. input stack trace:.*,"
-                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n",
-            ):
-                self.curr_node().run(
-                    [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp]
-                )
 
         def _run_iter(self, param, fn):
             fwd_output = fn(torch.ones(2, 2), param)
@@ -2818,7 +2775,6 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(self.get_manager().new_graph_id().id, 4)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_param_inputs(self):
             # Verify that we can record multiple cudagraphs for a single
             # compiled function with param inputs
@@ -2829,7 +2785,6 @@ if HAS_CUDA_AND_TRITON:
             self.run_static_input_param_test(fn, 4)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_builtin_module(self):
             # Verify that we don't recompile when changing the param of a builtin module
             # and that we record another cudagraph
@@ -2837,7 +2792,6 @@ if HAS_CUDA_AND_TRITON:
             self._module_test(torch.nn.Linear(2, 3, device="cuda"))
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_builtin_module_buffers(self):
             # Verify that we don't recompile when changing the buffer of a builtin module
             # and that we record another cudagraph
@@ -2849,7 +2803,6 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_custom_module(self):
             # Test that we can correctly dispatch multiple graphs
             # if params of a custom module change
@@ -2866,7 +2819,6 @@ if HAS_CUDA_AND_TRITON:
             )
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_custom_module_buffer(self):
             # Test that we can correctly dispatch multiple graphs
             # if buffers of a custom module change
@@ -2890,7 +2842,6 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_child_node(self):
             # Test that we can correctly dispatch multiple graphs if a child node
             # in the tree has stable input pointers change
@@ -2909,7 +2860,6 @@ if HAS_CUDA_AND_TRITON:
             self.run_static_input_param_test(fn, 5)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_parent_node(self):
             def fn(x, p):
                 # Graph 1
@@ -2929,145 +2879,6 @@ if HAS_CUDA_AND_TRITON:
             self.run_static_input_param_test(fn, 6)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
-        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
-        def test_fallback_to_eager_if_recompiling_too_many_times(self):
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.param = torch.nn.Parameter(torch.rand([2, 2], device="cuda"))
-
-                def forward(self, x):
-                    return x * self.param
-
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.cudagraph_utils", "cudagraphs"
-            )
-            with ctx():
-                # We have 3 graphs here
-                #             None
-                #       /                           \
-                # (fwd w/ p1, Graph 0)            (bwd w/p2, Graph2)
-                # (bwd w/ p1, Graph 1)
-                # All other graphs are skipped because we hit the max recording limit
-                # (=0 for each node and function pair)
-                fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
-                for _ in range(3):
-                    fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                    fn_compiled.param.grad = None
-
-                # Change static tensor address
-                fn_compiled.param.data = torch.rand([2, 2], device="cuda")
-                fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                self.assertEqual(self.get_manager().new_graph_id().id, 3)
-
-            FileCheck().check(
-                "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input data pointer changed."
-            ).run(log_stream.getvalue())
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
-
-        @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
-        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
-        def test_fallback_to_eager_if_recompiling_too_many_times_warn_only_once(self):
-            class Foo(torch.nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    self.param = torch.nn.Parameter(torch.rand([2, 2], device="cuda"))
-
-                def forward(self, x):
-                    return x * self.param
-
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.cudagraph_utils", "cudagraphs"
-            )
-            with ctx():
-                with torch.device("cuda"):
-                    # We have 3 graphs here
-                    #             None
-                    #       /                           \
-                    # (fwd w/ p1, Graph 0)            (bwd w/p2, Graph2)
-                    # (bwd w/ p1, Graph 1)
-                    # All other graphs are skipped because we hit the max recording limit
-                    # (=0 for each node and function pair)
-                    fn_compiled = torch.compile(Foo(), mode="reduce-overhead")
-                    for _ in range(3):
-                        fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                        fn_compiled.param.grad = None
-
-                    for _ in range(5):
-                        # Change static tensor address
-                        fn_compiled.param.data = torch.rand([2, 2], device="cuda")
-                        fn_compiled(torch.rand([2, 2], device="cuda")).sum().backward()
-                        fn_compiled.param.grad = None
-
-            FileCheck().check_count(
-                "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input data pointer changed.",
-                1,
-                exactly=True,
-            ).check_count(
-                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
-                "on cudagraph node None due to static input data pointer changed.",
-                1,
-                exactly=True,
-            ).run(log_stream.getvalue())
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
-
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
-        @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 0)
-        def test_fallback_to_eager_if_recompiling_too_many_times_due_to_cudagraph_managed_tensor(
-            self,
-        ):
-            # By setting triton.cudagraph_support_input_mutation=True, we force re-record
-            # if cudagraph managed tensor addresses changed.
-            @torch.compile(mode="reduce-overhead")
-            def foo(x):
-                return x + 1
-
-            @torch.compile(mode="reduce-overhead")
-            def goo(x):
-                return x * 2
-
-            for _ in range(3):
-                torch.compiler.cudagraph_mark_step_begin()
-                inp = torch.rand((2, 3), device="cuda")
-                y = foo(inp)
-                z = goo(y)
-
-            log_stream, ctx = logs_to_string(
-                "torch._inductor.cudagraph_utils", "cudagraphs"
-            )
-            with ctx():
-                torch.compiler.cudagraph_mark_step_begin()
-                x = torch.rand(2, 3, device="cuda")
-                y = foo(x)
-                y_clone = y.clone()
-                z = goo(y_clone)
-
-            # eager function should run successfully
-            for _ in range(5):
-                torch.compiler.cudagraph_mark_step_begin()
-                x = torch.rand(2, 3, device="cuda")
-                y = foo(x)
-                y_clone = y.clone()
-                z = goo(y_clone)
-
-            FileCheck().check_count(
-                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) "
-                "on cudagraph node 0 due to cudagraph managed tensor data pointer changed",
-                1,
-                exactly=True,
-            ).run(log_stream.getvalue())
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
-
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
-        @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         @torch._inductor.config.patch("triton.cudagraph_unexpected_rerecord_limit", 1)
         def test_not_fallback_to_eager_if_have_not_recompiling_too_many_times(self):
             def fn(x, y):
@@ -3082,7 +2893,6 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
-        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_no_rerecord_with_mark_static_address(self):
             class Mod(torch.nn.Module):
                 def __init__(self):
@@ -3512,20 +3322,8 @@ if HAS_CUDA_AND_TRITON:
             foo.static_tensor = torch.ones((2, 2), device="cuda")
             foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
 
-            if torch._dynamo.config.inline_inbuilt_nn_modules:
-                for _ in range(3):
-                    foo(inp)
-            else:
-                # Run with specific function id to avoid dynamo recompiling
-                self.get_manager().run(
-                    [
-                        foo.goo.linear.weight,
-                        foo.goo.linear.bias,
-                        foo.static_tensor,
-                        inp,
-                    ],
-                    FunctionID(0),
-                )
+            for _ in range(3):
+                foo(inp)
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 

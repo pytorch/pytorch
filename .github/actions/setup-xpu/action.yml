@@ -44,7 +44,7 @@ runs:
         fi
 
     - name: Runner diskspace health check
-      uses: ./.github/actions/diskspace-cleanup
+      uses: pytorch/pytorch/.github/actions/diskspace-cleanup@main
       if: always()
 
     - name: Runner health check disconnect on failure
@@ -67,4 +67,4 @@ runs:
         echo "GPU_FLAG=--device=/dev/mem --device=/dev/dri --group-add video --group-add $render_gid" >> "${GITHUB_ENV}"
 
     - name: Login to ECR
-      uses: ./.github/actions/ecr-login
+      uses: pytorch/pytorch/.github/actions/ecr-login@main

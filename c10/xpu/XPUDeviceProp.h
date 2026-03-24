@@ -186,20 +186,24 @@ namespace c10::xpu {
   _DEFINE_SYCL_PROP(                     \
       sycl::ext::oneapi::experimental::info::device, property, property)
 
-struct C10_XPU_API DeviceProp {
-  AT_FORALL_XPU_DEVICE_PROPERTIES(DEFINE_DEVICE_PROP);
+struct C10_XPU_API DeviceProp{
+    AT_FORALL_XPU_DEVICE_PROPERTIES(DEFINE_DEVICE_PROP)
 
-  // the platform name.
-  DEFINE_PLATFORM_PROP(name, platform_name);
+    // the platform name.
+    DEFINE_PLATFORM_PROP(name, platform_name)
 
-  AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP);
+    // ext properties.
+    AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP)
 
-  AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT);
+    // device aspects.
+    AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT)
 
-  AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_ASPECT);
+    // experimental device aspects.
+    AT_FORALL_XPU_EXP_CL_ASPECT(DEFINE_DEVICE_ASPECT)
 
 #if SYCL_COMPILER_VERSION >= 20250000
-  AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP);
+    // experimental device properties.
+    AT_FORALL_XPU_EXP_DEVICE_PROPERTIES(DEFINE_EXP_DEVICE_PROP)
 #endif
 };
 

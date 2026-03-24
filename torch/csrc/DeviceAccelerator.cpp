@@ -101,6 +101,15 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_emptyCache", []() { at::accelerator::emptyCache(); });
 
+  m.def("_accelerator_emptyHostCache", []() {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    if (torch::utils::is_device_lazy_init_supported(device_type) &&
+        !torch::utils::is_device_initialized(device_type)) {
+      return;
+    }
+    at::accelerator::emptyHostCache();
+  });
+
   m.def("_accelerator_getDeviceStats", [](c10::DeviceIndex device_index) {
     using c10::CachingAllocator::Stat;
     using c10::CachingAllocator::StatArray;
@@ -163,6 +172,10 @@ void initModule(PyObject* module) {
     torch::utils::maybe_initialize_device(device_type);
     py::gil_scoped_release no_gil;
     return at::accelerator::getMemoryInfo(device_index);
+  });
+
+  m.def("_accelerator_getAllocatorSettings", []() {
+    return c10::CachingAllocator::getAllocatorSettings();
   });
 
   m.def("_accelerator_setAllocatorSettings", [](std::string env) {

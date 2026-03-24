@@ -136,7 +136,6 @@ class TestPatternMatcher(TestCase):
                 ref[indices], test[indices]
             )  # also checks that dtype is correct
 
-    # @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -2177,6 +2176,98 @@ class TestPatternMatcherLogging(LoggingTestCase):
             specific_record.getMessage(),
         )
 
+    @make_logging_test()
+    def test_pattern_match_debug_multiple_nodes(self, records):
+        def pattern_add(x, y):
+            return x + y
+
+        def replacement_add(x, y):
+            return x * y
+
+        def pattern_sub(x, y):
+            return x - y
+
+        def replacement_sub(x, y):
+            return x * y
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(
+            pattern_add, replacement_add, inputs, fwd_only, my_patterns
+        )
+        register_replacement(
+            pattern_sub, replacement_sub, inputs, fwd_only, my_patterns
+        )
+
+        def custom_pass(graph: torch.fx.Graph):
+            return my_patterns.apply(graph)
+
+        def fn(x, y):
+            return (x + y) + (x - y)
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        # Debug both "add" and "sub" nodes
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "add,sub"}
+        ):
+            compiled_fn = torch.compile(
+                fn, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            _ = compiled_fn(x, y)
+
+        self.assertTrue(self.hasRecord(records, "Specific pattern match: add"))
+        self.assertTrue(self.hasRecord(records, "Specific pattern match: sub"))
+
+    @make_logging_test()
+    def test_pattern_match_debug_all_nodes(self, records):
+        def pattern_add(x, y):
+            return x + y
+
+        def replacement_add(x, y):
+            return x * y
+
+        def pattern_sub(x, y):
+            return x - y
+
+        def replacement_sub(x, y):
+            return x * y
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(
+            pattern_add, replacement_add, inputs, fwd_only, my_patterns
+        )
+        register_replacement(
+            pattern_sub, replacement_sub, inputs, fwd_only, my_patterns
+        )
+
+        def custom_pass(graph: torch.fx.Graph):
+            return my_patterns.apply(graph)
+
+        def fn(x, y):
+            return (x + y) + (x - y)
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "all"}
+        ):
+            compiled_fn = torch.compile(
+                fn, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            _ = compiled_fn(x, y)
+        self.assertTrue(self.hasRecord(records, "Specific pattern match: add"))
+        self.assertTrue(self.hasRecord(records, "Specific pattern match: sub"))
+
     def test_gumbel_max_trick(self):
         counters.clear()
 
@@ -2213,6 +2304,68 @@ class TestPatternMatcherLogging(LoggingTestCase):
             self.assertTrue(abs(ratio - 1) < tol, f"{expected} v.s. {actual}")
 
         self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
+
+    def test_per_pattern_counter(self):
+        """Test that per-pattern counters track individual pattern matches"""
+        with inductor_config.patch(fx_graph_cache=False):
+            with unittest.mock.patch.dict(
+                os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
+            ):
+                counters.clear()
+
+                def fn(x, y):
+                    return torch.bmm(x, y)
+
+                x = torch.randn(4, 10, 10, device=GPU_TYPE)
+                y = torch.randn(4, 10, 10, device=GPU_TYPE)
+
+                compiled = torch.compile(fn)
+                compiled(x, y)
+
+                counter_key = "inductor_pattern_matcher_per_pattern"
+                per_pattern = counters.get(counter_key, None)
+
+                self.assertIsInstance(per_pattern, dict)
+                self.assertGreater(len(per_pattern), 0)
+                self.assertIn("CallFunction_aten.bmm.default", per_pattern)
+                self.assertEqual(per_pattern["CallFunction_aten.bmm.default"], 1)
+
+    def test_per_pattern_counter_accumulation(self):
+        """Test that per-pattern counters accumulate across compilations"""
+        with inductor_config.patch(fx_graph_cache=False):
+            with unittest.mock.patch.dict(
+                os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "1"}
+            ):
+                counter_key = "inductor_pattern_matcher_per_pattern"
+
+                counters.clear()
+
+                x = torch.randn(2, 10, 10, device=GPU_TYPE)
+                y = torch.randn(2, 10, 10, device=GPU_TYPE)
+
+                def fn1(a, b):
+                    return torch.bmm(a, b)
+
+                compiled1 = torch.compile(fn1)
+                compiled1(x, y)
+                count1 = sum(counters.get(counter_key, {}).values())
+
+                # Compile second function without clearing counters
+                def fn2(a, b):
+                    return torch.bmm(a, b) * 2
+
+                compiled2 = torch.compile(fn2)
+                compiled2(x, y)
+                accumulated_count = sum(counters.get(counter_key, {}).values())
+
+                # Verify accumulation
+                counters.clear()
+                torch._dynamo.reset()
+                compiled2 = torch.compile(fn2)
+                compiled2(x, y)
+                count2 = sum(counters.get(counter_key, {}).values())
+
+                self.assertEqual(accumulated_count, count1 + count2)
 
 
 if __name__ == "__main__":

@@ -8745,8 +8745,6 @@ aot_autograd_failures = {
     xfail("nn.functional.gaussian_nll_loss"),
     xfail("tensor_split"),
     xfail("corrcoef"),
-    xfail("quantile"),
-    xfail("nanquantile"),
     skip("narrow"),
     xfail("istft"),
     xfail("linalg.eig"),
