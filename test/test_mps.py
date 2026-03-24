@@ -13010,6 +13010,15 @@ class TestConsistency(TestCaseMPS):
             # Broadcast
             self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/142048
+    def test_solve_triangular_device_mismatch(self):
+        A = torch.randn(3, 3, device="mps")
+        B = torch.eye(3, device="cpu")
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            torch.linalg.solve_triangular(A, B, upper=True)
+        with self.assertRaisesRegex(RuntimeError, "same device"):
+            torch.linalg.solve_triangular(B, A.cpu(), upper=True, out=torch.empty(0, device="mps"))
+
 
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
