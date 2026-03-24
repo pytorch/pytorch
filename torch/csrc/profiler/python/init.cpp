@@ -408,6 +408,7 @@ void initPythonBindings(PyObject* module) {
           "    record_python_gc_info (bool) : adds python gc events to profile\n"
           "    expose_kineto_event_metadata (bool) : whether to expose KinetoEvent metadata in the PyTorch Profiler\n"
           "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n"
+          "    adjust_timestamps (bool) : whether to adjust timestamps to align Vulkan event timelines with parent CPU events\n"
           "    expose_python_function_events (bool) : whether to include Python function call frame events in events()\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
