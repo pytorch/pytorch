@@ -862,8 +862,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
         mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
         args: list[Any],
         aot_config: AOTConfig,
-        cudagraphs: BoxedBool,
-        boxed_forward_device_index: BoxedDeviceIndex | None,
+        fx_config: _CompileFxKwargs,
         local: bool,
         remote: bool,
     ) -> Callable[..., Any] | None:
@@ -878,7 +877,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             debug_lines: list[str] = []
             cache_event_time = time.time_ns()
             cache_state = None
-            fx_config = create_fx_config(cudagraphs, boxed_forward_device_index)
             try:
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
