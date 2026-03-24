@@ -20,7 +20,7 @@ was not what you expected.
 ## A Gentle Introduction to Dynamo
 
 Before getting our hands dirty with all the implementation details,
-let’s start by discussing what it is that Dynamo does.
+let's start by discussing what it is that Dynamo does.
 
 Dynamo is a tracer. This means, given and function and inputs to it, it
 executes the function and records a linear sequence of instructions
@@ -64,9 +64,9 @@ graph](https://pytorch.org/docs/main/fx.html). We will simply think
 of an FX graph as a container that stores a list of function calls.
 
 The first thing we should notice is that the graph is a linear sequence
-of PyTorch operations. [^1] Dynamo records all the PyTorch operations
+of PyTorch {term}`operations<Operation>`. [^1] Dynamo records all the PyTorch {term}`operations<Operation>`
 and stores them sequentially. For example, it split `z = (x - y) ** 2`
-into its two constituting operations, `sub = l_x_ - l_y_` and
+into its two constituting {term}`operations<Operation>`, `sub = l_x_ - l_y_` and
 `z = sub ** 2`.
 
 When we say that the trace is linear, we mean that there is no branching
@@ -848,7 +848,7 @@ Below are additional details and references for concepts mentioned in this docum
 
 [^5]: Interestingly enough, it does understand NumPy code! Have a look at
     [this blogpost](https://pytorch.org/blog/compiling-numpy-code/)
-    and [the docs](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_faq.html#does-numpy-work-with-torch-compile).
+    and [the docs](https://pytorch.org/docs/main/torch.compiler_faq.html#does-numpy-work-with-torch-compile).
     Now, this is just possible because we reimplemented NumPy using
     PyTorch. Good luck implementing Django in PyTorch though…
 
