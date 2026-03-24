@@ -1056,12 +1056,37 @@ def repro_common(
         load_args(input_reader)
         args = input_reader.args
 
+    # Track symint indices before make_fx modifies anything
+    symint_indices = getattr(input_reader, "symint_indices", [])
+
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
     # pyrefly: ignore [bad-assignment]
     torch._inductor.config.generate_intermediate_hooks = True
+
+    # Convert plain int symint args to proper SymInt objects using the GraphModule's
+    # shape_env. This ensures compile_fx_inner can properly track unbacked symbols
+    # from operations like repeat_interleave. Without this, shape_env_from_inputs()
+    # returns None and unbacked symbols are never defined in the generated code.
+    # Only convert args at indices that were loaded via reader.symint().
+    if symint_indices and mod.shape_env:
+        shape_env = mod.shape_env
+        from torch._dynamo.source import SyntheticLocalSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        for i, idx in enumerate(symint_indices):
+            val = args[idx]
+            if isinstance(val, int) and not isinstance(val, bool):
+                source = SyntheticLocalSource(f"repro_symint_{i}")
+                sym = shape_env.create_symbol(
+                    val,
+                    source=source,
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                    constraint_dim=None,
+                )
+                args[idx] = shape_env.create_symintnode(sym, hint=val)
 
     return mod, args
 

@@ -6,10 +6,12 @@ import subprocess
 import sys
 import unittest
 from unittest import mock
+from unittest.mock import MagicMock
 
 import torch
 import torch._logging.structured
 import torch.distributed as dist
+from torch._dynamo.repro.after_aot import repro_common
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
@@ -586,6 +588,59 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
         payload = self.buffer.getvalue().strip()
         self.assertNotIn("# Fixup: ensure sum(repeats) == output_size", payload)
+
+    def test_repro_common_converts_symints(self):
+        """Test that repro_common converts plain int symint args to SymInt objects."""
+
+        class MinimalRepeatInterleaveRepro(torch.nn.Module):
+            def forward(
+                self, repeats: torch.Tensor, data: torch.Tensor, output_size: int
+            ):
+                indices = torch.ops.aten.repeat_interleave.Tensor(
+                    repeats, output_size=output_size
+                )
+                result = torch.ops.aten.index.Tensor(data, [indices])
+                return (result,)
+
+        def load_args(reader):
+            buf0 = reader.storage(
+                None, 80, device=torch.device("cpu"), dtype_hint=torch.int64
+            )
+            reader.tensor(buf0, (10,), dtype=torch.int64, is_leaf=True)
+
+            buf1 = reader.storage(
+                None, 400, device=torch.device("cpu"), dtype_hint=torch.float32
+            )
+            reader.tensor(buf1, (100, 1), is_leaf=True)
+
+            reader.symint(50)
+
+            # Fixup for repeat_interleave
+            if hasattr(reader, "args"):
+                _repeats = reader.args[0]
+                _output_size = reader.args[2]
+                if isinstance(_repeats, torch.Tensor) and _repeats.dtype == torch.int64:
+                    _n = _repeats.numel()
+                    _repeats.fill_(_output_size // _n)
+                    _repeats[: _output_size % _n] += 1
+
+        load_args._version = 0
+
+        mod = MinimalRepeatInterleaveRepro()
+        options = MagicMock()
+        options.save_dir = None
+        options.tracing_mode = "symbolic"
+
+        _, args = repro_common(options, mod, load_args)
+
+        # Verify symint arg was converted to SymInt
+        output_size_arg = args[2]
+        self.assertIsInstance(
+            output_size_arg,
+            torch.SymInt,
+            f"Expected SymInt, got {type(output_size_arg)}",
+        )
+        self.assertEqual(output_size_arg.node.hint, 50)
 
 
 @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")

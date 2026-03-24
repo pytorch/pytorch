@@ -607,6 +607,8 @@ class InputReader:
         self.store = ContentStoreReader(save_dir) if save_dir is not None else None
         self.args: list[Any] = []
         self.pbar = pbar
+        # Track indices of symint arguments for proper SymInt conversion later
+        self.symint_indices: list[int] = []
 
     def storage(
         self,
@@ -671,6 +673,7 @@ class InputReader:
         return t  # for BC
 
     def symint(self, val: Any) -> Any:
+        self.symint_indices.append(len(self.args))
         self.args.append(val)
         return val  # for BC
 
