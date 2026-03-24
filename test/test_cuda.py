@@ -5122,6 +5122,10 @@ print(value, end="")
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC,
+        "cudaMallocAsync pre-allocates pool; device_memory_used may not reflect individual allocations",
+    )
     def test_device_memory_used(self):
         """
         Verify used device memory in bytes
@@ -5144,7 +5148,7 @@ print(value, end="")
         self.assertTrue(torch.cuda.power_draw() >= 0)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
-    @skipIfRocmArch(MI300_ARCH)
+    @skipIfRocm(msg="clock_rate() not reliably supported across ROCm architectures")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
