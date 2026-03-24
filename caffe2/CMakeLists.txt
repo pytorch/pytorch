@@ -1464,7 +1464,7 @@ if(USE_ROCM)
     target_compile_definitions(torch_hip PRIVATE USE_ROCM_CK_SDPA)
   endif()
 
-  message(WARNING "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND}")
+  message(INFO "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM} rocshmem_FOUND=${rocshmem_FOUND}")
   if(USE_NVSHMEM)
     if(rocshmem_FOUND)
       message(STATUS "rocSHMEM found, building with rocSHMEM support")

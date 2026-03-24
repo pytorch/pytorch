@@ -16,6 +16,7 @@
 #include <c10/hip/HIPException.h>
 #include <rocshmem/rocshmem.hpp>
 
+using namespace rocshmem;
 namespace c10d::nvshmem_extension {
 
 #define THREADS_PER_BLOCK 512

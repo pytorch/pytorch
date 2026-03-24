@@ -3399,21 +3399,21 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CUDNN_CHECK", "MIOPEN_CHECK"),
     # NVSHMEM → rocSHMEM mappings (only symbols used in hipified files:
     # NVSHMEMSymmetricMemory.cpp and nvshmem_team_manager.hpp).
-    ("NVSHMEM_TEAM_INVALID", "ROCSHMEM_TEAM_INVALID"),
-    ("NVSHMEM_TEAM_WORLD", "ROCSHMEM_TEAM_WORLD"),
-    ("NVSHMEMX_INIT_WITH_UNIQUEID", "ROCSHMEM_INIT_WITH_UNIQUEID"),
+    ("NVSHMEM_TEAM_INVALID", "rocshmem::ROCSHMEM_TEAM_INVALID"),
+    ("NVSHMEM_TEAM_WORLD", "rocshmem::ROCSHMEM_TEAM_WORLD"),
+    ("NVSHMEMX_INIT_WITH_UNIQUEID", "rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID"),
 
-    ("nvshmem_malloc", "rocshmem_malloc"),
-    ("nvshmem_free", "rocshmem_free"),
-    ("nvshmem_ptr", "rocshmem_ptr"),
-    ("nvshmem_team_t", "rocshmem_team_t"),
-    ("nvshmem_team_split_strided", "rocshmem_team_split_strided"),
+    ("nvshmem_malloc", "rocshmem::rocshmem_malloc"),
+    ("nvshmem_free", "rocshmem::rocshmem_free"),
+    ("nvshmem_ptr", "rocshmem::rocshmem_ptr"),
+    ("nvshmem_team_t", "rocshmem::rocshmem_team_t"),
+    ("nvshmem_team_split_strided", "rocshmem::rocshmem_team_split_strided"),
 
-    ("nvshmemx_uniqueid_t", "rocshmem_uniqueid_t"),
-    ("nvshmemx_get_uniqueid", "rocshmem_get_uniqueid"),
-    ("nvshmemx_init_attr", "rocshmem_init_attr"),
-    ("nvshmemx_init_attr_t", "rocshmem_init_attr_t"),
-    ("nvshmemx_set_attr_uniqueid_args", "rocshmem_set_attr_uniqueid_args"),
+    ("nvshmemx_uniqueid_t", "rocshmem::rocshmem_uniqueid_t"),
+    ("nvshmemx_get_uniqueid", "rocshmem::rocshmem_get_uniqueid"),
+    ("nvshmemx_init_attr", "rocshmem::rocshmem_init_attr"),
+    ("nvshmemx_init_attr_t", "rocshmem::rocshmem_init_attr_t"),
+    ("nvshmemx_set_attr_uniqueid_args", "rocshmem::rocshmem_set_attr_uniqueid_args"),
 ])
 
 C10_MAPPINGS = collections.OrderedDict([

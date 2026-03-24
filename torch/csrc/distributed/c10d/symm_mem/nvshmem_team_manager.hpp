@@ -17,7 +17,6 @@
 #include <host/nvshmemx_api.h>
 #else
 #include <rocshmem/rocshmem.hpp>
-using namespace rocshmem;
 #endif
 // For maximum compatibility, we use the "host/" style for now.
 
