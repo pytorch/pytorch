@@ -1240,16 +1240,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def get_dict_vt(self, tx: "InstructionTranslator") -> "DunderDictVariable":
         if self.dict_vt is None:
-            dict_proxy = {
-                key: VariableTracker.build(
-                    tx,
-                    value,
-                    source=self.source
-                    and DictGetItemSource(AttrSource(self.source, "__dict__"), key),
-                )
-                for key, value in self.value.__dict__.items()
-            }
-            self.dict_vt = variables.DunderDictVariable.create(tx, self, dict_proxy)
+            self.dict_vt = variables.DunderDictVariable.create(tx, self)
         return self.dict_vt
 
     def is_underlying_vt_modified(self, side_effects: "SideEffects") -> bool:

@@ -649,6 +649,33 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_len_dunder_dict_after_delete(self):
+        # After deleting an attribute during tracing, len(obj.__dict__) must
+        # reflect the deletion. The bug: SideEffectsProxyDict.__len__ returned
+        # len(item_dict) + len(side_effects_table), double-counting deleted
+        # entries and keys mutated from item_dict.
+        class UserDefined:
+            def __init__(self) -> None:
+                self.a = 3
+                self.b = 5
+
+            def run(self, x):
+                del self.a
+                # len should be 1 (only b remains), not 3 (item_dict=2 + mutations=1)
+                return x * len(self.__dict__)
+
+        obj1 = UserDefined()
+        obj2 = UserDefined()
+
+        def fn(x, obj):
+            return obj.run(x)
+
+        x = torch.ones(2)
+        ref = fn(x, obj1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x, obj2)
+        self.assertEqual(ref, res)
+
     def test_contains_module_dunder_dict(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
