@@ -614,6 +614,47 @@ class TestPrecomputedSizeHinting(InductorTestCase):
         self.assertEqual(hint, 53)
 
 
+class TestOptimizationHintZeroDivision(InductorTestCase):
+    """Test that optimization_hint handles ZeroDivisionError from ModularIndexing with zero-valued unbacked symbols."""
+
+    def test_modular_indexing_with_zero_divisor(self):
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # u0 + 1 ensures base != 0 after substitution; u1 is the divisor.
+        # With fallback=0: u0->0, u1->0, so (0+1) // 0 -> ZeroDivisionError.
+        # optimization_hint catches ZeroDivisionError and returns fallback.
+        expr = ModularIndexing(u0 + 1, u1, 4)
+        hint = sizevars.optimization_hint(expr, fallback=0)
+        self.assertEqual(hint, 0)
+
+    def test_floor_div_with_zero_divisor(self):
+        """optimization_hint should not crash when FloorDiv has an unbacked
+        symbol as divisor that gets substituted with 0."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # With fallback=0: u0->0, u1->0, FloorDiv(0+1, 0) -> ZeroDivisionError.
+        # optimization_hint catches ZeroDivisionError and returns fallback.
+        expr = FloorDiv(u0 + 1, u1)
+        hint = sizevars.optimization_hint(expr, fallback=0)
+        self.assertEqual(hint, 0)
+
+    def test_modular_indexing_zero_divisor_nonzero_fallback(self):
+        """When fallback is nonzero, the hint should still not crash."""
+        sizevars = SizeVarAllocator()
+        u0 = sizevars.shape_env.create_unbacked_symint().node.expr
+        u1 = sizevars.shape_env.create_unbacked_symint().node.expr
+
+        # With fallback=8192: u0->8192, u1->8192
+        # (8192+1) // 8192 = 1, 1 % 4 = 1
+        expr = ModularIndexing(u0 + 1, u1, 4)
+        hint = sizevars.optimization_hint(expr, fallback=8192)
+        self.assertEqual(hint, 1)
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 

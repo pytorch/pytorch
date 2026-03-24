@@ -180,6 +180,26 @@ automatic_dynamic_shapes = (
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
+# When True, adds exclusion guards for tensor dims and scalars that transition
+# from static to dynamic via automatic_dynamic_shapes.
+#
+# Invariant: when enabled, automatic_dynamic recompilation preserves graph
+# selection — inputs that matched a previous static cache entry will continue
+# to use that entry, not be intercepted by a newer dynamic entry. This holds
+# as long as recompilations are caused solely by the same variable being
+# observed with different static values (progressive dynamism). A recompilation
+# triggered by a different reason (e.g., a guard failure unrelated to shape
+# transitions) will clear the exclusion state for that entry.
+#
+# Mechanism: the exclusion guard rejects inputs matching the prior static
+# graph's sizes, so those inputs fall through to the more specialized static
+# graph instead of being captured by the newer dynamic graph.
+#
+# Scope: applies only to graph-input-level dimension and scalar transitions.
+# Does NOT handle data-dependent branching (if x.size(0) > k), graph breaks,
+# or other recompilation triggers where no dimension actually transitions.
+automatic_dynamic_exclusion_guard = False
+
 # log graph in/out metadata
 # This is only turned on for export today since we
 # know we are tracing a flat callable. later, this

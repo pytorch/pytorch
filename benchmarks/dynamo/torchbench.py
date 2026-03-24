@@ -208,19 +208,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             "vision_maskrcnn",
         }
 
-    @property
-    def inline_inbuilt_nn_modules_models(self):
-        return {
-            "basic_gnn_edgecnn",
-            "drq",
-            "hf_Reformer",
-            "DALLE2_pytorch",
-            "detectron2_maskrcnn_r_50_fpn",
-            "detectron2_maskrcnn_r_101_fpn",
-            "vision_maskrcnn",
-            "doctr_reco_predictor",
-        }
-
     @cached_property
     def _fb_models_available(self):
         """This property exists because importing IS_FBCODE causes some models to be

@@ -438,7 +438,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
     def test_custom_getattr_on_module_exception(self):
         class Foo(torch.nn.Module):
             def __init__(self, a=3):

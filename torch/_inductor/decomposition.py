@@ -571,7 +571,7 @@ def add(
     if y.ndim == 0:
         y = y.reshape(1)
 
-    z: torch.Tensor = y
+    z = y
     if alpha is not None:
         z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)

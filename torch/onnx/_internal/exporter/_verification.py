@@ -9,7 +9,6 @@ __all__ = [
 import dataclasses
 import logging
 import math
-import typing
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -140,8 +139,8 @@ def _compare_tensors(
     normalizer = torch.abs(expected) + eps
     rel_diff = abs_diff / normalizer
 
-    max_absolute_difference = typing.cast(float, abs_diff.max().item())
-    max_relative_difference = typing.cast(float, rel_diff.max().item())
+    max_absolute_difference = abs_diff.max().item()
+    max_relative_difference = rel_diff.max().item()
 
     return max_absolute_difference, max_relative_difference, abs_diff, rel_diff
 

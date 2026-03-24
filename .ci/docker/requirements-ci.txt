@@ -75,15 +75,14 @@ librosa==0.10.2 ; python_version == "3.12" and platform_machine != "s390x"
 #test that import: test_spectral_ops.py
 #librosa depends on numba; disable it for s390x while numba is disabled too
 
-#mkl #this breaks linux-bionic-rocm4.5-py3.7
+mkl==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
+mkl-static==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
+mkl-include==2024.2.0 ; platform_machine != "aarch64" and sys_platform != "darwin"
 #Description: Intel oneAPI Math Kernel Library
-#Pinned versions:
+#Pinned versions: 2024.2.0
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
 #test_nn.py, test_mkldnn.py, test_jit.py, test_fx_experimental.py,
 #test_autograd.py
-
-#mkl-devel
-# see mkl
 
 #mock
 #Description: A testing library that allows you to replace parts of your
@@ -292,6 +291,11 @@ lintrunner==0.12.11
 #Pinned versions: 0.12.11
 #test that import:
 
+spin==0.17
+#Description: developer CLI for common build/lint tasks
+#Pinned versions: 0.17
+#test that import:
+
 redis>=4.0.0
 #Description: redis database
 #test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
@@ -370,6 +374,7 @@ pwlf==2.2.1
 #test that import: test_sac_estimator.py
 
 # To build PyTorch itself
+pip==26.0.1
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1

@@ -1855,7 +1855,7 @@ class Reduction(Loops):
             reduction_ranges, [reduction_numel], dense_index
         )
         need_mask = not V.graph.sizevars.statically_known_true(
-            sympy.Eq(reduction_numel % split, 0)
+            sympy.Eq(Mod(reduction_numel, split), 0)
         )
 
         def wrapper_fn(
@@ -2326,7 +2326,7 @@ class WelfordReduction(MultiOutputReduction):
         """
         reduction_numel = sympy_product(reduction_ranges)
         need_mask = not V.graph.sizevars.statically_known_true(
-            sympy.Eq(reduction_numel % split, 0)
+            sympy.Eq(Mod(reduction_numel, split), 0)
         )
 
         if need_mask and reduction_type != "welford_combine":

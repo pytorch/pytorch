@@ -207,8 +207,6 @@ dtensor_fails = {
     # DTensorConverter can't convert sparse tensor inputs
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
-    # bug in squeeze.dims strategy: TypeError with empty dims arg
-    xfail("squeeze", "multiple"),
     # meta tensor data not allocated yet during tensor_split
     xfail("tensor_split"),
     # output_specs count mismatch in unsafe_split strategy
@@ -251,7 +249,6 @@ dtensor_fails = {
     skip("_segment_reduce", "lengths"),
     skip("_segment_reduce", "offsets"),
     # TODO: fix the following ops
-    skip("squeeze"),
     skip("empty"),
     skip("empty_strided"),
     skip("empty_like"),
@@ -289,6 +286,8 @@ dtensor_compiled_fails = {
     xfail("permute"),
     xfail("select"),
     xfail("slice"),
+    xfail("squeeze"),
+    xfail("squeeze", "multiple"),
     xfail("t"),
     xfail("transpose_copy"),
     xfail("unsqueeze"),
@@ -320,6 +319,11 @@ dtensor_compiled_fails = {
     xfail("lu_unpack"),
     xfail("scatter"),
     xfail("scatter_add"),
+    # batch_norm variants decompose through squeeze.dims → as_strided under
+    # compilation, and DTensor has no as_strided strategy.
+    xfail("_native_batch_norm_legit"),
+    xfail("native_batch_norm"),
+    xfail("nn.functional.batch_norm"),
     # False positives: these have no sharding strategy and their
     # eager DTensor failure is registered elsewhere.
     xfail("nn.functional.margin_ranking_loss"),
@@ -368,7 +372,6 @@ dtensor_numeric_only_fails = {
 dtensor_fails_no_strategy = {
     xfail("_batch_norm_with_update"),
     xfail("_chunk_cat"),
-    xfail("_native_batch_norm_legit"),
     xfail("_unsafe_masked_index"),
     xfail("_unsafe_masked_index_put_accumulate"),
     xfail("_upsample_bilinear2d_aa"),
@@ -406,8 +409,6 @@ dtensor_fails_no_strategy = {
     xfail("max_pool2d_with_indices_backward"),
     xfail("multinomial"),
     xfail("nanquantile"),
-    xfail("native_batch_norm"),
-    xfail("nn.functional.batch_norm"),
     xfail("nn.functional.bilinear"),
     xfail("nn.functional.grid_sample"),
     xfail("nn.functional.group_norm"),
@@ -807,6 +808,7 @@ ops_unbacked_dtensor_dde = {
     xfail("__rmatmul__"),
     xfail("_segment_reduce", "lengths"),
     xfail("_segment_reduce", "offsets"),
+    xfail("_native_batch_norm_legit"),
     xfail("_unsafe_masked_index"),
     xfail("addmm"),
     xfail("addmm", "decomposed"),
@@ -858,7 +860,9 @@ ops_unbacked_dtensor_dde = {
     xfail("new_empty_strided"),
     xfail("new_full"),
     xfail("new_ones"),
+    xfail("native_batch_norm"),
     xfail("new_zeros"),
+    xfail("nn.functional.batch_norm"),
     xfail("nn.functional.celu"),
     xfail("nn.functional.conv1d"),
     xfail("nn.functional.conv2d"),
@@ -890,6 +894,7 @@ ops_unbacked_dtensor_dde = {
     xfail("nonzero_static"),
     xfail("permute_copy"),
     xfail("prod"),
+    xfail("quantile"),
     xfail("ravel"),
     xfail("reshape"),
     xfail("reshape_as"),
@@ -904,7 +909,7 @@ ops_unbacked_dtensor_dde = {
     xfail("special.log_ndtr"),
     xfail("special.ndtri"),
     xfail("special.spherical_bessel_j0"),
-    xfail("squeeze", "multiple"),
+    xfail("squeeze_copy"),
     xfail("std_mean"),
     xfail("topk"),
     xfail("transpose_copy"),

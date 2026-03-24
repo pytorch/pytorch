@@ -6,13 +6,14 @@ import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._opaque_base import OpaqueBase
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed._pycute import IntTuple, is_int, suffix_product
+from torch.types import IntLikeType
 from torch.utils._typing_utils import not_none
 
 
@@ -219,6 +220,7 @@ else:
         _mesh_dim_names: tuple[str, ...] | None
         _layout: _MeshLayout
         _root_mesh: "DeviceMesh | None" = None
+        _thread_id: int | None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
         # Registry mapping group names to ProcessGroup objects (to avoid C++ lookup)
@@ -665,19 +667,21 @@ else:
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
 
+        def _hash_key(self) -> tuple[Any, ...]:
+            """Return the tuple used for hashing. Used by both __hash__ and _stable_hash."""
+            return (
+                self._flatten_rank_map,
+                self._layout,
+                self._device_type,
+                self._mesh_dim_names,
+                self._thread_id,
+            )
+
         def __hash__(self):
             # lazily compute hash
             self._hash = getattr(self, "_hash", None)
             if not self._hash:
-                self._hash = hash(
-                    (
-                        self._flatten_rank_map,
-                        self._layout,
-                        self._device_type,
-                        self._mesh_dim_names,
-                        self._thread_id,
-                    )
-                )
+                self._hash = hash(self._hash_key())
             return self._hash
 
         def __eq__(self, other: object) -> bool:
@@ -692,6 +696,17 @@ else:
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
             )
+
+        def _stable_hash(self) -> str:
+            """
+            Return a stable hash for AOT autograd caching.
+            [See note: Tensor subclass stable hashing for AOT autograd cache]
+            """
+            import hashlib
+
+            return hashlib.blake2b(
+                repr(self._hash_key()).encode(), digest_size=16
+            ).hexdigest()
 
         def __getitem__(self, mesh_dim_names: str | tuple[str, ...]) -> "DeviceMesh":
             """
@@ -1242,7 +1257,7 @@ else:
             """
             return self._coordinate_on_dim
 
-        def _sym_get_coordinate(self, index: int) -> int:
+        def _sym_get_coordinate(self, index: int) -> IntLikeType:
             import torch.distributed.config as config
             from torch._guards import detect_fake_mode
 
@@ -1612,6 +1627,7 @@ def _register_distributed_opaque_types():
             "rank": MemberType.USE_REAL,
             "_get_backend_name": MemberType.USE_REAL,
             "group_name": MemberType.USE_REAL,
+            "group_desc": MemberType.USE_REAL,
             "__eq__": MemberType.USE_REAL,
         },
     )

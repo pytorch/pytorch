@@ -328,6 +328,7 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     import triton
     from triton import JITFunction  # type: ignore[name-defined, attr-defined]
     from triton.language import constexpr  # type: ignore[name-defined]
+    from triton.language.core import dtype as triton_dtype
 
     # global constexpr vars handled above
     symbols_included = OrderedSet([kernel.__name__])
@@ -351,7 +352,6 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
-
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
@@ -359,9 +359,25 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                     symbol,
                     triton.runtime.jit.ConstexprFunction,
                 ):
+                    # Import dtype class if used in type annotations
+                    if "dtype" in symbol.src and "dtype" not in symbols_included:
+                        dtype_symbol = symbol.fn.__globals__.get("dtype")
+                        if (
+                            dtype_symbol
+                            and hasattr(dtype_symbol, "__module__")
+                            and dtype_symbol.__module__.startswith("triton")
+                        ):
+                            compile_wrapper.writeline(
+                                f"from {dtype_symbol.__module__} import dtype as dtype"
+                            )
+                            symbols_included.add("dtype")
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.constexpr_function")
                     compile_wrapper.splice(symbol.src, strip=True)
+                    if symbol_name != symbol.fn.__name__:
+                        compile_wrapper.writeline(
+                            f"{symbol_name} = {symbol.fn.__name__}"
+                        )
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif isinstance(symbol, (int, str, bool, constexpr)):
@@ -395,9 +411,14 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                     # a global symbol imported from triton is referenced
                     # without module qualification (i.e., `store` instead
                     # of `tl.store`): need to codegen an import
-                    compile_wrapper.writeline(
-                        f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
-                    )
+
+                    # Triton dtype instances have .name instead of .__name__
+                    if isinstance(symbol, triton_dtype):
+                        compile_wrapper.writeline(f"{symbol_name} = tl.{symbol.name}")
+                    elif hasattr(symbol, "__name__"):
+                        compile_wrapper.writeline(
+                            f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
+                        )
                     symbols_included.add(symbol_name)
 
     traverse(kernel)

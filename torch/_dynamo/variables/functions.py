@@ -587,6 +587,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # subclasses (such as methods) usually aren't a constant
         return super().as_python_constant()
 
+    def get_real_python_backed_value(self) -> Any:
+        if istype(self, UserFunctionVariable):
+            return self.fn
+        return super().get_real_python_backed_value()
+
     def self_args(self) -> list[VariableTracker]:
         return []
 
@@ -2109,6 +2114,9 @@ class SkipFunctionVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.value
 
+    def get_real_python_backed_value(self) -> Any:
+        return self.value
+
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "SkipFunctionVariable":
         # Use closure match guard (i.e. guard on __code__ object instead of
@@ -3065,9 +3073,12 @@ class DynamoTritonHOPifier(TritonHOPifier):
         from .builder import VariableBuilder
 
         assert tx is not None
+        # Route through VariableBuilder.__call__ so already-tracked mutable
+        # objects (for example autotuner config lists) are reused instead of
+        # being registered for mutation twice in the same trace.
         wrapped_user_obj = VariableBuilder(
             tx, AttrSource(variable.kernel_source, f"{name}")
-        )._wrap(user_obj)
+        )(user_obj)
         return wrapped_user_obj
 
     def maybe_unpack_configs(

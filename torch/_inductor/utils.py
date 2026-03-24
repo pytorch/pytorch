@@ -23,6 +23,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+import warnings
 from collections.abc import (
     Callable,
     Collection,
@@ -277,7 +278,7 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
             [s.elapsed_time(e) for s, e in zip(start_event, end_event)]
         )
 
-    res = cast(float, torch.mean(times).item())
+    res = torch.mean(times).item()
     log.debug("raw events")
     log.debug(p.key_averages().table(sort_by="self_device_time_total", row_limit=-1))
     filtered_events = EventList(
@@ -652,7 +653,7 @@ def print_performance(
     )
     took = torch.median(timings) / times
     print(f"{took / baseline:.6f}")
-    return cast(float, took.item())
+    return took.item()
 
 
 def precompute_method(obj: Any, method: str) -> None:
@@ -2128,9 +2129,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     # for the compiled CUTLASS .so, similar to how the triton branch uses
     # static CUfunction + loadKernel for non-AOT mode.
     if V.graph.cpp_wrapper and not V.graph.aot_mode:
-        log.warning(
+        warnings.warn(
             "CUTLASS backend is not supported with non-AOT cpp_wrapper mode. "
-            "Skipping CUTLASS backend."
+            "Skipping CUTLASS backend.",
         )
         return False
 
