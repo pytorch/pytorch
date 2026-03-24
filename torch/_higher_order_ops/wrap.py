@@ -31,7 +31,7 @@ _R = TypeVar("_R")
 log = logging.getLogger(__name__)
 
 
-uid = itertools.count(1)
+from torch.utils.checkpoint import _ac_graph_id_counter as uid
 
 
 # Used for testing the HigherOrderOperator mechanism

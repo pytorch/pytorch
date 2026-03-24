@@ -5,13 +5,16 @@ import contextlib
 import copy
 import functools
 import math
+import operator
 import re
 import unittest  # noqa: F811
+from collections import defaultdict
 from importlib import import_module
 
 import torch
 import torch._dynamo.config
 import torch._dynamo.test_case
+import torch.utils._pytree as pytree
 import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
@@ -2584,6 +2587,221 @@ devices = ["cuda", "hpu"]
 instantiate_device_type_tests(
     ActivationCheckpointingViaTagsTests, globals(), only_for=devices
 )
+
+
+class ActivationCheckpointingMakeFxTests(torch._dynamo.test_case.TestCase):
+    """Tests that SAC metadata is correctly stamped when tracing with make_fx."""
+
+    def _trace_with_make_fx(self, mod, args):
+        from torch._subclasses import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.fx.traceback import preserve_node_meta
+        from torch.nn.utils import stateless
+
+        named_params = dict(mod.named_parameters(remove_duplicate=False))
+        named_bufs = dict(mod.named_buffers(remove_duplicate=False))
+        params_and_bufs = {**named_params, **named_bufs}
+        flat_params, params_spec = pytree.tree_flatten(params_and_bufs)
+        params_len = len(flat_params)
+
+        def functional_call(*all_args):
+            p = all_args[:params_len]
+            u = all_args[params_len:]
+            params = pytree.tree_unflatten(list(p), params_spec)
+            with stateless._reparametrize_module(mod, params):
+                return mod.forward(*u)
+
+        flat_user, user_spec = pytree.tree_flatten(args)
+        full_args = tuple(flat_params) + tuple(flat_user)
+
+        fake_mode = FakeTensorMode(
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(),
+        )
+        fake_args = tuple(
+            fake_mode.from_tensor(a, static_shapes=True) if isinstance(a, torch.Tensor) else a
+            for a in full_args
+        )
+
+        def fn(*plain_args):
+            p = list(plain_args[:params_len])
+            u = pytree.tree_unflatten(list(plain_args[params_len:]), user_spec)
+            out = functional_call(*p, *u)
+            flat, _ = pytree.tree_flatten(out)
+            return flat
+
+        prev = torch._dynamo.config.error_on_nested_fx_trace
+        torch._dynamo.config.error_on_nested_fx_trace = False
+        try:
+            with fake_mode, preserve_node_meta():
+                return make_fx(fn, record_stack_traces=True)(*fake_args)
+        finally:
+            torch._dynamo.config.error_on_nested_fx_trace = prev
+
+    def test_sac_region_ids(self):
+        """ac_graph_id is unique per checkpoint region and recompute tags are correct."""
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.addmm.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def context_fn():
+            return create_selective_checkpoint_contexts(policy_fn)
+
+        class Block(nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.linear = nn.Linear(dim, dim)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = nn.ModuleList([Block(8) for _ in range(3)])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = checkpoint(
+                        layer, x, use_reentrant=False, context_fn=context_fn,
+                    )
+                return x
+
+        gm = self._trace_with_make_fx(Model(), (torch.randn(2, 8),))
+
+        # Collect ac_graph_ids for call_function nodes that have them.
+        ids_seen = set()
+        id_to_nodes = defaultdict(list)
+        for node in gm.graph.nodes:
+            ac_id = node.meta.get("ac_graph_id")
+            if ac_id is not None:
+                ids_seen.add(ac_id)
+                id_to_nodes[ac_id].append(node)
+
+        # 3 checkpoint regions -> 3 distinct ac_graph_ids
+        self.assertEqual(len(ids_seen), 3)
+
+        # addmm nodes should be MUST_SAVE
+        for node in gm.graph.nodes:
+            if node.target == torch.ops.aten.addmm.default:
+                self.assertEqual(node.meta.get("recompute"), CheckpointPolicy.MUST_SAVE)
+
+    def test_interleaved_sac_and_vanilla_ac_ids(self):
+        """Interleaving SAC and vanilla AC regions produces monotonically increasing ac_graph_ids for SAC."""
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            if func == torch.ops.aten.addmm.default:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def sac_context_fn():
+            return create_selective_checkpoint_contexts(policy_fn)
+
+        class Block(nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.linear = nn.Linear(dim, dim)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = nn.ModuleList([Block(8) for _ in range(4)])
+
+            def forward(self, x):
+                # SAC, vanilla, SAC, vanilla -- interleaved
+                x = checkpoint(self.layers[0], x, use_reentrant=False, context_fn=sac_context_fn)
+                x = checkpoint(self.layers[1], x, use_reentrant=False)
+                x = checkpoint(self.layers[2], x, use_reentrant=False, context_fn=sac_context_fn)
+                x = checkpoint(self.layers[3], x, use_reentrant=False)
+                return x
+
+        gm = self._trace_with_make_fx(Model(), (torch.randn(2, 8),))
+
+        # Collect ac_graph_ids in order of appearance.
+        ids_in_order = []
+        for node in gm.graph.nodes:
+            ac_id = node.meta.get("ac_graph_id")
+            if ac_id is not None and (not ids_in_order or ids_in_order[-1] != ac_id):
+                ids_in_order.append(ac_id)
+
+        # 2 SAC regions, each with a distinct id, monotonically increasing.
+        self.assertEqual(len(ids_in_order), 2)
+        self.assertLess(ids_in_order[0], ids_in_order[1])
+
+    def test_cleanup_recompute_tags_saves_boundary_tensors(self):
+        """cleanup_recompute_tags overrides boundary nodes to MUST_SAVE."""
+        from torch._functorch.partitioners import cleanup_recompute_tags
+
+        def policy_fn(ctx, func, *args, **kwargs):
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def context_fn():
+            return create_selective_checkpoint_contexts(policy_fn)
+
+        class Block(nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.linear = nn.Linear(dim, dim)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = nn.ModuleList([Block(8) for _ in range(3)])
+
+            def forward(self, x):
+                for layer in self.layers:
+                    x = checkpoint(
+                        layer, x, use_reentrant=False, context_fn=context_fn,
+                    )
+                return x
+
+        gm = self._trace_with_make_fx(Model(), (torch.randn(2, 8),))
+
+        # Collect the ac_graph_ids so we know what regions exist.
+        ids_sorted = sorted({
+            node.meta["ac_graph_id"]
+            for node in gm.graph.nodes
+            if "ac_graph_id" in node.meta
+        })
+        self.assertEqual(len(ids_sorted), 3)
+
+        # Before cleanup: everything is PREFER_RECOMPUTE (policy recomputes all).
+        for node in gm.graph.nodes:
+            if node.meta.get("recompute") is not None and node.op == "call_function":
+                self.assertIn(node.meta["recompute"], [
+                    CheckpointPolicy.PREFER_RECOMPUTE,
+                    CheckpointPolicy.MUST_SAVE,  # detach after addmm inherits tag
+                ])
+
+        cleanup_recompute_tags(gm, is_default_partition=False)
+
+        # After cleanup: boundary nodes (region N feeding into region N+1) become MUST_SAVE.
+        boundary_saves = []
+        for node in gm.graph.nodes:
+            if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE:
+                boundary_saves.append(node)
+
+        self.assertGreater(len(boundary_saves), 0)
+        # Each boundary node should feed into a node with a higher ac_graph_id.
+        for node in boundary_saves:
+            node_id = node.meta.get("ac_graph_id")
+            has_cross_region_user = any(
+                u.meta.get("ac_graph_id", node_id) > node_id for u in node.users
+            )
+            self.assertTrue(
+                has_cross_region_user,
+                f"{node.name} is MUST_SAVE but has no cross-region user",
+            )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

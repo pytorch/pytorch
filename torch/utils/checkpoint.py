@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import platform
 import uuid
 import warnings
@@ -1310,6 +1311,9 @@ SAC_IGNORED_OPS = {
 } | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
+_ac_graph_id_counter = itertools.count(1)
+
+
 class _CachingTorchDispatchMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls):
@@ -1319,7 +1323,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
     def __init__(self, policy_fn, storage, ac_graph_id=None) -> None:
         self.policy_fn = policy_fn
         self.storage = storage
-        self.ac_graph_id = ac_graph_id
+        self.ac_graph_id = ac_graph_id if ac_graph_id is not None else next(_ac_graph_id_counter)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if func in SAC_IGNORED_OPS:
@@ -1334,7 +1338,6 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         is_compiling = _is_compiling(func, args, kwargs)
 
         if is_compiling:
-            # Overwrite each node's "recompute" tag to add in the user annotation.
             fx_traceback.current_meta["recompute"] = policy
             fx_traceback.current_meta["ac_graph_id"] = self.ac_graph_id
 
