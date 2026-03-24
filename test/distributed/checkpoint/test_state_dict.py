@@ -1098,7 +1098,7 @@ class TestNoComm(MultiProcessTestCase):
             model, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
         )
         for v in msd.values():
-            self.assertFalse(v.is_cuda)
+            self.assertEqual(v.device, torch.device("cpu"))
         self.assertEqual(model.state_dict(), msd)
         set_model_state_dict(model, model.state_dict())
         osd = get_optimizer_state_dict(
