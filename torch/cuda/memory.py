@@ -50,6 +50,7 @@ __all__ = [
     "memory_allocated",
     "max_memory_allocated",
     "memory_reserved",
+    "private_pool_memory_reserved",
     "max_memory_reserved",
     "memory_cached",
     "max_memory_cached",
@@ -567,6 +568,27 @@ def memory_reserved(device: "Device" = None) -> int:
         management.
     """
     return memory_stats(device=device).get("reserved_bytes.all.current", 0)
+
+
+def private_pool_memory_reserved(device: "Device" = None) -> int:
+    r"""Return the current GPU memory reserved in private memory pools (e.g. CUDA graph pools).
+
+    Unlike :func:`~torch.cuda.memory_reserved`, this is not reduced by
+    :func:`~torch.cuda.empty_cache`; it only decreases when a private pool
+    is deleted.
+
+    Args:
+        device (torch.device or int, optional): selected device. Returns
+            statistic for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+    """
+    return memory_stats(device=device).get(
+        "private_pool_reserved_bytes.all.current", 0
+    )
 
 
 def max_memory_reserved(device: "Device" = None) -> int:

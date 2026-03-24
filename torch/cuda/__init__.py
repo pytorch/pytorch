@@ -2077,6 +2077,7 @@ __all__ = [
     "memory_allocated",
     "memory_cached",
     "memory_reserved",
+    "private_pool_memory_reserved",
     "memory_snapshot",
     "memory_stats",
     "memory_stats_as_nested_dict",

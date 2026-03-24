@@ -619,6 +619,8 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   result["inactive_split"] = statArrayToDict(stats.inactive_split);
   result["allocated_bytes"] = statArrayToDict(stats.allocated_bytes);
   result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
+  result["private_pool_reserved_bytes"] =
+      statArrayToDict(stats.private_pool_reserved_bytes);
   result["active_bytes"] = statArrayToDict(stats.active_bytes);
   result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
   result["requested_bytes"] = statArrayToDict(stats.requested_bytes);

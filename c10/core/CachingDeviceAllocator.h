@@ -24,6 +24,10 @@ struct DeviceStats {
   StatArray allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
   StatArray reserved_bytes;
+  // SUM: bytes reserved in private memory pools (e.g. CUDA graph pools).
+  // Unlike reserved_bytes, this is not reduced by empty_cache(); it only
+  // decreases when a private pool is deleted.
+  StatArray private_pool_reserved_bytes;
   // SUM: bytes within active memory blocks
   StatArray active_bytes;
   // SUM: bytes within inactive, split memory blocks

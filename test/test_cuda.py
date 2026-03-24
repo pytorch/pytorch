@@ -7956,6 +7956,88 @@ class TestMemPool(TestCase):
                     "-- free was likely deferred as if under graph capture",
                 )
 
+    def _check_private_pool_reserved_bytes(self):
+        # 5M float32 elements = 20MB per tensor, above kMinLargeAlloc (10MB)
+        NELEMS = 5 * 1024 * 1024
+        TENSOR_SIZE = NELEMS * 4
+
+        torch.cuda.empty_cache()
+        self.assertEqual(torch.cuda.private_pool_memory_reserved(), 0)
+
+        # Case 1: Allocating multiple tensors increases reserved bytes.
+        pool = torch.cuda.MemPool()
+        tensors = []
+        prev = 0
+        with torch.cuda.use_mem_pool(pool):
+            for i in range(4):
+                tensors.append(torch.randn(NELEMS, device="cuda", dtype=torch.float32))
+                cur = torch.cuda.private_pool_memory_reserved()
+                self.assertGreaterEqual(cur, (i + 1) * TENSOR_SIZE)
+                self.assertGreaterEqual(cur, prev)
+                prev = cur
+        reserved_after_alloc = torch.cuda.private_pool_memory_reserved()
+
+        # Case 2: empty_cache does not reduce private pool reserved bytes.
+        del tensors
+        torch.cuda.empty_cache()
+        self.assertEqual(
+            torch.cuda.private_pool_memory_reserved(), reserved_after_alloc
+        )
+
+        # Case 3: Resetting stats does not reduce private pool reserved bytes.
+        torch.cuda.reset_accumulated_memory_stats()
+        torch.cuda.reset_peak_memory_stats()
+        self.assertEqual(
+            torch.cuda.private_pool_memory_reserved(), reserved_after_alloc
+        )
+
+        # Case 4: Deleting the pool and clearing cache releases the segments.
+        del pool
+        torch.cuda.empty_cache()
+        self.assertEqual(torch.cuda.private_pool_memory_reserved(), 0)
+
+        # Case 5: Two private pools contribute to the aggregate.
+        pool1 = torch.cuda.MemPool()
+        pool2 = torch.cuda.MemPool()
+        with torch.cuda.use_mem_pool(pool1):
+            t1 = torch.randn(NELEMS, device="cuda", dtype=torch.float32)
+        reserved1 = torch.cuda.private_pool_memory_reserved()
+        self.assertGreaterEqual(reserved1, TENSOR_SIZE)
+
+        with torch.cuda.use_mem_pool(pool2):
+            t2 = torch.randn(NELEMS, device="cuda", dtype=torch.float32)
+        reserved_both = torch.cuda.private_pool_memory_reserved()
+        self.assertGreaterEqual(reserved_both, 2 * TENSOR_SIZE)
+
+        # Deleting one pool reduces the total but doesn't zero it.
+        del t1
+        del pool1
+        torch.cuda.empty_cache()
+        reserved_after_pool1_delete = torch.cuda.private_pool_memory_reserved()
+        self.assertGreaterEqual(reserved_after_pool1_delete, TENSOR_SIZE)
+        self.assertLess(reserved_after_pool1_delete, reserved_both)
+
+        # Deleting the second pool zeros it.
+        del t2
+        del pool2
+        torch.cuda.empty_cache()
+        self.assertEqual(torch.cuda.private_pool_memory_reserved(), 0)
+
+    @serialTest()
+    def test_private_pool_reserved_bytes(self):
+        self._check_private_pool_reserved_bytes()
+
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    @serialTest()
+    def test_private_pool_reserved_bytes_expandable(self):
+        torch.cuda.empty_cache()
+        torch.cuda.memory._set_allocator_settings("expandable_segments:True")
+        try:
+            self._check_private_pool_reserved_bytes()
+        finally:
+            torch.cuda.empty_cache()
+            torch.cuda.memory._set_allocator_settings("")
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
