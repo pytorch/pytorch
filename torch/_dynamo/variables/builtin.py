@@ -2123,16 +2123,6 @@ class BuiltinVariable(VariableTracker):
         **kwargs: VariableTracker,
     ) -> VariableTracker:
         args_list = list(args)
-        if (
-            len(args_list) == 1
-            and isinstance(args_list[0], variables.GetAttrVariable)
-            and isinstance(args_list[0].obj, variables.UserDefinedClassVariable)
-            and not tx.output.side_effects.has_pending_mutation(args_list[0].obj)
-        ):
-            # Forward the GetAttrVariable(foo, "__dict__") to a realized vt of
-            # VT(foo.__dict__). This simplifies the construction of the new
-            # dict.
-            args_list[0] = args_list[0].get_forwarded_dict(tx)
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.construct_dict),
             [VariableTracker.build(tx, user_cls), *args_list],

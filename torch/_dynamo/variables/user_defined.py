@@ -288,13 +288,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self) -> bool:
         return self.value in self._constant_fold_classes()
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
-        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
-            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
-            return not isinstance(mutated_attr, variables.DeletedVariable)
-
-        return key in self.value.__dict__
-
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from . import ConstantVariable
 
@@ -305,8 +298,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__qualname__":
             return VariableTracker.build(tx, self.value.__qualname__)
         elif name == "__dict__":
-            options = {"source": source}
-            return variables.GetAttrVariable(self, name, None, **options)
+            return VariableTracker.build(
+                tx,
+                self.value.__dict__,
+                # Should this be a TypeDictSource?
+                source=self.source and AttrSource(self.source, "__dict__"),
+            )
         elif name == "__mro__":
             attr_source = self.source and TypeMROSource(self.source)
             return VariableTracker.build(tx, self.value.__mro__, attr_source)
