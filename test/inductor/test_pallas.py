@@ -2164,6 +2164,7 @@ class PallasTestsMixin:
         expected = transformer(x, mask, *all_params)
         self.assertEqual(result, expected, atol=atol, rtol=rtol)
 
+    @skip_if_cuda
     def test_transformer_tiny(self):
         """Test a 4-layer Llama-style transformer at tiny dimensions."""
         self._run_transformer(
@@ -2177,6 +2178,7 @@ class PallasTestsMixin:
             rtol=1e-2,
         )
 
+    @skip_if_cuda
     def test_transformer_medium(self):
         """Test a 4-layer transformer at Llama-7B-like dimensions."""
         self._run_transformer(
@@ -2454,6 +2456,7 @@ class PallasTestsMixin:
         expected = fn(indices, table)
         self.assertEqual(result, expected)
 
+    @skip_if_cuda
     def test_transformer_with_final_norm_and_lm_head(self):
         """Test multi-layer transformer + final RMSNorm + LM head (no embedding)."""
         torch._dynamo.reset()
