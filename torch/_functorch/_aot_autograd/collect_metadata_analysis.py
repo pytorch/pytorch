@@ -870,12 +870,6 @@ from a multi-output view call"
                 grad_enabled_mutation,
             )
 
-        subclass_inp_meta = create_subclass_meta(flat_args)
-        subclass_fw_graph_out_meta = create_subclass_meta(fw_graph_outs)
-        subclass_tangent_meta = create_subclass_meta(
-            traced_tangents, count_symints=False, with_memory_format=True
-        )
-
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             output_info=output_info,
@@ -883,9 +877,13 @@ from a multi-output view call"
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
             traced_tangents_descs=traced_tangents_descs,
-            subclass_inp_meta=subclass_inp_meta,
-            subclass_fw_graph_out_meta=subclass_fw_graph_out_meta,
-            subclass_tangent_meta=subclass_tangent_meta,
+            subclass_inp_meta=create_subclass_meta(flat_args),
+            subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
+            subclass_tangent_meta=create_subclass_meta(
+                traced_tangents,
+                count_symints=False,
+                with_memory_format=True,
+            ),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,

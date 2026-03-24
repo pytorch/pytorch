@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from torch._guards import Source
+    from torch._library.opaque_object import OpaqueType
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
@@ -182,8 +183,8 @@ def disable_fake_tensor_cache(fake_mode: FakeTensorMode) -> Generator[None, None
 
 
 def get_plain_tensors(
-    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueBase]
-) -> list[Tensor | int | SymInt | OpaqueBase]:
+    subclass: Tensor, *, out: list[Tensor | int | SymInt | OpaqueType]
+) -> list[Tensor | int | SymInt | OpaqueType]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
