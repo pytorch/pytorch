@@ -1,3 +1,61 @@
+/**
+ * ================================================================================
+ * MemoryViz.js - PyTorch Memory Visualization Tool
+ * ================================================================================
+ *
+ * OVERVIEW:
+ * ---------
+ * This file contains the core visualization logic for PyTorch's memory profiler.
+ * It renders memory allocation timelines, stack traces, and provides interactive
+ * exploration of memory snapshots captured during model execution.
+ *
+ * KEY FEATURES:
+ * - Multiple visualization tabs/views for different memory analysis perspectives
+ * - Interactive stack trace display (supports both click and hover modes)
+ * - Zoom and brush controls for navigating large memory timelines
+ * - Support for loading memory snapshot files (.pickle format)
+ *
+ * ================================================================================
+ * TESTING INSTRUCTIONS FOR ENGINEERS & AGENTS
+ * ================================================================================
+ *
+ * 1. LOCAL TESTING SETUP:
+ *    - Create a simple HTML file that references this JS file:
+ *
+ *      <!DOCTYPE html>
+ *      <html>
+ *      <head><title>MemoryViz Test</title></head>
+ *      <body>
+ *        <script type="module" src="MemoryViz.js"></script>
+ *      </body>
+ *      </html>
+ *
+ *    - Serve locally using: python3 -m http.server 8888
+ *    - Open http://localhost:8888 in your browser
+ *
+ * 2. WHAT TO TEST:
+ *    - Ensure ALL tabs/views render correctly and switch properly
+ *    - Verify BOTH interaction modes work:
+ *      * Click mode: stack traces appear on click
+ *      * Hover mode: stack traces appear on mouseover
+ *    - Test zoom and brush controls for timeline navigation
+ *    - Verify memory allocation blocks are rendered and interactive
+ *
+ * 3. TEST DATA REQUIREMENTS:
+ *    - DO NOT just test with small dummy .pickle files
+ *    - Use realistic, decent-sized .pickle files (10-100+ MB range)
+ *    - Large files stress-test rendering performance and memory handling
+ *    - Test with snapshots from real model training/inference runs
+ *
+ * 4. COMMON ISSUES TO WATCH FOR:
+ *    - Performance degradation with large snapshots
+ *    - Stack trace popups not appearing or positioning incorrectly
+ *    - Tab switching not updating the visualization properly
+ *    - Zoom/brush state not persisting across interactions
+ *
+ * ================================================================================
+ */
+
 'use strict';
 
 import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";

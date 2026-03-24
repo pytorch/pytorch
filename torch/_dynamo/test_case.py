@@ -17,7 +17,6 @@ import re
 import sys
 import unittest
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import torch
@@ -30,7 +29,6 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
 )
-from torch.testing._internal.dynamo_test_failures import dynamo_expected_failures
 
 from . import config, reset, utils
 
@@ -182,40 +180,6 @@ class CPythonTestCase(TestCase):
     assertLogs = unittest.TestCase.assertLogs
     fail = unittest.TestCase.fail
     failureException = unittest.TestCase.failureException
-
-    def _callTestMethod(self, method: Callable[..., Any]) -> None:
-        def check_dynamo_compile_test(captured) -> None:
-            frame_skip_msg = f"WON'T CONVERT {self._testMethodName}"
-            if frame_skip_msg in "\n".join(captured.output):
-                expected_failures_dir = Path("test") / "dynamo_expected_failures"
-                key = self._dynamo_test_key()
-                skip_test_file = expected_failures_dir / key
-                reason = (
-                    f"Test method '{self._testMethodName}' was not compiled by Dynamo.\n\n"
-                    f"Expected behavior: When PYTORCH_TEST_WITH_DYNAMO=1 is set, CPython test methods "
-                    f"should be fully compiled by Dynamo. Instead, this test was partially executed by CPython "
-                    f"without compilation.\n\n"
-                    f"To resolve this, either:\n"
-                    f"  1. Fix the test to be Dynamo-compatible (preferred)\n"
-                    f"  2. Mark as an expected failure by creating:\n"
-                    f"     'touch {skip_test_file}'\n\n"
-                    f"For debugging, run with TORCH_LOGS=dynamo to see what prevented compilation."
-                )
-                if key in dynamo_expected_failures:
-                    raise unittest.SkipTest(reason) from None
-                else:
-                    self.fail(reason)
-
-        with self.assertLogs("torch._dynamo.convert_frame") as captured:
-            try:
-                super()._callTestMethod(method)  # pyrefly: ignore[missing-attribute]
-            except RuntimeError as e:
-                if "Unexpected success, please remove" in e.args[0]:
-                    check_dynamo_compile_test(captured)
-                # re-raise the original error
-                raise
-            else:
-                check_dynamo_compile_test(captured)
 
     def compile_fn(
         self,

@@ -1057,13 +1057,22 @@ class CachingAutotuner(KernelInterface):
 
         copies = {}
         try:
-            budget = torch.cuda.max_memory_allocated() - torch.cuda.memory_allocated()
+            if torch.accelerator.current_accelerator() is None:
+                # No initialized accelerator; skip memory-optimized path
+                return {}
+            budget = (
+                torch.accelerator.max_memory_allocated()
+                - torch.accelerator.memory_allocated()
+            )
         except RuntimeError:
             # Possibly a custom CUDA allocator, see https://github.com/pytorch/pytorch/issues/163257
             return {}
 
         def maybe_copy(name, arg):
-            if name in self.mutated_arg_names and arg.is_cuda:
+            if name in self.mutated_arg_names and arg.device.type in (
+                "cuda",
+                "xpu",
+            ):
                 nonlocal budget
                 assert isinstance(arg, torch.Tensor)
                 required_storage_length = compute_required_storage_length(

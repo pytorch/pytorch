@@ -7212,7 +7212,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_self = grad_self.scatter(dim, index, 0);
   }
 
-  return std::make_tuple(grad_self, grad_src);
+  return std::make_tuple(std::move(grad_self), std::move(grad_src));
 }
 
 Tensor _to_copy_backward(
@@ -7308,7 +7308,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     grad_self = grad_self.index_fill(dim, index, 0);
   }
 
-  return std::make_tuple(grad_self, grad_src);
+  return std::make_tuple(std::move(grad_self), std::move(grad_src));
 }
 
 Tensor take_backward(

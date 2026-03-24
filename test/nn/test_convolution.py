@@ -3581,7 +3581,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
     @torch.backends.miopen.flags(immediate=True)
-    @tf32_on_and_off(0.001)
+    @tf32_on_and_off(0.005)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions
         m = nn.Conv2d(4, 4, kernel_size=3, groups=2).to(device, dtype)

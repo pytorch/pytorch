@@ -367,6 +367,7 @@ def expand_to_full_mesh_op_strategy(
         [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
+    different_mesh_args: list[int] | None = None,
 ) -> OpStrategy:
     """
     Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
@@ -476,6 +477,52 @@ def expand_to_full_mesh_op_strategy(
                 f"input_specs({len(input_specs)}) != strategies({len(input_args_strategy)}: "
                 f"{len(args_strategy)} args + {len(kwargs_strategy)} kwargs)"
             )
+
+        # Note [Multi-mesh args]
+        #
+        # Some ops accept args whose DTensor lives on a different DeviceMesh
+        # than the op's primary compute mesh.  We call these "multi-mesh
+        # args".  They arise in fused optimizer ops (e.g. _fused_adam_)
+        # where *state_steps* is a per-rank scalar counter allocated on a
+        # smaller sub-mesh (e.g. 1-D DP) while params and grads live on a
+        # larger mesh (e.g. 2-D DP × TP).
+        #
+        # Why must these args be Replicate?
+        #   Sharding implies a specific partitioning of a tensor's data
+        #   across the ranks of a mesh.  If a tensor doesn't even *exist*
+        #   on the compute mesh, there is no meaningful way to interpret a
+        #   Shard placement for it.  Replicate, on the other hand, is
+        #   mesh-agnostic: every rank already holds the full data, so the
+        #   op can simply read the value regardless of which mesh owns it.
+        #
+        # What we do here:
+        #   We preserve the original mesh and Replicate placement for these
+        #   args so the propagator does not try to redistribute them onto
+        #   the compute mesh (which would fail or produce wrong results).
+        #
+        # This is distinct from the *element_mesh* handling in
+        # single_dim_strategy.py, which deals with foreach ops where
+        # different *elements* in a tensor list may live on different
+        # sub-meshes (e.g. param group A on 2-D mesh, param group B on
+        # 1-D mesh).
+        # TODO: refactor fused_ops handling so that there are no longer
+        # args on different meshes
+        if different_mesh_args is not None:
+            for idx in different_mesh_args:
+                if idx < len(input_args_strategy):
+                    cross_mesh_input = input_args_strategy[idx]
+                    original_spec = cross_mesh_input.strategies[0].output_spec
+                    if original_spec.mesh != mesh:
+                        if not all(p == Replicate() for p in original_spec.placements):
+                            raise RuntimeError(
+                                f"Cross-mesh input at index {idx} must be Replicate, "
+                                f"but got {original_spec.placements}"
+                            )
+                        input_specs[idx] = DTensorSpec(
+                            mesh=original_spec.mesh,
+                            placements=original_spec.placements,
+                            tensor_meta=original_spec.tensor_meta,
+                        )
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
         redistribute_input = self_spec.placements != input_specs[0].placements

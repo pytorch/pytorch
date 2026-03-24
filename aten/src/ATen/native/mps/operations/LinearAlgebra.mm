@@ -310,6 +310,20 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   if (c10::isComplexType(self.scalar_type()) && self.size(1) > max_complex_inner_size) {
     return true;
   }
+  // Detect conditions that would trigger LORADOWN GEMV kernel with potential padding overflow
+  // See https://github.com/pytorch/pytorch/issues/178056
+  if (self.scalar_type() == at::ScalarType::Half && (self.size(0) <= 16 || other.size(1) <= 16) &&
+      self.stride(1) == 1 && other.stride(0) == 1) {
+    int64_t self_padding = self.stride(0) - self.size(1);
+    int64_t other_padding = other.stride(1) - other.size(0);
+
+    if (self_padding > 15 || other_padding > 15 || self_padding % 4 != 0 || other_padding % 4 != 0) {
+      TORCH_WARN_ONCE(
+          "MPS mm implementation has a known issue with this shape, dtype and slice. Dispatching to metal implementation instead. This may impact performance.");
+      return true;
+    }
+  }
+
   return !is_macos_14_4_or_newer &&
       (self.stride(0) > max_stride_size || self.stride(1) > max_stride_size || self.size(0) > max_stride_size ||
        self.size(1) > max_stride_size || other.stride(0) > max_stride_size || other.stride(1) > max_stride_size ||
