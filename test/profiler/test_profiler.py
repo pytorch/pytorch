@@ -3791,18 +3791,17 @@ class TestProfilerEventsParity(TestCase):
             self.assertGreater(e.time_range.end - e.time_range.start, 0)
 
         # Parity: count should match python_function events in Chrome trace
-        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
-            fname = f.name
-        prof.export_chrome_trace(fname)
-        with open(fname) as f:
-            trace = json.load(f)
-        os.remove(fname)
-        json_py = [
-            e
-            for e in trace["traceEvents"]
-            if e.get("cat") == "python_function" and e.get("ph") == "X"
-        ]
-        self.assertEqual(len(python_events), len(json_py))
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                trace = json.load(f)
+
+            json_py = [
+                e
+                for e in trace["traceEvents"]
+                if e.get("cat") == "python_function" and e.get("ph") == "X"
+            ]
+            self.assertEqual(len(python_events), len(json_py))
 
     def test_profiler_flow_events_parity(self):
         """Verify that async CPU->GPU flow fields on events() match Chrome trace JSON."""
