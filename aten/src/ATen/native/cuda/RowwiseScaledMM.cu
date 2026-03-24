@@ -288,7 +288,7 @@ void f8f8bf16_rowwise_impl(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr());
+  status = gemm.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -481,7 +481,7 @@ void f8f8bf16_rowwise_impl_sm100_sm120(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr());
+  status = gemm.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }
@@ -697,7 +697,7 @@ void f8f8bf16_rowwise_impl_sm89(
   }
 
   // Initialize CUTLASS kernel with arguments and workspace pointer
-  status = gemm.initialize(arguments, workspace.data_ptr());
+  status = gemm.initialize(arguments, workspace.data_ptr(), at::cuda::getCurrentCUDAStream());
   if (status != cutlass::Status::kSuccess) {
     throw std::runtime_error("cutlass cannot initialize");
   }

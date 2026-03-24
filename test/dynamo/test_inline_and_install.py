@@ -23,7 +23,6 @@ def make_dynamic_cls(cls):
         cls_prefix,
         suffix,
         (config, "install_free_tensors", True),
-        (config, "inline_inbuilt_nn_modules", True),
         xfail_prop="_expected_failure_inline_and_install",
     )
 

@@ -1422,11 +1422,12 @@ Tensor as_strided_tensorimpl(
 }
 
 template <typename T>
-static inline void setStridedUnchecked(
+static void setStridedUnchecked(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
     T&& storage_offset) {
+  checkAsStridedArgsAllowUnbackedSymInts(size, stride, storage_offset);
   auto* self_ = self.unsafeGetTensorImpl();
   self_->set_sizes_and_strides(size, stride, std::forward<T>(storage_offset));
 }
