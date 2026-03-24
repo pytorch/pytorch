@@ -1,0 +1,109 @@
+# ARC (Actions Runner Controller) Runner Label Mapping
+#
+# Maps current GitHub Actions runner labels to new ARC runner labels.
+# Reference: https://github.com/pytorch/ci-infra/issues/396
+#
+# New label format:
+#   {os}-[b]{arch}{vendor}{features}-{vcpu}-{memory}[-{gpu_type}[-{gpu_count}]]
+#
+# Fields:
+#   os       - l=Linux, w=Windows, m=MacOS
+#   b        - (optional) bare-metal instance
+#   arch     - x86=x86_64, arm64=AArch64
+#   vendor   - i=Intel, a=AMD, g2/g3/g4=Graviton gen
+#   features - (x86 only) avx2, avx512, amx
+#   vcpu     - vCPU count
+#   memory   - RAM in GiB
+#   gpu_type - (optional) t4, a10g, l4
+#   gpu_count- (optional, omitted when 1)
+#
+# Entries marked "# upgraded" had no exact ARC equivalent and were mapped to
+# the next larger available runner.
+
+runner_mapping:
+
+  # ---- x86 CPU — Intel AVX-512 (c5, c7i families) ----
+
+  linux.large: l-x86iavx512-2-4                        # c5.large
+  linux.c7i.large: l-x86iavx512-2-4                    # c7i.large
+  linux.2xlarge: l-x86iavx512-8-16                     # c5.2xlarge
+  linux.c7i.2xlarge: l-x86iavx512-8-16                 # c7i.2xlarge
+  linux.4xlarge: l-x86iavx512-16-32                    # c5.4xlarge
+  linux.4xlarge.for.testing.donotuse: l-x86iavx512-16-32  # c5.4xlarge
+  linux.c7i.4xlarge: l-x86iavx512-16-32                # c7i.4xlarge
+  linux.c7i.8xlarge: l-x86iavx512-48-96                # c7i.8xlarge — upgraded (no 32-64 equivalent)
+  linux.9xlarge.ephemeral: l-x86iavx512-36-72           # c5.9xlarge
+  linux.12xlarge: l-x86iavx512-48-96                    # c5.12xlarge
+  linux.12xlarge.ephemeral: l-x86iavx512-48-96          # c5.12xlarge
+  linux.c7i.12xlarge: l-x86iavx512-48-96               # c7i.12xlarge
+  linux.16xlarge.spr: l-x86iavx512-94-192               # c7i.16xlarge — upgraded (no 64-128 equivalent)
+  linux.24xlarge: l-x86iavx512-94-192                   # c5.24xlarge
+  linux.24xlarge.ephemeral: l-x86iavx512-94-192         # c5.24xlarge
+  linux.c7i.24xlarge: l-x86iavx512-94-192              # c7i.24xlarge
+  linux.24xl.spr-metal: l-bx86iamx-94-192               # c7i.metal-24xl
+
+  # ---- x86 CPU — Intel AMX (m7i-flex family) ----
+
+  linux.2xlarge.amx: l-x86iamx-8-32                    # m7i-flex.2xlarge
+  linux.4xlarge.amx: l-x86iamx-32-128                  # m7i-flex.4xlarge — upgraded (no 16-64 equivalent)
+  linux.8xlarge.amx: l-x86iamx-32-128                  # m7i-flex.8xlarge
+
+  # ---- x86 CPU — Intel AVX2 (m4 family) ----
+
+  linux.2xlarge.avx2: l-x86iavx2-8-32                  # m4.2xlarge
+  linux.4xlarge.avx2: l-x86iavx2-40-160                # m4.4xlarge — upgraded (no 16-64 equivalent)
+  linux.10xlarge.avx2: l-x86iavx2-40-160               # m4.10xlarge
+
+  # ---- x86 CPU — Memory-optimized (r5, r7i families) ----
+
+  linux.r7i.large: l-x86iavx512-8-64                   # r7i.large — upgraded (no 2-16 equivalent)
+  linux.r7i.xlarge: l-x86iavx512-8-64                  # r7i.xlarge — upgraded (no 4-32 equivalent)
+  linux.r7i.2xlarge: l-x86iavx512-8-64                 # r7i.2xlarge
+  linux.r7i.4xlarge: l-x86iavx512-16-128               # r7i.4xlarge
+  linux.r7i.8xlarge: l-x86iavx512-32-256               # r7i.8xlarge
+  linux.r7i.12xlarge: l-x86iavx512-48-384              # r7i.12xlarge
+  linux.2xlarge.memory: l-x86iavx512-8-64              # r5.2xlarge
+  linux.4xlarge.memory: l-x86iavx512-16-128            # r5.4xlarge
+  linux.8xlarge.memory: l-x86iavx512-32-256            # r5.8xlarge
+  linux.12xlarge.memory: l-x86iavx512-48-384           # r5.12xlarge
+  linux.12xlarge.memory.ephemeral: l-x86iavx512-48-384 # r5.12xlarge
+  linux.16xlarge.memory: l-x86iavx512-94-768           # r5.16xlarge — upgraded (no 64-512 equivalent)
+  linux.24xlarge.memory: l-x86iavx512-94-768           # r5.24xlarge
+
+  # ---- x86 CPU — AMD (m6a, m7a families) ----
+
+  linux.8xlarge.amd: l-x86aavx512-94-384               # m7a.8xlarge — upgraded (no 32-128 equivalent)
+  linux.12xlarge.amd: l-x86aavx512-94-384              # m6a.12xlarge — upgraded (no 48-192 equivalent)
+  linux.24xlarge.amd: l-x86aavx512-94-384              # m7a.24xlarge
+
+  # ---- x86 GPU — T4 (g4dn family) ----
+
+  linux.g4dn.4xlarge.nvidia.gpu: l-x86iavx512-16-64-t4          # g4dn.4xlarge
+  linux.g4dn.12xlarge.nvidia.gpu: l-x86iavx512-48-192-t4-4      # g4dn.12xlarge
+  linux.g4dn.metal.nvidia.gpu: l-bx86iavx512-94-384-t4-8        # g4dn.metal
+
+  # ---- x86 GPU — A10G (g5 family) ----
+
+  linux.g5.4xlarge.nvidia.gpu: l-x86aavx2-16-64-a10g            # g5.4xlarge
+  linux.g5.12xlarge.nvidia.gpu: l-x86aavx2-48-192-a10g-4        # g5.12xlarge
+  linux.g5.48xlarge.nvidia.gpu: l-x86aavx2-192-768-a10g-8       # g5.48xlarge
+
+  # ---- x86 GPU — L4 (g6 family) ----
+
+  linux.g6.4xlarge.experimental.nvidia.gpu: l-x86aavx2-16-64-l4 # g6.4xlarge
+  linux.g6.12xlarge.nvidia.gpu: l-x86aavx2-48-192-l4-4          # g6.12xlarge
+
+  # ---- x86 GPU — V100 (p3 family) ----
+
+  linux.p3.8xlarge.nvidia.gpu: l-x86aavx2-48-192-a10g-4         # p3.8xlarge — upgraded (no V100 equivalent; 4x A10G closest match)
+
+  # ---- ARM64 — Graviton ----
+
+  linux.arm64.2xlarge: l-arm64g2-6-32                            # t4g.2xlarge
+  linux.arm64.2xlarge.ephemeral: l-arm64g2-6-32                  # t4g.2xlarge
+  linux.arm64.m7g.4xlarge: l-arm64g3-16-64                      # m7g.4xlarge
+  linux.arm64.m7g.4xlarge.ephemeral: l-arm64g3-16-64            # m7g.4xlarge
+  linux.arm64.m8g.4xlarge: l-arm64g4-16-64                      # m8g.4xlarge
+  linux.arm64.m8g.4xlarge.ephemeral: l-arm64g4-16-64            # m8g.4xlarge
+  linux.arm64.r7g.12xlarge.memory: l-arm64g3-48-384             # r7g.12xlarge
+  linux.arm64.m7g.metal: l-barm64g3-62-256                      # m7g.metal

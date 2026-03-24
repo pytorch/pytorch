@@ -35,7 +35,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     skipIfNoLapack, skipIfRocm, MI300_ARCH, skipIfRocmArch, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMPS, \
-    IS_PPC, \
+    IS_PPC, IS_ARM64, IS_CPU_CAPABILITY_SVE256, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
@@ -2223,6 +2223,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 res_bf16 = F.threshold(x.to(dtype=dtype), threshold, 0).float()
                 self.assertEqual(res_bf16, expected)
 
+    @xfailIf(IS_ARM64 and not IS_CPU_EXT_SVE_SUPPORTED)  # SIGILL on AArch64 without SVE
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
                          ' with instruction set support avx2 or newer.')
@@ -2666,6 +2667,31 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         loss = F.mse_loss(inputs, targets, weight=weight, reduction='mean')
         expected_loss = torch.tensor(0.25)
         self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+
+    def test_mse_loss_mixed_dtype_grad(self):
+        devices = ['cpu'] + (['cuda'] if TEST_CUDA else [])
+        for device in devices:
+            for reduction in ['mean', 'sum', 'none']:
+                x = torch.tensor([1.0, 2.0], dtype=torch.float32, requires_grad=True, device=device)
+                y = torch.tensor([1.5, 2.5], dtype=torch.float64, requires_grad=True, device=device)
+                loss = F.mse_loss(x, y, reduction=reduction)
+                if reduction == 'mean':
+                    expected_loss = torch.tensor(0.25, dtype=torch.float64, device=device)
+                    expected_grad_x = torch.tensor([-0.5, -0.5], dtype=torch.float32, device=device)
+                    expected_grad_y = torch.tensor([0.5, 0.5], dtype=torch.float64, device=device)
+                elif reduction == 'sum':
+                    expected_loss = torch.tensor(0.5, dtype=torch.float64, device=device)
+                    expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
+                    expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
+                else:  # 'none'
+                    expected_loss = torch.tensor([0.25, 0.25], dtype=torch.float64, device=device)
+                    expected_grad_x = torch.tensor([-1.0, -1.0], dtype=torch.float32, device=device)
+                    expected_grad_y = torch.tensor([1.0, 1.0], dtype=torch.float64, device=device)
+                self.assertEqual(loss, expected_loss, atol=1e-6, rtol=0)
+                grad = torch.ones_like(loss) if reduction == 'none' else None
+                loss.backward(grad)
+                self.assertEqual(x.grad, expected_grad_x, atol=1e-6, rtol=0)
+                self.assertEqual(y.grad, expected_grad_y, atol=1e-6, rtol=0)
 
     def test_weighted_l1_loss_with_weights(self):
         inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
@@ -6819,6 +6845,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected_out_t = torch.tensor([[[[2.5]]]])
         self.assertEqual(expected_out_t, out_t)
 
+    @xfailIf(IS_ARM64 and IS_CPU_EXT_SVE_SUPPORTED and not IS_CPU_CAPABILITY_SVE256)
+    # see https://github.com/pytorch/pytorch/issues/177250
     def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
         def helper(size, scale_factor, mode, device, memory_format=torch.contiguous_format):
             input = torch.randn(size, device=device, dtype=dtype).to(memory_format=memory_format).detach().requires_grad_(True)
@@ -7647,6 +7675,27 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ]:
             test_rnn_cell(cell_fn, gate_count)
 
+    def test_conv3d_initialization_consistency(self):
+        # 1. Create a Conv3d layer
+        m = torch.nn.Conv3d(3, 6, kernel_size=3)
+
+        # 2. Test initialization in default (contiguous) format
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_default = m.weight.clone().detach()
+
+        # 3. Test initialization in channels_last_3d format
+        m.to(memory_format=torch.channels_last_3d)
+        torch.manual_seed(42)
+        m.reset_parameters()
+        weights_channels_last = m.weight.clone().detach()
+
+        # 4. Verify both initializations are identical
+        self.assertEqual(
+            weights_default,
+            weights_channels_last,
+            msg="Conv3d initialization is inconsistent between memory formats"
+        )
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),

@@ -126,6 +126,7 @@ standard_library = ["typing_extensions"]
 [tool.ruff]
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
+extend-exclude = ["third_party", "test/dynamo/cpython"]
 
 [tool.ruff.per-file-target-version]
 "**/py312_intrinsics.py" = "py312"
@@ -184,8 +185,6 @@ ignore = [
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
     "SIM300", # Yoda condition detected
-    "UP007", # keep-runtime-typing
-    "UP045", # keep-runtime-typing
     "TC006",
     # TODO: Remove Python-3.10 specific suppressions
     "B905",
@@ -267,10 +266,6 @@ select = [
     "YTT",
     "S101",
 ]
-
-[tool.ruff.lint.pyupgrade]
-# Preserve types, even if a file imports `from __future__ import annotations`.
-keep-runtime-typing = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = [

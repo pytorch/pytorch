@@ -98,6 +98,39 @@ from torch.hub import tqdm
 from .. import config
 
 
+def _find_repeat_interleave_constraints(
+    gm: torch.fx.GraphModule,
+) -> list[tuple[str, str]]:
+    """
+    Find repeat_interleave operations with output_size constraints.
+
+    Returns list of (repeats_placeholder_name, output_size_placeholder_name) pairs.
+    These represent constraints where sum(repeats) must equal output_size.
+    """
+    constraints = []
+    for node in gm.graph.nodes:
+        if (
+            node.op != "call_function"
+            or "repeat_interleave" not in str(node.target)
+            or not node.args
+        ):
+            continue
+
+        output_size_node = node.kwargs.get("output_size")
+        repeats_node = node.args[0]
+
+        # Both must be FX nodes (not constants) and direct placeholders
+        if (
+            isinstance(repeats_node, torch.fx.Node)
+            and isinstance(output_size_node, torch.fx.Node)
+            and repeats_node.op == "placeholder"
+            and output_size_node.op == "placeholder"
+        ):
+            constraints.append((str(repeats_node.target), str(output_size_node.target)))
+
+    return constraints
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -700,6 +733,32 @@ if "__compile_source__" in globals():
             f"{name} = {hint}" for name, hint in sorted(used_syms.items())
         )
         model_str = f"{hint_lines}\n\n{model_str}"
+
+    # Add fixup code for repeat_interleave constraints
+    # When inputs are regenerated randomly, sum(repeats) != output_size
+    # This fixup adjusts the repeats tensor to satisfy the constraint
+    constraints = _find_repeat_interleave_constraints(gm)
+    if constraints:
+        placeholder_to_idx = {name: idx for idx, name in enumerate(placeholder_targets)}
+        for repeats_name, output_size_name in constraints:
+            repeats_idx = placeholder_to_idx.get(repeats_name)
+            output_size_idx = placeholder_to_idx.get(output_size_name)
+            if repeats_idx is not None and output_size_idx is not None:
+                # Guard with hasattr since NopInputReader doesn't have args
+                writer._lines.append(
+                    "# Fixup: ensure sum(repeats) == output_size for repeat_interleave"
+                )
+                writer._lines.append("if hasattr(reader, 'args'):")
+                writer._lines.append(f"    _repeats = reader.args[{repeats_idx}]")
+                writer._lines.append(
+                    f"    _output_size = reader.args[{output_size_idx}]"
+                )
+                writer._lines.append(
+                    "    if isinstance(_repeats, torch.Tensor) and _repeats.dtype == torch.int64:"
+                )
+                writer._lines.append("        _n = _repeats.numel()")
+                writer._lines.append("        _repeats.fill_(_output_size // _n)")
+                writer._lines.append("        _repeats[:_output_size % _n] += 1")
 
     load_args_lines = writer.lines()
     load_args_code = "\n".join(load_args_lines)

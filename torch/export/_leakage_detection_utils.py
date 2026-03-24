@@ -2,8 +2,9 @@ import gc
 import types
 import typing
 import weakref
+from typing_extensions import TypeIs
 
-import torch
+from torch.fx.experimental.symbolic_shapes import TrackedFake
 
 
 """
@@ -37,8 +38,8 @@ def _is_globals_or_locals(obj: typing.Any) -> bool:
     return obj is globals() or obj is locals()
 
 
-def _is_tracked_fake(obj: typing.Any) -> bool:
-    return isinstance(obj, torch.fx.experimental.symbolic_shapes.TrackedFake)
+def _is_tracked_fake(obj: typing.Any) -> TypeIs[TrackedFake]:
+    return isinstance(obj, TrackedFake)
 
 
 def _is_gm_meta_like_dict(d: dict, o: typing.Any) -> bool:
