@@ -5453,7 +5453,7 @@ def split_group(
         )
 
     parent_group_rank = parent_global_to_group_ranks[global_rank]
-    parent_backend = parent_pg._get_backend(torch.device(torch.accelerator.current_accelerator()))
+    parent_backend = parent_pg._get_backend(torch.accelerator.current_accelerator())
 
     # if the parent backend does not support splitting, raise error
     # currently this API only support NCCL backend
@@ -5522,7 +5522,7 @@ def split_group(
 
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
     split_pg.bound_device_id = device_id  # type: ignore[union-attr]
-    split_backend_class = split_pg._get_backend(torch.device(torch.accelerator.current_accelerator()))
+    split_backend_class = split_pg._get_backend(torch.accelerator.current_accelerator())
     if not _use_torchcomms_enabled():
         split_backend_class._set_sequence_number_for_group()
     if split_pg.group_name != group_name:
